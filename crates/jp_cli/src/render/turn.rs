@@ -8,7 +8,6 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use camino::Utf8PathBuf;
 use chrono::Utc;
 use jp_config::{
     PartialAppConfig,
@@ -23,7 +22,6 @@ use jp_conversation::{
     EventKind,
     stream::{TurnOrigin, turn_iter::Turn},
 };
-use jp_mcp::server::InvocationContext;
 use jp_printer::{ErrChannel, Printer};
 use tracing::warn;
 
@@ -78,9 +76,7 @@ impl StyleOverlay {
 pub struct TurnRenderer {
     // Stable params for rebuilding sub-renderers.
     printer: Arc<Printer>,
-    root: Utf8PathBuf,
     source: ConfigSource,
-    invocation: InvocationContext,
 
     view: TurnView,
     tool: ToolRenderer,
@@ -113,9 +109,7 @@ impl TurnRenderer {
         mut tools_config: ToolsConfig,
         assistant_name: Option<String>,
         model_id: Option<String>,
-        root: Utf8PathBuf,
         source: ConfigSource,
-        invocation: InvocationContext,
         style_overlay: Option<StyleOverlay>,
     ) -> Self {
         if let Some(overlay) = &style_overlay {
@@ -130,18 +124,11 @@ impl TurnRenderer {
             RenderFlow::Replay,
         );
         let tool_chrome_shown = style.tool_call.show;
-        let tool = ToolRenderer::new(
-            ErrChannel::new(printer.clone()),
-            style,
-            root.clone(),
-            invocation.clone(),
-        );
+        let tool = ToolRenderer::new(ErrChannel::new(printer.clone()), style);
         view.set_tool_separator(tool.separator_flag());
         Self {
             printer,
-            root,
             source,
-            invocation,
             view,
             tool,
             tools_config,
@@ -287,12 +274,7 @@ impl TurnRenderer {
             assistant_name,
             model_id,
         );
-        self.tool = ToolRenderer::new(
-            ErrChannel::new(self.printer.clone()),
-            style,
-            self.root.clone(),
-            self.invocation.clone(),
-        );
+        self.tool = ToolRenderer::new(ErrChannel::new(self.printer.clone()), style);
         self.view.set_tool_separator(self.tool.separator_flag());
         self.tools_config = tools_config;
     }

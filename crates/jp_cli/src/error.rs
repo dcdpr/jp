@@ -2,11 +2,10 @@ use std::io;
 
 use camino::Utf8PathBuf;
 use jp_conversation::ConversationId;
-use jp_llm::tool::ExecutorError;
 use jp_mcp::server::http::EndpointError;
 use url::Url;
 
-use crate::cmd;
+use crate::{cmd, cmd::query::tool::executor::ExecutorError};
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 

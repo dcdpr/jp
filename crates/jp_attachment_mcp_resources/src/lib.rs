@@ -30,20 +30,30 @@ pub struct McpResources(BTreeSet<Url>);
 
 /// Returned when an `mcp` attachment is asked for its contents.
 ///
-/// Names the attachment so a conversation carrying several of them says which
-/// one to remove.
+/// Names every attachment the conversation carries, so one query tells the user
+/// the whole set to remove rather than one per attempt.
 #[derive(Debug)]
 pub struct UnsupportedResolution {
-    uri: Url,
+    uris: Vec<Url>,
 }
 
 impl fmt::Display for UnsupportedResolution {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let list = self
+            .uris
+            .iter()
+            .map(|uri| format!("`{uri}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let removals = self
+            .uris
+            .iter()
+            .map(|uri| format!("jp attachment rm '{uri}'"))
+            .collect::<Vec<_>>()
+            .join(" && ");
         write!(
             f,
-            "MCP resource attachments are no longer resolved: `{}`. Remove it with `jp attachment \
-             rm {}`.",
-            self.uri, self.uri
+            "MCP resource attachments are no longer resolved: {list}. Remove them with: {removals}"
         )
     }
 }
@@ -78,10 +88,12 @@ impl Handler for McpResources {
     }
 
     async fn get(&self, _: &Utf8Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
-        match self.0.iter().next() {
-            Some(uri) => Err(Box::new(UnsupportedResolution { uri: uri.clone() })),
-            None => Ok(vec![]),
+        if self.0.is_empty() {
+            return Ok(vec![]);
         }
+        Err(Box::new(UnsupportedResolution {
+            uris: self.0.iter().cloned().collect(),
+        }))
     }
 }
 

@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use camino_tempfile::Utf8TempDir;
 use jp_config::{
     AppConfig,
     conversation::tool::{CommandConfigOrString, style::ParametersStyle},
@@ -88,12 +87,7 @@ fn create_renderer() -> (ToolRenderer, SharedBuffer, SharedBuffer) {
     let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
     let mut config = AppConfig::new_test().style;
     config.tool_call.show = true;
-    let renderer = ToolRenderer::new(
-        ErrChannel::new(Arc::new(printer)),
-        config,
-        "/tmp".into(),
-        jp_mcp::server::InvocationContext::default(),
-    );
+    let renderer = ToolRenderer::new(ErrChannel::new(Arc::new(printer)), config);
     (renderer, err, out)
 }
 
@@ -113,12 +107,7 @@ fn create_renderer_with_show(show: bool) -> (ToolRenderer, SharedBuffer) {
     config.tool_call.progress.stderr_rows = StderrRows::Fixed(RowCount { rows: 2 });
     let printer =
         printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24)));
-    let renderer = ToolRenderer::new(
-        ErrChannel::new(Arc::new(printer)),
-        config,
-        "/tmp".into(),
-        jp_mcp::server::InvocationContext::default(),
-    );
+    let renderer = ToolRenderer::new(ErrChannel::new(Arc::new(printer)), config);
     (renderer, err)
 }
 
@@ -183,25 +172,13 @@ fn test_render_tool_call_custom_does_not_run_command() {
     insta::assert_snapshot!(output);
 }
 
-#[tokio::test]
-async fn test_render_custom_arguments_after_approval() {
-    let root = Utf8TempDir::new().unwrap();
+#[test]
+fn test_render_custom_result_after_approval() {
     let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
     let config = AppConfig::new_test().style;
-    let renderer = ToolRenderer::new(
-        ErrChannel::new(Arc::new(printer)),
-        config,
-        root.path().to_owned(),
-        jp_mcp::server::InvocationContext::default(),
-    );
+    let renderer = ToolRenderer::new(ErrChannel::new(Arc::new(printer)), config);
 
-    let mut args = Map::new();
-    args.insert("host".into(), Value::String("myhost".into()));
-    let style = ParametersStyle::Custom(CommandConfigOrString::String("echo custom-output".into()));
-
-    let outcome = renderer
-        .render_approved("ssh_run", "ssh_run", &args, &style)
-        .await;
+    let outcome = renderer.render_custom_result("ssh_run", Ok("custom-output".into()));
 
     assert!(matches!(outcome, RenderOutcome::Rendered {
         content: Some(_)
@@ -214,6 +191,24 @@ async fn test_render_custom_arguments_after_approval() {
     // line, the custom output, and the trailing newline the lazy separator
     // later turns into the blank line before the next header.
     assert_eq!(output, "Calling tool ssh_run\n\ncustom-output\n");
+}
+
+#[test]
+fn test_render_custom_result_suppresses_a_failed_formatter() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let renderer = ToolRenderer::new(
+        ErrChannel::new(Arc::new(printer)),
+        AppConfig::new_test().style,
+    );
+
+    let outcome = renderer.render_custom_result("ssh_run", Err("formatter exploded".into()));
+
+    assert!(
+        matches!(outcome, RenderOutcome::Suppressed { ref error } if error == "formatter exploded")
+    );
+    renderer.channel.flush();
+    // A broken formatter must not leave a header with nothing under it.
+    assert_eq!(strip_ansi(&err.lock()), "");
 }
 
 #[test]
@@ -405,12 +400,7 @@ fn progress_window_is_off_without_print_stderr() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let mut config = AppConfig::new_test().style;
     config.tool_call.progress.stderr_rows = StderrRows::Off;
-    let renderer = ToolRenderer::new(
-        ErrChannel::new(Arc::new(printer)),
-        config,
-        "/tmp".into(),
-        jp_mcp::server::InvocationContext::default(),
-    );
+    let renderer = ToolRenderer::new(ErrChannel::new(Arc::new(printer)), config);
 
     assert!(renderer.progress_source("cargo_test").is_none());
 }
@@ -526,12 +516,7 @@ fn test_completing_one_pending_tool_does_not_collide_with_header() {
     // Disable the animated suffix so `register` doesn't spawn a timer task
     // (this is a sync test with no tokio runtime).
     config.tool_call.preparing.show = false;
-    let mut renderer = ToolRenderer::new(
-        ErrChannel::new(Arc::new(printer)),
-        config,
-        "/tmp".into(),
-        jp_mcp::server::InvocationContext::default(),
-    );
+    let mut renderer = ToolRenderer::new(ErrChannel::new(Arc::new(printer)), config);
 
     renderer.register("id1", "fs_read_file");
     renderer.register("id2", "fs_read_file");
@@ -602,12 +587,7 @@ fn test_preparing_row_carries_the_elapsed_time() {
 #[test]
 fn test_show_false_suppresses_preparing_output() {
     let config = AppConfig::new_test().style;
-    let mut renderer = ToolRenderer::new(
-        ErrChannel::new(Arc::new(Printer::sink())),
-        config,
-        "/tmp".into(),
-        jp_mcp::server::InvocationContext::default(),
-    );
+    let mut renderer = ToolRenderer::new(ErrChannel::new(Arc::new(Printer::sink())), config);
     renderer.register("id1", "tool_a");
 
     renderer.complete("id1");
@@ -618,12 +598,7 @@ fn test_show_false_suppresses_preparing_output() {
 #[test]
 fn test_tool_call_show_false_suppresses_output() {
     let config = AppConfig::new_test().style;
-    let renderer = ToolRenderer::new(
-        ErrChannel::new(Arc::new(Printer::sink())),
-        config,
-        "/tmp".into(),
-        jp_mcp::server::InvocationContext::default(),
-    );
+    let renderer = ToolRenderer::new(ErrChannel::new(Arc::new(Printer::sink())), config);
     let mut args = Map::new();
     args.insert("key".into(), Value::String("value".into()));
 
@@ -665,48 +640,6 @@ fn test_format_args_custom_returns_empty() {
     let style = ParametersStyle::Custom(CommandConfigOrString::String("echo custom-output".into()));
     let result = format_args(&args, &style);
     assert_eq!(result, "");
-}
-
-#[tokio::test]
-async fn test_format_custom_content_returns_raw_content() {
-    let root = Utf8TempDir::new().unwrap();
-    let mut args = Map::new();
-    args.insert("key".into(), Value::String("value".into()));
-    let cmd = CommandConfigOrString::String("echo hello-world".into()).command();
-    let result = format_args_custom(
-        "my_tool",
-        &args,
-        cmd,
-        root.path(),
-        &jp_mcp::server::InvocationContext::default(),
-    )
-    .await
-    .unwrap();
-    assert_eq!(result, "hello-world");
-}
-
-/// Regression: the `format_arguments` path must surface the invocation's
-/// workspace and conversation IDs to a custom formatter command via
-/// `context.workspace_id` and `context.conversation_id`.
-/// A non-empty `InvocationContext` pins the wiring — the other tests pass the
-/// empty default, which would still pass if the fields were dropped or wired to
-/// empty strings.
-#[tokio::test]
-async fn test_format_args_custom_exposes_invocation_ids() {
-    let root = Utf8TempDir::new().unwrap();
-    let args = Map::new();
-    let cmd = CommandConfigOrString::String(
-        "echo {{context.workspace_id}}/{{context.conversation_id}}".into(),
-    )
-    .command();
-    let invocation = jp_mcp::server::InvocationContext {
-        workspace_id: "ws-abc".into(),
-        conversation_id: "conv-xyz".into(),
-    };
-    let result = format_args_custom("my_tool", &args, cmd, root.path(), &invocation)
-        .await
-        .unwrap();
-    assert_eq!(result, "ws-abc/conv-xyz");
 }
 
 #[test]

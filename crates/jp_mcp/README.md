@@ -51,10 +51,9 @@ acknowledges final delivery and consumes the MCP response.
 The Host connection disables environment proxies, redirects, and transparent
 session reinitialization.
 It does not resubmit a tool call on transport failure.
-`http_client` implements rmcp's HTTP-client trait using the workspace Reqwest
-version.
-The rmcp worker owns MCP sessions and SSE resumption; the adapter does not
-implement another request retry loop.
+Transport, MCP sessions, and SSE resumption belong to rmcp's Reqwest client,
+reached through the `reqwest_mcp` alias because rmcp writes that implementation
+against a different Reqwest major than the rest of the workspace uses.
 The HTTP endpoint has no authentication; its loopback binding and header checks
 are not a claim that the caller is a particular local application.
 

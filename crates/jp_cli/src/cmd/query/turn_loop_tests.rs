@@ -51,9 +51,6 @@ use jp_llm::{
     model::ModelDetails,
     provider::mock::MockProvider,
     query::ChatQuery,
-    tool::{
-        Executor, ExecutorResult, ExecutorSource, MockExecutor, PermissionInfo, TestExecutorSource,
-    },
 };
 use jp_mcp::{
     Client,
@@ -75,7 +72,14 @@ use crate::{
     access::approvals::ApprovalStore,
     cmd::query::{
         stream::retry::MAX_CONSECUTIVE_REBUILDS,
-        tool::{ToolCoordinator, executor::TerminalExecutorSource},
+        tool::{
+            ToolCoordinator,
+            executor::{
+                Executor, ExecutorResult, ExecutorSource, PermissionInfo,
+                mock::{MockExecutor, TestExecutorSource},
+            },
+            mcp_executor::TerminalExecutorSource,
+        },
     },
     signals::testing::{detached_router, test_router},
 };
@@ -392,7 +396,6 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -492,7 +495,6 @@ async fn a_completed_block_is_persisted_before_the_turn_ends() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             ChatRequest::from("What is 2+2?"),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -576,7 +578,6 @@ async fn a_refusal_takes_back_content_it_had_persisted() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         ChatRequest::from("something declined"),
-        InvocationContext::default(),
         PendingStreamTrim::default(),
         router.turn_interrupt(lock.id()),
     )
@@ -663,7 +664,6 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -747,7 +747,6 @@ async fn test_normal_completion_persists_content() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
-        InvocationContext::default(),
         PendingStreamTrim::default(),
         router.turn_interrupt(lock.id()),
     )
@@ -833,7 +832,6 @@ async fn premature_stream_end_without_finished_returns_error() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             ChatRequest::from("hi"),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         ),
@@ -897,7 +895,6 @@ async fn premature_stream_end_exhausts_retry_budget() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             ChatRequest::from("hi"),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         ),
@@ -977,7 +974,6 @@ async fn output_ceiling_ends_turn_without_re_requesting() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             ChatRequest::from("hi"),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         ),
@@ -1082,7 +1078,6 @@ async fn orphan_tool_call_is_sanitized_before_provider_request() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         ChatRequest::from("new query"),
-        InvocationContext::default(),
         PendingStreamTrim::default(),
         router.turn_interrupt(lock.id()),
     )
@@ -1167,7 +1162,6 @@ async fn test_tool_call_cycle_completes_with_followup() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
-        InvocationContext::default(),
         PendingStreamTrim::default(),
         router.turn_interrupt(lock.id()),
     )
@@ -1465,7 +1459,6 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -1615,7 +1608,6 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source))
                 .with_interrupt(config.interrupt.tool_call.clone()),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -1758,7 +1750,6 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -1870,7 +1861,6 @@ async fn test_multiple_tool_calls_in_sequence() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
-        InvocationContext::default(),
         PendingStreamTrim::default(),
         router.turn_interrupt(lock.id()),
     )
@@ -1961,7 +1951,6 @@ async fn test_empty_tool_response_continues_cycle() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
-        InvocationContext::default(),
         PendingStreamTrim::default(),
         router.turn_interrupt(lock.id()),
     )
@@ -2107,7 +2096,6 @@ async fn test_tool_restart_on_interrupt() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -2229,7 +2217,6 @@ async fn test_merged_stream_exits_after_tool_response() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -2357,7 +2344,6 @@ async fn test_tool_call_with_run_mode_ask_approves() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -2500,7 +2486,6 @@ async fn test_tool_call_with_run_mode_ask_skips() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -2654,7 +2639,6 @@ async fn test_permission_prompt_follows_interactive_not_is_tty() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -2778,7 +2762,6 @@ async fn test_tool_call_with_run_mode_unattended() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -2926,7 +2909,6 @@ async fn test_tool_call_with_run_mode_skip() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -3130,7 +3112,6 @@ async fn test_multiple_tools_with_different_run_modes() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -3279,7 +3260,6 @@ async fn test_tool_call_returns_error() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -3515,7 +3495,6 @@ async fn test_waiting_indicator_shows_during_delay() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -3616,7 +3595,6 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -3731,7 +3709,6 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -3819,7 +3796,6 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -3899,7 +3875,6 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -3980,7 +3955,6 @@ async fn test_waiting_indicator_follows_stderr_not_stdout() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -4166,7 +4140,6 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -4254,7 +4227,6 @@ async fn test_turn_start_event_is_emitted() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
-        InvocationContext::default(),
         PendingStreamTrim::default(),
         router.turn_interrupt(lock.id()),
     )
@@ -4318,7 +4290,6 @@ async fn test_turn_start_index_increments_across_turns() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
-        InvocationContext::default(),
         PendingStreamTrim::default(),
         router.turn_interrupt(lock.id()),
     )
@@ -4354,7 +4325,6 @@ async fn test_turn_start_index_increments_across_turns() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
-        InvocationContext::default(),
         PendingStreamTrim::default(),
         router.turn_interrupt(lock.id()),
     )
@@ -4450,7 +4420,6 @@ async fn test_markdown_flushed_before_tool_header() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -4636,7 +4605,6 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -4796,7 +4764,6 @@ async fn test_single_tool_call_rendered_with_args() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -5043,7 +5010,6 @@ async fn a_running_tools_stderr_reaches_the_progress_window() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             ChatRequest::from("Build it"),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -5141,7 +5107,6 @@ async fn parallel_tools_label_their_window_rows() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             ChatRequest::from("Run both"),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -5263,7 +5228,6 @@ async fn a_tool_result_survives_a_live_window() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             ChatRequest::from("Run both"),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -5379,7 +5343,6 @@ async fn a_sink_survives_the_re_spawn_an_answer_triggers() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             ChatRequest::from("Ask then work"),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -5513,7 +5476,6 @@ async fn a_tool_can_opt_out_of_the_progress_window() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             ChatRequest::from("Run both"),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -5738,7 +5700,6 @@ async fn a_tool_prompt_hides_the_window_and_restores_it() {
             Arc::clone(&prompts) as Arc<dyn PromptBackend>,
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             ChatRequest::from("Ask me"),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -5921,7 +5882,7 @@ impl Executor for InquiryMockExecutor {
                 };
             }
         }
-        ExecutorResult::Completed(jp_conversation::event::ToolCallResponse {
+        ExecutorResult::Completed(ToolCallResponse {
             id: self.tool_id.clone(),
             result: Ok(self.output.clone()),
         })
@@ -6234,7 +6195,6 @@ async fn test_tool_with_single_inquiry() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -6363,7 +6323,6 @@ async fn test_secret_question_without_tty_fails_tool() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -6473,7 +6432,6 @@ async fn test_secret_question_with_assistant_target_fails_tool() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -6576,7 +6534,6 @@ async fn test_secret_prompter_answer_is_redacted() {
             Arc::new(MockPromptBackend::new().with_password_responses(["s3cret"])),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -6683,7 +6640,6 @@ async fn test_secret_static_answer_is_redacted() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -6791,7 +6747,6 @@ async fn test_static_answer_records_answered_inquiry() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -6907,7 +6862,6 @@ async fn test_remembered_answer_cache_hit_records_new_inquiry_pair() {
             prompt_backend,
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -7030,7 +6984,6 @@ async fn test_tool_with_multiple_inquiries() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -7183,7 +7136,6 @@ async fn test_parallel_tools_one_with_inquiry() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -7322,7 +7274,6 @@ async fn test_parallel_tools_both_with_inquiries() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -7473,7 +7424,6 @@ async fn test_retry_counter_resets_on_successful_event() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request,
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -7613,7 +7563,6 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -7724,7 +7673,6 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -7919,7 +7867,6 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request,
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -8035,7 +7982,6 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
         ChatRequest::from("use the tool"),
-        InvocationContext::default(),
         PendingStreamTrim::default(),
         router.turn_interrupt(lock.id()),
     )
@@ -8164,7 +8110,6 @@ async fn test_rebuild_cap_stops_a_provider_that_keeps_requesting_rebuilds() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         ChatRequest::from("repair this"),
-        InvocationContext::default(),
         PendingStreamTrim::default(),
         router.turn_interrupt(lock.id()),
     )
@@ -8256,7 +8201,6 @@ async fn test_refused_rebuild_clears_the_retry_line() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             ChatRequest::from("answer this"),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )
@@ -8341,7 +8285,6 @@ async fn test_refused_rebuild_persists_streamed_content() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         ChatRequest::from("answer this"),
-        InvocationContext::default(),
         PendingStreamTrim::default(),
         router.turn_interrupt(lock.id()),
     )
@@ -8445,7 +8388,6 @@ async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)),
             ChatRequest::from("Run the tool."),
-            InvocationContext::default(),
             PendingStreamTrim::default(),
             router.turn_interrupt(lock.id()),
         )

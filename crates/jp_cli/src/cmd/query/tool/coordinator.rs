@@ -87,8 +87,7 @@ use indexmap::IndexMap;
 use inquire::error::InquireError;
 use jp_config::{
     conversation::tool::{
-        FormatMode, QuestionTarget, ResultMode, RunMode, ToolSource, ToolsConfig,
-        style::ParametersStyle,
+        QuestionTarget, ResultMode, RunMode, ToolsConfig, style::ParametersStyle,
     },
     interrupt::ToolInterruptConfig,
 };
@@ -101,7 +100,6 @@ use jp_conversation::{
 };
 use jp_editor::EditorBackend;
 use jp_inquire::{ReplyEditMode, prompt::PromptBackend};
-use jp_llm::tool::{Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo};
 use jp_mcp::{Client, server::StderrSink};
 use jp_printer::Printer;
 use jp_tool::{AnswerType, Question};
@@ -113,6 +111,7 @@ use tracing::{debug, warn};
 
 use super::{
     ToolRenderer,
+    executor::{Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo, Review},
     inquiry::{self, InquiryBackend, InquiryError},
     prompter::{PermissionResult, ToolPrompter},
 };
@@ -170,18 +169,18 @@ enum ExecutionEvent {
     ResultModeProcessed {
         index: usize,
         tool_id: String,
-        response: ToolCallResponse,
+        review: Review,
     },
 }
 
 #[derive(Debug)]
 pub struct ExecutionResult {
-    /// Tool responses paired with the plan index supplied by the caller in
-    /// `executors`.
+    /// What the Host settled on per tool, paired with the plan index supplied
+    /// by the caller in `executors`.
     /// Indices may be sparse when the caller's plan also contains pre-resolved
     /// tools that bypass execution; merging those back into the original stream
     /// order is the caller's job.
-    pub responses: Vec<(usize, ToolCallResponse)>,
+    pub reviews: Vec<(usize, Review)>,
 
     /// How the execution phase ended, and what the caller should do next.
     pub outcome: ExecutionOutcome,
@@ -286,6 +285,17 @@ enum PendingPrompt {
         response: ToolCallResponse,
         result_mode: ResultMode,
     },
+}
+
+/// What rendering a tool call before its approval prompt produced.
+#[derive(Debug)]
+enum PreRender {
+    /// Rendered; the content shown, when the style produced any.
+    Ready(Option<String>),
+
+    /// Held back until the call is admitted, because its formatter is a
+    /// user-configured command the execution service has not run yet.
+    Deferred,
 }
 
 /// Result of [`ToolCoordinator::decide_permission`] for a single tool.
@@ -436,32 +446,6 @@ impl ToolCoordinator {
             .unwrap_or_default()
     }
 
-    /// Return the name the tool is invoked under.
-    ///
-    /// A tool's key in `conversation.tools` is the name the assistant calls.
-    /// Its `source` may name a differently named implementation
-    /// (`local.fs_list_files`, `mcp.<server>.<tool>`), and that is the name the
-    /// tool is actually invoked with.
-    /// Falls back to `tool_name` when the source names nothing.
-    pub fn invoked_name(&self, tool_name: &str) -> String {
-        self.tools_config
-            .get(tool_name)
-            .and_then(|config| match config.source() {
-                ToolSource::Builtin { tool }
-                | ToolSource::Local { tool }
-                | ToolSource::Mcp { tool, .. } => tool.clone(),
-            })
-            .unwrap_or_else(|| tool_name.to_owned())
-    }
-
-    /// Return the format mode for a tool, falling back to `Ask` if the tool is
-    /// unknown (untrusted-by-default).
-    pub fn format_mode(&self, tool_name: &str) -> FormatMode {
-        self.tools_config
-            .get(tool_name)
-            .map_or(FormatMode::Ask, |c| c.format())
-    }
-
     /// Pre-render a tool call ahead of its approval prompt.
     ///
     /// Built-in parameter styles ([`ParametersStyle::Json`],
@@ -470,47 +454,31 @@ impl ToolCoordinator {
     /// user needs to see the rendered call to make an informed approval
     /// decision.
     ///
-    /// [`ParametersStyle::Custom`] shells out to a user-configured command and
-    /// is gated by [`FormatMode`]: it only pre-renders when the tool opts in
-    /// via `format = "unattended"`; otherwise rendering is deferred until after
-    /// approval.
+    /// [`ParametersStyle::Custom`] renders whatever the execution service
+    /// produced.
+    /// A formatter configured with `format = "ask"` has not run yet at this
+    /// point, which is [`PreRender::Deferred`].
     ///
-    /// Returns:
-    ///
-    /// - `Ok(Some(content))` if pre-render fired successfully — caller should
-    ///   skip the post-approval render and use this content.
-    /// - `Ok(None)` if pre-render was suppressed (Custom style with `format =
-    ///   "ask"`) — caller should follow the existing post-approval render
-    ///   path.
-    /// - `Err(error_message)` if a custom formatter command failed — caller
-    ///   should treat this as a tool failure and skip prompting.
-    pub(crate) async fn pre_render_for_prompt(
+    /// Returns `Err` if a formatter failed — the caller should treat that as a
+    /// tool failure and skip prompting.
+    fn pre_render_for_prompt(
         &self,
-        tool_name: &str,
-        arguments: &Map<String, Value>,
+        executor: &dyn Executor,
         tool_renderer: &ToolRenderer,
-    ) -> Result<Option<Option<String>>, String> {
-        // `FormatMode::Ask` exists to defer side-effecting *custom*
-        // formatters until after approval — running a user-configured
-        // shell command before the user okays the tool would be
-        // surprising. Built-in styles are pure and have no side effects,
-        // so they always render before the prompt.
-        let should_pre_render = match self.parameter_style(tool_name) {
-            ParametersStyle::Custom(_) => {
-                matches!(self.format_mode(tool_name), FormatMode::Unattended)
-            }
-            ParametersStyle::Json | ParametersStyle::FunctionCall | ParametersStyle::Off => true,
-        };
-
-        if !should_pre_render {
-            return Ok(None);
+    ) -> Result<PreRender, String> {
+        let name = executor.tool_name();
+        if matches!(self.parameter_style(name), ParametersStyle::Custom(_))
+            && executor.formatted_arguments().is_none()
+        {
+            // Running a user-configured shell command before the user okays
+            // the tool would be surprising, so `format = "ask"` holds the
+            // formatter back until admission. Built-in styles are pure and
+            // have no side effects, so they always render before the prompt.
+            return Ok(PreRender::Deferred);
         }
 
-        match self
-            .render_approved_tool(tool_name, arguments, tool_renderer)
-            .await
-        {
-            RenderOutcome::Rendered { content } => Ok(Some(content)),
+        match self.render_executor(executor, tool_renderer) {
+            RenderOutcome::Rendered { content } => Ok(PreRender::Ready(content)),
             RenderOutcome::Suppressed { error } => Err(error),
         }
     }
@@ -558,13 +526,14 @@ impl ToolCoordinator {
         // it.
         prompter.set_background(tool_renderer.current_region());
 
+        // Asking the service to format arguments for a call the user already
+        // said no to would run a formatter command for output nobody sees.
         let remembered_denial = interactive
-            && executor.permission_info().is_some_and(|info| {
-                turn_state
-                    .remembered_permission_decisions
-                    .get(&PermissionCacheKey::new(&info.tool_name))
-                    == Some(&false)
-            });
+            && executor.needs_permission()
+            && turn_state
+                .remembered_permission_decisions
+                .get(&PermissionCacheKey::new(executor.tool_name()))
+                == Some(&false);
         let render_arguments = !self.is_hidden(executor.tool_name()) && !remembered_denial;
         match executor.prepare(render_arguments).await {
             Ok(Some(response)) => {
@@ -600,11 +569,9 @@ impl ToolCoordinator {
                 // Built-in parameter styles always pre-render; Custom
                 // formatters are gated on `format = "unattended"`
                 // because they shell out to a user-controlled command.
-                let pre = match self
-                    .pre_render_executor_for_prompt(executor.as_ref(), tool_renderer)
-                    .await
-                {
-                    Ok(maybe_content) => maybe_content,
+                let pre = match self.pre_render_for_prompt(executor.as_ref(), tool_renderer) {
+                    Ok(PreRender::Ready(content)) => Some(content),
+                    Ok(PreRender::Deferred) => None,
                     Err(error) => {
                         return ToolCallDecision::Failed(Self::render_failed_response(
                             info.tool_id.clone(),
@@ -649,7 +616,7 @@ impl ToolCoordinator {
             pre
         } else {
             let tool_name = executor.tool_name().to_owned();
-            match self.render_executor(executor.as_ref(), tool_renderer).await {
+            match self.render_executor(executor.as_ref(), tool_renderer) {
                 RenderOutcome::Rendered { content } => content,
                 RenderOutcome::Suppressed { error } => {
                     let id = executor.tool_id().to_owned();
@@ -668,62 +635,37 @@ impl ToolCoordinator {
         }
     }
 
-    async fn pre_render_executor_for_prompt(
-        &self,
-        executor: &dyn Executor,
-        renderer: &ToolRenderer,
-    ) -> Result<Option<Option<String>>, String> {
-        if !executor.formats_arguments()
-            || !matches!(
-                self.parameter_style(executor.tool_name()),
-                ParametersStyle::Custom(_)
-            )
-        {
-            return self
-                .pre_render_for_prompt(executor.tool_name(), executor.arguments(), renderer)
-                .await;
-        }
-        if executor.formatted_arguments().is_none() {
-            return Ok(None);
-        }
-        match self.render_executor(executor, renderer).await {
-            RenderOutcome::Rendered { content } => Ok(Some(content)),
-            RenderOutcome::Suppressed { error } => Err(error),
-        }
-    }
-
-    async fn render_executor(
-        &self,
-        executor: &dyn Executor,
-        renderer: &ToolRenderer,
-    ) -> RenderOutcome {
+    /// Render one tool call's arguments for display.
+    ///
+    /// A `Custom` parameter style shows what the execution service's formatter
+    /// produced.
+    /// The formatter is a user-configured command, so it runs once, there,
+    /// under the call's access policy and cancellation token — never a second
+    /// time here.
+    fn render_executor(&self, executor: &dyn Executor, renderer: &ToolRenderer) -> RenderOutcome {
         let name = executor.tool_name();
         if self.is_hidden(name) {
             return RenderOutcome::Rendered { content: None };
         }
-        if executor.formats_arguments()
-            && matches!(self.parameter_style(name), ParametersStyle::Custom(_))
-        {
-            return renderer.render_custom_result(
-                name,
-                executor
-                    .formatted_arguments()
-                    .cloned()
-                    .unwrap_or_else(|| Ok(String::new()))
-                    .map_err(|error| error.to_string()),
-            );
-        }
-        self.render_approved_tool(name, executor.arguments(), renderer)
-            .await
+        let ParametersStyle::Custom(_) = self.parameter_style(name) else {
+            return self.render_approved_tool(name, executor.arguments(), renderer);
+        };
+        // No formatter output means the service was never asked for it, so the
+        // call header is all there is to show.
+        let formatted = executor
+            .formatted_arguments()
+            .cloned()
+            .unwrap_or_else(|| Ok(String::new()));
+        renderer.render_custom_result(name, formatted.map_err(|error| error.to_string()))
     }
 
     /// Acknowledge the execution service after the conversation owner flushes.
-    pub async fn acknowledge_responses(
-        &self,
-        responses: Vec<ToolCallResponse>,
-    ) -> Result<(), ExecutorError> {
-        for response in responses {
-            self.executor_source.acknowledge(response).await?;
+    ///
+    /// Until this runs, each call is still parked on its final barrier and its
+    /// MCP response has not been returned to the caller.
+    pub async fn acknowledge_reviews(&self, reviews: Vec<Review>) -> Result<(), ExecutorError> {
+        for review in reviews {
+            self.executor_source.acknowledge(review).await?;
         }
         Ok(())
     }
@@ -835,20 +777,18 @@ impl ToolCoordinator {
 
     /// Renders the tool call header and arguments after permission approval.
     ///
-    /// For non-Custom styles: prints the header with inline-formatted
-    /// arguments.
-    /// For Custom style: runs the custom formatter command, then prints header
+    /// Prints the header with inline-formatted arguments.
+    /// A hidden tool renders nothing and still returns `Rendered`, because it
+    /// also still executes.
     ///
-    /// - custom output atomically.
-    ///   If the custom formatter fails, nothing is printed and
-    ///   [`RenderOutcome::Suppressed`] is returned — the caller should abort
-    ///   execution and return an error response to the LLM.
-    ///   For hidden tools: renders nothing but returns `Rendered` (hidden tools
-    ///   still execute).
-    pub(crate) async fn render_approved_tool(
+    /// A `Custom` parameter style is rendered by [`render_executor`] from the
+    /// execution service's formatter output, not here.
+    ///
+    /// [`render_executor`]: Self::render_executor
+    pub(crate) fn render_approved_tool(
         &self,
         tool_name: &str,
-        arguments: &serde_json::Map<String, Value>,
+        arguments: &Map<String, Value>,
         tool_renderer: &ToolRenderer,
     ) -> RenderOutcome {
         if self.is_hidden(tool_name) {
@@ -856,9 +796,7 @@ impl ToolCoordinator {
         }
 
         let style = self.parameter_style(tool_name);
-        tool_renderer
-            .render_approved(tool_name, &self.invoked_name(tool_name), arguments, &style)
-            .await
+        tool_renderer.render_approved(tool_name, arguments, &style)
     }
 
     /// Determines permission for a single tool without blocking on user input.
@@ -1040,7 +978,7 @@ impl ToolCoordinator {
     ) -> ExecutionResult {
         if executors.is_empty() {
             return ExecutionResult {
-                responses: Vec::new(),
+                reviews: Vec::new(),
                 outcome: ExecutionOutcome::Completed,
             };
         }
@@ -1071,7 +1009,7 @@ impl ToolCoordinator {
         let cancellation_token = self.cancellation_token.clone();
         let (event_tx, mut event_rx) = mpsc::channel::<ExecutionEvent>(32);
         let mut executing_tools: HashMap<usize, ExecutingTool> = HashMap::new();
-        let mut results: Vec<Option<ToolCallResponse>> = vec![None; total_tools];
+        let mut results: Vec<Option<Review>> = vec![None; total_tools];
         let mut pending_prompts: VecDeque<PendingPrompt> = VecDeque::new();
         let mut prompt_active = false;
 
@@ -1240,7 +1178,7 @@ impl ToolCoordinator {
                             Some(tool) => {
                                 self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
 
-                                results[index] = Some(ToolCallResponse {
+                                results[index] = Some(Review::replaced(ToolCallResponse {
                                     id: tool.tool_id.clone(),
                                     result: Err(format!(
                                         "The tool '{}' asked a follow-up question (\"{}\") that \
@@ -1250,7 +1188,7 @@ impl ToolCoordinator {
                                          the turn.",
                                         tool.tool_name, question_text, error,
                                     )),
-                                });
+                                }));
                             }
                         }
                     }
@@ -1276,14 +1214,14 @@ impl ToolCoordinator {
                 ExecutionEvent::ResultModeProcessed {
                     index,
                     tool_id,
-                    response,
+                    review,
                 } => {
                     prompt_active = false;
                     let tool_name = executing_tools
                         .get(&index)
                         .map(|t| t.tool_name.clone())
                         .unwrap_or_default();
-                    let is_error = response.result.is_err();
+                    let is_error = review.response.result.is_err();
                     let (inline_results, results_file_link) = self
                         .tools_config
                         .get(&tool_name)
@@ -1300,11 +1238,15 @@ impl ToolCoordinator {
                         .get(&tool_name)
                         .is_some_and(|cfg| cfg.style().hidden);
                     if !is_hidden {
-                        tool_renderer.render_result(&response, &inline_results, &results_file_link);
+                        tool_renderer.render_result(
+                            &review.response,
+                            &inline_results,
+                            &results_file_link,
+                        );
                     }
 
                     self.set_tool_state(&tool_id, ToolCallState::Completed);
-                    results[index] = Some(response);
+                    results[index] = Some(review);
                     self.process_next_prompt(
                         &mut pending_prompts,
                         &mut prompt_active,
@@ -1395,23 +1337,25 @@ impl ToolCoordinator {
 
         tool_renderer.clear_progress();
 
-        let mut responses: Vec<(usize, ToolCallResponse)> = plan_indices
+        let mut reviews: Vec<(usize, Review)> = plan_indices
             .into_iter()
-            .zip(results.into_iter().map(|r| {
-                r.unwrap_or_else(|| ToolCallResponse {
-                    id: "unknown".to_string(),
-                    result: Err("Tool did not complete".to_string()),
+            .zip(results.into_iter().map(|result| {
+                result.unwrap_or_else(|| {
+                    Review::replaced(ToolCallResponse {
+                        id: "unknown".to_owned(),
+                        result: Err("Tool did not complete".to_owned()),
+                    })
                 })
             }))
             .collect();
 
         if tools_cancelled {
             for &i in &cancelled_indices {
-                let Some((_, response)) = responses.get_mut(i) else {
+                let Some((_, review)) = reviews.get_mut(i) else {
                     continue;
                 };
 
-                response.result = Ok(if let Some(msg) = &cancellation_message {
+                review.response.result = Ok(if let Some(msg) = &cancellation_message {
                     format!("Tool run cancelled by user with a custom message:\n\n{msg}")
                 } else {
                     // No custom message: each cancelled tool answers with its
@@ -1422,10 +1366,13 @@ impl ToolCoordinator {
                         .unwrap_or_default();
                     self.cancellation_response(tool_name)
                 });
+                // The cancellation message stands in for whatever the tool
+                // would have produced.
+                review.edited = true;
             }
         }
 
-        ExecutionResult { responses, outcome }
+        ExecutionResult { reviews, outcome }
     }
 
     /// Builds an error response for a tool whose argument rendering failed.
@@ -1594,7 +1541,7 @@ impl ToolCoordinator {
         result: ExecutorResult,
         tool: &mut ExecutingTool,
         index: usize,
-        tracked_response: &mut Option<ToolCallResponse>,
+        tracked_review: &mut Option<Review>,
         pending_prompts: &mut VecDeque<PendingPrompt>,
         prompt_active: &mut bool,
         prompter: Arc<ToolPrompter>,
@@ -1636,14 +1583,14 @@ impl ToolCoordinator {
                             );
                         }
                         self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
-                        *tracked_response = Some(response);
+                        *tracked_review = Some(Review::unchanged(response));
                     }
+                    // The execution service applies `result = "skip"` itself,
+                    // so this response is already its skip message rather than
+                    // the tool's output, and recording it replaces nothing.
                     ResultMode::Skip => {
                         self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
-                        *tracked_response = Some(ToolCallResponse {
-                            id: response.id,
-                            result: Ok("Result delivery skipped by configuration.".to_string()),
-                        });
+                        *tracked_review = Some(Review::unchanged(response));
                     }
                     result_mode @ (ResultMode::Ask | ResultMode::Edit) => {
                         // Both Ask and Edit prompt whenever a user is there to
@@ -1688,7 +1635,7 @@ impl ToolCoordinator {
                                 );
                             }
                             self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
-                            *tracked_response = Some(response);
+                            *tracked_review = Some(Review::unchanged(response));
                         }
                     }
                 }
@@ -1829,10 +1776,10 @@ impl ToolCoordinator {
                     };
                     Self::record_inquiry_cancelled(conv, &inquiry_id, reason);
                     self.set_tool_state(&tool_id, ToolCallState::Completed);
-                    *tracked_response = Some(ToolCallResponse {
+                    *tracked_review = Some(Review::replaced(ToolCallResponse {
                         id: tool_id.clone(),
                         result: Err(message),
-                    });
+                    }));
                 } else {
                     // The `InquiryRequest` is already recorded above; spawn the
                     // async inquiry on a cloned snapshot.
@@ -1920,7 +1867,7 @@ impl ToolCoordinator {
         inquiry_id: &InquiryId,
         reason: CancellationReason,
         executing_tools: &mut HashMap<usize, ExecutingTool>,
-        results: &mut [Option<ToolCallResponse>],
+        results: &mut [Option<Review>],
         pending_prompts: &mut VecDeque<PendingPrompt>,
         prompt_active: &mut bool,
         prompter: Arc<ToolPrompter>,
@@ -1932,17 +1879,17 @@ impl ToolCoordinator {
         // A user cancellation (Esc / Ctrl-C / EOF at the prompt) completes the
         // tool benignly; a prompt failure is a tool-level error.
         let result = match reason {
-            CancellationReason::User => Ok("Tool input cancelled by user.".to_string()),
-            _ => Err("Tool input prompt failed.".to_string()),
+            CancellationReason::User => Ok("Tool input cancelled by user.".to_owned()),
+            _ => Err("Tool input prompt failed.".to_owned()),
         };
         Self::record_inquiry_cancelled(conv, inquiry_id, reason);
 
         if let Some(tool) = executing_tools.get(&index) {
             self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
-            results[index] = Some(ToolCallResponse {
+            results[index] = Some(Review::replaced(ToolCallResponse {
                 id: tool.tool_id.clone(),
                 result,
-            });
+            }));
         }
         self.process_next_prompt(
             pending_prompts,
@@ -2001,44 +1948,51 @@ impl ToolCoordinator {
         event_tx: mpsc::Sender<ExecutionEvent>,
     ) {
         tokio::task::spawn_blocking(move || {
-            let final_response = match result_mode {
+            // Whether the content changed is decided here, where both the
+            // offered response and the user's answer are in hand. Downstream
+            // it becomes `Review::edited`, which is what lets the execution
+            // service hand an unedited result back to the caller intact
+            // instead of re-deriving it from the recorded text.
+            let review = match result_mode {
                 ResultMode::Ask => match prompter.prompt_result_confirmation(&tool_name) {
-                    Ok(true) => response,
-                    Ok(false) => ToolCallResponse {
+                    Ok(true) => Review::unchanged(response),
+                    Ok(false) => Review::replaced(ToolCallResponse {
                         id: response.id,
-                        result: Ok("Result delivery skipped by user.".to_string()),
-                    },
-                    Err(e) if e.to_string().contains("edit_requested") => {
+                        result: Ok("Result delivery skipped by user.".to_owned()),
+                    }),
+                    Err(error) if error.to_string().contains("edit_requested") => {
                         Self::handle_edit_result(&prompter, response)
                     }
-                    Err(_) => ToolCallResponse {
+                    Err(_) => Review::replaced(ToolCallResponse {
                         id: response.id,
-                        result: Ok("Result delivery cancelled.".to_string()),
-                    },
+                        result: Ok("Result delivery cancelled.".to_owned()),
+                    }),
                 },
                 ResultMode::Edit => Self::handle_edit_result(&prompter, response),
-                _ => response,
+                _ => Review::unchanged(response),
             };
             drop(event_tx.blocking_send(ExecutionEvent::ResultModeProcessed {
                 index,
                 tool_id,
-                response: final_response,
+                review,
             }));
         });
     }
 
-    fn handle_edit_result(prompter: &ToolPrompter, response: ToolCallResponse) -> ToolCallResponse {
-        let result_str = response.result.as_ref().map_or("", |s| s.as_str());
-        match prompter.edit_result(result_str) {
-            Ok(Some(edited)) => ToolCallResponse {
+    fn handle_edit_result(prompter: &ToolPrompter, response: ToolCallResponse) -> Review {
+        let original = response.result.as_deref().unwrap_or_default();
+        match prompter.edit_result(original) {
+            Ok(Some(edited)) => Review::replaced(ToolCallResponse {
                 id: response.id,
                 result: Ok(edited),
-            },
-            Ok(None) => response,
-            Err(_) => ToolCallResponse {
+            }),
+            // The editor closed without a change, so the tool's own result
+            // stands.
+            Ok(None) => Review::unchanged(response),
+            Err(_) => Review::replaced(ToolCallResponse {
                 id: response.id,
-                result: Ok("Result edit cancelled.".to_string()),
-            },
+                result: Ok("Result edit cancelled.".to_owned()),
+            }),
         }
     }
 

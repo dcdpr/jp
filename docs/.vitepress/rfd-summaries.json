@@ -48,7 +48,7 @@
     "summary": "Add reusable, config-defined query templates with interactive prompts for collecting variables before rendering."
   },
   "014-attachment-handler-guide.md": {
-    "hash": "928ceb66c106ab184b657c3357133a6403d6d8dcc76a627b8384280d86155e22",
+    "hash": "10a0d5421c9fb6803eef69a274253b77dae974ae3b48e8d3eca6de6a98c20179",
     "summary": "Guide for implementing attachment handlers: URL parsing, trait methods, registration, and conventions for fetching user-provided context."
   },
   "015-simplified-attachment-handler-trait.md": {

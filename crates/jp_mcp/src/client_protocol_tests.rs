@@ -204,51 +204,158 @@ impl ServerHandler for NativeUpstream {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "One upstream call read end to end, from its wire result to the caller's"
+)]
 async fn native_upstream_result_survives_host_projection_and_http_delivery() {
     timeout(Duration::from_secs(10), async {
         let count = Arc::new(AtomicUsize::new(0));
         // Use the stdio codec without starting an extra fixture executable.
         let (client_transport, server_transport) = duplex(8192);
         let handler = NativeUpstream(count.clone());
-        let server = tokio::spawn(async move {handler.serve(server_transport).await.unwrap()});
+        let server = tokio::spawn(async move { handler.serve(server_transport).await.unwrap() });
         let running = ().serve(client_transport).await.unwrap();
         let server = server.await.unwrap();
-        let upstream = Client::new(IndexMap::from_iter([("upstream".into(), McpProviderConfig::Stdio(StdioConfig {
-            command:"unused-fixture".into(), arguments:vec![], variables:vec![], checksum:None, optional:false, startup_timeout_secs:60,
-        }))]));
-        upstream.services.write().await.insert(McpServerId::new("upstream"), running);
+
+        let upstream = Client::new(IndexMap::from_iter([(
+            "upstream".into(),
+            McpProviderConfig::Stdio(StdioConfig {
+                command: "unused-fixture".into(),
+                arguments: vec![],
+                variables: vec![],
+                checksum: None,
+                optional: false,
+                startup_timeout_secs: 60,
+            }),
+        )]));
+        upstream
+            .services
+            .write()
+            .await
+            .insert(McpServerId::new("upstream"), running);
+
         let mut cfg = AppConfig::new_test();
-        let partial: PartialToolConfig = serde_json::from_value(json!({"source":"mcp.upstream.native","run":"unattended","result":"ask"})).unwrap();
-        cfg.conversation.tools.insert("alias".into(), ToolConfig::from_partial(partial, vec![]).unwrap());
-        let definitions = tool_definitions(cfg.conversation.tools.iter(), &upstream, None).await.unwrap();
-        let configured = definitions.into_iter().map(|definition| ConfiguredTool {config:cfg.conversation.tools.get(&definition.name).unwrap(), definition, access:Ok(None), metadata:Map::new()}).collect();
-        let (service, mut host) = Service::new(configured, upstream, BuiltinExecutors::new(), "/work".into(), InvocationContext::default()).unwrap();
+        let partial: PartialToolConfig = serde_json::from_value(json!({
+            "source": "mcp.upstream.native",
+            "run": "unattended",
+            "result": "ask",
+        }))
+        .unwrap();
+        cfg.conversation.tools.insert(
+            "alias".into(),
+            ToolConfig::from_partial(partial, vec![]).unwrap(),
+        );
+        let definitions = tool_definitions(cfg.conversation.tools.iter(), &upstream, None)
+            .await
+            .unwrap();
+        let configured = definitions
+            .into_iter()
+            .map(|definition| ConfiguredTool {
+                config: cfg.conversation.tools.get(&definition.name).unwrap(),
+                definition,
+                access: Ok(None),
+                metadata: Map::new(),
+            })
+            .collect();
+        let (service, mut host) = Service::new(
+            configured,
+            upstream,
+            BuiltinExecutors::new(),
+            "/work".into(),
+            InvocationContext::default(),
+        )
+        .unwrap();
+
         let endpoint = Endpoint::start(service).await.unwrap();
         let client = endpoint.connect().await.unwrap();
         let peer = client.peer().clone();
-        let result = tokio::spawn(async move {peer.call_tool(CallToolRequestParams::new("alias")).await.unwrap()});
-        let Interaction::Prepare {arguments,reply,..} = host.recv().await.unwrap().interaction else {panic!("expected preparation")};
-        reply.send(Ok(Admission::Run {arguments})).unwrap();
-        let Interaction::Release {reply,..} = host.recv().await.unwrap().interaction else {panic!("expected release")};
+        let result = tokio::spawn(async move {
+            peer.call_tool(CallToolRequestParams::new("alias"))
+                .await
+                .unwrap()
+        });
+
+        let Interaction::Prepare {
+            arguments, reply, ..
+        } = host.recv().await.unwrap().interaction
+        else {
+            panic!("expected preparation")
+        };
+        reply.send(Ok(Admission::Run { arguments })).unwrap();
+
+        let Interaction::Release { reply, .. } = host.recv().await.unwrap().interaction else {
+            panic!("expected release")
+        };
         reply.send(Ok(ReleaseDecision::Execute)).unwrap();
-        let Interaction::Review {result: reviewed, reply, ..} = host.recv().await.unwrap().interaction else {panic!("expected review")};
-        assert!(matches!(&reviewed.content[1], ContentBlock::Image(image) if image.data == "AA==" && image.mime_type == "image/png"));
-        assert_eq!(reviewed.structured_content, Some(json!({"answer":42})));
-        assert_eq!(reviewed.metadata, Some(json!({"fixture/source":"upstream"}).as_object().unwrap().clone()));
+
+        // Everything the upstream server sent reaches the Host intact: the
+        // image block, the structured data, and the result metadata.
+        let Interaction::Review {
+            result: reviewed,
+            reply,
+            ..
+        } = host.recv().await.unwrap().interaction
+        else {
+            panic!("expected review")
+        };
+        assert!(matches!(
+            &reviewed.content[1],
+            ContentBlock::Image(image)
+                if image.data == "AA==" && image.mime_type == "image/png"
+        ));
+        assert_eq!(reviewed.structured_content, Some(json!({"answer": 42})));
+        assert_eq!(
+            reviewed.metadata,
+            Some(
+                json!({"fixture/source": "upstream"})
+                    .as_object()
+                    .unwrap()
+                    .clone()
+            )
+        );
         reply.send(Ok(reviewed.clone())).unwrap();
-        let Interaction::Record {result:projected,raw_result,reply,..} = host.recv().await.unwrap().interaction else {panic!("expected recording")};
+
+        let Interaction::Record {
+            result: projected,
+            raw_result,
+            reply,
+            ..
+        } = host.recv().await.unwrap().interaction
+        else {
+            panic!("expected recording")
+        };
         assert_eq!(projected, reviewed);
         assert_eq!(raw_result, Some(reviewed));
+        // The conversation stores only the text, which is what makes the
+        // assertion below worth making.
         assert_eq!(projected.to_text(), "alpha\n\nresource");
         assert!(!reply.is_closed());
         reply.send(Ok(())).unwrap();
-        assert_eq!(serde_json::to_value(result.await.unwrap()).unwrap(), json!({
-            "content":[{"type":"text","text":"alpha"},{"type":"image","data":"AA==","mimeType":"image/png"},{"type":"resource","resource":{"uri":"fixture:///resource","text":"resource","mimeType":"text/plain"}}],
-            "isError":false,"structuredContent":{"answer":42},"_meta":{"fixture/source":"upstream"}
-        }));
+
+        assert_eq!(
+            serde_json::to_value(result.await.unwrap()).unwrap(),
+            json!({
+                "content": [
+                    {"type": "text", "text": "alpha"},
+                    {"type": "image", "data": "AA==", "mimeType": "image/png"},
+                    {"type": "resource", "resource": {
+                        "uri": "fixture:///resource",
+                        "text": "resource",
+                        "mimeType": "text/plain",
+                    }},
+                ],
+                "isError": false,
+                "structuredContent": {"answer": 42},
+                "_meta": {"fixture/source": "upstream"},
+            })
+        );
         assert_eq!(count.load(Ordering::SeqCst), 1);
+
         client.cancel().await.unwrap();
         endpoint.shutdown().await.unwrap();
         server.cancel().await.unwrap();
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
 }

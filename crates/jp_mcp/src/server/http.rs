@@ -13,6 +13,7 @@ use std::{
 
 use axum::Router;
 use jp_tool::Error as ToolError;
+use reqwest_mcp::{Client as HttpClient, redirect::Policy};
 use rmcp::{
     ErrorData, ServerHandler, ServiceExt as _,
     model::{
@@ -35,10 +36,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use super::{
-    http_client::LoopbackClient,
-    service::{CallRequest, Service, ServiceError},
-};
+use super::service::{CallRequest, Service, ServiceError};
 
 /// Failure starting, connecting to, or stopping the in-process endpoint.
 #[derive(Debug, thiserror::Error)]
@@ -49,7 +47,7 @@ pub enum EndpointError {
     /// The HTTP task failed.
     #[error(transparent)]
     Task(#[from] JoinError),
-    /// Execution service shutdown failed.
+    /// The tool catalog the Host supplied cannot be served.
     #[error(transparent)]
     Service(#[from] ServiceError),
     /// The MCP handshake failed.
@@ -76,6 +74,12 @@ impl Endpoint {
         let service = Arc::new(service);
         let factory = service.clone();
         let cancellation = CancellationToken::new();
+        // Only this listener's own address is an acceptable Host or Origin, so
+        // a page in a browser cannot reach the endpoint by resolving some other
+        // name to loopback.
+        //
+        // Assigned field by field because rmcp marks the config
+        // `#[non_exhaustive]`, which rules out struct-update syntax downstream.
         let mut config = StreamableHttpServerConfig::default();
         config.allowed_hosts = vec![address.to_string()];
         config.allowed_origins = vec![origin];
@@ -112,8 +116,13 @@ impl Endpoint {
 
     /// Establish the MCP Host's ordinary HTTP connection to this endpoint.
     pub async fn connect(&self) -> Result<RunningService<RoleClient, ()>, EndpointError> {
-        let client =
-            LoopbackClient::new().map_err(|error| EndpointError::Connect(Box::new(error)))?;
+        // A loopback connection must not be routed through an environment
+        // proxy or followed to another host.
+        let client = HttpClient::builder()
+            .no_proxy()
+            .redirect(Policy::none())
+            .build()
+            .map_err(|error| EndpointError::Connect(Box::new(error)))?;
         let config = StreamableHttpClientTransportConfig::with_uri(self.url.clone())
             .reinit_on_expired_session(false);
         ().serve(StreamableHttpClientTransport::with_client(client, config))
@@ -134,7 +143,7 @@ impl Endpoint {
 
     /// Stop tool work, close upstream services, and join the HTTP listener.
     pub async fn shutdown(mut self) -> Result<(), EndpointError> {
-        self.service.shutdown().await?;
+        self.service.shutdown().await;
         self.cancellation.cancel();
         if let Some(task) = self.task.take() {
             task.await??;
@@ -157,6 +166,8 @@ struct Handler {
 
 impl ServerHandler for Handler {
     fn get_info(&self) -> ServerInfo {
+        // Assigned field by field because rmcp marks `ServerInfo`
+        // `#[non_exhaustive]`, which rules out struct-update syntax downstream.
         let mut info = ServerInfo::default();
         info.server_info.name = "jp".into();
         info.server_info.version = env!("CARGO_PKG_VERSION").into();

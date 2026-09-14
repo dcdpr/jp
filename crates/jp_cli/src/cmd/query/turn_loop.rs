@@ -36,10 +36,8 @@ use jp_llm::{
     model::ModelDetails,
     provider::get_provider,
     query::ChatQuery,
-    tool::Executor,
     with_idle_timeout, with_output_limit,
 };
-use jp_mcp::server::InvocationContext;
 use jp_printer::{ErrChannel, Printer, RegionStyle, StatusRegion};
 use jp_tool::ToolDefinition;
 use jp_workspace::{ConversationLock, ConversationMut};
@@ -59,6 +57,7 @@ use super::{
     tool::{
         PendingEntry, PendingTools, ToolCallDecision, ToolCallState, ToolCoordinator, ToolPrompter,
         ToolRenderer, build_execution_plan,
+        executor::{Executor, Review},
         inquiry::{InquiryBackend, InquiryConfig, LlmInquiryBackend},
     },
     turn::{Action, CommittedEvent, TurnCoordinator, TurnPhase, TurnState},
@@ -187,7 +186,6 @@ pub(super) async fn run_turn_loop(
     prompt_backend: Arc<dyn PromptBackend>,
     mut tool_coordinator: ToolCoordinator,
     chat_request: ChatRequest,
-    invocation: InvocationContext,
     pending_trim: PendingStreamTrim,
     mut turn_interrupt: TurnInterrupt,
 ) -> Result<(), Error> {
@@ -223,8 +221,6 @@ pub(super) async fn run_turn_loop(
             Printer::sink().into()
         }),
         cfg.style.clone(),
-        root.to_path_buf(),
-        invocation,
     );
     // Share the owed-separator flag so visible assistant content rendered by
     // the coordinator can cancel a blank line owed by a preceding tool result.
@@ -1159,18 +1155,30 @@ async fn commit_tool_responses(
     // permission phase into the corresponding ToolCallRequest events.
     flush_rendered_arguments(tool, conv);
 
-    // Both `result.responses` and `pre_resolved` are already keyed by the
+    // Both `result.reviews` and `pre_resolved` are already keyed by the
     // plan index assigned in `build_execution_plan`. Sorting by that
     // index restores stream order for the persisted responses.
-    let mut indexed: Vec<(usize, ToolCallResponse)> = result.responses;
-    indexed.extend(pre_resolved);
-    indexed.sort_by_key(|(idx, _)| *idx);
-    let responses: Vec<_> = indexed.into_iter().map(|(_, r)| r).collect();
+    //
+    // A pre-resolved tool never reached an executor, so nothing offered it a
+    // result to edit.
+    let mut indexed: Vec<(usize, Review)> = result.reviews;
+    indexed.extend(
+        pre_resolved
+            .into_iter()
+            .map(|(index, response)| (index, Review::unchanged(response))),
+    );
+    indexed.sort_by_key(|(index, _)| *index);
+    let reviews: Vec<_> = indexed.into_iter().map(|(_, review)| review).collect();
 
-    let recorded = responses.clone();
+    let responses = reviews
+        .iter()
+        .map(|review| review.response.clone())
+        .collect();
     let action = conv.update_events(|stream| turn.handle_tool_responses(stream, responses));
     conv.flush()?;
-    tool.acknowledge_responses(recorded)
+    // Only now does each call's MCP response reach its caller: the service
+    // holds every result until the conversation has it on disk.
+    tool.acknowledge_reviews(reviews)
         .await
         .map_err(Error::McpRecording)?;
 

@@ -20,12 +20,8 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse},
 };
 use jp_inquire::prompt::MockPromptBackend;
-use jp_llm::{
-    Provider,
-    provider::mock::MockProvider,
-    tool::{ExecutorSource, TestExecutorSource},
-};
-use jp_mcp::{Startup, StderrLine, server::InvocationContext};
+use jp_llm::{Provider, provider::mock::MockProvider};
+use jp_mcp::{Startup, StderrLine};
 use jp_printer::{OutputFormat, Printer, SharedBuffer, TerminalCapability};
 use jp_storage::backend::FsStorageBackend;
 use jp_term::width::display_width;
@@ -37,7 +33,10 @@ use relative_path::RelativePathBuf;
 use serde_json::Value;
 use tokio::{runtime::Runtime, sync::broadcast};
 
-use super::*;
+use super::{
+    tool::executor::{ExecutorSource, mock::TestExecutorSource},
+    *,
+};
 use crate::{
     Globals, KeyValueOrPath,
     cmd::target::{ConversationTarget, PickerFilter},
@@ -398,7 +397,6 @@ async fn run_mock_turn(
         Arc::new(MockPromptBackend::new()),
         tool::ToolCoordinator::new(cfg.conversation.tools.clone(), empty_executor_source()),
         ChatRequest::from(prompt),
-        InvocationContext::default(),
         PendingStreamTrim::default(),
         router.turn_interrupt(lock.id()),
     )

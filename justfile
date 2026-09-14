@@ -3550,6 +3550,12 @@ lint-ci: (_rustup_component "clippy") _install_ci_matchers
 
     cargo clippy --locked --workspace --all-targets --all-features --no-deps --profile=lint -- --deny warnings
 
+    # `--all-features` and the workspace build both turn `jp_mcp/server` on,
+    # because `jp_cli` asks for it. A crate that also ships without the tool
+    # server has to be compiled that way somewhere, or the `client`-only
+    # spelling rots unnoticed.
+    cargo clippy --locked --package jp_mcp --all-targets --no-default-features --features client --no-deps --profile=lint -- --deny warnings
+
 # Check code formatting on CI.
 [group('ci')]
 fmt-ci: (_rustup_component "rustfmt") _install_ci_matchers

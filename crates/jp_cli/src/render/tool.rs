@@ -11,17 +11,12 @@ use std::{
     time::Duration,
 };
 
-use camino::{Utf8Path, Utf8PathBuf};
 use crossterm::style::Stylize as _;
 use jp_config::{
-    conversation::tool::{
-        CommandConfig,
-        style::{InlineResults, LinkStyle, ParametersStyle, TruncateLines},
-    },
+    conversation::tool::style::{InlineResults, LinkStyle, ParametersStyle, TruncateLines},
     style::{StyleConfig, stderr_rows::StderrRows},
 };
 use jp_conversation::event::ToolCallResponse;
-use jp_mcp::server::{CommandResult, InvocationContext, run_tool_command};
 use jp_md::{
     format::{DefaultBackground, Formatter},
     shade::ShadedWriter,
@@ -29,7 +24,6 @@ use jp_md::{
 use jp_printer::{ErrChannel, LineSink, OutputLines, RegionStyle, StatusRegion};
 use jp_term::osc::hyperlink;
 use serde_json::{Map, Value};
-use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 /// Map the `stderr_rows` config key onto the printer's window budget.
@@ -90,11 +84,6 @@ pub enum RenderOutcome {
 pub struct ToolRenderer {
     channel: ErrChannel,
     config: StyleConfig,
-    root: Utf8PathBuf,
-
-    /// Workspace and conversation identity, forwarded to custom argument
-    /// formatter commands.
-    invocation: InvocationContext,
 
     /// Markdown formatter used for syntax highlighting code blocks in tool
     /// results.
@@ -145,12 +134,7 @@ pub struct ToolRenderer {
 }
 
 impl ToolRenderer {
-    pub fn new(
-        channel: ErrChannel,
-        config: StyleConfig,
-        root: Utf8PathBuf,
-        invocation: InvocationContext,
-    ) -> Self {
+    pub fn new(channel: ErrChannel, config: StyleConfig) -> Self {
         let formatter = Formatter::new().theme(if channel.pretty_printing_enabled() {
             config.markdown.theme.as_deref()
         } else {
@@ -160,8 +144,6 @@ impl ToolRenderer {
         Self {
             channel,
             config,
-            root,
-            invocation,
             formatter,
             pending: Vec::new(),
             preparing: StatusRegion::inert(),
@@ -272,62 +254,34 @@ impl ToolRenderer {
         });
     }
 
-    /// Renders a tool call with all styles, printing header and arguments
-    /// atomically.
+    /// Renders an approved tool call, printing header and arguments atomically.
     ///
-    /// For non-Custom styles: prints the header with inline-formatted arguments
-    /// in a single write.
+    /// Prints the header with inline-formatted arguments in a single write, and
+    /// returns `Rendered { content: None }`: the built-in styles print their
+    /// arguments inline rather than producing content a caller persists.
     ///
-    /// For Custom style: runs the custom formatter command first, then prints
-    /// the header followed by the formatted output.
-    /// If the custom formatter fails, nothing is printed and
-    /// [`RenderOutcome::Suppressed`] is returned.
+    /// A `Custom` style is rendered by [`render_custom_result`] instead, from
+    /// output the execution service produced.
     ///
-    /// On success, returns `Rendered { content }` where `content` is the
-    /// custom-formatted output (if any) so the caller can persist it for
-    /// replay.
-    ///
-    /// `name` is what the assistant called and what the header shows.
-    /// `invoked_name` is what the tool's implementation is called, which a
-    /// `source` override can make different, and is what a custom formatter
-    /// receives.
-    pub async fn render_approved(
+    /// [`render_custom_result`]: Self::render_custom_result
+    pub fn render_approved(
         &self,
         name: &str,
-        invoked_name: &str,
         arguments: &Map<String, Value>,
         style: &ParametersStyle,
     ) -> RenderOutcome {
-        if let ParametersStyle::Custom(cmd_config) = style {
-            let cmd = cmd_config.clone().command();
-            self.render_custom_tool_call(name, invoked_name, arguments, cmd)
-                .await
-        } else {
-            self.render_tool_call(name, arguments, style);
-            RenderOutcome::Rendered { content: None }
-        }
-    }
-
-    /// Renders a Custom-style tool call: header + custom formatted output.
-    ///
-    /// Runs the custom formatter command first.
-    /// If it succeeds, prints the "Calling tool X" header followed by the
-    /// formatted output.
-    /// If it fails, nothing is printed — the tool call is suppressed from the
-    /// display.
-    async fn render_custom_tool_call(
-        &self,
-        name: &str,
-        invoked_name: &str,
-        arguments: &Map<String, Value>,
-        cmd: CommandConfig,
-    ) -> RenderOutcome {
-        let result =
-            format_args_custom(invoked_name, arguments, cmd, &self.root, &self.invocation).await;
-        self.render_custom_result(name, result)
+        self.render_tool_call(name, arguments, style);
+        RenderOutcome::Rendered { content: None }
     }
 
     /// Render custom arguments already formatted by the execution service.
+    ///
+    /// Prints the "Calling tool X" header followed by the formatted output.
+    /// A formatter that failed prints nothing and returns
+    /// [`RenderOutcome::Suppressed`], so a broken formatter does not show a
+    /// half-rendered call.
+    ///
+    /// The returned content is what the caller persists for replay.
     pub(crate) fn render_custom_result(
         &self,
         name: &str,
@@ -819,108 +773,6 @@ fn has_xml_envelope(content: &str) -> bool {
 fn format_args_json(arguments: Map<String, Value>) -> String {
     let pretty = format!("{:#}", Value::Object(arguments));
     format!(" with arguments:\n\n```json\n{pretty}\n```")
-}
-
-/// Runs a custom arguments formatter command and returns the content.
-///
-/// `tool_name` is the name the tool is invoked under, which is the name its own
-/// implementation answers to rather than the key the assistant called.
-async fn format_args_custom(
-    tool_name: &str,
-    arguments: &Map<String, Value>,
-    cmd: CommandConfig,
-    root: &Utf8Path,
-    invocation: &InvocationContext,
-) -> Result<String, String> {
-    let ctx = serde_json::json!({
-        "tool": {
-            "name": tool_name,
-            "arguments": arguments,
-        },
-        "context": {
-            "action": jp_tool::Action::FormatArguments,
-            "root": root,
-            "workspace_id": &invocation.workspace_id,
-            "conversation_id": &invocation.conversation_id,
-        },
-    });
-
-    let result = run_tool_command(cmd.clone(), ctx, root, CancellationToken::new(), None)
-        .await
-        .map_err(|e| {
-            warn!(
-                command = %cmd,
-                error = %e,
-                "Custom parameters formatter failed"
-            );
-            format!("Custom parameters formatter '{cmd}' failed: {e}")
-        })?;
-
-    match result {
-        CommandResult::Success(content) => Ok(content.trim().to_owned()),
-        CommandResult::TransientError { message, trace } => {
-            let detail = CommandResult::format_error(&message, &trace);
-            warn!(
-                command = %cmd,
-                error = %detail,
-                "Custom parameters formatter returned error"
-            );
-            Err(detail)
-        }
-        CommandResult::FatalError { raw, .. } => {
-            warn!(
-                command = %cmd,
-                "Custom parameters formatter returned fatal error"
-            );
-            Err(raw)
-        }
-        CommandResult::NeedsInput(_) => {
-            warn!(
-                command = %cmd,
-                "Custom parameters formatter returned NeedsInput"
-            );
-            Err(format!(
-                "Custom parameters formatter '{cmd}' returned unexpected NeedsInput"
-            ))
-        }
-        CommandResult::Cancelled => Ok(String::new()),
-        CommandResult::InvalidInquiry { question_id } => {
-            warn!(
-                command = %cmd,
-                question_id = %question_id,
-                "Custom parameters formatter returned an invalid inquiry"
-            );
-            Err(format!(
-                "Custom parameters formatter '{cmd}' produced an invalid inquiry (question id \
-                 '{question_id}')"
-            ))
-        }
-        CommandResult::MalformedInquiry { detail } => {
-            warn!(
-                command = %cmd,
-                %detail,
-                "Custom parameters formatter returned a malformed inquiry"
-            );
-            Err(format!(
-                "Custom parameters formatter '{cmd}' produced a malformed inquiry: {detail}"
-            ))
-        }
-        CommandResult::RawOutput {
-            stdout,
-            success: true,
-            ..
-        } => Ok(stdout.trim().to_owned()),
-        CommandResult::RawOutput { stderr, .. } => {
-            warn!(
-                command = %cmd,
-                error = %stderr,
-                "Custom parameters formatter failed"
-            );
-            Err(format!(
-                "Custom parameters formatter '{cmd}' failed: {stderr}"
-            ))
-        }
-    }
 }
 
 #[cfg(test)]

@@ -35,6 +35,21 @@ fn definition(parameters: Value) -> ToolDefinition {
     }
 }
 
+/// Assert that validation reported exactly these missing and unknown arguments,
+/// in this order.
+#[track_caller]
+fn assert_arguments_error(result: Result<(), Error>, missing: &[String], unknown: &[String]) {
+    let Err(Error::Arguments {
+        missing: got_missing,
+        unknown: got_unknown,
+    }) = result
+    else {
+        panic!("expected an argument error, got {result:?}")
+    };
+    assert_eq!(got_missing, missing, "missing arguments");
+    assert_eq!(got_unknown, unknown, "unknown arguments");
+}
+
 #[test]
 fn coerces_json_strings_to_declared_parameter_types() {
     let parameters = schema([
@@ -126,14 +141,16 @@ fn test_validate_tool_arguments() {
     struct TestCase {
         arguments: Map<String, Value>,
         parameters: Value,
-        want: Result<(), Error>,
+        /// The arguments reported missing and unknown, or `None` when the call
+        /// is expected to validate.
+        want: Option<(Vec<String>, Vec<String>)>,
     }
 
     let cases = vec![
         ("empty", TestCase {
             arguments: Map::new(),
             parameters: schema([]),
-            want: Ok(()),
+            want: None,
         }),
         ("correct", TestCase {
             arguments: Map::from_iter([("foo".to_owned(), json!("bar"))]),
@@ -141,37 +158,31 @@ fn test_validate_tool_arguments() {
                 ("foo", param("string"), true),
                 ("bar", param("string"), false),
             ]),
-            want: Ok(()),
+            want: None,
         }),
         ("missing", TestCase {
             arguments: Map::new(),
             parameters: schema([("foo", param("string"), true)]),
-            want: Err(Error::Arguments {
-                missing: vec!["foo".to_owned()],
-                unknown: vec![],
-            }),
+            want: Some((vec!["foo".to_owned()], vec![])),
         }),
         ("unknown", TestCase {
             arguments: Map::from_iter([("foo".to_owned(), json!("bar"))]),
             parameters: schema([("bar", param("string"), false)]),
-            want: Err(Error::Arguments {
-                missing: vec![],
-                unknown: vec!["foo".to_owned()],
-            }),
+            want: Some((vec![], vec!["foo".to_owned()])),
         }),
         ("both", TestCase {
             arguments: Map::from_iter([("foo".to_owned(), json!("bar"))]),
             parameters: schema([("bar", param("string"), true)]),
-            want: Err(Error::Arguments {
-                missing: vec!["bar".to_owned()],
-                unknown: vec!["foo".to_owned()],
-            }),
+            want: Some((vec!["bar".to_owned()], vec!["foo".to_owned()])),
         }),
     ];
 
     for (name, test_case) in cases {
         let result = validate_tool_arguments(&test_case.arguments, &test_case.parameters);
-        assert_eq!(result, test_case.want, "failed case: {name}");
+        match test_case.want {
+            None => result.unwrap_or_else(|error| panic!("case {name} should validate: {error}")),
+            Some((missing, unknown)) => assert_arguments_error(result, &missing, &unknown),
+        }
     }
 }
 
@@ -203,10 +214,7 @@ fn test_validate_nested_array_item_properties() {
         "path": "src/lib.rs",
         "patterns": [{"old": "foo", "new": "bar"}]
     });
-    assert_eq!(
-        validate_tool_arguments(args.as_object().unwrap(), &parameters),
-        Ok(())
-    );
+    validate_tool_arguments(args.as_object().unwrap(), &parameters).expect("arguments validate");
 
     // Valid: multiple items.
     let args = json!({
@@ -216,22 +224,17 @@ fn test_validate_nested_array_item_properties() {
             {"old": "c", "new": "d"}
         ]
     });
-    assert_eq!(
-        validate_tool_arguments(args.as_object().unwrap(), &parameters),
-        Ok(())
-    );
+    validate_tool_arguments(args.as_object().unwrap(), &parameters).expect("arguments validate");
 
     // Invalid: unknown inner field.
     let args = json!({
         "path": "src/lib.rs",
         "patterns": [{"old": "foo", "new": "bar", "extra": true}]
     });
-    assert_eq!(
+    assert_arguments_error(
         validate_tool_arguments(args.as_object().unwrap(), &parameters),
-        Err(Error::Arguments {
-            missing: vec![],
-            unknown: vec!["extra".to_owned()],
-        })
+        &[],
+        &["extra".to_owned()],
     );
 
     // Invalid: missing required inner field.
@@ -239,12 +242,10 @@ fn test_validate_nested_array_item_properties() {
         "path": "src/lib.rs",
         "patterns": [{"old": "foo"}]
     });
-    assert_eq!(
+    assert_arguments_error(
         validate_tool_arguments(args.as_object().unwrap(), &parameters),
-        Err(Error::Arguments {
-            missing: vec!["new".to_owned()],
-            unknown: vec![],
-        })
+        &["new".to_owned()],
+        &[],
     );
 
     // Invalid: wrong inner field names (the LLM hallucinated names).
@@ -269,20 +270,14 @@ fn test_validate_nested_array_item_properties() {
         "path": "src/lib.rs",
         "patterns": ["not an object"]
     });
-    assert_eq!(
-        validate_tool_arguments(args.as_object().unwrap(), &parameters),
-        Ok(())
-    );
+    validate_tool_arguments(args.as_object().unwrap(), &parameters).expect("arguments validate");
 
     // Valid: parameter is not an array (type mismatch, but not our job to check types).
     let args = json!({
         "path": "src/lib.rs",
         "patterns": "not an array"
     });
-    assert_eq!(
-        validate_tool_arguments(args.as_object().unwrap(), &parameters),
-        Ok(())
-    );
+    validate_tool_arguments(args.as_object().unwrap(), &parameters).expect("arguments validate");
 }
 
 #[test]
@@ -305,36 +300,26 @@ fn test_validate_nested_object_properties() {
 
     // Valid.
     let args = json!({ "name": "test", "config": { "verbose": true, "output": "out.txt" } });
-    assert_eq!(
-        validate_tool_arguments(args.as_object().unwrap(), &parameters),
-        Ok(())
-    );
+    validate_tool_arguments(args.as_object().unwrap(), &parameters).expect("arguments validate");
 
     // Valid: optional object param omitted entirely.
     let args = json!({ "name": "test" });
-    assert_eq!(
-        validate_tool_arguments(args.as_object().unwrap(), &parameters),
-        Ok(())
-    );
+    validate_tool_arguments(args.as_object().unwrap(), &parameters).expect("arguments validate");
 
     // Invalid: unknown field inside the object.
     let args = json!({ "name": "test", "config": { "output": "o", "bogus": 1 } });
-    assert_eq!(
+    assert_arguments_error(
         validate_tool_arguments(args.as_object().unwrap(), &parameters),
-        Err(Error::Arguments {
-            missing: vec![],
-            unknown: vec!["bogus".to_owned()],
-        })
+        &[],
+        &["bogus".to_owned()],
     );
 
     // Invalid: missing required field inside the object.
     let args = json!({ "name": "test", "config": { "verbose": true } });
-    assert_eq!(
+    assert_arguments_error(
         validate_tool_arguments(args.as_object().unwrap(), &parameters),
-        Err(Error::Arguments {
-            missing: vec!["output".to_owned()],
-            unknown: vec![],
-        })
+        &["output".to_owned()],
+        &[],
     );
 }
 

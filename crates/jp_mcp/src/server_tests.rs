@@ -31,9 +31,10 @@ fn command_error_keeps_details_and_its_conversation_projection() {
             trace: vec!["upstream".into()],
         })
     );
+    assert!(result.is_error());
     assert_eq!(
-        to_legacy(&result),
-        Err(r#"{"message":"busy","trace":["upstream"]}"#.into())
+        result.to_text(),
+        r#"{"message":"busy","trace":["upstream"]}"#
     );
 }
 
