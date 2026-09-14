@@ -1,6 +1,6 @@
 //! Qualified Claude SDK options assembled from a resolved JP request.
 
-use std::{collections::BTreeMap, time::Duration};
+use std::collections::BTreeMap;
 
 use async_anthropic::types::{Effort, ExtendedThinking};
 use jp_config::{assistant::request::CachePolicy, model::id::Name};
@@ -129,12 +129,7 @@ pub(super) fn environment(
     prepared: &PreparedRequest,
     cache: CachePolicy,
 ) -> BTreeMap<String, String> {
-    let ttl = match cache {
-        CachePolicy::Long => "1h",
-        CachePolicy::Custom(duration) if duration >= Duration::from_mins(30) => "1h",
-        _ => "5m",
-    };
-    BTreeMap::from([
+    let mut environment = BTreeMap::from([
         ("CLAUDE_CODE_DISABLE_AUTO_MEMORY".into(), "1".into()),
         ("DISABLE_AUTO_COMPACT".into(), "1".into()),
         ("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS".into(), "1".into()),
@@ -144,11 +139,10 @@ pub(super) fn environment(
             prepared.max_tokens.to_string(),
         ),
         ("ENABLE_TOOL_SEARCH".into(), "false".into()),
-        (
-            "DISABLE_PROMPT_CACHING".into(),
-            if cache == CachePolicy::Off { "1" } else { "0" }.into(),
-        ),
-        ("CLAUDE_CODE_PROMPT_CACHE_TTL".into(), ttl.into()),
         ("MAX_MCP_OUTPUT_TOKENS".into(), "100000".into()),
-    ])
+    ]);
+    if cache == CachePolicy::Off {
+        environment.insert("DISABLE_PROMPT_CACHING".into(), "1".into());
+    }
+    environment
 }

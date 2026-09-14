@@ -42,8 +42,7 @@ fn query(policy: CachePolicy, tag: &str) -> ChatQuery {
             timestamp,
         ),
     ]);
-    // A long stable prefix clears the model's cache minimum. Policy-specific
-    // tags keep the long-cache control from reusing a short-cache entry.
+    // A long stable prefix clears the model's cache minimum.
     let reference = "Invoice INV-1042: amount 125, status paid.\n".repeat(2000);
     ThreadBuilder::new()
         .with_system_prompt(format!(
@@ -104,19 +103,6 @@ fn tokens(snapshot: &Value, key: &str) -> u64 {
         .sum()
 }
 
-fn writes(snapshot: &Value, duration: &str) -> u64 {
-    snapshot["requests"]
-        .as_object()
-        .expect("missing main request usage")
-        .values()
-        .map(|usage| {
-            usage["cache_creation"][duration]
-                .as_u64()
-                .expect("runtime omitted cache TTL counters")
-        })
-        .sum()
-}
-
 #[tokio::test]
 #[ignore = "Consumes subscription allowance; requires runtime setup and no-overage confirmation"]
 async fn live_cache_reconstruction() {
@@ -139,32 +125,25 @@ async fn live_cache_reconstruction() {
     };
     let short = query(CachePolicy::Short, &tag);
     let first = request(&provider, short.clone(), context.clone()).await;
-    println!("{}", json!({"case":"initial_short","usage":first}));
-    assert!(
-        writes(&first, "ephemeral_5m_input_tokens") > 0,
-        "initial short-cache request did not write a five-minute entry"
+    println!(
+        "{}",
+        json!({"case":"initial_runtime_managed","usage":first})
     );
-    assert_eq!(writes(&first, "ephemeral_1h_input_tokens"), 0);
+    assert!(
+        tokens(&first, "cache_creation_input_tokens") > 0,
+        "runtime-managed caching did not create an entry"
+    );
     let repeat = request(&provider, short, context.clone()).await;
-    println!("{}", json!({"case":"reconstructed_short","usage":repeat}));
+    println!(
+        "{}",
+        json!({"case":"reconstructed_runtime_managed","usage":repeat})
+    );
     assert_ne!(first["native_session_id"], repeat["native_session_id"]);
     assert!(
         tokens(&repeat, "cache_read_input_tokens") > 0,
         "reconstruction did not reuse any cache"
     );
 
-    let long = request(
-        &provider,
-        query(CachePolicy::Long, &format!("{tag}-long")),
-        context.clone(),
-    )
-    .await;
-    println!("{}", json!({"case":"long","usage":long}));
-    assert!(
-        writes(&long, "ephemeral_1h_input_tokens") > 0,
-        "long-cache control did not write a one-hour entry"
-    );
-    assert_eq!(writes(&long, "ephemeral_5m_input_tokens"), 0);
     let off = request(&provider, query(CachePolicy::Off, &tag), context).await;
     println!("{}", json!({"case":"off","usage":off}));
     assert_eq!(tokens(&off, "cache_read_input_tokens"), 0);

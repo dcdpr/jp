@@ -121,8 +121,11 @@ async fn run(
     let project = project_name(&context);
     let artifact = NativeArtifact::write(&prepared, &context.root, &directory, &project)?;
     let mut environment = options::environment(&prepared, cache);
-    environment.insert("CLAUDE_CONFIG_DIR".into(), directory.into_string());
-    environment.insert("CLAUDE_CODE_PROJECT_DIR_NAME".into(), project);
+    configure_storage_environment(
+        &mut environment,
+        env::var("CLAUDE_CONFIG_DIR").ok().as_deref(),
+        &project,
+    );
     let mut launch = process::command();
     launch.envs(&environment);
     drive(
@@ -273,6 +276,19 @@ async fn drive(
                 }
             }
         }
+    }
+}
+
+fn configure_storage_environment(
+    environment: &mut BTreeMap<String, String>,
+    configured: Option<&str>,
+    project: &str,
+) {
+    // Setting CLAUDE_CONFIG_DIR can select a different Keychain entry even
+    // when it names the default directory. Preserve the login environment.
+    // Without an explicit config directory, resume finds our file by ID.
+    if configured.is_some() {
+        environment.insert("CLAUDE_CODE_PROJECT_DIR_NAME".into(), project.into());
     }
 }
 

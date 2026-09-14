@@ -63,20 +63,40 @@ fn project_directory_is_scoped_by_host_identity_not_worktree_path() {
 }
 
 #[test]
+fn storage_options_do_not_select_a_different_login_directory() {
+    let mut environment = BTreeMap::new();
+    configure_storage_environment(&mut environment, None, "jp-c123-otvo8");
+    assert!(environment.is_empty());
+    configure_storage_environment(&mut environment, Some("/custom/claude"), "jp-c123-otvo8");
+    assert_eq!(
+        environment,
+        BTreeMap::from([(
+            "CLAUDE_CODE_PROJECT_DIR_NAME".into(),
+            "jp-c123-otvo8".into()
+        )])
+    );
+    assert!(!environment.contains_key("CLAUDE_CONFIG_DIR"));
+}
+
+#[test]
 fn cache_policy_reaches_the_native_sdk_environment() {
     let prepared = prepared();
-    for (policy, disabled, ttl) in [
-        (CachePolicy::Off, "1", "5m"),
-        (CachePolicy::Short, "0", "5m"),
-        (CachePolicy::Long, "0", "1h"),
-        (CachePolicy::Custom(Duration::from_secs(1799)), "0", "5m"),
-        (CachePolicy::Custom(Duration::from_mins(30)), "0", "1h"),
+    for policy in [
+        CachePolicy::Off,
+        CachePolicy::Short,
+        CachePolicy::Long,
+        CachePolicy::Custom(Duration::from_secs(1799)),
+        CachePolicy::Custom(Duration::from_mins(30)),
     ] {
         let environment = options::environment(&prepared, policy);
         let metadata = options::metadata(&prepared, &environment).unwrap();
         let native = &metadata["claudeCode"]["options"]["env"];
-        assert_eq!(native["DISABLE_PROMPT_CACHING"], disabled);
-        assert_eq!(native["CLAUDE_CODE_PROMPT_CACHE_TTL"], ttl);
+        if policy == CachePolicy::Off {
+            assert_eq!(native["DISABLE_PROMPT_CACHING"], "1");
+        } else {
+            assert!(native.get("DISABLE_PROMPT_CACHING").is_none());
+        }
+        assert!(native.get("CLAUDE_CODE_PROMPT_CACHE_TTL").is_none());
     }
 }
 

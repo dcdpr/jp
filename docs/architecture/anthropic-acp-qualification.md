@@ -19,8 +19,8 @@ increment.
 Keep the latest snapshot for each native session; do not sum snapshots from
 different content blocks or tool calls in that session.
 
-- `requests` contains completed main-session model responses, keyed by native
-  message ID.
+- `requests` contains observed main-session model usage, keyed by native message
+  ID.
   Repeated SDK observations update that entry.
   Uncached `input_tokens`, `cache_creation_input_tokens`,
   `cache_read_input_tokens`, and `output_tokens` remain separate.
@@ -70,21 +70,21 @@ It stops at the first failure.
 
 The cases are:
 
-| Case                  | What it checks                                                         |
-| --------------------- | ---------------------------------------------------------------------- |
-| Initial `short`       | A five-minute cache write, with no one-hour write.                     |
-| Reconstructed `short` | An identical Thread in a different native session reads cached tokens. |
-| `long`                | A separate prefix writes a one-hour entry, with no five-minute write.  |
-| `off`                 | The initial prefix produces neither cache reads nor writes.            |
+| Case                          | What it checks                                                         |
+| ----------------------------- | ---------------------------------------------------------------------- |
+| Initial runtime-managed       | Claude Code creates a cache entry using its own retention policy.      |
+| Reconstructed runtime-managed | An identical Thread in a different native session reads cached tokens. |
+| `off`                         | The initial prefix produces neither cache reads nor writes.            |
 
 Each successful request must also answer `INV-1042`.
 Reports are printed before the cache assertions, so a failure retains the
 counters that caused it.
-Missing TTL counters fail qualification rather than being interpreted as zero.
+TTL counters are retained when reported, but their values do not determine
+whether the runtime-managed case passes.
 Retain the reports and runtime versions; do not commit account-identifying auth
 output.
 
-The repeated-short case exercises process restart and native-history
+The repeated runtime-managed case exercises process restart and native-history
 reconstruction through JP.
 It proves useful reuse, **not equivalent efficiency to continuing an existing
 Claude Code session**.
@@ -93,8 +93,8 @@ comparison prompt, run that prompt through normal native continuation, then run
 the corresponding JP Thread through reconstruction.
 Hold the model, working directory, tool definitions, instructions, and content
 constant; account for runtime-added context and run within the cache TTL.
-The long-cache case deliberately uses another prefix and is not an efficiency
-comparison with the short-cache cases.
+JP does not enforce `short`, `long`, or custom retention durations in this flow.
+Only `off` changes the runtime's caching policy.
 
 The existing protocol and transcript fixtures cover replay exclusion, tool ID
 stability, repeated SDK message IDs, runtime helper totals, configuration

@@ -68,6 +68,10 @@ Claude Code decides availability for the active account; JP reports
 model-selection and request failures with the runtime's explanation.
 Canonical identifiers returned for aliases are accepted and recorded in usage
 metadata.
+JP does not set or change `CLAUDE_CONFIG_DIR` for a default login: that variable
+also selects credentials, including the macOS Keychain entry.
+A user-supplied value is inherited unchanged.
+
 JP stores derived Claude Code conversations under
 `~/.claude/projects/jp-<conversation-id>-<workspace-id>/`, or under the
 configured `CLAUDE_CONFIG_DIR`.
@@ -98,18 +102,16 @@ Fixture tests alone do not establish live cache efficiency.
 
 ### Prompt caching
 
-`assistant.request.cache` maps to the Claude runtime's cache controls:
+For ACP subscriptions, `assistant.request.cache = "off"` explicitly disables
+caching.
+Every other value leaves caching and retention to Claude Code; JP sends no TTL
+override.
+There is no `auto` value, and direct HTTP flows keep their own existing
+cache-policy behavior.
 
-| Policy            | Behavior                                                   |
-| ----------------- | ---------------------------------------------------------- |
-| `short` (default) | Request five-minute cache retention.                       |
-| `long`            | Request one-hour cache retention.                          |
-| `off`             | Disable prompt caching.                                    |
-| Custom duration   | Below 30 minutes selects five minutes; otherwise one hour. |
-
-JP overrides conflicting inherited cache environment settings.
-Runtime-managed policy can still affect requests; live qualification checks the
-reported cache writes rather than assuming a requested setting took effect.
+JP removes inherited cache environment overrides from the launched process.
+Claude Code's own defaults and managed policy decide retention when caching is
+not disabled.
 
 Provider events carry usage snapshots with uncached input, cache writes, cache
 reads, and output counted separately.
