@@ -68,13 +68,11 @@ tracing = { workspace = true }
 which = { workspace = true }
 
 [dev-dependencies]
-camino-tempfile = { workspace = true }
 assert_matches = { workspace = true }
-jp_test = { workspace = true }
+camino-tempfile = { workspace = true }
 # The conformance client speaks JSON-RPC and SSE over plain HTTP by hand, on
 # purpose: it must not share a transport with the endpoint it is checking.
 reqwest = { workspace = true, features = ["json"] }
-test-log = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 
 [lints]

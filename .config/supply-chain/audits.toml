@@ -26,6 +26,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.7.3"
 
+[[audits.chacha20]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.10.0 -> 0.10.2"
+
 [[audits.comfy-table]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -45,6 +50,11 @@ delta = "0.50.0 -> 0.52.0"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.2.14 -> 0.3.5"
+
+[[audits.cpufeatures]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.0 -> 0.3.1"
 
 [[audits.datetime_literal]]
 who = "Jean Mertz <git@jeanmertz.com>"
@@ -215,6 +225,16 @@ version = "0.167.0"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.9.4 -> 0.9.5"
+
+[[audits.rand]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.10.1 -> 0.10.2"
+
+[[audits.rand_core]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.10.0 -> 0.10.1"
 
 [[audits.rand_xorshift]]
 who = "Jean Mertz <git@jeanmertz.com>"
