@@ -33,7 +33,9 @@ pub(super) struct PreparedRequest {
     pub history: Vec<Message>,
     pub prompt: String,
     pub model: Name,
-    pub max_tokens: i32,
+    /// Explicit JP limit.
+    /// Absence leaves the runtime's output limit unchanged.
+    pub max_tokens: Option<u32>,
     pub thinking: Option<ExtendedThinking>,
     pub effort: Option<Effort>,
     pub schema: Option<Map<String, Value>>,
@@ -43,6 +45,7 @@ impl PreparedRequest {
     pub(super) fn new(model: &ModelDetails, mut query: ChatQuery) -> Result<Self> {
         let config = query.thread.events.config()?;
         let parameters = &config.assistant.model.parameters;
+        let max_tokens = parameters.max_tokens;
         for (parameter, configured) in [
             ("temperature", parameters.temperature.is_some()),
             ("top_p", parameters.top_p.is_some()),
@@ -131,7 +134,7 @@ impl PreparedRequest {
             history: request.messages,
             prompt,
             model: model.id.name.clone(),
-            max_tokens: request.max_tokens,
+            max_tokens,
             thinking: request.thinking,
             effort,
             schema,

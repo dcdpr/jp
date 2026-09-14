@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use super::*;
+use crate::error::StreamErrorKind;
 
 fn state() -> State {
     let mut state = State::new(
@@ -218,6 +219,14 @@ fn sdk_failure_preserves_the_reported_details() {
         error.message(),
         "Claude Code request failed (error_during_execution): Adapter disconnected."
     );
+}
+
+#[test]
+fn exhausted_runtime_output_limit_is_not_a_generic_or_retryable_error() {
+    let mut state = state();
+    let error = state.sdk(notification(json!({"type":"assistant","error":"max_output_tokens","message":{"content":[{"type":"text","text":"Response exceeded 2048 output tokens."}]}}))).unwrap_err();
+    assert_eq!(error.kind, StreamErrorKind::MaxOutputTokens);
+    assert!(!error.is_retryable());
 }
 
 #[test]

@@ -83,6 +83,11 @@ to Claude Code is unchanged.
 Restarting tool execution stops the attempt while keeping the original MCP call
 open.
 The MCP Host re-prepares the call before another execution attempt.
+Claude Code chooses the output-token limit unless
+`assistant.model.parameters.max_tokens` is explicitly set.
+That override applies to each underlying model request, including its reasoning
+tokens, not to the sum of every request in a Turn.
+
 Temperature, top-p, top-k, stop words, service tiers other than `off`, and
 custom model parameters have no ACP mapping.
 Non-default values are ignored with a warning in tracing output; they do not

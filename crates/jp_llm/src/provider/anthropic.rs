@@ -1796,7 +1796,7 @@ fn create_request(
             warn!(
                 %model.id,
                 %DEFAULT_MAX_TOKENS,
-                "Model `max_tokens` parameter not found, using default value."
+                "HTTP request serialization has no configured or reported output limit; using its fallback."
             );
 
             DEFAULT_MAX_TOKENS as u32
@@ -2335,7 +2335,7 @@ fn map_event(
 
     trace!(
         event = serde_json::to_string(&event).unwrap_or_default(),
-        "Received event from Anthropic API."
+        "Received Anthropic message stream event."
     );
 
     match event {

@@ -21,7 +21,7 @@ use super::{
     usage::{ModelUsage, RuntimeUsage, UsageLedger},
 };
 use crate::{
-    error::StreamError,
+    error::{StreamError, StreamErrorKind},
     event::{Event, EventPart, FinishReason, ToolCallPart},
     provider::anthropic::map_event,
 };
@@ -385,6 +385,16 @@ impl State {
                         .collect::<Vec<_>>()
                         .join("\n");
                     let rejection = match error.as_str() {
+                        "max_output_tokens" => {
+                            return Err(StreamError::new(
+                                StreamErrorKind::MaxOutputTokens,
+                                format!("Claude Code exhausted its output-token limit: {detail}"),
+                            )
+                            .with_hint(
+                                "Configure assistant.model.parameters.max_tokens to override the \
+                                 runtime output limit.",
+                            ));
+                        }
                         "model_not_found" => Error::ModelUnavailable {
                             model: self.model.clone(),
                             detail,

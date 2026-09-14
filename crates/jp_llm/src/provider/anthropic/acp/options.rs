@@ -134,13 +134,15 @@ pub(super) fn environment(
         ("DISABLE_AUTO_COMPACT".into(), "1".into()),
         ("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS".into(), "1".into()),
         ("CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS".into(), "0".into()),
-        (
-            "CLAUDE_CODE_MAX_OUTPUT_TOKENS".into(),
-            prepared.max_tokens.to_string(),
-        ),
         ("ENABLE_TOOL_SEARCH".into(), "false".into()),
         ("MAX_MCP_OUTPUT_TOKENS".into(), "100000".into()),
     ]);
+    if let Some(max_tokens) = prepared.max_tokens {
+        environment.insert(
+            "CLAUDE_CODE_MAX_OUTPUT_TOKENS".into(),
+            max_tokens.to_string(),
+        );
+    }
     if cache == CachePolicy::Off {
         environment.insert("DISABLE_PROMPT_CACHING".into(), "1".into());
     }

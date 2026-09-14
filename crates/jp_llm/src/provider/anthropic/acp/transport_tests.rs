@@ -23,9 +23,14 @@ use super::{super::live_tests::UsageCapture, *};
 use crate::event::{EventPart, FinishReason};
 
 fn prepared() -> PreparedRequest {
+    prepared_with_limit(None)
+}
+
+fn prepared_with_limit(max_tokens: Option<u32>) -> PreparedRequest {
+    let mut config = AppConfig::new_test();
+    config.assistant.model.parameters.max_tokens = max_tokens;
     let timestamp = datetime!(2026-09-11 12:00:00 Z);
-    let mut events =
-        ConversationStream::new(AppConfig::new_test().into()).with_created_at(timestamp);
+    let mut events = ConversationStream::new(config.into()).with_created_at(timestamp);
     events.extend([
         ConversationEvent::new(ChatRequest::from("Earlier input."), timestamp),
         ConversationEvent::new(ChatResponse::message("Earlier response."), timestamp),
@@ -45,6 +50,24 @@ fn notification(message: Value) -> SdkNotification {
         session_id: "11111111-1111-4111-8111-111111111111".into(),
         message: serde_json::from_value(message).unwrap(),
     }
+}
+
+#[test]
+fn an_unspecified_output_limit_does_not_inherit_the_http_fallback() {
+    let environment = options::environment(&prepared(), CachePolicy::Short);
+    assert!(!environment.contains_key("CLAUDE_CODE_MAX_OUTPUT_TOKENS"));
+}
+
+#[test]
+fn an_explicit_output_limit_is_forwarded() {
+    let prepared = prepared_with_limit(Some(8192));
+    let environment = options::environment(&prepared, CachePolicy::Short);
+    assert_eq!(
+        environment
+            .get("CLAUDE_CODE_MAX_OUTPUT_TOKENS")
+            .map(String::as_str),
+        Some("8192")
+    );
 }
 
 #[test]

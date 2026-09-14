@@ -479,6 +479,10 @@ pub enum StreamErrorKind {
     /// This is not retryable because a retry regenerates the same runaway.
     OutputLimit,
 
+    /// The provider could not finish within its output-token limit.
+    /// Distinct from the Host's output-byte ceiling.
+    MaxOutputTokens,
+
     /// Other errors that are not categorized.
     /// These may or may not be retryable depending on the specific error.
     Other,
@@ -498,6 +502,7 @@ impl StreamErrorKind {
             Self::AuthRejected => "Authentication rejected",
             Self::ContextWindowExceeded => "Context window exceeded",
             Self::OutputLimit => "Output limit exceeded",
+            Self::MaxOutputTokens => "Output token limit exceeded",
             Self::Other => "Stream Error",
         }
     }
