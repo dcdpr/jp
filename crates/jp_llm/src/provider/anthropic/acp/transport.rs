@@ -117,12 +117,10 @@ impl Request for PromptRequest {
 /// Establishes one connection and runs it until the request sequence finishes.
 ///
 /// [`Spawned`] is what production uses.
-/// A test supplies [`cassette::Recorded`], which answers from a recording over
-/// an in-memory pipe, so the same handler and foreground run either way.
+/// A test supplies `cassette::Recorded`, which answers from a recording over an
+/// in-memory pipe, so the same handler and foreground run either way.
 ///
 /// Consumed by connecting, since one of these describes one connection.
-///
-/// [`cassette::Recorded`]: super::cassette::Recorded
 pub(super) trait Transport: Send {
     fn connect(
         self: Box<Self>,

@@ -5,11 +5,26 @@ The ACP subscription flow accepts `claude-agent-acp` 0.76.0 with Claude Code
 Model availability is decided by the runtime, not a JP allowlist.
 The cache qualification fixture uses `claude-opus-5`; that choice does not
 restrict ordinary queries.
-The setup instructions are in [Providers].
 Qualification uses the production provider entry point, not a separate CLI
 wrapper.
 Automated protocol fixtures need no runtime, credentials, or quota.
 They do not prove live cache hits or subscription allowance savings.
+
+## Prerequisites
+
+A live run needs `claude-agent-acp` on `PATH` and an active Pro or Max login:
+
+```sh
+npm install --global --include=optional @agentclientprotocol/claude-agent-acp@0.76.0
+claude-agent-acp --cli auth login --claudeai
+claude-agent-acp --cli auth status --json
+```
+
+Node.js 22 or later, with npm's optional dependencies enabled.
+The status must report a first-party Claude account on a Pro or Max plan rather
+than an API-key source.
+Disable paid Usage credits in Claude's Settings > Usage if no overage is
+permitted.
 
 ## Usage accounting
 
@@ -123,5 +138,3 @@ API pricing ratios and SDK dollar estimates are not a published formula for
 subscription-window percentages.
 Neither latency benchmarks nor credential-switch experiments are required by
 this procedure.
-
-[Providers]: ../README/providers.md#anthropic-subscription-flows

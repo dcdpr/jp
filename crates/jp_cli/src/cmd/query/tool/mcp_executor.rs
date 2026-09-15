@@ -4,8 +4,9 @@
 //! the task that routes the service's private interactions back to the tool
 //! call that submitted them.
 //! Each [`ToolExecutor`] drives one logical call: it holds the single-use Host
-//! reply the service is waiting on, and hands the coordinator a [`Delivery`]
-//! whenever the call produces something the conversation should record.
+//! reply the service is waiting on, and hands the coordinator an
+//! [`ExecutorResult`] whenever the call produces something the conversation
+//! should record.
 
 use std::{
     collections::HashMap,

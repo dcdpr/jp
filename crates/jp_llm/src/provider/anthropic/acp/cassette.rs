@@ -1,6 +1,6 @@
 //! Recording and replay of one ACP conversation.
 //!
-//! A cassette is the stdio counterpart of [`jp_test::mock::Vcr`], which records
+//! A cassette is the stdio counterpart of `jp_test::mock::Vcr`, which records
 //! HTTP by proxying it.
 //! ACP speaks newline-delimited JSON-RPC over a child process's pipes, so there
 //! is nothing for an HTTP proxy to intercept; what carries across is the
