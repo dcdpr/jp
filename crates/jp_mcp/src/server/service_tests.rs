@@ -229,7 +229,7 @@ async fn restart_keeps_the_logical_call_open_and_replaces_old_replies() {
         ToolResult::text(r#"{"arguments":{"path":"original"},"answer":true}"#)
     );
     assert_eq!(count.load(Ordering::SeqCst), 3);
-    service.shutdown().await.unwrap();
+    service.shutdown().await;
 }
 
 #[tokio::test]

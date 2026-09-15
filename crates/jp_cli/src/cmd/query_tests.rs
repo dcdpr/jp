@@ -387,6 +387,8 @@ async fn run_mock_turn(
         &model,
         cfg,
         &router,
+        Utf8Path::new("/tmp"),
+        InvocationContext::default(),
         false, // interactive
         &[],
         lock,

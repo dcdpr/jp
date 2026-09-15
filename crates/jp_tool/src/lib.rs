@@ -18,6 +18,20 @@ pub use content::{ContentBlock, InputRequest, Resource, ResourceContent, ToolRes
 pub use definition::{ParameterDocs, ToolDefinition, ToolDocs};
 pub use error::Error;
 
+/// Which workspace and conversation a tool call belongs to.
+///
+/// Surfaced to local tools through the rendered template `context` (as
+/// `context.workspace_id` and `context.conversation_id`) so a tool can scope
+/// any state it persists to the conversation that caused it.
+///
+/// Both fields are empty for a call with no conversation owner, such as a title
+/// generation or a summary.
+#[derive(Debug, Clone, Default)]
+pub struct InvocationContext {
+    pub workspace_id: String,
+    pub conversation_id: String,
+}
+
 /// The result of a tool call.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

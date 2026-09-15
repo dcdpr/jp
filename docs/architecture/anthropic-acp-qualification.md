@@ -39,25 +39,37 @@ A cancelled or failed request may never receive final usage from the runtime.
 
 ## Controlled live comparison
 
-This is an ignored test because it spends subscription allowance.
-Confirm paid Usage credits are disabled in Claude's Settings > Usage before
-enabling it.
-The environment flag is the operator's confirmation, not a billing setting.
+`cache_reconstruction` replays `crates/jp_llm/tests/fixtures/acp/live.jsonl` by
+default: no runtime is spawned and no allowance is spent, so it runs on every
+commit like any other test.
+A missing recording fails it rather than skipping it.
+
+`RECORD=1` reaches the installed runtime instead, adds the cache measurements
+only a live service can answer, and writes the recording back.
+That run spends subscription allowance, so confirm paid Usage credits are
+disabled in Claude's Settings > Usage first — nothing in the test can check
+that for you.
 No API-key fallback is configured.
 
 From the repository root, with the pinned runtime on PATH:
 
 ```sh
+RECORD=1 cargo test -p jp_llm cache_reconstruction -- --nocapture
+cargo insta accept
+```
+
+The test checks the adapter and runtime versions and the active login itself,
+before it spends anything.
+Capture them separately when a report needs them:
+
+```sh
 claude-agent-acp --version
 claude-agent-acp --cli --version
 claude-agent-acp --cli auth status --json
-
-env JP_ACP_LIVE_NO_OVERAGE=1 JP_ACP_CACHE_RUN=qualification-001 \
-  cargo test -p jp_llm live_cache_reconstruction -- --ignored --nocapture
 ```
 
-Use a fresh `JP_ACP_CACHE_RUN` value for each run so an earlier test does not
-warm the initial prefix.
+Each run tags its system prompt with a fresh identifier, so an earlier run
+cannot warm the initial prefix.
 The test uses its own JP configuration, so workspace inquiry-model overrides do
 not affect it.
 It runs without tools and uses a synthetic invoice history with a long reference

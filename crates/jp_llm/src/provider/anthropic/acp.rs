@@ -10,7 +10,6 @@ use std::{
     time::Duration,
 };
 
-use agent_client_protocol::{Error as RpcError, schema::v1::SessionConfigId};
 use jp_config::model::id::{ModelIdConfig, Name, ProviderId};
 use serde::Deserialize;
 use tokio::{io::AsyncReadExt as _, process::Command, time::timeout};
@@ -18,12 +17,18 @@ use tracing::warn;
 
 use crate::{error::StreamError, model::ModelDetails};
 
+mod cassette;
 mod options;
 mod process;
 mod protocol;
+mod rpc;
+mod schema;
 mod transcript;
 mod transport;
 mod usage;
+
+use rpc::RpcError;
+use schema::SessionConfigId;
 pub(super) use transport::stream;
 
 /// A failure in the Claude Code subscription flow.
@@ -325,8 +330,8 @@ async fn read_output(mut command: Command, check: Check) -> Result<Vec<u8>, Erro
 }
 
 #[cfg(test)]
-#[path = "acp/live_tests.rs"]
-mod live_tests;
+#[path = "acp/recorded_tests.rs"]
+mod recorded_tests;
 
 #[cfg(test)]
 #[path = "acp/workflow_tests.rs"]

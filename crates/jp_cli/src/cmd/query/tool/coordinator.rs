@@ -1294,9 +1294,11 @@ impl ToolCoordinator {
                             | ToolInterruptResult::PromptFailed
                             | ToolInterruptResult::Declined => {}
                             ToolInterruptResult::Restart => {
-                                // Preserve logical MCP requests before cancelling the Host
-                                // workers. Re-preparation releases the paused attempts.
-                                for tool in executing_tools.values() {
+                                // Hold each call's service-side invocation open
+                                // before cancelling the Host workers, so the
+                                // re-preparation that follows continues the same
+                                // logical calls instead of submitting new ones.
+                                for tool in state.tools.values() {
                                     tool.executor.pause_for_restart();
                                 }
                                 cancellation_token.cancel();

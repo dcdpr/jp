@@ -26,16 +26,11 @@ use jp_llm::{
 };
 use jp_mcp::{
     Client,
-    server::{
-        BuiltinTool, InvocationContext,
-        builtin::BuiltinExecutors,
-        http::connect,
-        result::{from_mcp, to_legacy},
-    },
+    server::{BuiltinTool, builtin::BuiltinExecutors, http::connect, result::from_mcp},
 };
 use jp_printer::{OutputFormat, Printer};
 use jp_storage::backend::FsStorageBackend;
-use jp_tool::{Outcome, Question, ToolDefinition, ToolDocs};
+use jp_tool::{InvocationContext, Outcome, Question, ToolDefinition, ToolDocs};
 use jp_workspace::Workspace;
 use rmcp::model::{CallToolRequestParams, Meta};
 use serde_json::{Map, Value, json};
@@ -43,7 +38,7 @@ use tokio::time::{Duration, timeout};
 
 use super::{PendingStreamTrim, ToolCoordinator, run_turn_loop};
 use crate::{
-    access::approvals::ApprovalStore, cmd::query::tool::executor::TerminalExecutorSource,
+    access::approvals::ApprovalStore, cmd::query::tool::mcp_executor::TerminalExecutorSource,
     signals::testing::detached_router,
 };
 
@@ -109,7 +104,7 @@ impl Provider for AgentProvider {
             yield Ok(Event::flush(0));
             yield Ok(Event::Finished(FinishReason::Completed));
             let result = call.await.unwrap().unwrap();
-            assert_eq!(to_legacy(&from_mcp(result).unwrap()), Ok("confirmed".into()));
+            assert_eq!(from_mcp(result).unwrap().to_text(), "confirmed");
             let mut second = CallToolRequestParams::new("http_tool");
             second.meta = Some(Meta(Map::from_iter([("test/agentId".into(), "agent-call-2".into())])));
             let peer = client.peer().clone();
@@ -119,7 +114,7 @@ impl Provider for AgentProvider {
             yield Ok(Event::flush(1));
             yield Ok(Event::Finished(FinishReason::Completed));
             let result = call.await.unwrap().unwrap();
-            assert_eq!(to_legacy(&from_mcp(result).unwrap()), Ok("confirmed".into()));
+            assert_eq!(from_mcp(result).unwrap().to_text(), "confirmed");
             let stored = serde_json::from_str(&storage.read_test_events_raw(&id).unwrap()).unwrap();
             let events = ConversationStream::from_parts(json!({}), stored, &config.into()).unwrap();
             let responses = events.iter().filter_map(|event| event.event.as_tool_call_response()).cloned().collect::<Vec<_>>();
@@ -164,7 +159,7 @@ async fn agent_continuation_waits_for_host_recording_without_resubmission() {
         let router = detached_router();
         let (printer, output, chrome) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        run_turn_loop(provider.clone(), &model, &config, &router, &client, root, false, &[], &lock, ToolChoice::Auto, &definitions, printer.clone(), Arc::new(MockPromptBackend::new()), ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)), ChatRequest::from("Run the tool."), InvocationContext::default(), PendingStreamTrim::default(), router.turn_interrupt(lock.id())).await.unwrap();
+        run_turn_loop(provider.clone(), &model, &config, &router, root, InvocationContext::default(), false, &[], &lock, ToolChoice::Auto, &definitions, printer.clone(), Arc::new(MockPromptBackend::new()), ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)), ChatRequest::from("Run the tool."), PendingStreamTrim::default(), router.turn_interrupt(lock.id())).await.unwrap();
         let answers = lock.events().iter().filter_map(|event| event.event.as_inquiry_response()).filter_map(|answer| match answer { InquiryResponse::Answered { answer, .. } => Some(answer.clone()), _ => None }).collect::<Vec<_>>();
         assert_eq!(answers, vec![json!(true), json!(true)]);
         assert_eq!(count.load(Ordering::SeqCst), 4);

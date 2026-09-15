@@ -28,20 +28,24 @@ async fn process_failure_retains_stderr() {
     let mut command = Command::new("cmd.exe");
     #[cfg(windows)]
     command.args(["/D", "/C", "echo fixture-error >&2 & exit /B 7"]);
+    // The adapter never speaks: the foreground request cannot be answered, so
+    // the exit status is what ends the connection.
     let error = tokio::time::timeout(
         Duration::from_secs(5),
-        Client.builder().connect_to(Process(command)),
+        run(
+            command,
+            Tap::none(),
+            Box::new(|_| Box::pin(async { Ok(serde_json::Value::Null) })),
+            |_peer| async { Ok(()) },
+        ),
     )
     .await
     .unwrap()
     .unwrap_err();
-    // The SDK adds a source-location wrapper; shell line endings differ by OS.
+    // Shell line endings differ by OS.
     let detail = error.data.unwrap();
-    assert_eq!(detail["data"]["cause"]["exit_code"], 7);
-    assert_eq!(
-        detail["data"]["stderr"].as_str().unwrap().trim(),
-        "fixture-error"
-    );
+    assert_eq!(detail["cause"]["exit_code"], 7);
+    assert_eq!(detail["stderr"].as_str().unwrap().trim(), "fixture-error");
 }
 
 #[tokio::test]

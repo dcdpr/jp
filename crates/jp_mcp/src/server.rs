@@ -25,8 +25,8 @@ use jp_config::{
     types::command::shell_command_line,
 };
 use jp_tool::{
-    AccessPolicy, Action, Error as ToolError, Outcome, ParameterDocs, Question, ToolDefinition,
-    ToolDocs, ToolResult,
+    AccessPolicy, Action, Error as ToolError, InvocationContext, Outcome, ParameterDocs, Question,
+    ToolDefinition, ToolDocs, ToolResult,
     content::{ErrorDetails, ToolStatus},
     definition::{apply_parameter_defaults, split_description, validate_tool_arguments},
     schema::{Node, merge_description},
@@ -634,17 +634,6 @@ fn parse_command_output(stdout: &[u8], stderr: &[u8], success: bool) -> CommandR
             }
         }
     }
-}
-
-/// Identity of the conversation an invocation belongs to.
-///
-/// Surfaced to local tools through the rendered template `context` (as
-/// `context.workspace_id` and `context.conversation_id`) so a tool can scope
-/// any state it persists to the originating workspace and conversation.
-#[derive(Debug, Clone, Default)]
-pub struct InvocationContext {
-    pub workspace_id: String,
-    pub conversation_id: String,
 }
 
 /// Everything an execution attempt needs, fixed for the life of one invocation.

@@ -2588,6 +2588,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "camino",
+ "camino-tempfile",
  "chrono",
  "datetime_literal",
  "eventsource-stream",
@@ -2608,6 +2609,7 @@ dependencies = [
  "ollama-rs",
  "openai_responses",
  "paste",
+ "process-wrap",
  "quick-xml",
  "rand 0.9.5",
  "reqwest 0.12.28",
@@ -2620,6 +2622,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "url",
  "uuid",
 ]
@@ -2653,6 +2656,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "url",
  "which",
 ]
 
@@ -4202,7 +4206,6 @@ dependencies = [
  "schemars_derive",
  "serde",
  "serde_json",
- "url",
 ]
 
 [[package]]
@@ -4413,9 +4416,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.149"
+version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
+checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
  "indexmap",
  "itoa",
@@ -5493,6 +5496,7 @@ checksum = "a68d3c8f01c0cfa54a75291d83601161799e4a89a39e0929f4b0354d88757a37"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
+ "serde_core",
  "sha1_smol",
  "wasm-bindgen",
 ]

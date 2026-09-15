@@ -14,7 +14,6 @@ use std::{
 use axum::Router;
 use jp_tool::Error as ToolError;
 use reqwest_mcp::{Client as HttpClient, redirect::Policy};
-use reqwest::Url;
 use rmcp::{
     ErrorData, ServerHandler, ServiceExt as _,
     model::{
@@ -36,6 +35,7 @@ use tokio::{
     task::{JoinError, JoinHandle},
 };
 use tokio_util::sync::CancellationToken;
+use url::Url;
 
 use super::service::{CallRequest, Service, ServiceError};
 
@@ -85,46 +85,46 @@ impl Endpoint {
     /// Start the endpoint.
     /// Does not consume or drive the private Host receiver.
     pub async fn start(service: Service) -> Result<Self, EndpointError> {
-    let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).await?;
-    let address = listener.local_addr()?;
-    let origin = format!("http://{address}");
-    let url = format!("{origin}/mcp");
-    let service = Arc::new(service);
-    let factory = service.clone();
-    let cancellation = CancellationToken::new();
-    // Only this listener's own address is an acceptable Host or Origin, so
-    // a page in a browser cannot reach the endpoint by resolving some other
-    // name to loopback.
-    //
-    // Assigned field by field because rmcp marks the config
-    // `#[non_exhaustive]`, which rules out struct-update syntax downstream.
-    let mut config = StreamableHttpServerConfig::default();
-    config.allowed_hosts = vec![address.to_string()];
-    config.allowed_origins = vec![origin];
-    config.cancellation_token = cancellation.clone();
-    let transport = StreamableHttpService::new(
-        move || {
-            Ok(Handler {
-                service: factory.clone(),
-            })
-        },
-        Arc::new(LocalSessionManager::default()),
-        config,
-    );
-    let router = Router::new().nest_service("/mcp", transport);
-    let shutdown = cancellation.clone();
-    let task = tokio::spawn(async move {
-        axum::serve(listener, router)
-            .with_graceful_shutdown(shutdown.cancelled_owned())
-            .await
-    });
-    Ok(Self {
-        url,
-        service,
-        cancellation,
-        task: Some(task),
-    })
-}
+        let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).await?;
+        let address = listener.local_addr()?;
+        let origin = format!("http://{address}");
+        let url = format!("{origin}/mcp");
+        let service = Arc::new(service);
+        let factory = service.clone();
+        let cancellation = CancellationToken::new();
+        // Only this listener's own address is an acceptable Host or Origin, so
+        // a page in a browser cannot reach the endpoint by resolving some other
+        // name to loopback.
+        //
+        // Assigned field by field because rmcp marks the config
+        // `#[non_exhaustive]`, which rules out struct-update syntax downstream.
+        let mut config = StreamableHttpServerConfig::default();
+        config.allowed_hosts = vec![address.to_string()];
+        config.allowed_origins = vec![origin];
+        config.cancellation_token = cancellation.clone();
+        let transport = StreamableHttpService::new(
+            move || {
+                Ok(Handler {
+                    service: factory.clone(),
+                })
+            },
+            Arc::new(LocalSessionManager::default()),
+            config,
+        );
+        let router = Router::new().nest_service("/mcp", transport);
+        let shutdown = cancellation.clone();
+        let task = tokio::spawn(async move {
+            axum::serve(listener, router)
+                .with_graceful_shutdown(shutdown.cancelled_owned())
+                .await
+        });
+        Ok(Self {
+            url,
+            service,
+            cancellation,
+            task: Some(task),
+        })
+    }
 
     /// URL provided to MCP callers; JP's terminal stdio is not used.
     #[must_use]
@@ -134,12 +134,12 @@ impl Endpoint {
 
     /// Establish the MCP Host's ordinary HTTP connection to this endpoint.
     pub async fn connect(&self) -> Result<RunningService<RoleClient, ()>, EndpointError> {
-    let url = self
-        .url
-        .parse()
-        .map_err(|error| EndpointError::Connect(Box::new(error)))?;
-    connect(&url).await
-}
+        let url = self
+            .url
+            .parse()
+            .map_err(|error| EndpointError::Connect(Box::new(error)))?;
+        connect(&url).await
+    }
 
     /// Private in-process control for the MCP Host, not exposed through HTTP.
     #[must_use]
@@ -149,18 +149,18 @@ impl Endpoint {
 
     /// Signal cancellation of current calls without closing the endpoint.
     pub fn cancel_current(&self) {
-    self.service.cancel_current();
-}
+        self.service.cancel_current();
+    }
 
     /// Stop tool work, close upstream services, and join the HTTP listener.
     pub async fn shutdown(mut self) -> Result<(), EndpointError> {
-    self.service.shutdown().await;
-    self.cancellation.cancel();
-    if let Some(task) = self.task.take() {
-        task.await??;
+        self.service.shutdown().await;
+        self.cancellation.cancel();
+        if let Some(task) = self.task.take() {
+            task.await??;
+        }
+        Ok(())
     }
-    Ok(())
-}
 }
 
 impl Drop for Endpoint {

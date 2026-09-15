@@ -106,7 +106,6 @@ use jp_llm::provider;
 use jp_mcp::{
     StartupSet,
     server::{
-        InvocationContext,
         builtin::{BuiltinExecutors, describe_tools::DescribeTools},
         tool_definitions,
     },
@@ -115,7 +114,7 @@ use jp_md::format::Formatter;
 use jp_printer::Printer;
 use jp_storage::backend::{FsStorageBackend, Projection};
 use jp_task::task::TitleGeneratorTask;
-use jp_tool::{Error as ToolError, ToolDefinition, ToolDocs};
+use jp_tool::{Error as ToolError, InvocationContext, ToolDefinition, ToolDocs};
 use jp_workspace::{ConversationHandle, ConversationLock, Id as WorkspaceId, Workspace};
 use minijinja::{Environment, UndefinedBehavior};
 use strip_ansi_escapes::strip_str;
@@ -1108,7 +1107,7 @@ impl Query {
             tools,
             &cfg.conversation.tools,
             approvals,
-            invocation,
+            invocation.clone(),
             mcp_client,
             root.clone(),
             provider.mcp_tool_metadata(&model),
@@ -1124,6 +1123,8 @@ impl Query {
             &model,
             cfg,
             signals,
+            &root,
+            invocation,
             interactive,
             attachments,
             lock,

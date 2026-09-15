@@ -1,8 +1,7 @@
 use camino::Utf8PathBuf;
 use jp_config::assistant::tool_choice::ToolChoice;
 use jp_conversation::thread::Thread;
-use jp_mcp::server::InvocationContext;
-use jp_tool::ToolDefinition;
+use jp_tool::{InvocationContext, ToolDefinition};
 use url::Url;
 
 use crate::stream::EventStream;

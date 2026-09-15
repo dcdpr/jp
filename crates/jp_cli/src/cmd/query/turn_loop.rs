@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 
+use camino::Utf8Path;
 use futures::{
     Stream, StreamExt as _, future,
     stream::{self, SelectAll},
@@ -38,7 +39,7 @@ use jp_llm::{
     with_idle_timeout, with_output_limit,
 };
 use jp_printer::{ErrChannel, Printer, RegionStyle, StatusRegion};
-use jp_tool::ToolDefinition;
+use jp_tool::{InvocationContext, ToolDefinition};
 use jp_workspace::{ConversationLock, ConversationMut};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, info, warn};
@@ -174,6 +175,8 @@ pub(super) async fn run_turn_loop(
     model: &ModelDetails,
     cfg: &AppConfig,
     signals: &SignalRouter,
+    root: &Utf8Path,
+    invocation: InvocationContext,
     interactive: bool,
     attachments: &[Attachment],
     lock: &ConversationLock,
@@ -211,7 +214,7 @@ pub(super) async fn run_turn_loop(
         cfg.assistant.name.clone(),
         Some(cfg.assistant.model.id.resolved().to_string()),
     );
-    let query_invocation = invocation.clone();
+    let query_invocation = invocation;
     let mut tool_renderer = ToolRenderer::new(
         ErrChannel::new(if cfg.style.tool_call.show && !printer.format().is_json() {
             printer.clone()
