@@ -5,13 +5,10 @@ use jp_config::AppConfig;
 use jp_config::conversation::tool::{ToolConfig, ToolSource, style::PartialDisplayStyleConfig};
 use jp_inquire::{ReplyEditMode, ReplyOutcome, prompt::MockPromptBackend};
 #[cfg(unix)]
-use jp_mcp::{
-    Client,
-    server::{InvocationContext, builtin::BuiltinExecutors},
-};
+use jp_mcp::{Client, server::builtin::BuiltinExecutors};
 use jp_printer::{ErrChannel, OutputFormat, Printer};
 #[cfg(unix)]
-use jp_tool::{ToolDefinition, ToolDocs};
+use jp_tool::{InvocationContext, ToolDefinition, ToolDocs};
 use schematic::Config as _;
 #[cfg(unix)]
 use serde_json::json;

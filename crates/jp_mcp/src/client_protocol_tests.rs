@@ -9,7 +9,7 @@ use jp_config::{
     conversation::tool::{PartialToolConfig, ToolConfig},
     providers::mcp::{McpProviderConfig, StdioConfig},
 };
-use jp_tool::{ContentBlock, Outcome, Question, ToolDefinition, ToolDocs};
+use jp_tool::{ContentBlock, InvocationContext, Outcome, Question, ToolDefinition, ToolDocs};
 use rmcp::{
     ErrorData, ServerHandler,
     model::{
@@ -29,7 +29,7 @@ use super::{Client, McpServerId};
 use crate::{
     Content,
     server::{
-        Answers, Execution, ExecutionOutcome, InvocationContext,
+        Answers, Execution, ExecutionOutcome,
         builtin::BuiltinExecutors,
         execute,
         http::Endpoint,

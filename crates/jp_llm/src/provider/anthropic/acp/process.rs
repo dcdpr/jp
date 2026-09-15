@@ -8,7 +8,6 @@ use std::{
     time::Duration,
 };
 
-use agent_client_protocol::{Agent, ByteStreams, Client, ConnectTo, Error};
 #[cfg(windows)]
 use process_wrap::tokio::JobObject;
 #[cfg(unix)]
@@ -19,10 +18,12 @@ use tokio::{
     io::{AsyncRead, AsyncReadExt as _},
     process::Command,
 };
-use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 use tracing::debug;
 
-use super::removes_variable;
+use super::{
+    removes_variable,
+    rpc::{self, Handler, Peer, RpcError, Tap},
+};
 
 pub(super) fn command() -> Command {
     #[cfg(windows)]
@@ -78,55 +79,66 @@ impl Drop for Child {
     }
 }
 
-pub(super) struct Process(pub Command);
-
-impl ConnectTo<Client> for Process {
-    async fn connect_to(self, client: impl ConnectTo<Agent>) -> Result<(), Error> {
-        let mut command = self.0;
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let mut child = spawn(command).map_err(Error::into_internal_error)?;
-        let stdin = child.stdin().take().expect("stdin is piped");
-        let stdout = child.stdout().take().expect("stdout is piped");
-        let stderr = child.stderr().take().expect("stderr is piped");
-        let protocol = ConnectTo::<Client>::connect_to(
-            ByteStreams::new(stdin.compat_write(), stdout.compat()),
-            client,
-        );
-        tokio::pin!(protocol);
-        let completion = async {
-            let result = tokio::select! {
-                result = &mut protocol => {
-                    match tokio::time::timeout(Duration::from_secs(1), child.wait()).await {
-                        Ok(Ok(status)) if result.is_ok() && !status.success() => Err(Error::internal_error().data(json!({"exit_code":status.code(),"status":status.to_string()}))),
-                        _ => result,
-                    }
-                },
-                status = child.wait() => match status {
-                    Ok(status) if status.success() => tokio::time::timeout(Duration::from_secs(1), &mut protocol).await
-                        .map_err(Error::into_internal_error).and_then(|result| result),
-                    Ok(status) => Err(Error::internal_error().data(json!({"exit_code":status.code(),"status":status.to_string()}))),
-                    Err(error) => Err(Error::into_internal_error(error)),
+/// Spawn the adapter and run one ACP connection against its stdio.
+///
+/// `foreground` drives the request sequence; `handler` answers everything the
+/// adapter initiates.
+/// The connection ends when `foreground` returns, when the adapter exits, or
+/// when either side fails.
+///
+/// A failure carries the tail of the adapter's stderr, which is usually the
+/// only account of why a Node process died.
+pub(super) async fn run<F, Fut>(
+    command: Command,
+    tap: Tap,
+    handler: Handler,
+    foreground: F,
+) -> Result<(), RpcError>
+where
+    F: FnOnce(Peer) -> Fut,
+    Fut: Future<Output = Result<(), RpcError>>,
+{
+    let mut command = command;
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = spawn(command).map_err(RpcError::into_internal_error)?;
+    let stdin = child.stdin().take().expect("stdin is piped");
+    let stdout = child.stdout().take().expect("stdout is piped");
+    let stderr = child.stderr().take().expect("stderr is piped");
+    let protocol = rpc::drive(stdin, stdout, tap, handler, foreground);
+    tokio::pin!(protocol);
+    let completion = async {
+        let result = tokio::select! {
+            result = &mut protocol => {
+                match tokio::time::timeout(Duration::from_secs(1), child.wait()).await {
+                    Ok(Ok(status)) if result.is_ok() && !status.success() => Err(RpcError::internal_error().data(json!({"exit_code":status.code(),"status":status.to_string()}))),
+                    _ => result,
                 }
-            };
-            if let Err(error) = child.start_kill() {
-                debug!(%error, "ACP process cleanup");
+            },
+            status = child.wait() => match status {
+                Ok(status) if status.success() => tokio::time::timeout(Duration::from_secs(1), &mut protocol).await
+                    .map_err(RpcError::into_internal_error).and_then(|result| result),
+                Ok(status) => Err(RpcError::internal_error().data(json!({"exit_code":status.code(),"status":status.to_string()}))),
+                Err(error) => Err(RpcError::into_internal_error(error)),
             }
-            drop(tokio::time::timeout(Duration::from_secs(1), child.wait()).await);
-            result
         };
-        let (result, stderr) = tokio::join!(completion, stderr_tail(stderr));
-        let stderr = stderr.map_err(Error::into_internal_error)?;
-        result.map_err(|mut error| {
-            if stderr.is_empty() {
-                return error;
-            }
-            let cause = error.data.take();
-            error.data(json!({"cause":cause,"stderr":String::from_utf8_lossy(&stderr)}))
-        })
-    }
+        if let Err(error) = child.start_kill() {
+            debug!(%error, "ACP process cleanup");
+        }
+        drop(tokio::time::timeout(Duration::from_secs(1), child.wait()).await);
+        result
+    };
+    let (result, stderr) = tokio::join!(completion, stderr_tail(stderr));
+    let stderr = stderr.map_err(RpcError::into_internal_error)?;
+    result.map_err(|mut error| {
+        if stderr.is_empty() {
+            return error;
+        }
+        let cause = error.data.take();
+        error.data(json!({"cause":cause,"stderr":String::from_utf8_lossy(&stderr)}))
+    })
 }
 
 async fn stderr_tail(mut stderr: impl AsyncRead + Unpin) -> io::Result<Vec<u8>> {

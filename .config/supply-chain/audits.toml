@@ -1,3 +1,4 @@
+
 # cargo-vet audits file
 
 [[audits.axum-core]]
@@ -289,7 +290,6 @@ delta = "0.37.0 -> 0.38.0"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.23.35 -> 0.23.37"
-
 
 [[audits.rustls]]
 who = "Jean Mertz <git@jeanmertz.com>"

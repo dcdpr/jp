@@ -54,14 +54,11 @@ use jp_llm::{
 };
 use jp_mcp::{
     Client,
-    server::{
-        InvocationContext,
-        builtin::{BuiltinExecutors, BuiltinTool},
-    },
+    server::builtin::{BuiltinExecutors, BuiltinTool},
 };
 use jp_printer::{OutputFormat, Printer, TerminalCapability};
 use jp_storage::backend::FsStorageBackend;
-use jp_tool::{Outcome, Question, ToolDocs};
+use jp_tool::{InvocationContext, Outcome, Question, ToolDocs};
 use jp_workspace::Workspace;
 use serde_json::{Map, Value, json};
 use tokio::{sync::Notify, time::timeout};
@@ -384,6 +381,8 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],   // attachments
             &lock,
@@ -480,6 +479,8 @@ async fn a_completed_block_is_persisted_before_the_turn_ends() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // is_tty
             &[],   // attachments
             &lock,
@@ -560,6 +561,8 @@ async fn a_refusal_takes_back_content_it_had_persisted() {
         &model,
         &config,
         &router,
+        Utf8Path::new("/tmp"),
+        InvocationContext::default(),
         false,
         &[],
         &lock,
@@ -643,6 +646,8 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],   // attachments
             &lock,
@@ -723,6 +728,8 @@ async fn test_normal_completion_persists_content() {
         &model,
         &config,
         &router,
+        Utf8Path::new("/tmp"),
+        InvocationContext::default(),
         false, // interactive
         &[],
         &lock,
@@ -805,6 +812,8 @@ async fn premature_stream_end_without_finished_returns_error() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -865,6 +874,8 @@ async fn premature_stream_end_exhausts_retry_budget() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -941,6 +952,8 @@ async fn output_ceiling_ends_turn_without_re_requesting() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -1042,6 +1055,8 @@ async fn orphan_tool_call_is_sanitized_before_provider_request() {
         &model,
         &config,
         &router,
+        Utf8Path::new("/tmp"),
+        InvocationContext::default(),
         false, // interactive
         &[],
         &lock,
@@ -1123,6 +1138,8 @@ async fn test_tool_call_cycle_completes_with_followup() {
         &model,
         &config,
         &router,
+        Utf8Path::new("/tmp"),
+        InvocationContext::default(),
         false, // interactive
         &[],
         &lock,
@@ -1415,6 +1432,8 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -1560,6 +1579,8 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -1701,6 +1722,8 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive: user-targeted question prompts need a user
             &[],
             &lock,
@@ -1809,6 +1832,8 @@ async fn test_multiple_tool_calls_in_sequence() {
         &model,
         &config,
         &router,
+        Utf8Path::new("/tmp"),
+        InvocationContext::default(),
         false, // interactive
         &[],
         &lock,
@@ -1896,6 +1921,8 @@ async fn test_empty_tool_response_continues_cycle() {
         &model,
         &config,
         &router,
+        Utf8Path::new("/tmp"),
+        InvocationContext::default(),
         false, // interactive
         &[],
         &lock,
@@ -2038,6 +2065,8 @@ async fn test_tool_restart_on_interrupt() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -2156,6 +2185,8 @@ async fn test_merged_stream_exits_after_tool_response() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -2280,6 +2311,8 @@ async fn test_tool_call_with_run_mode_ask_approves() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive = true to enable prompts
             &[],
             &lock,
@@ -2419,6 +2452,8 @@ async fn test_tool_call_with_run_mode_ask_skips() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive
             &[],
             &lock,
@@ -2569,6 +2604,8 @@ async fn test_permission_prompt_follows_interactive_not_is_tty() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive: the user is still at the terminal
             &[],
             &lock,
@@ -2689,6 +2726,8 @@ async fn test_tool_call_with_run_mode_unattended() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive doesn't matter for Unattended
             &[],
             &lock,
@@ -2833,6 +2872,8 @@ async fn test_tool_call_with_run_mode_skip() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive
             &[],
             &lock,
@@ -3033,6 +3074,8 @@ async fn test_multiple_tools_with_different_run_modes() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive
             &[],
             &lock,
@@ -3178,6 +3221,8 @@ async fn test_tool_call_returns_error() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive
             &[],
             &lock,
@@ -3419,6 +3464,8 @@ async fn test_waiting_indicator_shows_during_delay() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -3516,6 +3563,8 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive
             &[],
             &lock,
@@ -3627,6 +3676,8 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive
             &[],
             &lock,
@@ -3711,6 +3762,8 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive
             &[],
             &lock,
@@ -3787,6 +3840,8 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive
             &[],
             &lock,
@@ -3864,6 +3919,8 @@ async fn test_waiting_indicator_follows_stderr_not_stdout() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive
             &[],
             &lock,
@@ -4046,6 +4103,8 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive
             &[],
             &lock,
@@ -4130,6 +4189,8 @@ async fn test_turn_start_event_is_emitted() {
         &model,
         &config,
         &router,
+        Utf8Path::new("/tmp"),
+        InvocationContext::default(),
         false, // interactive
         &[],
         &lock,
@@ -4189,6 +4250,8 @@ async fn test_turn_start_index_increments_across_turns() {
         &model,
         &config,
         &router,
+        Utf8Path::new("/tmp"),
+        InvocationContext::default(),
         false, // interactive
         &[],
         &lock,
@@ -4222,6 +4285,8 @@ async fn test_turn_start_index_increments_across_turns() {
         &model,
         &config,
         &router,
+        Utf8Path::new("/tmp"),
+        InvocationContext::default(),
         false, // interactive
         &[],
         &lock,
@@ -4314,6 +4379,8 @@ async fn test_markdown_flushed_before_tool_header() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive
             &[],
             &lock,
@@ -4497,6 +4564,8 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -4653,6 +4722,8 @@ async fn test_single_tool_call_rendered_with_args() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -4894,6 +4965,8 @@ async fn a_running_tools_stderr_reaches_the_progress_window() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -4988,6 +5061,8 @@ async fn parallel_tools_label_their_window_rows() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -5037,6 +5112,10 @@ async fn parallel_tools_label_their_window_rows() {
 /// region frame lands inside the link's line — not about the text being
 /// present at all.
 #[tokio::test(flavor = "multi_thread")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "One linear window-lifecycle scenario"
+)]
 async fn a_tool_result_survives_a_live_window() {
     let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
@@ -5106,6 +5185,8 @@ async fn a_tool_result_survives_a_live_window() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -5218,6 +5299,8 @@ async fn a_sink_survives_the_re_spawn_an_answer_triggers() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -5349,6 +5432,8 @@ async fn a_tool_can_opt_out_of_the_progress_window() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -5570,6 +5655,8 @@ async fn a_tool_prompt_hides_the_window_and_restores_it() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive: a user-targeted question needs a user
             &[],
             &lock,
@@ -6087,6 +6174,8 @@ async fn test_tool_with_single_inquiry() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -6212,6 +6301,8 @@ async fn test_secret_question_without_tty_fails_tool() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -6318,6 +6409,8 @@ async fn test_secret_question_with_assistant_target_fails_tool() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -6417,6 +6510,8 @@ async fn test_secret_prompter_answer_is_redacted() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive
             &[],
             &lock,
@@ -6520,6 +6615,8 @@ async fn test_secret_static_answer_is_redacted() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -6624,6 +6721,8 @@ async fn test_static_answer_records_answered_inquiry() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -6736,6 +6835,8 @@ async fn test_remembered_answer_cache_hit_records_new_inquiry_pair() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive
             &[],
             &lock,
@@ -6855,6 +6956,8 @@ async fn test_tool_with_multiple_inquiries() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -7004,6 +7107,8 @@ async fn test_parallel_tools_one_with_inquiry() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -7139,6 +7244,8 @@ async fn test_parallel_tools_both_with_inquiries() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -7286,6 +7393,8 @@ async fn test_retry_counter_resets_on_successful_event() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -7422,6 +7531,8 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -7529,6 +7640,8 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -7720,6 +7833,8 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false, // interactive
             &[],
             &lock,
@@ -7832,6 +7947,8 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
         &model,
         &config,
         &router,
+        Utf8Path::new("/tmp"),
+        InvocationContext::default(),
         false, // interactive
         &[],
         &lock,
@@ -7953,6 +8070,8 @@ async fn a_tool_that_does_not_join_reasoning_renders_unshaded_live() {
         &model,
         &config,
         &router,
+        root,
+        InvocationContext::default(),
         false, // interactive
         &[],
         &lock,
@@ -8081,6 +8200,8 @@ async fn test_rebuild_cap_stops_a_provider_that_keeps_requesting_rebuilds() {
         &model,
         &config,
         &router,
+        Utf8Path::new("/tmp"),
+        InvocationContext::default(),
         false, // interactive
         &[],
         &lock,
@@ -8169,6 +8290,8 @@ async fn test_refused_rebuild_clears_the_retry_line() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             true, // interactive
             &[],
             &lock,
@@ -8250,6 +8373,8 @@ async fn test_refused_rebuild_persists_streamed_content() {
         &model,
         &config,
         &router,
+        Utf8Path::new("/tmp"),
+        InvocationContext::default(),
         false, // interactive
         &[],
         &lock,
@@ -8351,6 +8476,8 @@ async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
             &model,
             &config,
             &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
             false,
             &[],
             &lock,

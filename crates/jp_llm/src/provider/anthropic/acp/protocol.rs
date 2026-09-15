@@ -2,14 +2,6 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use agent_client_protocol::{
-    JsonRpcNotification,
-    schema::v1::{
-        PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
-        RequestPermissionResponse, SelectedPermissionOutcome, SessionId, SessionNotification,
-        SessionUpdate, ToolCallStatus,
-    },
-};
 use async_anthropic::types::{CreateMessagesResponse, MessageContent, MessagesStreamEvent, Usage};
 use indexmap::IndexSet;
 use jp_config::model::id::Name;
@@ -19,6 +11,10 @@ use tracing::trace;
 
 use super::{
     Error,
+    schema::{
+        PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
+        RequestPermissionResponse, SessionId, SessionNotification, SessionUpdate, ToolCallStatus,
+    },
     transcript::tool_name,
     usage::{ModelUsage, RuntimeUsage, UsageLedger},
 };
@@ -29,11 +25,17 @@ use crate::{
 };
 
 /// The adapter's effective authentication, independent of JP's token store.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonRpcNotification)]
-#[notification(method = "_auth/status_update")]
+///
+/// A Claude Code extension rather than an ACP method, so its name is spelled
+/// here instead of coming from the schema's method tables.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct AuthUpdate {
     pub auth_status: AgentAuth,
+}
+
+impl AuthUpdate {
+    pub(super) const METHOD: &'static str = "_auth/status_update";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,12 +59,19 @@ impl AgentAuth {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonRpcNotification)]
-#[notification(method = "_claude/sdkMessage")]
+/// One message from the Claude SDK behind the adapter.
+///
+/// A Claude Code extension rather than an ACP method, so its name is spelled
+/// here instead of coming from the schema's method tables.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct SdkNotification {
     pub session_id: SessionId,
     pub message: SdkMessage,
+}
+
+impl SdkNotification {
+    pub(super) const METHOD: &'static str = "_claude/sdkMessage";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -233,6 +242,7 @@ impl State {
         }
         let call = request.tool_call;
         let id = call.tool_call_id.to_string();
+
         let native_name = call
             .meta
             .as_ref()
@@ -256,7 +266,6 @@ impl State {
             ));
         }
         let arguments = call
-            .fields
             .raw_input
             .and_then(|input| input.as_object().cloned())
             .ok_or_else(|| StreamError::other("ACP tool arguments must be a JSON object"))?;
@@ -288,9 +297,11 @@ impl State {
             Event::Finished(FinishReason::Completed),
         ];
         Ok((
-            RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
-                SelectedPermissionOutcome::new(option.option_id),
-            )),
+            RequestPermissionResponse {
+                outcome: RequestPermissionOutcome::Selected {
+                    option_id: option.option_id,
+                },
+            },
             events,
         ))
     }
@@ -316,7 +327,7 @@ impl State {
     pub(super) fn usage_snapshot(&self) -> Value {
         self.session
             .as_ref()
-            .map_or(Value::Null, |id| self.usage.snapshot(id.0.as_ref()))
+            .map_or(Value::Null, |id| self.usage.snapshot(&id.0))
     }
 
     pub(super) fn observe(&mut self, notification: SessionNotification) {
@@ -328,14 +339,14 @@ impl State {
             SessionUpdate::ToolCallUpdate(update) => {
                 let id = update.tool_call_id.to_string();
                 if matches!(
-                    update.fields.status,
+                    update.status,
                     Some(ToolCallStatus::Completed | ToolCallStatus::Failed)
                 ) {
                     self.pending_tools.remove(&id);
                 }
                 (id, update.meta)
             }
-            _ => return,
+            SessionUpdate::Other => return,
         };
         if let Some(name) = meta
             .as_ref()

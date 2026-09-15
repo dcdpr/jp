@@ -13,7 +13,6 @@ use std::{
 
 use axum::Router;
 use jp_tool::Error as ToolError;
-use reqwest::Url;
 use rmcp::{
     ErrorData, ServerHandler, ServiceExt as _,
     model::{
@@ -35,6 +34,7 @@ use tokio::{
     task::{JoinError, JoinHandle},
 };
 use tokio_util::sync::CancellationToken;
+use url::Url;
 
 use super::{
     http_client::LoopbackClient,

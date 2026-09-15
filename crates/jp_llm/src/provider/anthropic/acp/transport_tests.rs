@@ -1,12 +1,5 @@
 use std::{error::Error as _, iter};
 
-use agent_client_protocol::{
-    Agent,
-    schema::v1::{
-        InitializeResponse, LoadSessionResponse, NewSessionResponse, PromptResponse,
-        SessionConfigOptionValue, SetSessionConfigOptionResponse,
-    },
-};
 use datetime_literal::datetime;
 use jp_config::AppConfig;
 use jp_conversation::{
@@ -14,9 +7,10 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse, ConversationEvent},
     thread::ThreadBuilder,
 };
-use jp_mcp::server::InvocationContext;
+use jp_tool::InvocationContext;
 use serde_json::{Map, Value, json};
 use tokio::{
+    io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader},
     sync::Notify,
     task::JoinHandle,
     time::{advance, timeout},
@@ -24,7 +18,7 @@ use tokio::{
 use tracing::instrument::WithSubscriber as _;
 use tracing_subscriber::{layer::SubscriberExt as _, registry};
 
-use super::{super::live_tests::UsageCapture, *};
+use super::{super::recorded_tests::UsageCapture, *};
 use crate::event::{EventPart, FinishReason};
 
 fn prepared() -> PreparedRequest {
@@ -55,6 +49,113 @@ fn notification(message: Value) -> SdkNotification {
         session_id: "11111111-1111-4111-8111-111111111111".into(),
         message: serde_json::from_value(message).unwrap(),
     }
+}
+
+/// Pushes notifications to JP while a request of its own is still open.
+#[derive(Clone)]
+struct Notifier(mpsc::UnboundedSender<Value>);
+
+impl Notifier {
+    fn notify(&self, method: &str, params: &Value) {
+        drop(
+            self.0
+                .send(json!({"jsonrpc": "2.0", "method": method, "params": params})),
+        );
+    }
+
+    /// One `_claude/sdkMessage`, the channel Claude Code streams through.
+    fn sdk(&self, message: Value) {
+        let params = serde_json::to_value(notification(message)).unwrap();
+        self.notify(SdkNotification::METHOD, &params);
+    }
+
+    fn auth(&self, plan: &str) {
+        self.notify(
+            AuthUpdate::METHOD,
+            &json!({"authStatus": {"kind": "account", "account": {"plan": plan}}}),
+        );
+    }
+}
+
+/// An adapter scripted at the wire level.
+///
+/// `respond` answers each request JP sends, by method, and may push
+/// notifications through its [`Notifier`] before returning.
+/// Everything crosses a real pipe as newline-delimited JSON, so the framing is
+/// under test rather than bypassed.
+fn scripted<F, Fut>(respond: F) -> Box<dyn Transport>
+where
+    F: Fn(String, Value, Notifier) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<Value, RpcError>> + Send + 'static,
+{
+    Box::new(move |handler, foreground| {
+        let (jp_writes, agent_reads) = tokio::io::duplex(1 << 16);
+        let (agent_writes, jp_reads) = tokio::io::duplex(1 << 16);
+        let (outgoing, mut queued) = mpsc::unbounded_channel::<Value>();
+        let notifier = Notifier(outgoing.clone());
+
+        tokio::spawn(async move {
+            let mut agent_writes = agent_writes;
+            while let Some(message) = queued.recv().await {
+                let mut line = serde_json::to_vec(&message).unwrap();
+                line.push(b'\n');
+                if agent_writes.write_all(&line).await.is_err() {
+                    break;
+                }
+                drop(agent_writes.flush().await);
+            }
+        });
+
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(agent_reads).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let message: Value = serde_json::from_str(&line).unwrap();
+                let Some(id) = message.get("id").cloned() else {
+                    continue;
+                };
+                let method = message["method"].as_str().unwrap().to_owned();
+                let params = message.get("params").cloned().unwrap_or(Value::Null);
+                let reply = match respond(method, params, notifier.clone()).await {
+                    Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
+                    Err(error) => json!({"jsonrpc": "2.0", "id": id, "error": error}),
+                };
+                drop(outgoing.send(reply));
+            }
+        });
+
+        // `.boxed()` rather than `Box::pin`, which infers a future that is not
+        // spelled `Send` and so does not satisfy `Transport`.
+        futures::FutureExt::boxed(super::super::rpc::drive(
+            jp_writes,
+            jp_reads,
+            Tap::none(),
+            handler,
+            foreground,
+        ))
+    })
+}
+
+#[tokio::test]
+async fn the_scripted_adapter_answers_one_request() {
+    let agent = scripted(|method, _params, _notifier| async move {
+        assert_eq!(method, agent_method::INITIALIZE);
+        Ok(json!({"protocolVersion": 1, "agentCapabilities": {}}))
+    });
+    let handler: Handler = Box::new(|_| Box::pin(async { Ok(Value::Null) }));
+    let foreground: Foreground = Box::new(|peer| {
+        Box::pin(async move {
+            peer.request(InitializeRequest {
+                protocol_version: ProtocolVersion::V1,
+                client_capabilities: ClientCapabilities::default(),
+            })
+            .await?;
+            Ok(())
+        })
+    });
+    timeout(Duration::from_secs(5), agent.connect(handler, foreground))
+        .await
+        .unwrap()
+        .unwrap();
 }
 
 #[test]
@@ -153,34 +254,19 @@ fn a_followup_error_does_not_replace_the_original_failure() {
 
 #[tokio::test]
 async fn runtime_model_rejection_preserves_its_classification() {
-    let agent = Agent
-        .builder()
-        .on_receive_request(
-            async |_request: InitializeRequest, responder, _cx| {
-                responder.respond(
-                    serde_json::from_value::<InitializeResponse>(
-                        json!({"protocolVersion":1,"agentCapabilities":{"loadSession":true}}),
-                    )
-                    .unwrap(),
-                )
-            },
-            on_receive_request!(),
-        )
-        .on_receive_request(
-            async |_request: LoadSessionRequest, responder, _cx| {
-                responder.respond(LoadSessionResponse::new())
-            },
-            on_receive_request!(),
-        )
-        .on_receive_request(
-            async |request: SetSessionConfigOptionRequest, responder, _cx| {
-                assert_eq!(request.config_id.0.as_ref(), "model");
-                responder.respond_with_error(
-                    RpcError::invalid_params().data("Unknown model on this account."),
-                )
-            },
-            on_receive_request!(),
-        );
+    let agent = scripted(|method, params, _notifier| async move {
+        match method.as_str() {
+            m if m == agent_method::INITIALIZE => {
+                Ok(json!({"protocolVersion": 1, "agentCapabilities": {"loadSession": true}}))
+            }
+            m if m == agent_method::SESSION_LOAD => Ok(json!({})),
+            m if m == agent_method::SESSION_SET_CONFIG_OPTION => {
+                assert_eq!(params["configId"], "model");
+                Err(RpcError::invalid_params().data("Unknown model on this account."))
+            }
+            other => panic!("unexpected request: {other}"),
+        }
+    });
     let mut prepared = prepared();
     prepared.model = "future-model".parse().unwrap();
     let environment = options::environment(&prepared, CachePolicy::Short);
@@ -310,32 +396,47 @@ struct LivenessFixture {
 fn liveness_fixture(arguments: bool) -> LivenessFixture {
     let finish = Arc::new(Notify::new());
     let release = finish.clone();
-    let agent = Agent.builder()
-        .on_receive_request(async |_: InitializeRequest, responder, _cx| {
-            responder.respond(serde_json::from_value::<InitializeResponse>(json!({"protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"http":true}}})).unwrap())
-        }, on_receive_request!())
-        .on_receive_request(async |_: NewSessionRequest, responder, cx| {
-            cx.send_notification(serde_json::from_value::<AuthUpdate>(json!({"authStatus":{"kind":"account","account":{"plan":"Claude Max"}}})).unwrap())?;
-            responder.respond(serde_json::from_value::<NewSessionResponse>(json!({"sessionId":"11111111-1111-4111-8111-111111111111"})).unwrap())
-        }, on_receive_request!())
-        .on_receive_request(async |request: SetSessionConfigOptionRequest, responder, _cx| {
-            let SessionConfigOptionValue::ValueId { value } = request.value else { panic!("expected value") };
-            responder.respond(serde_json::from_value::<SetSessionConfigOptionResponse>(json!({"configOptions":[{"id":request.config_id,"name":"Setting","type":"select","currentValue":value,"options":[]}]})).unwrap())
-        }, on_receive_request!())
-        .on_receive_request(async move |_: PromptRequest, responder, cx| {
-            cx.send_notification(notification(json!({"type":"system","subtype":"init","tools":["mcp__jp__lookup"]})))?;
-            cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"Rewrite."}}})))?;
-            cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_stop","index":0}})))?;
-            if arguments {
-                cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call-args","name":"mcp__jp__lookup","input":{}}}})))?;
+    let agent = scripted(move |method, params, notifier| {
+        let release = release.clone();
+        async move {
+            match method.as_str() {
+                m if m == agent_method::INITIALIZE => Ok(
+                    json!({"protocolVersion": 1, "agentCapabilities": {"mcpCapabilities": {"http": true}}}),
+                ),
+                m if m == agent_method::SESSION_NEW => {
+                    notifier.auth("Claude Max");
+                    Ok(json!({"sessionId": "11111111-1111-4111-8111-111111111111"}))
+                }
+                m if m == agent_method::SESSION_SET_CONFIG_OPTION => Ok(json!({
+                    "configOptions": [{
+                        "id": params["configId"],
+                        "name": "Setting",
+                        "type": "select",
+                        "currentValue": params["value"],
+                        "options": [],
+                    }],
+                })),
+                m if m == agent_method::SESSION_PROMPT => {
+                    notifier.sdk(
+                        json!({"type": "system", "subtype": "init", "tools": ["mcp__jp__lookup"]}),
+                    );
+                    notifier.sdk(json!({"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": "Rewrite."}}}));
+                    notifier.sdk(json!({"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}}));
+                    if arguments {
+                        notifier.sdk(json!({"type": "stream_event", "event": {"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "call-args", "name": "mcp__jp__lookup", "input": {}}}}));
+                    }
+                    release.notified().await;
+                    if arguments {
+                        notifier.sdk(json!({"type": "stream_event", "event": {"type": "content_block_stop", "index": 1}}));
+                    }
+                    notifier
+                        .sdk(json!({"type": "result", "subtype": "success", "is_error": false}));
+                    Ok(json!({"stopReason": "end_turn"}))
+                }
+                other => panic!("unexpected request: {other}"),
             }
-            release.notified().await;
-            if arguments {
-                cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_stop","index":1}})))?;
-            }
-            cx.send_notification(notification(json!({"type":"result","subtype":"success","is_error":false})))?;
-            responder.respond(serde_json::from_value::<PromptResponse>(json!({"stopReason":"end_turn"})).unwrap())
-        }, on_receive_request!());
+        }
+    });
     let prepared = prepared();
     let environment = options::environment(&prepared, CachePolicy::Short);
     let (sender, receiver) = mpsc::channel(16);
@@ -364,40 +465,58 @@ fn liveness_fixture(arguments: bool) -> LivenessFixture {
 
 #[tokio::test]
 async fn real_protocol_driver_loads_history_and_emits_only_live_output() {
-    let agent = Agent.builder()
-        .on_receive_request(async |request: InitializeRequest, responder, _cx| {
-            assert_eq!(request.protocol_version, ProtocolVersion::V1);
-            let response: InitializeResponse = serde_json::from_value(json!({"protocolVersion":1,"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true}}})).unwrap();
-            responder.respond(response)
-        }, on_receive_request!())
-        .on_receive_request(async |request: LoadSessionRequest, responder, cx| {
-            assert_eq!(request.session_id.to_string(), "11111111-1111-4111-8111-111111111111");
-            assert_eq!(request.cwd.to_str(), Some("/work/project"));
-            insta::assert_json_snapshot!("session_options", request.meta);
-            cx.send_notification(serde_json::from_value::<AuthUpdate>(json!({"authStatus":{"kind":"account","account":{"plan":"Claude Max"}}})).unwrap())?;
-            cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"REPLAY MUST NOT APPEAR"}}})))?;
-            responder.respond(LoadSessionResponse::new())
-        }, on_receive_request!())
-        .on_receive_request(async |request: SetSessionConfigOptionRequest, responder, _cx| {
-            if request.config_id.0.as_ref() == "model" {
-                assert_eq!(serde_json::to_value(&request.value).unwrap(), json!({"value":"claude-opus-5"}));
+    let agent = scripted(|method, params, notifier| async move {
+        match method.as_str() {
+            m if m == agent_method::INITIALIZE => {
+                assert_eq!(params["protocolVersion"], 1);
+                Ok(json!({
+                    "protocolVersion": 1,
+                    "agentCapabilities": {"loadSession": true, "mcpCapabilities": {"http": true}},
+                }))
             }
-            // Request values are flattened objects; a select's current value is the ID itself.
-            let SessionConfigOptionValue::ValueId { value } = request.value else { panic!("expected a value ID") };
-            let current = if request.config_id.0.as_ref() == "model" { json!("resolved-fixture-model") } else { json!(value) };
-            let response: SetSessionConfigOptionResponse = serde_json::from_value(json!({"configOptions":[{"id":request.config_id,"name":"Setting","type":"select","currentValue":current,"options":[]}]})).unwrap();
-            responder.respond(response)
-        }, on_receive_request!())
-        .on_receive_request(async |request: PromptRequest, responder, cx| {
-            assert_eq!(serde_json::to_value(request.prompt).unwrap(), json!([{"type":"text","text":"Current request."}]));
-            cx.send_notification(notification(json!({"type":"system","subtype":"init","tools":[]})))?;
-            cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}})))?;
-            cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"CURRENT"}}})))?;
-            cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_stop","index":0}})))?;
-            cx.send_notification(notification(json!({"type":"assistant","message":{"id":"msg-traced","model":"resolved-fixture-model","content":[{"type":"text","text":"CURRENT"}],"usage":{"input_tokens":2,"output_tokens":7,"cache_read_input_tokens":500}}})))?;
-            cx.send_notification(notification(json!({"type":"result","subtype":"success","is_error":false})))?;
-            responder.respond(serde_json::from_value::<PromptResponse>(json!({"stopReason":"end_turn"})).unwrap())
-        }, on_receive_request!());
+            m if m == agent_method::SESSION_LOAD => {
+                assert_eq!(params["sessionId"], "11111111-1111-4111-8111-111111111111");
+                assert_eq!(params["cwd"], "/work/project");
+                insta::assert_json_snapshot!("session_options", params["_meta"]);
+                notifier.auth("Claude Max");
+                // Replay of the loaded transcript, which must not reach the
+                // caller as live output.
+                notifier.sdk(json!({"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": "REPLAY MUST NOT APPEAR"}}}));
+                Ok(json!({}))
+            }
+            m if m == agent_method::SESSION_SET_CONFIG_OPTION => {
+                let current = if params["configId"] == "model" {
+                    assert_eq!(params["value"], "claude-opus-5");
+                    json!("resolved-fixture-model")
+                } else {
+                    params["value"].clone()
+                };
+                Ok(json!({
+                    "configOptions": [{
+                        "id": params["configId"],
+                        "name": "Setting",
+                        "type": "select",
+                        "currentValue": current,
+                        "options": [],
+                    }],
+                }))
+            }
+            m if m == agent_method::SESSION_PROMPT => {
+                assert_eq!(
+                    params["prompt"],
+                    json!([{"type": "text", "text": "Current request."}])
+                );
+                notifier.sdk(json!({"type": "system", "subtype": "init", "tools": []}));
+                notifier.sdk(json!({"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}}));
+                notifier.sdk(json!({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "CURRENT"}}}));
+                notifier.sdk(json!({"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}}));
+                notifier.sdk(json!({"type": "assistant", "message": {"id": "msg-traced", "model": "resolved-fixture-model", "content": [{"type": "text", "text": "CURRENT"}], "usage": {"input_tokens": 2, "output_tokens": 7, "cache_read_input_tokens": 500}}}));
+                notifier.sdk(json!({"type": "result", "subtype": "success", "is_error": false}));
+                Ok(json!({"stopReason": "end_turn"}))
+            }
+            other => panic!("unexpected request: {other}"),
+        }
+    });
     let prepared = prepared();
     let environment = options::environment(&prepared, CachePolicy::Short);
     let (sender, mut receiver) = mpsc::channel(16);

@@ -42,13 +42,12 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
-agent-client-protocol = { workspace = true }
 process-wrap = { workspace = true, features = ["tokio1", "process-group", "job-object", "kill-on-drop"] }
-tokio-util = { workspace = true, features = ["compat"] }
 uuid = { workspace = true, features = ["v4", "v5", "serde"] }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
+camino-tempfile = { workspace = true }
 saphyr = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 datetime_literal = { workspace = true }

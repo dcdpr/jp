@@ -18,7 +18,7 @@ indoc = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 rmcp = { workspace = true, features = ["server", "transport-io", "macros"] }
 rusqlite = { workspace = true, features = ["bundled", "array", "vtab"] }
-schemars = { workspace = true, features = ["preserve_order", "schemars_derive", "std", "url2"] }
+schemars = { workspace = true, features = ["derive", "preserve_order", "std"] }
 scraper = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

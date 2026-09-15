@@ -13,10 +13,12 @@ use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults, ToolSource};
 use jp_conversation::event::{InquirySource, ToolCallRequest, ToolCallResponse};
+use jp_llm::query::ToolExecution;
 use jp_mcp::server::{StderrSink, service::Formatted};
 use jp_tool::{Question, ToolResult};
 use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
+use url::Url;
 
 #[path = "executor_error.rs"]
 mod error;
@@ -90,6 +92,16 @@ pub(crate) trait Executor: Send + Sync {
     /// request.
     fn set_arguments(&mut self, args: Value);
 
+    /// Hold this call's service-side invocation open while its current attempt
+    /// is abandoned, so a replacement attempt continues the same logical call.
+    ///
+    /// Returns `false` when there is nothing to hold — the service has not
+    /// named the call yet, or this executor has no service behind it — in
+    /// which case a restart submits a fresh call instead.
+    fn pause_for_restart(&self) -> bool {
+        false
+    }
+
     /// Advance the call to its next input request or result.
     ///
     /// An MCP-backed executor releases prepared work or answers the pending
@@ -121,6 +133,25 @@ pub(crate) trait Executor: Send + Sync {
 
 /// Creates Host-facing tool calls and acknowledges their recorded responses.
 pub(crate) trait ExecutorSource: Send + Sync {
+    /// The endpoint an external agent submits its own tool calls to.
+    ///
+    /// `None` when this source has no reachable endpoint, which is every source
+    /// that only serves calls JP submits itself.
+    fn endpoint(&self) -> Option<Url> {
+        None
+    }
+
+    /// Choose who submits the MCP request for the calls created after this.
+    ///
+    /// A source that can only serve calls JP submits refuses anything else,
+    /// rather than silently accepting work it will never route.
+    fn set_execution(&self, execution: ToolExecution) -> Result<(), ExecutorError> {
+        if execution == ToolExecution::Caller {
+            return Ok(());
+        }
+        Err(ExecutorError::ExternalCallsUnsupported)
+    }
+
     /// Release a final delivery barrier after the response has been recorded.
     ///
     /// `review` carries the content the Host settled on, which the executor

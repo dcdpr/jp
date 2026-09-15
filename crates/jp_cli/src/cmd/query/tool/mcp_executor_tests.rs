@@ -134,6 +134,9 @@ fn recorded(result: Result<&str, &str>) -> Review {
     })
 }
 
+#[path = "mcp_executor_shutdown_tests.rs"]
+mod shutdown;
+
 #[tokio::test]
 async fn one_call_spans_input_and_recording() {
     let fixture = Fixture::inquiring("edit").await;
