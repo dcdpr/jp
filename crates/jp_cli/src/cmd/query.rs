@@ -1103,7 +1103,7 @@ impl Query {
             .collect();
         let builtin_executors =
             BuiltinExecutors::new().register("describe_tools", DescribeTools::new(docs_map));
-        let (executor_source, execution_owner) = TerminalExecutorSource::start(
+        let (executor_source, execution_owner) = TerminalExecutorSource::start_with_metadata(
             builtin_executors,
             tools,
             &cfg.conversation.tools,
@@ -1111,6 +1111,7 @@ impl Query {
             invocation,
             mcp_client,
             root.clone(),
+            provider.mcp_tool_metadata(&model),
         )
         .await?;
         let tool_coordinator =

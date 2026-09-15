@@ -3359,6 +3359,15 @@ impl Provider for PacedMockProvider {
     }
 }
 
+#[test]
+fn pending_tool_progress_releases_the_generic_waiting_indicator() {
+    let event = StreamingLoopEvent::Llm(Box::new(Ok(Event::ToolCallPending {
+        id: "pending".into(),
+        name: "fs_create_file".into(),
+    })));
+    assert!(!event_keeps_waiting_indicator(&event));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_waiting_indicator_shows_during_delay() {
     // Tests that the waiting indicator appears when the LLM takes longer

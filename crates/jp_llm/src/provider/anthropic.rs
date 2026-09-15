@@ -1,16 +1,13 @@
+pub mod acp;
 pub mod auth;
+mod http;
 pub mod oauth;
 pub mod resolve;
 
-use std::{
-    mem,
-    ops::RangeInclusive,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{env, mem, ops::RangeInclusive, time::Duration};
 
 use async_anthropic::{
-    Client, bearer,
+    Client,
     errors::AnthropicError,
     messages::DEFAULT_MAX_TOKENS,
     types::{
@@ -21,16 +18,19 @@ use async_anthropic::{
 use async_stream::try_stream;
 use async_trait::async_trait;
 use base64::Engine as _;
+use camino::Utf8PathBuf;
 use chrono::{NaiveDate, Utc};
 use futures::{StreamExt as _, TryStreamExt as _, pin_mut, stream};
 use jp_attachment::AttachmentContent;
+#[cfg(test)]
+use jp_config::providers::llm::anthropic::AuthEntry;
 use jp_config::{
     assistant::{request::CachePolicy, tool_choice::ToolChoice},
     model::{
         id::{Name, ProviderId},
         parameters::{ReasoningConfig, ReasoningEffort, ServiceTier},
     },
-    providers::llm::anthropic::{AnthropicConfig, AuthEntry},
+    providers::llm::anthropic::{AnthropicConfig, SubscriptionFlow},
 };
 use jp_conversation::{
     ConversationStream,
@@ -51,7 +51,7 @@ use crate::{
     event::{Event, EventMatcher, EventPart, EventPatch, FinishReason, PatchAction, ToolCallPart},
     event_builder::EventBuilder,
     model::{ModelDeprecation, ModelDetails, ReasoningDetails, ReasoningMode},
-    query::ChatQuery,
+    query::{ChatQuery, QueryContext, QueryStream, ToolExecution},
     stream::{EventStream, chain::find_merge_point, with_tool_call_keepalive},
 };
 
@@ -168,10 +168,10 @@ pub struct Anthropic {
     /// Which beta features are enabled.
     beta: BetaFeatures,
 
-    /// The credential store backing `profile` chain entries.
+    /// The store used for direct subscription tokens and named-credential
+    /// lookup.
     ///
-    /// `None` when the chain holds no profile entries; the default
-    /// `["api_key"]` chain works without touching the store.
+    /// API-key-only chains and unnamed ACP subscriptions do not open the store.
     store: Option<CredentialStore>,
 
     /// A directly injected credential, bypassing chain resolution.
@@ -188,7 +188,7 @@ pub struct Anthropic {
     /// per request.
     /// A credential switch replaces the entry, since the auth material is baked
     /// into the client's default headers.
-    client_cache: Arc<Mutex<Option<(Credential, Client, bool)>>>,
+    client_cache: http::Clients,
 }
 
 impl Anthropic {
@@ -206,10 +206,7 @@ impl Anthropic {
     /// Returns an error when the chain, the store, or one of their entries is
     /// config-shaped-broken, or when no chain entry can resolve.
     pub fn new(config: &AnthropicConfig) -> Result<Self> {
-        let store = config
-            .auth
-            .iter()
-            .any(AuthEntry::may_need_store)
+        let store = resolve::needs_store(config)
             .then(CredentialStore::file_default)
             .transpose()
             .map_err(resolve::ResolveError::from)?;
@@ -220,7 +217,7 @@ impl Anthropic {
             chain_on_max_tokens: config.chain_on_max_tokens,
             store,
             fixed_credential: None,
-            client_cache: Arc::new(Mutex::new(None)),
+            client_cache: http::Clients::default(),
         };
 
         // No model is named at construction, so only account-scoped cooldowns
@@ -243,7 +240,7 @@ impl Anthropic {
             chain_on_max_tokens: config.chain_on_max_tokens,
             store: None,
             fixed_credential: Some(credential),
-            client_cache: Arc::new(Mutex::new(None)),
+            client_cache: http::Clients::default(),
         }
     }
 
@@ -254,7 +251,7 @@ impl Anthropic {
     async fn resolve(&self, model: &str) -> Result<resolve::Attempt> {
         if let Some(credential) = &self.fixed_credential {
             return Ok(resolve::Attempt {
-                credential: credential.clone(),
+                route: resolve::Route::Http(credential.clone()),
                 selected: None,
                 notices: vec![],
             });
@@ -309,58 +306,11 @@ impl Anthropic {
     /// Bearer requests carry the Claude Code fingerprint, including the
     /// identity line leading the system content, so the flag feeds request
     /// construction, not only the auth header.
-    fn client_for(&self, credential: &Credential) -> Result<(Client, bool)> {
-        let mut cache = self.client_cache.lock().expect("poisoned");
-        if let Some((cached, client, bearer)) = cache.as_ref()
-            && cached == credential
-        {
-            return Ok((client.clone(), *bearer));
+    fn client_for(&self, route: &resolve::Route) -> Result<(Client, bool)> {
+        match route {
+            resolve::Route::Http(credential) => self.client_cache.get(&self.config, credential),
+            resolve::Route::Acp => Err(acp::Error::FlowChanged.into()),
         }
-
-        let mut builder = Client::builder();
-        builder
-            .base_url(self.config.base_url.clone())
-            .version("2023-06-01");
-
-        let bearer = match credential {
-            Credential::ApiKey(key) => {
-                builder.api_key(key.clone());
-                false
-            }
-            Credential::Bearer(token) => {
-                builder.auth_token(token.clone());
-                true
-            }
-        };
-
-        if !self.config.beta_headers.is_empty() {
-            builder.beta(self.config.beta_headers.join(","));
-        }
-
-        // Bearer mode changes the request fingerprint, not just the auth
-        // header, so record which mode a request went out in and the beta
-        // set that accompanied it.
-        debug!(
-            bearer,
-            betas = %if bearer {
-                bearer::merge_betas(
-                    (!self.config.beta_headers.is_empty())
-                        .then(|| self.config.beta_headers.join(","))
-                        .as_deref(),
-                )
-            } else {
-                self.config.beta_headers.join(",")
-            },
-            "Constructing Anthropic client."
-        );
-
-        let client = builder
-            .build()
-            .map_err(|e| Error::Anthropic(AnthropicError::Unknown(e.to_string())))?;
-
-        *cache = Some((credential.clone(), client.clone(), bearer));
-
-        Ok((client, bearer))
     }
 }
 
@@ -376,6 +326,34 @@ fn is_switchable(error: &AnthropicError) -> bool {
 
 #[async_trait]
 impl Provider for Anthropic {
+    fn mcp_tool_metadata(&self, model: &ModelDetails) -> Map<String, Value> {
+        if model.served_by_subscription() && self.config.subscription_flow == SubscriptionFlow::Acp
+        {
+            return Map::from_iter([("anthropic/maxResultSizeChars".into(), 500_000.into())]);
+        }
+        Map::new()
+    }
+    async fn start_query(
+        &self,
+        model: &ModelDetails,
+        query: ChatQuery,
+        context: QueryContext,
+    ) -> Result<QueryStream> {
+        let attempt = self.resolve(model.name()).await?;
+        if matches!(attempt.route, resolve::Route::Acp) {
+            acp::inspect().await?;
+            return Ok(QueryStream {
+                events: acp::stream(model, query, context)?,
+                execution: ToolExecution::Agent {
+                    correlation_key: "claudecode/toolUseId",
+                },
+            });
+        }
+        Ok(QueryStream {
+            events: self.chat_completion_stream(model, query).await?,
+            execution: ToolExecution::Caller,
+        })
+    }
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let mut attempt = self.resolve(name).await?;
 
@@ -384,7 +362,12 @@ impl Provider for Anthropic {
                 warn!("{notice}");
             }
 
-            let (client, _) = self.client_for(&attempt.credential)?;
+            if matches!(attempt.route, resolve::Route::Acp) {
+                let model = acp::model_details(name);
+                acp::inspect().await?;
+                return Ok(model);
+            }
+            let (client, _) = self.client_for(&attempt.route)?;
             match client.models().get(name).await {
                 Ok(model) => return map_model(model),
                 Err(error) => attempt = self.advance_or_fail(&attempt, error, name).await?,
@@ -402,7 +385,11 @@ impl Provider for Anthropic {
                 warn!("{notice}");
             }
 
-            let (client, _) = self.client_for(&attempt.credential)?;
+            if matches!(attempt.route, resolve::Route::Acp) {
+                acp::inspect().await?;
+                return Ok(vec![acp::model_details(&"claude-opus-5".parse()?)]);
+            }
+            let (client, _) = self.client_for(&attempt.route)?;
             let mut all_models = vec![];
             let mut after_id = None;
 
@@ -450,6 +437,16 @@ impl Provider for Anthropic {
         // ordinary error before a stream exists; switches re-resolve inside
         // the stream.
         let attempt = self.resolve(model.name()).await?;
+        if matches!(attempt.route, resolve::Route::Acp) {
+            acp::inspect().await?;
+            let root = env::current_dir().map_err(acp::Error::NativeIo)?;
+            let root = Utf8PathBuf::from_path_buf(root).map_err(|_| acp::Error::NativeDirectory)?;
+            return acp::stream(model, query, QueryContext {
+                root,
+                mcp_endpoint: None,
+                invocation: None,
+            });
+        }
 
         let this = self.clone();
         let model = model.clone();
@@ -465,7 +462,7 @@ impl Provider for Anthropic {
                 // API key request differ in fingerprint, not only in the auth
                 // header.
                 let (client, bearer) = this
-                    .client_for(&attempt.credential)
+                    .client_for(&attempt.route)
                     .map_err(|e| StreamError::other(e.to_string()))?;
                 let (request, is_structured, forced_tool) =
                     create_request(&model, query.clone(), true, &this.beta, bearer)
@@ -509,7 +506,13 @@ impl Provider for Anthropic {
                     match item {
                         Ok(event) => {
                             content_seen = content_seen
-                                || !matches!(event, Event::KeepAlive | Event::Notice(_));
+                                || !matches!(
+                                    event,
+                                    Event::KeepAlive
+                                        | Event::ToolCallPending { .. }
+                                        | Event::ToolCallPendingEnd { .. }
+                                        | Event::Notice(_)
+                                );
                             yield event;
                         }
                         Err(error) if error.needs_credential_switch() => {
@@ -792,7 +795,9 @@ fn call(
                     yield flush;
                 }
                 patch @ Event::Patch(_) => yield patch,
-                keep_alive @ Event::KeepAlive => yield keep_alive,
+                progress @ (Event::KeepAlive
+                | Event::ToolCallPending { .. }
+                | Event::ToolCallPendingEnd { .. }) => yield progress,
                 notice @ Event::Notice(_) => yield notice,
             }
         }
@@ -1799,7 +1804,7 @@ fn create_request(
             warn!(
                 %model.id,
                 %DEFAULT_MAX_TOKENS,
-                "Model `max_tokens` parameter not found, using default value."
+                "HTTP request serialization has no configured or reported output limit; using its fallback."
             );
 
             DEFAULT_MAX_TOKENS as u32
@@ -2324,8 +2329,7 @@ fn map_model(model: types::Model) -> Result<ModelDetails> {
         // Only a model in the table has a known answer; the API reports nothing
         // about prefill.
         prefill: known.then_some(overrides.prefill),
-        // Anthropic bills its subscription through Claude Code rather than
-        // through JP, so no model here is reachable with one.
+        // The HTTP model catalog does not report subscription availability.
         subscription: None,
         features,
     })
@@ -2339,7 +2343,7 @@ fn map_event(
 
     trace!(
         event = serde_json::to_string(&event).unwrap_or_default(),
-        "Received event from Anthropic API."
+        "Received Anthropic message stream event."
     );
 
     match event {
@@ -3124,7 +3128,7 @@ fn erase_model_output(block: &mut Value) {
 #[cfg(test)]
 static SUBSCRIPTION_ROUTE: SubscriptionTestRoute = SubscriptionTestRoute;
 
-/// The Claude subscription route.
+/// The direct HTTP subscription route.
 ///
 /// Recording authenticates exactly as a user's own machine does: through the
 /// credential store, resolved by the same chain a real request walks.
@@ -3166,6 +3170,7 @@ impl super::ProviderTestRoute for SubscriptionTestRoute {
 
         let mut config = config.anthropic.clone();
         config.auth = vec![AuthEntry::Subscription(Some(profile))];
+        config.subscription_flow = SubscriptionFlow::Direct;
 
         Anthropic::new(&config)
             .map(|provider| Box::new(provider) as Box<dyn super::Provider>)

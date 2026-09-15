@@ -449,6 +449,7 @@ Ok(
                                 ),
                             ],
                         ),
+                        subscription_flow: None,
                         api_key_env: Some(
                             One(
                                 "ANTHROPIC_API_KEY",

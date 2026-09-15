@@ -449,6 +449,7 @@ impl From<crate::error::Error> for Error {
             Conversation(error) => return error.into(),
             Mcp(error) => return error.into(),
             McpEndpoint(error) => [("message", error.to_string())].into(),
+            McpHost(error) => with_cause(&error, "MCP Host control failed"),
             Llm(error) => return error.into(),
             Io(error) => return error.into(),
             Url(error) => return error.into(),
@@ -791,6 +792,7 @@ impl From<jp_llm::Error> for Error {
                 ("response", response),
             ]
             .into(),
+            AnthropicAcp(error) => with_cause(&error, "Anthropic ACP subscription error"),
             Anthropic(anthropic_error) => [
                 ("message", "Anthropic error".into()),
                 ("error", anthropic_error.to_string()),

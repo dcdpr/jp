@@ -1,0 +1,39 @@
+---
+source: crates/jp_llm/src/provider/anthropic/acp/transport_tests.rs
+expression: request.meta
+---
+{
+  "claudeCode": {
+    "emitRawSDKMessages": true,
+    "options": {
+      "systemPrompt": {
+        "type": "custom",
+        "prompt": "Use JP's history.",
+        "snapshot": false
+      },
+      "model": "claude-opus-5",
+      "tools": [],
+      "allowedTools": [],
+      "strictMcpConfig": true,
+      "settingSources": [],
+      "settings": {
+        "disableAllHooks": true,
+        "autoMemoryEnabled": false,
+        "permissions": {
+          "ask": [
+            "mcp__jp__*"
+          ]
+        }
+      },
+      "persistSession": true,
+      "env": {
+        "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+        "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
+        "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "0",
+        "DISABLE_AUTO_COMPACT": "1",
+        "ENABLE_TOOL_SEARCH": "false",
+        "MAX_MCP_OUTPUT_TOKENS": "100000"
+      }
+    }
+  }
+}

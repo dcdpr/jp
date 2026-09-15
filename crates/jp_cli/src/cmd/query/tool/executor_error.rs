@@ -12,6 +12,17 @@ pub(crate) enum ExecutorError {
     #[error("MCP Host interaction channel closed")]
     HostDisconnected,
 
+    /// This executor source only serves calls the Host itself submits.
+    #[error("executor source does not support external MCP calls")]
+    ExternalCallsUnsupported,
+
+    /// An agent announced a tool call but never submitted it to the endpoint.
+    ///
+    /// The two arrive over independent transports, so the Host waits rather
+    /// than assuming an ordering; this is that wait running out.
+    #[error("external tool call did not reach the JP MCP Server within 30 seconds")]
+    ExternalCallTimeout,
+
     /// Result metadata could not be decoded into the shared result contract.
     #[error("Invalid tool result: {0}")]
     MalformedResult(#[source] JsonError),

@@ -69,6 +69,10 @@ pub(crate) enum Error {
     #[error(transparent)]
     McpEndpoint(#[from] EndpointError),
 
+    /// The Host could not establish the provider's tool-dispatch contract.
+    #[error("MCP Host control failed: {0}")]
+    McpHost(#[source] ExecutorError),
+
     #[error("LLM error")]
     Llm(#[from] jp_llm::Error),
 

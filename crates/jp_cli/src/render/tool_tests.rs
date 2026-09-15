@@ -476,6 +476,35 @@ fn test_register_duplicate_ignored() {
 }
 
 #[test]
+fn replacing_an_abandoned_call_does_not_collapse_distinct_calls() {
+    let (mut renderer, _out) = create_renderer_with_show(true);
+    renderer.register("abandoned", "fs_create_file");
+    renderer.complete("abandoned");
+    renderer.register("replacement", "fs_create_file");
+    renderer.register("replacement", "fs_create_file");
+    assert_eq!(
+        renderer
+            .pending
+            .iter()
+            .map(|call| (call.id.as_str(), call.name.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("replacement", "fs_create_file")]
+    );
+    renderer.register("another", "fs_create_file");
+    assert_eq!(
+        renderer
+            .pending
+            .iter()
+            .map(|call| (call.id.as_str(), call.name.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("replacement", "fs_create_file"),
+            ("another", "fs_create_file")
+        ]
+    );
+}
+
+#[test]
 fn test_complete_removes_from_pending() {
     let (mut renderer, _out) = create_renderer_with_show(true);
     renderer.register("id1", "fs_read_file");
