@@ -43,6 +43,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Search Hit](#search-hit)
     - [Service Tier](#service-tier)
     - [Signal Router](#signal-router)
+    - [Subscription Flow](#subscription-flow)
     - [Summary](#summary)
     - [Thread](#thread)
     - [Tool Call](#tool-call)
@@ -356,6 +357,16 @@ Only the topmost handler is notified; a handler may `decline` to pass the
 interrupt down the stack.
 The registered scopes are the streaming loop, the tool execution loop, and the
 turn-level handler covering gaps between turn phases.
+
+### Subscription Flow
+
+The request implementation selected for subscription authentication within a
+provider.
+Represented by `SubscriptionFlow` in `jp_config::providers::llm::anthropic`.
+
+**Not the same as** a credential, model, or service tier: selecting a flow does
+not select an account, change the model ID, or authorize another billing kind.
+API-key requests do not use this selection.
 
 ### Summary
 

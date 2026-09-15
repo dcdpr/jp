@@ -482,8 +482,8 @@ fn tool_interrupt_restart_returns_restart() {
 
     assert_eq!(result, ToolInterruptResult::Restart);
     assert!(
-        token.is_cancelled(),
-        "Restart should cancel current execution"
+        !token.is_cancelled(),
+        "The coordinator must preserve MCP calls before cancelling workers"
     );
 }
 

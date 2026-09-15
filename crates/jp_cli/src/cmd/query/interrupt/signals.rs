@@ -300,7 +300,6 @@ pub fn handle_tool_interrupt(
     let result = match action {
         InterruptAction::RestartTool => {
             info!("Restarting tool execution");
-            cancellation_token.cancel();
             ToolInterruptResult::Restart
         }
         InterruptAction::ToolCancelled { response, exit } => {

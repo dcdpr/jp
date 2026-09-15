@@ -8,6 +8,8 @@ use chrono::{DateTime, Utc};
 use jp_config::model::{id::ProviderId, parameters::ServiceTier};
 use reqwest::header::{HeaderMap, RETRY_AFTER};
 
+use crate::provider::anthropic::acp::Error as AnthropicAcpError;
+
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 /// A provider-agnostic streaming error.
@@ -477,6 +479,10 @@ pub enum StreamErrorKind {
     /// This is not retryable because a retry regenerates the same runaway.
     OutputLimit,
 
+    /// The provider could not finish within its output-token limit.
+    /// Distinct from the Host's output-byte ceiling.
+    MaxOutputTokens,
+
     /// Other errors that are not categorized.
     /// These may or may not be retryable depending on the specific error.
     Other,
@@ -496,6 +502,7 @@ impl StreamErrorKind {
             Self::AuthRejected => "Authentication rejected",
             Self::ContextWindowExceeded => "Context window exceeded",
             Self::OutputLimit => "Output limit exceeded",
+            Self::MaxOutputTokens => "Output token limit exceeded",
             Self::Other => "Stream Error",
         }
     }
@@ -564,6 +571,10 @@ pub enum Error {
 
     #[error("Request error: {0}")]
     Request(#[from] reqwest::Error),
+
+    /// The Claude Code subscription flow failed its compatibility checks.
+    #[error(transparent)]
+    AnthropicAcp(#[from] AnthropicAcpError),
 
     #[error("Anthropic error: {0}")]
     Anthropic(#[from] AnthropicError),

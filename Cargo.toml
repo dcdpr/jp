@@ -9,6 +9,7 @@ members = [
 resolver = "3"
 
 [workspace.dependencies]
+agent-client-protocol = { version = "2.1", default-features = false }
 jp_attachment = { path = "crates/jp_attachment" }
 jp_attachment_agentic_shepherd = { path = "crates/jp_attachment_agentic_shepherd" }
 jp_attachment_bear_note = { path = "crates/jp_attachment_bear_note" }
@@ -114,6 +115,7 @@ percent-encoding = { version = "2", default-features = false }
 portable-pty = { version = "0.9", default-features = false }
 pretty_assertions = { version = "1", default-features = false }
 proc-macro2 = { version = "1", default-features = false }
+process-wrap = { version = "9", default-features = false }
 proptest = { version = "1", default-features = false }
 quick-xml = { version = "0.41", default-features = false }
 quote = { version = "1", default-features = false }

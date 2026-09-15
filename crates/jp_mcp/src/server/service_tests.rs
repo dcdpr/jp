@@ -201,6 +201,38 @@ async fn preparation_release_input_and_delivery_use_distinct_acknowledgements() 
 }
 
 #[tokio::test]
+async fn restart_keeps_the_logical_call_open_and_replaces_old_replies() {
+    let (service, mut host, count) = fixture("ask", "unattended");
+    let call = service.start_call(request()).unwrap();
+    let id = call.id();
+    release(&mut host).await;
+    let old = next(&mut host).await;
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    assert!(service.pause_call(id));
+    service.resume_call(id);
+    release(&mut host).await;
+    let Interaction::Input { reply, .. } = next(&mut host).await.interaction else {
+        panic!("expected input")
+    };
+    assert!(old.interaction.is_expired());
+    assert_eq!(count.load(Ordering::SeqCst), 2);
+    assert!(!call.is_finished());
+    reply.send(Ok(InputAnswer::Answer(json!(true)))).unwrap();
+    let recorded = next(&mut host).await;
+    assert_eq!(recorded.call.id, id);
+    let Interaction::Record { reply, .. } = recorded.interaction else {
+        panic!("expected recording")
+    };
+    reply.send(Ok(())).unwrap();
+    assert_eq!(
+        call.finish().await.unwrap(),
+        ToolResult::text(r#"{"arguments":{"path":"original"},"answer":true}"#)
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 3);
+    service.shutdown().await;
+}
+
+#[tokio::test]
 async fn denied_call_never_executes() {
     let (service, mut host, count) = fixture("ask", "unattended");
     let call = service.start_call(request()).unwrap();

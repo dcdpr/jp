@@ -260,7 +260,11 @@ fn summarize_events(events: Vec<Event>) -> StreamOutcome {
             Event::Patch(mut p) => patches.append(&mut p),
             // `KeepAlive` is a liveness signal, and `collect_with_retry` has
             // already delivered every notice to its sink.
-            Event::KeepAlive | Event::Notice(_) => {}
+            Event::KeepAlive
+            | Event::Notice(_)
+            | Event::ToolCallPending { .. }
+            | Event::ToolCallPendingEnd { .. } => {
+            }
         }
     }
 

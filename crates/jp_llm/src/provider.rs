@@ -27,14 +27,38 @@ use ollama::Ollama;
 use openai::Openai;
 use openrouter::Openrouter;
 use vllm::Vllm;
+use serde_json::{Map, Value};
 
 use crate::{
-    error::Result, model::ModelDetails, provider::mock::MockProvider, query::ChatQuery,
+    error::Result,
+    model::ModelDetails,
+    provider::mock::MockProvider,
+    query::{ChatQuery, QueryContext, QueryStream, ToolExecution},
     stream::EventStream,
 };
 
 #[async_trait]
 pub trait Provider: Send + Sync {
+    /// Provider-specific hints advertised by the Host on its MCP tool
+    /// descriptions.
+    fn mcp_tool_metadata(&self, _model: &ModelDetails) -> Map<String, Value> {
+        Map::new()
+    }
+    /// Start a request with Host resources for provider-owned tool
+    /// continuation.
+    /// API providers use the ordinary response stream and caller-side dispatch.
+    async fn start_query(
+        &self,
+        model: &ModelDetails,
+        query: ChatQuery,
+        _context: QueryContext,
+    ) -> Result<QueryStream> {
+        Ok(QueryStream {
+            events: self.chat_completion_stream(model, query).await?,
+            execution: ToolExecution::Caller,
+        })
+    }
+
     /// Get details of a model.
     async fn model_details(&self, name: &Name) -> Result<ModelDetails>;
 

@@ -19,7 +19,6 @@ jp_conversation = { workspace = true }
 jp_credentials = { workspace = true }
 jp_openrouter = { workspace = true }
 jp_tool = { workspace = true }
-
 async-anthropic = { workspace = true }
 async-stream = { workspace = true }
 async-trait = { workspace = true }
@@ -43,7 +42,10 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
-uuid = { workspace = true, features = ["v5"] }
+agent-client-protocol = { workspace = true }
+process-wrap = { workspace = true, features = ["tokio1", "process-group", "job-object", "kill-on-drop"] }
+tokio-util = { workspace = true, features = ["compat"] }
+uuid = { workspace = true, features = ["v4", "v5", "serde"] }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
@@ -58,6 +60,7 @@ jp_storage = { workspace = true }
 jp_test = { workspace = true }
 paste = { workspace = true }
 test-log = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true

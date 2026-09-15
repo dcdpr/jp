@@ -94,6 +94,7 @@ use jp_conversation::event::{
     CancellationReason, InquiryAnswerType, InquiryId, InquiryQuestion, InquiryRequest,
     InquiryResponse, InquirySource, SelectOption, ToolCallRequest, ToolCallResponse,
 };
+use jp_llm::query::ToolExecution;
 use jp_mcp::server::StderrSink;
 use jp_tool::{AnswerType, Question};
 use jp_workspace::ConversationMut;
@@ -101,6 +102,7 @@ use serde_json::{Map, Value};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
+use url::Url;
 
 use super::{
     ToolRenderer,
@@ -441,6 +443,16 @@ pub struct ToolCoordinator {
 }
 
 impl ToolCoordinator {
+    /// The endpoint used by provider-owned tool dispatch.
+    pub fn endpoint(&self) -> Option<Url> {
+        self.executor_source.endpoint()
+    }
+
+    /// Bind upcoming tool observations to the selected dispatch contract.
+    pub fn set_execution(&self, execution: ToolExecution) -> Result<(), ExecutorError> {
+        self.executor_source.set_execution(execution)
+    }
+
     pub fn new(tools_config: ToolsConfig, executor_source: Box<dyn ExecutorSource>) -> Self {
         Self {
             executors: Vec::new(),
@@ -477,6 +489,16 @@ impl ToolCoordinator {
 
     pub(crate) fn set_tool_state(&mut self, tool_id: impl Into<String>, state: ToolCallState) {
         self.tool_states.insert(tool_id.into(), state);
+    }
+
+    /// Remove an abandoned argument preview without changing executable calls.
+    pub(crate) fn discard_pending_tool(&mut self, tool_id: &str) {
+        if matches!(
+            self.tool_states.get(tool_id),
+            Some(ToolCallState::ReceivingArguments { .. })
+        ) {
+            self.tool_states.remove(tool_id);
+        }
     }
 
     fn clear_tool_states(&mut self) {
@@ -1285,6 +1307,12 @@ impl ToolCoordinator {
                             | ToolInterruptResult::PromptFailed
                             | ToolInterruptResult::Declined => {}
                             ToolInterruptResult::Restart => {
+                                // Preserve logical MCP requests before cancelling the Host
+                                // workers. Re-preparation releases the paused attempts.
+                                for tool in executing_tools.values() {
+                                    tool.executor.pause_for_restart();
+                                }
+                                cancellation_token.cancel();
                                 outcome.upgrade(ExecutionOutcome::Restart);
                             }
                             ToolInterruptResult::Cancelled { response, exit } => {

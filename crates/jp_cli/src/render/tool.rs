@@ -573,7 +573,7 @@ impl ToolRenderer {
         }
     }
 
-    /// Completes a tool call and removes it from the temp line.
+    /// End a call's pending-arguments display, including an abandoned call.
     ///
     /// This only handles the rewritable temp-line display.
     /// The permanent "Calling tool ..." header is printed later by
@@ -583,10 +583,8 @@ impl ToolRenderer {
     pub fn complete(&mut self, id: &str) {
         self.pending.retain(|t| t.id != id);
 
-        // The completed tool's permanent header is rendered immediately after
-        // this returns and uses the currently-active region, so realign that
-        // region to this tool's captured one (a no-op for a single tool, but
-        // correct when parallel tools sit in different regions).
+        // A prepared call's permanent header uses its captured region, which
+        // can differ from the other calls still on the preparing row.
         self.current_region = self.regions.get(id).cloned();
 
         if self.pending.is_empty() {

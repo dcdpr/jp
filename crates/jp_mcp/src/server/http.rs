@@ -13,6 +13,7 @@ use std::{
 
 use axum::Router;
 use jp_tool::Error as ToolError;
+use reqwest::Url;
 use rmcp::{
     ErrorData, ServerHandler, ServiceExt as _,
     model::{
@@ -55,6 +56,19 @@ pub enum EndpointError {
     /// The MCP handshake failed.
     #[error("Could not connect to JP MCP Server: {0}")]
     Connect(Box<dyn StdError + Send + Sync>),
+}
+
+/// Open an independent MCP session using JP's HTTP transport.
+/// Expired sessions fail rather than replaying tool execution automatically.
+pub async fn connect(url: &Url) -> Result<RunningService<RoleClient, ()>, EndpointError> {
+    // A loopback connection must not be routed through an environment
+    // proxy or followed to another host.
+    let client = LoopbackClient::new().map_err(|error| EndpointError::Connect(Box::new(error)))?;
+    let config = StreamableHttpClientTransportConfig::with_uri(url.to_string())
+        .reinit_on_expired_session(false);
+    ().serve(StreamableHttpClientTransport::with_client(client, config))
+        .await
+        .map_err(|error| EndpointError::Connect(Box::new(error)))
 }
 
 /// Owns a loopback listener with an OS-assigned port.
@@ -118,15 +132,11 @@ impl Endpoint {
 
     /// Establish the MCP Host's ordinary HTTP connection to this endpoint.
     pub async fn connect(&self) -> Result<RunningService<RoleClient, ()>, EndpointError> {
-        // A loopback connection must not be routed through an environment
-        // proxy or followed to another host.
-        let client =
-            LoopbackClient::new().map_err(|error| EndpointError::Connect(Box::new(error)))?;
-        let config = StreamableHttpClientTransportConfig::with_uri(self.url.clone())
-            .reinit_on_expired_session(false);
-        ().serve(StreamableHttpClientTransport::with_client(client, config))
-            .await
-            .map_err(|error| EndpointError::Connect(Box::new(error)))
+        let url = self
+            .url
+            .parse()
+            .map_err(|error| EndpointError::Connect(Box::new(error)))?;
+        connect(&url).await
     }
 
     /// Private in-process control for the MCP Host, not exposed through HTTP.
