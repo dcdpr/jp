@@ -3,8 +3,8 @@
 //! [`Executor`] is the MCP Host's view of one logical tool call: preparation
 //! and approval precede execution release, and an input request returns control
 //! to the Host so it can route the inquiry, review the result, and record both.
-//! [`ExecutorSource`] builds one per tool call, so a test can supply
-//! [`MockExecutor`] where production supplies [`super::mcp_executor`].
+//! [`ExecutorSource`] builds one per tool call, so a test can supply a scripted
+//! executor where production supplies [`super::mcp_executor`].
 //!
 //! Execution itself lives in `jp_mcp::server`; nothing here runs a tool.
 
