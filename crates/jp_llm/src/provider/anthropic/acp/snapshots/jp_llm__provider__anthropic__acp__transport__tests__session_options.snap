@@ -1,6 +1,6 @@
 ---
 source: crates/jp_llm/src/provider/anthropic/acp/transport_tests.rs
-expression: request.meta
+expression: "params[\"_meta\"]"
 ---
 {
   "claudeCode": {
@@ -30,9 +30,11 @@ expression: request.meta
         "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
         "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
         "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "0",
+        "CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT": "0",
         "DISABLE_AUTO_COMPACT": "1",
         "ENABLE_TOOL_SEARCH": "false",
-        "MAX_MCP_OUTPUT_TOKENS": "100000"
+        "MAX_MCP_OUTPUT_TOKENS": "100000",
+        "MCP_TOOL_TIMEOUT": "2147483647"
       }
     }
   }

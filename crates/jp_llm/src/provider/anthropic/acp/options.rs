@@ -125,6 +125,13 @@ pub(super) fn metadata(
     })
 }
 
+/// The adapter's wall-clock ceiling for one tool call, in milliseconds.
+///
+/// `MCP_TOOL_TIMEOUT` has no "off" spelling, so the ceiling is a number large
+/// enough that no prompt outlives it: about 24 days, the most a 32-bit
+/// millisecond timer holds.
+const NO_TIMEOUT: i32 = i32::MAX;
+
 pub(super) fn environment(
     prepared: &PreparedRequest,
     cache: CachePolicy,
@@ -136,6 +143,21 @@ pub(super) fn environment(
         ("CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS".into(), "0".into()),
         ("ENABLE_TOOL_SEARCH".into(), "false".into()),
         ("MAX_MCP_OUTPUT_TOKENS".into(), "100000".into()),
+        // A JP tool call stays silent while its approval prompt is open, and
+        // the adapter's two per-call timers measure wall-clock time whether or
+        // not JP is running: a closed laptop looks exactly like a hung server.
+        // Both would otherwise abort the call and hand the model a failure for
+        // a question nobody has answered yet.
+        //
+        // Disabling the idle check rather than sending progress notifications
+        // is what survives suspension — a heartbeat only resets the timer if it
+        // arrives, and a suspended process sends nothing.
+        //
+        // Deciding when to stop waiting is JP's job: the interrupt handler
+        // cancels a call the user abandons, and the MCP Host holds the reply
+        // the service is parked on until then.
+        ("CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT".into(), "0".into()),
+        ("MCP_TOOL_TIMEOUT".into(), NO_TIMEOUT.to_string()),
     ]);
     if let Some(max_tokens) = prepared.max_tokens {
         environment.insert(
