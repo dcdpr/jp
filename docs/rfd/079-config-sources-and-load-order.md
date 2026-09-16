@@ -257,6 +257,9 @@ init`), the sequence is:
 11. The result is the **base partial** for this invocation.
 12. Load the conversation's `base_config.json` and event-stream `ConfigDelta`s
     (for continuing or forking invocations only).
+    A path those deltas cleared and never set again ([RFD 070]) is also cleared
+    from the base partial, so the file layer cannot restore it.
+    Step 13 can set it again.
 13. Apply `--cfg` and `--no-cfg` ([RFD 038]) directives left-to-right ([RFD
     008]).
 14. Apply CLI shortcut flags (`--model`, `--reasoning`, etc.).
@@ -280,6 +283,7 @@ pipeline may care about; see `ConfigPipeline::partial_without_conversation` and
   `config_load_paths` resolution across roots.
 - [RFD 054]: Split Conversation Config and Events — how `base_config.json` and
   event-stream `ConfigDelta`s are structured.
+- [RFD 070]: Negative Config Deltas — how a delta records a cleared path.
 - `crates/jp_cli/src/lib.rs` — `load_partial_configs_from_files` and
   `load_base_partial`.
 - `crates/jp_config/src/util.rs` — `load_partials_with_inheritance`,
@@ -292,4 +296,5 @@ pipeline may care about; see `ConfigPipeline::partial_without_conversation` and
 [RFD 035]: 035-multi-root-config-load-path-resolution.md
 [RFD 038]: 038-config-reset-keywords.md
 [RFD 054]: 054-split-conversation-config-and-events.md
+[RFD 070]: 070-negative-config-deltas.md
 [RFD 080]: 080-editor-as-a-config-source.md
