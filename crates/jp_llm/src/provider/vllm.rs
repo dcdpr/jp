@@ -22,10 +22,7 @@ use tracing::{debug, trace, warn};
 
 use super::{
     EventStream, ModelDetails,
-    openai_compat::{
-        assemble_event_stream, convert_events, convert_tool_choice, convert_tools,
-        to_system_messages,
-    },
+    openai_compat::{assemble_event_stream, convert_events, convert_tool_choice, convert_tools},
     trace_to_tmpfile,
 };
 use crate::{error::Error, provider::Provider, query::ChatQuery, stream::with_tool_call_keepalive};
@@ -151,7 +148,15 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
         system_parts.push(xml);
     }
 
-    let mut messages: Vec<Value> = to_system_messages(system_parts).collect();
+    // vLLM renders the request through the served model's own chat template,
+    // and several of those templates reject a system message that isn't the
+    // first message. Joining the parts keeps every served model reachable
+    // regardless of its template.
+    let mut messages: Vec<Value> = if system_parts.is_empty() {
+        vec![]
+    } else {
+        vec![json!({ "role": "system", "content": system_parts.join("\n\n") })]
+    };
 
     // Prepend binary image attachments as a user message with image_url
     // content blocks (OpenAI chat completions format).
