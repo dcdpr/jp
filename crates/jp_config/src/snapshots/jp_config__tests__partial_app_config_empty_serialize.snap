@@ -258,6 +258,10 @@ PartialAppConfig {
                 app_referrer: None,
                 base_url: None,
             },
+            vllm: PartialVllmConfig {
+                api_key_env: None,
+                base_url: None,
+            },
         },
         mcp: Map(
             {},

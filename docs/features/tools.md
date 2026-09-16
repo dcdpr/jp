@@ -197,7 +197,7 @@ Describe the parameter in configuration when that happens.
 
 Providers accept different subsets of JSON Schema, and each one adapts the
 schema itself.
-OpenAI, Google, Anthropic, Cerebras, OpenRouter, and llama.cpp all accept
+OpenAI, Google, Anthropic, Cerebras, OpenRouter, llama.cpp, and vLLM all accept
 references and definitions.
 Ollama does not, so its schemas are expanded before the request is sent.
 It also ignores keywords outside a small set, keeping `type`, `description`,
