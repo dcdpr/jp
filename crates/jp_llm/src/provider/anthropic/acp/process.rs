@@ -50,7 +50,7 @@ pub(super) fn spawn(command: Command) -> io::Result<Child> {
     #[cfg(unix)]
     command.wrap(ProcessGroup::leader());
     #[cfg(windows)]
-    command.wrap(JobObject::new());
+    command.wrap(JobObject);
     command.spawn().map(Child)
 }
 
