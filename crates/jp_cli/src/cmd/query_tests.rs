@@ -3396,6 +3396,37 @@ fn run_missing_at_path_query_leaves_conversation_and_session_untouched() {
     assert_eq!(ctx.workspace.session_active_conversation(&session), None);
 }
 
+// A bare `--fork` keeps every turn, and a value keeps that many trailing turns.
+//
+// The reported failure: the flag declared a `default_missing_value` fed through
+// a parser returning `Option<usize>`, so clap registered the value as one type
+// and the derived reader asked for another. Every `jp query --fork` panicked
+// while parsing its own arguments.
+#[test]
+fn fork_flag_parses_with_and_without_a_turn_count() {
+    let bare = QueryArgs::try_parse_from(["query", "--fork"])
+        .unwrap()
+        .query;
+    assert_eq!(bare.fork, Some(None));
+
+    let counted = QueryArgs::try_parse_from(["query", "--fork=2"])
+        .unwrap()
+        .query;
+    assert_eq!(counted.fork, Some(Some(2)));
+}
+
+#[test]
+fn fork_flag_rejects_a_non_numeric_turn_count() {
+    let Err(error) = QueryArgs::try_parse_from(["query", "--fork=x"]) else {
+        panic!("a non-numeric turn count must be rejected");
+    };
+
+    assert!(
+        error.to_string().contains("expected a positive integer"),
+        "unexpected error: {error}"
+    );
+}
+
 #[test]
 fn resolve_query_missing_at_path_errors() {
     let dir = camino_tempfile::tempdir().unwrap();

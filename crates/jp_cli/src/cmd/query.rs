@@ -192,7 +192,6 @@ pub(crate) struct Query {
     #[arg(
         long = "fork",
         num_args = 0..=1,
-        default_missing_value = "",
         value_parser = parse_fork_turns,
         conflicts_with = "new",
     )]
@@ -3275,14 +3274,13 @@ fn parse_schema(s: String) -> Result<schemars::Schema> {
         .map_err(Into::into)
 }
 
-/// Parse the `--fork` value.
-/// Empty string means "all turns", a number means "keep last N turns".
-fn parse_fork_turns(s: &str) -> std::result::Result<Option<usize>, String> {
-    if s.is_empty() {
-        return Ok(None);
-    }
-    s.parse::<usize>()
-        .map(Some)
+/// Parse the `--fork` value: how many trailing turns the fork keeps.
+///
+/// Only reached when a value was written.
+/// A bare `--fork` keeps every turn and never lands here: clap reads the flag's
+/// absent value as `None` for the inner `Option`.
+fn parse_fork_turns(s: &str) -> std::result::Result<usize, String> {
+    s.parse()
         .map_err(|_| format!("expected a positive integer, got '{s}'"))
 }
 
