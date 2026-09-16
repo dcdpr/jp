@@ -78,7 +78,7 @@
 //! The coordinator uses the [`Executor`] trait for tool execution.
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
 };
 
@@ -107,7 +107,7 @@ use jp_llm::tool::{
 };
 use jp_mcp::Client;
 use jp_printer::Printer;
-use jp_tool::{AnswerType, Question};
+use jp_tool::{AccessPolicy, AnswerType, Question};
 use jp_workspace::ConversationMut;
 use serde_json::{Map, Value};
 use tokio::sync::mpsc;
@@ -332,6 +332,20 @@ pub enum ToolCallDecision {
     Failed(ToolCallResponse),
 }
 
+/// Result of [`ToolCoordinator::pre_render_for_prompt`].
+#[derive(Debug)]
+pub(crate) enum PreRender {
+    /// The call was rendered.
+    /// `content` is custom formatter output to persist.
+    Done { content: Option<String> },
+    /// No pre-render was attempted: a custom formatter with `format = "ask"`
+    /// only runs once the user has approved the call.
+    Skipped,
+    /// The formatter asked a question.
+    /// Nothing was printed, and the call is rendered after it runs.
+    Deferred,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolCallState {
     ReceivingArguments { name: String },
@@ -387,6 +401,12 @@ pub struct ToolCoordinator {
     /// Keyed by tool call ID.
     /// Drained by the turn loop to write into event metadata.
     rendered_arguments: HashMap<String, String>,
+    /// Tool call IDs whose formatter asked a question instead of describing the
+    /// call.
+    ///
+    /// Nothing was printed for these; they are rendered once the call has run
+    /// and its answers are known.
+    deferred_renders: HashSet<String>,
 }
 
 impl ToolCoordinator {
@@ -399,6 +419,7 @@ impl ToolCoordinator {
             executor_source,
             cancellation_token: CancellationToken::new(),
             rendered_arguments: HashMap::new(),
+            deferred_renders: HashSet::new(),
         }
     }
 
@@ -478,21 +499,19 @@ impl ToolCoordinator {
     /// via `format = "unattended"`; otherwise rendering is deferred until after
     /// approval.
     ///
-    /// Returns:
+    /// Returns [`PreRender`], or `Err(error_message)` if a custom formatter
+    /// command failed — the caller should treat that as a tool failure and
+    /// skip prompting.
     ///
-    /// - `Ok(Some(content))` if pre-render fired successfully — caller should
-    ///   skip the post-approval render and use this content.
-    /// - `Ok(None)` if pre-render was suppressed (Custom style with `format =
-    ///   "ask"`) — caller should follow the existing post-approval render
-    ///   path.
-    /// - `Err(error_message)` if a custom formatter command failed — caller
-    ///   should treat this as a tool failure and skip prompting.
+    /// The formatter is called with no answers: none exist before the call
+    /// runs.
     pub(crate) async fn pre_render_for_prompt(
         &self,
         tool_name: &str,
         arguments: &Map<String, Value>,
+        access: Option<&AccessPolicy>,
         tool_renderer: &ToolRenderer,
-    ) -> Result<Option<Option<String>>, String> {
+    ) -> Result<PreRender, String> {
         // `FormatMode::Ask` exists to defer side-effecting *custom*
         // formatters until after approval — running a user-configured
         // shell command before the user okays the tool would be
@@ -506,14 +525,21 @@ impl ToolCoordinator {
         };
 
         if !should_pre_render {
-            return Ok(None);
+            return Ok(PreRender::Skipped);
         }
 
         match self
-            .render_approved_tool(tool_name, arguments, tool_renderer)
+            .render_approved_tool(
+                tool_name,
+                arguments,
+                &IndexMap::new(),
+                access,
+                tool_renderer,
+            )
             .await
         {
-            RenderOutcome::Rendered { content } => Ok(Some(content)),
+            RenderOutcome::Rendered { content } => Ok(PreRender::Done { content }),
+            RenderOutcome::Deferred => Ok(PreRender::Deferred),
             RenderOutcome::Suppressed { error } => Err(error),
         }
     }
@@ -546,6 +572,7 @@ impl ToolCoordinator {
     ///    execute.
     /// 3. For approved tools, render the call (skipping if pre-rendered).
     /// 4. Return [`ToolCallDecision::Approved`], `Skipped`, or `Failed`.
+    #[expect(clippy::too_many_lines)]
     pub(crate) async fn resolve_tool_call_decision(
         &mut self,
         executor: Box<dyn Executor>,
@@ -575,16 +602,43 @@ impl ToolCoordinator {
             PermissionDecision::NeedsPrompt { executor, info } => {
                 self.set_tool_state(&info.tool_id, ToolCallState::AwaitingPermission);
 
+                // Grants that don't compile fail the call here rather than one
+                // round later at execution: the formatter is about to run under
+                // them too.
+                let access = match Self::render_access(executor.as_ref(), tool_renderer) {
+                    Ok(access) => access,
+                    Err(error) => {
+                        return ToolCallDecision::Failed(Self::render_failed_response(
+                            info.tool_id.clone(),
+                            &info.tool_name,
+                            &error,
+                        ));
+                    }
+                };
+
                 // Pre-render before the prompt so the user sees the
                 // rendered call (not raw arguments) when deciding.
                 // Built-in parameter styles always pre-render; Custom
                 // formatters are gated on `format = "unattended"`
                 // because they shell out to a user-controlled command.
                 let pre = match self
-                    .pre_render_for_prompt(&info.tool_name, executor.arguments(), tool_renderer)
+                    .pre_render_for_prompt(
+                        &info.tool_name,
+                        executor.arguments(),
+                        access.as_ref(),
+                        tool_renderer,
+                    )
                     .await
                 {
-                    Ok(maybe_content) => maybe_content,
+                    Ok(PreRender::Done { content }) => Some(content),
+                    Ok(PreRender::Skipped) => None,
+                    // Nothing was printed and nothing will be until the call
+                    // has run. Counted as pre-rendered so step 3 doesn't run
+                    // the formatter a second time to the same answer.
+                    Ok(PreRender::Deferred) => {
+                        self.deferred_renders.insert(info.tool_id.clone());
+                        Some(None)
+                    }
                     Err(error) => {
                         return ToolCallDecision::Failed(Self::render_failed_response(
                             info.tool_id.clone(),
@@ -622,11 +676,31 @@ impl ToolCoordinator {
         } else {
             let tool_name = executor.tool_name().to_owned();
             let args = executor.arguments().clone();
+            let access = match Self::render_access(executor.as_ref(), tool_renderer) {
+                Ok(access) => access,
+                Err(error) => {
+                    let id = executor.tool_id().to_owned();
+                    return ToolCallDecision::Failed(Self::render_failed_response(
+                        id, &tool_name, &error,
+                    ));
+                }
+            };
+
             match self
-                .render_approved_tool(&tool_name, &args, tool_renderer)
+                .render_approved_tool(
+                    &tool_name,
+                    &args,
+                    &IndexMap::new(),
+                    access.as_ref(),
+                    tool_renderer,
+                )
                 .await
             {
                 RenderOutcome::Rendered { content } => content,
+                RenderOutcome::Deferred => {
+                    self.deferred_renders.insert(executor.tool_id().to_owned());
+                    None
+                }
                 RenderOutcome::Suppressed { error } => {
                     let id = executor.tool_id().to_owned();
                     return ToolCallDecision::Failed(Self::render_failed_response(
@@ -765,6 +839,8 @@ impl ToolCoordinator {
         &self,
         tool_name: &str,
         arguments: &serde_json::Map<String, Value>,
+        answers: &IndexMap<String, Value>,
+        access: Option<&AccessPolicy>,
         tool_renderer: &ToolRenderer,
     ) -> RenderOutcome {
         if self.is_hidden(tool_name) {
@@ -772,9 +848,37 @@ impl ToolCoordinator {
         }
 
         let style = self.parameter_style(tool_name);
+        let options = self
+            .tools_config
+            .get(tool_name)
+            .map(|config| config.options().clone())
+            .unwrap_or_default();
+
         tool_renderer
-            .render_approved(tool_name, &self.invoked_name(tool_name), arguments, &style)
+            .render_approved(
+                tool_name,
+                &self.invoked_name(tool_name),
+                arguments,
+                answers,
+                &options,
+                access,
+                &style,
+            )
             .await
+    }
+
+    /// The access policy to hand a formatter describing `executor`'s call.
+    ///
+    /// Compiled against the directory the formatter runs in, which is the
+    /// renderer's root.
+    /// Grants that fail to compile are reported so the caller can fail the call
+    /// rather than describe it under a policy that isn't the one it would run
+    /// under.
+    fn render_access(
+        executor: &dyn Executor,
+        tool_renderer: &ToolRenderer,
+    ) -> Result<Option<AccessPolicy>, String> {
+        executor.access(tool_renderer.root())
     }
 
     /// Determines permission for a single tool without blocking on user input.
@@ -1085,7 +1189,8 @@ impl ToolCoordinator {
                         turn_state,
                         interactive,
                         tool_renderer,
-                    );
+                    )
+                    .await;
                 }
                 ExecutionEvent::PromptAnswer {
                     index,
@@ -1505,7 +1610,7 @@ impl ToolCoordinator {
 
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_lines)]
-    fn handle_tool_result(
+    async fn handle_tool_result(
         &mut self,
         result: ExecutorResult,
         tool: &mut ExecutingTool,
@@ -1527,6 +1632,9 @@ impl ToolCoordinator {
         match result {
             ExecutorResult::Completed(response) => {
                 let is_error = response.result.is_err();
+                self.render_deferred_call(tool, is_error, tool_renderer)
+                    .await;
+
                 let (inline_results, results_file_link) = self
                     .tools_config
                     .get(&tool.tool_name)
@@ -1766,6 +1874,50 @@ impl ToolCoordinator {
                     self.set_tool_state(&tool_id, ToolCallState::AwaitingInput);
                 }
             }
+        }
+    }
+
+    /// Render a call whose formatter deferred at permission time.
+    ///
+    /// The answers are in hand now, so the formatter describes the call as it
+    /// actually ran.
+    /// A call that ended in an error is left off the display: the formatter
+    /// already said it could not describe it, and the error response is
+    /// rendered on its own.
+    ///
+    /// Does nothing for a call that was already rendered.
+    async fn render_deferred_call(
+        &mut self,
+        tool: &ExecutingTool,
+        is_error: bool,
+        tool_renderer: &ToolRenderer,
+    ) {
+        if !self.deferred_renders.remove(&tool.tool_id) || is_error {
+            return;
+        }
+
+        // The call ran, so its grants compiled. An error here can't be acted
+        // on anyway: the work is done and the result is about to be shown.
+        let Ok(access) = Self::render_access(tool.executor.as_ref(), tool_renderer) else {
+            return;
+        };
+
+        let outcome = self
+            .render_approved_tool(
+                &tool.tool_name,
+                tool.executor.arguments(),
+                &tool.accumulated_answers,
+                access.as_ref(),
+                tool_renderer,
+            )
+            .await;
+
+        if let RenderOutcome::Rendered {
+            content: Some(content),
+        } = outcome
+        {
+            self.rendered_arguments
+                .insert(tool.tool_id.clone(), content);
         }
     }
 

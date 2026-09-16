@@ -9,7 +9,7 @@ use jp_config::{
 use jp_conversation::event::ToolCallResponse;
 use jp_md::format::{BackgroundFill, DefaultBackground};
 use jp_printer::{ErrChannel, OutputFormat, Printer, SharedBuffer, TerminalCapability};
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 
 use super::*;
 
@@ -18,6 +18,33 @@ fn terminal_region() -> DefaultBackground {
     DefaultBackground {
         param: "48;5;236".into(),
         fill: BackgroundFill::Terminal,
+    }
+}
+
+/// No answers and no options, the shape both render paths pass for a call that
+/// has not been asked anything.
+fn no_extras() -> (IndexMap<String, Value>, IndexMap<String, JsonValue>) {
+    (IndexMap::new(), IndexMap::new())
+}
+
+/// A formatter's view of a call, with the pieces a test wants to vary.
+fn format_ctx<'a>(
+    name: &'a str,
+    arguments: &'a Value,
+    answers: &'a IndexMap<String, Value>,
+    options: &'a IndexMap<String, JsonValue>,
+    root: &'a Utf8Path,
+    invocation: &'a jp_llm::tool::InvocationContext,
+) -> ToolContext<'a> {
+    ToolContext {
+        action: jp_tool::Action::FormatArguments,
+        name,
+        arguments,
+        answers,
+        options,
+        root,
+        access: None,
+        invocation,
     }
 }
 
@@ -199,8 +226,11 @@ async fn test_render_custom_arguments_after_approval() {
     args.insert("host".into(), Value::String("myhost".into()));
     let style = ParametersStyle::Custom(CommandConfigOrString::String("echo custom-output".into()));
 
+    let (answers, options) = no_extras();
     let outcome = renderer
-        .render_approved("ssh_run", "ssh_run", &args, &style)
+        .render_approved(
+            "ssh_run", "ssh_run", &args, &answers, &options, None, &style,
+        )
         .await;
 
     assert!(matches!(outcome, RenderOutcome::Rendered {
@@ -673,16 +703,87 @@ async fn test_format_custom_content_returns_raw_content() {
     let mut args = Map::new();
     args.insert("key".into(), Value::String("value".into()));
     let cmd = CommandConfigOrString::String("echo hello-world".into()).command();
-    let result = format_args_custom(
+    let (answers, options) = no_extras();
+    let invocation = jp_llm::tool::InvocationContext::default();
+    let arguments = Value::Object(args);
+    let ctx = format_ctx(
         "my_tool",
-        &args,
-        cmd,
+        &arguments,
+        &answers,
+        &options,
         root.path(),
-        &jp_llm::tool::InvocationContext::default(),
+        &invocation,
+    );
+
+    let result = format_args_custom(&ctx, cmd).await.unwrap();
+    assert_eq!(result.as_deref(), Some("hello-world"));
+}
+
+/// The formatter reads the same call the execution route will run: the answers
+/// accumulated so far and the tool's configured options travel with the
+/// arguments.
+#[tokio::test]
+async fn test_format_args_custom_exposes_answers_and_options() {
+    let root = Utf8TempDir::new().unwrap();
+    let cmd = CommandConfigOrString::String(
+        "echo {{tool.answers.shorter_title}}/{{tool.options.max_title_length}}".into(),
     )
-    .await
+    .command();
+
+    let answers = IndexMap::from([("shorter_title".to_owned(), Value::String("Short".into()))]);
+    let options = IndexMap::from([("max_title_length".to_owned(), JsonValue::from(json!(60)))]);
+    let invocation = jp_llm::tool::InvocationContext::default();
+    let arguments = Value::Object(Map::new());
+    let ctx = format_ctx(
+        "ticket_create",
+        &arguments,
+        &answers,
+        &options,
+        root.path(),
+        &invocation,
+    );
+
+    let result = format_args_custom(&ctx, cmd).await.unwrap();
+    assert_eq!(result.as_deref(), Some("Short/60"));
+}
+
+/// A formatter that answers with a question cannot describe the call yet.
+/// Nothing is rendered, and the call is not treated as failed.
+#[tokio::test]
+async fn test_format_args_custom_question_defers_the_render() {
+    let root = Utf8TempDir::new().unwrap();
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let renderer = ToolRenderer::new(
+        ErrChannel::new(Arc::new(printer)),
+        AppConfig::new_test().style,
+        root.path().to_owned(),
+        jp_llm::tool::InvocationContext::default(),
+    );
+
+    // Serialized rather than hand-written so the test speaks the wire format
+    // a real tool emits, not a copy of it that can drift.
+    let payload = serde_json::to_string(&jp_tool::Outcome::NeedsInput {
+        question: jp_tool::Question::text("q", "Which one?").unwrap(),
+    })
     .unwrap();
-    assert_eq!(result, "hello-world");
+    let style = ParametersStyle::Custom(CommandConfigOrString::String(format!("echo '{payload}'")));
+
+    let (answers, options) = no_extras();
+    let outcome = renderer
+        .render_approved(
+            "my_tool",
+            "my_tool",
+            &Map::new(),
+            &answers,
+            &options,
+            None,
+            &style,
+        )
+        .await;
+
+    assert!(matches!(outcome, RenderOutcome::Deferred), "{outcome:?}");
+    renderer.channel.flush();
+    assert_eq!(err.lock().as_str(), "");
 }
 
 /// Regression: the `format_arguments` path must surface the invocation's
@@ -703,10 +804,19 @@ async fn test_format_args_custom_exposes_invocation_ids() {
         workspace_id: "ws-abc".into(),
         conversation_id: "conv-xyz".into(),
     };
-    let result = format_args_custom("my_tool", &args, cmd, root.path(), &invocation)
-        .await
-        .unwrap();
-    assert_eq!(result, "ws-abc/conv-xyz");
+    let (answers, options) = no_extras();
+    let arguments = Value::Object(args);
+    let ctx = format_ctx(
+        "my_tool",
+        &arguments,
+        &answers,
+        &options,
+        root.path(),
+        &invocation,
+    );
+
+    let result = format_args_custom(&ctx, cmd).await.unwrap();
+    assert_eq!(result.as_deref(), Some("ws-abc/conv-xyz"));
 }
 
 #[test]

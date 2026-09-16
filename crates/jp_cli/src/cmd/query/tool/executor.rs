@@ -58,6 +58,7 @@ use jp_llm::{
     },
 };
 use jp_mcp::Client;
+use jp_tool::AccessPolicy;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
@@ -212,6 +213,15 @@ impl Executor for ToolExecutor {
         // If not an object, ignore (preserve original arguments)
     }
 
+    fn access(&self, root: &Utf8Path) -> Result<Option<AccessPolicy>, String> {
+        compile_tool_policy(self.config.access(), root, &self.approvals).map_err(|error| {
+            format!(
+                "invalid access policy for tool '{}': {error}",
+                self.request.name
+            )
+        })
+    }
+
     async fn execute(
         &self,
         answers: &IndexMap<String, Value>,
@@ -220,19 +230,15 @@ impl Executor for ToolExecutor {
         cancellation_token: CancellationToken,
         stderr: Option<StderrSink>,
     ) -> ExecutorResult {
-        // Compile this tool's access grants into a runtime policy, baking
-        // approved external targets in. The policy travels to the tool in its
-        // context so the tool can self-enforce. A policy that fails to compile
-        // (invalid config) fails the tool rather than running it unenforced.
-        let access = match compile_tool_policy(self.config.access(), root, &self.approvals) {
+        // The policy travels to the tool in its context so the tool can
+        // self-enforce. A policy that fails to compile (invalid config) fails
+        // the tool rather than running it unenforced.
+        let access = match self.access(root) {
             Ok(access) => access,
-            Err(error) => {
+            Err(message) => {
                 return ExecutorResult::Completed(ToolCallResponse {
                     id: self.request.id.clone(),
-                    result: Err(format!(
-                        "invalid access policy for tool '{}': {error}",
-                        self.request.name
-                    )),
+                    result: Err(message),
                 });
             }
         };

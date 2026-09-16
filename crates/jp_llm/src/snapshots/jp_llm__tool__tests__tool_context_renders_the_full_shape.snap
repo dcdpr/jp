@@ -1,0 +1,41 @@
+---
+source: crates/jp_llm/src/tool_tests.rs
+expression: rendered
+---
+{
+  "tool": {
+    "name": "ticket_create",
+    "arguments": {
+      "title": "Bump the deny list"
+    },
+    "answers": {
+      "shorter_title": "Bump deny list"
+    },
+    "options": {
+      "max_title_length": 60
+    }
+  },
+  "context": {
+    "action": "format_arguments",
+    "root": "/tmp",
+    "access": {
+      "fs": [
+        {
+          "lexical_path": "docs",
+          "external": false,
+          "approved_target": null,
+          "read": null,
+          "write": null,
+          "create": null,
+          "update": null,
+          "delete": null,
+          "execute": null
+        }
+      ],
+      "net": [],
+      "env": []
+    },
+    "workspace_id": "ws-abc",
+    "conversation_id": "conv-xyz"
+  }
+}
