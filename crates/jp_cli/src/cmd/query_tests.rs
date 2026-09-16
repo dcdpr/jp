@@ -13,6 +13,7 @@ use jp_config::{
     },
     model::id::{ModelIdConfig, PartialModelIdConfig, ProviderId},
     style::stderr_rows::{RowCount, StderrRows},
+    types::command::CommandConfigOrString,
     util::build,
 };
 use jp_conversation::{
@@ -27,7 +28,10 @@ use jp_llm::{
 };
 use jp_mcp::{Startup, StderrLine};
 use jp_printer::{OutputFormat, Printer, SharedBuffer, TerminalCapability};
-use jp_storage::backend::FsStorageBackend;
+use jp_storage::{
+    backend::{FsStorageBackend, LoadBackend},
+    load::projected_conversation_ids,
+};
 use jp_term::width::display_width;
 use jp_workspace::{
     ConversationHandle, Workspace,
@@ -1958,20 +1962,6 @@ fn a_deferred_slot_keeps_its_whole_group_together() {
     assert_eq!(sources, ["mcp://a", "mcp://b", "file://last"]);
 }
 
-fn lock_with_title(
-    workspace: &mut Workspace,
-    id: ConversationId,
-    title: Option<&str>,
-) -> jp_workspace::ConversationLock {
-    let conversation = Conversation {
-        title: title.map(str::to_owned),
-        ..Default::default()
-    };
-    workspace.create_conversation_with_id(id, conversation, Arc::new(AppConfig::new_test()));
-    let handle = workspace.acquire_conversation(&id).unwrap();
-    workspace.test_lock(handle)
-}
-
 #[test]
 fn resolve_new_title_uses_leading_heading() {
     assert_eq!(
@@ -2016,51 +2006,44 @@ fn resolve_new_title_skips_when_both_disabled() {
 }
 
 #[test]
-fn apply_title_override_no_title_clears_existing_title() {
+fn resolve_title_override_no_title_clears_inherited_title() {
     // `--no-title` should clear an inherited title (the
     // `--fork --no-title` case from PR #600 review): a forked
     // conversation inherits the source's title via
     // `fork_conversation`, and `--no-title` is supposed to leave
     // the run with no title at all.
-    let mut workspace = Workspace::in_memory("/tmp/test");
-    let lock = lock_with_title(&mut workspace, make_id(1000), Some("inherited"));
-
-    apply_title_override(&lock, None, true);
-
-    assert_eq!(lock.metadata().title, None);
+    assert_eq!(
+        resolve_title_override(Some("inherited".to_owned()), None, true),
+        None
+    );
 }
 
 #[test]
-fn apply_title_override_no_title_clears_resumed_title() {
-    // `--no-title` is symmetric with `--title T`: both write the
-    // user's intent into `metadata.title`, regardless of whether
-    // the conversation is new, forked, or resumed.
-    let mut workspace = Workspace::in_memory("/tmp/test");
-    let lock = lock_with_title(&mut workspace, make_id(1001), Some("existing"));
-
-    apply_title_override(&lock, None, true);
-
-    assert_eq!(lock.metadata().title, None);
+fn resolve_title_override_no_title_clears_resumed_title() {
+    // `--no-title` is symmetric with `--title T`: both name what
+    // `metadata.title` ends up as, regardless of whether the
+    // conversation is new, forked, or resumed.
+    assert_eq!(
+        resolve_title_override(Some("existing".to_owned()), None, true),
+        None
+    );
 }
 
 #[test]
-fn apply_title_override_title_overwrites_existing_title() {
-    let mut workspace = Workspace::in_memory("/tmp/test");
-    let lock = lock_with_title(&mut workspace, make_id(1002), Some("old"));
-
-    apply_title_override(&lock, Some("new"), false);
-
-    assert_eq!(lock.metadata().title.as_deref(), Some("new"));
+fn resolve_title_override_title_overwrites_existing_title() {
+    assert_eq!(
+        resolve_title_override(Some("old".to_owned()), Some("new"), false),
+        Some("new".to_owned())
+    );
 }
 
 #[test]
-fn apply_title_override_neither_flag_is_noop() {
-    let mut workspace = Workspace::in_memory("/tmp/test");
-    let lock = lock_with_title(&mut workspace, make_id(1003), Some("keep"));
-
-    apply_title_override(&lock, None, false);
-
-    assert_eq!(lock.metadata().title.as_deref(), Some("keep"));
+fn resolve_title_override_neither_flag_keeps_the_stored_title() {
+    assert_eq!(
+        resolve_title_override(Some("keep".to_owned()), None, false),
+        Some("keep".to_owned())
+    );
+    assert_eq!(resolve_title_override(None, None, false), None);
 }
 
 #[test]
@@ -3396,6 +3379,106 @@ fn run_missing_at_path_query_leaves_conversation_and_session_untouched() {
     assert_eq!(ctx.workspace.session_active_conversation(&session), None);
 }
 
+/// A context whose editor leaves the seeded draft exactly as JP wrote it, which
+/// is what quitting without typing looks like to the query parser.
+///
+/// The temp dir comes back so the caller keeps it alive.
+fn empty_editor_ctx(session: &Session) -> (Ctx, SharedBuffer, SharedBuffer, Utf8TempDir) {
+    editor_ctx(session, "true")
+}
+
+/// A context that runs `editor_cmd` as the user's editor.
+///
+/// The temp dir comes back so the caller keeps it alive.
+fn editor_ctx(
+    session: &Session,
+    editor_cmd: &str,
+) -> (Ctx, SharedBuffer, SharedBuffer, Utf8TempDir) {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    // User-local storage keeps the editor's draft out of the workspace tree,
+    // which is where the real CLI puts it.
+    let fs = Arc::new(
+        FsStorageBackend::new(&root.join(".jp"))
+            .unwrap()
+            .with_user_storage(&root.join("user"), None, "abc")
+            .unwrap(),
+    );
+
+    let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+    let workspace = Workspace::in_memory(root).with_backend(Arc::clone(&fs));
+
+    let mut config = config_with_model(ProviderId::Test, "mock");
+    config.editor.cmd = Some(CommandConfigOrString::String(editor_cmd.to_owned()));
+    // The test provider streams nothing, so a turn that starts fails. Retrying
+    // it five times with backoff is time these tests would only spend waiting.
+    config.assistant.request.max_retries = 0;
+
+    let ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        Some(fs),
+        Runtime::new().unwrap(),
+        Globals::default(),
+        config,
+        Some(session.clone()),
+        printer,
+    );
+
+    (ctx, out, err, tmp)
+}
+
+/// Run `jp query <args>` to completion, without `parse_query`'s `--no-edit`:
+/// opening the editor is the path these tests exercise.
+fn run_query(ctx: &mut Ctx, args: &[&str]) -> crate::cmd::Output {
+    let argv = ["query"].into_iter().chain(args.iter().copied());
+    let query = QueryArgs::try_parse_from(argv).unwrap().query;
+
+    let result = Runtime::new()
+        .unwrap()
+        .block_on(query.run(ctx, None, false));
+    ctx.printer.flush();
+    result
+}
+
+// Quitting the editor without typing anything leaves no trace: the `--new`
+// conversation is never written to storage, and the session is left pointing
+// wherever it pointed before. Recording the activation is what writes it: the
+// `last_activated_at` bump is the first mutation a fresh conversation gets, so
+// this pins that no activation is recorded for a query that was ignored.
+#[test]
+fn run_empty_editor_query_stores_no_conversation() {
+    let session = Session {
+        id: SessionId::new("jp-cli-empty-query-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (mut ctx, out, err, tmp) = empty_editor_ctx(&session);
+
+    run_query(&mut ctx, &["--new"]).unwrap();
+
+    assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
+    assert_eq!(err.lock().as_str(), "");
+    assert_eq!(projected_conversation_ids(&tmp.path().join(".jp")), []);
+    assert_eq!(ctx.workspace.session_active_conversation(&session), None);
+}
+
+// `--title` names the title the run ends with, and the draft's directory is
+// named after it, so it is resolved before the request is composed. Storing it
+// is what must wait: an abandoned query leaves no titled conversation behind.
+#[test]
+fn run_empty_titled_query_stores_no_conversation() {
+    let session = Session {
+        id: SessionId::new("jp-cli-empty-title-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (mut ctx, out, _err, tmp) = empty_editor_ctx(&session);
+
+    run_query(&mut ctx, &["--new", "--title", "a title"]).unwrap();
+
+    assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
+    assert_eq!(projected_conversation_ids(&tmp.path().join(".jp")), []);
+}
+
 // A bare `--fork` keeps every turn, and a value keeps that many trailing turns.
 //
 // The reported failure: the flag declared a `default_missing_value` fed through
@@ -3424,6 +3507,232 @@ fn fork_flag_rejects_a_non_numeric_turn_count() {
     assert!(
         error.to_string().contains("expected a positive integer"),
         "unexpected error: {error}"
+    );
+}
+
+/// Seed a written conversation holding one completed turn, and return a handle
+/// to it.
+fn seed_conversation(ctx: &mut Ctx) -> ConversationHandle {
+    let id = make_id(1_700_000_000);
+    ctx.workspace.create_conversation_with_id(
+        id,
+        Conversation::default().with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let lock = ctx.workspace.test_lock(handle);
+    lock.as_mut().update_events(|events| {
+        events.start_turn(ChatRequest::from("seeded question"));
+        events.extend([ConversationEvent::now(ChatResponse::message(
+            "seeded answer",
+        ))]);
+    });
+    drop(lock);
+
+    ctx.workspace.acquire_conversation(&id).unwrap()
+}
+
+// `--expires-in` used to be stamped and flushed while the conversation was
+// being created, which wrote it before there was any request to send.
+#[test]
+fn run_empty_expiring_query_stores_no_conversation() {
+    let session = Session {
+        id: SessionId::new("jp-cli-empty-expiry-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (mut ctx, out, _err, tmp) = empty_editor_ctx(&session);
+
+    run_query(&mut ctx, &["--new", "--tmp=1h"]).unwrap();
+
+    assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
+    assert_eq!(projected_conversation_ids(&tmp.path().join(".jp")), []);
+}
+
+// A `--fork` query builds the fork before the request is composed, because the
+// editor's history preview and `--replay` both read the fork's inherited
+// stream. Abandoning the query must leave the source alone on disk.
+#[test]
+fn run_empty_forking_query_leaves_only_the_source() {
+    let session = Session {
+        id: SessionId::new("jp-cli-empty-fork-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (mut ctx, out, _err, tmp) = empty_editor_ctx(&session);
+    let source = seed_conversation(&mut ctx);
+    let source_id = source.id();
+
+    let query = QueryArgs::try_parse_from(["query", "--fork"])
+        .unwrap()
+        .query;
+    Runtime::new()
+        .unwrap()
+        .block_on(query.run(&mut ctx, Some(source), false))
+        .unwrap();
+    ctx.printer.flush();
+
+    assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
+    assert_eq!(projected_conversation_ids(&tmp.path().join(".jp")), [
+        source_id
+    ]);
+}
+
+// `--compact` is staged against the stream the request is composed against, so
+// the editor's history preview shows the compacted conversation. Abandoning the
+// query must leave the stored stream as it was.
+#[test]
+fn run_empty_compacting_query_stores_no_compaction() {
+    let session = Session {
+        id: SessionId::new("jp-cli-empty-compact-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (mut ctx, out, _err, tmp) = empty_editor_ctx(&session);
+    let source = seed_conversation(&mut ctx);
+    let source_id = source.id();
+
+    let query = QueryArgs::try_parse_from(["query", "--compact=r:.."])
+        .unwrap()
+        .query;
+    Runtime::new()
+        .unwrap()
+        .block_on(query.run(&mut ctx, Some(source), false))
+        .unwrap();
+    ctx.printer.flush();
+
+    assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
+
+    // The compaction was staged, so the run really did exercise the path: what
+    // the assertion below pins is that staging it never reached storage.
+    let handle = ctx.workspace.acquire_conversation(&source_id).unwrap();
+    assert_eq!(
+        ctx.workspace.events(&handle).unwrap().compactions().count(),
+        1,
+        "the compaction must have been staged in memory"
+    );
+
+    let storage = FsStorageBackend::new(&tmp.path().join(".jp")).unwrap();
+    let stored = storage
+        .load_conversation_stream(&source_id, &PartialAppConfig::empty())
+        .unwrap();
+    assert_eq!(stored.compactions().count(), 0);
+}
+
+// Not only the empty query: any failure before the turn starts leaves the
+// staged conversation unwritten. Here the editor cannot be spawned, which
+// aborts the run after `--tmp` and the fresh conversation are already staged.
+#[test]
+fn run_failing_before_the_turn_stores_no_conversation() {
+    let session = Session {
+        id: SessionId::new("jp-cli-failed-setup-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (mut ctx, _out, _err, tmp) = editor_ctx(&session, "jp-no-such-editor-binary");
+
+    let Err(error) = run_query(&mut ctx, &["--new", "--tmp=1h"]) else {
+        panic!("a query whose editor cannot be spawned must fail");
+    };
+    assert_eq!(error.message.as_deref(), Some("Editor error"));
+
+    assert_eq!(projected_conversation_ids(&tmp.path().join(".jp")), []);
+}
+
+// The other side of the deferral for `--tmp`: a query that does go ahead stores
+// the expiry, stamped from the conversation's own creation time.
+#[test]
+fn run_expiring_query_stores_the_expiry_before_the_turn() {
+    let session = Session {
+        id: SessionId::new("jp-cli-stored-expiry-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (mut ctx, _out, _err, tmp) = empty_editor_ctx(&session);
+
+    // An inline query skips the editor, so the request is non-empty.
+    let error = run_query(&mut ctx, &["--new", "--tmp=1h", "hello"]).unwrap_err();
+    assert_eq!(error.message.as_deref(), Some("Stream error"));
+
+    let storage_dir = tmp.path().join(".jp");
+    let ids = projected_conversation_ids(&storage_dir);
+    assert_eq!(ids.len(), 1, "expected one stored conversation: {ids:?}");
+
+    let storage = FsStorageBackend::new(&storage_dir).unwrap();
+    let metadata = storage.load_conversation_metadata(&ids[0]).unwrap();
+    assert_eq!(
+        metadata.expires_at,
+        Some(ids[0].timestamp() + chrono::Duration::hours(1))
+    );
+}
+
+// The other side of the deferral for `--fork`: a query that does go ahead
+// writes the fork, with the source's turns inherited.
+#[test]
+fn run_forking_query_stores_the_fork_before_the_turn() {
+    let session = Session {
+        id: SessionId::new("jp-cli-stored-fork-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (mut ctx, _out, _err, tmp) = empty_editor_ctx(&session);
+    let source = seed_conversation(&mut ctx);
+    let source_id = source.id();
+
+    // An inline query skips the editor, so the request is non-empty. It goes
+    // ahead of `--fork`, which would otherwise swallow it as its turn count.
+    let query = QueryArgs::try_parse_from(["query", "hello", "--fork"])
+        .unwrap()
+        .query;
+    let Err(error) = Runtime::new()
+        .unwrap()
+        .block_on(query.run(&mut ctx, Some(source), false))
+    else {
+        panic!("the test provider streams nothing, so the turn must fail");
+    };
+    assert_eq!(error.message.as_deref(), Some("Stream error"));
+
+    let storage_dir = tmp.path().join(".jp");
+    let ids = projected_conversation_ids(&storage_dir);
+    assert_eq!(ids.len(), 2, "source and fork are both on disk: {ids:?}");
+
+    let fork_id = ids
+        .into_iter()
+        .find(|id| *id != source_id)
+        .expect("the fork is one of the two");
+    let storage = FsStorageBackend::new(&storage_dir).unwrap();
+    let stored = storage
+        .load_conversation_stream(&fork_id, &PartialAppConfig::empty())
+        .unwrap();
+
+    assert_eq!(
+        stored.turn_count(),
+        2,
+        "the fork inherited the source's turn and started its own"
+    );
+}
+
+// The other side of the deferral: a query that does go ahead ends with the
+// title `--title` named, written to storage before the turn starts. The turn
+// then fails here, because the test provider streams nothing.
+#[test]
+fn run_titled_query_stores_the_title_before_the_turn() {
+    let session = Session {
+        id: SessionId::new("jp-cli-stored-title-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (mut ctx, _out, _err, tmp) = empty_editor_ctx(&session);
+
+    // An inline query skips the editor, so the request is non-empty.
+    let error = run_query(&mut ctx, &["--new", "--title", "a title", "hello"]).unwrap_err();
+    assert_eq!(error.message.as_deref(), Some("Stream error"));
+
+    let storage_dir = tmp.path().join(".jp");
+    let ids = projected_conversation_ids(&storage_dir);
+    assert_eq!(ids.len(), 1, "expected one stored conversation: {ids:?}");
+
+    let storage = FsStorageBackend::new(&storage_dir).unwrap();
+    let metadata = storage.load_conversation_metadata(&ids[0]).unwrap();
+    assert_eq!(metadata.title.as_deref(), Some("a title"));
+
+    assert_eq!(
+        ctx.workspace.session_active_conversation(&session),
+        Some(ids[0])
     );
 }
 

@@ -13,7 +13,10 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse, TurnStart},
 };
 use jp_printer::{OutputFormat, Printer};
-use jp_storage::backend::{FsStorageBackend, Projection};
+use jp_storage::{
+    backend::{FsStorageBackend, LoadBackend, Projection},
+    load::projected_conversation_ids,
+};
 use jp_workspace::Workspace;
 use tokio::runtime::Runtime;
 
@@ -1104,11 +1107,12 @@ fn fork_reresolves_apply_on_fork_rules() {
     ctx.set_now(ctx.now() + Duration::from_secs(1));
 
     let source_handle = ctx.workspace.acquire_conversation(&source_id).unwrap();
-    let fork_lock = Runtime::new()
+    let (fork_lock, fork_staged) = Runtime::new()
         .unwrap()
         .block_on(fork_conversation(&mut ctx, &source_handle, |_| {}))
         .unwrap();
     let fork_id = fork_lock.id();
+    drop(fork_staged);
     drop(fork_lock);
 
     let fork_handle = ctx.workspace.acquire_conversation(&fork_id).unwrap();
@@ -1553,10 +1557,11 @@ fn fork_inherits_local_only_projection() {
     );
 
     let source = ctx.workspace.acquire_conversation(&id).unwrap();
-    let lock = Runtime::new()
+    let (lock, staged) = Runtime::new()
         .unwrap()
         .block_on(fork_conversation(&mut ctx, &source, |_| {}))
         .unwrap();
+    drop(staged);
 
     assert_eq!(
         lock.projection(),
@@ -1615,15 +1620,89 @@ fn fork_inherits_patch_overlays() {
     ctx.set_now(ctx.now() + Duration::from_secs(1));
 
     let source = ctx.workspace.acquire_conversation(&id).unwrap();
-    let fork_lock = Runtime::new()
+    let (fork_lock, staged) = Runtime::new()
         .unwrap()
         .block_on(fork_conversation(&mut ctx, &source, |_| {}))
         .unwrap();
+    drop(staged);
 
     assert_eq!(
         fork_lock.events().overlays().count(),
         1,
         "the fork inherits the source's repair"
+    );
+}
+
+/// `jp c fork` writes the fork, inherited stream and all.
+///
+/// The fork is built in memory and written by the flush at the end of the
+/// command, so nothing but that flush puts it on disk.
+#[test]
+fn fork_writes_the_new_conversation() {
+    let tmp = tempdir().unwrap();
+    let (printer, _out, _) = Printer::memory(OutputFormat::TextPretty);
+    let storage = tmp.path().join(".jp");
+    let fs = Arc::new(FsStorageBackend::new(&storage).unwrap());
+    let workspace = Workspace::in_memory(tmp.path()).with_backend(Arc::clone(&fs));
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        Some(Arc::clone(&fs)),
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    let source_id = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace.create_conversation_with_id(
+        source_id,
+        Conversation::default().with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+    let handle = ctx.workspace.acquire_conversation(&source_id).unwrap();
+    let lock = ctx.workspace.test_lock(handle);
+    lock.as_mut()
+        .update_events(|e| e.start_turn(ChatRequest::from("inherited")));
+    drop(lock);
+
+    ctx.set_now(ctx.now() + Duration::from_secs(1));
+
+    let fork = Fork {
+        target: PositionalIds::default(),
+        activate: false,
+        range: TurnSelection::default(),
+        title: None,
+        compact: CompactFlag::default(),
+        no_turns: false,
+    };
+    let source = ctx.workspace.acquire_conversation(&source_id).unwrap();
+    Runtime::new()
+        .unwrap()
+        .block_on(fork.run(&mut ctx, &[source]))
+        .unwrap();
+
+    let mut stored = projected_conversation_ids(&storage);
+    stored.sort_unstable();
+    assert_eq!(
+        stored.len(),
+        2,
+        "source and fork are both on disk: {stored:?}"
+    );
+
+    let fork_id = stored
+        .into_iter()
+        .find(|id| *id != source_id)
+        .expect("the fork is one of the two");
+    let events = fs
+        .load_conversation_stream(&fork_id, &PartialAppConfig::empty())
+        .expect("the fork's stream is readable");
+
+    assert_eq!(
+        events.turn_count(),
+        1,
+        "the fork inherited the source's turn"
     );
 }
 
