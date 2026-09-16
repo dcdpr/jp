@@ -98,6 +98,14 @@ fn definitions_inside_a_task_item_remain_visible() {
 }
 
 #[test]
+fn task_items_whose_checkbox_starts_on_a_later_line_remain_visible() {
+    let output = Formatter::with_width(0)
+        .format_terminal("-\n  [x] Done.\n\n  [docs]: /docs\n")
+        .unwrap();
+    assert_eq!(output, "- [x] Done.\n  [docs]: /docs\n");
+}
+
+#[test]
 fn task_items_use_their_own_marker_width() {
     let output = Formatter::with_width(0)
         .format_terminal("9. [x] First.\n10. [x] Second.\n\n    [docs]: /docs\n")

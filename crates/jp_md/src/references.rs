@@ -155,21 +155,28 @@ fn container_source(node: Node<'_>, lines: &[&str], range: Range<usize>) -> Stri
                     {
                         // TaskItem has no padding field. Its checkbox position
                         // identifies the content column even when numbering
-                        // crosses from 9 to 10.
-                        let opening = lines[data.sourcepos.start.line - 1];
+                        // crosses from 9 to 10, but an item whose marker line
+                        // carries no content holds its checkbox on a later line.
+                        let start_line = data.sourcepos.start.line;
+                        let opening = lines[start_line - 1];
                         let marker = data.sourcepos.start.column - 1;
-                        let checkbox = task.symbol_sourcepos.start.column - 1;
                         let start_column = opening[..marker].chars().fold(0, advance_column);
-                        let end_column = opening[marker..checkbox]
-                            .chars()
-                            .fold(start_column, advance_column);
+                        let end_column = if task.symbol_sourcepos.start.line == start_line {
+                            let checkbox = task.symbol_sourcepos.start.column - 1;
+                            opening[marker..checkbox]
+                                .chars()
+                                .fold(start_column, advance_column)
+                        } else {
+                            // An empty marker line indents content one column
+                            // past the marker.
+                            opening[marker..]
+                                .trim_end_matches(['\r', '\n'])
+                                .chars()
+                                .fold(start_column, advance_column)
+                                + 1
+                        };
                         let count = list.marker_offset + end_column - start_column;
-                        column += strip_columns(
-                            &mut line,
-                            count,
-                            index + 1 == data.sourcepos.start.line,
-                            column,
-                        );
+                        column += strip_columns(&mut line, count, index + 1 == start_line, column);
                     }
                 }
                 _ => {}
