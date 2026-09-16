@@ -858,3 +858,127 @@ async fn hidden_presentation_never_executes_formatter() {
     assert_eq!(call.finish().await.unwrap(), ToolResult::text("denied"));
     assert!(!root.path().join("formatter-ran").exists());
 }
+
+/// A service whose `count` tool has a formatter that can only describe the call
+/// once its `confirm` question is answered, and asks it otherwise.
+#[cfg(unix)]
+fn deferring_formatter_fixture() -> (Service, HostReceiver, Utf8TempDir) {
+    let root = tempdir().unwrap();
+    // Serialized rather than hand-written, so the formatter speaks the wire
+    // format a real tool emits.
+    let question = serde_json::to_string(&Outcome::NeedsInput {
+        question: Question::boolean("confirm", "Proceed?").unwrap(),
+    })
+    .unwrap();
+    let script = [
+        "{% if tool.answers.confirm is defined %}printf 'confirmed:{{tool.answers.confirm}}'{% \
+         else %}printf '%s' '",
+        &question,
+        "'{% endif %}",
+    ]
+    .concat();
+    let (service, host) = service(
+        json!({
+            "source": "builtin",
+            "run": "ask",
+            "result": "unattended",
+            "format": "unattended",
+            "style": {"parameters": {
+                "program": "sh",
+                "args": ["-c", script],
+                "shell": false,
+            }},
+        }),
+        root.path(),
+        BuiltinExecutors::new().register("count", CountingTool(Arc::new(AtomicUsize::new(0)))),
+        InvocationContext::default(),
+    );
+    (service, host, root)
+}
+
+/// Take a deferring formatter's call up to the tool's own question: the
+/// formatter declines to describe it before approval, and the call runs anyway.
+#[cfg(unix)]
+async fn run_until_input(host: &mut HostReceiver) -> oneshot::Sender<HostReply<InputAnswer>> {
+    let Interaction::RenderArguments { reply } = next(host).await.interaction else {
+        panic!("expected visibility request")
+    };
+    reply.send(Ok(true)).unwrap();
+    let Interaction::Prepare {
+        arguments,
+        formatted_arguments,
+        reply,
+        ..
+    } = next(host).await.interaction
+    else {
+        panic!("expected preparation")
+    };
+    assert_eq!(
+        formatted_arguments.map(|result| result.map_err(|error| error.to_string())),
+        Some(Err("Custom arguments formatter requested input.".into()))
+    );
+    reply.send(Ok(Admission::Run { arguments })).unwrap();
+    let Interaction::Release { reply, .. } = next(host).await.interaction else {
+        panic!("expected release")
+    };
+    reply.send(Ok(ReleaseDecision::Execute)).unwrap();
+    let Interaction::Input { reply, .. } = next(host).await.interaction else {
+        panic!("expected input")
+    };
+    reply
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn a_deferred_formatter_describes_the_call_with_its_answers() {
+    let (service, mut host, _root) = deferring_formatter_fixture();
+    let call = service.start_call(request()).unwrap();
+    run_until_input(&mut host)
+        .await
+        .send(Ok(json!(true).into()))
+        .unwrap();
+
+    // The description comes before the result is recorded, so the Host can
+    // show the call ahead of what it returned.
+    let Interaction::DeferredArguments {
+        formatted_arguments,
+        reply,
+    } = next(&mut host).await.interaction
+    else {
+        panic!("expected the deferred description")
+    };
+    assert_eq!(
+        formatted_arguments.map_err(|error| error.to_string()),
+        Ok("confirmed:true".into())
+    );
+    reply.send(Ok(())).unwrap();
+    let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
+        panic!("expected recording")
+    };
+    reply.send(Ok(())).unwrap();
+    assert_eq!(
+        call.finish().await.unwrap(),
+        ToolResult::text(r#"{"arguments":{"path":"original"},"answer":true}"#)
+    );
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn a_deferred_formatter_is_not_run_for_a_call_the_host_settled() {
+    let (service, mut host, _root) = deferring_formatter_fixture();
+    let call = service.start_call(request()).unwrap();
+    run_until_input(&mut host)
+        .await
+        .send(Ok(InputAnswer::Complete {
+            result: ToolResult::text("declined"),
+        }))
+        .unwrap();
+
+    // Recording follows directly: the call the formatter was waiting to
+    // describe never ran.
+    let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
+        panic!("expected recording, not a description")
+    };
+    reply.send(Ok(())).unwrap();
+    assert_eq!(call.finish().await.unwrap(), ToolResult::text("declined"));
+}

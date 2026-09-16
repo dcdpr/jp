@@ -126,7 +126,11 @@ pub enum FormatterError {
     /// The command could not execute.
     #[error("{0}")]
     Execution(#[source] Arc<ToolError>),
-    /// Formatters cannot invoke an inquiry cycle.
+    /// The formatter needs answers the call has not collected yet.
+    ///
+    /// The call still runs, and the formatter runs again once it has, with the
+    /// answers the call collected; that output arrives as
+    /// [`Interaction::DeferredArguments`].
     #[error("Custom arguments formatter requested input.")]
     InputRequired,
     /// The formatter ran and reported a tool error.
@@ -206,6 +210,17 @@ pub enum Interaction {
         /// Permission to execute, or a final response without execution.
         reply: oneshot::Sender<HostReply<ReleaseDecision>>,
     },
+    /// Custom representation of the arguments, for a call whose formatter
+    /// needed the call's answers before it could describe it.
+    ///
+    /// Sent once the call has run successfully, before its result is reviewed
+    /// or recorded.
+    DeferredArguments {
+        /// The formatter's output, given the answers the call collected.
+        formatted_arguments: Formatted,
+        /// Acknowledges that the Host has the representation.
+        reply: oneshot::Sender<HostReply<()>>,
+    },
     /// Obtain and record input before the next execution attempt.
     Input {
         /// The expected answer shape and secrecy constraints.
@@ -265,7 +280,7 @@ impl Interaction {
             Self::Release { reply, .. } => reply.is_closed(),
             Self::Input { reply, .. } => reply.is_closed(),
             Self::Review { reply, .. } => reply.is_closed(),
-            Self::Record { reply, .. } => reply.is_closed(),
+            Self::DeferredArguments { reply, .. } | Self::Record { reply, .. } => reply.is_closed(),
         }
     }
 }
@@ -775,9 +790,17 @@ async fn run_call(
     // `format = "ask"` holds a user-configured command back until the Host has
     // admitted the call.
     let mut formatted_arguments = match &formatter {
-        Some(command) if tool.config.format() == FormatMode::Unattended => {
-            Some(format_arguments(inner, &tool, command, &arguments, cancellation).await?)
-        }
+        Some(command) if tool.config.format() == FormatMode::Unattended => Some(
+            format_arguments(
+                inner,
+                &tool,
+                command,
+                &arguments,
+                &Answers::new(),
+                cancellation,
+            )
+            .await?,
+        ),
         _ => None,
     };
     let original_arguments = arguments.clone();
@@ -812,9 +835,24 @@ async fn run_call(
     if let Some(command) = &formatter
         && (formatted_arguments.is_none() || arguments != original_arguments)
     {
-        formatted_arguments =
-            Some(format_arguments(inner, &tool, command, &arguments, cancellation).await?);
+        formatted_arguments = Some(
+            format_arguments(
+                inner,
+                &tool,
+                command,
+                &arguments,
+                &Answers::new(),
+                cancellation,
+            )
+            .await?,
+        );
     }
+    let deferred = formatter.as_ref().filter(|_| {
+        matches!(
+            formatted_arguments,
+            Some(Err(FormatterError::InputRequired))
+        )
+    });
     let release = ask(inner, call, |reply| Interaction::Release {
         arguments: arguments.clone(),
         formatted_arguments,
@@ -823,7 +861,7 @@ async fn run_call(
     .await?;
     let (output, executed) = match release {
         ReleaseDecision::Execute => (
-            execute_with_answers(inner, call, &tool, &arguments, cancellation).await?,
+            execute_released(inner, call, &tool, &arguments, deferred, cancellation).await?,
             true,
         ),
         ReleaseDecision::Complete { result } => (
@@ -835,6 +873,43 @@ async fn run_call(
         ),
     };
     deliver_result(inner, call, &tool, arguments, output, executed).await
+}
+
+/// Run a released call to completion.
+///
+/// `deferred` is the formatter that declined to describe the call before it
+/// ran, because it needed the call's answers.
+/// Once the call has run, it formats the call with those answers, and the Host
+/// receives that before the result.
+/// Nothing is sent for a call the Host settled or that ended in an error, which
+/// is not the call the formatter was waiting to describe, nor for a call that
+/// collected no answers, where the formatter would see exactly what it declined
+/// to describe the first time.
+async fn execute_released(
+    inner: &Inner,
+    call: &CallInfo,
+    tool: &ConfiguredTool,
+    arguments: &Map<String, Value>,
+    deferred: Option<&CommandConfig>,
+    cancellation: &CancellationToken,
+) -> Result<CallOutput, ServiceError> {
+    let mut answers = Answers::new();
+    let output =
+        execute_with_answers(inner, call, tool, arguments, &mut answers, cancellation).await?;
+    let Some(command) = deferred else {
+        return Ok(output);
+    };
+    if output.delivery_decided || output.result.is_error() || answers.is_empty() {
+        return Ok(output);
+    }
+    let formatted_arguments =
+        format_arguments(inner, tool, command, arguments, &answers, cancellation).await?;
+    ask(inner, call, |reply| Interaction::DeferredArguments {
+        formatted_arguments,
+        reply,
+    })
+    .await?;
+    Ok(output)
 }
 
 /// Record a call the Host resolved before it could execute.
@@ -906,11 +981,16 @@ async fn deliver_result(
     })
 }
 
+/// Run the tool until it completes, asking the Host for each answer it needs.
+///
+/// `answers` collects every answer given, and is left holding them when the
+/// call ends.
 async fn execute_with_answers(
     inner: &Inner,
     call: &CallInfo,
     tool: &ConfiguredTool,
     arguments: &Map<String, Value>,
+    answers: &mut Answers,
     cancellation: &CancellationToken,
 ) -> Result<CallOutput, ServiceError> {
     let access = match &tool.access {
@@ -945,9 +1025,8 @@ async fn execute_with_answers(
         cancellation: cancellation.clone(),
         stderr: Some(stderr),
     };
-    let mut answers = Answers::new();
     loop {
-        match execute(&execution, &answers).await? {
+        match execute(&execution, answers).await? {
             ExecutionOutcome::Cancelled { .. } => return Err(ServiceError::Cancelled),
             ExecutionOutcome::Completed { result, .. } => {
                 return Ok(CallOutput {
@@ -990,6 +1069,7 @@ async fn execute_with_answers(
 
 /// Run a tool's configured argument formatter and return what it printed.
 ///
+/// The formatter sees `answers` as the answers to the tool's questions so far.
 /// A formatter that fails is presentation that failed, not a failed call, so it
 /// comes back as [`FormatterError`] for the Host to show or suppress.
 /// Only cancellation and a policy that never compiled end the call itself.
@@ -998,6 +1078,7 @@ async fn format_arguments(
     tool: &ConfiguredTool,
     command: &CommandConfig,
     arguments: &Map<String, Value>,
+    answers: &Answers,
     cancellation: &CancellationToken,
 ) -> Result<Formatted, ServiceError> {
     let name = match tool.config.source() {
@@ -1008,7 +1089,7 @@ async fn format_arguments(
     let context = tool_context(
         name,
         &Value::Object(arguments.clone()),
-        &IndexMap::new(),
+        answers,
         &tool.config,
         &inner.root,
         &Action::FormatArguments,

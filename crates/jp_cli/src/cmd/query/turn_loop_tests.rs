@@ -78,6 +78,7 @@ use crate::{
             mcp_executor::TerminalExecutorSource,
         },
     },
+    render::metadata::get_rendered_arguments,
     signals::testing::{detached_router, test_router},
 };
 
@@ -9082,6 +9083,140 @@ async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
             chrome.lock().as_str(),
             "\n── \x1b[1mjp\x1b[0m \x1b[2m(anthropic/test)\x1b[0m \
              ─────────────────────────────────────────────────────────\n\n"
+        );
+        owner.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+/// A formatter that can only describe a call once the tool's question is
+/// answered does not fail the call: the call runs, and is shown with the answer
+/// ahead of its result.
+#[tokio::test]
+#[cfg(unix)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep the end-to-end setup and persisted assertions in one scenario"
+)]
+async fn a_formatter_waiting_for_answers_describes_the_call_after_it_runs() {
+    timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        // Serialized rather than hand-written, so the formatter speaks the
+        // wire format a real tool emits.
+        let question = serde_json::to_string(&Outcome::NeedsInput {
+            question: Question::boolean("confirm", "Continue?").unwrap(),
+        })
+        .unwrap();
+        let script = [
+            "{% if tool.answers.confirm is defined %}printf 'confirm = \
+             {{tool.answers.confirm}}'{% else %}printf '%s' '",
+            &question,
+            "'{% endif %}",
+        ]
+        .concat();
+        let mut config = AppConfig::new_test();
+        let partial: PartialToolConfig = serde_json::from_value(json!({
+            "source": "builtin", "run": "unattended", "format": "unattended",
+            "questions": {"confirm": {"answer": true}},
+            "style": {
+                "parameters": {"program": "sh", "args": ["-c", script], "shell": false},
+                "results_file_link": "off",
+            },
+        }))
+        .unwrap();
+        config.conversation.tools.insert(
+            "http_tool".into(),
+            ToolConfig::from_partial(partial, vec![]).unwrap(),
+        );
+        let storage = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
+        let mut workspace = Workspace::in_memory(root).with_backend(storage.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+            .unwrap();
+        let definitions = vec![ToolDefinition {
+            name: "http_tool".into(),
+            docs: ToolDocs::default(),
+            parameters: json!({"type":"object","properties":{}}),
+        }];
+        let count = Arc::new(AtomicUsize::new(0));
+        let client = Client::default();
+        let (source, owner) = TerminalExecutorSource::start(
+            BuiltinExecutors::new().register("http_tool", HttpInquiryTool(count.clone())),
+            &definitions,
+            &config.conversation.tools,
+            Arc::new(ApprovalStore::default()),
+            InvocationContext::default(),
+            &client,
+            root.to_owned(),
+        )
+        .await
+        .unwrap();
+        let provider = Arc::new(SequentialMockProvider::with_tool_then_message(
+            "http-call",
+            "http_tool",
+            "Finished.",
+        ));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+        let router = detached_router();
+        let (printer, _output, chrome) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        run_turn_loop(
+            provider.clone(),
+            &model,
+            &config,
+            &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &definitions,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)),
+            ChatRequest::from("Run the tool."),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
+        )
+        .await
+        .unwrap();
+
+        let stored =
+            serde_json::from_str(&storage.read_test_events_raw(&lock.id()).unwrap()).unwrap();
+        let events =
+            ConversationStream::from_parts(json!({}), stored, &config.clone().into()).unwrap();
+        let responses = events
+            .iter()
+            .filter_map(|event| event.event.as_tool_call_response())
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(responses, vec![ToolCallResponse {
+            id: "http-call".into(),
+            result: Ok("confirmed".into())
+        }]);
+        // Persisted, so a replay shows the call the way it was shown live.
+        let rendered = events
+            .iter()
+            .filter(|event| event.event.as_tool_call_request().is_some())
+            .map(|event| get_rendered_arguments(event.event))
+            .collect::<Vec<_>>();
+        assert_eq!(rendered, vec![Some("confirm = true".to_owned())]);
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+
+        printer.flush();
+        // The call's header and description come before its result: nothing
+        // was shown for it before it ran.
+        assert_eq!(
+            chrome.lock().as_str(),
+            "\n── \x1b[1mjp\x1b[0m \x1b[2m(anthropic/test)\x1b[0m \
+             ─────────────────────────────────────────────────────────\n\nCalling tool \
+             \x1b[38;5;11m\x1b[1mhttp_tool\x1b[0m\n\nconfirm = true\n\nconfirmed\n\n"
         );
         owner.shutdown().await.unwrap();
     })
