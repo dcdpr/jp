@@ -1,4 +1,7 @@
-use jp_config::{assistant::tool_choice::ToolChoice, model::parameters::PartialReasoningConfig};
+use jp_config::{
+    assistant::{sections::SectionConfig, tool_choice::ToolChoice},
+    model::parameters::PartialReasoningConfig,
+};
 use jp_conversation::{
     ConversationEvent, ConversationStream,
     event::{ChatRequest, ChatResponse, ToolCallRequest, ToolCallResponse},
@@ -64,6 +67,38 @@ fn create_request_plain_message() {
             "stream": true,
             "chat_template_kwargs": { "enable_thinking": false },
         })
+    );
+}
+
+/// Regression: vLLM renders the request through the served model's own chat
+/// template, and several of those templates reject a system message that isn't
+/// the first message.
+/// The prompt, its sections, and the attachment XML must therefore arrive as a
+/// single system message.
+#[test]
+fn create_request_joins_system_parts_into_one_message() {
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: Some("You are JP.".to_owned()),
+            sections: vec![
+                SectionConfig::default().with_content("Rule 1."),
+                SectionConfig::default().with_content("Rule 2."),
+            ],
+            attachments: vec![],
+            events: ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let (body, _) = create_request(&qwen_details(), query).unwrap();
+
+    assert_eq!(
+        body["messages"],
+        json!([
+            { "role": "system", "content": "You are JP.\n\nRule 1.\n\nRule 2." },
+            { "role": "user", "content": "test" },
+        ])
     );
 }
 
