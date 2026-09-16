@@ -1,6 +1,8 @@
 use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_conversation::{Conversation, ConversationId};
-use jp_plugin::message::{ExitMessage, InterruptRequest, ReadyMessage};
+use jp_plugin::message::{
+    ExitMessage, InterruptRequest, OptionalId, ReadEventsRequest, ReadyMessage,
+};
 use jp_storage::backend::{FsStorageBackend, PersistBackend as _};
 use relative_path::RelativePathBuf;
 use serde_json::json;
@@ -559,6 +561,139 @@ fn an_unknown_conversation_fails_against_its_request() {
         }
         other => panic!("expected an error, got {other:?}"),
     }
+}
+
+/// The messages the host wrote back, in the order the plugin receives them.
+fn replies(sink: &[u8]) -> Vec<HostToPlugin> {
+    String::from_utf8(sink.to_vec())
+        .expect("the host writes utf-8")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a host message"))
+        .collect()
+}
+
+/// A long-running host sees what another process wrote after it started.
+///
+/// The host loads the index once at startup.
+/// Without re-reading it, a plugin asking for the conversation list is served
+/// that snapshot for the life of the process, so a conversation started in a
+/// terminal never appears.
+#[tokio::test]
+async fn a_conversation_written_after_startup_is_listed() {
+    let (mut ws, _first, fs, tmp) = workspace_with_drafts();
+    let mut sink: Vec<u8> = Vec::new();
+
+    // The host's view, taken at startup.
+    ws.load_conversation_index();
+    assert_eq!(ws.conversations().count(), 1);
+
+    // Another process writes a second conversation. Same store, its own handle,
+    // which is what a `jp query` in a terminal amounts to.
+    let second = conversation_id(1_700_000_001);
+    fs.write_test_conversation(&second, &Conversation::default());
+
+    let response = handle_request(
+        PluginToHost::ListConversations(OptionalId { id: None }),
+        &mut sink,
+        &mut ws,
+        &json!({}),
+        None,
+        None,
+        &AppConfig::new_test(),
+        &router(),
+    )
+    .unwrap();
+    assert_eq!(response, Flow::Continue);
+
+    // Asserted against what reached the plugin rather than the workspace: a
+    // refresh running after the response is serialized leaves the workspace
+    // right and the plugin holding the stale list.
+    let sent = replies(&sink);
+    let [HostToPlugin::Conversations(listed)] = sent.as_slice() else {
+        panic!("expected one conversations response, got {sent:?}");
+    };
+
+    // Sorted because the index is a map, and the order it iterates in is not
+    // what this test is about.
+    let mut ids: Vec<&str> = listed.data.iter().map(|c| c.id.as_str()).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, ["jp-c17000000000", "jp-c17000000010"]);
+
+    drop(tmp);
+}
+
+/// A conversation the host has already read is read again, not served from the
+/// copy it kept.
+///
+/// The first read loads the stream and caches it.
+/// A `jp query` in a terminal appends to the same conversation, and without
+/// dropping that cache the plugin is served the events as they stood before
+/// that turn ran, for the life of the process.
+#[tokio::test]
+async fn an_event_written_after_a_read_is_served_by_the_next_read() {
+    let (mut ws, id, fs, tmp) = workspace_with_drafts();
+    let mut sink: Vec<u8> = Vec::new();
+
+    let request = || {
+        PluginToHost::ReadEvents(ReadEventsRequest {
+            id: None,
+            conversation: wire_id(id),
+        })
+    };
+
+    // The read that populates the host's stream cache.
+    handle_request(
+        request(),
+        &mut sink,
+        &mut ws,
+        &json!({}),
+        None,
+        None,
+        &AppConfig::new_test(),
+        &router(),
+    )
+    .unwrap();
+
+    // Another process runs a turn on that same conversation.
+    let stream = ConversationStream::new_test().with_turn("what the other terminal asked");
+    fs.write(
+        &id,
+        &Conversation::default(),
+        &stream,
+        Projection::Projected,
+    )
+    .unwrap();
+
+    handle_request(
+        request(),
+        &mut sink,
+        &mut ws,
+        &json!({}),
+        None,
+        None,
+        &AppConfig::new_test(),
+        &router(),
+    )
+    .unwrap();
+
+    let sent = replies(&sink);
+    let [HostToPlugin::Events(before), HostToPlugin::Events(after)] = sent.as_slice() else {
+        panic!("expected two events responses, got {sent:?}");
+    };
+
+    assert!(
+        before.data.is_empty(),
+        "the conversation had no events when it was first read: {before:?}"
+    );
+
+    let [turn_start, chat_request] = after.data.as_slice() else {
+        panic!("expected the turn the other process wrote, got {after:?}");
+    };
+    assert_eq!(turn_start["type"], "turn_start");
+    assert_eq!(chat_request["type"], "chat_request");
+    assert_eq!(chat_request["content"], "what the other terminal asked");
+
+    drop(tmp);
 }
 
 /// The canonical spelling is what JP prints, and bare deciseconds still resolve
