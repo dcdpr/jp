@@ -27,7 +27,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -232,9 +232,10 @@ struct Globals {
     /// Write the full tracing log to the given file.
     ///
     /// Use `-` to stream logs to stderr instead.
-    /// When unset, the log is written to a temporary file, which is kept and
-    /// its path printed when a run fails, or when `JP_DEBUG=1` is set and
-    /// stdout is a terminal.
+    /// When unset, the log is written to a temporary file.
+    /// `JP_DEBUG=1` announces its path before execution and keeps it afterward.
+    /// Runs lasting at least five minutes repeat the path at completion.
+    /// A failed run without `JP_DEBUG` reports the retained path at completion.
     #[arg(long, global = true, value_name = "PATH")]
     log_file: Option<String>,
 
@@ -432,6 +433,7 @@ pub fn run() -> ExitCode {
     cli.globals.no_interactive |= env_opt_out("JP_NONINTERACTIVE");
 
     let format = cli.globals.format.resolve(is_tty);
+    let debug_enabled = env_opt_out("JP_DEBUG");
 
     let guard = configure_logging(
         cli.globals.verbose,
@@ -441,6 +443,19 @@ pub fn run() -> ExitCode {
         cli.globals.log_file.as_deref(),
         cli.globals.log.as_deref(),
     );
+
+    let trace_log_started_at =
+        if debug_enabled && let Some(path) = guard.as_ref().and_then(TracingGuard::path) {
+            if format.is_json() {
+                let msg = serde_json::json!({ "trace_log": path.as_str() });
+                eprintln!("{msg}");
+            } else {
+                eprintln!("Streaming trace logs to: {path}");
+            }
+            Some(Instant::now())
+        } else {
+            None
+        };
 
     trace!(command = cli.command.name(), arguments = %cli, "Starting CLI run.");
     let (code, outcome, output) = match run_inner(cli, format) {
@@ -467,12 +482,10 @@ pub fn run() -> ExitCode {
         }
     }
 
-    // Read here rather than inside the policy, which stays a pure function of
-    // its inputs.
-    let debug_enabled = env_opt_out("JP_DEBUG");
-
-    if should_report_trace_log(outcome, debug_enabled)
+    if should_persist_trace_log(outcome, debug_enabled)
         && let Some(path) = guard.and_then(TracingGuard::persist)
+        && trace_log_started_at
+            .is_none_or(|started_at| should_repeat_trace_log_notice(started_at.elapsed()))
     {
         if format.is_json() {
             let msg = serde_json::json!({ "trace_log": path.as_str() });
@@ -500,23 +513,24 @@ enum RunOutcome {
     Failed,
 }
 
-/// Whether to tell the user where the run's trace log was written.
+/// Whether to keep the run's temporary trace log.
 ///
-/// A failed run always reports it: diagnosing the failure matters more than
-/// keeping the output stream clean.
-/// The exit status alone doesn't answer this, since a command can exit non-zero
-/// to report a result rather than a failure.
-///
-/// Every other run makes the report opt-in via `JP_DEBUG`.
-/// The report is developer output that someone asked for by name, so where the
-/// run's own streams are pointed has no say in it.
-/// It goes to stderr either way, and a caller who wants it gone redirects that
-/// stream or unsets the variable.
-const fn should_report_trace_log(outcome: RunOutcome, debug_enabled: bool) -> bool {
+/// A failed run always keeps it because the trace may explain the failure.
+/// The exit status alone does not answer this, since a command can exit
+/// non-zero to report a result rather than a failure.
+/// Every other run makes retention opt-in through `JP_DEBUG`.
+const fn should_persist_trace_log(outcome: RunOutcome, debug_enabled: bool) -> bool {
     match outcome {
         RunOutcome::Failed => true,
         RunOutcome::AsExpected => debug_enabled,
     }
+}
+
+const TRACE_LOG_REMINDER_AFTER: Duration = Duration::from_mins(5);
+
+/// Whether enough time has passed to repeat the trace log path at completion.
+fn should_repeat_trace_log_notice(elapsed: Duration) -> bool {
+    elapsed >= TRACE_LOG_REMINDER_AFTER
 }
 
 /// The width to lay output out against.
@@ -1343,7 +1357,7 @@ pub struct TracingGuard {
 /// Where the full trace log is written.
 enum TraceSink {
     /// A delete-on-drop temp file, kept only when [`TracingGuard::persist`] is
-    /// called (a failed run, or `JP_DEBUG=1` with stdout on a terminal).
+    /// called for a failed run or under `JP_DEBUG=1`.
     Temp(NamedUtf8TempFile),
     /// A caller-chosen path (`--log-file <path>`).
     /// The file always persists.
@@ -1351,6 +1365,13 @@ enum TraceSink {
 }
 
 impl TracingGuard {
+    fn path(&self) -> Option<&Utf8Path> {
+        match self.sink.as_ref()? {
+            TraceSink::Temp(file) => Some(file.path()),
+            TraceSink::Path(path) => Some(path),
+        }
+    }
+
     fn persist(mut self) -> Option<Utf8PathBuf> {
         match self.sink.take()? {
             TraceSink::Temp(file) => file.keep().ok().map(|(_file, path)| path),
@@ -1424,8 +1445,8 @@ fn configure_logging(
 
     // An explicit `--log-file <path>` pins the trace log to that path;
     // otherwise it goes to a delete-on-drop temp file that is only kept when the
-    // run fails, or when `JP_DEBUG=1` is set and stdout is a terminal. (`-`
-    // selects the stderr layer below, not a file path.)
+    // run fails or `JP_DEBUG=1` is set. (`-` selects the stderr layer below, not
+    // a file path.)
     let (file_writer, sink) = match log_file {
         Some(path) if path != "-" => {
             let file = fs::File::create(path).ok()?;

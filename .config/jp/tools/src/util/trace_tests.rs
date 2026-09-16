@@ -82,7 +82,13 @@ fn parse_drops_lines_with_unknown_level() {
 }
 
 #[test]
-fn extract_trace_path_reads_text_marker_line() {
+fn extract_trace_path_reads_streaming_text_marker_line() {
+    let stderr = "some noise\nStreaming trace logs to: /tmp/x.jsonl\n";
+    assert_eq!(extract_trace_path(stderr), Some("/tmp/x.jsonl".to_owned()));
+}
+
+#[test]
+fn extract_trace_path_reads_completed_text_marker_line() {
     let stderr = "some noise\nFull trace log written to: /tmp/x.jsonl\n";
     assert_eq!(extract_trace_path(stderr), Some("/tmp/x.jsonl".to_owned()));
 }
@@ -101,7 +107,10 @@ fn extract_trace_path_returns_none_without_a_marker() {
 }
 
 #[test]
-fn is_trace_path_marker_line_matches_both_formats() {
+fn is_trace_path_marker_line_matches_text_and_json_formats() {
+    assert!(is_trace_path_marker_line(
+        "Streaming trace logs to: /tmp/x.jsonl"
+    ));
     assert!(is_trace_path_marker_line(
         "Full trace log written to: /tmp/x.jsonl"
     ));
