@@ -8,7 +8,7 @@ pub(crate) mod label;
 mod lock;
 pub(crate) mod plugin;
 mod provider;
-mod query;
+pub(crate) mod query;
 pub(crate) mod target;
 pub(crate) mod time;
 pub(crate) mod turn_selection;
@@ -448,6 +448,8 @@ impl From<crate::error::Error> for Error {
             Workspace(error) => return error.into(),
             Conversation(error) => return error.into(),
             Mcp(error) => return error.into(),
+            McpEndpoint(error) => [("message", error.to_string())].into(),
+            McpHost(error) => with_cause(&error, "MCP Host control failed"),
             Llm(error) => return error.into(),
             Io(error) => return error.into(),
             Url(error) => return error.into(),
@@ -719,7 +721,7 @@ impl_from_error!(jp_storage::LoadError, "Storage load error");
 impl_from_error!(jp_config::ConfigError, "Config error");
 impl_from_error!(jp_config::fs::ConfigLoaderError, "Config loader error");
 impl_from_error!(jp_conversation::Error, "Conversation error");
-impl_from_error!(jp_llm::ToolError, "Tool error");
+impl_from_error!(jp_tool::Error, "Tool error");
 impl_from_error!(jp_mcp::Error, "MCP error");
 impl_from_error!(minijinja::Error, "Template error");
 impl_from_error!(quick_xml::SeError, "XML serialization error");
@@ -790,6 +792,7 @@ impl From<jp_llm::Error> for Error {
                 ("response", response),
             ]
             .into(),
+            AnthropicAcp(error) => with_cause(&error, "Anthropic ACP subscription error"),
             Anthropic(anthropic_error) => [
                 ("message", "Anthropic error".into()),
                 ("error", anthropic_error.to_string()),

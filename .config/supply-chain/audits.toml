@@ -6,6 +6,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.5.6"
 
+[[audits.base64]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.22.1 -> 0.23.1"
+
 [[audits.bzip2]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -26,6 +31,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.7.3"
 
+[[audits.chacha20]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.10.0 -> 0.10.2"
+
 [[audits.comfy-table]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -45,6 +55,11 @@ delta = "0.50.0 -> 0.52.0"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.2.14 -> 0.3.5"
+
+[[audits.cpufeatures]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.0 -> 0.3.1"
 
 [[audits.datetime_literal]]
 who = "Jean Mertz <git@jeanmertz.com>"
@@ -236,6 +251,16 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.9.4 -> 0.9.5"
 
+[[audits.rand]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.10.1 -> 0.10.2"
+
+[[audits.rand_core]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.10.0 -> 0.10.1"
+
 [[audits.rand_xorshift]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -286,6 +311,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.37.0 -> 0.38.0"
 
+[[audits.rustls]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.23.35 -> 0.23.45"
+
 [[audits.rustls-webpki]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -295,6 +325,11 @@ delta = "0.103.6 -> 0.103.10"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.103.10 -> 0.103.12"
+
+[[audits.rustls-webpki]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.103.13 -> 0.103.15"
 
 [[audits.ruzstd]]
 who = "Jean Mertz <git@jeanmertz.com>"
@@ -345,6 +380,11 @@ version = "1.0.2"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.5.2"
+
+[[audits.sse-stream]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.2.6"
 
 [[audits.string_cache]]
 who = "Jean Mertz <git@jeanmertz.com>"
@@ -405,6 +445,11 @@ version = "0.1.4"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "1.22.0"
+
+[[audits.wasm-streams]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.2 -> 0.5.0"
 
 [[audits.web_atoms]]
 who = "Jean Mertz <git@jeanmertz.com>"

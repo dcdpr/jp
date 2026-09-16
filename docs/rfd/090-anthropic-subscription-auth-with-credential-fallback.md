@@ -5,6 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-03
 - **Tracking Issue**: [\#875]
+- **Extended by**: [RFD 110]
 
 ## Summary
 
@@ -900,6 +901,7 @@ Depends on Phases 1 and 2c; independent of Phases 2 and 3.
 - [Using Claude Code with your Pro or Max plan][claude-plans]
 
 [RFD 048]: 048-four-channel-output-model.md
+[RFD 110]: 110-anthropic-subscription-queries-via-acp.md
 [\#875]: https://github.com/dcdpr/jp/issues/875
 [claude-code-source]: https://github.com/alex000kim/claude-code
 [claude-plans]: https://support.claude.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan

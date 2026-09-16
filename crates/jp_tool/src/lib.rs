@@ -5,10 +5,32 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 mod access;
+pub mod content;
+pub mod definition;
+mod error;
+pub mod schema;
+
 pub use access::{
     AccessPolicy, Capability, EnvRule, FsAccessError, FsRule, NetRule,
     canonicalize_workspace_target, lexical_workspace_relative,
 };
+pub use content::{ContentBlock, InputRequest, Resource, ResourceContent, ToolResult};
+pub use definition::{ParameterDocs, ToolDefinition, ToolDocs};
+pub use error::Error;
+
+/// Which workspace and conversation a tool call belongs to.
+///
+/// Surfaced to local tools through the rendered template `context` (as
+/// `context.workspace_id` and `context.conversation_id`) so a tool can scope
+/// any state it persists to the conversation that caused it.
+///
+/// Both fields are empty for a call with no conversation owner, such as a title
+/// generation or a summary.
+#[derive(Debug, Clone, Default)]
+pub struct InvocationContext {
+    pub workspace_id: String,
+    pub conversation_id: String,
+}
 
 /// The result of a tool call.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -82,6 +104,42 @@ impl Outcome {
     #[must_use]
     pub fn unwrap_content(self) -> String {
         self.into_content().unwrap()
+    }
+
+    /// Whether `text` claims to be a `needs_input` outcome, however badly.
+    ///
+    /// Answers the question a decoder asks after [`Outcome`] itself failed to
+    /// parse: did the tool mean to ask something?
+    /// A payload that says it did and then will not parse is a protocol
+    /// mismatch the caller must report, where output that was never an
+    /// `Outcome` is just text.
+    #[must_use]
+    pub fn claims_needs_input(text: &str) -> bool {
+        Self::claimed_shape(text).is_some_and(|kind| kind == "needs_input")
+    }
+
+    /// The variant tag `text` carries, if it is a JSON object carrying one.
+    fn claimed_shape(text: &str) -> Option<String> {
+        serde_json::from_str::<Value>(text)
+            .ok()?
+            .get("type")?
+            .as_str()
+            .map(str::to_owned)
+    }
+
+    /// The question id a `needs_input` payload carries, if it carries one.
+    ///
+    /// Read straight from the JSON rather than from a parsed [`Question`],
+    /// because the reason a caller wants it is that parsing failed: an id that
+    /// [`QuestionId`] rejects is exactly what it is looking for.
+    #[must_use]
+    pub fn claimed_question_id(text: &str) -> Option<String> {
+        serde_json::from_str::<Value>(text)
+            .ok()?
+            .get("question")?
+            .get("id")?
+            .as_str()
+            .map(str::to_owned)
     }
 }
 
@@ -206,16 +264,26 @@ pub struct Question {
 }
 
 impl Question {
+    /// Construct a question with an already validated identifier.
+    #[must_use]
+    pub fn new(id: QuestionId, text: impl Into<String>, answer_type: AnswerType) -> Self {
+        Self {
+            id,
+            text: text.into(),
+            answer_type,
+            pre_amble: None,
+            default: None,
+        }
+    }
+
     /// Create a new text question.
     /// Fails if `id` is empty or contains a `.`.
     pub fn text(id: impl Into<String>, text: impl Into<String>) -> Result<Self, InvalidQuestionId> {
-        Ok(Self {
-            id: QuestionId::try_from(id.into())?,
-            text: text.into(),
-            pre_amble: None,
-            answer_type: AnswerType::Text,
-            default: None,
-        })
+        Ok(Self::new(
+            QuestionId::try_from(id.into())?,
+            text,
+            AnswerType::Text,
+        ))
     }
 
     /// Create a new boolean question.

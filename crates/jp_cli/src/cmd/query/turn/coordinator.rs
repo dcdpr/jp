@@ -373,9 +373,12 @@ impl TurnCoordinator {
                 HandleEventOutcome::new(self.transition_from_streaming(stream, reason))
             }
 
-            // Patch is handled by the caller before reaching here; KeepAlive is
-            // a liveness signal with nothing to record or render.
-            Event::Patch(_) | Event::KeepAlive => HandleEventOutcome::new(Action::Continue),
+            // Patches and tool progress are handled by the caller. None of
+            // these events contributes content to the conversation.
+            Event::Patch(_)
+            | Event::KeepAlive
+            | Event::ToolCallPending { .. }
+            | Event::ToolCallPendingEnd { .. } => HandleEventOutcome::new(Action::Continue),
 
             // A provider decision the user must see (a skipped credential, a
             // credential switch): chrome on stderr, never part of the

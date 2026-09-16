@@ -2,10 +2,10 @@ use jp_conversation::{
     ConversationStream,
     event::{ChatRequest, ChatResponse, ToolCallRequest, ToolCallResponse},
 };
-use jp_llm::tool::executor::MockExecutor;
 use serde_json::Map;
 
 use super::*;
+use crate::cmd::query::tool::executor::mock::MockExecutor;
 
 fn req(id: &str, name: &str) -> ToolCallRequest {
     ToolCallRequest {

@@ -3429,8 +3429,9 @@ serve-tools CONTEXT TOOL:
 # recipe, so every `jp query` that uses bookworm tools picks up the latest
 # local source automatically.
 [group('tools')]
-serve-bookworm: _build-bookworm
-    @$(cargo metadata --format-version 1 | jq -r .build_directory)/release/bookworm mcp
+serve-bookworm: # _build-bookworm
+    /Users/jean/.cargo/bin/bookworm mcp
+    # @$(cargo metadata --format-version 1 | jq -r .build_directory)/release/bookworm mcp
 
 [private]
 @_build-bookworm:
@@ -3549,6 +3550,12 @@ lint-ci: (_rustup_component "clippy") _install_ci_matchers
     fi
 
     cargo clippy --locked --workspace --all-targets --all-features --no-deps --profile=lint -- --deny warnings
+
+    # `--all-features` and the workspace build both turn `jp_mcp/server` on,
+    # because `jp_cli` asks for it. A crate that also ships without the tool
+    # server has to be compiled that way somewhere, or the `client`-only
+    # spelling rots unnoticed.
+    cargo clippy --locked --package jp_mcp --all-targets --no-default-features --features client --no-deps --profile=lint -- --deny warnings
 
 # Check code formatting on CI.
 [group('ci')]

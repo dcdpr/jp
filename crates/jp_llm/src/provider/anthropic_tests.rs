@@ -1512,7 +1512,7 @@ fn test_adaptive_thinking_with_structured_output() {
 /// thinking disabled.
 #[test]
 fn test_forced_tool_with_reasoning_returns_fallback() {
-    use crate::tool::{ToolDefinition, ToolDocs};
+    use jp_tool::{ToolDefinition, ToolDocs};
 
     let model = ModelDetails {
         id: (PROVIDER, "claude-sonnet-4-5").try_into().unwrap(),
@@ -1585,7 +1585,7 @@ fn test_forced_tool_with_reasoning_returns_fallback() {
 /// up an escalating-nudge fallback that keeps thinking on.
 #[test]
 fn test_forced_tool_thinking_always_on_uses_escalating_nudge() {
-    use crate::tool::{ToolDefinition, ToolDocs};
+    use jp_tool::{ToolDefinition, ToolDocs};
 
     let model = ModelDetails {
         id: (PROVIDER, "claude-fable-5").try_into().unwrap(),
@@ -1665,7 +1665,7 @@ fn test_forced_tool_thinking_always_on_uses_escalating_nudge() {
 /// of the reasoning config.
 #[test]
 fn test_forced_tool_thinking_always_on_reasoning_off_still_soft_forces() {
-    use crate::tool::{ToolDefinition, ToolDocs};
+    use jp_tool::{ToolDefinition, ToolDocs};
 
     let model = ModelDetails {
         id: (PROVIDER, "claude-fable-5").try_into().unwrap(),
@@ -1729,7 +1729,7 @@ fn test_forced_tool_thinking_always_on_reasoning_off_still_soft_forces() {
 /// specific tool.
 #[test]
 fn test_forced_tool_function_multi_tool_preserves_name() {
-    use crate::tool::{ToolDefinition, ToolDocs};
+    use jp_tool::{ToolDefinition, ToolDocs};
 
     let model = ModelDetails {
         id: (PROVIDER, "claude-sonnet-4-5").try_into().unwrap(),
@@ -1804,7 +1804,7 @@ fn test_fallback_any_satisfied_by_any_tool() {
 /// Without reasoning, forced `tool_choice` should NOT produce a fallback.
 #[test]
 fn test_forced_tool_without_reasoning_no_fallback() {
-    use crate::tool::{ToolDefinition, ToolDocs};
+    use jp_tool::{ToolDefinition, ToolDocs};
 
     let model = ModelDetails {
         id: (PROVIDER, "claude-3-haiku-20240307").try_into().unwrap(),

@@ -14,6 +14,7 @@ use jp_conversation::{
     event::{ChatResponse, EventKind},
     thread::text_attachments_to_xml,
 };
+use jp_tool::ToolDefinition;
 use ollama_rs::{
     Ollama as Client,
     error::OllamaError,
@@ -35,7 +36,6 @@ use crate::{
     event::{Event, FinishReason},
     model::ReasoningDetails,
     query::ChatQuery,
-    tool::{ToolDefinition, json_schema},
 };
 
 static PROVIDER: ProviderId = ProviderId::Ollama;
@@ -422,7 +422,7 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Result<Vec<ToolInfo>> {
     tools
         .into_iter()
         .map(|tool| {
-            let parameters = json_schema::inline(&tool.parameters)
+            let parameters = jp_tool::schema::inline(&tool.parameters)
                 .as_object()
                 .cloned()
                 .unwrap_or_default();

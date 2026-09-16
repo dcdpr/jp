@@ -5,7 +5,6 @@ use jp_config::{
     style::{reasoning::ReasoningDisplayConfig, typewriter::DelayDuration},
 };
 use jp_conversation::stream::TurnOrigin;
-use jp_llm::tool::InvocationContext;
 use jp_workspace::ConversationHandle;
 
 use crate::{
@@ -150,11 +149,6 @@ impl Print {
         let raw_count = events.turn_count();
         let cfg = ctx.config();
 
-        let root = ctx
-            .storage_path()
-            .unwrap_or(ctx.workspace.root())
-            .to_path_buf();
-
         let source = if current_config {
             ConfigSource::Fixed
         } else {
@@ -173,20 +167,13 @@ impl Print {
         let assistant_name = cfg.assistant.name.clone();
         let model_id = Some(cfg.assistant.model.id.resolved().to_string());
 
-        let invocation = InvocationContext {
-            workspace_id: ctx.workspace.id().to_string(),
-            conversation_id: handle.id().to_string(),
-        };
-
         let mut renderer = TurnRenderer::new(
             ctx.printer.clone(),
             render_style,
             tools_config,
             assistant_name,
             model_id,
-            root,
             source,
-            invocation,
             style_overlay,
         );
         renderer.set_user_only(user_only);

@@ -21,6 +21,7 @@ use jp_conversation::{
     event::{ChatResponse, ConversationEvent, EventKind},
     thread::{ThreadParts, text_attachments_to_xml},
 };
+use jp_tool::ToolDefinition;
 use serde_json::{Map, Value};
 use tracing::{debug, trace, warn};
 
@@ -34,7 +35,6 @@ use crate::{
     event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction},
     model::{ModelDeprecation, ModelDetails, ReasoningDetails, ReasoningMode},
     query::ChatQuery,
-    tool::ToolDefinition,
 };
 
 static PROVIDER: ProviderId = ProviderId::Google;

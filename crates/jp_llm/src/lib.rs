@@ -8,7 +8,6 @@ pub mod query;
 pub mod retry;
 mod stream;
 pub mod title;
-pub mod tool;
 pub mod window;
 
 #[cfg(test)]
@@ -19,10 +18,9 @@ pub(crate) mod test;
 mod cross_route_tests;
 
 pub use credential::{AccountIdentity, Credential, ProviderAuth, provider_auth};
-pub use error::{Error, StreamError, StreamErrorKind, ToolError};
+pub use error::{Error, StreamError, StreamErrorKind};
 pub use provider::Provider;
 pub use retry::{exponential_backoff, retry_delay};
 pub use stream::{
     EventStream, chain::EventChain, with_idle_timeout, with_output_limit, with_tool_call_keepalive,
 };
-pub use tool::{CommandResult, ExecutionOutcome, ToolTrace, run_tool_command};

@@ -16,7 +16,7 @@
 use async_anthropic::errors::{UnifiedRateLimit, WindowUtilization};
 use chrono::{DateTime, Utc};
 use jp_config::{
-    providers::llm::anthropic::{AnthropicConfig, AuthEntry},
+    providers::llm::anthropic::{AnthropicConfig, AuthEntry, SubscriptionFlow},
     types::api_key_env::ApiKeyEnv,
 };
 use jp_credentials::{
@@ -25,11 +25,15 @@ use jp_credentials::{
 };
 use tracing::{debug, warn};
 
-use crate::{credential::Credential, error::StreamError, provider::anthropic::oauth};
+use super::{acp::Error as AcpError, oauth};
+use crate::{credential::Credential, error::StreamError};
 
 /// Errors from walking the credential chain.
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveError {
+    /// ACP selection failed before a request could be sent.
+    #[error(transparent)]
+    Acp(#[from] AcpError),
     #[error(transparent)]
     Store(#[from] StoreError),
 
@@ -127,6 +131,8 @@ pub enum ResolveError {
 /// What a walk of the chain landed on.
 #[derive(Debug)]
 enum Landing {
+    /// Use Claude Code's own authentication without reading stored tokens.
+    Acp,
     /// A credential that can be sent as-is.
     Ready(Credential),
 
@@ -140,12 +146,11 @@ enum Landing {
     },
 }
 
-/// A resolved chain attempt: the credential to send with, the entry that
-/// produced it, and notices for entries skipped on the way there.
+/// A resolved request route and the chain entry that selected it.
 #[derive(Debug)]
 pub(super) struct Attempt {
-    /// The credential the request authenticates with.
-    pub credential: Credential,
+    /// The request implementation, carrying a credential only for HTTP.
+    pub route: Route,
 
     /// Which chain entry produced the credential, with a bare `profile`
     /// normalized to the profile it resolved to.
@@ -156,6 +161,24 @@ pub(super) struct Attempt {
 
     /// User-facing notices for skipped entries, surfaced as chrome.
     pub notices: Vec<String>,
+}
+
+/// The selected request implementation and its authentication material.
+#[derive(Debug)]
+pub(super) enum Route {
+    /// An API key or an explicitly selected direct subscription token.
+    Http(Credential),
+    /// Authentication is owned by Claude Code, not by JP's token store.
+    Acp,
+}
+
+/// Whether resolving this chain requires consulting JP's credential store.
+pub(super) fn needs_store(config: &AnthropicConfig) -> bool {
+    config.auth.iter().any(|entry| match entry {
+        AuthEntry::ApiKey(_) => false,
+        AuthEntry::Subscription(_) => config.subscription_flow == SubscriptionFlow::Direct,
+        AuthEntry::Named(_) => true,
+    })
 }
 
 /// Check that some entry of the chain could resolve, without any network use.
@@ -200,6 +223,13 @@ pub(super) async fn resolve(
         let (landing, selected, mut notices) = walk_chain(config, snapshot.as_ref(), model, now)?;
 
         let stale = match landing {
+            Landing::Acp => {
+                return Ok(Attempt {
+                    route: Route::Acp,
+                    selected: Some(selected),
+                    notices,
+                });
+            }
             Landing::Ready(credential) => {
                 debug!(
                     entry = %selected,
@@ -210,7 +240,7 @@ pub(super) async fn resolve(
                 );
 
                 return Ok(Attempt {
-                    credential,
+                    route: Route::Http(credential),
                     selected: Some(selected),
                     notices,
                 });
@@ -646,6 +676,12 @@ fn walk_chain(
             }
 
             AuthEntry::Subscription(name) => {
+                if config.subscription_flow == SubscriptionFlow::Acp {
+                    if let Some(name) = name {
+                        return Err(AcpError::NamedSubscription { name: name.clone() }.into());
+                    }
+                    return Ok((Landing::Acp, entry.clone(), notices));
+                }
                 let (profile, stored) = lookup_profile(store, name.as_deref())?;
 
                 if stored.needs_relogin {

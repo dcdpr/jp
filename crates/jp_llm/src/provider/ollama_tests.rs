@@ -1,7 +1,7 @@
+use jp_tool::{ToolDefinition, ToolDocs};
 use serde_json::json;
 
 use super::*;
-use crate::tool::ToolDocs;
 
 /// Ollama drops `$ref` while decoding a tool's parameters, so a referenced type
 /// has to arrive expanded or the model sees a property with no type.

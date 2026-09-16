@@ -731,6 +731,7 @@ providers: ProviderConfig
       base_url?: string
       beta_headers?: [string]
       chain_on_max_tokens?: bool
+      subscription_flow?: "acp" | "direct"
     cerebras: CerebrasConfig
       api_key_env?: string
       auth?: [string]

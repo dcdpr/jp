@@ -1,0 +1,24 @@
+---
+source: crates/jp_llm/src/provider/anthropic/acp/workflow_tests.rs
+expression: prepared.history
+---
+[
+  {
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "[Summary of previous conversation]"
+      }
+    ]
+  },
+  {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "Lookup and verification established OAK."
+      }
+    ]
+  }
+]

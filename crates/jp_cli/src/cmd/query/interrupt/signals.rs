@@ -242,6 +242,27 @@ pub enum ToolInterruptResult {
     PromptFailed,
 }
 
+/// What the tool interrupt menu needs in order to run.
+///
+/// The menu is the only part of an execution phase that talks to the terminal
+/// on its own, so its dependencies travel together and reach nothing else.
+pub struct InterruptUi<'a> {
+    /// Records the state transition the chosen action implies.
+    pub turn_coordinator: &'a mut TurnCoordinator,
+
+    /// Where the menu draws.
+    pub printer: &'a Printer,
+
+    /// Reads the user's choice; a test supplies a scripted one.
+    pub backend: &'a dyn PromptBackend,
+
+    /// Opens the editor a "Stop & respond" reply may use.
+    pub editor: Option<Arc<dyn EditorBackend>>,
+
+    /// Which editing style that reply uses.
+    pub edit_mode: ReplyEditMode,
+}
+
 /// Handle a Ctrl-C interrupt notification received during tool execution.
 ///
 /// Applies the configured tool interrupt behavior: the menu is shown only when
@@ -252,20 +273,10 @@ pub enum ToolInterruptResult {
 /// question, result edit), the interrupt is declined: the active prompt handles
 /// Ctrl+C itself, and the caller should pass the notification down the handler
 /// stack.
-///
-/// # Arguments
-///
-/// - `is_prompting` - Whether any tool is currently showing an interactive
-///   prompt.
-/// - `backend` - Allows injecting a mock prompt backend for testing.
 pub fn handle_tool_interrupt(
     cancellation_token: &CancellationToken,
-    turn_coordinator: &mut TurnCoordinator,
     is_prompting: bool,
-    printer: &Printer,
-    backend: &dyn PromptBackend,
-    editor: Option<Arc<dyn EditorBackend>>,
-    edit_mode: ReplyEditMode,
+    ui: &mut InterruptUi<'_>,
     config: &ToolInterruptConfig,
 ) -> ToolInterruptResult {
     if is_prompting {
@@ -273,8 +284,8 @@ pub fn handle_tool_interrupt(
         return ToolInterruptResult::Declined;
     }
 
-    let action = InterruptHandler::with_backend(backend, editor, edit_mode)
-        .handle_tool_interrupt(config, printer);
+    let action = InterruptHandler::with_backend(ui.backend, ui.editor.clone(), ui.edit_mode)
+        .handle_tool_interrupt(config, ui.printer);
     debug!(?action, "Tool interrupt resolved.");
 
     // A menu that never ran decided nothing: the running tools are left alone
@@ -284,12 +295,11 @@ pub fn handle_tool_interrupt(
     }
 
     // Notify the state machine (reserved for future state transitions).
-    turn_coordinator.handle_tool_interrupt(&action);
+    ui.turn_coordinator.handle_tool_interrupt(&action);
 
     let result = match action {
         InterruptAction::RestartTool => {
             info!("Restarting tool execution");
-            cancellation_token.cancel();
             ToolInterruptResult::Restart
         }
         InterruptAction::ToolCancelled { response, exit } => {
