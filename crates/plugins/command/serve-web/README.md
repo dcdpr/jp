@@ -34,21 +34,23 @@ with the first.
 
 ## Protocol
 
-Needs protocol 7 (`REQUIRED_PROTOCOL`).
+Needs protocol 8 (`REQUIRED_PROTOCOL`).
 The host refuses an older pairing at the handshake rather than failing later, so
 a stale `jp` alongside a fresh plugin is an error message and not a mystery.
 
-| Message              | Direction | Used for                                         |
-| -------------------- | --------- | ------------------------------------------------ |
-| `list_conversations` | → host    | The conversation index                           |
-| `read_events`        | → host    | One conversation's transcript and title          |
-| `list_configs`       | → host    | The configurations a new conversation can name   |
-| `query`              | → host    | Start a turn, or start a conversation            |
-| `created`            | ← host    | The id of a conversation just created            |
-| `query_complete`     | ← host    | That turn finished                               |
-| `interrupt`          | → host    | Stop the turn on one named conversation          |
-| `read_draft`         | → host    | The message being composed, as the CLI stores it |
-| `write_draft`        | → host    | Save it back, conditional on a revision          |
+| Message                | Direction | Used for                                         |
+| ---------------------- | --------- | ------------------------------------------------ |
+| `list_conversations`   | → host    | The conversation index                           |
+| `read_events`          | → host    | One conversation's transcript, title and lock    |
+| `list_configs`         | → host    | The configurations a new conversation can name   |
+| `query`                | → host    | Start a turn, or start a conversation            |
+| `created`              | ← host    | The id of a conversation just created            |
+| `query_complete`       | ← host    | That turn finished                               |
+| `interrupt`            | → host    | Stop the turn on one named conversation          |
+| `read_draft`           | → host    | The message being composed, as the CLI stores it |
+| `write_draft`          | → host    | Save it back, conditional on a revision          |
+| `archive_conversation` | → host    | Move one conversation to the archive             |
+| `set_title`            | → host    | Rename one conversation                          |
 
 Starting a conversation is answered twice: `created` as soon as there is
 somewhere to send the reader, and `query_complete` when the first turn ends.
@@ -59,9 +61,19 @@ quickly would otherwise arrive before anything was listening for it.
 
 There is no push channel yet, so the page polls `/conversations/{id}/messages`
 every second while a turn is running and every three when it isn't.
-The endpoint returns an event count and the rendered transcript; the page swaps
-its contents only when the count moves, so reading isn't interrupted on every
-tick.
+The page says how much of the transcript it holds and the endpoint answers with
+the rest, so a tick that brings nothing new costs one small response and no
+re-render.
+
+While a turn is running, the newest entry is re-sent on every tick if it is one
+that can still change.
+A tool call is rendered when it is requested and gains its result later, and a
+run of assistant text is rendered as one block that the next flush adds to —
+neither of which moves the count, so counting alone would leave the page holding
+the first version of either.
+An entry that is finished the moment it appears, such as the request itself, is
+not re-sent; waiting for the first token is the longest stretch of a turn, and
+nothing changes on the page during it.
 
 The host re-reads the conversation from disk on each request, which means a turn
 you started in a terminal shows up in the browser too, without a restart.
@@ -89,7 +101,6 @@ server-rendered.
 `/status` exists for whoever supervises the process: restarting to pick up a new
 build aborts a turn in flight, so a supervisor polls it and waits for `busy` to
 go false.
-`just serve-web-watch` does exactly that.
 
 ## Security
 
@@ -100,14 +111,18 @@ runs whatever tools the conversation allows.
 Binding to a non-loopback address hands that to the network.
 The plugin warns on startup when you do.
 
+Writing requests are refused when they come from a page on another origin, which
+is checked from `Sec-Fetch-Site` and `Origin`.
+Loopback is no defence on its own here: a form post is not subject to a
+preflight, so any site a browser visits can submit one to `127.0.0.1` and start
+a turn, and the same-origin policy only stops it reading the answer.
+A request that carries neither header — `curl`, a script, another tool — is
+allowed, since no browser can be made to omit both.
+
 ## Development
 
-```sh
-just serve-web-watch --bind 0.0.0.0 --port 3001
-```
-
-Rebuilds on any change under `crates/` and restarts once no turn is running.
-A plain file watcher can't be used here: a turn started from the browser runs
-inside the host process the plugin is attached to, so restarting on save aborts
-whatever the assistant was in the middle of — including the assistant editing
-these files.
+A file watcher that restarts on save can't be used here: a turn started from the
+browser runs inside the host process the plugin is attached to, so restarting on
+save aborts whatever the assistant was in the middle of — including the
+assistant editing these files.
+Poll `/status` and restart only once `busy` is false.

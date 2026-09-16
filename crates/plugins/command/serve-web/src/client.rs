@@ -33,15 +33,6 @@ pub type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 /// forever, which would otherwise stall graceful shutdown.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// How long a delegated turn is given before the request is abandoned.
-///
-/// A turn runs the whole agent loop: the model thinks, tools run, the model
-/// thinks again.
-/// Minutes are normal, so this is generous — it exists to stop a lost response
-/// from pinning a browser connection open forever, not to bound how long the
-/// assistant may take.
-const QUERY_TIMEOUT: Duration = Duration::from_mins(15);
-
 /// A protocol client that talks to the JP host over stdin/stdout.
 ///
 /// Cloneable via `Arc` internally — pass it into axum state directly.
@@ -62,14 +53,20 @@ pub struct TurnOutcome {
 impl TurnOutcome {
     /// Wait for the turn to finish.
     ///
-    /// Takes as long as the turn does, which can be minutes.
+    /// Takes as long as the turn does, which is however long the assistant
+    /// takes: an agent loop that calls tools between thoughts can run for the
+    /// better part of an hour.
+    /// Waits without a deadline for that reason.
+    /// The wait is already bounded by the connection — the reader drops every
+    /// waiter when the host's stdout closes — so a deadline here could only
+    /// report a failure for a turn that is still running, and the host would go
+    /// on holding the conversation after this said it had stopped.
     pub async fn finished(self) -> Result<(), ClientError> {
-        match tokio::time::timeout(QUERY_TIMEOUT, self.rx).await {
-            Ok(Ok(HostToPlugin::QueryComplete(_))) => Ok(()),
-            Ok(Ok(HostToPlugin::Error(e))) => Err(ClientError::Host(e.message)),
-            Ok(Ok(other)) => Err(ClientError::Unexpected(format!("{other:?}"))),
-            Ok(Err(_)) => Err(ClientError::ChannelClosed),
-            Err(_) => Err(ClientError::Timeout),
+        match self.rx.await {
+            Ok(HostToPlugin::QueryComplete(_)) => Ok(()),
+            Ok(HostToPlugin::Error(e)) => Err(ClientError::Host(e.message)),
+            Ok(other) => Err(ClientError::Unexpected(format!("{other:?}"))),
+            Err(_) => Err(ClientError::ChannelClosed),
         }
     }
 }
@@ -151,6 +148,9 @@ impl PluginClient {
     /// them back with [`Self::read_events`].
     /// The host owns the agent loop, so this resolves the model, calls the
     /// provider, and runs tools without the plugin seeing any of it.
+    ///
+    /// Waits without a deadline, for the reason [`TurnOutcome::finished`]
+    /// gives.
     pub async fn query(
         &self,
         conversation: &str,
@@ -167,7 +167,7 @@ impl PluginClient {
             content: content.to_owned(),
         });
 
-        match self.request_within(&id, &msg, QUERY_TIMEOUT).await? {
+        match self.request_within(&id, &msg, None).await? {
             HostToPlugin::QueryComplete(_) => Ok(()),
             HostToPlugin::Error(e) => Err(ClientError::Host(e.message)),
             other => Err(ClientError::Unexpected(format!("{other:?}"))),
@@ -342,15 +342,15 @@ impl PluginClient {
     /// leaves nothing to remove, so the cleanup here targets only the
     /// transport-error paths.
     async fn request(&self, id: &str, msg: &PluginToHost) -> Result<HostToPlugin, ClientError> {
-        self.request_within(id, msg, REQUEST_TIMEOUT).await
+        self.request_within(id, msg, Some(REQUEST_TIMEOUT)).await
     }
 
-    /// [`Self::request`], with a deadline of the caller's choosing.
+    /// [`Self::request`], with a deadline of the caller's choosing, or none.
     async fn request_within(
         &self,
         id: &str,
         msg: &PluginToHost,
-        timeout: Duration,
+        timeout: Option<Duration>,
     ) -> Result<HostToPlugin, ClientError> {
         let rx = self.register(id);
 
@@ -430,10 +430,18 @@ pub enum ClientError {
 
 /// Await a pending response, failing with [`ClientError`] on a closed channel
 /// or timeout instead of blocking forever.
+///
+/// Without a timeout the wait ends only with the answer or with the host: the
+/// reader drops every waiter when stdout closes, which resolves this as
+/// [`ClientError::ChannelClosed`].
 async fn await_response(
     rx: oneshot::Receiver<HostToPlugin>,
-    timeout: Duration,
+    timeout: Option<Duration>,
 ) -> Result<HostToPlugin, ClientError> {
+    let Some(timeout) = timeout else {
+        return rx.await.map_err(|_| ClientError::ChannelClosed);
+    };
+
     tokio::time::timeout(timeout, rx)
         .await
         .map_err(|_| ClientError::Timeout)?

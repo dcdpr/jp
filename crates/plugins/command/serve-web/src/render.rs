@@ -45,6 +45,30 @@ pub(crate) fn settled_upto(events: &[RenderedEvent]) -> usize {
         .unwrap_or(events.len())
 }
 
+/// Whether the newest entry can still change where it stands.
+///
+/// A tool call gains its result after it has been rendered, and a run of
+/// assistant text or reasoning renders as one block that the next flush adds
+/// to.
+/// Neither moves the count, so a caller that has already counted the entry has
+/// no way to learn that it changed, and has to be sent it again.
+///
+/// A request, a structured response and a turn separator are finished the
+/// moment they appear.
+/// Waiting for the first token of a reply is the longest stretch of a turn, and
+/// the transcript ends in the request throughout it, so the distinction is
+/// worth making.
+pub(crate) fn tail_can_change(events: &[RenderedEvent]) -> bool {
+    matches!(
+        events.last(),
+        Some(
+            RenderedEvent::ToolCall { .. }
+                | RenderedEvent::AssistantMessage { .. }
+                | RenderedEvent::Reasoning { .. }
+        )
+    )
+}
+
 /// Whether the conversation is waiting on the assistant.
 ///
 /// True when the last thing in the transcript is the user's message, or a tool

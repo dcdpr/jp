@@ -565,6 +565,20 @@ let boot = null;
 // the message belongs to the conversation now, not to the draft.
 let submitted = false;
 
+// Whether the field is holding a message that has been sent but not yet recorded.
+//
+// The text stays where it is until the transcript carries it, because a turn can
+// still be refused after the request was accepted — so for that stretch the field
+// holds something that is neither a draft nor gone.
+//
+// Both halves are needed. `submitted` covers the post itself and is cleared as
+// soon as it returns, which is seconds before the message appears;
+// `clearWhenLanded` covers the wait for it to appear.
+//
+// `clearWhenLanded` is declared below and read only when this is called, which is
+// never during the script's own evaluation.
+const holdingSent = () => submitted || clearWhenLanded !== null;
+
 // Whether the send button is currently offering to pull the message back.
 let cancelling = false;
 
@@ -870,10 +884,17 @@ const configGroups = document.getElementById('config-groups');
 let chosenConfigs = new Set();
 let configsLoaded = false;
 
-document.getElementById('open-config').addEventListener('click', () => {
+document.getElementById('open-config').addEventListener('click', async () => {
   nav.open = false;
   configModal.showModal();
-  loadConfigs();
+  await loadConfigs();
+
+  // The boxes outlive the choice: the list is built once, and what is chosen is
+  // spent when a message is sent. Re-reading it on every open keeps the ticks
+  // saying what the next message will actually run under.
+  for (const box of configGroups.querySelectorAll('input[type=checkbox]')) {
+    box.checked = chosenConfigs.has(box.value);
+  }
 });
 
 async function loadConfigs() {
@@ -1393,6 +1414,19 @@ async function loadDraft() {
 // textarea during submit makes the form post an empty message, because the
 // browser serialises it after the handler runs.
 async function saveDraft(content) {
+  // A message that has been sent but not yet recorded is not a draft, however
+  // much it looks like one sitting there in the field. Storing it would write
+  // back the draft the host deleted when it turned the message into a request,
+  // and the next visit to this conversation would offer to send it again.
+  //
+  // Here rather than at each caller: blur, `pagehide`, the expanded editor
+  // closing and a quote being inserted all save what is in the field, and the
+  // window this guards against is open for as long as the host takes to record
+  // the request.
+  // `saveDraft('')` is how the draft is cleared once the message does land, and
+  // that is named content, so it still goes through.
+  if (content === undefined && holdingSent()) return;
+
   const text = content ?? input.value;
 
   // Nothing here and nothing recorded means nothing to say. Writing anyway would
@@ -1413,26 +1447,36 @@ async function saveDraft(content) {
     });
     if (!r.ok) return;
     const d = await r.json();
-    revision = d.revision ?? null;
 
     // A draft that has gone *empty* underneath us is not somebody else's edit:
     // the host clears it when it turns a message into a request, which leaves
     // this page holding a revision for a file that no longer exists. Adopt the
     // new revision and put the text back, rather than reporting a conflict that
     // has no other party.
+    //
+    // Not while a sent message is still in the field, though — that is the same
+    // deletion, and writing the text back there is what would offer it again on
+    // the next visit.
     if (d.conflict && !d.content) {
+      revision = d.revision ?? null;
       draftNote.hidden = true;
 
-      if (input.value && !retried) {
+      if (input.value && !retried && !holdingSent()) {
         retried = true;
         queued = input.value;
       }
     } else if (d.conflict) {
-      draftNote.textContent =
-        'This draft was changed elsewhere. Yours is kept here; the other version '
-        + 'is on disk.';
-      draftNote.hidden = false;
+      // The revision deliberately stays where it was, which keeps every later
+      // save refused too.
+      //
+      // Adopting the one that came back would make the next keystroke's save
+      // match, succeed, and quietly overwrite the text this refusal exists to
+      // protect — while the note on screen still said it was safe on disk.
+      // Which version wins is a thing to be asked for, not something a debounce
+      // decides.
+      showConflict(d.content, d.revision ?? null);
     } else {
+      revision = d.revision ?? null;
       draftNote.hidden = true;
       retried = false;
     }
@@ -1448,16 +1492,61 @@ async function saveDraft(content) {
   }
 }
 
+// Say the save was refused, and offer the two ways out of it.
+//
+// Both versions survive until one is chosen: theirs is on disk, ours is in the
+// field, and nothing overwrites either in the meantime.
+// `theirRevision` is what either choice has to write against, since it names
+// what is actually there now.
+function showConflict(theirs, theirRevision) {
+  draftNote.textContent = 'This draft was changed elsewhere. Nothing was saved. ';
+  draftNote.hidden = false;
+
+  const take = document.createElement('button');
+  take.type = 'button';
+  take.className = 'draft-resolve';
+  take.textContent = 'Take theirs';
+  take.addEventListener('click', () => {
+    // No write: the field now holds exactly what is on disk, so there is
+    // nothing to store, only a revision to catch up with.
+    input.value = theirs;
+    fitInput();
+    resolveConflict(theirRevision);
+  });
+
+  const keep = document.createElement('button');
+  keep.type = 'button';
+  keep.className = 'draft-resolve';
+  keep.textContent = 'Keep mine';
+  keep.addEventListener('click', () => {
+    resolveConflict(theirRevision);
+    saveDraft();
+  });
+
+  draftNote.append(take, keep);
+}
+
+// Accept what is on disk as the version being edited from.
+//
+// The one place the revision moves after a refusal, and it takes somebody
+// pressing a button. A save that follows this is an answer to the question the
+// refusal asked; a save that beat it to the revision would just be an accident.
+function resolveConflict(theirRevision) {
+  revision = theirRevision;
+  retried = false;
+  draftNote.textContent = '';
+  draftNote.hidden = true;
+}
+
 let saveTimer = null;
 input.addEventListener('input', () => {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => saveDraft(), 600);
 });
 
-// Leaving the field, or the page, is the last chance to keep what is there —
-// unless it has just been sent, in which case saving would resurrect it.
-input.addEventListener('blur', () => { if (!submitted) saveDraft(); });
-addEventListener('pagehide', () => { if (!submitted) saveDraft(); });
+// Leaving the field, or the page, is the last chance to keep what is there.
+input.addEventListener('blur', () => saveDraft());
+addEventListener('pagehide', () => saveDraft());
 
 // Send without navigating.
 //
@@ -1510,7 +1599,14 @@ composer.addEventListener('submit', async (event) => {
         accept: 'application/json',
       },
       body: (() => {
-        const params = new URLSearchParams({ content, client: clientId });
+        // `count` is what the provisional copy of this message is retired
+        // against: the request is recorded as soon as the transcript grows past
+        // it, which the server cannot work out from the transcript alone.
+        const params = new URLSearchParams({
+          content,
+          client: clientId,
+          count: String(landedAbove),
+        });
         // One entry per choice: the same shape `--cfg` takes, repeated.
         for (const segment of chosenConfigs) params.append('cfg', segment);
         return params;
@@ -1545,6 +1641,16 @@ composer.addEventListener('submit', async (event) => {
   // Free for the next message, including one meant to interrupt this turn.
   submitted = false;
   clearWhenLanded = landedAbove;
+
+  // The choice is spent, because `--cfg` is a change from this message onward
+  // rather than a setting for one message. The host merges what was named into
+  // the conversation's own configuration and records the difference, so naming
+  // it again next turn layers it over a configuration that already has it — and
+  // for an appending field, such as a system prompt a configuration adds to,
+  // that appends a second copy and the conversation keeps it for every turn
+  // after.
+  chosenConfigs.clear();
+  document.getElementById('open-config').classList.remove('active');
 
   poll();
 });

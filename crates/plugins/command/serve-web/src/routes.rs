@@ -8,15 +8,16 @@ use std::{
 
 use axum::{
     Form, Json, Router,
-    extract::{Path, Query, State},
-    http::{StatusCode, header},
+    extract::{Path, Query, Request, State},
+    http::{HeaderMap, Method, StatusCode, header},
+    middleware::{self, Next},
     response::{IntoResponse, Redirect, Response},
 };
 use jp_plugin::message::LockState;
 use maud::Markup;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     client::{ClientError, PluginClient},
@@ -57,6 +58,7 @@ enum TurnStatus {
     /// point.
     Running {
         pending: Option<String>,
+
         /// Which client asked for it, when one said.
         ///
         /// Kept here rather than on the lock: this distinction never leaves the
@@ -64,6 +66,14 @@ enum TurnStatus {
         /// Another peer only needs to know the turn is this server's, which the
         /// lock already says.
         client: Option<String>,
+
+        /// How long the transcript was when the message was submitted, when the
+        /// submitter said.
+        ///
+        /// What tells `pending` it can go: the request is recorded as soon as
+        /// the transcript is longer than this, whether or not the assistant has
+        /// already begun answering it.
+        sent_at: Option<usize>,
     },
 
     /// It failed, and nobody has been told yet.
@@ -138,8 +148,8 @@ pub(crate) async fn serve(
             axum::routing::get(read_draft).post(write_draft),
         )
         .route(
-            "/conversations/count",
-            axum::routing::get(conversation_count),
+            "/conversations/digest",
+            axum::routing::get(conversation_digest),
         )
         .route(
             "/conversations/{id}/archive",
@@ -151,6 +161,7 @@ pub(crate) async fn serve(
         .route("/assets/style.css", axum::routing::get(serve_css))
         .route("/assets/icon.svg", axum::routing::get(serve_icon))
         .route("/manifest.webmanifest", axum::routing::get(serve_manifest))
+        .layer(middleware::from_fn(same_origin_only))
         .with_state(state);
 
     let local_addr = listener.local_addr().ok();
@@ -165,6 +176,74 @@ pub(crate) async fn serve(
         .with_graceful_shutdown(shutdown)
         .await
         .map_err(|e| format!("server error: {e}"))
+}
+
+/// Refuse a write that a page on some other origin asked for.
+///
+/// A form post needs no preflight, so any page a browser visits can submit one
+/// here and start a turn, which spends tokens and runs whatever tools the
+/// conversation allows.
+/// The same-origin policy stops that page reading the answer, not sending the
+/// request, and binding to loopback does not help: the request comes from the
+/// user's own browser, which is already inside.
+///
+/// Reads are left alone.
+/// They are as exposed as the port is, which the startup warning and the README
+/// already say, and a `GET` is where a supervisor and a `curl` live.
+async fn same_origin_only(request: Request, next: Next) -> Response {
+    let writing = !matches!(*request.method(), Method::GET | Method::HEAD);
+
+    if writing && !same_origin(request.headers()) {
+        warn!(
+            method = %request.method(),
+            path = %request.uri().path(),
+            "Refused a write from another origin",
+        );
+
+        return (
+            StatusCode::FORBIDDEN,
+            "This request came from another site.\n",
+        )
+            .into_response();
+    }
+
+    next.run(request).await
+}
+
+/// Whether a request came from one of this server's own pages.
+///
+/// `Sec-Fetch-Site` is the browser's own answer and is taken where it is given.
+/// `Origin` against `Host` is the fallback for a browser too old to send it: a
+/// cross-site form post carries the submitting page's origin, which is not this
+/// server's.
+///
+/// A request carrying neither is allowed.
+/// `curl`, a script, or another tool sends no such header, and no browser can
+/// be made to omit both — so refusing here would lock out every non-browser
+/// caller to stop nothing.
+fn same_origin(headers: &HeaderMap) -> bool {
+    if let Some(site) = headers
+        .get("sec-fetch-site")
+        .and_then(|value| value.to_str().ok())
+    {
+        return site == "same-origin" || site == "none";
+    }
+
+    let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else {
+        return true;
+    };
+
+    // Whatever the browser was told to connect to, which is the authority half
+    // of the origin its own pages carry. Its absence with an `Origin` present
+    // leaves nothing to compare against, and guessing is not worth it.
+    headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|host| {
+            origin
+                .split_once("://")
+                .is_some_and(|(_, authority)| authority == host)
+        })
 }
 
 async fn index() -> Redirect {
@@ -228,6 +307,10 @@ struct TurnForm {
     content: String,
     cfg: Vec<String>,
     client: Option<String>,
+
+    /// How much of the transcript the submitting page held, which is what the
+    /// provisional copy of this message is retired against.
+    count: Option<usize>,
 }
 
 impl TurnForm {
@@ -241,6 +324,7 @@ impl TurnForm {
                 // Without this the turn is recorded unattributed, and the page
                 // that started it is told the turn is somebody else's.
                 "client" => form.client = Some(value.into_owned()),
+                "count" => form.count = value.parse().ok(),
                 _ => {}
             }
         }
@@ -330,6 +414,7 @@ async fn start_turn(
         .insert(id.clone(), TurnStatus::Running {
             pending: Some(content.clone()),
             client: form.client.clone(),
+            sent_at: form.count,
         });
 
     let client = state.client.clone();
@@ -476,6 +561,7 @@ async fn start_conversation(
                     TurnStatus::Running {
                         pending: None,
                         client: form.client.clone(),
+                        sent_at: None,
                     },
                 );
 
@@ -586,24 +672,34 @@ fn wants_json(headers: &axum::http::HeaderMap) -> bool {
         .is_some_and(|accept| accept.contains("application/json"))
 }
 
-/// How many conversations there are.
+/// What the conversation list currently amounts to.
 #[derive(Debug, Serialize)]
-struct ConversationCount {
-    count: usize,
+struct ConversationDigest {
+    digest: String,
 }
 
-/// How many conversations there are.
+/// A fingerprint of the conversation list.
 ///
-/// Enough for a page to tell whether its copy of the list is still the whole
-/// list, without asking for the list itself.
-async fn conversation_count(
+/// Enough for a page to tell whether the list it is showing is still the list,
+/// without re-rendering one it already has.
+///
+/// A fingerprint rather than a count, because most of what a page would want to
+/// redraw for leaves the count alone: a rename, a conversation being used, an
+/// archive and a creation that happen to balance.
+/// It costs nothing extra — answering at all means reading every
+/// conversation's metadata, which is where a title comes from anyway.
+async fn conversation_digest(
     State(state): State<AppState>,
-) -> Result<Json<ConversationCount>, AppError> {
+) -> Result<Json<ConversationDigest>, AppError> {
     state
         .client
         .list_conversations()
         .await
-        .map(|list| Json(ConversationCount { count: list.len() }))
+        .map(|list| {
+            Json(ConversationDigest {
+                digest: views::list::digest(&list),
+            })
+        })
         .map_err(|e| AppError::Internal(e.to_string()))
 }
 
@@ -787,12 +883,14 @@ async fn messages(
 ) -> Result<Json<MessagesBody>, AppError> {
     let resp = read_conversation(&state, &id).await?;
     let rendered = render::render_events(&resp.data);
-    // A pending message is only worth showing until the transcript carries it.
-    let landed = render::awaiting_response(&rendered);
-    let view = take_turn_status(&state, &id, landed);
 
     // Walking backwards: a window of what came before what the caller holds.
+    //
+    // Read without consuming. A history fetch happens while the same page is
+    // polling, and this answer carries no failure and no provisional message, so
+    // taking either here would deliver it to nobody.
     if let Some(before) = query.before {
+        let view = peek_turn_status(&state, &id);
         let before = before.min(rendered.len());
         let from = if query.all.is_some_and(|all| all != 0) {
             0
@@ -813,17 +911,22 @@ async fn messages(
         }));
     }
 
-    // What the caller already has, when that is a prefix of what is here. A count
-    // beyond the end means the transcript was rewritten under it — compacted, or
-    // edited on disk — and the only safe answer is the tail, from scratch.
-    let from = query
-        .count
-        .filter(|&count| count <= rendered.len())
-        .unwrap_or_else(|| rendered.len().saturating_sub(WINDOW))
-        // Never past an event that can still change. A tool call is rendered when
-        // it is requested and gains its result later, so sending only what comes
-        // after it would leave the caller holding the question forever.
-        .min(render::settled_upto(&rendered));
+    // The lock is the authority on whether a turn is running. Inferring it from a
+    // transcript ending in a request cannot tell a live turn from one that
+    // failed, and got that wrong in the direction that blocks the composer for a
+    // conversation nothing is working on.
+    //
+    // `view.running` still counts, for the moment between this server starting a
+    // turn and the host taking the lock.
+    let view = take_turn_status(&state, &id, &rendered);
+    let running = view.running || resp.lock.is_held();
+
+    let from = answer_from(
+        query.count,
+        rendered.len(),
+        render::settled_upto(&rendered),
+        running && render::tail_can_change(&rendered),
+    );
 
     let stale = from != rendered.len();
 
@@ -835,18 +938,40 @@ async fn messages(
             .pending
             .as_deref()
             .map(|content| views::detail::pending(content).into_string()),
-        // The lock is the authority on whether a turn is running. Inferring it
-        // from a transcript ending in a request cannot tell a live turn from one
-        // that failed, and got that wrong in the direction that blocks the
-        // composer for a conversation nothing is working on.
-        //
-        // `view.running` still counts, for the moment between this server
-        // starting a turn and the host taking the lock.
         stop: stop_mode(&view, resp.lock, query.client.as_deref()),
         boot: state.boot.clone(),
-        running: view.running || resp.lock.is_held(),
+        running,
         error: view.error,
     }))
+}
+
+/// Where the answer to a poll has to start.
+///
+/// `held` is how much the caller says it has rendered and `settled` where the
+/// first entry that can still change begins, so ordinarily the answer starts at
+/// whichever is lower and carries only what the caller is missing.
+/// A `held` beyond the end means the transcript was rewritten under the caller
+/// — compacted, or edited on disk — and the only safe answer is the tail,
+/// from scratch.
+///
+/// `tail_unsettled` takes one more off the top, for a newest entry that can
+/// change without the count moving — a tool call that gains its result, a
+/// block of assistant text that the next flush adds to.
+/// Counting alone leaves the caller holding the first version of either, and no
+/// later poll corrects it, because by then the count has moved past the entry
+/// that changed.
+fn answer_from(held: Option<usize>, total: usize, settled: usize, tail_unsettled: bool) -> usize {
+    let held = held
+        .filter(|&held| held <= total)
+        .unwrap_or_else(|| total.saturating_sub(WINDOW));
+
+    let final_upto = if tail_unsettled {
+        settled.min(total.saturating_sub(1))
+    } else {
+        settled
+    };
+
+    held.min(final_upto)
 }
 
 /// What stopping the running turn would take, for the client that is asking.
@@ -874,13 +999,32 @@ fn stop_mode(view: &TurnView, lock: LockState, asker: Option<&str>) -> StopMode 
 ///
 /// A failure is reported once: leaving it in place would have every later poll
 /// re-raise an error the reader has already seen.
-/// The pending message is dropped as soon as `landed` says the transcript has
-/// the request, so the page stops showing its provisional copy.
-fn take_turn_status(state: &AppState, id: &str, landed: bool) -> TurnView {
+/// The provisional copy of a submitted message is dropped once `rendered`
+/// carries the request.
+fn take_turn_status(state: &AppState, id: &str, rendered: &[render::RenderedEvent]) -> TurnView {
     let mut turns = state.turns.lock().expect("turns lock poisoned");
 
     match turns.get_mut(id) {
-        Some(TurnStatus::Running { pending, client }) => {
+        Some(TurnStatus::Running {
+            pending,
+            client,
+            sent_at,
+        }) => {
+            // Counted rather than read off the end of the transcript. A fast
+            // first flush can persist the request and an answer to it between
+            // two polls, and a transcript ending in assistant output says
+            // nothing about whether the request below it is the one submitted
+            // here — which left the provisional copy up beside the real one for
+            // the rest of the turn.
+            //
+            // A submission that named no count — a plain form post, or a page
+            // from an older build — has only the end of the transcript to go
+            // on.
+            let landed = sent_at.map_or_else(
+                || render::awaiting_response(rendered),
+                |sent| rendered.len() > sent,
+            );
+
             if landed {
                 pending.take();
             }
@@ -906,6 +1050,31 @@ fn take_turn_status(state: &AppState, id: &str, landed: bool) -> TurnView {
             }
         }
         None => TurnView {
+            running: false,
+            error: None,
+            pending: None,
+            client: None,
+        },
+    }
+}
+
+/// A conversation's turn state, leaving everything where it is.
+///
+/// For a read that is not the live view.
+/// A failure is delivered once, so it has to be taken by the poll that drives
+/// the indicator and not by whatever else the page happens to be asking for at
+/// the time.
+fn peek_turn_status(state: &AppState, id: &str) -> TurnView {
+    let turns = state.turns.lock().expect("turns lock poisoned");
+
+    match turns.get(id) {
+        Some(TurnStatus::Running { client, .. }) => TurnView {
+            running: true,
+            error: None,
+            pending: None,
+            client: client.clone(),
+        },
+        Some(TurnStatus::Failed(_)) | None => TurnView {
             running: false,
             error: None,
             pending: None,
@@ -1058,3 +1227,7 @@ impl IntoResponse for AppError {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "routes_tests.rs"]
+mod tests;

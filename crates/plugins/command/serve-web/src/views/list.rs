@@ -3,8 +3,44 @@
 use chrono::{DateTime, Utc};
 use jp_plugin::message::ConversationSummary;
 use maud::{Markup, PreEscaped, html};
+use sha2::{Digest as _, Sha256};
 
 use crate::views::layout;
+
+/// A fingerprint of the list as it is shown.
+///
+/// Covers what a page would redraw for: which conversations there are, what
+/// they are called, and when each was last used — which is also what orders
+/// them.
+///
+/// Sorted before hashing, so this says nothing about the order the host happens
+/// to list them in.
+/// A conversation moving to the top still changes it, through the timestamp
+/// that moved it.
+pub(crate) fn digest(conversations: &[ConversationSummary]) -> String {
+    let mut entries: Vec<String> = conversations
+        .iter()
+        .map(|entry| {
+            format!(
+                "{}\u{1f}{}\u{1f}{}",
+                entry.id,
+                entry.title.as_deref().unwrap_or_default(),
+                entry.last_activated_at.to_rfc3339(),
+            )
+        })
+        .collect();
+
+    entries.sort();
+
+    let mut hasher = Sha256::new();
+    for entry in entries {
+        hasher.update(entry.as_bytes());
+        hasher.update([0x1e]);
+    }
+
+    let hash = format!("{:x}", hasher.finalize());
+    hash[..16].to_owned()
+}
 
 /// Render the conversation list page.
 ///
@@ -20,9 +56,9 @@ pub(crate) fn render(conversations: &[ConversationSummary]) -> Markup {
     // scroll normally is what makes the platform's own gestures work, including
     // tapping the status bar to return to the top.
     layout::scrolling_page("Conversations", html! {
-        // The count travels with the page so it can ask later whether anything
-        // has been added since, without re-reading the list to find out.
-        header class="page-header" data-count=(sorted.len()) {
+        // The fingerprint travels with the page so it can ask later whether the
+        // list has moved on, without re-reading the list to find out.
+        header class="page-header" data-digest=(digest(conversations)) {
             h1 { "Conversations" }
             a href="/conversations/new" class="new-conversation-link" { "New" }
         }
@@ -93,19 +129,28 @@ pub(crate) fn render(conversations: &[ConversationSummary]) -> Markup {
 /// Coming back to a list that is already current is better than a gesture that
 /// asks for it.
 ///
-/// Only when the count has moved, so a page already showing everything keeps
+/// Only when the list has actually moved on, so a page already showing it keeps
 /// its scroll position and its filter rather than being thrown away to arrive
 /// at the same list.
 const LIST_SCRIPT: &str = r"
 const header = document.querySelector('.page-header');
 
+// What the server says the list amounts to.
+//
+// A fingerprint rather than a count: renaming a conversation, or using one,
+// leaves the count exactly where it was, and so would an archive and a creation
+// between the same two visits.
+async function listDigest() {
+  const r = await fetch('/conversations/digest');
+  if (!r.ok) throw new Error(r.status);
+
+  const { digest } = await r.json();
+  return digest;
+}
+
 async function reloadIfStale() {
   try {
-    const r = await fetch('/conversations/count');
-    if (!r.ok) return;
-
-    const { count } = await r.json();
-    if (String(count) !== header.dataset.count) location.reload();
+    if (await listDigest() !== header.dataset.digest) location.reload();
   } catch (e) {
     // Offline, or the server is restarting. The next return tries again.
   }
@@ -146,7 +191,16 @@ document.addEventListener('submit', async (event) => {
     // Removed rather than reloaded: the rest of the list is unchanged, and a
     // reload would lose the filter and the scroll position.
     row.remove();
-    header.dataset.count = String(Number(header.dataset.count) - 1);
+
+    // The page now matches a list it has not seen, so its fingerprint has to
+    // catch up — otherwise the next return here reloads to show the removal it
+    // is already showing. Asked for rather than computed, since the page holds
+    // no list to compute one from.
+    try {
+      header.dataset.digest = await listDigest();
+    } catch (e) {
+      // Left stale, which costs one reload on the next return and nothing else.
+    }
   } catch (e) {
     alert('Could not archive that conversation.');
   }

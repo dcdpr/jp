@@ -1,7 +1,7 @@
 //! The form for starting a conversation.
 
 use jp_plugin::message::ConfigEntry;
-use maud::{Markup, html};
+use maud::{Markup, PreEscaped, html};
 
 use super::layout;
 
@@ -32,6 +32,11 @@ pub(crate) fn render(
             }
 
             form class="new-conversation" method="post" action="/conversations/new" {
+                // Filled by the script below with this tab's identity, so the
+                // turn this starts is recorded as belonging to the page that is
+                // about to be redirected to it.
+                input type="hidden" id="client" name="client";
+
                 label {
                     span class="field-label" { "Title" }
                     input
@@ -70,9 +75,38 @@ pub(crate) fn render(
                     button type="submit" { "Start" }
                 }
             }
+
+            script { (PreEscaped(CLIENT_SCRIPT)) }
         }
     })
 }
+
+/// Carry this tab's identity into the form.
+///
+/// The conversation this starts is answered with a redirect, and the page that
+/// lands there asks the server whether the running turn is its own.
+/// A turn recorded without a client belongs to nobody, so that page is told the
+/// turn is somebody else's and asks before stopping the turn it just started
+/// itself.
+///
+/// Enhancement, and correct either way: with no script the field stays empty,
+/// the turn is unattributed, and that is the truth — a page that cannot store
+/// an identity has none to claim a turn with.
+const CLIENT_SCRIPT: &str = r"
+// The same per-tab key the conversation page reads, because the page that has to
+// recognise this turn is the one this redirects to, in this same tab.
+try {
+  let id = sessionStorage.getItem('jp-client');
+  if (!id) {
+    id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    sessionStorage.setItem('jp-client', id);
+  }
+  document.getElementById('client').value = id;
+} catch (e) {
+  // Private browsing, or storage denied. The turn stays unattributed, which
+  // reads as shared and errs toward asking.
+}
+";
 
 /// Configurations sharing a namespace, in the order the host listed them.
 struct Group<'a> {

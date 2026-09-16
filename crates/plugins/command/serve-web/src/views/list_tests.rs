@@ -15,6 +15,55 @@ fn summary(id: &str, title: Option<&str>) -> ConversationSummary {
     }
 }
 
+/// The case a count misses: the list is the same length and reads differently.
+#[test]
+fn renaming_a_conversation_changes_the_digest() {
+    let before = [
+        summary("0001", Some("Add a search bar")),
+        summary("0002", None),
+    ];
+    let after = [
+        summary("0001", Some("Add a filter field")),
+        summary("0002", None),
+    ];
+
+    assert_ne!(digest(&before), digest(&after));
+}
+
+/// The other case a count misses: one conversation archived and another started
+/// between two visits leaves the list exactly as long as it was.
+#[test]
+fn swapping_one_conversation_for_another_changes_the_digest() {
+    let before = [summary("0001", Some("Add a search bar"))];
+    let after = [summary("0002", Some("Add a search bar"))];
+
+    assert_ne!(digest(&before), digest(&after));
+}
+
+/// The protocol promises no order, and the page sorts for itself, so the order
+/// the host happens to answer in must not read as a change.
+#[test]
+fn the_digest_ignores_the_order_the_host_lists_them_in() {
+    let one = summary("0001", Some("Add a search bar"));
+    let two = summary("0002", Some("Fix the poller"));
+
+    assert_eq!(
+        digest(&[one.clone(), two.clone()]),
+        digest(&[two, one]),
+        "the same list in a different order is the same list"
+    );
+}
+
+#[test]
+fn an_unchanged_list_keeps_its_digest() {
+    let conversations = [
+        summary("0001", Some("Add a search bar")),
+        summary("0002", None),
+    ];
+
+    assert_eq!(digest(&conversations), digest(&conversations));
+}
+
 #[test]
 fn renders_filter_field_and_entries() {
     let conversations = vec![
