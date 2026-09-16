@@ -9,6 +9,7 @@ pub mod ollama;
 pub mod openai;
 pub(crate) mod openai_compat;
 pub mod openrouter;
+pub mod vllm;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -24,6 +25,7 @@ use llamacpp::Llamacpp;
 use ollama::Ollama;
 use openai::Openai;
 use openrouter::Openrouter;
+use vllm::Vllm;
 
 use crate::{
     error::Result, model::ModelDetails, provider::mock::MockProvider, query::ChatQuery,
@@ -56,6 +58,7 @@ pub fn get_provider(id: ProviderId, config: &LlmProviderConfig) -> Result<Box<dy
         ProviderId::Ollama => Box::new(Ollama::try_from(&config.ollama)?),
         ProviderId::Openai => Box::new(Openai::try_from(&config.openai)?),
         ProviderId::Openrouter => Box::new(Openrouter::try_from(&config.openrouter)?),
+        ProviderId::Vllm => Box::new(Vllm::try_from(&config.vllm)?),
 
         ProviderId::Deepseek => todo!(),
         ProviderId::Xai => todo!(),
@@ -113,6 +116,7 @@ pub(crate) fn build_request_value(
         ProviderId::Openrouter => {
             Openrouter::try_from(&config.openrouter)?.request_value(model, query)
         }
+        ProviderId::Vllm => Vllm::try_from(&config.vllm)?.request_value(model, query),
         ProviderId::Test | ProviderId::Deepseek | ProviderId::Xai => {
             unreachable!("{id:?} is not part of the request snapshot suite")
         }
