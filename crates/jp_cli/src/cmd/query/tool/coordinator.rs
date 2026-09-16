@@ -95,7 +95,7 @@ use jp_conversation::event::{
     InquiryResponse, InquirySource, SelectOption, ToolCallRequest, ToolCallResponse,
 };
 use jp_llm::query::ToolExecution;
-use jp_mcp::server::StderrSink;
+use jp_mcp::server::{StderrSink, service::FormatterError};
 use jp_printer::Printer;
 use jp_tool::{AnswerType, Question};
 use jp_workspace::ConversationMut;
@@ -516,7 +516,8 @@ pub struct ToolCoordinator {
     interrupt_config: ToolInterruptConfig,
     executor_source: Box<dyn ExecutorSource>,
     cancellation_token: CancellationToken,
-    /// Rendered custom argument output accumulated during the permission phase.
+    /// Rendered custom argument output accumulated during the permission phase,
+    /// and for a call whose formatter waited for its answers, once it has run.
     /// Keyed by tool call ID.
     /// Drained by the turn loop to write into event metadata.
     rendered_arguments: HashMap<String, String>,
@@ -604,6 +605,8 @@ impl ToolCoordinator {
     /// produced.
     /// A formatter configured with `format = "ask"` has not run yet at this
     /// point, which is [`PreRender::Deferred`].
+    /// A formatter that needs the call's answers prints nothing here; its
+    /// output is shown once the call has run.
     ///
     /// Returns `Err` if a formatter failed.
     /// The caller should treat that as a tool failure and skip prompting.
@@ -804,7 +807,38 @@ impl ToolCoordinator {
             // call to announce: a bare header would say otherwise.
             return RenderOutcome::Rendered { content: None };
         };
+        // The formatter needs answers the call has not collected. The call
+        // still runs, and the service formats it again once it has; see
+        // `render_deferred_arguments`.
+        if matches!(formatted, Err(FormatterError::InputRequired)) {
+            return RenderOutcome::Rendered { content: None };
+        }
         renderer.render_custom_result(name, formatted.clone().map_err(|error| error.to_string()))
+    }
+
+    /// Show the arguments of a call whose formatter waited for its answers.
+    ///
+    /// Runs when the call's result arrives, so the call is shown ahead of it.
+    /// The call has already run, so a formatter that fails here only leaves the
+    /// call undescribed.
+    fn render_deferred_arguments(&mut self, tool: &ExecutingTool, renderer: &ToolRenderer) {
+        let Some(formatted) = tool.executor.take_deferred_arguments() else {
+            return;
+        };
+        if self.is_hidden(&tool.tool_name) {
+            return;
+        }
+        let outcome = renderer.render_custom_result(
+            &tool.tool_name,
+            formatted.map_err(|error| error.to_string()),
+        );
+        if let RenderOutcome::Rendered {
+            content: Some(content),
+        } = outcome
+        {
+            self.rendered_arguments
+                .insert(tool.tool_id.clone(), content);
+        }
     }
 
     /// Acknowledge the execution service after the conversation owner flushes.
@@ -1741,6 +1775,7 @@ impl ToolCoordinator {
         let tracked_review = &mut reviews[index];
         match result {
             ExecutorResult::Completed(response) => {
+                self.render_deferred_arguments(tool, tool_renderer);
                 match self.result_mode(&tool.tool_name) {
                     ResultMode::Unattended => {
                         self.finish_tool_call(tool, response, tracked_review, tool_renderer);

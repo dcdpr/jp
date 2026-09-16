@@ -53,6 +53,14 @@ pub(crate) trait Executor: Send + Sync {
         None
     }
 
+    /// Custom argument rendering the execution service produced once the call
+    /// had run, for a formatter that needed the call's answers first.
+    ///
+    /// Returned once; later calls return `None`.
+    fn take_deferred_arguments(&self) -> Option<Formatted> {
+        None
+    }
+
     /// Returns the tool call ID.
     fn tool_id(&self) -> &str;
 

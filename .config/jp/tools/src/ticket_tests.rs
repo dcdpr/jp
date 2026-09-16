@@ -44,16 +44,41 @@ fn enum_values(schema: &toml::Value, what: &str) -> Vec<String> {
 /// Drive a tool through the public `run` entry point, exercising argument
 /// parsing and dispatch.
 fn run_tool(dir: &Utf8TempDir, name: &str, args: Value) -> ToolResult {
-    dispatch(dir, Action::Run, name, args)
+    dispatch(dir, Action::Run, name, args, json!({}), json!({}))
+}
+
+/// Drive a tool the way JP re-executes it once a question has been answered.
+fn run_tool_with_answers(dir: &Utf8TempDir, name: &str, args: Value, answers: Value) -> ToolResult {
+    dispatch(dir, Action::Run, name, args, answers, json!({}))
+}
+
+/// Drive a tool with the declaration-level options JP passes alongside the
+/// arguments.
+fn run_tool_with_options(dir: &Utf8TempDir, name: &str, args: Value, options: Value) -> ToolResult {
+    dispatch(dir, Action::Run, name, args, json!({}), options)
 }
 
 /// Drive a tool through the argument-formatting path JP takes before asking for
 /// approval.
 fn preview_tool(dir: &Utf8TempDir, name: &str, args: Value) -> ToolResult {
-    dispatch(dir, Action::FormatArguments, name, args)
+    dispatch(
+        dir,
+        Action::FormatArguments,
+        name,
+        args,
+        json!({}),
+        json!({}),
+    )
 }
 
-fn dispatch(dir: &Utf8TempDir, action: Action, name: &str, args: Value) -> ToolResult {
+fn dispatch(
+    dir: &Utf8TempDir,
+    action: Action,
+    name: &str,
+    args: Value,
+    answers: Value,
+    options: Value,
+) -> ToolResult {
     let ctx = Context {
         root: dir.path().to_path_buf(),
         action,
@@ -65,12 +90,20 @@ fn dispatch(dir: &Utf8TempDir, action: Action, name: &str, args: Value) -> ToolR
         Value::Object(map) => map,
         _ => serde_json::Map::new(),
     };
+    let answers = match answers {
+        Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    let options = match options {
+        Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
 
     run(ctx, Tool {
         name: name.to_owned(),
         arguments,
-        answers: serde_json::Map::new(),
-        options: serde_json::Map::new(),
+        answers,
+        options,
     })
 }
 
@@ -91,6 +124,13 @@ fn error_message(result: ToolResult) -> String {
     match result.expect("tool result") {
         Outcome::Error { message, .. } => message,
         other => panic!("expected error, got: {other:?}"),
+    }
+}
+
+fn question(result: ToolResult) -> Question {
+    match result.expect("tool result") {
+        Outcome::NeedsInput { question } => question,
+        other => panic!("expected a question, got: {other:?}"),
     }
 }
 
@@ -203,6 +243,51 @@ fn create_preview_renders_the_file_that_will_be_written() {
             "> \n",
             "> The header renders one column left of the body.\n",
         )
+    );
+}
+
+/// The preview shows the document that will be written, so a title still
+/// waiting to be shortened has nothing to show yet: it asks the same question
+/// the run would, and JP comes back once the answer is in.
+#[test]
+fn create_preview_asks_before_drawing_a_title_that_will_change() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let question = question(preview_tool(
+        &dir,
+        "ticket_create",
+        json!({
+            "kind": "chore",
+            "title": "Make provider fixtures deterministic and sanitize recorded model output",
+            "body": "Something is wrong."
+        }),
+    ));
+
+    assert_eq!(question.id, "shorter_title");
+}
+
+/// The answered preview draws the ticket under the title that will be filed,
+/// not the one the assistant first asked for.
+#[test]
+fn create_preview_draws_the_answered_title() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let out = strip_ansi(content(dispatch(
+        &dir,
+        Action::FormatArguments,
+        "ticket_create",
+        json!({
+            "kind": "chore",
+            "title": "Make provider fixtures deterministic and sanitize recorded model output",
+            "body": "Something is wrong."
+        }),
+        json!({ "shorter_title": "Sanitize recorded model output in fixtures" }),
+        json!({}),
+    )));
+
+    assert!(
+        out.starts_with("> # Sanitize recorded model output in fixtures\n"),
+        "{out}"
     );
 }
 
@@ -450,6 +535,171 @@ fn create_rejects_an_empty_title() {
     ));
 
     assert_eq!(out, "`title` must not be empty.");
+}
+
+/// A title past the slug budget loses its tail in the filename, so it is put
+/// back as a question instead of being filed under a truncated name.
+#[test]
+fn create_asks_for_a_shorter_title() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let question = question(run_tool(
+        &dir,
+        "ticket_create",
+        json!({
+            "kind": "chore",
+            "title": "Make provider fixtures deterministic and sanitize recorded model output",
+            "body": "Something is wrong."
+        }),
+    ));
+
+    assert_eq!(question.id, "shorter_title");
+    assert_eq!(
+        question.text,
+        "The title is 71 characters, and a ticket takes at most 60. Give a shorter title for: \
+         Make provider fixtures deterministic and sanitize recorded model output"
+    );
+    assert!(
+        ids(&dir).is_empty(),
+        "the ticket was filed before the answer"
+    );
+}
+
+/// The answer replaces the title, and the rest of the call is the one that was
+/// already made: the body does not travel a second time.
+#[test]
+fn a_shorter_title_answer_files_the_ticket() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let out = content(run_tool_with_answers(
+        &dir,
+        "ticket_create",
+        json!({
+            "kind": "chore",
+            "title": "Make provider fixtures deterministic and sanitize recorded model output",
+            "body": "Something is wrong."
+        }),
+        json!({ "shorter_title": "Sanitize recorded model output in fixtures" }),
+    ));
+
+    assert!(
+        out.ends_with("-sanitize-recorded-model-output-in-fixtures.md"),
+        "{out}"
+    );
+
+    let id = ids(&dir).pop().expect("one ticket");
+    let ticket = content(run_tool(
+        &dir,
+        "ticket_show",
+        json!({ "id": id.to_string() }),
+    ));
+    assert!(
+        ticket.starts_with(&format!(
+            "```markdown\n# {id}: Sanitize recorded model output in fixtures\n"
+        )),
+        "{ticket}"
+    );
+    assert!(ticket.contains("Something is wrong."), "{ticket}");
+}
+
+/// The question is asked once.
+/// A replacement that doesn't fit either ends the call, rather than being asked
+/// again under an id that already has an answer.
+#[test]
+fn a_shorter_title_answer_that_still_does_not_fit_ends_the_call() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let out = error_message(run_tool_with_answers(
+        &dir,
+        "ticket_create",
+        json!({ "kind": "chore", "title": "A title that does not fit" }),
+        json!({
+            "shorter_title":
+                "Make provider fixtures deterministic and sanitize recorded model output"
+        }),
+    ));
+
+    assert_eq!(
+        out,
+        "The shorter title is 71 characters, and a ticket takes at most 60."
+    );
+    assert!(ids(&dir).is_empty(), "a refused title filed a ticket");
+}
+
+#[test]
+fn an_empty_shorter_title_answer_ends_the_call() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let out = error_message(run_tool_with_answers(
+        &dir,
+        "ticket_create",
+        json!({ "kind": "chore", "title": "A title that does not fit" }),
+        json!({ "shorter_title": "  " }),
+    ));
+
+    assert_eq!(out, "The shorter title was empty.");
+}
+
+/// The boundary is inclusive: a title that fits exactly is filed under a slug
+/// that carries all of it.
+#[test]
+fn create_accepts_a_title_that_fills_the_slug() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let out = create_ticket(
+        &dir,
+        "Sanitize recorded model output in the provider test fixtures",
+    );
+
+    assert!(
+        out.ends_with("-sanitize-recorded-model-output-in-the-provider-test-fixtures.md"),
+        "{out}"
+    );
+}
+
+#[test]
+fn the_title_limit_is_configurable() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let question = question(run_tool_with_options(
+        &dir,
+        "ticket_create",
+        json!({ "kind": "chore", "title": "Bump the deny list" }),
+        json!({ "max_title_length": 10 }),
+    ));
+
+    assert_eq!(
+        question.text,
+        "The title is 18 characters, and a ticket takes at most 10. Give a shorter title for: \
+         Bump the deny list"
+    );
+}
+
+/// The declaration routes the question and advertises the limit, both by hand,
+/// so both have to be checked against what the tool does.
+#[test]
+fn create_declares_the_question_and_the_limit_it_enforces() {
+    let declaration = declaration("create.toml");
+    let tool = &declaration["conversation"]["tools"]["ticket_create"];
+
+    assert_eq!(
+        tool["questions"][SHORTER_TITLE]["target"].as_str(),
+        Some("assistant"),
+        "the retitle question is not routed to the assistant"
+    );
+
+    let limit = format!("{DEFAULT_MAX_TITLE_LENGTH} characters");
+    for field in [
+        tool["description"].as_str().expect("description"),
+        tool["parameters"]["title"]["summary"]
+            .as_str()
+            .expect("title summary"),
+    ] {
+        assert!(
+            field.contains(&limit),
+            "ticket_create does not advertise the limit `{limit}`: {field}"
+        );
+    }
 }
 
 #[test]

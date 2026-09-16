@@ -560,6 +560,7 @@ impl ExecutorSource for TerminalExecutorSource {
                 service: self.service.clone(),
                 slot,
                 formatted: None,
+                deferred: SyncMutex::new(None),
             }));
         }
 
@@ -592,6 +593,7 @@ impl ExecutorSource for TerminalExecutorSource {
             service: self.service.clone(),
             slot,
             formatted: None,
+            deferred: SyncMutex::new(None),
         }))
     }
 
@@ -900,6 +902,10 @@ pub(crate) struct ToolExecutor {
     service: Arc<Service>,
     slot: Arc<CallSlot>,
     formatted: Option<Formatted>,
+
+    /// Formatter output the service sent once the call had run, waiting for the
+    /// coordinator to take it.
+    deferred: SyncMutex<Option<Formatted>>,
 }
 
 impl ToolExecutor {
@@ -963,6 +969,10 @@ impl Executor for ToolExecutor {
 
     fn formatted_arguments(&self) -> Option<&Formatted> {
         self.formatted.as_ref()
+    }
+
+    fn take_deferred_arguments(&self) -> Option<Formatted> {
+        locked(&self.deferred).take()
     }
 
     fn needs_permission(&self) -> bool {
@@ -1178,8 +1188,28 @@ impl Executor for ToolExecutor {
                 }
             }
             let id = &self.slot.request.id;
-            match state.next().await? {
-                Received::Interaction(interaction) => match *interaction {
+            loop {
+                let interaction = match state.next().await? {
+                    Received::Interaction(interaction) => *interaction,
+                    Received::Finished(result) => {
+                        return Ok(ExecutorResult::Completed(response(id, &result)));
+                    }
+                };
+                return match interaction {
+                    // Kept for the coordinator, which shows it ahead of the
+                    // result that follows.
+                    Interaction::DeferredArguments {
+                        formatted_arguments,
+                        reply,
+                    } => {
+                        *locked(&self.deferred) = Some(formatted_arguments);
+                        reply
+                            .send(Ok(()))
+                            .map_err(|_| ExecutorError::ReplyExpired {
+                                operation: "deferred arguments",
+                            })?;
+                        continue;
+                    }
                     Interaction::Input {
                         request,
                         supporting,
@@ -1213,8 +1243,7 @@ impl Executor for ToolExecutor {
                         Ok(ExecutorResult::Completed(response))
                     }
                     _ => Err(ExecutorError::UnexpectedInteraction { phase: "executing" }),
-                },
-                Received::Finished(result) => Ok(ExecutorResult::Completed(response(id, &result))),
+                };
             }
         };
         let result = tokio::select! {
