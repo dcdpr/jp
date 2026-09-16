@@ -292,7 +292,7 @@
     "summary": "UPPERCASE keywords NONE and WORKSPACE reset config state; loader.reset entry setting provides local resets; ConfigDelta becomes enum to persist resets."
   },
   "079-config-sources-and-load-order.md": {
-    "hash": "f6dc6f90d9a17bd469d82db2b8c4998f43cd8d126e774dc117cc4a9337978321",
+    "hash": "1a9ca633586e826b8ecd5a44d5412e811eb26c3515d270a97c43b9b88e93e7fe",
     "summary": "JP loads config from four implicit sources plus environment variables, with extends directives and inherit flags controlling precedence."
   },
   "074-eager-loading-with-command-declared-data-requirements.md": {
