@@ -19,6 +19,81 @@ fn create_renderer() -> (ChatRenderer, SharedBuffer, SharedBuffer) {
     create_renderer_with_config(AppConfig::new_test())
 }
 
+#[test]
+fn reference_definition_remains_visible_after_its_paragraph_streams() {
+    let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+    let mut renderer = ChatRenderer::new(
+        Arc::new(printer.clone()),
+        AppConfig::new_test().style,
+        RenderFlow::Live,
+    );
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "Read [the documentation][docs].\n\n".into(),
+    });
+    printer.flush();
+    assert_eq!(*out.lock(), "Read [the documentation][docs].\n\n");
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "[docs]: https://example.com/documentation\n".into(),
+    });
+    renderer.flush();
+    printer.flush();
+
+    assert_eq!(
+        *out.lock(),
+        "Read [the documentation][docs].\n\n[docs]: https://example.com/documentation\n\n"
+    );
+    assert_eq!(*err.lock(), "");
+}
+
+#[test]
+fn reference_definitions_render_identically_whole_or_fragmented() {
+    let source = "Read [the documentation][docs].\n\n[docs]:\n  <https://example.com/a_b>\n  \"A \
+                  *literal* title\"\n[other]: /other";
+    let expected = "Read [the documentation][docs].\n\n[docs]:\n  <https://example.com/a_b>\n  \
+                    \"A *literal* title\"\n[other]: /other\n\n";
+
+    let (mut renderer, out, _) = create_renderer();
+    renderer.render_response(&ChatResponse::Message {
+        message: source.into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+    assert_eq!(*out.lock(), expected);
+
+    let (mut renderer, out, _) = create_renderer();
+    for ch in source.chars() {
+        renderer.render_response(&ChatResponse::Message {
+            message: ch.to_string(),
+        });
+    }
+    renderer.flush();
+    renderer.printer.flush();
+    assert_eq!(*out.lock(), expected);
+}
+
+#[test]
+fn reference_definition_waits_for_its_multiline_title() {
+    let (mut renderer, out, _) = create_renderer();
+    renderer.render_response(&ChatResponse::Message {
+        message: "[docs]: https://example.com\n  \"A title that continues\n".into(),
+    });
+    renderer.printer.flush();
+    assert_eq!(*out.lock(), "");
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "  on another line\"\n\nAfter.\n\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+    assert_eq!(
+        *out.lock(),
+        "[docs]: https://example.com\n  \"A title that continues\n  on another \
+         line\"\n\nAfter.\n\n"
+    );
+}
+
 // The gap that spaces a tool call's chrome from the content after it is chrome
 // itself: the chrome is on the error stream, so a stdout captured on its own
 // must not carry a blank line standing in for something that never landed
