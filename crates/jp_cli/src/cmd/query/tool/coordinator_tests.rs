@@ -1,9 +1,12 @@
 use async_trait::async_trait;
+#[cfg(unix)]
 use camino_tempfile::Utf8TempDir;
 #[cfg(unix)]
 use jp_config::AppConfig;
 use jp_config::conversation::tool::{ToolConfig, ToolSource, style::PartialDisplayStyleConfig};
-use jp_inquire::{ReplyEditMode, ReplyOutcome, prompt::MockPromptBackend};
+#[cfg(unix)]
+use jp_inquire::ReplyEditMode;
+use jp_inquire::{ReplyOutcome, prompt::MockPromptBackend};
 #[cfg(unix)]
 use jp_mcp::{Client, server::builtin::BuiltinExecutors};
 use jp_printer::{ErrChannel, OutputFormat, Printer};
