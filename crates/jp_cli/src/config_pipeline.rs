@@ -337,6 +337,12 @@ impl ConfigPipeline {
         unsets: &[String],
     ) -> Result<PartialAppConfig> {
         let mut partial = conversation.fill_from(self.base.clone());
+        if !unsets.is_empty() {
+            debug!(
+                ?unsets,
+                "Conversation clears suppressing base-layer values."
+            );
+        }
         for path in unsets {
             if let Err(error) = partial.unset(path) {
                 warn!(%path, %error, "Ignoring a config delta unset for an unknown field.");
