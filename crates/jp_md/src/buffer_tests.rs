@@ -1363,17 +1363,40 @@ fn test_buffer_thematic_break() {
 }
 
 #[test]
-fn test_buffer_link_ref_def() {
-    let cases = vec![("simple", TestCase {
-        in_out: vec![("[my-link]: https://example.com\n", vec![Event::block(
-            "[my-link]: https://example.com\n",
-        )])],
-        flushed: None,
-    })];
+fn reference_definition_waits_for_a_block_boundary() {
+    let mut buffer = Buffer::new();
+    buffer.push("[my-link]: https://example.com\n");
+    assert_eq!(buffer.next(), None);
 
-    for (name, case) in cases {
-        case.run(name);
-    }
+    buffer.push("  \"A title\"\n\n");
+    assert_eq!(
+        buffer.next(),
+        Some(Event::block(
+            "[my-link]: https://example.com\n  \"A title\"\n\n"
+        ))
+    );
+    assert_eq!(buffer.flush_events(), vec![]);
+}
+
+#[test]
+fn long_reference_definition_does_not_stream_before_its_title_is_complete() {
+    let source = "[docs]: /docs \"This title is long enough to cross the paragraph streaming \
+                  threshold, but its next line still belongs to the definition\n";
+    assert!(source.len() > SETEXT_STREAM_THRESHOLD);
+    let mut buffer = Buffer::new();
+    buffer.push(source);
+    assert_eq!(buffer.next(), None);
+
+    buffer.push("and must be kept as literal source.\"\n\n");
+    assert_eq!(
+        buffer.next(),
+        Some(Event::block(
+            "[docs]: /docs \"This title is long enough to cross the paragraph streaming \
+             threshold, but its next line still belongs to the definition\nand must be kept as \
+             literal source.\"\n\n"
+        ))
+    );
+    assert_eq!(buffer.flush_events(), vec![]);
 }
 
 #[test]

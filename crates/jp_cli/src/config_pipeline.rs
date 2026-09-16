@@ -24,7 +24,7 @@ use jp_config::{
 use jp_storage::backend::FsStorageBackend;
 use jp_workspace::Workspace;
 use relative_path::RelativePath;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use super::{CfgKeyword, KeyValueOrPath};
 use crate::error::{Error, Result};
@@ -314,12 +314,20 @@ impl ConfigPipeline {
     /// base only what it does not, which is what the snapshot already meant for
     /// every field that merges by replacement.
     ///
-    /// `--cfg` still merges on top, where combining is what the user asked for.
+    /// `unsets` carries the conversation's explicitly cleared paths.
+    /// These are cleared after filling so the base cannot restore them.
+    /// `--cfg` merges on top and can set them again.
     pub fn partial_with_conversation(
         &self,
         conversation: PartialAppConfig,
+        unsets: &[String],
     ) -> Result<PartialAppConfig> {
-        let partial = conversation.fill_from(self.base.clone());
+        let mut partial = conversation.fill_from(self.base.clone());
+        for path in unsets {
+            if let Err(error) = partial.unset(path) {
+                warn!(%path, %error, "Ignoring a config delta unset for an unknown field.");
+            }
+        }
         apply_cfg_args(partial, &self.cfg_args)
     }
 

@@ -1,6 +1,9 @@
 //! See [`ConversationStream`].
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+};
 
 use chrono::{DateTime, Utc};
 use jp_config::{AppConfig, ConfigError, FillDefaults as _, PartialAppConfig, PartialConfig as _};
@@ -549,6 +552,37 @@ impl ConversationStream {
         }
 
         Ok(partial)
+    }
+
+    /// Dotted config paths explicitly cleared and not subsequently set.
+    ///
+    /// Reset deltas discard earlier clears.
+    /// A clear followed by a replacement in the same apply delta is not
+    /// included.
+    /// Unknown paths are ignored.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a delta cannot be folded onto the accumulated state.
+    pub fn config_unsets(&self) -> Result<Vec<String>, StreamError> {
+        let mut unsets = BTreeSet::new();
+        for delta in self.config_deltas() {
+            match delta {
+                ConfigDelta::Apply(apply) => unsets.extend(apply.unsets.iter().cloned()),
+                ConfigDelta::Reset(_) => unsets.clear(),
+            }
+        }
+
+        let partial = self.config_partial()?;
+        Ok(unsets
+            .into_iter()
+            .filter(|path| {
+                // Probe the typed path before resolution injects defaults. Clearing
+                // it changes nothing only when the accumulated field is still absent.
+                let mut cleared = partial.clone();
+                cleared.unset(path).is_ok() && cleared == partial
+            })
+            .collect())
     }
 
     /// Removes all events from the end of the stream, until a [`ChatRequest`]

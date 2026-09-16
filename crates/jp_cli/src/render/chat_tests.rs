@@ -19,6 +19,81 @@ fn create_renderer() -> (ChatRenderer, SharedBuffer, SharedBuffer) {
     create_renderer_with_config(AppConfig::new_test())
 }
 
+#[test]
+fn reference_definition_remains_visible_after_its_paragraph_streams() {
+    let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+    let mut renderer = ChatRenderer::new(
+        Arc::new(printer.clone()),
+        AppConfig::new_test().style,
+        RenderFlow::Live,
+    );
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "Read [the documentation][docs].\n\n".into(),
+    });
+    printer.flush();
+    assert_eq!(*out.lock(), "Read [the documentation][docs].\n\n");
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "[docs]: https://example.com/documentation\n".into(),
+    });
+    renderer.flush();
+    printer.flush();
+
+    assert_eq!(
+        *out.lock(),
+        "Read [the documentation][docs].\n\n[docs]: https://example.com/documentation\n\n"
+    );
+    assert_eq!(*err.lock(), "");
+}
+
+#[test]
+fn reference_definitions_render_identically_whole_or_fragmented() {
+    let source = "Read [the documentation][docs].\n\n[docs]:\n  <https://example.com/a_b>\n  \"A \
+                  *literal* title\"\n[other]: /other";
+    let expected = "Read [the documentation][docs].\n\n[docs]:\n  <https://example.com/a_b>\n  \
+                    \"A *literal* title\"\n[other]: /other\n\n";
+
+    let (mut renderer, out, _) = create_renderer();
+    renderer.render_response(&ChatResponse::Message {
+        message: source.into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+    assert_eq!(*out.lock(), expected);
+
+    let (mut renderer, out, _) = create_renderer();
+    for ch in source.chars() {
+        renderer.render_response(&ChatResponse::Message {
+            message: ch.to_string(),
+        });
+    }
+    renderer.flush();
+    renderer.printer.flush();
+    assert_eq!(*out.lock(), expected);
+}
+
+#[test]
+fn reference_definition_waits_for_its_multiline_title() {
+    let (mut renderer, out, _) = create_renderer();
+    renderer.render_response(&ChatResponse::Message {
+        message: "[docs]: https://example.com\n  \"A title that continues\n".into(),
+    });
+    renderer.printer.flush();
+    assert_eq!(*out.lock(), "");
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "  on another line\"\n\nAfter.\n\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+    assert_eq!(
+        *out.lock(),
+        "[docs]: https://example.com\n  \"A title that continues\n  on another \
+         line\"\n\nAfter.\n\n"
+    );
+}
+
 // The gap that spaces a tool call's chrome from the content after it is chrome
 // itself: the chrome is on the error stream, so a stdout captured on its own
 // must not carry a blank line standing in for something that never landed
@@ -560,6 +635,110 @@ fn test_consecutive_reasoning_events_form_one_region() {
         strip_ansi(&out.lock()),
         "I can test this directly by verifying the return value.\n\n"
     );
+}
+
+#[test]
+fn reasoning_terminator_does_not_add_spacing_at_end_of_stream() {
+    for (terminator, background) in [
+        ("", None),
+        ("\n\n", None),
+        ("", Some(Color::Ansi256(236))),
+        ("\n\n", Some(Color::Ansi256(236))),
+    ] {
+        let mut config = AppConfig::new_test();
+        config.style.reasoning.display = ReasoningDisplayConfig::Full;
+        config.style.reasoning.background = background;
+        let (mut renderer, out, err) = create_renderer_with_config(config);
+
+        renderer.render_response(&ChatResponse::reasoning("**Heading**\n\nBody."));
+        renderer.render_response(&ChatResponse::reasoning(terminator));
+        renderer.flush();
+        renderer.printer.flush();
+
+        assert_eq!(strip_ansi(&out.lock()), "**Heading**\n\nBody.\n\n");
+        assert_eq!(*err.lock(), "");
+    }
+}
+
+#[test]
+fn reasoning_terminator_does_not_add_spacing_before_message() {
+    for (terminator, background) in [
+        ("", None),
+        ("\n\n", None),
+        ("", Some(Color::Ansi256(236))),
+        ("\n\n", Some(Color::Ansi256(236))),
+    ] {
+        let mut config = AppConfig::new_test();
+        config.style.reasoning.display = ReasoningDisplayConfig::Full;
+        config.style.reasoning.background = background;
+        let (mut renderer, out, err) = create_renderer_with_config(config);
+
+        renderer.render_response(&ChatResponse::reasoning("**Heading**\n\nBody."));
+        renderer.render_response(&ChatResponse::reasoning(terminator));
+        renderer.render_response(&ChatResponse::message("Answer."));
+        renderer.flush();
+        renderer.printer.flush();
+
+        assert_eq!(
+            strip_ansi(&out.lock()),
+            "**Heading**\n\nBody.\n\nAnswer.\n\n"
+        );
+        assert_eq!(*err.lock(), "");
+    }
+}
+
+#[test]
+fn reasoning_terminator_does_not_add_spacing_at_tool_boundary() {
+    for (terminator, background) in [
+        ("", None),
+        ("\n\n", None),
+        ("", Some(Color::Ansi256(236))),
+        ("\n\n", Some(Color::Ansi256(236))),
+    ] {
+        let mut config = AppConfig::new_test();
+        config.style.reasoning.display = ReasoningDisplayConfig::Full;
+        config.style.reasoning.background = background;
+        let (mut renderer, out, err) = create_renderer_with_config(config);
+
+        renderer.render_response(&ChatResponse::reasoning("**Heading**\n\nBody."));
+        renderer.render_response(&ChatResponse::reasoning(terminator));
+        renderer.enter_tool_call();
+        renderer.flush();
+        renderer.printer.flush();
+
+        assert_eq!(strip_ansi(&out.lock()), "**Heading**\n\nBody.\n\n");
+        assert_eq!(*err.lock(), "");
+    }
+}
+
+#[test]
+fn reasoning_terminator_consumes_truncation_budget() {
+    // The renderer counts all input characters, including provider-inserted
+    // newlines. Adding a terminator can exhaust the budget even when the
+    // visible text fits; the renderer cannot distinguish it from model text.
+    for (terminator, expected) in [
+        ("", "Think\n\nAnswer.\n\n"),
+        ("\n\n", "Think ...\n\nAnswer.\n\n"),
+    ] {
+        let mut config = AppConfig::new_test();
+        config.style.reasoning.display =
+            ReasoningDisplayConfig::Truncate(TruncateChars { characters: 6 });
+        config.style.reasoning.background = None;
+        let (mut renderer, out, err) = create_renderer_with_config(config);
+
+        renderer.render_response(&ChatResponse::reasoning("Think"));
+        renderer.render_response(&ChatResponse::reasoning(terminator));
+        renderer.render_response(&ChatResponse::message("Answer."));
+        renderer.flush();
+        renderer.printer.flush();
+
+        assert_eq!(
+            strip_ansi(&out.lock()),
+            expected,
+            "terminator: {terminator:?}"
+        );
+        assert_eq!(*err.lock(), "");
+    }
 }
 
 /// A provider-supplied blank line splits one reasoning region into two blocks.

@@ -208,7 +208,7 @@ fn with_conversation_preserves_cfg_over_conversation() {
     let mut conv = PartialAppConfig::empty();
     conv.conversation.start_local = Some(false);
 
-    let partial = pipeline.partial_with_conversation(conv).unwrap();
+    let partial = pipeline.partial_with_conversation(conv, &[]).unwrap();
     // `--cfg` should win over conversation layer
     assert_eq!(partial.conversation.start_local, Some(true));
 }
@@ -220,8 +220,76 @@ fn conversation_layer_overrides_base() {
     let mut conv = PartialAppConfig::empty();
     conv.conversation.start_local = Some(true);
 
-    let partial = pipeline.partial_with_conversation(conv).unwrap();
+    let partial = pipeline.partial_with_conversation(conv, &[]).unwrap();
     assert_eq!(partial.conversation.start_local, Some(true));
+}
+
+#[test]
+fn conversation_clears_prevent_base_values_from_returning() {
+    let mut pipeline = empty_pipeline();
+    pipeline.base.assistant.name = Some("Bot".to_owned());
+    pipeline.base.user.name = Some("Alice".to_owned());
+    pipeline
+        .base
+        .providers
+        .mcp
+        .insert("bookworm".to_owned(), mcp_server("serve"));
+    pipeline
+        .base
+        .providers
+        .mcp
+        .insert("kagi".to_owned(), mcp_server("search"));
+    let mut conversation = pipeline.base.clone();
+    conversation.assistant.name = None;
+    conversation.providers.mcp.shift_remove("kagi");
+    conversation
+        .unset("providers.mcp.bookworm.arguments")
+        .unwrap();
+
+    let partial = pipeline
+        .partial_with_conversation(conversation, &[
+            "assistant.name".to_owned(),
+            "providers.mcp.bookworm.arguments".to_owned(),
+            "providers.mcp.kagi".to_owned(),
+        ])
+        .unwrap();
+
+    assert_eq!(partial.assistant.name, None);
+    assert_eq!(partial.user.name.as_deref(), Some("Alice"));
+    assert_eq!(mcp_arguments(&partial, "bookworm"), None);
+    assert!(!partial.providers.mcp.contains_key("kagi"));
+}
+
+#[test]
+fn conversation_clears_allow_explicit_cfg_values() {
+    let mut pipeline = empty_pipeline();
+    pipeline.base.assistant.name = Some("Bot".to_owned());
+    pipeline.cfg_args.push(ResolvedCfgArg::KeyValue(
+        "assistant.name=NewBot".parse().unwrap(),
+    ));
+
+    let partial = pipeline
+        .partial_with_conversation(PartialAppConfig::empty(), &["assistant.name".to_owned()])
+        .unwrap();
+
+    assert_eq!(partial.assistant.name.as_deref(), Some("NewBot"));
+}
+
+#[test]
+fn conversation_clears_allow_cfg_resets() {
+    let mut pipeline = empty_pipeline();
+    pipeline.base.assistant.name = Some("Bot".to_owned());
+    pipeline
+        .cfg_args
+        .push(ResolvedCfgArg::Reset(ConfigReset::Workspace(Box::new(
+            pipeline.base.clone(),
+        ))));
+
+    let partial = pipeline
+        .partial_with_conversation(PartialAppConfig::empty(), &["assistant.name".to_owned()])
+        .unwrap();
+
+    assert_eq!(partial.assistant.name.as_deref(), Some("Bot"));
 }
 
 /// An MCP server entry with a command and one argument.
@@ -258,7 +326,9 @@ fn conversation_layer_does_not_duplicate_an_appended_list() {
         base,
         cfg_args: vec![],
     };
-    let partial = pipeline.partial_with_conversation(conversation).unwrap();
+    let partial = pipeline
+        .partial_with_conversation(conversation, &[])
+        .unwrap();
 
     assert_eq!(
         mcp_arguments(&partial, "bookworm"),
@@ -292,7 +362,9 @@ fn conversation_layer_keeps_a_server_only_the_file_layer_has() {
         base,
         cfg_args: vec![],
     };
-    let partial = pipeline.partial_with_conversation(conversation).unwrap();
+    let partial = pipeline
+        .partial_with_conversation(conversation, &[])
+        .unwrap();
 
     assert_eq!(
         mcp_arguments(&partial, "kagi"),

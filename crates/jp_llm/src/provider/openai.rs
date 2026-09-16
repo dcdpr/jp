@@ -132,12 +132,20 @@ impl Provider for Openai {
             return Ok(stream::iter(events.into_iter().map(Ok::<_, StreamError>)).boxed());
         }
 
+        let mut reasoning = ReasoningState::default();
         let raw_stream = self
             .client
             .stream(request)
             .filter_map(skip_unknown_events)
             .or_else(map_error)
-            .map_ok(move |v| stream::iter(map_event(v, is_structured, reasoning_enabled)))
+            .map_ok(move |v| {
+                stream::iter(map_event(
+                    v,
+                    is_structured,
+                    reasoning_enabled,
+                    &mut reasoning,
+                ))
+            })
             .try_flatten()
             .boxed();
 
@@ -154,12 +162,13 @@ fn map_non_streaming_response(
     reasoning_enabled: bool,
 ) -> Result<Vec<Event>> {
     let incomplete_reason = response.incomplete_details.map(|details| details.reason);
+    let mut reasoning = ReasoningState::default();
     let mut events = response
         .output
         .into_iter()
         .enumerate()
         .flat_map(|(index, item)| synthesize_non_streaming_output_item_events(index, item))
-        .flat_map(|event| map_event(event, is_structured, reasoning_enabled))
+        .flat_map(|event| map_event(event, is_structured, reasoning_enabled, &mut reasoning))
         .collect::<std::result::Result<Vec<_>, StreamError>>()?;
 
     events.push(map_non_streaming_finish_reason(
@@ -1333,6 +1342,50 @@ async fn map_error(error: OpenaiStreamError) -> std::result::Result<types::Event
     })
 }
 
+/// Tracks the last text-bearing reasoning item within one provider response.
+#[derive(Default)]
+struct ReasoningState {
+    index: Option<usize>,
+    trailing_newlines: usize,
+}
+
+impl ReasoningState {
+    fn delta(&mut self, index: usize, text: String) -> Event {
+        let has_text = !text.trim().is_empty();
+        let missing = if has_text && self.index.is_some_and(|previous| previous != index) {
+            let leading_newlines = text
+                .chars()
+                .take_while(char::is_ascii_whitespace)
+                .filter(|c| *c == '\n')
+                .take(2)
+                .count();
+            2_usize.saturating_sub(self.trailing_newlines + leading_newlines)
+        } else {
+            0
+        };
+        let text = match missing {
+            2 => format!("\n\n{text}"),
+            1 => format!("\n{text}"),
+            _ => text,
+        };
+
+        // Empty items and whitespace-only deltas must not consume the boundary.
+        // Track line endings across chunks so split or existing blank lines count.
+        if has_text {
+            self.index = Some(index);
+        }
+        for character in text.chars() {
+            match character {
+                '\n' => self.trailing_newlines = (self.trailing_newlines + 1).min(2),
+                ' ' | '\t' | '\r' => {}
+                _ => self.trailing_newlines = 0,
+            }
+        }
+
+        Event::reasoning(index, text)
+    }
+}
+
 /// Map an Openai [`types::Event`] into one or more [`Event`]s.
 ///
 /// This is the only place where OpenAI wire events become JP events.
@@ -1344,6 +1397,7 @@ fn map_event(
     event: types::Event,
     is_structured: bool,
     reasoning_enabled: bool,
+    reasoning: &mut ReasoningState,
 ) -> Vec<std::result::Result<Event, StreamError>> {
     use types::Event::*;
 
@@ -1351,6 +1405,12 @@ fn map_event(
         event = serde_json::to_string(&event).unwrap_or_default(),
         "Received event from OpenAI API."
     );
+
+    if let OutputItemAdded { item, .. } = &event
+        && !matches!(item, types::OutputItem::Reasoning(_))
+    {
+        *reasoning = ReasoningState::default();
+    }
 
     #[expect(clippy::cast_possible_truncation)]
     match event {
@@ -1426,13 +1486,13 @@ fn map_event(
             output_index,
             summary_index,
             ..
-        } if summary_index > 0 => vec![Ok(Event::reasoning(output_index as usize, "\n\n"))],
+        } if summary_index > 0 => vec![Ok(reasoning.delta(output_index as usize, "\n\n".into()))],
 
         ReasoningSummaryTextDelta {
             delta,
             output_index,
             ..
-        } => vec![Ok(Event::reasoning(output_index as usize, delta))],
+        } => vec![Ok(reasoning.delta(output_index as usize, delta))],
 
         FunctionCallArgumentsDelta {
             delta,
@@ -1486,6 +1546,7 @@ fn map_event(
         ResponseCompleted { response }
         | ResponseIncomplete { response }
         | ResponseFailed { response } => {
+            *reasoning = ReasoningState::default();
             let incomplete_reason = response.incomplete_details.map(|d| d.reason);
             match map_non_streaming_finish_reason(response.status, incomplete_reason) {
                 Ok(event) => vec![Ok(event)],

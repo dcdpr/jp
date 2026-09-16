@@ -136,6 +136,109 @@ fn a_delta_that_only_clears_is_recorded() {
     assert!(resolved_arguments(&stream).is_empty());
 }
 
+#[test]
+fn config_unsets_keeps_clears_across_unrelated_deltas() {
+    let mut stream = stream_with_server(&["serve"]);
+    stream.add_config_delta(ApplyDelta::with_unsets(
+        delta_timestamp(),
+        PartialAppConfig::empty(),
+        vec![
+            "assistant.name".to_owned(),
+            "providers.mcp.bookworm.arguments".to_owned(),
+        ],
+    ));
+    let mut partial = PartialAppConfig::empty();
+    partial.user.name = Some("Alice".to_owned());
+    stream.add_config_delta(ApplyDelta::new(delta_timestamp(), partial));
+
+    assert_eq!(stream.config_unsets().unwrap(), [
+        "assistant.name",
+        "providers.mcp.bookworm.arguments",
+    ]);
+}
+
+#[test]
+fn config_unsets_drops_a_path_when_a_later_delta_sets_it() {
+    let mut stream = stream_with_server(&["serve"]);
+    stream.add_config_delta(ApplyDelta::with_unsets(
+        delta_timestamp(),
+        PartialAppConfig::empty(),
+        vec![
+            "assistant.name".to_owned(),
+            "providers.mcp.bookworm.arguments".to_owned(),
+        ],
+    ));
+    stream.add_config_delta(ApplyDelta::new(
+        delta_timestamp(),
+        server_arguments_partial(&["run"]),
+    ));
+
+    assert_eq!(stream.config_unsets().unwrap(), ["assistant.name"]);
+}
+
+#[test]
+fn config_unsets_excludes_a_same_delta_replacement() {
+    let mut stream = stream_with_server(&["serve", "--verbose"]);
+    stream.add_config_delta(ApplyDelta::with_unsets(
+        delta_timestamp(),
+        server_arguments_partial(&["serve"]),
+        vec![
+            "assistant.name".to_owned(),
+            "providers.mcp.bookworm.arguments".to_owned(),
+        ],
+    ));
+
+    assert_eq!(stream.config_unsets().unwrap(), ["assistant.name"]);
+}
+
+#[test]
+fn config_unsets_discards_clears_before_a_reset() {
+    let mut stream = stream_with_server(&["serve"]);
+    stream.add_config_delta(ApplyDelta::with_unsets(
+        delta_timestamp(),
+        PartialAppConfig::empty(),
+        vec!["assistant.name".to_owned()],
+    ));
+    stream.add_config_delta(ResetDelta {
+        timestamp: delta_timestamp(),
+    });
+    stream.add_config_delta(ApplyDelta::with_unsets(
+        delta_timestamp(),
+        PartialAppConfig::empty(),
+        vec!["user.name".to_owned()],
+    ));
+
+    assert_eq!(stream.config_unsets().unwrap(), ["user.name"]);
+}
+
+#[test]
+fn config_unsets_keeps_a_removed_map_entry() {
+    let mut stream = stream_with_server(&["serve"]);
+    stream.add_config_delta(ApplyDelta::with_unsets(
+        delta_timestamp(),
+        PartialAppConfig::empty(),
+        vec!["providers.mcp.bookworm".to_owned()],
+    ));
+
+    assert_eq!(stream.config_unsets().unwrap(), ["providers.mcp.bookworm"]);
+}
+
+#[test]
+fn config_unsets_deduplicates_paths_and_ignores_unknown_fields() {
+    let mut stream = stream_with_server(&["serve"]);
+    stream.add_config_delta(ApplyDelta::with_unsets(
+        delta_timestamp(),
+        PartialAppConfig::empty(),
+        vec![
+            "assistant.name".to_owned(),
+            "assistant.removed_field".to_owned(),
+            "assistant.name".to_owned(),
+        ],
+    ));
+
+    assert_eq!(stream.config_unsets().unwrap(), ["assistant.name"]);
+}
+
 /// A config granting the local tool `bash` the named access rules.
 ///
 /// Both rule lists carry their own merge strategy, which is what puts them on

@@ -288,22 +288,19 @@ fn render_omits_stdout_section_when_empty() {
 }
 
 #[test]
-fn render_strips_trace_path_marker_from_stderr() {
+fn render_strips_streaming_trace_path_marker_from_stderr() {
     // The marker line jp emits to advertise the trace path should not
-    // appear inside the rendered stderr block — it's already in the footer.
+    // appear inside the rendered stderr block; it is already in the footer.
     let mut launch = fixture_launch();
-    launch.stderr = "some real error\nFull trace log written to: /tmp/x\n".into();
+    launch.stderr = "some real error\nStreaming trace logs to: /tmp/x\n".into();
 
     let report = render(&[], 0, &launch, &["c".into()], fixture_paths());
     assert!(report.contains("## stderr"));
     assert!(report.contains("some real error"));
-    // The marker line appears in the footer reference, not inside the
-    // stderr fenced block. We verify by checking that the stderr block
-    // closes before the marker text could possibly appear.
     let stderr_start = report.find("## stderr").unwrap();
     let footer_start = report.find("**Files:**").unwrap();
     let stderr_section = &report[stderr_start..footer_start];
-    assert!(!stderr_section.contains("Full trace log written to"));
+    assert!(!stderr_section.contains("Streaming trace logs to"));
 }
 
 #[test]

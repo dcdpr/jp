@@ -192,7 +192,7 @@ impl IntoPartialAppConfig for Commands {
         partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,
         handle: &jp_workspace::ConversationHandle,
-    ) -> Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<(PartialAppConfig, Vec<String>), Box<dyn std::error::Error + Send + Sync>> {
         match self {
             Commands::Query(args) => {
                 args.apply_conversation_config(workspace, partial, merged_config, handle)
@@ -204,7 +204,7 @@ impl IntoPartialAppConfig for Commands {
             | Commands::Init(_)
             | Commands::Plugin(_)
             | Commands::Workspace(_)
-            | Commands::External(_) => Ok(partial),
+            | Commands::External(_) => Ok((partial, Vec::new())),
         }
     }
 }

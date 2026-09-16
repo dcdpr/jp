@@ -293,6 +293,7 @@ pub(crate) trait IntoPartialAppConfig {
         merged_config: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>>;
 
+    /// Apply the conversation layer and return its explicitly cleared paths.
     #[expect(unused_variables)]
     fn apply_conversation_config(
         &self,
@@ -300,8 +301,11 @@ pub(crate) trait IntoPartialAppConfig {
         partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,
         handle: &jp_workspace::ConversationHandle,
-    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(partial)
+    ) -> std::result::Result<
+        (PartialAppConfig, Vec<String>),
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        Ok((partial, Vec::new()))
     }
 }
 
