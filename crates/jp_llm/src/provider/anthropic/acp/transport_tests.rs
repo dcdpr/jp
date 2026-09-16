@@ -176,6 +176,40 @@ fn an_explicit_output_limit_is_forwarded() {
     );
 }
 
+/// An approval prompt can stay open across a lunch break or a closed laptop,
+/// and the adapter's two per-call timers measure wall-clock time regardless of
+/// whether JP is scheduled to run.
+///
+/// A progress notification cannot stand in for this: a heartbeat only resets
+/// the timer if it arrives, and a suspended process sends nothing.
+#[test]
+fn neither_per_call_timer_can_abort_a_call_waiting_on_the_user() {
+    const WEEK_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+
+    let environment = options::environment(&prepared(), CachePolicy::Short);
+
+    assert_eq!(
+        environment
+            .get("CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT")
+            .map(String::as_str),
+        Some("0"),
+        "the idle check has an off switch, and off is what survives suspension"
+    );
+
+    // The wall clock has no off switch, so the ceiling stands in for one: a
+    // prompt that outlives it has outlived the 32-bit millisecond timer behind
+    // it.
+    let ceiling: i64 = environment
+        .get("MCP_TOOL_TIMEOUT")
+        .expect("a wall-clock ceiling")
+        .parse()
+        .expect("a plain millisecond count, which is all the adapter parses");
+    assert!(
+        ceiling >= WEEK_MS,
+        "a week is the least a prompt left over a holiday needs, got {ceiling}ms"
+    );
+}
+
 #[test]
 fn project_directory_is_scoped_by_host_identity_not_worktree_path() {
     let mut context = QueryContext {
