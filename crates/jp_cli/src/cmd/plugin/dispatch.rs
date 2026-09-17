@@ -4,7 +4,7 @@
 //! the plugin sends `exit` or the process terminates.
 
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt::Write as _,
     fs,
     io::{self, BufRead, BufReader, Write},
@@ -40,26 +40,33 @@ use jp_plugin::{
         ComposeMode, ComposeOption, ComposeRequest, ComposeResponse, ConfigEntry, ConfigResponse,
         ConfigsResponse, ConversationSummary, ConversationsResponse, CreatedResponse,
         DescribeResponse, DoneResponse, DraftResponse, ErrorResponse, EventsResponse, HostToPlugin,
-        InitMessage, LockState, LogMessage, OutputFormat as PluginOutputFormat, PathsInfo,
-        PluginToHost, QueryCompleteResponse, QueryRequest, SetTitleRequest, WorkspaceInfo,
-        WriteDraftRequest,
+        InitMessage, InterruptAction as WireAction, InterruptRequest, LockState, LogMessage,
+        OutputFormat as PluginOutputFormat, PathsInfo, PluginToHost, QueryCompleteResponse,
+        QueryRequest, SetTitleRequest, WorkspaceInfo, WriteDraftRequest,
     },
 };
 use jp_printer::{OutputFormat, Printer};
 use jp_storage::backend::{FsStorageBackend, Projection};
+use jp_task::task::TitleGeneratorTask;
 use jp_workspace::{ConversationLock, LockResult, Workspace, session::Session};
 use serde_json::Value;
-use tokio::{sync::mpsc, task::JoinSet};
+use tokio::{
+    sync::mpsc::{self, error::TrySendError},
+    task::JoinSet,
+};
 use tracing::{debug, error, info, trace, warn};
 
 use super::registry;
 use crate::{
     Ctx, KeyValueOrPath, cmd,
-    cmd::query::{PendingStreamTrim, TurnInputs, interrupt::reply_edit_mode},
+    cmd::query::{
+        NewTitle, PendingStreamTrim, TurnInputs,
+        interrupt::{InterruptAction, TurnInterruptSender, TurnInterrupts, reply_edit_mode},
+        resolve_new_title,
+    },
     config_pipeline::{build_partial_over, config_search_roots},
     ctx::McpServerScope,
     editor::{draft_query_text, draft_revision, report_editor_failure},
-    signals::SignalRouter,
 };
 
 /// Runs the prompts a plugin asks for.
@@ -398,6 +405,7 @@ pub(crate) async fn run_plugin(
         &shutdown_sent,
         &composer,
         &mut turns,
+        &RunningTurns::default(),
     )
     .await;
 
@@ -604,6 +612,7 @@ async fn message_loop(
     shutdown_sent: &AtomicBool,
     composer: &Composer,
     turns: &mut JoinSet<()>,
+    running: &RunningTurns,
 ) -> Result<(), cmd::Error> {
     while let Some(line) = requests.recv().await {
         if line.trim().is_empty() {
@@ -629,7 +638,7 @@ async fn message_loop(
 
             PluginToHost::Query(request) => {
                 // `None` means the turn is running and will answer for itself.
-                if let Some(response) = run_query(ctx, request, stdin, turns).await {
+                if let Some(response) = run_query(ctx, request, stdin, turns, running).await {
                     let mut writer = stdin.lock().expect("stdin lock poisoned");
                     write_message(&mut *writer, &response)
                         .map_err(|e| cmd::Error::from(format!("failed to answer a query: {e}")))?;
@@ -640,7 +649,6 @@ async fn message_loop(
                 let config = ctx.config();
                 let fs_backend = ctx.fs_backend.clone();
                 let session = ctx.session.clone();
-                let signals = ctx.signals.clone();
                 let mut writer = stdin.lock().expect("stdin lock poisoned");
 
                 if handle_request(
@@ -651,7 +659,7 @@ async fn message_loop(
                     session.as_ref(),
                     fs_backend.as_deref(),
                     &config,
-                    &signals,
+                    running,
                 )? == Flow::Stop
                 {
                     return Ok(());
@@ -691,6 +699,7 @@ async fn run_query(
     request: QueryRequest,
     stdin: &Arc<Mutex<ChildStdin>>,
     turns: &mut JoinSet<()>,
+    running: &RunningTurns,
 ) -> Option<HostToPlugin> {
     let reply_id = request.id.clone();
     let failed = |message: String| Some(query_error(reply_id.clone(), message));
@@ -710,7 +719,7 @@ async fn run_query(
     // dispatched while the task may not have started. A handler registered by
     // the task itself would not exist yet, and the stop request would be
     // reported as reaching nothing.
-    let turn_interrupt = ctx.signals.turn_interrupt(lock.id());
+    let turn_interrupt = ctx.signals.turn_interrupt();
 
     // Read from the lock, not the request: a new conversation was named by the
     // host, and the plugin has no other way to learn its id.
@@ -754,24 +763,54 @@ async fn run_query(
         "Running a delegated query.",
     );
 
+    let chat_request = ChatRequest {
+        content: request.content,
+        author: config.user.name.clone(),
+        ..ChatRequest::default()
+    };
+
+    // Registered before the turn starts, so an interrupt that arrives while it
+    // is still being prepared is delivered rather than refused as "no turn is
+    // running".
+    let interrupts = running.register(lock.id());
+
     // Swapped around collecting only, because that is the part that reads the
     // context. The turn itself carries the config it was given.
     let host_config = ctx.swap_config(Arc::clone(&config));
-    let prepared = prepare_turn(ctx, config, &lock, request.content).await;
+    let prepared = prepare_turn(
+        ctx,
+        Arc::clone(&config),
+        &lock,
+        chat_request.clone(),
+        interrupts,
+    )
+    .await;
     ctx.swap_config(host_config);
 
     let (inputs, stream) = match prepared {
         Ok(prepared) => prepared,
-        Err(error) => return failed(error.to_string()),
+        Err(error) => {
+            running.finished(lock.id());
+            return failed(error.to_string());
+        }
     };
+
+    let title_task = resolve_title(&config, &lock, &stream, &chat_request);
 
     // Hand the turn to its own task. It owns everything it needs and the lock owns
     // itself, so nothing here is borrowed for the minutes a turn can take, which
     // is what keeps the message loop answering reads while it runs.
     let stdin = Arc::clone(stdin);
+    let running = running.clone();
 
     turns.spawn(async move {
-        let outcome = inputs.run(&lock, stream, turn_interrupt).await;
+        // Alongside the turn rather than after it: the two are independent
+        // requests, and whoever is looking at a list of conversations wants a
+        // name for this one long before the answer arrives.
+        let (outcome, ()) = tokio::join!(
+            inputs.run(&lock, stream, turn_interrupt),
+            write_generated_title(title_task, &lock),
+        );
 
         // Reported through tracing rather than to the terminal. These are facts
         // about the host, not content: the turn's output belongs to the
@@ -792,6 +831,14 @@ async fn run_query(
                 query_error(reply_id, detail)
             }
         };
+
+        // Both before the answer goes out, because the answer is what a client
+        // waits on before sending its next request. Reporting the turn as
+        // finished while it still held the conversation would have that request
+        // refused as already-locked, and an interrupt aimed at a turn that has
+        // stopped reading would be accepted and then dropped.
+        running.finished(lock.id());
+        drop(lock);
 
         let mut writer = stdin.lock().expect("stdin lock poisoned");
         drop(write_message(&mut *writer, &reply));
@@ -931,7 +978,8 @@ async fn prepare_turn(
     ctx: &mut Ctx,
     config: Arc<AppConfig>,
     lock: &ConversationLock,
-    content: String,
+    chat_request: ChatRequest,
+    interrupts: TurnInterrupts,
 ) -> Result<(TurnInputs, ConversationStream), cmd::Error> {
     // The client was built from the config this host read at startup. A provider
     // added to the workspace since then is otherwise unknown to it, and starting
@@ -947,12 +995,6 @@ async fn prepare_turn(
     let mcp_servers = ctx
         .configure_active_mcp_servers(forced_tool, McpServerScope::Shared)
         .await?;
-
-    let chat_request = ChatRequest {
-        content,
-        author: config.user.name.clone(),
-        ..ChatRequest::default()
-    };
 
     // The message has moved from draft to request, so the draft is done. Clearing
     // it here rather than from the caller gives it one owner: a client that
@@ -1018,10 +1060,88 @@ async fn prepare_turn(
         // tool at `ask` runs rather than stopping for approval, matching what
         // `jp query --no-interactive` does.
         false,
+        interrupts,
     )
     .await?;
 
     Ok((inputs, stream))
+}
+
+/// Decide how a conversation nobody has named gets a title from its first
+/// message.
+///
+/// A leading markdown heading is written straight to the conversation.
+/// Anything else needs the model, and comes back as a task for the caller to
+/// run.
+/// Returns `None` when the conversation already has a title, already has
+/// events, or the configuration asks for neither route.
+fn resolve_title(
+    config: &AppConfig,
+    lock: &ConversationLock,
+    stream: &ConversationStream,
+    chat_request: &ChatRequest,
+) -> Option<TitleGeneratorTask> {
+    if lock.metadata().title.is_some() || !stream.is_empty() {
+        return None;
+    }
+
+    match resolve_new_title(
+        config.conversation.title.from_heading,
+        config.conversation.title.generate.auto,
+        &chat_request.content,
+    ) {
+        NewTitle::FromHeading(title) => {
+            debug!(conversation = %lock.id(), "Titling from the prompt's leading heading.");
+            lock.as_mut()
+                .update_metadata(|meta| meta.title = Some(title));
+            None
+        }
+        NewTitle::Generate => {
+            // The title model is configured separately from the assistant's, so
+            // a broken one must not take the turn down with it.
+            let mut events = stream.clone();
+            events.start_turn(chat_request.clone());
+
+            match TitleGeneratorTask::new(lock.id(), events, config, false) {
+                Ok(task) => Some(task),
+                Err(error) => {
+                    warn!(%error, "Skipping title generation.");
+                    None
+                }
+            }
+        }
+        NewTitle::Skip => None,
+    }
+}
+
+/// Run a title task and record what it produced.
+///
+/// Writes through the turn's own lock, so the name is on disk as soon as the
+/// model answers rather than when the turn ends.
+async fn write_generated_title(task: Option<TitleGeneratorTask>, lock: &ConversationLock) {
+    let Some(task) = task else {
+        return;
+    };
+
+    let title = match task.generate().await {
+        Ok(Some(title)) => title,
+        Ok(None) => {
+            warn!(conversation = %lock.id(), "The title model answered without a title.");
+            return;
+        }
+        Err(error) => {
+            warn!(%error, conversation = %lock.id(), "Failed to generate a title.");
+            return;
+        }
+    };
+
+    debug!(conversation = %lock.id(), %title, "Generated a conversation title.");
+
+    let mut conv = lock.as_mut();
+    conv.update_metadata(|meta| meta.title = Some(title));
+    if let Err(error) = conv.flush() {
+        warn!(%error, "Failed to persist the generated title.");
+    }
 }
 
 /// Flatten an error and its sources into one line.
@@ -1063,6 +1183,135 @@ enum Flow {
     Stop,
 }
 
+/// The turns this host is running, and how to reach each one.
+///
+/// An interrupt names the conversation it means, because a host runs several
+/// turns at once and stopping the wrong one is worse than stopping nothing.
+///
+/// An entry lives for exactly as long as its turn: registered before the turn
+/// starts, removed once it ends.
+/// A request that arrives a moment too late therefore finds nothing, and is
+/// told so rather than being dropped — which is what lets a client tell an
+/// interrupted turn from one that had already finished.
+#[derive(Clone, Default)]
+struct RunningTurns(Arc<Mutex<HashMap<ConversationId, TurnInterruptSender>>>);
+
+impl RunningTurns {
+    /// Open the interrupt channel for a turn about to start on `conversation`.
+    ///
+    /// Returns the end the turn keeps.
+    /// Any earlier entry for the same conversation is replaced, which cannot
+    /// happen while the conversation lock is doing its job.
+    fn register(&self, conversation: ConversationId) -> TurnInterrupts {
+        let (tx, interrupts) = TurnInterrupts::channel();
+        self.0
+            .lock()
+            .expect("running turns lock poisoned")
+            .insert(conversation, tx);
+
+        interrupts
+    }
+
+    /// Forget the turn on `conversation`.
+    fn finished(&self, conversation: ConversationId) {
+        self.0
+            .lock()
+            .expect("running turns lock poisoned")
+            .remove(&conversation);
+    }
+
+    /// Deliver `action` to the turn running on `conversation`.
+    ///
+    /// The error is the message to report, phrased for whoever sent the
+    /// interrupt.
+    fn interrupt(
+        &self,
+        conversation: ConversationId,
+        action: InterruptAction,
+    ) -> Result<(), String> {
+        let sender = self
+            .0
+            .lock()
+            .expect("running turns lock poisoned")
+            .get(&conversation)
+            .cloned()
+            .ok_or_else(|| format!("no turn is running on conversation {conversation}"))?;
+
+        sender.try_send(action).map_err(|error| match error {
+            TrySendError::Closed(_) => {
+                format!("the turn on conversation {conversation} has ended")
+            }
+            TrySendError::Full(_) => format!(
+                "the turn on conversation {conversation} has not caught up with the interrupts \
+                 already sent"
+            ),
+        })
+    }
+}
+
+/// Deliver an interrupt to the turn it names.
+///
+/// Returns the answer to send, or `None` when the request carried no id: a
+/// plugin that is not waiting for one has nowhere to put an uncorrelated
+/// response.
+fn handle_interrupt(req: InterruptRequest, turns: &RunningTurns) -> Option<HostToPlugin> {
+    let delivered = parse_conversation_id(&req.conversation)
+        .and_then(|id| Ok((id, requested_action(&req)?)))
+        .and_then(|(id, action)| turns.interrupt(id, action));
+
+    match &delivered {
+        Ok(()) => debug!(
+            conversation = %req.conversation,
+            action = ?req.action,
+            "Interrupted a turn on a plugin's behalf."
+        ),
+        Err(error) => debug!(
+            conversation = %req.conversation,
+            action = ?req.action,
+            error,
+            "Could not interrupt a turn on a plugin's behalf."
+        ),
+    }
+
+    let id = req.id?;
+
+    Some(match delivered {
+        Ok(()) => HostToPlugin::Done(DoneResponse { id: Some(id) }),
+        Err(message) => HostToPlugin::Error(ErrorResponse {
+            id: Some(id),
+            request: Some("interrupt".to_owned()),
+            message,
+        }),
+    })
+}
+
+/// Read the interrupt a request is asking for.
+///
+/// The error is the message to report: a `reply` without anything to say is the
+/// one combination the wire format allows and a turn cannot act on.
+fn requested_action(request: &InterruptRequest) -> Result<InterruptAction, String> {
+    match request.action {
+        WireAction::Stop => Ok(InterruptAction::Stop),
+        WireAction::Abort => Ok(InterruptAction::Abort),
+        WireAction::Reply => {
+            let content = request
+                .content
+                .as_deref()
+                .map(str::trim)
+                .filter(|content| !content.is_empty())
+                .ok_or("a reply needs `content`")?;
+
+            Ok(InterruptAction::Reply {
+                content: content.to_owned(),
+
+                // Typed somewhere else entirely, so the terminal the turn runs
+                // in has never seen it.
+                echo: true,
+            })
+        }
+    }
+}
+
 /// Answer one request from the plugin.
 ///
 /// Runs with the writer lock held, so everything here has to be quick: anything
@@ -1075,7 +1324,7 @@ fn handle_request(
     session: Option<&Session>,
     fs_backend: Option<&FsStorageBackend>,
     config: &AppConfig,
-    signals: &SignalRouter,
+    turns: &RunningTurns,
 ) -> Result<Flow, cmd::Error> {
     match msg {
         PluginToHost::Ready(ready) => {
@@ -1130,39 +1379,8 @@ fn handle_request(
         }
 
         PluginToHost::Interrupt(req) => {
-            // Aimed at the named conversation, not at whatever is topmost.
-            //
-            // Several turns can be running at once, and the request already said
-            // which one it means. Falling back to the untargeted path would stop
-            // an arbitrary other turn, which is worse than stopping nothing.
-            //
-            // Nothing to answer: what the interrupt did lands in the
-            // conversation, and the turn's own outcome is still the reply to its
-            // `query`.
-            //
-            // A scope with no handler is benign, so it stays at debug: the turn
-            // finished before the request arrived. An id that does not parse is
-            // the plugin's bug, and silence would leave its author unable to
-            // tell the two apart.
-            //
-            // `interrupt_scope` is called before the macro, not inside it: a
-            // tracing field expression only runs when the callsite is enabled,
-            // and a run whose log file could not be created installs no
-            // subscriber at all. The interrupt has to happen either way.
-            match parse_conversation_id(&req.conversation) {
-                Ok(id) => {
-                    let reached = signals.interrupt_scope(id);
-                    debug!(
-                        conversation = %req.conversation,
-                        reached,
-                        "Interrupting on a plugin's behalf."
-                    );
-                }
-                Err(error) => warn!(
-                    conversation = %req.conversation,
-                    %error,
-                    "Ignoring an interrupt that names an unparseable conversation."
-                ),
+            if let Some(response) = handle_interrupt(req, turns) {
+                write_message(writer, &response)?;
             }
         }
 

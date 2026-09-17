@@ -47,8 +47,16 @@ fn shell(title: &str, scroll: Scroll, body: Markup) -> Markup {
                 meta charset="utf-8";
                 // `viewport-fit=cover` so the safe-area insets below have
                 // something to report on a notched screen.
+                //
+                // `interactive-widget=resizes-content` asks the browser to take
+                // the on-screen keyboard out of the layout viewport rather than
+                // leaving it the full height and panning what is visible over
+                // it. Where that is honoured the column simply fits the room
+                // left and the composer needs no lifting at all; where it is
+                // not, the page measures the difference itself.
                 meta name="viewport"
-                    content="width=device-width, initial-scale=1, viewport-fit=cover";
+                    content="width=device-width, initial-scale=1, viewport-fit=cover, \
+                             interactive-widget=resizes-content";
                 title { (title) " - JP" }
 
                 // Installed to a home screen, this runs without browser chrome

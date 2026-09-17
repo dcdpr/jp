@@ -1,4 +1,5 @@
 use axum::http::{HeaderMap, HeaderName};
+use pretty_assertions::assert_eq;
 use serde_json::json;
 
 use super::*;
@@ -74,27 +75,97 @@ fn a_caller_that_sends_neither_header_is_allowed() {
     assert!(same_origin(&headers(&[("host", "127.0.0.1:3000")])));
 }
 
+/// A caller that says nothing about what it holds gets the tail.
 #[test]
-fn a_caller_holding_the_whole_transcript_is_sent_nothing() {
-    // `from == total` is what the handler reads as "nothing to say".
-    assert_eq!(answer_from(Some(4), 4, 4, false), 4);
+fn resend_from_gives_the_tail_to_a_caller_that_holds_nothing() {
+    assert_eq!(resend_from(500, None, None, 500, false), 300);
 }
 
-/// The regression this guards: an entry that changes in place.
+/// A short conversation fits in one window, so the tail is the whole thing.
+#[test]
+fn resend_from_gives_the_whole_transcript_when_it_fits() {
+    assert_eq!(resend_from(12, None, None, 12, false), 0);
+}
+
+/// Nothing to send when the caller is up to date and nothing is in flight.
 ///
-/// A tool call is rendered when it is requested and gains its result later, and
-/// consecutive assistant text renders as one block that grows.
-/// Either way the count stays where it was, so a caller that trusts the count
-/// holds the first version forever — no later poll corrects it, because by
-/// then the count has moved past the entry that changed.
+/// `from == total` is what the handler reads as "nothing to say".
+#[test]
+fn resend_from_sends_nothing_to_an_up_to_date_caller() {
+    assert_eq!(resend_from(13, Some(13), Some(13), 13, false), 13);
+}
+
+/// A count past the end means the transcript was rewritten under the caller, so
+/// the tail is the only safe answer.
+#[test]
+fn resend_from_ignores_a_count_past_the_end() {
+    assert_eq!(resend_from(400, Some(900), None, 400, false), 200);
+}
+
+/// The tool call the caller is waiting on is sent again, so its result reaches
+/// the page.
+#[test]
+fn resend_from_reaches_back_to_the_call_the_caller_is_waiting_on() {
+    // Thirteen events, the caller holds all of them, and the call at 11 has no
+    // result yet.
+    assert_eq!(resend_from(13, Some(13), Some(11), 11, false), 11);
+}
+
+/// A tool call that gained its result between two polls is sent again.
+///
+/// By then the server's own boundary has moved past it — the next call in the
+/// batch is the one waiting — so the caller's floor is what reaches back for
+/// the entry that changed.
+#[test]
+fn resend_from_reaches_back_to_a_call_that_has_since_resolved() {
+    // The caller was last told that everything from 10 was provisional. Since
+    // then the call at 10 resolved and the one at 11 is the first still waiting.
+    assert_eq!(resend_from(13, Some(13), Some(10), 11, false), 10);
+}
+
+/// A floor above what the caller holds cannot reach past the end of its copy.
+#[test]
+fn resend_from_never_sends_past_what_the_caller_holds() {
+    assert_eq!(resend_from(20, Some(11), Some(30), 20, false), 11);
+}
+
+/// A boundary that moved backwards is honoured over a stale floor.
+///
+/// Compaction rewrites the transcript, which can leave an entry the caller
+/// believes final provisional again.
+#[test]
+fn resend_from_honours_a_boundary_below_the_callers_floor() {
+    assert_eq!(resend_from(30, Some(30), Some(20), 8, false), 8);
+}
+
+/// The regression the tail rule guards: an entry that changes in place while
+/// nothing after it is provisional.
+///
+/// Consecutive assistant text renders as one block that grows, and it is the
+/// last entry — so the settled boundary sits at the end and neither it nor the
+/// caller's floor reaches back for it.
+/// The count stays where it was too, so a caller that trusts either holds the
+/// first version forever.
 #[test]
 fn an_unsettled_tail_is_resent_to_a_caller_that_already_has_it() {
-    assert_eq!(answer_from(Some(4), 4, 4, true), 3);
+    assert_eq!(resend_from(4, Some(4), Some(4), 4, true), 3);
 }
 
 #[test]
 fn a_settled_tail_leaves_an_up_to_date_caller_alone() {
-    assert_eq!(answer_from(Some(4), 4, 4, false), 4);
+    assert_eq!(resend_from(4, Some(4), Some(4), 4, false), 4);
+}
+
+/// An unsettled entry wins over the newest one: a tool call still waiting on
+/// its result is where the answer has to start, however much came after it.
+#[test]
+fn an_unsettled_entry_is_resent_from_where_it_starts() {
+    assert_eq!(resend_from(9, Some(9), Some(9), 4, true), 4);
+}
+
+#[test]
+fn an_empty_transcript_has_nothing_to_resend() {
+    assert_eq!(resend_from(0, Some(0), Some(0), 0, true), 0);
 }
 
 /// Waiting for the first token is the longest stretch of a turn, and the
@@ -125,31 +196,6 @@ fn a_tool_call_and_a_block_of_text_are_both_unsettled() {
     assert!(render::tail_can_change(&render::render_events(&answering)));
 }
 
-/// An unsettled entry wins over the newest one: a tool call still waiting on
-/// its result is where the answer has to start, however much came after it.
-#[test]
-fn an_unsettled_entry_is_resent_from_where_it_starts() {
-    assert_eq!(answer_from(Some(9), 9, 4, true), 4);
-}
-
-/// A count past the end means the transcript was rewritten underneath the
-/// caller — compacted, or edited on disk — so the only safe answer is the
-/// tail.
-#[test]
-fn a_count_beyond_the_end_falls_back_to_the_tail() {
-    assert_eq!(answer_from(Some(500), 300, 300, false), 100);
-}
-
-#[test]
-fn a_caller_that_says_nothing_is_sent_the_tail() {
-    assert_eq!(answer_from(None, 300, 300, false), 100);
-}
-
-#[test]
-fn an_empty_transcript_has_nothing_to_resend() {
-    assert_eq!(answer_from(Some(0), 0, 0, true), 0);
-}
-
 /// The same thing end to end, against what the renderer actually produces.
 ///
 /// The count is identical before and after the result arrives, because
@@ -163,8 +209,13 @@ fn a_tool_result_reaches_a_caller_that_already_counted_the_call() {
         json!({"type": "tool_call_request", "id": "t1", "name": "ls", "arguments": {}}),
     ];
 
-    let held = render::render_events(&asked).len();
+    let asked = render::render_events(&asked);
+    let held = asked.len();
     assert_eq!(held, 2);
+
+    // What the caller was told on the poll that delivered the unanswered call.
+    let floor = render::settled_upto(&asked);
+    assert_eq!(floor, 1);
 
     let answered = [
         json!({"type": "chat_request", "content": "run it"}),
@@ -179,9 +230,10 @@ fn a_tool_result_reaches_a_caller_that_already_counted_the_call() {
         "the result renders into the call, so the count cannot report it"
     );
 
-    let from = answer_from(
-        Some(held),
+    let from = resend_from(
         rendered.len(),
+        Some(held),
+        Some(floor),
         render::settled_upto(&rendered),
         render::tail_can_change(&rendered),
     );
@@ -196,4 +248,49 @@ fn a_tool_result_reaches_a_caller_that_already_counted_the_call() {
         html.contains("a.txt"),
         "what is sent carries the result: {html}"
     );
+}
+
+/// Both shapes of choice reach the host in the order the chooser held them.
+///
+/// The host applies them in that order, so an assignment written above a
+/// configuration is overridden by it, and one written below wins.
+#[test]
+fn a_turn_form_keeps_the_order_the_rows_were_arranged_in() {
+    let form = TurnForm::parse(
+        "content=go&cfg=assistant.model.id%3Dopus&cfg=personas%2Fdev&cfg=skill%2Frfd",
+    );
+
+    assert_eq!(form.content, "go");
+    assert_eq!(form.cfg.args(), [
+        "assistant.model.id=opus",
+        "personas/dev",
+        "skill/rfd"
+    ]);
+}
+
+/// A picker left on its empty option is not an argument.
+#[test]
+fn a_turn_form_drops_a_row_that_chose_nothing() {
+    let form = TurnForm::parse("content=go&cfg=&cfg=+&cfg=personas%2Fdev");
+
+    assert_eq!(form.cfg.args(), ["personas/dev"]);
+}
+
+/// Space around an argument is the keyboard's, not the reader's.
+#[test]
+fn a_turn_form_trims_an_argument() {
+    let form = TurnForm::parse("content=go&cfg=+assistant.name%3DJP+");
+
+    assert_eq!(form.cfg.args(), ["assistant.name=JP"]);
+}
+
+/// The new-conversation form reads the same field as the composer.
+#[test]
+fn the_new_conversation_form_reads_the_same_configuration_field() {
+    let form = NewConversationForm::parse(
+        "title=Spike&content=go&cfg=personas%2Fdev&cfg=assistant.name%3DJP",
+    );
+
+    assert_eq!(form.title, "Spike");
+    assert_eq!(form.cfg.args(), ["personas/dev", "assistant.name=JP"]);
 }

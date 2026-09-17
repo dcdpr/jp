@@ -105,6 +105,10 @@ object = { version = "0.39" }
 # which is the last release on reqwest 0.12.
 ollama-rs = { git = "https://github.com/JeanMertz/ollama-rs", rev = "6270148236d2d8e199580ee8f5a529868134c0a5", default-features = false }
 openai_responses = { version = "0.1", default-features = false }
+oxc_allocator = { version = "0.146", default-features = false }
+oxc_parser = { version = "0.146", default-features = false }
+oxc_semantic = { version = "0.146", default-features = false }
+oxc_span = { version = "0.146", default-features = false }
 parking_lot = { version = "0.12", default-features = false, features = ["arc_lock"] }
 paste = { version = "1", default-features = false }
 percent-encoding = { version = "2", default-features = false }

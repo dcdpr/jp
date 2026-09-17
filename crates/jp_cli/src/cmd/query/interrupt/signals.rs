@@ -82,6 +82,37 @@ pub fn handle_streaming_interrupt(
     config: &StreamingInterruptConfig,
     llm_stream_finished: bool,
 ) -> StreamingInterruptResult {
+    let action = decide_streaming_interrupt(
+        turn_coordinator,
+        printer,
+        backend,
+        editor,
+        edit_mode,
+        config,
+        llm_stream_finished,
+    );
+
+    apply_streaming_interrupt(action, turn_coordinator, conversation_stream)
+}
+
+/// Ask the user what an interrupt during LLM streaming should do.
+///
+/// Shows the menu when `config.action` is `prompt`, and otherwise resolves the
+/// configured action without asking.
+/// Decides only: nothing is committed to the conversation and the turn's phase
+/// does not move until the action reaches [`apply_streaming_interrupt`].
+///
+/// `llm_stream_finished` narrows the menu to what a dead stream can still
+/// offer.
+pub fn decide_streaming_interrupt(
+    turn_coordinator: &mut TurnCoordinator,
+    printer: &Printer,
+    backend: &dyn PromptBackend,
+    editor: Option<Arc<dyn EditorBackend>>,
+    edit_mode: ReplyEditMode,
+    config: &StreamingInterruptConfig,
+    llm_stream_finished: bool,
+) -> InterruptAction {
     info!("Interrupt received during streaming.");
 
     // Flush the renderer's markdown buffer to the printer queue, then drain
@@ -93,6 +124,26 @@ pub fn handle_streaming_interrupt(
     let action = InterruptHandler::with_backend(backend, editor, edit_mode)
         .handle_streaming_interrupt(config, printer, !llm_stream_finished);
 
+    debug!(
+        ?action,
+        llm_stream_finished, "Streaming interrupt resolved."
+    );
+
+    action
+}
+
+/// Apply an already-decided interrupt action to a streaming turn.
+///
+/// Commits partial assistant content, appends a reply, or moves the phase,
+/// depending on the action, and reports what the streaming loop should do next.
+///
+/// The action's source does not matter here: a menu choice and a command that
+/// arrived from a client are applied identically.
+pub fn apply_streaming_interrupt(
+    action: InterruptAction,
+    turn_coordinator: &mut TurnCoordinator,
+    conversation_stream: &mut ConversationStream,
+) -> StreamingInterruptResult {
     // `Resume` means "keep waiting for the current stream." The state
     // machine is a no-op for it, and we must NOT break the inner loop:
     // breaking drops the live `SelectAll` and forces a redundant new
@@ -100,10 +151,6 @@ pub fn handle_streaming_interrupt(
     // polling instead.
     let is_resume = matches!(action, InterruptAction::Resume);
     let is_escalate = matches!(action, InterruptAction::Escalate);
-    debug!(
-        ?action,
-        llm_stream_finished, "Streaming interrupt resolved."
-    );
 
     // A menu that never ran decided nothing, so the state machine is left
     // untouched: no partial commit, no phase change.
@@ -277,6 +324,46 @@ pub fn handle_tool_interrupt(
         .handle_tool_interrupt(config, printer);
     debug!(?action, "Tool interrupt resolved.");
 
+    apply_tool_interrupt(action, cancellation_token, turn_coordinator)
+}
+
+/// Restate an interrupt decided elsewhere in the terms tool execution acts on.
+///
+/// The two menus offer different verbs for the same intents, and only these
+/// ones mean anything while tools are running: a reply becomes the answer each
+/// cancelled tool gives back, which is what `[r] Stop & respond` does at the
+/// terminal, and stopping cancels them and ends the turn.
+#[must_use]
+pub fn as_tool_interrupt(action: InterruptAction) -> InterruptAction {
+    match action {
+        InterruptAction::Reply { content, .. } => InterruptAction::ToolCancelled {
+            response: Some(content),
+            exit: false,
+        },
+
+        // Abort discards the turn's uncommitted work, and cancelling the
+        // running tools is as much of that as this phase owns.
+        InterruptAction::Stop | InterruptAction::Abort => InterruptAction::ToolCancelled {
+            response: None,
+            exit: true,
+        },
+
+        other => other,
+    }
+}
+
+/// Apply an already-decided interrupt action to running tools.
+///
+/// Cancels the running tools where the action calls for it, and reports what
+/// the execution loop should do with the results.
+///
+/// The action's source does not matter here: a menu choice and a command that
+/// arrived from a client are applied identically.
+pub fn apply_tool_interrupt(
+    action: InterruptAction,
+    cancellation_token: &CancellationToken,
+    turn_coordinator: &mut TurnCoordinator,
+) -> ToolInterruptResult {
     // A menu that never ran decided nothing: the running tools are left alone
     // and the state machine is not notified.
     if matches!(action, InterruptAction::PromptFailed) {
