@@ -5,6 +5,7 @@
 //! ```toml
 //! [tools.my_tool.style]
 //! hidden = false           # applies to both request and response
+//! joins_reasoning = true   # shade the chrome when called while reasoning
 //! parameters = "json"      # how arguments are rendered on the call
 //! inline_results = "full"  # how successful results are rendered
 //! results_file_link = "osc8"
@@ -48,6 +49,19 @@ pub struct DisplayStyleConfig {
     /// call header, arguments, or results are rendered to the terminal.
     #[setting(default = false)]
     pub hidden: bool,
+
+    /// Whether this tool's chrome joins the reasoning it was called from.
+    ///
+    /// Defaults to `true`: when the assistant calls the tool part-way through a
+    /// reasoning block, the call header, arguments, progress row, and results
+    /// carry the reasoning background, so the reasoning reads as one continuous
+    /// span.
+    ///
+    /// Has no effect when `style.reasoning.background` is unset or
+    /// `style.reasoning.extend_across_tool_calls` is `false`, since there is no
+    /// region to join.
+    #[setting(default = true)]
+    pub joins_reasoning: bool,
 
     /// How to display the results of the tool call.
     ///
@@ -141,6 +155,7 @@ impl AssignKeyValue for PartialDisplayStyleConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             "hidden" => self.hidden = kv.try_some_bool()?,
+            "joins_reasoning" => self.joins_reasoning = kv.try_some_bool()?,
             "inline_results" => self.inline_results = kv.try_some_from_str()?,
             "results_file_link" => self.results_file_link = kv.try_some_from_str()?,
             "parameters" => self.parameters = kv.try_some_from_str()?,
@@ -157,6 +172,7 @@ impl PartialConfigDelta for PartialDisplayStyleConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             hidden: delta_opt(self.hidden.as_ref(), next.hidden),
+            joins_reasoning: delta_opt(self.joins_reasoning.as_ref(), next.joins_reasoning),
             inline_results: delta_opt(self.inline_results.as_ref(), next.inline_results),
             results_file_link: delta_opt(self.results_file_link.as_ref(), next.results_file_link),
             parameters: delta_opt(self.parameters.as_ref(), next.parameters),
@@ -170,6 +186,7 @@ impl FillDefaults for PartialDisplayStyleConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             hidden: self.hidden.or(defaults.hidden),
+            joins_reasoning: self.joins_reasoning.or(defaults.joins_reasoning),
             inline_results: self.inline_results.or(defaults.inline_results),
             results_file_link: self.results_file_link.or(defaults.results_file_link),
             parameters: self.parameters.or(defaults.parameters),
@@ -185,6 +202,7 @@ impl ToPartial for DisplayStyleConfig {
 
         Self::Partial {
             hidden: partial_opt(&self.hidden, defaults.hidden),
+            joins_reasoning: partial_opt(&self.joins_reasoning, defaults.joins_reasoning),
             inline_results: partial_opt(&self.inline_results, defaults.inline_results),
             results_file_link: partial_opt(&self.results_file_link, defaults.results_file_link),
             parameters: partial_opt(&self.parameters, defaults.parameters),

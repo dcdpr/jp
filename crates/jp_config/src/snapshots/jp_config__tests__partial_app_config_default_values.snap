@@ -128,6 +128,9 @@ Ok(
                             hidden: Some(
                                 false,
                             ),
+                            joins_reasoning: Some(
+                                true,
+                            ),
                             inline_results: None,
                             results_file_link: None,
                             parameters: None,

@@ -4501,6 +4501,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
 
         let fn_call_style = Some(DisplayStyleConfig {
             hidden: false,
+            joins_reasoning: true,
             inline_results: InlineResults::Off,
             results_file_link: LinkStyle::Off,
             parameters: ParametersStyle::FunctionCall,
@@ -5197,6 +5198,7 @@ async fn a_tool_result_survives_a_live_window() {
         let mut config = talking_tool_config(&["slow_tool", "quick_tool"]);
         config.conversation.tools.defaults.style = DisplayStyleConfig {
             hidden: false,
+            joins_reasoning: true,
             inline_results: InlineResults::Truncate(TruncateLines { lines: 1 }),
             results_file_link: LinkStyle::Full,
             parameters: ParametersStyle::Off,
@@ -5436,6 +5438,7 @@ async fn a_tool_can_opt_out_of_the_progress_window() {
                 result: None,
                 style: Some(DisplayStyleConfig {
                     hidden: false,
+                    joins_reasoning: true,
                     inline_results: InlineResults::Off,
                     results_file_link: LinkStyle::Off,
                     parameters: ParametersStyle::Off,
@@ -8054,6 +8057,134 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
             .windows(b"Calling tool".len())
             .any(|w| w == b"Calling tool"),
         "the shaded header text should still be present.\nChrome:\n{chrome:?}"
+    );
+}
+
+/// A style that keeps its tool's chrome out of any reasoning region, with the
+/// header and inline results otherwise fully visible.
+fn non_joining_style() -> DisplayStyleConfig {
+    DisplayStyleConfig {
+        hidden: false,
+        joins_reasoning: false,
+        inline_results: InlineResults::Full,
+        results_file_link: LinkStyle::Off,
+        parameters: ParametersStyle::Off,
+        print_stderr: false,
+        error: ErrorStyleConfig {
+            inline_results: None,
+            results_file_link: None,
+        },
+    }
+}
+
+/// End-to-end twin of the test above with `joins_reasoning = false`: the same
+/// reasoning-then-tool-call stream renders the chrome unshaded, while the
+/// header and result still reach the terminal.
+#[tokio::test]
+async fn a_tool_that_does_not_join_reasoning_renders_unshaded_live() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let mut config = AppConfig::new_test();
+    config.style.tool_call.show = true;
+    config.conversation.tools.defaults.run = RunMode::Unattended;
+    config
+        .conversation
+        .tools
+        .insert("mock_tool".to_string(), ToolConfig {
+            source: ToolSource::Local { tool: None },
+            command: None,
+            run: Some(RunMode::Unattended),
+            format: None,
+            enable: None,
+            summary: None,
+            description: None,
+            examples: None,
+            parameters: IndexMap::new(),
+            result: None,
+            style: Some(non_joining_style()),
+            questions: IndexMap::new(),
+            options: IndexMap::default(),
+            access: None,
+            cancellation_response: None,
+        });
+
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+        .unwrap();
+
+    let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        responses: vec![
+            vec![
+                Event::reasoning(0, "Thinking about it.\n\n"),
+                Event::flush(0),
+                Event::tool_call_start(1, "call_mock".to_string(), "mock_tool".to_string()),
+                Event::flush(1),
+                Event::Finished(FinishReason::Completed),
+            ],
+            final_message_events("Done."),
+        ],
+        call_index: AtomicUsize::new(0),
+        model: ModelDetails::empty(id::ModelIdConfig {
+            provider: ProviderId::Test,
+            name: "reasoning-tool-mock".parse().expect("valid name"),
+        }),
+    });
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let router = detached_router();
+
+    let executor_source = TestExecutorSource::new().with_executor("mock_tool", |req| {
+        Box::new(MockExecutor::completed(&req.id, &req.name, "tool output"))
+    });
+    let tool_defs = executor_source.tool_definitions();
+
+    run_turn_loop(
+        Arc::clone(&provider),
+        &model,
+        &config,
+        &router,
+        &mcp_client,
+        root,
+        false, // interactive
+        &[],
+        &lock,
+        ToolChoice::Auto,
+        &tool_defs,
+        printer.clone(),
+        Arc::new(MockPromptBackend::new()),
+        ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+        ChatRequest::from("use the tool"),
+        InvocationContext::default(),
+        PendingStreamTrim::default(),
+        router.turn_interrupt(lock.id()),
+    )
+    .await
+    .unwrap();
+
+    printer.flush();
+    let chrome = err.lock().clone();
+    let plain = String::from_utf8(strip_ansi_escapes::strip(&chrome)).unwrap();
+    assert!(
+        plain.contains("Calling tool mock_tool"),
+        "the chrome still renders \u{2014} this is not `hidden`.\nChrome:\n{chrome:?}"
+    );
+    assert!(
+        plain.contains("tool output"),
+        "the result still renders.\nChrome:\n{chrome:?}"
+    );
+    assert!(
+        !chrome.contains("\x1b[48;5;236m"),
+        "no part of the chrome carries the reasoning background.\nChrome:\n{chrome:?}"
     );
 }
 

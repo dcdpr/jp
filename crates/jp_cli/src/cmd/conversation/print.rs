@@ -20,6 +20,7 @@ use crate::{
 /// Brief-mode tool display style: no arguments, no results, no file links.
 const BRIEF_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
     hidden: false,
+    joins_reasoning: true,
     parameters: ParametersStyle::Off,
     inline_results: InlineResults::Off,
     results_file_link: style::LinkStyle::Off,
@@ -33,6 +34,7 @@ const BRIEF_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
 /// Chat-mode tool display style: tool calls are fully hidden.
 const CHAT_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
     hidden: true,
+    joins_reasoning: true,
     parameters: ParametersStyle::Off,
     inline_results: InlineResults::Off,
     results_file_link: style::LinkStyle::Off,
@@ -46,6 +48,7 @@ const CHAT_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
 /// Full-mode tool display style: everything visible, nothing truncated.
 const FULL_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
     hidden: false,
+    joins_reasoning: true,
     parameters: ParametersStyle::Json,
     inline_results: InlineResults::Full,
     results_file_link: style::LinkStyle::Full,

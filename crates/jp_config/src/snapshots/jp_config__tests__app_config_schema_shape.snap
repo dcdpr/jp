@@ -444,6 +444,7 @@ conversation: ConversationConfig
           results_file_link: "full" | "osc8" | "off" | null
         hidden?: bool
         inline_results?: "off" | "full" | string
+        joins_reasoning?: bool
         parameters?: ParametersStyle
           |: "json"
           |: "function_call"
@@ -661,6 +662,7 @@ conversation: ConversationConfig
               results_file_link: "full" | "osc8" | "off" | null
             hidden?: bool
             inline_results?: "off" | "full" | string
+            joins_reasoning?: bool
             parameters?: ParametersStyle
               |: "json"
               |: "function_call"

@@ -3,9 +3,13 @@ use std::time::Duration;
 use camino_tempfile::{Utf8TempDir, tempdir};
 use chrono::{DateTime, TimeZone as _, Utc};
 use clap::Parser as _;
+use indexmap::IndexMap;
 use jp_config::{
     AppConfig, PartialAppConfig,
-    conversation::tool::style::{InlineResults, LinkStyle, ParametersStyle},
+    conversation::tool::{
+        ToolConfig, ToolSource,
+        style::{DisplayStyleConfig, ErrorStyleConfig, InlineResults, LinkStyle, ParametersStyle},
+    },
     style::reasoning::{ReasoningDisplayConfig, TruncateChars},
 };
 use jp_conversation::{
@@ -28,6 +32,54 @@ use crate::{
 fn strip_ansi(s: &str) -> String {
     let bytes = strip_ansi_escapes::strip(s);
     String::from_utf8(bytes).expect("valid utf-8 after stripping ANSI")
+}
+
+/// The escape-bearing line of `raw` whose visible text contains `needle`.
+///
+/// Shading is asserted per line, so the escapes have to survive the search
+/// while the needle is matched against the text a reader sees.
+fn line_with<'a>(raw: &'a str, needle: &str) -> &'a str {
+    raw.lines()
+        .find(|line| strip_ansi(line).contains(needle))
+        .unwrap_or_else(|| panic!("no line containing {needle:?} in {raw:?}"))
+}
+
+/// A display style that renders a bare `Calling tool X` header and nothing
+/// else, so a test can assert on the header's shading alone.
+fn header_only_style(joins_reasoning: bool) -> DisplayStyleConfig {
+    DisplayStyleConfig {
+        hidden: false,
+        joins_reasoning,
+        inline_results: InlineResults::Off,
+        results_file_link: LinkStyle::Off,
+        parameters: ParametersStyle::Off,
+        print_stderr: false,
+        error: ErrorStyleConfig {
+            inline_results: None,
+            results_file_link: None,
+        },
+    }
+}
+
+/// A tool whose config differs from the global defaults only in its style.
+fn tool_with_style(style: DisplayStyleConfig) -> ToolConfig {
+    ToolConfig {
+        source: ToolSource::Local { tool: None },
+        enable: None,
+        command: None,
+        summary: None,
+        description: None,
+        examples: None,
+        parameters: IndexMap::new(),
+        run: None,
+        format: None,
+        result: None,
+        cancellation_response: None,
+        style: Some(style),
+        questions: IndexMap::new(),
+        options: IndexMap::new(),
+        access: None,
+    }
 }
 
 fn make_id(secs: u64) -> ConversationId {
@@ -2224,5 +2276,169 @@ fn replay_does_not_leak_reasoning_region_across_turns() {
         !chrome.contains("\x1b[48;5;236m"),
         "a tool call opening a new turn must not carry the previous turn's reasoning background, \
          got: {chrome:?}"
+    );
+}
+
+/// `joins_reasoning = false` keeps a tool's chrome off the reasoning background
+/// while still rendering it, which is what separates it from `hidden = true`.
+#[test]
+fn replay_does_not_shade_a_tool_that_does_not_join_reasoning() {
+    let mut config = AppConfig::new_test();
+    config.conversation.tools.defaults.style.joins_reasoning = false;
+    let (mut ctx, id, _out, err, _tmp) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("edit it"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::reasoning("Let me edit the file.\n\n"),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "modify_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("patched".into()),
+            },
+            ts(0, 0, 4),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnSelection::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let chrome = err.lock().clone();
+    assert!(
+        strip_ansi(&chrome).contains("Calling tool modify_file"),
+        "the chrome still renders \u{2014} this is not `hidden`, got: {chrome:?}"
+    );
+    assert!(
+        strip_ansi(&chrome).contains("patched"),
+        "the result still renders, got: {chrome:?}"
+    );
+    assert!(
+        !chrome.contains("\x1b[48;5;236m"),
+        "no part of a non-joining tool's chrome carries the reasoning background, got: {chrome:?}"
+    );
+}
+
+/// A non-joining tool is a hole in the region, not a break in it: the reasoning
+/// that follows the tool is still shaded, because the tool never ended the
+/// region it sat in.
+#[test]
+fn a_tool_that_does_not_join_reasoning_leaves_the_region_shaded_around_it() {
+    let mut config = AppConfig::new_test();
+    config.conversation.tools.defaults.style.joins_reasoning = false;
+    let (mut ctx, id, out, err, _tmp) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("edit it"), ts(0, 0, 1)),
+        ConversationEvent::new(ChatResponse::reasoning("Before the edit.\n\n"), ts(0, 0, 2)),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "modify_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("patched".into()),
+            },
+            ts(0, 0, 4),
+        ),
+        ConversationEvent::new(ChatResponse::reasoning("After the edit.\n\n"), ts(0, 0, 5)),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnSelection::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let chat = out.lock().clone();
+    assert!(
+        line_with(&chat, "After the edit.").contains("\x1b[48;5;236m"),
+        "the reasoning after a non-joining tool is still in the region, got: {chat:?}"
+    );
+    assert!(
+        !err.lock().contains("\x1b[48;5;236m"),
+        "the tool's own chrome stays out of it, got: {:?}",
+        err.lock()
+    );
+}
+
+/// Membership is per tool call, so two tools in one reasoning region can
+/// disagree: the captured background is keyed by tool-call ID, which is also
+/// what makes parallel calls in different regions render correctly.
+#[test]
+fn joins_reasoning_is_decided_per_tool_within_one_region() {
+    let mut config = AppConfig::new_test();
+    config.conversation.tools.defaults.style = header_only_style(true);
+    config.conversation.tools.insert(
+        "loner".to_owned(),
+        tool_with_style(header_only_style(false)),
+    );
+
+    let (mut ctx, id, _out, err, _tmp) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("do both"), ts(0, 0, 1)),
+        ConversationEvent::new(ChatResponse::reasoning("Two calls.\n\n"), ts(0, 0, 2)),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "joiner".into(),
+                arguments: Map::new(),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc2".into(),
+                name: "loner".into(),
+                arguments: Map::new(),
+            },
+            ts(0, 0, 4),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnSelection::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let chrome = err.lock().clone();
+    assert!(
+        line_with(&chrome, "Calling tool joiner").contains("\x1b[48;5;236m"),
+        "the joining tool's header is shaded, got: {chrome:?}"
+    );
+    assert!(
+        !line_with(&chrome, "Calling tool loner").contains("\x1b[48;5;236m"),
+        "the non-joining tool's header is not, got: {chrome:?}"
     );
 }

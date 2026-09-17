@@ -34,6 +34,7 @@ pub fn describe_tools() -> PartialToolConfig {
         run: Some(RunMode::Unattended),
         style: Some(PartialDisplayStyleConfig {
             hidden: Some(true),
+            joins_reasoning: None,
             inline_results: Some(InlineResults::Off),
             results_file_link: Some(LinkStyle::Off),
             parameters: Some(ParametersStyle::Off),

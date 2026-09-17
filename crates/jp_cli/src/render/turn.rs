@@ -211,7 +211,10 @@ impl TurnRenderer {
                     // JSON format, and the per-tool `hidden` flag.
                     let chrome_visible =
                         self.tool_chrome_shown && !self.printer.format().is_json() && !style.hidden;
-                    let region = self.view.enter_tool_call_region(chrome_visible);
+                    let region = self
+                        .view
+                        .enter_tool_call_region(chrome_visible)
+                        .filter(|_| style.joins_reasoning);
                     self.tool.set_region(&req.id, region);
 
                     if chrome_visible {

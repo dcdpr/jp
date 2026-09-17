@@ -101,6 +101,7 @@ expression: "AppConfig::fields()"
     "conversation.tools.*.run",
     "conversation.tools.*.style.hidden",
     "conversation.tools.*.style.inline_results",
+    "conversation.tools.*.style.joins_reasoning",
     "conversation.tools.*.style.parameters",
     "conversation.tools.*.style.print_stderr",
     "conversation.tools.*.style.results_file_link",

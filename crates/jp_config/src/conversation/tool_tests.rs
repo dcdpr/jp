@@ -76,6 +76,68 @@ print_stderr = false
     );
 }
 
+/// A tool opting out of the reasoning region keeps that answer through the
+/// whole loader, and a tool that says nothing joins.
+///
+/// The fixture is the shape the repository's own tool files use: a `style`
+/// block naming `joins_reasoning` alongside other keys, which has to
+/// deserialize and then survive the field-by-field fill from `'*'`.
+#[test]
+fn a_tool_keeps_its_own_joins_reasoning_through_the_loader() {
+    let loaded: PartialAppConfig = toml::from_str(
+        r#"
+[conversation.tools.'*']
+run = "unattended"
+
+[conversation.tools.'*'.style]
+inline_results = "off"
+
+[conversation.tools.reader]
+source = "local"
+
+[conversation.tools.differ]
+source = "local"
+
+[conversation.tools.differ.style]
+results_file_link = "off"
+joins_reasoning = false
+"#,
+    )
+    .expect("the fixture parses");
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools = loaded.conversation.tools;
+
+    let config = build(partial).expect("the fixture resolves");
+    let tools = &config.conversation.tools;
+
+    assert!(
+        !tools
+            .get("differ")
+            .expect("differ is configured")
+            .style()
+            .joins_reasoning,
+        "a tool setting joins_reasoning = false must keep it"
+    );
+    assert!(
+        tools
+            .get("reader")
+            .expect("reader is configured")
+            .style()
+            .joins_reasoning,
+        "a tool setting nothing joins the region"
+    );
+    assert_eq!(
+        tools
+            .get("differ")
+            .expect("differ is configured")
+            .style()
+            .inline_results,
+        InlineResults::Off,
+        "the '*' block still fills the fields the tool left out"
+    );
+}
+
 // `--tool` and `--no-tool` read a comma as the separator between tool names, so
 // a tool named `read,write` could never be enabled or disabled from the CLI.
 #[test]
