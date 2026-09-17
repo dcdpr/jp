@@ -146,6 +146,22 @@ fn test_result_mode_with_configured_tool() {
     );
 }
 
+/// A tool the model named but the config never declared reads its membership
+/// from the `*` defaults block, the same place replay reads it from.
+///
+/// A model can emit a name it was never offered, and `tool_definitions` builds
+/// the offered set from this very map, so the name arrives here with no entry
+/// to consult.
+#[test]
+fn joins_reasoning_falls_back_to_the_defaults_block_for_an_unconfigured_tool() {
+    let mut tools = jp_config::AppConfig::new_test().conversation.tools;
+    tools.defaults.style.joins_reasoning = false;
+
+    let coordinator = ToolCoordinator::new(tools, empty_executor_source());
+
+    assert!(!coordinator.joins_reasoning("a_tool_the_model_invented"));
+}
+
 #[test]
 fn test_question_target_nonexistent_tool() {
     let coordinator = ToolCoordinator::new(

@@ -53,9 +53,8 @@ pub struct DisplayStyleConfig {
     /// Whether this tool's chrome joins the reasoning it was called from.
     ///
     /// Defaults to `true`: when the assistant calls the tool part-way through a
-    /// reasoning block, the call header, arguments, progress row, and results
-    /// carry the reasoning background, so the reasoning reads as one continuous
-    /// span.
+    /// reasoning block, its call header, arguments, and results carry the
+    /// reasoning background, so the reasoning reads as one continuous span.
     ///
     /// Has no effect when `style.reasoning.background` is unset or
     /// `style.reasoning.extend_across_tool_calls` is `false`, since there is no

@@ -568,6 +568,11 @@ pub(super) async fn run_turn_loop(
                                 let tool_chrome_visible = cfg.style.tool_call.show
                                     && !printer.format().is_json()
                                     && !tool_coordinator.is_hidden(name);
+                                // A tool that does not join the region still
+                                // lets it pass over: the boundary runs either
+                                // way, only the background it captured is
+                                // dropped, so the chrome renders unshaded while
+                                // the reasoning around it stays continuous.
                                 let region = turn_coordinator
                                     .enter_tool_call(tool_chrome_visible)
                                     .filter(|_| tool_coordinator.joins_reasoning(name));
