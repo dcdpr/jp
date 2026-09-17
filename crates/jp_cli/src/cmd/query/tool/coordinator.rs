@@ -665,6 +665,19 @@ impl ToolCoordinator {
             .is_some_and(|cfg| cfg.style().hidden)
     }
 
+    /// Whether this tool's chrome joins the reasoning region it was called
+    /// from, per `conversation.tools.<name>.style.joins_reasoning`.
+    ///
+    /// A tool with no config entry takes the value from the `*` defaults block,
+    /// matching replay.
+    pub fn joins_reasoning(&self, tool_name: &str) -> bool {
+        self.tools_config
+            .get(tool_name)
+            .map_or(self.tools_config.defaults.style.joins_reasoning, |cfg| {
+                cfg.style().joins_reasoning
+            })
+    }
+
     /// Return the response recorded for a cancelled call to `tool_name`: the
     /// tool's configured `cancellation_response`, falling back to the global
     /// default for unconfigured tools.

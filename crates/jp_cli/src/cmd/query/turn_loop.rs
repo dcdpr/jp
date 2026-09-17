@@ -568,7 +568,9 @@ pub(super) async fn run_turn_loop(
                                 let tool_chrome_visible = cfg.style.tool_call.show
                                     && !printer.format().is_json()
                                     && !tool_coordinator.is_hidden(name);
-                                let region = turn_coordinator.enter_tool_call(tool_chrome_visible);
+                                let region = turn_coordinator
+                                    .enter_tool_call(tool_chrome_visible)
+                                    .filter(|_| tool_coordinator.joins_reasoning(name));
                                 tool_renderer.set_region(id, region);
 
                                 tool_renderer.register(id, name);

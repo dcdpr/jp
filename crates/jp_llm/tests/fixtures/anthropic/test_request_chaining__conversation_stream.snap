@@ -61,6 +61,7 @@ expression: v
           "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
           "style": {
             "hidden": false,
+            "joins_reasoning": true,
             "inline_results": {
               "truncate": {
                 "lines": 10

@@ -63,6 +63,7 @@ PartialAppConfig {
                 cancellation_response: None,
                 style: PartialDisplayStyleConfig {
                     hidden: None,
+                    joins_reasoning: None,
                     inline_results: None,
                     results_file_link: None,
                     parameters: None,
