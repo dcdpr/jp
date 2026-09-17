@@ -34,8 +34,6 @@ pub fn describe_tools() -> PartialToolConfig {
         run: Some(RunMode::Unattended),
         style: Some(PartialDisplayStyleConfig {
             hidden: Some(true),
-            // Nothing renders for a hidden tool, so leave the reasoning-region
-            // question to whatever the user configured.
             joins_reasoning: None,
             inline_results: Some(InlineResults::Off),
             results_file_link: Some(LinkStyle::Off),

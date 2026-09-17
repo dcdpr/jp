@@ -211,9 +211,6 @@ impl TurnRenderer {
                     // JSON format, and the per-tool `hidden` flag.
                     let chrome_visible =
                         self.tool_chrome_shown && !self.printer.format().is_json() && !style.hidden;
-                    // As live: a tool that does not join the region drops the
-                    // captured background, leaving the reasoning around it
-                    // continuous.
                     let region = self
                         .view
                         .enter_tool_call_region(chrome_visible)
