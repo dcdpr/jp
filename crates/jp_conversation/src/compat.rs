@@ -362,11 +362,20 @@ fn strategy_carrying_variant<'a>(union_type: &'a UnionType, value: &Value) -> Op
     let collection = sole(variants().filter(|variant| is_map(variant)))?;
     let wrapper = sole(variants().filter(|variant| !is_map(variant)))?;
 
-    let stated = value
-        .as_object()
-        .is_some_and(|obj| obj.contains_key("value") && obj.contains_key("strategy"));
+    let stated = value.as_object().is_some_and(states_a_strategy);
 
     Some(if stated { wrapper } else { collection })
+}
+
+/// Whether an object is a collection that states its own merge strategy, rather
+/// than the collection itself.
+///
+/// Both reach disk as a table, so the keys decide: the wrapper carries `value`
+/// beside `strategy`, which is how its own deserializer tells them apart.
+/// An entry named `value` needs the sibling `strategy` before it reads as the
+/// wrapper, so a tool called `value` stays addressable.
+fn states_a_strategy(obj: &serde_json::Map<String, Value>) -> bool {
+    obj.contains_key("value") && obj.contains_key("strategy")
 }
 
 /// The only item an iterator yields, if it yields exactly one.
@@ -444,6 +453,22 @@ fn strip_struct<'a>(
         obj.retain(|key, _| struct_type.fields.contains_key(key));
         before - obj.len()
     };
+
+    // A flattened map stating a strategy puts the wrapper's own keys where
+    // entries otherwise sit: `value` holds the map, and the metadata beside it
+    // says how it merges rather than naming an entry. Walking those keys as
+    // entries would take the map for a single one and delete every key in it.
+    if has_flatten && states_a_strategy(obj) {
+        if let Some(entry_schema) = entry_schema
+            && let Some(Value::Object(entries)) = obj.get_mut("value")
+        {
+            for entry in entries.values_mut() {
+                stripped += strip_schema(entry, entry_schema, enclosing);
+            }
+        }
+
+        return stripped;
+    }
 
     for (key, child) in obj.iter_mut() {
         // The flattened field's own name is not a key in the serialized form,
