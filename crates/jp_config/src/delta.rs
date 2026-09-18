@@ -123,18 +123,15 @@ fn repeats_an_element<T: PartialEq>(items: &[T]) -> bool {
 /// spell.
 /// The whole map is then carried with `replace`, since a deep merge would
 /// resurrect the dropped key.
+///
+/// See [`delta_mergeable_map_at`] for the variant that also reports the paths
+/// it drops and clears, which a caller filling one layer from another needs.
 pub fn delta_mergeable_map<T>(prev: &MergeableMap<T>, next: MergeableMap<T>) -> MergeableMap<T>
 where
     T: PartialConfigDelta + PartialEq,
 {
     if prev.keys().any(|key| !next.contains_key(key)) {
-        // Stated rather than inherited from `next`'s shape: a plain map
-        // deep-merges on the fold and brings the dropped key back.
-        return MergeableMap::Merged(MergedMap {
-            value: next.into_map(),
-            strategy: Some(MergedMapStrategy::Replace),
-            discard_when_merged: false,
-        });
+        return replace_with(next);
     }
 
     next.into_iter()
@@ -195,6 +192,103 @@ pub fn delta_opt_partial_at<T: PartialConfigDelta + PartialEq>(
     }
 }
 
+/// Calculate the delta between two strategy-carrying maps, reporting what
+/// merging cannot reach.
+///
+/// A dropped key is said twice, because two readers need it.
+/// The value says it by carrying `replace`, which is what the conversation's
+/// own fold applies.
+/// The path says it to a caller that fills this layer from another, where a key
+/// this layer does not hold is indistinguishable from one it never mentioned —
+/// and filling would put the dropped key back.
+///
+/// An entry both maps hold is diffed with its own dotted path, so a field
+/// cleared inside a surviving entry reports where it lives.
+pub fn delta_mergeable_map_at<T>(
+    prefix: &str,
+    prev: &MergeableMap<T>,
+    next: MergeableMap<T>,
+    unsets: &mut Vec<String>,
+) -> MergeableMap<T>
+where
+    T: PartialConfigDelta + PartialEq,
+{
+    if report_dropped_keys(prefix, prev, &next, unsets) {
+        return replace_with(next);
+    }
+
+    next.into_iter()
+        .filter_map(|(key, next)| {
+            let Some(prev) = prev.get(&key) else {
+                return Some((key, next));
+            };
+
+            if prev == &next {
+                return None;
+            }
+
+            let mut entry = Vec::new();
+            let delta = prev.delta_with_unsets(next, &path(prefix, &key), &mut entry);
+            let cleared = !entry.is_empty();
+            unsets.append(&mut entry);
+
+            (cleared || !delta.is_empty()).then_some((key, delta))
+        })
+        .collect()
+}
+
+/// Report every key `prev` holds and `next` does not, returning whether there
+/// were any.
+fn report_dropped_keys<T>(
+    prefix: &str,
+    prev: &MergeableMap<T>,
+    next: &MergeableMap<T>,
+    unsets: &mut Vec<String>,
+) -> bool {
+    let dropped: Vec<String> = prev
+        .keys()
+        .filter(|key| !next.contains_key(*key))
+        .map(|key| path(prefix, key))
+        .collect();
+
+    let any = !dropped.is_empty();
+    unsets.extend(dropped);
+    any
+}
+
+/// The whole map, stated as a replacement.
+///
+/// Stated rather than inherited from the map's shape: a plain map deep-merges
+/// on the fold and brings a dropped key back.
+fn replace_with<T>(next: MergeableMap<T>) -> MergeableMap<T> {
+    MergeableMap::Merged(MergedMap {
+        value: next.into_map(),
+        strategy: Some(MergedMapStrategy::Replace),
+        discard_when_merged: false,
+    })
+}
+
+/// Calculate the delta between two strategy-carrying maps of plain values,
+/// reporting the keys it drops.
+///
+/// Mirrors [`delta_mergeable_map_at`] for a map whose values carry no partial
+/// of their own, so an entry is compared and carried whole rather than diffed,
+/// and only a dropped key has a path to report.
+pub fn delta_mergeable_value_map_at<T: Clone + PartialEq>(
+    prefix: &str,
+    prev: &MergeableMap<T>,
+    next: MergeableMap<T>,
+    unsets: &mut Vec<String>,
+) -> MergeableMap<T> {
+    if report_dropped_keys(prefix, prev, &next, unsets) {
+        return replace_with(next);
+    }
+
+    next.into_iter()
+        .filter(|(key, next)| !prev.get(key).is_some_and(|prev| prev == next))
+        .collect()
+}
+
 /// Calculate the delta between two strategy-carrying maps of plain values.
 ///
 /// Mirrors [`delta_mergeable_map`] for a map whose values carry no partial of
@@ -204,13 +298,7 @@ pub fn delta_mergeable_value_map<T: Clone + PartialEq>(
     next: MergeableMap<T>,
 ) -> MergeableMap<T> {
     if prev.keys().any(|key| !next.contains_key(key)) {
-        // Stated rather than inherited from `next`'s shape: a plain map
-        // deep-merges on the fold and brings the dropped key back.
-        return MergeableMap::Merged(MergedMap {
-            value: next.into_map(),
-            strategy: Some(MergedMapStrategy::Replace),
-            discard_when_merged: false,
-        });
+        return replace_with(next);
     }
 
     next.into_iter()
