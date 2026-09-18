@@ -4,7 +4,7 @@ use schematic::Config;
 
 use crate::{
     assignment::{AssignKeyValue, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_mergeable_value_map},
+    delta::{PartialConfigDelta, delta_mergeable_value_map, delta_mergeable_value_map_at, path},
     fill::FillDefaults,
     internal::merge::map_with_strategy,
     partial::ToPartial,
@@ -41,6 +41,17 @@ impl PartialConfigDelta for PartialTemplateConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             values: delta_mergeable_value_map(&self.values, next.values),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            values: delta_mergeable_value_map_at(
+                &path(prefix, "values"),
+                &self.values,
+                next.values,
+                unsets,
+            ),
         }
     }
 }

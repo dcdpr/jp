@@ -772,13 +772,18 @@ fn a_dropped_mcp_argument_is_recorded() {
     );
 }
 
-/// A server the user removed is recorded, so the conversation stops starting
-/// it.
+/// A server the user removed is recorded twice over, so the conversation stops
+/// starting it.
 ///
 /// Entries merge by key, which is what lets a server the workspace config
 /// gained reach a conversation created before it existed.
 /// That same property means a deep merge would resurrect a removed one, so the
 /// delta states `replace` and carries the map the user is left with.
+///
+/// The value settles the conversation's own fold.
+/// The path settles the layer above it, where the conversation is filled from
+/// the config files and a server it does not hold would otherwise read as one
+/// it never mentioned.
 #[test]
 fn a_removed_mcp_server_is_recorded() {
     use crate::providers::mcp::{McpProviderConfig, StdioConfig};
@@ -804,9 +809,10 @@ fn a_removed_mcp_server_is_recorded() {
         .to_partial()
         .delta_with_unsets(next.to_partial(), "", &mut unsets);
 
-    assert!(
-        unsets.is_empty(),
-        "the map states its own strategy, so no path is reported: {unsets:?}"
+    assert_eq!(
+        unsets,
+        ["providers.mcp.bookworm"],
+        "the removed key reports its path, so filling cannot restore it"
     );
     assert!(
         delta.providers.mcp.discard_when_merged() || !delta.providers.mcp.is_empty(),

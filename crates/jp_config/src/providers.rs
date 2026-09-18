@@ -7,7 +7,7 @@ use schematic::{Config, ConfigError};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_mergeable_map, path},
+    delta::{PartialConfigDelta, delta_mergeable_map, delta_mergeable_map_at, path},
     fill::{FillDefaults, fill_map},
     internal::merge::map_with_strategy,
     partial::ToPartial,
@@ -86,9 +86,7 @@ impl PartialConfigDelta for PartialProviderConfig {
             llm: self
                 .llm
                 .delta_with_unsets(next.llm, &path(prefix, "llm"), unsets),
-            // The map states its own strategy, so a removed server travels in
-            // the value as a `replace` and needs no path reported.
-            mcp: delta_mergeable_map(&self.mcp, next.mcp),
+            mcp: delta_mergeable_map_at(&path(prefix, "mcp"), &self.mcp, next.mcp, unsets),
         }
     }
 }

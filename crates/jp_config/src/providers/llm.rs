@@ -14,7 +14,7 @@ use schematic::{Config, ConfigError};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_mergeable_map, path},
+    delta::{PartialConfigDelta, delta_mergeable_map, delta_mergeable_map_at, path},
     fill::{FillDefaults, fill_map},
     internal::merge::map_with_strategy,
     model::id::{ModelIdConfig, ModelIdConfigError, ModelIdOrAliasConfig, resolve_alias_chain},
@@ -137,9 +137,12 @@ impl PartialConfigDelta for PartialLlmProviderConfig {
 
     fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
         Self {
-            // The map states its own strategy, so a removed alias travels in
-            // the value as a `replace` and needs no path reported.
-            aliases: delta_mergeable_map(&self.aliases, next.aliases),
+            aliases: delta_mergeable_map_at(
+                &path(prefix, "aliases"),
+                &self.aliases,
+                next.aliases,
+                unsets,
+            ),
             anthropic: self.anthropic.delta_with_unsets(
                 next.anthropic,
                 &path(prefix, "anthropic"),

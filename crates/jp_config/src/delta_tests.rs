@@ -32,6 +32,43 @@ fn map(arguments: &[&str]) -> MergeableMap<PartialMcpProviderConfig> {
     map.into()
 }
 
+/// A field cleared inside an entry both maps hold reports where it lives.
+///
+/// No key disappears, so the map merges per key and the entry carries its own
+/// delta.
+/// That delta cannot say a field went away, which is what the path is for.
+#[test]
+fn map_delta_reports_a_field_cleared_inside_a_surviving_entry() {
+    use crate::providers::mcp::{PartialChecksumConfig, PartialStdioConfig};
+
+    let with_checksum = |checksum: Option<PartialChecksumConfig>| {
+        let mut map = IndexMap::new();
+        map.insert(
+            "kagi".to_owned(),
+            PartialMcpProviderConfig::Stdio(PartialStdioConfig {
+                command: Some("serve".into()),
+                checksum,
+                ..PartialStdioConfig::default()
+            }),
+        );
+        MergeableMap::from(map)
+    };
+
+    let prev = with_checksum(Some(PartialChecksumConfig {
+        value: Some("abc".to_owned()),
+        ..PartialChecksumConfig::default()
+    }));
+
+    let mut unsets = Vec::new();
+    let delta = delta_mergeable_map_at("providers.mcp", &prev, with_checksum(None), &mut unsets);
+
+    assert_eq!(unsets, ["providers.mcp.kagi.checksum"]);
+    assert!(
+        !delta.is_empty(),
+        "the entry is carried so the clear has somewhere to land: {delta:?}"
+    );
+}
+
 /// A removed entry is carried as a `replace`, since a deep merge would bring
 /// the key back.
 #[test]

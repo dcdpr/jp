@@ -18,8 +18,9 @@ use crate::{
         style::{DisplayStyleConfig, PartialDisplayStyleConfig},
     },
     delta::{
-        PartialConfigDelta, delta_mergeable_map, delta_mergeable_value_map, delta_opt,
-        delta_opt_at, delta_opt_partial, delta_opt_partial_at, delta_vec, path,
+        PartialConfigDelta, delta_mergeable_map, delta_mergeable_map_at, delta_mergeable_value_map,
+        delta_mergeable_value_map_at, delta_opt, delta_opt_at, delta_opt_partial,
+        delta_opt_partial_at, delta_vec, path,
     },
     fill::{FillDefaults, fill_map},
     internal::merge::map_with_strategy,
@@ -78,9 +79,7 @@ impl PartialConfigDelta for PartialToolsConfig {
             defaults: self
                 .defaults
                 .delta_with_unsets(next.defaults, &path(prefix, "*"), unsets),
-            // The map states its own strategy, so a removed tool travels in
-            // the value as a `replace` and needs no path reported.
-            tools: delta_mergeable_map(&self.tools, next.tools),
+            tools: delta_mergeable_map_at(prefix, &self.tools, next.tools, unsets),
         }
     }
 }
@@ -689,9 +688,12 @@ impl PartialConfigDelta for PartialToolConfig {
             summary: delta_opt(self.summary.as_ref(), next.summary),
             description: delta_opt(self.description.as_ref(), next.description),
             examples: delta_opt(self.examples.as_ref(), next.examples),
-            // Each map states its own strategy, so a removed entry travels in
-            // the value as a `replace` and needs no path reported.
-            parameters: delta_mergeable_map(&self.parameters, next.parameters),
+            parameters: delta_mergeable_map_at(
+                &path(prefix, "parameters"),
+                &self.parameters,
+                next.parameters,
+                unsets,
+            ),
             run: delta_opt(self.run.as_ref(), next.run),
             format: delta_opt(self.format.as_ref(), next.format),
             result: delta_opt(self.result.as_ref(), next.result),
@@ -705,8 +707,18 @@ impl PartialConfigDelta for PartialToolConfig {
                 next.style,
                 unsets,
             ),
-            questions: delta_mergeable_map(&self.questions, next.questions),
-            options: delta_mergeable_value_map(&self.options, next.options),
+            questions: delta_mergeable_map_at(
+                &path(prefix, "questions"),
+                &self.questions,
+                next.questions,
+                unsets,
+            ),
+            options: delta_mergeable_value_map_at(
+                &path(prefix, "options"),
+                &self.options,
+                next.options,
+                unsets,
+            ),
             access: delta_opt_partial_at(
                 &path(prefix, "access"),
                 self.access.as_ref(),
@@ -854,6 +866,65 @@ impl PartialConfigDelta for PartialToolParameterConfig {
             enumeration: delta_opt(self.enumeration.as_ref(), next.enumeration),
             items: delta_opt(self.items.as_ref(), next.items),
             properties: delta_mergeable_map(&self.properties, next.properties),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            kind: delta_opt_partial_at(
+                &path(prefix, "type"),
+                self.kind.as_ref(),
+                next.kind,
+                unsets,
+            ),
+            default: delta_opt_at(
+                &path(prefix, "default"),
+                self.default.as_ref(),
+                next.default,
+                unsets,
+            ),
+            required: delta_opt_at(
+                &path(prefix, "required"),
+                self.required.as_ref(),
+                next.required,
+                unsets,
+            ),
+            summary: delta_opt_at(
+                &path(prefix, "summary"),
+                self.summary.as_ref(),
+                next.summary,
+                unsets,
+            ),
+            description: delta_opt_at(
+                &path(prefix, "description"),
+                self.description.as_ref(),
+                next.description,
+                unsets,
+            ),
+            examples: delta_opt_at(
+                &path(prefix, "examples"),
+                self.examples.as_ref(),
+                next.examples,
+                unsets,
+            ),
+            enumeration: delta_opt_at(
+                &path(prefix, "enum"),
+                self.enumeration.as_ref(),
+                next.enumeration,
+                unsets,
+            ),
+            items: delta_opt_at(
+                &path(prefix, "items"),
+                self.items.as_ref(),
+                next.items,
+                unsets,
+            ),
+            properties: delta_mergeable_map_at(
+                &path(prefix, "properties"),
+                &self.properties,
+                next.properties,
+                unsets,
+            ),
         }
     }
 }

@@ -19,7 +19,8 @@ use crate::{
         tool::{PartialToolsConfig, ToolsConfig},
     },
     delta::{
-        PartialConfigDelta, delta_mergeable_map, delta_mergeable_vec, delta_opt, delta_opt_at, path,
+        PartialConfigDelta, delta_mergeable_map, delta_mergeable_map_at, delta_mergeable_vec,
+        delta_opt, delta_opt_at, path,
     },
     fill::FillDefaults,
     internal::merge::{map_with_strategy, vec_with_strategy},
@@ -168,7 +169,12 @@ impl PartialConfigDelta for PartialConversationConfig {
                 next.default_id,
                 unsets,
             ),
-            labels: delta_mergeable_map(&self.labels, next.labels),
+            labels: delta_mergeable_map_at(
+                &path(prefix, "labels"),
+                &self.labels,
+                next.labels,
+                unsets,
+            ),
         }
     }
 }

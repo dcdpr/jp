@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_opt, delta_opt_mergeable_vec, delta_opt_partial},
+    delta::{
+        PartialConfigDelta, delta_opt, delta_opt_mergeable_vec, delta_opt_partial,
+        delta_opt_partial_at, path,
+    },
     internal::merge::ordered_vec_with_strategy,
     partial::{ToPartial, partial_opt, partial_opt_config},
     types::vec::MergeableVec,
@@ -47,8 +50,28 @@ impl PartialConfigDelta for PartialMcpProviderConfig {
         }
     }
 
-    // No `delta_with_unsets`: `arguments` and `variables` state `replace`
-    // themselves now, so no field here needs a path reported.
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        match (self, next) {
+            (Self::Stdio(prev), Self::Stdio(next)) => Self::Stdio(PartialStdioConfig {
+                command: delta_opt(prev.command.as_ref(), next.command),
+                // `arguments` and `variables` state `replace` themselves, so a
+                // dropped element travels in the value.
+                arguments: delta_opt_mergeable_vec(prev.arguments.as_ref(), next.arguments),
+                variables: delta_opt_mergeable_vec(prev.variables.as_ref(), next.variables),
+                checksum: delta_opt_partial_at(
+                    &path(prefix, "checksum"),
+                    prev.checksum.as_ref(),
+                    next.checksum,
+                    unsets,
+                ),
+                optional: delta_opt(prev.optional.as_ref(), next.optional),
+                startup_timeout_secs: delta_opt(
+                    prev.startup_timeout_secs.as_ref(),
+                    next.startup_timeout_secs,
+                ),
+            }),
+        }
+    }
 }
 
 impl McpProviderConfig {

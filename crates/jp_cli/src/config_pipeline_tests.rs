@@ -264,6 +264,55 @@ fn conversation_clears_prevent_base_values_from_returning() {
     assert!(!partial.providers.mcp.contains_key("kagi"));
 }
 
+/// A server the conversation removed stays removed on the next invocation, with
+/// the paths taken from the delta rather than named by hand.
+///
+/// The two halves have to meet: the delta reports the key it dropped, and the
+/// pipeline clears it after filling.
+/// Either alone puts the server back, since filling reads a key the
+/// conversation does not hold as one it never mentioned.
+#[test]
+fn a_removed_server_survives_the_next_invocation() {
+    use jp_config::PartialConfigDelta as _;
+
+    let mut pipeline = empty_pipeline();
+    pipeline
+        .base
+        .providers
+        .mcp
+        .insert("bookworm".to_owned(), mcp_server("serve"));
+    pipeline
+        .base
+        .providers
+        .mcp
+        .insert("kagi".to_owned(), mcp_server("search"));
+
+    // The invocation that removed `kagi`, as the producer sees it: the
+    // conversation's state before, against the config the turn ran with.
+    let before = pipeline.base.clone();
+    let mut after = pipeline.base.clone();
+    after.providers.mcp.shift_remove("kagi");
+
+    let mut unsets = Vec::new();
+    let delta = before.delta_with_unsets(after.clone(), "", &mut unsets);
+
+    assert!(
+        !delta.providers.mcp.contains_key("kagi"),
+        "the delta carries the map the user is left with"
+    );
+
+    let partial = pipeline.partial_with_conversation(after, &unsets).unwrap();
+
+    assert!(
+        !partial.providers.mcp.contains_key("kagi"),
+        "the workspace must not restore a server the conversation removed"
+    );
+    assert!(
+        partial.providers.mcp.contains_key("bookworm"),
+        "and the servers it kept are still there"
+    );
+}
+
 #[test]
 fn conversation_clears_allow_explicit_cfg_values() {
     let mut pipeline = empty_pipeline();
