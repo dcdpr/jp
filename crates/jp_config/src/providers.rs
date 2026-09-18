@@ -15,8 +15,8 @@ use crate::{
         llm::{LlmProviderConfig, PartialLlmProviderConfig},
         mcp::McpProviderConfig,
     },
-    validate::Validator,
     types::map::{MergeableMap, map_to_partial_per_key},
+    validate::Validator,
 };
 
 /// Provider configuration.

@@ -937,7 +937,7 @@ async fn prepare_turn(
     // added to the workspace since then is otherwise unknown to it, and starting
     // it fails.
     ctx.mcp_client
-        .set_servers(config.providers.mcp.clone())
+        .set_servers(config.providers.mcp.clone().into_map())
         .await;
 
     // Shared, because a turn spawned earlier may still be using a server this

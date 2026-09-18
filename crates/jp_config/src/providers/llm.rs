@@ -29,8 +29,8 @@ use crate::{
         openai::{OpenaiConfig, PartialOpenaiConfig},
         openrouter::{OpenrouterConfig, PartialOpenrouterConfig},
     },
-    validate::Validator,
     types::map::{MergeableMap, map_to_partial_per_key},
+    validate::Validator,
 };
 
 /// Provider configuration.

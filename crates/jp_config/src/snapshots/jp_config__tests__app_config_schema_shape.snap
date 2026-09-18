@@ -3,7 +3,7 @@ source: crates/jp_config/src/lib_tests.rs
 expression: "crate::schema_shape::render(&AppConfig::schema())"
 ---
 assistant: AssistantConfig
-  instructions?: MergeableVec
+  instructions?: MergeableVec_InstructionsConfig
     |:
       []: InstructionsConfig
         description: string | null
@@ -17,7 +17,7 @@ assistant: AssistantConfig
         items: [string]
         position?: int
         title: string | null
-    |: MergedVec
+    |: MergedVec_InstructionsConfig
       dedup?: "inherit" | "true" | "false" | bool | null
       discard_when_merged?: bool
       strategy?: "append" | "prepend" | "replace" | null
@@ -79,14 +79,14 @@ assistant: AssistantConfig
       separator?: "none" | "space" | "line" | "paragraph"
       strategy?: "append" | "prepend" | "replace"
       value?: string
-  system_prompt_sections?: MergeableVec
+  system_prompt_sections?: MergeableVec_SectionConfig
     |:
       []: SectionConfig
         content: string
         position?: int
         tag: string | null
         title: string | null
-    |: MergedVec
+    |: MergedVec_SectionConfig
       dedup?: "inherit" | "true" | "false" | bool | null
       discard_when_merged?: bool
       strategy?: "append" | "prepend" | "replace" | null
@@ -105,7 +105,7 @@ config_load_paths: MergeableVec
     strategy?: "append" | "prepend" | "replace" | null
     value?: [string]
 conversation: ConversationConfig
-  attachments?: MergeableVec
+  attachments?: MergeableVec_AttachmentConfig
     |:
       []: AttachmentConfig
         |: string
@@ -114,7 +114,7 @@ conversation: ConversationConfig
             *: unknown
           path: string
           type: string
-    |: MergedVec
+    |: MergedVec_AttachmentConfig
       dedup?: "inherit" | "true" | "false" | bool | null
       discard_when_merged?: bool
       strategy?: "append" | "prepend" | "replace" | null
@@ -127,7 +127,7 @@ conversation: ConversationConfig
             path: string
             type: string
   compaction: CompactionConfig
-    rules?: MergeableVec
+    rules?: MergeableVec_CompactionRuleConfig
       |:
         []: CompactionRuleConfig
           keep_first?: int | string
@@ -163,7 +163,13 @@ conversation: ConversationConfig
                           exclude?: bool
                       |: null
                     service_tier: "off" | "flex" | "standard" | "priority" | null
-                    stop_words?: @MergeableVec
+                    stop_words?: MergeableVec
+                      |: [string]
+                      |: MergedVec
+                        dedup?: "inherit" | "true" | "false" | bool | null
+                        discard_when_merged?: bool
+                        strategy?: "append" | "prepend" | "replace" | null
+                        value?: [string]
                     temperature: float | null
                     top_k: int | null
                     top_p: float | null
@@ -177,7 +183,7 @@ conversation: ConversationConfig
                 over: int | string
                 policy: "strip" (aka s) | "strip-responses" (aka strip_responses, sres) | "strip-requests" (aka strip_requests, sreq) | "omit" (aka o)
             |: null
-      |: MergedVec
+      |: MergedVec_CompactionRuleConfig
         dedup?: "inherit" | "true" | "false" | bool | null
         discard_when_merged?: bool
         strategy?: "append" | "prepend" | "replace" | null
@@ -216,7 +222,13 @@ conversation: ConversationConfig
                             exclude?: bool
                         |: null
                       service_tier: "off" | "flex" | "standard" | "priority" | null
-                      stop_words?: @MergeableVec
+                      stop_words?: MergeableVec
+                        |: [string]
+                        |: MergedVec
+                          dedup?: "inherit" | "true" | "false" | bool | null
+                          discard_when_merged?: bool
+                          strategy?: "append" | "prepend" | "replace" | null
+                          value?: [string]
                       temperature: float | null
                       top_k: int | null
                       top_p: float | null
@@ -233,7 +245,7 @@ conversation: ConversationConfig
   default_id: "ask" | "last-activated" (aka last, last_activated) | "last-created" (aka last_created) | "previous" (aka prev) | string | null
   inquiry: InquiryConfig
     assistant: AssistantConfig
-      instructions?: MergeableVec
+      instructions?: MergeableVec_InstructionsConfig
         |:
           []: InstructionsConfig
             description: string | null
@@ -247,7 +259,7 @@ conversation: ConversationConfig
             items: [string]
             position?: int
             title: string | null
-        |: MergedVec
+        |: MergedVec_InstructionsConfig
           dedup?: "inherit" | "true" | "false" | bool | null
           discard_when_merged?: bool
           strategy?: "append" | "prepend" | "replace" | null
@@ -309,14 +321,14 @@ conversation: ConversationConfig
           separator?: "none" | "space" | "line" | "paragraph"
           strategy?: "append" | "prepend" | "replace"
           value?: string
-      system_prompt_sections?: MergeableVec
+      system_prompt_sections?: MergeableVec_SectionConfig
         |:
           []: SectionConfig
             content: string
             position?: int
             tag: string | null
             title: string | null
-        |: MergedVec
+        |: MergedVec_SectionConfig
           dedup?: "inherit" | "true" | "false" | bool | null
           discard_when_merged?: bool
           strategy?: "append" | "prepend" | "replace" | null
@@ -327,7 +339,7 @@ conversation: ConversationConfig
               tag: string | null
               title: string | null
       tool_choice?: "auto" | "none" | "required" | string
-  labels: MergeableMap
+  labels: MergeableMap_LabelConfig
     |:
       *: LabelConfig
         |: string
@@ -348,7 +360,7 @@ conversation: ConversationConfig
                   args?: [string]
                   program: string
                   shell?: bool
-    |: MergedMap
+    |: MergedMap_LabelConfig
       discard_when_merged?: bool
       strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
       value?:
@@ -411,12 +423,12 @@ conversation: ConversationConfig
     *: ToolsDefaultsConfig
       access:
         |: AccessConfig
-          env: MergeableVec
+          env: MergeableVec_EnvRuleConfig
             |:
               []: EnvRuleConfig
                 name: string
                 read: bool | null
-            |: MergedVec
+            |: MergedVec_EnvRuleConfig
               dedup?: "inherit" | "true" | "false" | bool | null
               discard_when_merged?: bool
               strategy?: "append" | "prepend" | "replace" | null
@@ -424,7 +436,7 @@ conversation: ConversationConfig
                 []: EnvRuleConfig
                   name: string
                   read: bool | null
-          fs: MergeableVec
+          fs: MergeableVec_FsRuleConfig
             |:
               []: FsRuleConfig
                 create: bool | null
@@ -435,7 +447,7 @@ conversation: ConversationConfig
                 read: bool | null
                 update: bool | null
                 write: bool | null
-            |: MergedVec
+            |: MergedVec_FsRuleConfig
               dedup?: "inherit" | "true" | "false" | bool | null
               discard_when_merged?: bool
               strategy?: "append" | "prepend" | "replace" | null
@@ -481,39 +493,26 @@ conversation: ConversationConfig
               shell?: bool
         print_stderr?: bool
         results_file_link?: "full" | "osc8" | "off"
-    tools (flattened):
-      *: ToolConfig
-        access:
-          |: AccessConfig
-            env: MergeableVec
-              |:
-                []: EnvRuleConfig
-                  name: string
-                  read: bool | null
-              |: MergedVec
-                dedup?: "inherit" | "true" | "false" | bool | null
-                discard_when_merged?: bool
-                strategy?: "append" | "prepend" | "replace" | null
-                value?:
+    tools (flattened): MergeableMap_ToolConfig
+      |:
+        *: ToolConfig
+          access:
+            |: AccessConfig
+              env: MergeableVec_EnvRuleConfig
+                |:
                   []: EnvRuleConfig
                     name: string
                     read: bool | null
-            fs: MergeableVec
-              |:
-                []: FsRuleConfig
-                  create: bool | null
-                  delete: bool | null
-                  execute: bool | null
-                  external: bool | null
-                  path: string
-                  read: bool | null
-                  update: bool | null
-                  write: bool | null
-              |: MergedVec
-                dedup?: "inherit" | "true" | "false" | bool | null
-                discard_when_merged?: bool
-                strategy?: "append" | "prepend" | "replace" | null
-                value?:
+                |: MergedVec_EnvRuleConfig
+                  dedup?: "inherit" | "true" | "false" | bool | null
+                  discard_when_merged?: bool
+                  strategy?: "append" | "prepend" | "replace" | null
+                  value?:
+                    []: EnvRuleConfig
+                      name: string
+                      read: bool | null
+              fs: MergeableVec_FsRuleConfig
+                |:
                   []: FsRuleConfig
                     create: bool | null
                     delete: bool | null
@@ -523,69 +522,84 @@ conversation: ConversationConfig
                     read: bool | null
                     update: bool | null
                     write: bool | null
-          |: null
-        cancellation_response: string | null
-        command:
-          |: CommandConfigOrString
-            |: string
-            | (expanded): CommandConfig
-              args?: [string]
-              program: string
-              shell?: bool
-          |: null
-        description: string | null
-        enable:
-          |:
-            |: bool
-            |: "on" | "off" | "always" | "explicit"
-            | (expanded): EnableConfig
-              allow_toggle: "any" | "never" | "if_named" | "if_named_or_group" | null
-              state: bool | null
-          |: null
-        examples: string | null
-        format: "ask" | "unattended" | null
-        options:
-          *: unknown
-        parameters:
-          *: ToolParameterConfig
-            default?: unknown | null
-            description?: string | null
-            enum?: [unknown] | null
-            examples?: string | null
-            items?: @ToolParameterConfig | null
-            properties?:
-              *: @ToolParameterConfig
-            required?: bool | null
-            summary?: string | null
-            type?: string | [string] | null
-        questions:
-          *: QuestionConfig
-            answer: unknown | null
-            target: QuestionTarget
-              |: "user" | "assistant"
-              |: PartialAssistantConfig
-                instructions?:
-                  |: PartialMergeableVec
-                    |:
-                      []: PartialInstructionsConfig
-                        description?: string | null
-                        examples?:
-                          |:
-                            []: PartialExampleConfig
-                              |: string
-                              |: PartialContrastConfig
-                                bad?: string | null
-                                good?: string | null
-                                reason?: string | null
-                          |: null
-                        items?: [string] | null
-                        position?: int | null
-                        title?: string | null
-                    |: PartialMergedVec
-                      dedup?: "inherit" | "true" | "false" | bool | null | null
-                      discard_when_merged?: bool | null
-                      strategy?: "append" | "prepend" | "replace" | null
-                      value?:
+                |: MergedVec_FsRuleConfig
+                  dedup?: "inherit" | "true" | "false" | bool | null
+                  discard_when_merged?: bool
+                  strategy?: "append" | "prepend" | "replace" | null
+                  value?:
+                    []: FsRuleConfig
+                      create: bool | null
+                      delete: bool | null
+                      execute: bool | null
+                      external: bool | null
+                      path: string
+                      read: bool | null
+                      update: bool | null
+                      write: bool | null
+            |: null
+          cancellation_response: string | null
+          command:
+            |: CommandConfigOrString
+              |: string
+              | (expanded): CommandConfig
+                args?: [string]
+                program: string
+                shell?: bool
+            |: null
+          description: string | null
+          enable:
+            |:
+              |: bool
+              |: "on" | "off" | "always" | "explicit"
+              | (expanded): EnableConfig
+                allow_toggle: "any" | "never" | "if_named" | "if_named_or_group" | null
+                state: bool | null
+            |: null
+          examples: string | null
+          format: "ask" | "unattended" | null
+          options: MergeableMap_JsonValue
+            |:
+              *: unknown
+            |: MergedMap_JsonValue
+              discard_when_merged?: bool
+              strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
+              value?:
+                *: unknown
+          parameters: MergeableMap_ToolParameterConfig
+            |:
+              *: ToolParameterConfig
+                default?: unknown | null
+                description?: string | null
+                enum?: [unknown] | null
+                examples?: string | null
+                items?: @ToolParameterConfig | null
+                properties?: @MergeableMap_ToolParameterConfig
+                required?: bool | null
+                summary?: string | null
+                type?: string | [string] | null
+            |: MergedMap_ToolParameterConfig
+              discard_when_merged?: bool
+              strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
+              value?:
+                *: ToolParameterConfig
+                  default?: unknown | null
+                  description?: string | null
+                  enum?: [unknown] | null
+                  examples?: string | null
+                  items?: @ToolParameterConfig | null
+                  properties?: @MergeableMap_ToolParameterConfig
+                  required?: bool | null
+                  summary?: string | null
+                  type?: string | [string] | null
+          questions: MergeableMap_QuestionConfig
+            |:
+              *: QuestionConfig
+                answer: unknown | null
+                target: QuestionTarget
+                  |: "user" | "assistant"
+                  |: PartialAssistantConfig
+                    instructions?:
+                      |: PartialMergeableVec_InstructionsConfig
                         |:
                           []: PartialInstructionsConfig
                             description?: string | null
@@ -601,114 +615,644 @@ conversation: ConversationConfig
                             items?: [string] | null
                             position?: int | null
                             title?: string | null
-                        |: null
-                  |: null
-                model?:
-                  |: PartialModelConfig
-                    id?:
-                      |: PartialModelIdOrAliasConfig
-                        |: PartialModelIdConfig
-                          name?: string | null
-                          provider?: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai" | null
+                        |: PartialMergedVec_InstructionsConfig
+                          dedup?: "inherit" | "true" | "false" | bool | null | null
+                          discard_when_merged?: bool | null
+                          strategy?: "append" | "prepend" | "replace" | null
+                          value?:
+                            |:
+                              []: PartialInstructionsConfig
+                                description?: string | null
+                                examples?:
+                                  |:
+                                    []: PartialExampleConfig
+                                      |: string
+                                      |: PartialContrastConfig
+                                        bad?: string | null
+                                        good?: string | null
+                                        reason?: string | null
+                                  |: null
+                                items?: [string] | null
+                                position?: int | null
+                                title?: string | null
+                            |: null
+                      |: null
+                    model?:
+                      |: PartialModelConfig
+                        id?:
+                          |: PartialModelIdOrAliasConfig
+                            |: PartialModelIdConfig
+                              name?: string | null
+                              provider?: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai" | null
+                            |: string
+                          |: null
+                        parameters?:
+                          |: PartialParametersConfig
+                            max_tokens?: int | null
+                            other?:
+                              |:
+                                *: unknown
+                              |: null
+                            reasoning?:
+                              |: PartialReasoningConfig
+                                |: "off"
+                                |: "auto"
+                                |: PartialCustomReasoningConfig
+                                  effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string | null
+                                  exclude?: bool | null
+                              |: null
+                            service_tier?: "off" | "flex" | "standard" | "priority" | null
+                            stop_words?:
+                              |: MergeableVec
+                                |: [string]
+                                |: PartialMergedVec
+                                  dedup?: "inherit" | "true" | "false" | bool | null | null
+                                  discard_when_merged?: bool | null
+                                  strategy?: "append" | "prepend" | "replace" | null
+                                  value?: [string] | null
+                              |: null
+                            temperature?: float | null
+                            top_k?: int | null
+                            top_p?: float | null
+                          |: null
+                      |: null
+                    name?: string | null
+                    request?:
+                      |: PartialRequestConfig
+                        base_backoff_ms?: int | null
+                        cache?: bool | "off" | "short" | "long" | string | null
+                        max_backoff_secs?: int | null
+                        max_response_bytes?: int | "disabled" | "off" | bool | null
+                        max_retries?: int | null
+                        stream_idle_timeout_secs?: int | null
+                      |: null
+                    system_prompt?:
+                      |: PartialMergeableString
                         |: string
+                        |: PartialMergedString
+                          dedup?: bool | "inherit" | "off" | "exact" | "block" | "contains" | null | null
+                          discard_when_merged?: bool | null
+                          separator?: "none" | "space" | "line" | "paragraph" | null
+                          strategy?: "append" | "prepend" | "replace" | null
+                          value?: string | null
                       |: null
-                    parameters?:
-                      |: PartialParametersConfig
-                        max_tokens?: int | null
-                        other?:
-                          |:
-                            *: unknown
-                          |: null
-                        reasoning?:
-                          |: PartialReasoningConfig
-                            |: "off"
-                            |: "auto"
-                            |: PartialCustomReasoningConfig
-                              effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string | null
-                              exclude?: bool | null
-                          |: null
-                        service_tier?: "off" | "flex" | "standard" | "priority" | null
-                        stop_words?:
-                          |: MergeableVec
-                            |: [string]
-                            |: PartialMergedVec
-                              dedup?: "inherit" | "true" | "false" | bool | null | null
-                              discard_when_merged?: bool | null
-                              strategy?: "append" | "prepend" | "replace" | null
-                              value?: [string] | null
-                          |: null
-                        temperature?: float | null
-                        top_k?: int | null
-                        top_p?: float | null
-                      |: null
-                  |: null
-                name?: string | null
-                request?:
-                  |: PartialRequestConfig
-                    base_backoff_ms?: int | null
-                    cache?: bool | "off" | "short" | "long" | string | null
-                    max_backoff_secs?: int | null
-                    max_response_bytes?: int | "disabled" | "off" | bool | null
-                    max_retries?: int | null
-                    stream_idle_timeout_secs?: int | null
-                  |: null
-                system_prompt?:
-                  |: PartialMergeableString
-                    |: string
-                    |: PartialMergedString
-                      dedup?: bool | "inherit" | "off" | "exact" | "block" | "contains" | null | null
-                      discard_when_merged?: bool | null
-                      separator?: "none" | "space" | "line" | "paragraph" | null
-                      strategy?: "append" | "prepend" | "replace" | null
-                      value?: string | null
-                  |: null
-                system_prompt_sections?:
-                  |: PartialMergeableVec
-                    |:
-                      []: PartialSectionConfig
-                        content?: string | null
-                        position?: int | null
-                        tag?: string | null
-                        title?: string | null
-                    |: PartialMergedVec
-                      dedup?: "inherit" | "true" | "false" | bool | null | null
-                      discard_when_merged?: bool | null
-                      strategy?: "append" | "prepend" | "replace" | null
-                      value?:
+                    system_prompt_sections?:
+                      |: PartialMergeableVec_SectionConfig
                         |:
                           []: PartialSectionConfig
                             content?: string | null
                             position?: int | null
                             tag?: string | null
                             title?: string | null
+                        |: PartialMergedVec_SectionConfig
+                          dedup?: "inherit" | "true" | "false" | bool | null | null
+                          discard_when_merged?: bool | null
+                          strategy?: "append" | "prepend" | "replace" | null
+                          value?:
+                            |:
+                              []: PartialSectionConfig
+                                content?: string | null
+                                position?: int | null
+                                tag?: string | null
+                                title?: string | null
+                            |: null
+                      |: null
+                    tool_choice?: "auto" | "none" | "required" | string | null
+            |: MergedMap_QuestionConfig
+              discard_when_merged?: bool
+              strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
+              value?:
+                *: QuestionConfig
+                  answer: unknown | null
+                  target: QuestionTarget
+                    |: "user" | "assistant"
+                    |: PartialAssistantConfig
+                      instructions?:
+                        |: PartialMergeableVec_InstructionsConfig
+                          |:
+                            []: PartialInstructionsConfig
+                              description?: string | null
+                              examples?:
+                                |:
+                                  []: PartialExampleConfig
+                                    |: string
+                                    |: PartialContrastConfig
+                                      bad?: string | null
+                                      good?: string | null
+                                      reason?: string | null
+                                |: null
+                              items?: [string] | null
+                              position?: int | null
+                              title?: string | null
+                          |: PartialMergedVec_InstructionsConfig
+                            dedup?: "inherit" | "true" | "false" | bool | null | null
+                            discard_when_merged?: bool | null
+                            strategy?: "append" | "prepend" | "replace" | null
+                            value?:
+                              |:
+                                []: PartialInstructionsConfig
+                                  description?: string | null
+                                  examples?:
+                                    |:
+                                      []: PartialExampleConfig
+                                        |: string
+                                        |: PartialContrastConfig
+                                          bad?: string | null
+                                          good?: string | null
+                                          reason?: string | null
+                                    |: null
+                                  items?: [string] | null
+                                  position?: int | null
+                                  title?: string | null
+                              |: null
                         |: null
-                  |: null
-                tool_choice?: "auto" | "none" | "required" | string | null
-        result: "unattended" | "ask" | "edit" | "skip" | null
-        run: "ask" | "unattended" | "edit" | "skip" | null
-        source: string(/^(builtin|local)(\..+)?$|^mcp\.[^.]+(\..+)?$/)
-        style:
-          |: DisplayStyleConfig
-            error: ErrorStyleConfig
-              inline_results: "off" | "full" | string | null
-              results_file_link: "full" | "osc8" | "off" | null
-            hidden?: bool
-            inline_results?: "off" | "full" | string
-            joins_reasoning?: bool
-            parameters?: ParametersStyle
-              |: "json"
-              |: "function_call"
-              |: "off"
+                      model?:
+                        |: PartialModelConfig
+                          id?:
+                            |: PartialModelIdOrAliasConfig
+                              |: PartialModelIdConfig
+                                name?: string | null
+                                provider?: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai" | null
+                              |: string
+                            |: null
+                          parameters?:
+                            |: PartialParametersConfig
+                              max_tokens?: int | null
+                              other?:
+                                |:
+                                  *: unknown
+                                |: null
+                              reasoning?:
+                                |: PartialReasoningConfig
+                                  |: "off"
+                                  |: "auto"
+                                  |: PartialCustomReasoningConfig
+                                    effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string | null
+                                    exclude?: bool | null
+                                |: null
+                              service_tier?: "off" | "flex" | "standard" | "priority" | null
+                              stop_words?:
+                                |: MergeableVec
+                                  |: [string]
+                                  |: PartialMergedVec
+                                    dedup?: "inherit" | "true" | "false" | bool | null | null
+                                    discard_when_merged?: bool | null
+                                    strategy?: "append" | "prepend" | "replace" | null
+                                    value?: [string] | null
+                                |: null
+                              temperature?: float | null
+                              top_k?: int | null
+                              top_p?: float | null
+                            |: null
+                        |: null
+                      name?: string | null
+                      request?:
+                        |: PartialRequestConfig
+                          base_backoff_ms?: int | null
+                          cache?: bool | "off" | "short" | "long" | string | null
+                          max_backoff_secs?: int | null
+                          max_response_bytes?: int | "disabled" | "off" | bool | null
+                          max_retries?: int | null
+                          stream_idle_timeout_secs?: int | null
+                        |: null
+                      system_prompt?:
+                        |: PartialMergeableString
+                          |: string
+                          |: PartialMergedString
+                            dedup?: bool | "inherit" | "off" | "exact" | "block" | "contains" | null | null
+                            discard_when_merged?: bool | null
+                            separator?: "none" | "space" | "line" | "paragraph" | null
+                            strategy?: "append" | "prepend" | "replace" | null
+                            value?: string | null
+                        |: null
+                      system_prompt_sections?:
+                        |: PartialMergeableVec_SectionConfig
+                          |:
+                            []: PartialSectionConfig
+                              content?: string | null
+                              position?: int | null
+                              tag?: string | null
+                              title?: string | null
+                          |: PartialMergedVec_SectionConfig
+                            dedup?: "inherit" | "true" | "false" | bool | null | null
+                            discard_when_merged?: bool | null
+                            strategy?: "append" | "prepend" | "replace" | null
+                            value?:
+                              |:
+                                []: PartialSectionConfig
+                                  content?: string | null
+                                  position?: int | null
+                                  tag?: string | null
+                                  title?: string | null
+                              |: null
+                        |: null
+                      tool_choice?: "auto" | "none" | "required" | string | null
+          result: "unattended" | "ask" | "edit" | "skip" | null
+          run: "ask" | "unattended" | "edit" | "skip" | null
+          source: string(/^(builtin|local)(\..+)?$|^mcp\.[^.]+(\..+)?$/)
+          style:
+            |: DisplayStyleConfig
+              error: ErrorStyleConfig
+                inline_results: "off" | "full" | string | null
+                results_file_link: "full" | "osc8" | "off" | null
+              hidden?: bool
+              inline_results?: "off" | "full" | string
+              joins_reasoning?: bool
+              parameters?: ParametersStyle
+                |: "json"
+                |: "function_call"
+                |: "off"
+                |: CommandConfigOrString
+                  |: string
+                  | (expanded): CommandConfig
+                    args?: [string]
+                    program: string
+                    shell?: bool
+              print_stderr?: bool
+              results_file_link?: "full" | "osc8" | "off"
+            |: null
+          summary: string | null
+      |: MergedMap_ToolConfig
+        discard_when_merged?: bool
+        strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
+        value?:
+          *: ToolConfig
+            access:
+              |: AccessConfig
+                env: MergeableVec_EnvRuleConfig
+                  |:
+                    []: EnvRuleConfig
+                      name: string
+                      read: bool | null
+                  |: MergedVec_EnvRuleConfig
+                    dedup?: "inherit" | "true" | "false" | bool | null
+                    discard_when_merged?: bool
+                    strategy?: "append" | "prepend" | "replace" | null
+                    value?:
+                      []: EnvRuleConfig
+                        name: string
+                        read: bool | null
+                fs: MergeableVec_FsRuleConfig
+                  |:
+                    []: FsRuleConfig
+                      create: bool | null
+                      delete: bool | null
+                      execute: bool | null
+                      external: bool | null
+                      path: string
+                      read: bool | null
+                      update: bool | null
+                      write: bool | null
+                  |: MergedVec_FsRuleConfig
+                    dedup?: "inherit" | "true" | "false" | bool | null
+                    discard_when_merged?: bool
+                    strategy?: "append" | "prepend" | "replace" | null
+                    value?:
+                      []: FsRuleConfig
+                        create: bool | null
+                        delete: bool | null
+                        execute: bool | null
+                        external: bool | null
+                        path: string
+                        read: bool | null
+                        update: bool | null
+                        write: bool | null
+              |: null
+            cancellation_response: string | null
+            command:
               |: CommandConfigOrString
                 |: string
                 | (expanded): CommandConfig
                   args?: [string]
                   program: string
                   shell?: bool
-            print_stderr?: bool
-            results_file_link?: "full" | "osc8" | "off"
-          |: null
-        summary: string | null
+              |: null
+            description: string | null
+            enable:
+              |:
+                |: bool
+                |: "on" | "off" | "always" | "explicit"
+                | (expanded): EnableConfig
+                  allow_toggle: "any" | "never" | "if_named" | "if_named_or_group" | null
+                  state: bool | null
+              |: null
+            examples: string | null
+            format: "ask" | "unattended" | null
+            options: MergeableMap_JsonValue
+              |:
+                *: unknown
+              |: MergedMap_JsonValue
+                discard_when_merged?: bool
+                strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
+                value?:
+                  *: unknown
+            parameters: MergeableMap_ToolParameterConfig
+              |:
+                *: ToolParameterConfig
+                  default?: unknown | null
+                  description?: string | null
+                  enum?: [unknown] | null
+                  examples?: string | null
+                  items?: @ToolParameterConfig | null
+                  properties?: @MergeableMap_ToolParameterConfig
+                  required?: bool | null
+                  summary?: string | null
+                  type?: string | [string] | null
+              |: MergedMap_ToolParameterConfig
+                discard_when_merged?: bool
+                strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
+                value?:
+                  *: ToolParameterConfig
+                    default?: unknown | null
+                    description?: string | null
+                    enum?: [unknown] | null
+                    examples?: string | null
+                    items?: @ToolParameterConfig | null
+                    properties?: @MergeableMap_ToolParameterConfig
+                    required?: bool | null
+                    summary?: string | null
+                    type?: string | [string] | null
+            questions: MergeableMap_QuestionConfig
+              |:
+                *: QuestionConfig
+                  answer: unknown | null
+                  target: QuestionTarget
+                    |: "user" | "assistant"
+                    |: PartialAssistantConfig
+                      instructions?:
+                        |: PartialMergeableVec_InstructionsConfig
+                          |:
+                            []: PartialInstructionsConfig
+                              description?: string | null
+                              examples?:
+                                |:
+                                  []: PartialExampleConfig
+                                    |: string
+                                    |: PartialContrastConfig
+                                      bad?: string | null
+                                      good?: string | null
+                                      reason?: string | null
+                                |: null
+                              items?: [string] | null
+                              position?: int | null
+                              title?: string | null
+                          |: PartialMergedVec_InstructionsConfig
+                            dedup?: "inherit" | "true" | "false" | bool | null | null
+                            discard_when_merged?: bool | null
+                            strategy?: "append" | "prepend" | "replace" | null
+                            value?:
+                              |:
+                                []: PartialInstructionsConfig
+                                  description?: string | null
+                                  examples?:
+                                    |:
+                                      []: PartialExampleConfig
+                                        |: string
+                                        |: PartialContrastConfig
+                                          bad?: string | null
+                                          good?: string | null
+                                          reason?: string | null
+                                    |: null
+                                  items?: [string] | null
+                                  position?: int | null
+                                  title?: string | null
+                              |: null
+                        |: null
+                      model?:
+                        |: PartialModelConfig
+                          id?:
+                            |: PartialModelIdOrAliasConfig
+                              |: PartialModelIdConfig
+                                name?: string | null
+                                provider?: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai" | null
+                              |: string
+                            |: null
+                          parameters?:
+                            |: PartialParametersConfig
+                              max_tokens?: int | null
+                              other?:
+                                |:
+                                  *: unknown
+                                |: null
+                              reasoning?:
+                                |: PartialReasoningConfig
+                                  |: "off"
+                                  |: "auto"
+                                  |: PartialCustomReasoningConfig
+                                    effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string | null
+                                    exclude?: bool | null
+                                |: null
+                              service_tier?: "off" | "flex" | "standard" | "priority" | null
+                              stop_words?:
+                                |: MergeableVec
+                                  |: [string]
+                                  |: PartialMergedVec
+                                    dedup?: "inherit" | "true" | "false" | bool | null | null
+                                    discard_when_merged?: bool | null
+                                    strategy?: "append" | "prepend" | "replace" | null
+                                    value?: [string] | null
+                                |: null
+                              temperature?: float | null
+                              top_k?: int | null
+                              top_p?: float | null
+                            |: null
+                        |: null
+                      name?: string | null
+                      request?:
+                        |: PartialRequestConfig
+                          base_backoff_ms?: int | null
+                          cache?: bool | "off" | "short" | "long" | string | null
+                          max_backoff_secs?: int | null
+                          max_response_bytes?: int | "disabled" | "off" | bool | null
+                          max_retries?: int | null
+                          stream_idle_timeout_secs?: int | null
+                        |: null
+                      system_prompt?:
+                        |: PartialMergeableString
+                          |: string
+                          |: PartialMergedString
+                            dedup?: bool | "inherit" | "off" | "exact" | "block" | "contains" | null | null
+                            discard_when_merged?: bool | null
+                            separator?: "none" | "space" | "line" | "paragraph" | null
+                            strategy?: "append" | "prepend" | "replace" | null
+                            value?: string | null
+                        |: null
+                      system_prompt_sections?:
+                        |: PartialMergeableVec_SectionConfig
+                          |:
+                            []: PartialSectionConfig
+                              content?: string | null
+                              position?: int | null
+                              tag?: string | null
+                              title?: string | null
+                          |: PartialMergedVec_SectionConfig
+                            dedup?: "inherit" | "true" | "false" | bool | null | null
+                            discard_when_merged?: bool | null
+                            strategy?: "append" | "prepend" | "replace" | null
+                            value?:
+                              |:
+                                []: PartialSectionConfig
+                                  content?: string | null
+                                  position?: int | null
+                                  tag?: string | null
+                                  title?: string | null
+                              |: null
+                        |: null
+                      tool_choice?: "auto" | "none" | "required" | string | null
+              |: MergedMap_QuestionConfig
+                discard_when_merged?: bool
+                strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
+                value?:
+                  *: QuestionConfig
+                    answer: unknown | null
+                    target: QuestionTarget
+                      |: "user" | "assistant"
+                      |: PartialAssistantConfig
+                        instructions?:
+                          |: PartialMergeableVec_InstructionsConfig
+                            |:
+                              []: PartialInstructionsConfig
+                                description?: string | null
+                                examples?:
+                                  |:
+                                    []: PartialExampleConfig
+                                      |: string
+                                      |: PartialContrastConfig
+                                        bad?: string | null
+                                        good?: string | null
+                                        reason?: string | null
+                                  |: null
+                                items?: [string] | null
+                                position?: int | null
+                                title?: string | null
+                            |: PartialMergedVec_InstructionsConfig
+                              dedup?: "inherit" | "true" | "false" | bool | null | null
+                              discard_when_merged?: bool | null
+                              strategy?: "append" | "prepend" | "replace" | null
+                              value?:
+                                |:
+                                  []: PartialInstructionsConfig
+                                    description?: string | null
+                                    examples?:
+                                      |:
+                                        []: PartialExampleConfig
+                                          |: string
+                                          |: PartialContrastConfig
+                                            bad?: string | null
+                                            good?: string | null
+                                            reason?: string | null
+                                      |: null
+                                    items?: [string] | null
+                                    position?: int | null
+                                    title?: string | null
+                                |: null
+                          |: null
+                        model?:
+                          |: PartialModelConfig
+                            id?:
+                              |: PartialModelIdOrAliasConfig
+                                |: PartialModelIdConfig
+                                  name?: string | null
+                                  provider?: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai" | null
+                                |: string
+                              |: null
+                            parameters?:
+                              |: PartialParametersConfig
+                                max_tokens?: int | null
+                                other?:
+                                  |:
+                                    *: unknown
+                                  |: null
+                                reasoning?:
+                                  |: PartialReasoningConfig
+                                    |: "off"
+                                    |: "auto"
+                                    |: PartialCustomReasoningConfig
+                                      effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string | null
+                                      exclude?: bool | null
+                                  |: null
+                                service_tier?: "off" | "flex" | "standard" | "priority" | null
+                                stop_words?:
+                                  |: MergeableVec
+                                    |: [string]
+                                    |: PartialMergedVec
+                                      dedup?: "inherit" | "true" | "false" | bool | null | null
+                                      discard_when_merged?: bool | null
+                                      strategy?: "append" | "prepend" | "replace" | null
+                                      value?: [string] | null
+                                  |: null
+                                temperature?: float | null
+                                top_k?: int | null
+                                top_p?: float | null
+                              |: null
+                          |: null
+                        name?: string | null
+                        request?:
+                          |: PartialRequestConfig
+                            base_backoff_ms?: int | null
+                            cache?: bool | "off" | "short" | "long" | string | null
+                            max_backoff_secs?: int | null
+                            max_response_bytes?: int | "disabled" | "off" | bool | null
+                            max_retries?: int | null
+                            stream_idle_timeout_secs?: int | null
+                          |: null
+                        system_prompt?:
+                          |: PartialMergeableString
+                            |: string
+                            |: PartialMergedString
+                              dedup?: bool | "inherit" | "off" | "exact" | "block" | "contains" | null | null
+                              discard_when_merged?: bool | null
+                              separator?: "none" | "space" | "line" | "paragraph" | null
+                              strategy?: "append" | "prepend" | "replace" | null
+                              value?: string | null
+                          |: null
+                        system_prompt_sections?:
+                          |: PartialMergeableVec_SectionConfig
+                            |:
+                              []: PartialSectionConfig
+                                content?: string | null
+                                position?: int | null
+                                tag?: string | null
+                                title?: string | null
+                            |: PartialMergedVec_SectionConfig
+                              dedup?: "inherit" | "true" | "false" | bool | null | null
+                              discard_when_merged?: bool | null
+                              strategy?: "append" | "prepend" | "replace" | null
+                              value?:
+                                |:
+                                  []: PartialSectionConfig
+                                    content?: string | null
+                                    position?: int | null
+                                    tag?: string | null
+                                    title?: string | null
+                                |: null
+                          |: null
+                        tool_choice?: "auto" | "none" | "required" | string | null
+            result: "unattended" | "ask" | "edit" | "skip" | null
+            run: "ask" | "unattended" | "edit" | "skip" | null
+            source: string(/^(builtin|local)(\..+)?$|^mcp\.[^.]+(\..+)?$/)
+            style:
+              |: DisplayStyleConfig
+                error: ErrorStyleConfig
+                  inline_results: "off" | "full" | string | null
+                  results_file_link: "full" | "osc8" | "off" | null
+                hidden?: bool
+                inline_results?: "off" | "full" | string
+                joins_reasoning?: bool
+                parameters?: ParametersStyle
+                  |: "json"
+                  |: "function_call"
+                  |: "off"
+                  |: CommandConfigOrString
+                    |: string
+                    | (expanded): CommandConfig
+                      args?: [string]
+                      program: string
+                      shell?: bool
+                print_stderr?: bool
+                results_file_link?: "full" | "osc8" | "off"
+              |: null
+            summary: string | null
 editor: EditorConfig
   cmd:
     |: CommandConfigOrString
@@ -746,25 +1290,49 @@ loader: LoaderConfig
   reset: "none" | null
 plugins: PluginsConfig
   auto_install?: bool
-  command:
-    *: CommandPluginConfig
-      checksum:
-        |: ChecksumConfig
-          algorithm?: "sha256" | "sha1"
-          value: string
-        |: null
-      install: bool | null
-      options: unknown | null
-      run: "ask" | "unattended" | "deny" | null
+  command: MergeableMap_CommandPluginConfig
+    |:
+      *: CommandPluginConfig
+        checksum:
+          |: ChecksumConfig
+            algorithm?: "sha256" | "sha1"
+            value: string
+          |: null
+        install: bool | null
+        options: unknown | null
+        run: "ask" | "unattended" | "deny" | null
+    |: MergedMap_CommandPluginConfig
+      discard_when_merged?: bool
+      strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
+      value?:
+        *: CommandPluginConfig
+          checksum:
+            |: ChecksumConfig
+              algorithm?: "sha256" | "sha1"
+              value: string
+            |: null
+          install: bool | null
+          options: unknown | null
+          run: "ask" | "unattended" | "deny" | null
   shutdown_timeout_secs?: int
 providers: ProviderConfig
   llm: LlmProviderConfig
-    aliases:
-      *: ModelIdOrAliasConfig
-        |: ModelIdConfig
-          name: string
-          provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
-        |: string
+    aliases: MergeableMap_ModelIdOrAliasConfig
+      |:
+        *: ModelIdOrAliasConfig
+          |: ModelIdConfig
+            name: string
+            provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+          |: string
+      |: MergedMap_ModelIdOrAliasConfig
+        discard_when_merged?: bool
+        strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
+        value?:
+          *: ModelIdOrAliasConfig
+            |: ModelIdConfig
+              name: string
+              provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+            |: string
     anthropic: AnthropicConfig
       api_key_env?: string
       auth?: [string]
@@ -799,32 +1367,62 @@ providers: ProviderConfig
       app_name?: string
       app_referrer: string | null
       base_url?: string
-  mcp:
-    *: McpProviderConfig
-      |: StdioConfig
-        arguments?: MergeableVec
-          |: [string]
-          |: MergedVec
-            dedup?: "inherit" | "true" | "false" | bool | null
-            discard_when_merged?: bool
-            strategy?: "append" | "prepend" | "replace" | null
-            value?: [string]
-        checksum:
-          |: ChecksumConfig
-            algorithm?: "sha256" | "sha1"
-            value: string
-          |: null
-        command: string
-        optional?: bool
-        startup_timeout_secs?: int
-        type: "stdio"
-        variables?: MergeableVec
-          |: [string]
-          |: MergedVec
-            dedup?: "inherit" | "true" | "false" | bool | null
-            discard_when_merged?: bool
-            strategy?: "append" | "prepend" | "replace" | null
-            value?: [string]
+  mcp: MergeableMap_McpProviderConfig
+    |:
+      *: McpProviderConfig
+        |: StdioConfig
+          arguments?: MergeableVec
+            |: [string]
+            |: MergedVec
+              dedup?: "inherit" | "true" | "false" | bool | null
+              discard_when_merged?: bool
+              strategy?: "append" | "prepend" | "replace" | null
+              value?: [string]
+          checksum:
+            |: ChecksumConfig
+              algorithm?: "sha256" | "sha1"
+              value: string
+            |: null
+          command: string
+          optional?: bool
+          startup_timeout_secs?: int
+          type: "stdio"
+          variables?: MergeableVec
+            |: [string]
+            |: MergedVec
+              dedup?: "inherit" | "true" | "false" | bool | null
+              discard_when_merged?: bool
+              strategy?: "append" | "prepend" | "replace" | null
+              value?: [string]
+    |: MergedMap_McpProviderConfig
+      discard_when_merged?: bool
+      strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
+      value?:
+        *: McpProviderConfig
+          |: StdioConfig
+            arguments?: MergeableVec
+              |: [string]
+              |: MergedVec
+                dedup?: "inherit" | "true" | "false" | bool | null
+                discard_when_merged?: bool
+                strategy?: "append" | "prepend" | "replace" | null
+                value?: [string]
+            checksum:
+              |: ChecksumConfig
+                algorithm?: "sha256" | "sha1"
+                value: string
+              |: null
+            command: string
+            optional?: bool
+            startup_timeout_secs?: int
+            type: "stdio"
+            variables?: MergeableVec
+              |: [string]
+              |: MergedVec
+                dedup?: "inherit" | "true" | "false" | bool | null
+                discard_when_merged?: bool
+                strategy?: "append" | "prepend" | "replace" | null
+                value?: [string]
 style: StyleConfig
   code: CodeConfig
     color?: bool
@@ -898,7 +1496,13 @@ style: StyleConfig
     max_latency?: string
     text_delay?: string
 template: TemplateConfig
-  values:
-    *: unknown
+  values: MergeableMap_JsonValue
+    |:
+      *: unknown
+    |: MergedMap_JsonValue
+      discard_when_merged?: bool
+      strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
+      value?:
+        *: unknown
 user: UserConfig
   name: string | null

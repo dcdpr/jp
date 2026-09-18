@@ -64,22 +64,25 @@ where
     where
         D: Deserializer<'de>,
     {
-        // Try as `MergedMap` first (has `value` + `strategy` keys), then
-        // fall back to a plain map.
+        // Both variants are maps, so the keys decide which one this is: a table
+        // carrying `value` and `strategy` is the wrapper, anything else is a
+        // plain map. An entry named `value` alone is still an entry.
         UntaggedEnumVisitor::new()
             .map(|map| {
                 let value: serde_json::Value = map.deserialize()?;
 
-                // Peek: does this look like a MergedMap?
                 if let Some(obj) = value.as_object()
                     && obj.contains_key("value")
                     && obj.contains_key("strategy")
-                    && let Ok(merged) = serde_json::from_value::<MergedMap<T>>(value.clone())
                 {
-                    return Ok(Self::Merged(merged));
+                    // Committed: a malformed wrapper is an error rather than a
+                    // map that happens to use these two names, so a misspelled
+                    // strategy is reported instead of becoming an entry.
+                    return serde_json::from_value::<MergedMap<T>>(value)
+                        .map(Self::Merged)
+                        .map_err(serde::de::Error::custom);
                 }
 
-                // Plain map.
                 serde_json::from_value(value)
                     .map(Self::Map)
                     .map_err(serde::de::Error::custom)
