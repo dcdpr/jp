@@ -3702,6 +3702,68 @@ fn run_failing_before_the_turn_stores_no_conversation() {
     assert_eq!(projected_conversation_ids(&tmp.path().join(".jp")), []);
 }
 
+// A run that renames the conversation composes its draft in the directory the
+// conversation lives in now, not the one its new title will name. Naming the
+// draft's directory after the uncommitted title put it beside the real one,
+// where the next write deleted it as a stale copy of the same id — taking the
+// request the user had just typed.
+#[test]
+fn run_renaming_query_keeps_the_composed_draft() {
+    let session = Session {
+        id: SessionId::new("jp-cli-rename-draft-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    // An editor that types for the user, so the request is non-empty and the
+    // draft it leaves behind is the only copy of what was composed.
+    let (mut ctx, _out, _err, tmp) = editor_ctx(
+        &session,
+        r#"sh -c 'printf "typed request\n" > "$1"' jp-editor"#,
+    );
+
+    let id = make_id(1_700_000_000);
+    ctx.workspace.create_conversation_with_id(
+        id,
+        Conversation {
+            title: Some("Old".to_owned()),
+            ..Conversation::default().with_last_activated_at(ctx.now())
+        },
+        ctx.config(),
+    );
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let lock = ctx.workspace.test_lock(handle);
+    lock.as_mut()
+        .update_events(|events| events.start_turn(ChatRequest::from("seeded question")));
+    drop(lock);
+
+    let source = ctx.workspace.acquire_conversation(&id).unwrap();
+    let query = QueryArgs::try_parse_from(["query", "--edit", "--title", "New"])
+        .unwrap()
+        .query;
+    let Err(error) = Runtime::new()
+        .unwrap()
+        .block_on(query.run(&mut ctx, Some(source), false))
+    else {
+        panic!("the test provider streams nothing, so the turn must fail");
+    };
+    assert_eq!(error.message.as_deref(), Some("Stream error"));
+
+    let dir = ctx
+        .fs_backend
+        .as_deref()
+        .unwrap()
+        .find_user_local_conversation_dir(&id)
+        .expect("the conversation still has a user-local directory");
+    let draft = std::fs::read_to_string(dir.join(editor::QUERY_FILENAME))
+        .expect("the composed request is still recoverable");
+    assert_eq!(draft, "typed request\n");
+
+    // The rename did happen, so the draft survived it rather than the title
+    // having been quietly dropped.
+    let storage = FsStorageBackend::new(&tmp.path().join(".jp")).unwrap();
+    let metadata = storage.load_conversation_metadata(&id).unwrap();
+    assert_eq!(metadata.title.as_deref(), Some("New"));
+}
+
 // The other side of the deferral for `--tmp`: a query that does go ahead stores
 // the expiry, stamped from the conversation's own creation time.
 #[test]

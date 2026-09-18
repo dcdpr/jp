@@ -492,10 +492,9 @@ impl Query {
             .await?;
 
         // The title this run ends with, resolved here because the terminal
-        // title and the draft file's directory below are named after it.
-        // Writing it into metadata waits until the request is known to be
-        // non-empty, so an abandoned query leaves the conversation as it found
-        // it.
+        // title is named after it. Writing it into metadata waits until the
+        // request is known to be non-empty, so an abandoned query leaves the
+        // conversation as it found it.
         let stored_title = lock.metadata().title.clone();
         let conv_title =
             resolve_title_override(stored_title.clone(), self.title.as_deref(), self.no_title);
@@ -506,16 +505,29 @@ impl Query {
         }
 
         let cid = lock.id();
+
+        // Where the editor composes the draft.
+        //
+        // Named for where the conversation lives now, not for the title it will
+        // end the run with: a write reconciles the id to a single directory,
+        // renaming the live one into the new name and deleting every other
+        // copy. Composing under the new name would put the draft in the copy
+        // that gets deleted, while the rename carries it across for free.
         let conversation_path = ctx.fs_backend.as_deref().map_or_else(
             || {
                 ctx.workspace
                     .root()
-                    .join(cid.to_dirname(conv_title.as_deref()))
+                    .join(cid.to_dirname(stored_title.as_deref()))
             },
             // The query draft is a transient editor scratch file, so it is
             // written to durable user-local storage (`user = true`) and never
             // projected into the committed workspace tree.
-            |fs| fs.build_conversation_dir(&cid, conv_title.as_deref(), true),
+            |fs| {
+                fs.find_user_local_conversation_dir(&cid)
+                    .unwrap_or_else(|| {
+                        fs.build_conversation_dir(&cid, stored_title.as_deref(), true)
+                    })
+            },
         );
 
         let piped = read_piped_stdin()?;
