@@ -1,4 +1,4 @@
-use jp_config::{AppConfig, style::reasoning::ReasoningDisplayConfig};
+use jp_config::{AppConfig, style::reasoning::ReasoningDisplayConfig, types::color::Color};
 use jp_conversation::event::{ChatResponse, ToolCallRequest};
 use jp_llm::event::FinishReason;
 use jp_printer::{OutputFormat, Printer};
@@ -150,6 +150,65 @@ fn reasoning_items_split_by_a_redacted_item_render_as_one_region() {
     assert!(
         output.ends_with("I can test this directly by verifying the return value.\n\n"),
         "reasoning items must form one region, got: {output:?}"
+    );
+}
+
+/// A tool whose chrome is hidden puts nothing on screen, so the reasoning on
+/// either side of it is one region and the gap between them keeps the reasoning
+/// background.
+///
+/// The tool call ends the streaming cycle, and the cycle boundary is where the
+/// renderer decides whether the region is over.
+/// It is not: the turn still owes tool execution, and the same response
+/// continues after it.
+#[test]
+fn a_hidden_tool_call_keeps_the_reasoning_region_continuous() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mut style = AppConfig::new_test().style;
+    style.reasoning.display = ReasoningDisplayConfig::Full;
+    style.reasoning.background = Some(Color::Ansi256(236));
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        style,
+        None,
+        None,
+        Some("anthropic/test".into()),
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("hello"));
+    coordinator.handle_event(&mut stream, Event::reasoning(0, "First thought.\n\n"));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+
+    // The turn loop owns the tool-call boundary and resolves it before the
+    // call's events reach the coordinator. This tool's chrome is hidden.
+    coordinator.enter_tool_call(false);
+    coordinator.handle_event(&mut stream, Event::tool_call_start(1, "call-1", "lookup"));
+    coordinator.handle_event(&mut stream, Event::tool_call_args(1, "{}"));
+    coordinator.handle_event(&mut stream, Event::flush(1));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    coordinator.handle_tool_responses(&mut stream, vec![ToolCallResponse {
+        id: "call-1".into(),
+        result: Ok("done".into()),
+    }]);
+
+    coordinator.handle_event(&mut stream, Event::reasoning(0, "Second thought.\n\n"));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    printer.flush();
+    assert_eq!(
+        out.lock().clone(),
+        concat!(
+            "\x1b[48;5;236mFirst thought.\x1b[48;5;236m\x1b[K\x1b[0m\n",
+            // The gap across the hidden tool call: a shaded blank line rather
+            // than the bare newline an ended region would leave.
+            "\x1b[48;5;236m\x1b[K\x1b[49m\n",
+            "\x1b[48;5;236mSecond thought.\x1b[48;5;236m\x1b[K\x1b[0m\n",
+            "\n",
+        )
     );
 }
 

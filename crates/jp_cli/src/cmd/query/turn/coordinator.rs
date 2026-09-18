@@ -354,7 +354,17 @@ impl TurnCoordinator {
                     }
                 }
 
-                self.view.flush();
+                // A turn that still owes tool execution continues this response
+                // past the cycle boundary, so a separator owed by reasoning
+                // stays pending for the content after the tools to shade.
+                // Flushing it here would end the reasoning region on a boundary
+                // the reader never sees, leaving an unshaded gap between two
+                // shaded blocks whenever the tools in between render no chrome.
+                if has_unresponded_tool_calls_in_current_turn(stream) {
+                    self.view.flush_for_continuation();
+                } else {
+                    self.view.flush();
+                }
                 // The provider has stopped emitting. Switch the printer's
                 // bounded-latency controller into drain mode so its
                 // per-character delay holds the current pace instead of
