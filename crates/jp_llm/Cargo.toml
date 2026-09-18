@@ -16,6 +16,7 @@ version.workspace = true
 jp_attachment = { workspace = true }
 jp_config = { workspace = true }
 jp_conversation = { workspace = true }
+jp_credentials = { workspace = true }
 jp_mcp = { workspace = true }
 jp_openrouter = { workspace = true }
 jp_tool = { workspace = true }
@@ -44,19 +45,23 @@ reqwest = { workspace = true }
 reqwest-eventsource = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
+datetime_literal = { workspace = true }
 eventsource-stream = { workspace = true }
 http = { workspace = true }
 infer = { workspace = true, features = ["std"] }
 insta = { workspace = true, features = ["json"] }
+jp_storage = { workspace = true }
 jp_test = { workspace = true }
 paste = { workspace = true }
 test-log = { workspace = true }

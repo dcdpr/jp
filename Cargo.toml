@@ -20,6 +20,7 @@ jp_attachment_internal = { path = "crates/jp_attachment_internal" }
 jp_attachment_mcp_resources = { path = "crates/jp_attachment_mcp_resources" }
 jp_config = { path = "crates/jp_config" }
 jp_conversation = { path = "crates/jp_conversation" }
+jp_credentials = { path = "crates/jp_credentials" }
 jp_editor = { path = "crates/jp_editor" }
 jp_github = { path = "crates/jp_github" }
 jp_id = { path = "crates/jp_id" }
@@ -41,6 +42,7 @@ jp_tool = { path = "crates/jp_tool" }
 jp_workspace = { path = "crates/jp_workspace" }
 
 comfort = { path = "crates/contrib/comfort" }
+async-anthropic = { path = "crates/contrib/async-anthropic" }
 grizzly = { path = "crates/contrib/grizzly", default-features = false }
 schematic = { path = "crates/contrib/schematic", default-features = false }
 ticket = { path = "crates/internal/ticket" }
@@ -49,11 +51,10 @@ xct2cli = { path = "crates/contrib/xct2cli" }
 addr2line = { version = "0.26" }
 ahash = { version = "0.8", default-features = false, features = ["runtime-rng", "std", "serde"] }
 assert_matches = { version = "1", default-features = false }
-async-anthropic = { git = "https://github.com/JeanMertz/async-anthropic", default-features = false }
 async-stream = { version = "0.3", default-features = false }
 async-trait = { version = "0.1", default-features = false }
 axum = { version = "0.8", default-features = false }
-backon = { git = "https://github.com/JeanMertz/backon", default-features = false } # <https://github.com/JeanMertz/async-anthropic/blob/5edba470a3aa912de2c9e815bdd71dfc20fdf54f/Cargo.toml#L23-L31>
+backon = { git = "https://github.com/JeanMertz/backon", default-features = false } # fork: adds `ExponentialBuilder` getters used by `crates/contrib/async-anthropic`
 base64 = { version = "0.22", default-features = false }
 camino = { version = "1", default-features = false }
 camino-tempfile = { version = "1", default-features = false }
@@ -69,6 +70,7 @@ crossbeam-channel = { version = "0.5", default-features = false }
 crossterm = { version = "0.29", default-features = false }
 darling = { version = "0.23", default-features = false }
 datetime_literal = { version = "0.1", default-features = false }
+derive_builder = { version = "0.20", default-features = false }
 dhat = { version = "0.3", default-features = false }
 directories = { version = "6", default-features = false }
 duct = { version = "1", default-features = false }
@@ -129,6 +131,7 @@ rustc-demangle = { version = "0.1", default-features = false }
 saphyr = { git = "https://github.com/JeanMertz/saphyr", branch = "jean/fix-multinewline-endings", default-features = false } # <https://github.com/saphyr-rs/saphyr/pull/90>
 schemars = { version = "1.0.0-alpha.17", default-features = false }
 scraper = { version = "0.25", default-features = false }
+secrecy = { version = "0.10", default-features = false }
 semver = { version = "1", default-features = false }
 serde = { version = "1", default-features = false }
 serde-content = { version = "0.1", default-features = false }
@@ -162,9 +165,11 @@ unicode-segmentation = { version = "1", default-features = false }
 unicode-width = { version = "0.2", default-features = false }
 url = { version = "2", default-features = false }
 vt100 = { version = "0.16", default-features = false }
+uuid = { version = "1", default-features = false }
 vte = { version = "0.14", default-features = false }
 which = { version = "8", default-features = false }
 windows-sys = { version = "0.61", default-features = false }
+wiremock = { version = "0.6", default-features = false }
 zip = { version = "8", default-features = false }
 
 [patch.crates-io]

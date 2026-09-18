@@ -1,3 +1,4 @@
+pub mod credential;
 pub mod error;
 pub mod event;
 pub mod event_builder;
@@ -13,6 +14,7 @@ pub mod window;
 #[cfg(test)]
 pub(crate) mod test;
 
+pub use credential::{AccountIdentity, Credential, ProviderAuth, provider_auth};
 pub use error::{Error, StreamError, StreamErrorKind, ToolError};
 pub use provider::Provider;
 pub use retry::{exponential_backoff, retry_delay};

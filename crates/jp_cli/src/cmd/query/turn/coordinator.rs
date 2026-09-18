@@ -376,6 +376,14 @@ impl TurnCoordinator {
             // Patch is handled by the caller before reaching here; KeepAlive is
             // a liveness signal with nothing to record or render.
             Event::Patch(_) | Event::KeepAlive => HandleEventOutcome::new(Action::Continue),
+
+            // A provider decision the user must see (a skipped credential, a
+            // credential switch): chrome on stderr, never part of the
+            // conversation.
+            Event::Notice(notice) => {
+                self.printer.eprintln(notice);
+                HandleEventOutcome::new(Action::Continue)
+            }
         }
     }
 
