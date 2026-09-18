@@ -421,7 +421,7 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Result<Vec<ToolInfo>> {
     tools
         .into_iter()
         .map(|tool| {
-            let parameters = json_schema::inline(&tool.parameters)
+            let parameters = json_schema::inline(&tool.provider_schema())
                 .as_object()
                 .cloned()
                 .unwrap_or_default();

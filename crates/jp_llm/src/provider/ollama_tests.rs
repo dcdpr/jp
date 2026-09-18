@@ -10,6 +10,7 @@ fn tool_references_are_expanded() {
     let tools = vec![ToolDefinition {
         name: "crate_search_items".to_owned(),
         docs: ToolDocs::default(),
+        fan_out: None,
         parameters: json!({
             "type": "object",
             "properties": {
@@ -45,6 +46,7 @@ fn tool_parameters_keep_the_schema_document() {
     let tools = vec![ToolDefinition {
         name: "read_file".to_owned(),
         docs: ToolDocs::default(),
+        fan_out: None,
         parameters: json!({
             "type": "object",
             "properties": { "path": { "type": "string" } },

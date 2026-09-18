@@ -177,6 +177,7 @@ fn prompter_with_editor(prompt: MockPromptBackend, editor: MockEditorBackend) ->
 fn make_permission_info(run_mode: RunMode, arguments: Value) -> PermissionInfo {
     PermissionInfo {
         tool_id: "call_123".to_string(),
+        state_key: "call_123".to_string(),
         tool_name: "test_tool".to_string(),
         tool_source: ToolSource::Builtin { tool: None },
         run_mode,
