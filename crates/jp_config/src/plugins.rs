@@ -11,7 +11,7 @@ use schematic::Config;
 use crate::{
     FillDefaults,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_mergeable_map, delta_opt},
+    delta::{PartialConfigDelta, delta_mergeable_map, delta_mergeable_map_at, delta_opt, path},
     fill::fill_map,
     internal::merge::map_with_strategy,
     partial::ToPartial,
@@ -68,6 +68,22 @@ impl PartialConfigDelta for PartialPluginsConfig {
                 next.shutdown_timeout_secs,
             ),
             command: delta_mergeable_map(&self.command, next.command),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            auto_install: delta_opt(self.auto_install.as_ref(), next.auto_install),
+            shutdown_timeout_secs: delta_opt(
+                self.shutdown_timeout_secs.as_ref(),
+                next.shutdown_timeout_secs,
+            ),
+            command: delta_mergeable_map_at(
+                &path(prefix, "command"),
+                &self.command,
+                next.command,
+                unsets,
+            ),
         }
     }
 }
