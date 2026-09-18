@@ -43,6 +43,20 @@ impl BuiltinTool for InquiringTool {
     }
 }
 
+/// A tool that answers with its `name` argument, so each call's result says
+/// which arguments it ran with.
+struct EchoName(Arc<AtomicUsize>);
+
+#[async_trait]
+impl BuiltinTool for EchoName {
+    async fn execute(&self, arguments: &Value, _: &IndexMap<String, Value>) -> Outcome {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Outcome::Success {
+            content: arguments["name"].as_str().unwrap_or_default().to_owned(),
+        }
+    }
+}
+
 /// A tool that runs until its attempt is abandoned, so an interrupt always
 /// lands while it is still in flight.
 struct BlockingTool(Arc<AtomicUsize>);
@@ -79,6 +93,7 @@ impl Fixture {
                 "type": "object",
                 "properties": {"name": {"type": "string"}},
             }),
+            fan_out: false,
         }];
         let (source, owner) = TerminalExecutorSource::start(
             BuiltinExecutors::new().register("example", tool),
@@ -121,6 +136,7 @@ impl Fixture {
                     arguments: arguments.as_object().cloned().unwrap_or_default(),
                 },
                 self.config.clone(),
+                None,
             )
             .unwrap()
     }
@@ -151,6 +167,70 @@ fn recorded(result: Result<&str, &str>) -> Review {
 
 #[path = "mcp_executor_shutdown_tests.rs"]
 mod shutdown;
+
+/// The operations of a fanned-out call share one tool call id but are separate
+/// MCP calls, each delivering its own result.
+/// Each is acknowledged with its own review, and that review has to reach the
+/// call it belongs to: routed to a sibling, it would disagree with what that
+/// sibling delivered.
+#[tokio::test]
+async fn each_operation_of_a_call_is_acknowledged_on_its_own_mcp_call() {
+    let count = Arc::new(AtomicUsize::new(0));
+    let mut fixture = Fixture::start(
+        json!({"source": "builtin", "run": "unattended", "fan_out": true}),
+        EchoName(count.clone()),
+    )
+    .await;
+    fixture.count = count;
+
+    let mut responses = Vec::new();
+    for (op, name) in ["first", "second"].into_iter().enumerate() {
+        let mut executor = fixture
+            .source
+            .create(
+                ToolCallRequest {
+                    id: "call-1".into(),
+                    name: "example".into(),
+                    arguments: Map::from_iter([("name".into(), json!(name))]),
+                },
+                fixture.config.clone(),
+                Some(op),
+            )
+            .unwrap();
+        assert_eq!(executor.state_key(), format!("call-1#{op}"));
+
+        assert!(executor.prepare(false).await.unwrap().is_none());
+        executor.approve().await.unwrap();
+        let result = executor
+            .execute(&IndexMap::new(), CancellationToken::new(), None)
+            .await;
+        let ExecutorResult::Completed(response) = result else {
+            panic!("expected a completed operation, got {result:?}")
+        };
+        responses.push(response);
+    }
+
+    assert_eq!(fixture.attempts(), 2, "each operation runs once");
+    assert_eq!(
+        responses
+            .iter()
+            .map(|response| response.result.clone())
+            .collect::<Vec<_>>(),
+        vec![Ok("first".to_owned()), Ok("second".to_owned())]
+    );
+
+    // The first operation is acknowledged first: were the two registered under
+    // the tool call id alone, the later one would have replaced it and receive
+    // this review instead.
+    for (op, response) in responses.into_iter().enumerate() {
+        fixture
+            .acknowledge(Review::unchanged(response).for_op(Some(op)))
+            .await
+            .unwrap();
+    }
+    assert_eq!(fixture.attempts(), 2, "acknowledgement must not re-execute");
+    fixture.shutdown().await;
+}
 
 #[tokio::test]
 async fn one_call_spans_input_and_recording() {

@@ -768,12 +768,14 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<Value> {
     tools
         .into_iter()
         .map(|tool| {
+            let parameters = parameters_with_strict_mode(&tool.provider_schema(), false);
+
             json!({
                 "type": "function",
                 "function": {
                     "name": tool.name,
-                    "description": tool.docs.schema_description().unwrap_or_default(),
-                    "parameters": parameters_with_strict_mode(&tool.parameters, false),
+                    "description": tool.provider_description().unwrap_or_default(),
+                    "parameters": parameters,
                 },
             })
         })

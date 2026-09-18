@@ -168,6 +168,7 @@ fn create_request_tool_call_round_trip() {
             summary: Some("Read a file.".into()),
             ..ToolDocs::default()
         },
+        fan_out: false,
         parameters: json!({
             "type": "object",
             "properties": { "path": { "type": "string" } },

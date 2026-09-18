@@ -103,6 +103,7 @@ mod harness_tests {
         vec![ToolDefinition {
             name: "run_me".to_owned(),
             docs: ToolDocs::default(),
+            fan_out: false,
             parameters: json!({
                 "type": "object",
                 "properties": { "foo": { "type": "string" } },
@@ -341,6 +342,7 @@ impl TestRequest {
             query.tools.push(ToolDefinition {
                 name: name.into(),
                 docs: ToolDocs::default(),
+                fan_out: false,
                 parameters,
             });
         }

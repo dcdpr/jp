@@ -86,7 +86,7 @@ use indexmap::IndexMap;
 use inquire::error::InquireError;
 use jp_config::{
     conversation::tool::{
-        QuestionTarget, ResultMode, RunMode, ToolsConfig, style::ParametersStyle,
+        FanOut, QuestionTarget, ResultMode, RunMode, ToolsConfig, style::ParametersStyle,
     },
     interrupt::ToolInterruptConfig,
 };
@@ -97,7 +97,10 @@ use jp_conversation::event::{
 use jp_llm::query::ToolExecution;
 use jp_mcp::server::StderrSink;
 use jp_printer::Printer;
-use jp_tool::{AnswerType, Question};
+use jp_tool::{
+    AnswerType, Question,
+    fan_out::{self, OperationOutcome},
+};
 use jp_workspace::ConversationMut;
 use serde_json::{Map, Value};
 use tokio::sync::mpsc;
@@ -110,6 +113,7 @@ use super::{
     executor::{Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo, Review},
     inquiry::{self, InquiryBackend, InquiryError},
     prompter::{PermissionResult, ToolPrompter},
+    schedule::Schedule,
 };
 use crate::{
     Error,
@@ -132,9 +136,15 @@ use crate::{
 /// The tools with no result yet are the ones a cancellation answers for, so
 /// they are collected as the interrupt lands rather than after the loop, where
 /// a result that arrived in between would have filled one in.
+///
+/// Every outcome that cancels the running tools also gives up on the operations
+/// `schedule` is still holding back behind a concurrency limit: they were never
+/// spawned, so the execution loop would otherwise wait forever for results they
+/// cannot send.
 fn record_tool_interrupt(
     result: &ToolInterruptResult,
     state: &PhaseState,
+    schedule: &mut Schedule,
     cancellation_token: &CancellationToken,
     outcome: &mut ExecutionOutcome,
     tools_cancelled: &mut bool,
@@ -152,23 +162,24 @@ fn record_tool_interrupt(
         ToolInterruptResult::Restart => {
             // Hold each call's service-side invocation open before cancelling
             // the Host workers, so the re-preparation that follows continues
-            // the same logical calls instead of submitting new ones.
+            // the same logical calls instead of submitting new ones. An
+            // operation still queued behind a concurrency limit was prepared
+            // and approved too, so it is held the same way.
             for tool in state.tools.values() {
                 tool.executor.pause_for_restart();
             }
+            for executor in schedule.queued() {
+                executor.pause_for_restart();
+            }
 
+            schedule.abandon_unstarted();
             cancellation_token.cancel();
             outcome.upgrade(ExecutionOutcome::Restart);
         }
 
         ToolInterruptResult::Cancelled { response, exit } => {
-            let unfinished: Vec<usize> = state
-                .reviews
-                .iter()
-                .enumerate()
-                .filter(|(_, review)| review.is_none())
-                .map(|(index, _)| index)
-                .collect();
+            let unfinished = schedule.unfinished(&state.reviews);
+            schedule.abandon_unstarted();
 
             // Hold each unfinished call open before cancelling the Host
             // workers, so the cancellation response this phase records is what
@@ -192,7 +203,10 @@ fn record_tool_interrupt(
         // The menu itself was cancelled with Ctrl-C: the tools are already
         // cancelled; surface the escalation so the turn loop begins a graceful
         // shutdown.
-        ToolInterruptResult::Escalate => outcome.upgrade(ExecutionOutcome::Escalated),
+        ToolInterruptResult::Escalate => {
+            schedule.abandon_unstarted();
+            outcome.upgrade(ExecutionOutcome::Escalated);
+        }
     }
 }
 
@@ -332,6 +346,11 @@ struct ExecutingTool {
     executor: Arc<dyn Executor>,
     tool_id: String,
     tool_name: String,
+
+    /// This operation's display-state key, which is its tool call id unless the
+    /// call fans out.
+    state_key: String,
+
     accumulated_answers: IndexMap<String, Value>,
 
     /// Where this tool's stderr goes while it runs.
@@ -394,7 +413,7 @@ enum PendingPrompt {
     },
     ResultMode {
         index: usize,
-        tool_id: String,
+        state_key: String,
         tool_name: String,
         response: ToolCallResponse,
         result_mode: ResultMode,
@@ -435,6 +454,83 @@ pub enum PermissionDecision {
         executor: Box<dyn Executor>,
         info: PermissionInfo,
     },
+}
+
+/// One operation of a tool call, after the permission decision.
+pub enum GroupOp {
+    /// Approved and ready to run.
+    Run(Box<dyn Executor>),
+
+    /// Decided before it ran: skipped by the user, or its argument formatter
+    /// failed.
+    /// The response stands in for the operation when the call's result is
+    /// folded.
+    Resolved(ToolCallResponse),
+}
+
+/// Every operation belonging to one tool call.
+///
+/// A call to a tool without fan-out holds exactly one operation, which is what
+/// makes the fan-out machinery a no-op for it: one operation in, one response
+/// out, no framing added.
+pub struct ExecutorGroup {
+    /// The tool call id every operation in the group answers to.
+    pub tool_id: String,
+
+    /// The tool being called.
+    pub tool_name: String,
+
+    /// The call's fan-out policy, or `None` when it carries one operation.
+    pub fan_out: Option<FanOut>,
+
+    /// The operations, in the order the assistant wrote them.
+    pub ops: Vec<GroupOp>,
+}
+
+impl ExecutorGroup {
+    /// Whether any operation still needs to run.
+    ///
+    /// A group with nothing left to run is folded straight into its response
+    /// rather than entering the execution loop.
+    #[must_use]
+    pub fn has_work(&self) -> bool {
+        self.ops.iter().any(|op| matches!(op, GroupOp::Run(_)))
+    }
+
+    /// Fold a group whose operations were all decided before running.
+    ///
+    /// Returns the response the call answers with, and the review each
+    /// operation's MCP call is acknowledged with.
+    fn fold_resolved(self) -> (ToolCallResponse, Vec<Review>) {
+        let fans_out = self.fan_out.is_some();
+        let mut outcomes = Vec::with_capacity(self.ops.len());
+        let mut operations = Vec::with_capacity(self.ops.len());
+
+        for (position, op) in self.ops.into_iter().enumerate() {
+            let GroupOp::Resolved(response) = op else {
+                unreachable!("fold_resolved is only called on a group with no work")
+            };
+            outcomes.push(match &response.result {
+                Ok(content) => OperationOutcome::Ok(content.clone()),
+                Err(message) => OperationOutcome::Error(message.clone()),
+            });
+            operations.push(Review::unchanged(response).for_op(fans_out.then_some(position)));
+        }
+
+        // A call without fan-out answers with its one decision verbatim.
+        if !fans_out && let Some(review) = operations.pop() {
+            return (review.response, Vec::new());
+        }
+
+        // Every operation was skipped or failed the same way, so the call as a
+        // whole did not run. `Ok` matches how a single skipped tool answers
+        // today: the user declining is not an error the assistant should retry.
+        let response = ToolCallResponse {
+            id: self.tool_id,
+            result: Ok(fan_out::fold(&outcomes)),
+        };
+        (response, operations)
+    }
 }
 
 /// Final outcome of [`ToolCoordinator::resolve_tool_call_decision`], the
@@ -510,7 +606,17 @@ fn tool_question_to_inquiry_question(q: &Question) -> InquiryQuestion {
 }
 
 pub struct ToolCoordinator {
-    executors: Vec<(usize, Box<dyn Executor>)>,
+    /// Prepared executors, grouped by the plan index of the call they belong
+    /// to.
+    /// A group holds one executor per operation, so a call without fan-out
+    /// holds exactly one.
+    executors: Vec<(usize, Vec<Box<dyn Executor>>)>,
+
+    /// Display state per *operation*, keyed by `Executor::state_key`.
+    ///
+    /// Not keyed by tool call id: a fanned-out call renders one line per
+    /// operation, and two operations of one call would otherwise overwrite each
+    /// other's state and make `is_prompting` report whichever wrote last.
     tool_states: HashMap<String, ToolCallState>,
     tools_config: ToolsConfig,
     interrupt_config: ToolInterruptConfig,
@@ -520,6 +626,22 @@ pub struct ToolCoordinator {
     /// Keyed by tool call ID.
     /// Drained by the turn loop to write into event metadata.
     rendered_arguments: HashMap<String, String>,
+
+    /// What each operation of a fanned-out call settled on, keyed by tool call
+    /// id.
+    ///
+    /// The conversation records one folded response per call, but every
+    /// operation ran as its own MCP call and is acknowledged with its own
+    /// result, so [`Self::acknowledge_reviews`] expands a call's review into
+    /// these.
+    /// A call without fan-out has no entry and is acknowledged as recorded.
+    operation_reviews: HashMap<String, Vec<Review>>,
+
+    /// Who submits the MCP request for each call.
+    ///
+    /// Fan-out applies only when JP submits them: an agent submitting its own
+    /// calls was shown each tool's own schema, never the envelope.
+    execution: ToolExecution,
 }
 
 impl ToolCoordinator {
@@ -529,8 +651,10 @@ impl ToolCoordinator {
     }
 
     /// Bind upcoming tool observations to the selected dispatch contract.
-    pub fn set_execution(&self, execution: ToolExecution) -> Result<(), ExecutorError> {
-        self.executor_source.set_execution(execution)
+    pub fn set_execution(&mut self, execution: ToolExecution) -> Result<(), ExecutorError> {
+        self.executor_source.set_execution(execution)?;
+        self.execution = execution;
+        Ok(())
     }
 
     pub fn new(tools_config: ToolsConfig, executor_source: Box<dyn ExecutorSource>) -> Self {
@@ -542,6 +666,8 @@ impl ToolCoordinator {
             executor_source,
             cancellation_token: CancellationToken::new(),
             rendered_arguments: HashMap::new(),
+            operation_reviews: HashMap::new(),
+            execution: ToolExecution::default(),
         }
     }
 
@@ -567,8 +693,8 @@ impl ToolCoordinator {
         self.tool_states.values().any(ToolCallState::is_prompting)
     }
 
-    pub(crate) fn set_tool_state(&mut self, tool_id: impl Into<String>, state: ToolCallState) {
-        self.tool_states.insert(tool_id.into(), state);
+    pub(crate) fn set_tool_state(&mut self, state_key: impl Into<String>, state: ToolCallState) {
+        self.tool_states.insert(state_key.into(), state);
     }
 
     /// Remove an abandoned argument preview without changing executable calls.
@@ -684,12 +810,12 @@ impl ToolCoordinator {
         let render_arguments = !self.is_hidden(executor.tool_name()) && !remembered_denial;
         match executor.prepare(render_arguments).await {
             Ok(Some(response)) => {
-                self.set_tool_state(&response.id, ToolCallState::Completed);
+                self.set_tool_state(executor.state_key(), ToolCallState::Completed);
                 return ToolCallDecision::Skipped(response);
             }
             Ok(None) => {}
             Err(error) => {
-                self.set_tool_state(executor.tool_id(), ToolCallState::Completed);
+                self.set_tool_state(executor.state_key(), ToolCallState::Completed);
                 return ToolCallDecision::Failed(ToolCallResponse {
                     id: executor.tool_id().into(),
                     result: Err(error.to_string()),
@@ -709,7 +835,7 @@ impl ToolCoordinator {
                 return ToolCallDecision::Skipped(response);
             }
             PermissionDecision::NeedsPrompt { executor, info } => {
-                self.set_tool_state(&info.tool_id, ToolCallState::AwaitingPermission);
+                self.set_tool_state(&info.state_key, ToolCallState::AwaitingPermission);
 
                 // Pre-render before the prompt so the user sees the
                 // rendered call (not raw arguments) when deciding.
@@ -751,7 +877,7 @@ impl ToolCoordinator {
         };
 
         if let Err(error) = executor.approve().await {
-            self.set_tool_state(executor.tool_id(), ToolCallState::Completed);
+            self.set_tool_state(executor.state_key(), ToolCallState::Completed);
             return ToolCallDecision::Failed(ToolCallResponse {
                 id: executor.tool_id().into(),
                 result: Err(error.to_string()),
@@ -813,7 +939,20 @@ impl ToolCoordinator {
     /// MCP response has not been returned to the caller.
     /// Every call is acknowledged even when one fails, so one call's
     /// disagreement does not strand the rest; the first failure is returned.
-    pub async fn acknowledge_reviews(&self, reviews: Vec<Review>) -> Result<(), ExecutorError> {
+    ///
+    /// A fanned-out call's review is replaced by the reviews of its operations,
+    /// because each operation is its own MCP call whose result is its own, not
+    /// the folded response the conversation recorded.
+    pub async fn acknowledge_reviews(&mut self, reviews: Vec<Review>) -> Result<(), ExecutorError> {
+        let reviews: Vec<_> = reviews
+            .into_iter()
+            .flat_map(|review| {
+                self.operation_reviews
+                    .remove(&review.response.id)
+                    .unwrap_or_else(|| vec![review])
+            })
+            .collect();
+
         let mut failure = None;
         for review in reviews {
             if let Err(error) = self.executor_source.acknowledge(review).await {
@@ -896,12 +1035,13 @@ impl ToolCoordinator {
     pub fn prepare(&mut self, requests: Vec<ToolCallRequest>) -> Vec<(usize, ToolCallResponse)> {
         self.executors.clear();
         self.clear_tool_states();
+        self.operation_reviews.clear();
         self.cancellation_token = CancellationToken::new();
 
         let mut unavailable = Vec::new();
         for (index, request) in requests.into_iter().enumerate() {
             match self.prepare_one(request) {
-                Ok(executor) => self.executors.push((index, executor)),
+                Ok(executors) => self.executors.push((index, executors)),
                 Err(response) => unavailable.push((index, response)),
             }
         }
@@ -909,36 +1049,95 @@ impl ToolCoordinator {
         unavailable
     }
 
-    /// Prepares a single executor for a tool call request.
+    /// Prepares the executors for a tool call request.
     ///
-    /// Returns the executor on success, or an error response if the tool cannot
-    /// be resolved (e.g. missing from config or definitions).
+    /// A call to a tool without fan-out yields exactly one executor.
+    /// A call to a fan-out tool yields one per operation in its `ops` array,
+    /// all sharing the request's tool call id and each carrying that
+    /// operation's arguments.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error response when the tool cannot be resolved (missing from
+    /// config or definitions), or when a fan-out call's envelope is malformed.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn prepare_one(
         &mut self,
         request: ToolCallRequest,
-    ) -> Result<Box<dyn Executor>, ToolCallResponse> {
-        self.tool_states
-            .insert(request.id.clone(), ToolCallState::Queued);
+    ) -> Result<Vec<Box<dyn Executor>>, ToolCallResponse> {
+        let Some(config) = self.tools_config.get(&request.name) else {
+            return Err(self.unavailable(&request));
+        };
 
-        if let Some(executor) = self
-            .tools_config
-            .get(&request.name)
-            .and_then(|config| self.executor_source.create(request.clone(), config))
-        {
-            return Ok(executor);
+        // The envelope is taken apart here rather than inside the executor
+        // source, so a malformed one answers with a message naming what went
+        // wrong instead of looking like a tool that does not exist.
+        let operations = if self.fan_out(&request.name).is_some() {
+            match fan_out::expand(&request.arguments) {
+                Ok(ops) => ops
+                    .into_iter()
+                    .enumerate()
+                    .map(|(op, arguments)| (Some(op), arguments))
+                    .collect(),
+                Err(error) => {
+                    warn!(
+                        tool = %request.name,
+                        id = %request.id,
+                        "Malformed fan-out envelope, returning error to LLM",
+                    );
+                    self.set_tool_state(&request.id, ToolCallState::Completed);
+                    return Err(ToolCallResponse {
+                        id: request.id.clone(),
+                        result: Err(error.message(&request.name)),
+                    });
+                }
+            }
+        } else {
+            vec![(None, request.arguments.clone())]
+        };
+
+        let mut executors = Vec::with_capacity(operations.len());
+        for (op, arguments) in operations {
+            let mut op_request = request.clone();
+            op_request.arguments = arguments;
+
+            let Some(executor) = self.executor_source.create(op_request, config.clone(), op) else {
+                return Err(self.unavailable(&request));
+            };
+
+            self.tool_states
+                .insert(executor.state_key(), ToolCallState::Queued);
+            executors.push(executor);
         }
 
+        Ok(executors)
+    }
+
+    /// The fan-out policy calls to `tool_name` run under, if they fan out.
+    ///
+    /// `None` for a tool without `fan_out` configured, and for every tool while
+    /// an agent submits its own calls: that agent was shown each tool's own
+    /// schema, so its arguments are one operation's, never the envelope.
+    fn fan_out(&self, tool_name: &str) -> Option<FanOut> {
+        if self.execution != ToolExecution::Caller {
+            return None;
+        }
+        self.tools_config.get(tool_name)?.fan_out()
+    }
+
+    /// The response for a tool the LLM named but JP cannot run.
+    fn unavailable(&mut self, request: &ToolCallRequest) -> ToolCallResponse {
         warn!(tool = %request.name, "Tool not available, returning error to LLM");
         self.set_tool_state(&request.id, ToolCallState::Completed);
-        Err(ToolCallResponse {
-            id: request.id,
+        ToolCallResponse {
+            id: request.id.clone(),
             result: Err(format!(
                 "Tool '{}' is not available. It may have been available earlier in this \
                  conversation but is no longer enabled. Do not retry this tool until it it is \
                  available again in the list of enabled tools.",
                 request.name,
             )),
-        })
+        }
     }
 
     /// Renders the tool call header and arguments after permission approval.
@@ -990,7 +1189,7 @@ impl ToolCoordinator {
         };
 
         if !interactive && matches!(info.run_mode, RunMode::Ask | RunMode::Edit) {
-            self.set_tool_state(&info.tool_id, ToolCallState::Running);
+            self.set_tool_state(&info.state_key, ToolCallState::Running);
             return PermissionDecision::Approved(executor);
         }
 
@@ -1003,11 +1202,11 @@ impl ToolCoordinator {
 
         match persisted {
             Some(true) => {
-                self.set_tool_state(&info.tool_id, ToolCallState::Running);
+                self.set_tool_state(&info.state_key, ToolCallState::Running);
                 PermissionDecision::Approved(executor)
             }
             Some(false) => {
-                self.set_tool_state(&info.tool_id, ToolCallState::Completed);
+                self.set_tool_state(&info.state_key, ToolCallState::Completed);
                 PermissionDecision::Skipped(ToolCallResponse {
                     id: info.tool_id.clone(),
                     result: Ok("Tool skipped by user (remembered).".to_string()),
@@ -1038,7 +1237,7 @@ impl ToolCoordinator {
                         .insert(permission_key, true);
                 }
                 executor.set_arguments(arguments);
-                self.set_tool_state(&info.tool_id, ToolCallState::Running);
+                self.set_tool_state(&info.state_key, ToolCallState::Running);
                 Ok(executor)
             }
             Ok(PermissionResult::Skip { reason, persist }) => {
@@ -1047,7 +1246,7 @@ impl ToolCoordinator {
                         .remembered_permission_decisions
                         .insert(permission_key, false);
                 }
-                self.set_tool_state(&info.tool_id, ToolCallState::Completed);
+                self.set_tool_state(&info.state_key, ToolCallState::Completed);
                 let msg = if let Some(r) = reason {
                     format!("Tool skipped by user: {r}")
                 } else {
@@ -1059,7 +1258,7 @@ impl ToolCoordinator {
                 })
             }
             Err(e) => {
-                self.set_tool_state(&info.tool_id, ToolCallState::Completed);
+                self.set_tool_state(&info.state_key, ToolCallState::Completed);
                 Err(ToolCallResponse {
                     id: info.tool_id.clone(),
                     result: Err(format!("Permission prompt failed: {e}")),
@@ -1068,6 +1267,15 @@ impl ToolCoordinator {
         }
     }
 
+    /// Decide permission for every prepared operation, grouped by tool call.
+    ///
+    /// Each operation of a fanned-out call is prompted for separately, because
+    /// each one is rendered as its own call: approving three lines with one
+    /// prompt would ask the user to approve something other than what they were
+    /// shown.
+    ///
+    /// Returns the groups with work left to do, and the folded responses of the
+    /// calls whose every operation was decided here.
     pub async fn run_permission_phase(
         &mut self,
         prompter: &ToolPrompter,
@@ -1075,14 +1283,70 @@ impl ToolCoordinator {
         turn_state: &mut TurnState,
         tool_renderer: &ToolRenderer,
         printer: &Printer,
-    ) -> (
-        Vec<(usize, Box<dyn Executor>)>,
-        Vec<(usize, ToolCallResponse)>,
-    ) {
-        let mut approved_executors = Vec::new();
-        let mut skipped_responses = Vec::new();
+    ) -> (Vec<(usize, ExecutorGroup)>, Vec<(usize, ToolCallResponse)>) {
+        let mut groups = Vec::new();
+        let mut resolved = Vec::new();
 
-        for (index, executor) in std::mem::take(&mut self.executors) {
+        for (index, executors) in std::mem::take(&mut self.executors) {
+            let group = self
+                .decide_group(
+                    executors,
+                    prompter,
+                    interactive,
+                    turn_state,
+                    tool_renderer,
+                    printer,
+                )
+                .await;
+
+            if group.has_work() {
+                groups.push((index, group));
+            } else {
+                resolved.push((index, self.fold_decided_group(group)));
+            }
+        }
+
+        (groups, resolved)
+    }
+
+    /// Fold a group whose every operation was decided before it could run.
+    ///
+    /// The caller has already checked [`ExecutorGroup::has_work`]; this turns
+    /// what is left into the one response the call answers with, and keeps each
+    /// operation's own decision for [`Self::acknowledge_reviews`].
+    pub fn fold_decided_group(&mut self, group: ExecutorGroup) -> ToolCallResponse {
+        let (response, operations) = group.fold_resolved();
+        if !operations.is_empty() {
+            self.operation_reviews
+                .insert(response.id.clone(), operations);
+        }
+        response
+    }
+
+    /// Run every operation of one call through the permission pipeline.
+    pub async fn decide_group(
+        &mut self,
+        executors: Vec<Box<dyn Executor>>,
+        prompter: &ToolPrompter,
+        interactive: bool,
+        turn_state: &mut TurnState,
+        tool_renderer: &ToolRenderer,
+        printer: &Printer,
+    ) -> ExecutorGroup {
+        let tool_id = executors
+            .first()
+            .map(|e| e.tool_id().to_owned())
+            .unwrap_or_default();
+        let tool_name = executors
+            .first()
+            .map(|e| e.tool_name().to_owned())
+            .unwrap_or_default();
+        let fan_out = self.fan_out(&tool_name);
+
+        let mut ops = Vec::with_capacity(executors.len());
+        let mut rendered = Vec::new();
+
+        for executor in executors {
             // Funnel through the unified per-tool permission pipeline. The
             // streaming path in `turn_loop.rs` uses the same call so the
             // decide → pre-render → prompt → render policy stays in one
@@ -1104,18 +1368,32 @@ impl ToolCoordinator {
                     rendered_arguments,
                 } => {
                     if let Some(content) = rendered_arguments {
-                        self.rendered_arguments
-                            .insert(executor.tool_id().to_owned(), content);
+                        rendered.push(content);
                     }
-                    approved_executors.push((index, executor));
+                    ops.push(GroupOp::Run(executor));
                 }
                 ToolCallDecision::Skipped(response) | ToolCallDecision::Failed(response) => {
-                    skipped_responses.push((index, response));
+                    ops.push(GroupOp::Resolved(response));
                 }
             }
         }
 
-        (approved_executors, skipped_responses)
+        // One event carries the whole call, so its operations' custom-formatted
+        // output is stored as one record. Joining reproduces on replay exactly
+        // what was printed live, which was these chunks one after another, and
+        // keeps the metadata value a string for conversations recorded before
+        // fan-out existed.
+        if !rendered.is_empty() {
+            self.rendered_arguments
+                .insert(tool_id.clone(), rendered.join("\n"));
+        }
+
+        ExecutorGroup {
+            tool_id,
+            tool_name,
+            fan_out,
+            ops,
+        }
     }
 
     /// Run the approved tools, answering their questions and result prompts as
@@ -1127,7 +1405,7 @@ impl ToolCoordinator {
     #[expect(clippy::too_many_lines, clippy::too_many_arguments)]
     pub async fn execute_with_prompting(
         &mut self,
-        executors: Vec<(usize, Box<dyn Executor>)>,
+        groups: Vec<(usize, ExecutorGroup)>,
         prompter: Arc<ToolPrompter>,
         signals: &SignalRouter,
         turn_state: &mut TurnState,
@@ -1138,31 +1416,29 @@ impl ToolCoordinator {
         interactive: bool,
         interrupts: &mut TurnInterrupts,
     ) -> ExecutionResult {
-        if executors.is_empty() {
+        if groups.is_empty() {
             return ExecutionResult {
                 reviews: Vec::new(),
                 outcome: ExecutionOutcome::Completed,
             };
         }
 
-        debug!(tools = executors.len(), "Starting tool execution.");
+        debug!(tools = groups.len(), "Starting tool execution.");
 
         // Register the tool interrupt handler for this execution phase. While
         // registered, the first Ctrl-C press is delivered to this event loop;
         // the guard deregisters the handler when execution completes.
         let (interrupt_guard, mut interrupt_rx) = signals.push_handler();
 
-        // The caller's `index` values come from the execution plan and may
-        // be sparse (e.g. when some tools in the same plan are
-        // pre-resolved and don't reach this function). We can't use them
-        // as offsets into a `Vec` sized to `executors.len()`, so we
-        // re-base to contiguous local indices for internal bookkeeping
-        // and pair each response back with its plan index on output.
-        let plan_indices: Vec<usize> = executors.iter().map(|(idx, _)| *idx).collect();
-        let executors: Vec<Box<dyn Executor>> =
-            executors.into_iter().map(|(_, exec)| exec).collect();
+        // The caller's `index` values come from the execution plan and may be
+        // sparse (e.g. when some tools in the same plan are pre-resolved and
+        // don't reach this function), and one call may hold several operations.
+        // Both are flattened here: every operation gets a contiguous local index
+        // for internal bookkeeping, and `Schedule` remembers which call each one
+        // belongs to so the responses can be folded back per call on output.
+        let mut schedule = Schedule::new(groups);
 
-        let total_tools = executors.len();
+        let total_ops = schedule.total_ops();
         let cancellation_token = self.cancellation_token.clone();
         let (event_tx, mut event_rx) = mpsc::channel::<ExecutionEvent>(32);
         let services = PhaseServices {
@@ -1175,7 +1451,7 @@ impl ToolCoordinator {
         };
         let mut state = PhaseState {
             tools: HashMap::new(),
-            reviews: vec![None; total_tools],
+            reviews: vec![None; total_ops],
             pending_prompts: VecDeque::new(),
             prompt_active: false,
         };
@@ -1194,29 +1470,8 @@ impl ToolCoordinator {
         // shows how long a tool has been going.
         tool_renderer.start_progress();
 
-        for (index, executor) in executors.into_iter().enumerate() {
-            let tool_id = executor.tool_id().to_string();
-            let tool_name = executor.tool_name().to_string();
-            // No pre-seeding: static answers flow through the late
-            // `static_answer` path so every question round-trip is recorded as
-            // an inquiry pair (RFD 082).
-            let accumulated_answers = IndexMap::new();
-
-            let executor: Arc<dyn Executor> = Arc::from(executor);
-
-            let stderr = stderr_sink(tool_renderer, &self.tools_config, &tool_name);
-
-            let tool = ExecutingTool {
-                executor,
-                tool_id: tool_id.clone(),
-                tool_name,
-                accumulated_answers,
-                stderr,
-            };
-
-            self.set_tool_state(&tool_id, ToolCallState::Running);
-            Self::spawn_tool_execution(index, &tool, &services);
-            state.tools.insert(index, tool);
+        for (index, executor) in schedule.release(&state.reviews) {
+            self.start_operation(index, executor, &mut state, &services, tool_renderer);
         }
 
         // Forward interrupt notifications into the execution event channel.
@@ -1311,7 +1566,7 @@ impl ToolCoordinator {
                         Self::record_inquiry_answer(services.conv, &inquiry_id, &answer);
                         if let Some(tool) = state.tools.get_mut(&index) {
                             tool.accumulated_answers.insert(question_id, answer);
-                            self.set_tool_state(&tool.tool_id, ToolCallState::Running);
+                            self.set_tool_state(&tool.state_key, ToolCallState::Running);
                             Self::spawn_tool_execution(index, tool, &services);
                         } else {
                             warn!(index, "Received InquiryResult for unknown tool.");
@@ -1328,7 +1583,7 @@ impl ToolCoordinator {
                                 warn!(index, %error, "Received InquiryResult for unknown tool.");
                             }
                             Some(tool) => {
-                                self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
+                                self.set_tool_state(&tool.state_key, ToolCallState::Completed);
 
                                 state.reviews[index] = Some(Review::replaced(ToolCallResponse {
                                     id: tool.tool_id.clone(),
@@ -1358,9 +1613,9 @@ impl ToolCoordinator {
                     // for the life of the phase, and this index came from one.
                     if let Some(tool) = state.tools.get(&index) {
                         let tool_name = tool.tool_name.clone();
-                        let tool_id = tool.tool_id.clone();
+                        let state_key = tool.state_key.clone();
                         self.render_result(&tool_name, &review.response, tool_renderer);
-                        self.set_tool_state(&tool_id, ToolCallState::Completed);
+                        self.set_tool_state(&state_key, ToolCallState::Completed);
                     } else {
                         warn!(index, "Received ResultModeProcessed for unknown tool.");
                     }
@@ -1402,6 +1657,7 @@ impl ToolCoordinator {
                         record_tool_interrupt(
                             &result,
                             &state,
+                            &mut schedule,
                             &cancellation_token,
                             &mut outcome,
                             &mut tools_cancelled,
@@ -1425,6 +1681,7 @@ impl ToolCoordinator {
                     record_tool_interrupt(
                         &result,
                         &state,
+                        &mut schedule,
                         &cancellation_token,
                         &mut outcome,
                         &mut tools_cancelled,
@@ -1434,7 +1691,26 @@ impl ToolCoordinator {
                 }
             }
 
-            if state.reviews.iter().all(Option::is_some) {
+            // Tell the schedule which operations failed, so a call configured
+            // to stop on error starts none of the ones still queued.
+            // Re-scanning every finished operation each time is cheap at these
+            // sizes, and recording the same failure twice is a no-op.
+            for (index, review) in state.reviews.iter().enumerate() {
+                if let Some(review) = review {
+                    schedule.record_outcome(index, &review.response);
+                }
+            }
+
+            // Release whatever the finished operations made room for: the next
+            // operation of a call with a concurrency limit, or nothing at all
+            // for a call already running everything it has.
+            if !tools_cancelled {
+                for (index, executor) in schedule.release(&state.reviews) {
+                    self.start_operation(index, executor, &mut state, &services, tool_renderer);
+                }
+            }
+
+            if schedule.all_accounted_for(&state.reviews) {
                 break;
             }
         }
@@ -1445,43 +1721,34 @@ impl ToolCoordinator {
 
         tool_renderer.clear_progress();
 
-        let mut reviews: Vec<(usize, Review)> = plan_indices
-            .into_iter()
-            .zip(state.reviews.into_iter().map(|review| {
-                review.unwrap_or_else(|| {
-                    Review::replaced(ToolCallResponse {
-                        id: "unknown".to_owned(),
-                        result: Err("Tool did not complete".to_owned()),
-                    })
-                })
-            }))
-            .collect();
-
         if tools_cancelled {
             for &i in &cancelled_indices {
-                let Some((_, review)) = reviews.get_mut(i) else {
-                    continue;
-                };
-
-                review.response.result = Ok(if let Some(msg) = &cancellation_message {
+                let content = if let Some(msg) = &cancellation_message {
                     format!("Tool run cancelled by user with a custom message:\n\n{msg}")
                 } else {
                     // No custom message: each cancelled tool answers with its
-                    // configured cancellation response.
-                    let tool_name = state
-                        .tools
-                        .get(&i)
-                        .map(|tool| tool.tool_name.as_str())
-                        .unwrap_or_default();
-                    self.cancellation_response(tool_name)
-                });
+                    // configured cancellation response. Read off the schedule
+                    // rather than `state.tools`, which only knows the
+                    // operations that were actually spawned.
+                    self.cancellation_response(schedule.tool_name(i))
+                };
+
                 // The cancellation message stands in for whatever the tool
                 // would have produced.
-                review.edited = true;
+                state.reviews[i] = Some(Review::replaced(ToolCallResponse {
+                    id: schedule.tool_id(i).to_owned(),
+                    result: Ok(content),
+                }));
             }
         }
 
-        ExecutionResult { reviews, outcome }
+        let folded = schedule.fold(state.reviews);
+        self.operation_reviews.extend(folded.operations);
+
+        ExecutionResult {
+            reviews: folded.recorded,
+            outcome,
+        }
     }
 
     /// Builds an error response for a tool whose argument rendering failed.
@@ -1499,6 +1766,38 @@ impl ToolCoordinator {
                  {error}",
             )),
         }
+    }
+
+    /// Register an operation and spawn it.
+    ///
+    /// Called once per operation when the schedule releases it, which for a
+    /// call without a concurrency limit is all of them up front.
+    fn start_operation(
+        &mut self,
+        index: usize,
+        executor: Box<dyn Executor>,
+        state: &mut PhaseState,
+        services: &PhaseServices<'_>,
+        tool_renderer: &ToolRenderer,
+    ) {
+        let tool_name = executor.tool_name().to_owned();
+        let stderr = stderr_sink(tool_renderer, &self.tools_config, &tool_name);
+
+        let tool = ExecutingTool {
+            tool_id: executor.tool_id().to_owned(),
+            state_key: executor.state_key(),
+            executor: Arc::from(executor),
+            tool_name,
+            // No pre-seeding: static answers flow through the late
+            // `static_answer` path so every question round-trip is recorded as
+            // an inquiry pair (RFD 082).
+            accumulated_answers: IndexMap::new(),
+            stderr,
+        };
+
+        self.set_tool_state(&tool.state_key, ToolCallState::Running);
+        Self::spawn_tool_execution(index, &tool, services);
+        state.tools.insert(index, tool);
     }
 
     /// Run one attempt of a tool, reporting back through the phase's channel.
@@ -1673,7 +1972,7 @@ impl ToolCoordinator {
         tool_renderer: &ToolRenderer,
     ) {
         self.render_result(&tool.tool_name, &response, tool_renderer);
-        self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
+        self.set_tool_state(&tool.state_key, ToolCallState::Completed);
         *tracked_review = Some(Review::unchanged(response));
     }
 
@@ -1709,7 +2008,7 @@ impl ToolCoordinator {
                 tool.tool_name
             )
         };
-        self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
+        self.set_tool_state(&tool.state_key, ToolCallState::Completed);
         *tracked_review = Some(Review::replaced(ToolCallResponse {
             id: tool.tool_id.clone(),
             result: Err(message),
@@ -1750,7 +2049,7 @@ impl ToolCoordinator {
                     // the tool's output. Rendering it would announce a result
                     // the configuration asked not to deliver.
                     ResultMode::Skip => {
-                        self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
+                        self.set_tool_state(&tool.state_key, ToolCallState::Completed);
                         *tracked_review = Some(Review::unchanged(response));
                     }
                     // Nobody is there to answer, so the configured prompt is
@@ -1765,14 +2064,14 @@ impl ToolCoordinator {
                         if *prompt_active {
                             pending_prompts.push_back(PendingPrompt::ResultMode {
                                 index,
-                                tool_id: tool.tool_id.clone(),
+                                state_key: tool.state_key.clone(),
                                 tool_name: tool.tool_name.clone(),
                                 response,
                                 result_mode,
                             });
                         } else {
                             *prompt_active = true;
-                            self.set_tool_state(&tool.tool_id, ToolCallState::AwaitingResultEdit);
+                            self.set_tool_state(&tool.state_key, ToolCallState::AwaitingResultEdit);
                             Self::spawn_result_mode_prompt(
                                 index,
                                 tool.tool_name.clone(),
@@ -1916,7 +2215,7 @@ impl ToolCoordinator {
                 });
             } else {
                 *prompt_active = true;
-                self.set_tool_state(&tool_id, ToolCallState::AwaitingInput);
+                self.set_tool_state(&tool.state_key, ToolCallState::AwaitingInput);
                 Self::spawn_user_prompt(index, question, inquiry_id, services);
             }
         } else if is_secret {
@@ -1941,7 +2240,7 @@ impl ToolCoordinator {
                 )
             };
             Self::record_inquiry_cancelled(conv, &inquiry_id, reason);
-            self.set_tool_state(&tool_id, ToolCallState::Completed);
+            self.set_tool_state(&tool.state_key, ToolCallState::Completed);
             *tracked_review = Some(Review::replaced(ToolCallResponse {
                 id: tool_id.clone(),
                 result: Err(message),
@@ -1957,7 +2256,7 @@ impl ToolCoordinator {
                 question,
                 services,
             );
-            self.set_tool_state(&tool_id, ToolCallState::AwaitingInput);
+            self.set_tool_state(&tool.state_key, ToolCallState::AwaitingInput);
         }
     }
 
@@ -1992,7 +2291,7 @@ impl ToolCoordinator {
                     .insert(answer_key, answer.clone());
             }
             tool.accumulated_answers.insert(question_id, answer);
-            self.set_tool_state(&tool.tool_id, ToolCallState::Running);
+            self.set_tool_state(&tool.state_key, ToolCallState::Running);
             Self::spawn_tool_execution(index, tool, services);
         }
         self.process_next_prompt(state, services);
@@ -2017,7 +2316,7 @@ impl ToolCoordinator {
         Self::record_inquiry_cancelled(services.conv, inquiry_id, reason);
 
         if let Some(tool) = state.tools.get(&index) {
-            self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
+            self.set_tool_state(&tool.state_key, ToolCallState::Completed);
             state.reviews[index] = Some(Review::replaced(ToolCallResponse {
                 id: tool.tool_id.clone(),
                 result,
@@ -2137,18 +2436,18 @@ impl ToolCoordinator {
                 inquiry_id,
             } => {
                 if let Some(tool) = state.tools.get(&index) {
-                    self.set_tool_state(&tool.tool_id, ToolCallState::AwaitingInput);
+                    self.set_tool_state(&tool.state_key, ToolCallState::AwaitingInput);
                 }
                 Self::spawn_user_prompt(index, question, inquiry_id, services);
             }
             PendingPrompt::ResultMode {
                 index,
-                tool_id,
+                state_key,
                 tool_name,
                 response,
                 result_mode,
             } => {
-                self.set_tool_state(&tool_id, ToolCallState::AwaitingResultEdit);
+                self.set_tool_state(&state_key, ToolCallState::AwaitingResultEdit);
                 Self::spawn_result_mode_prompt(index, tool_name, response, result_mode, services);
             }
         }

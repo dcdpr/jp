@@ -1055,16 +1055,15 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
     tools
         .into_iter()
         .map(|tool| {
+            let schema = tool.provider_schema().into_owned();
+            let description = tool.provider_description().unwrap_or_default().into_owned();
+
             types::Tool::FunctionDeclaration(types::ToolConfigFunctionDeclaration {
                 function_declarations: vec![types::FunctionDeclaration {
                     parameters: None,
-                    parameters_json_schema: Some(closed_object_schema(tool.parameters)),
+                    parameters_json_schema: Some(closed_object_schema(schema)),
                     name: tool.name,
-                    description: tool
-                        .docs
-                        .schema_description()
-                        .unwrap_or_default()
-                        .to_owned(),
+                    description,
                     response: None,
                 }],
             })

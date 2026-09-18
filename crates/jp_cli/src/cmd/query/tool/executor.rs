@@ -54,10 +54,30 @@ pub(crate) trait Executor: Send + Sync {
     }
 
     /// Returns the tool call ID.
+    ///
+    /// Every operation of a fanned-out call shares one id, because the provider
+    /// asked for one call and expects one response.
     fn tool_id(&self) -> &str;
 
     /// Returns the tool name.
     fn tool_name(&self) -> &str;
+
+    /// Position of this executor's operation within its tool call.
+    ///
+    /// `None` when the call carries exactly one operation, which is every call
+    /// to a tool without fan-out configured.
+    fn op_index(&self) -> Option<usize> {
+        None
+    }
+
+    /// Key identifying this operation's display state.
+    ///
+    /// A fanned-out call renders one line per operation and prompts once per
+    /// operation, so each needs a slot of its own rather than sharing the one
+    /// its tool call id would name.
+    fn state_key(&self) -> String {
+        state_key(self.tool_id(), self.op_index())
+    }
 
     /// Returns the tool call arguments.
     ///
@@ -171,7 +191,13 @@ pub(crate) trait ExecutorSource: Send + Sync {
         Box::pin(async { Ok(()) })
     }
 
-    /// Creates an executor for the given tool call request.
+    /// Creates an executor for one operation of the given tool call request.
+    ///
+    /// `request.arguments` holds that operation's arguments, already taken out
+    /// of the fan-out envelope by the caller, so an implementation never sees
+    /// the envelope itself.
+    /// `op` is the operation's position within the call, or `None` when the
+    /// call carries exactly one operation.
     ///
     /// Returns `None` if the tool cannot be resolved (e.g. missing from the
     /// definitions).
@@ -179,7 +205,19 @@ pub(crate) trait ExecutorSource: Send + Sync {
         &self,
         request: ToolCallRequest,
         config: ToolConfigWithDefaults,
+        op: Option<usize>,
     ) -> Option<Box<dyn Executor>>;
+}
+
+/// The display-state key for operation `op` of tool call `tool_id`.
+///
+/// The tool call id itself when the call carries one operation, so a call
+/// without fan-out is addressed exactly as it always was.
+pub(crate) fn state_key(tool_id: &str, op: Option<usize>) -> String {
+    match op {
+        None => tool_id.to_owned(),
+        Some(op) => format!("{tool_id}#{op}"),
+    }
 }
 
 /// What the Host settled on for one call, once the conversation has it.
@@ -197,6 +235,13 @@ pub(crate) struct Review {
 
     /// Whether the Host changed the content it was offered.
     pub edited: bool,
+
+    /// Which operation of a fanned-out call this settles, or `None` when the
+    /// call carries one operation.
+    ///
+    /// Every operation runs as its own MCP call under the shared tool call id,
+    /// so this is what tells them apart when each is acknowledged.
+    pub op: Option<usize>,
 }
 
 impl Review {
@@ -205,6 +250,7 @@ impl Review {
         Self {
             response,
             edited: false,
+            op: None,
         }
     }
 
@@ -213,7 +259,15 @@ impl Review {
         Self {
             response,
             edited: true,
+            op: None,
         }
+    }
+
+    /// This review, settling operation `op` of its call.
+    #[must_use]
+    pub fn for_op(mut self, op: Option<usize>) -> Self {
+        self.op = op;
+        self
     }
 }
 
@@ -301,7 +355,17 @@ pub(crate) enum ExecutorResult {
 #[derive(Debug, Clone)]
 pub(crate) struct PermissionInfo {
     /// The tool call ID.
+    ///
+    /// Shared by every operation of a fanned-out call; use [`state_key`] to
+    /// address one operation's display state.
+    ///
+    /// [`state_key`]: Self::state_key
     pub tool_id: String,
+
+    /// Key identifying this operation's display state.
+    ///
+    /// Matches [`Executor::state_key`] for the executor this info came from.
+    pub state_key: String,
 
     /// The tool name.
     pub tool_name: String,

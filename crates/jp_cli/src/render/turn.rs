@@ -23,6 +23,7 @@ use jp_conversation::{
     stream::{TurnOrigin, turn_iter::Turn},
 };
 use jp_printer::{ErrChannel, Printer};
+use jp_tool::fan_out;
 use tracing::warn;
 
 use super::{RenderFlow, ToolRenderer, TurnView, metadata::get_rendered_arguments};
@@ -205,8 +206,22 @@ impl TurnRenderer {
                     self.tool.set_region(&req.id, region);
 
                     if chrome_visible {
-                        self.tool
-                            .render_tool_call(&req.name, &req.arguments, &style.parameters);
+                        // A fanned-out call was shown live as one header per
+                        // operation, so replay reproduces that rather than
+                        // printing the envelope the provider was sent.
+                        // A call that does not fan out has one set of
+                        // arguments and renders as the single header it always
+                        // did.
+                        let operations = tool_cfg
+                            .as_ref()
+                            .and_then(ToolConfigWithDefaults::fan_out)
+                            .and(fan_out::expand(&req.arguments).ok())
+                            .unwrap_or_else(|| vec![req.arguments.clone()]);
+
+                        for arguments in &operations {
+                            self.tool
+                                .render_tool_call(&req.name, arguments, &style.parameters);
+                        }
 
                         // Show stored custom-formatter output when replaying
                         // a tool call that was originally rendered with a

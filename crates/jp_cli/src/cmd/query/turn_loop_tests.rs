@@ -708,6 +708,7 @@ async fn two_client_replies_during_a_tool_both_reach_the_conversation() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1880,6 +1881,7 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2028,6 +2030,7 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: Some(CUSTOM_CANCELLATION_RESPONSE.to_string()),
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2171,6 +2174,7 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2507,6 +2511,7 @@ async fn test_tool_restart_on_interrupt() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2662,6 +2667,7 @@ async fn test_merged_stream_exits_after_tool_response() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2774,6 +2780,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2808,6 +2815,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
                 MockExecutor::completed(&req.id, &req.name, "mock output").with_permission_info(
                     PermissionInfo {
                         tool_id: req.id.clone(),
+                        state_key: req.id.clone(),
                         tool_name: req.name.clone(),
                         tool_source: ToolSource::Local { tool: None },
                         run_mode: RunMode::Ask,
@@ -2917,6 +2925,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2951,6 +2960,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
                 MockExecutor::completed(&req.id, &req.name, "should not see this")
                     .with_permission_info(PermissionInfo {
                         tool_id: req.id.clone(),
+                        state_key: req.id.clone(),
                         tool_name: req.name.clone(),
                         tool_source: ToolSource::Local { tool: None },
                         run_mode: RunMode::Ask,
@@ -3071,6 +3081,7 @@ async fn test_permission_prompt_follows_interactive_not_is_tty() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3103,6 +3114,7 @@ async fn test_permission_prompt_follows_interactive_not_is_tty() {
                 MockExecutor::completed(&req.id, &req.name, "mock output").with_permission_info(
                     PermissionInfo {
                         tool_id: req.id.clone(),
+                        state_key: req.id.clone(),
                         tool_name: req.name.clone(),
                         tool_source: ToolSource::Local { tool: None },
                         run_mode: RunMode::Ask,
@@ -3197,6 +3209,7 @@ async fn test_tool_call_with_run_mode_unattended() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3335,6 +3348,7 @@ async fn test_tool_call_with_run_mode_skip() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3374,6 +3388,7 @@ async fn test_tool_call_with_run_mode_skip() {
                 )
                 .with_permission_info(PermissionInfo {
                     tool_id: req.id.clone(),
+                    state_key: req.id.clone(),
                     tool_name: req.name.clone(),
                     tool_source: ToolSource::Local { tool: None },
                     run_mode: RunMode::Skip,
@@ -3489,6 +3504,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
         // tool_unattended runs automatically
         config
@@ -3510,6 +3526,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3569,6 +3586,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                     MockExecutor::completed(&req.id, &req.name, "ask tool output")
                         .with_permission_info(PermissionInfo {
                             tool_id: req.id.clone(),
+                            state_key: req.id.clone(),
                             tool_name: req.name.clone(),
                             tool_source: ToolSource::Local { tool: None },
                             run_mode: RunMode::Ask,
@@ -3697,6 +3715,7 @@ async fn test_tool_call_returns_error() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -5001,6 +5020,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
         config
             .conversation
@@ -5021,6 +5041,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -5193,6 +5214,7 @@ async fn test_single_tool_call_rendered_with_args() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -5292,6 +5314,338 @@ async fn test_single_tool_call_rendered_with_args() {
         assert!(
             chrome.contains("/etc/hosts"),
             "Should contain tool args.\nChrome:\n{chrome}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// One provider tool call carrying three operations runs the tool three times
+/// and answers with one response holding all three results.
+///
+/// This is the whole of fan-out end to end: the envelope goes in, three
+/// separate executions come out, the terminal shows three headers, and the
+/// provider gets back the single response its one call is waiting for.
+#[tokio::test]
+#[expect(clippy::too_many_lines)]
+async fn a_fanned_out_call_runs_every_operation_and_answers_once() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.style.tool_call.show = true;
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config
+            .conversation
+            .tools
+            .insert("fs_read_file".to_string(), ToolConfig {
+                source: ToolSource::Local { tool: None },
+                command: None,
+                run: Some(RunMode::Unattended),
+                format: None,
+                enable: None,
+                summary: None,
+                description: None,
+                examples: None,
+                parameters: IndexMap::new().into(),
+                result: None,
+                style: None,
+                questions: IndexMap::new().into(),
+                options: IndexMap::default().into(),
+                access: None,
+                cancellation_response: None,
+                fan_out: Some(jp_config::conversation::tool::FanOutConfig {
+                    enabled: Some(true),
+                    concurrency: None,
+                    on_error: None,
+                }),
+            });
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Read three files");
+
+        // The envelope the provider is shown, carrying three operations.
+        let args = json!({
+            "ops": [
+                { "path": "a.rs" },
+                { "path": "b.rs" },
+                { "path": "c.rs" },
+            ]
+        });
+
+        let provider: Arc<dyn Provider> = Arc::new({
+            let events = vec![
+                Event::tool_call_start(0, "call_1".to_string(), "fs_read_file".to_string()),
+                Event::tool_call_args(0, serde_json::to_string(&args).unwrap()),
+                Event::flush(0),
+                Event::Finished(FinishReason::Completed),
+            ];
+
+            let followup = vec![
+                Event::message(0, "Done.\n\n"),
+                Event::flush(0),
+                Event::Finished(FinishReason::Completed),
+            ];
+
+            SequentialMockProvider {
+                responses: vec![events, followup],
+                call_index: AtomicUsize::new(0),
+                model: ModelDetails::empty(id::ModelIdConfig {
+                    provider: ProviderId::Test,
+                    name: "fan-out-mock".parse().expect("valid name"),
+                }),
+            }
+        });
+
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let router = detached_router();
+
+        // Counts executions rather than trusting the response text: an
+        // implementation that ran one operation and printed three sections
+        // would satisfy the output assertions below but not this one.
+        let runs = Arc::new(AtomicUsize::new(0));
+        let executor_source = TestExecutorSource::new().with_executor("fs_read_file", {
+            let runs = Arc::clone(&runs);
+            move |req| {
+                runs.fetch_add(1, Ordering::SeqCst);
+                let path = req
+                    .arguments
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .unwrap_or("<missing>")
+                    .to_owned();
+
+                Box::new(
+                    MockExecutor::completed(&req.id, &req.name, &format!("contents of {path}"))
+                        .with_arguments(req.arguments.clone()),
+                )
+            }
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            root,
+            InvocationContext::default(),
+            false, // interactive
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            chat_request.clone(),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
+        )
+        .await
+        .unwrap();
+
+        printer.flush();
+
+        assert_eq!(
+            runs.load(Ordering::SeqCst),
+            3,
+            "the tool runs once per operation"
+        );
+
+        // One request in, one response out: the provider asked for one call and
+        // a second response would leave the stream unpaired.
+        let conv = lock.as_mut();
+        let events = conv.events();
+        let responses: Vec<_> = events
+            .iter()
+            .filter_map(|e| e.event.as_tool_call_response())
+            .filter(|r| r.id == "call_1")
+            .collect();
+
+        assert_eq!(responses.len(), 1, "one call is answered once");
+        assert_eq!(
+            responses[0].content(),
+            "[1/3] ok\ncontents of a.rs\n\n[2/3] ok\ncontents of b.rs\n\n[3/3] ok\ncontents of \
+             c.rs\n",
+            "every operation's result is framed with its position"
+        );
+
+        // Three operations render as three calls, matching what a model that
+        // issued them separately would have shown.
+        let chrome = err.lock().clone();
+        assert_eq!(
+            chrome.matches("Calling tool").count(),
+            3,
+            "one header per operation.\nChrome:\n{chrome}"
+        );
+        for path in ["a.rs", "b.rs", "c.rs"] {
+            assert!(
+                chrome.contains(path),
+                "header for {path} is missing.\nChrome:\n{chrome}"
+            );
+        }
+        assert!(
+            !chrome.contains("ops"),
+            "the envelope must not reach the terminal.\nChrome:\n{chrome}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A malformed envelope answers with a message naming what went wrong, and the
+/// tool never runs.
+#[tokio::test]
+#[expect(clippy::too_many_lines)]
+async fn a_fanned_out_call_with_an_empty_envelope_is_refused() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config
+            .conversation
+            .tools
+            .insert("fs_read_file".to_string(), ToolConfig {
+                source: ToolSource::Local { tool: None },
+                command: None,
+                run: Some(RunMode::Unattended),
+                format: None,
+                enable: None,
+                summary: None,
+                description: None,
+                examples: None,
+                parameters: IndexMap::new().into(),
+                result: None,
+                style: None,
+                questions: IndexMap::new().into(),
+                options: IndexMap::default().into(),
+                access: None,
+                cancellation_response: None,
+                fan_out: Some(jp_config::conversation::tool::FanOutConfig {
+                    enabled: Some(true),
+                    concurrency: None,
+                    on_error: None,
+                }),
+            });
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let provider: Arc<dyn Provider> = Arc::new({
+            let events = vec![
+                Event::tool_call_start(0, "call_1".to_string(), "fs_read_file".to_string()),
+                Event::tool_call_args(0, r#"{"ops":[]}"#.to_owned()),
+                Event::flush(0),
+                Event::Finished(FinishReason::Completed),
+            ];
+            let followup = vec![
+                Event::message(0, "Sorry.\n\n"),
+                Event::flush(0),
+                Event::Finished(FinishReason::Completed),
+            ];
+
+            SequentialMockProvider {
+                responses: vec![events, followup],
+                call_index: AtomicUsize::new(0),
+                model: ModelDetails::empty(id::ModelIdConfig {
+                    provider: ProviderId::Test,
+                    name: "fan-out-empty-mock".parse().expect("valid name"),
+                }),
+            }
+        });
+
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let router = detached_router();
+
+        let runs = Arc::new(AtomicUsize::new(0));
+        let executor_source = TestExecutorSource::new().with_executor("fs_read_file", {
+            let runs = Arc::clone(&runs);
+            move |req| {
+                runs.fetch_add(1, Ordering::SeqCst);
+                Box::new(MockExecutor::completed(
+                    &req.id,
+                    &req.name,
+                    "should not run",
+                ))
+            }
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            root,
+            InvocationContext::default(),
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            ChatRequest::from("Read nothing"),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            runs.load(Ordering::SeqCst),
+            0,
+            "a call with no operations runs nothing"
+        );
+
+        let conv = lock.as_mut();
+        let events = conv.events();
+        let response = events
+            .iter()
+            .filter_map(|e| e.event.as_tool_call_response())
+            .find(|r| r.id == "call_1")
+            .expect("the call is answered");
+
+        assert_eq!(
+            response.result,
+            Err(
+                "Tool 'fs_read_file' was called with an empty `ops` array, so there was nothing \
+                 to do. Include at least one operation."
+                    .to_owned()
+            )
         );
     }))
     .await;
@@ -5409,6 +5763,7 @@ fn talking_tool_config(names: &[&str]) -> AppConfig {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
     }
 
@@ -5915,6 +6270,7 @@ async fn a_tool_can_opt_out_of_the_progress_window() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -6463,6 +6819,7 @@ fn inquiry_tool_config(questions: &[&str]) -> ToolConfig {
         options: IndexMap::default().into(),
         access: None,
         cancellation_response: None,
+        fan_out: None,
     }
 }
 
@@ -7593,6 +7950,7 @@ async fn test_parallel_tools_one_with_inquiry() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -8025,6 +8383,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -8454,6 +8813,7 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
             options: IndexMap::default().into(),
             access: None,
             cancellation_response: None,
+            fan_out: None,
         });
 
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -8579,6 +8939,7 @@ async fn a_tool_that_does_not_join_reasoning_renders_unshaded_live() {
             options: IndexMap::default().into(),
             access: None,
             cancellation_response: None,
+            fan_out: None,
         });
 
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -9002,6 +9363,7 @@ async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
             name: "http_tool".into(),
             docs: ToolDocs::default(),
             parameters: json!({"type":"object","properties":{}}),
+            fan_out: false,
         }];
         let count = Arc::new(AtomicUsize::new(0));
         let client = Client::default();

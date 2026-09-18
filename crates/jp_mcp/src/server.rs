@@ -979,18 +979,24 @@ async fn resolve_tool(
     mcp_client: &Client,
 ) -> Result<ToolDefinition, ToolError> {
     let path = format!("conversation.tools.{name}.parameters");
-    let definition = match config.source() {
+    let mut definition = match config.source() {
         ToolSource::Local { .. } | ToolSource::Builtin { .. } => ToolDefinition {
             name: name.to_owned(),
             docs: tool_docs_from_config(config),
             parameters: json_schema::from_config(&path, config.parameters())?,
+            fan_out: false,
         },
         ToolSource::Mcp { server, tool } => {
             resolve_mcp_tool(server, name, tool.as_deref(), config, mcp_client).await?
         }
     };
 
+    // Validated before fan-out is attached: what a tool must declare is a
+    // property of the operation it performs, and the envelope is JP's own
+    // construction rather than anything the tool's source said.
     jp_tool::schema::validate(&path, &definition.parameters)?;
+
+    definition.fan_out = config.fan_out().is_some();
 
     Ok(definition)
 }
@@ -1100,6 +1106,9 @@ async fn resolve_mcp_tool(
         name: name.to_owned(),
         docs,
         parameters,
+        // Attached by `resolve_tool` once the schema has been validated; an MCP
+        // server has no say in whether JP batches calls to it.
+        fan_out: false,
     })
 }
 

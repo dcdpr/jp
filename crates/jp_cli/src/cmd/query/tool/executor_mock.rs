@@ -6,12 +6,12 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::ToolConfigWithDefaults;
 use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
-use jp_mcp::server::StderrSink;
+use jp_mcp::server::{StderrSink, service::Formatted};
 use jp_tool::{ToolDefinition, ToolDocs};
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
-use super::{Executor, ExecutorResult, ExecutorSource, PermissionInfo};
+use super::{Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo};
 
 /// A mock executor for testing that returns pre-configured results.
 ///
@@ -168,6 +168,7 @@ impl TestExecutorSource {
                 name: name.clone(),
                 docs: ToolDocs::default(),
                 parameters: json!({ "type": "object", "properties": {} }),
+                fan_out: false,
             })
             .collect()
     }
@@ -178,8 +179,97 @@ impl ExecutorSource for TestExecutorSource {
         &self,
         request: ToolCallRequest,
         _config: ToolConfigWithDefaults,
+        op: Option<usize>,
     ) -> Option<Box<dyn Executor>> {
         let factory = self.factories.get(&request.name)?;
-        Some(factory(request))
+        let executor = factory(request);
+
+        Some(match op {
+            None => executor,
+            Some(op) => Box::new(OpExecutor {
+                inner: executor,
+                op,
+            }),
+        })
+    }
+}
+
+/// Wraps a test executor so it reports the operation it stands for.
+///
+/// Test factories build one executor from one request and know nothing about
+/// fan-out; this carries the operation index the source was asked for without
+/// every factory having to thread it through.
+struct OpExecutor {
+    inner: Box<dyn Executor>,
+    op: usize,
+}
+
+#[async_trait]
+impl Executor for OpExecutor {
+    async fn prepare(
+        &mut self,
+        render_arguments: bool,
+    ) -> Result<Option<ToolCallResponse>, ExecutorError> {
+        self.inner.prepare(render_arguments).await
+    }
+
+    async fn approve(&mut self) -> Result<(), ExecutorError> {
+        self.inner.approve().await
+    }
+
+    fn formatted_arguments(&self) -> Option<&Formatted> {
+        self.inner.formatted_arguments()
+    }
+
+    fn tool_id(&self) -> &str {
+        self.inner.tool_id()
+    }
+
+    fn tool_name(&self) -> &str {
+        self.inner.tool_name()
+    }
+
+    fn op_index(&self) -> Option<usize> {
+        Some(self.op)
+    }
+
+    fn arguments(&self) -> &Map<String, Value> {
+        self.inner.arguments()
+    }
+
+    fn permission_info(&self) -> Option<PermissionInfo> {
+        // The inner executor keys its info by the call alone; this one stands
+        // for an operation of it.
+        self.inner.permission_info().map(|info| PermissionInfo {
+            state_key: self.state_key(),
+            ..info
+        })
+    }
+
+    fn needs_permission(&self) -> bool {
+        self.inner.needs_permission()
+    }
+
+    fn set_arguments(&mut self, args: Value) {
+        self.inner.set_arguments(args);
+    }
+
+    fn pause_for_restart(&self) -> bool {
+        self.inner.pause_for_restart()
+    }
+
+    fn hold_for_response(&self) -> bool {
+        self.inner.hold_for_response()
+    }
+
+    async fn execute(
+        &self,
+        answers: &IndexMap<String, Value>,
+        cancellation_token: CancellationToken,
+        stderr: Option<StderrSink>,
+    ) -> ExecutorResult {
+        self.inner
+            .execute(answers, cancellation_token, stderr)
+            .await
     }
 }

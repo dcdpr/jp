@@ -56,9 +56,9 @@ use super::{
         commit_partial_response, handle_stream_error,
     },
     tool::{
-        PendingEntry, PendingTools, ToolCallDecision, ToolCallState, ToolCoordinator, ToolPrompter,
+        ExecutorGroup, PendingEntry, PendingTools, ToolCallState, ToolCoordinator, ToolPrompter,
         ToolRenderer, build_execution_plan,
-        executor::{Executor, Review},
+        executor::Review,
         inquiry::{InquiryBackend, InquiryConfig, LlmInquiryBackend},
     },
     turn::{Action, CommittedEvent, TurnCoordinator, TurnPhase, TurnState},
@@ -788,15 +788,16 @@ pub(super) async fn run_turn_loop(
                                 tool_renderer.complete(&req.id);
 
                                 match tool_coordinator.prepare_one(req.clone()) {
-                                    Ok(executor) => {
-                                        // Run the unified per-tool permission
-                                        // pipeline. The await blocks the
-                                        // streaming event loop while the user
-                                        // decides; LLM events buffer in the
-                                        // channel and are processed after.
-                                        let decision = tool_coordinator
-                                            .resolve_tool_call_decision(
-                                                executor,
+                                    Ok(executors) => {
+                                        // Run the unified permission pipeline
+                                        // over every operation of the call. The
+                                        // await blocks the streaming event loop
+                                        // while the user decides; LLM events
+                                        // buffer in the channel and are
+                                        // processed after.
+                                        let group = tool_coordinator
+                                            .decide_group(
+                                                executors,
                                                 &prompter,
                                                 interactive,
                                                 &mut turn_state,
@@ -805,25 +806,21 @@ pub(super) async fn run_turn_loop(
                                             )
                                             .await;
 
-                                        match decision {
-                                            ToolCallDecision::Approved {
-                                                executor,
-                                                rendered_arguments,
-                                            } => {
-                                                if let Some(content) = rendered_arguments {
-                                                    conv.update_events(|stream| {
-                                                        store_rendered_arguments(
-                                                            stream, &req.id, &content,
-                                                        );
-                                                    });
-                                                }
-                                                pending_tools
-                                                    .insert_approved(req.id.clone(), executor);
-                                            }
-                                            ToolCallDecision::Skipped(resp)
-                                            | ToolCallDecision::Failed(resp) => {
-                                                pending_tools.insert_resolved(req.id.clone(), resp);
-                                            }
+                                        for (id, content) in
+                                            tool_coordinator.drain_rendered_arguments()
+                                        {
+                                            conv.update_events(|stream| {
+                                                store_rendered_arguments(stream, &id, &content);
+                                            });
+                                        }
+
+                                        if group.has_work() {
+                                            pending_tools.insert_approved(req.id.clone(), group);
+                                        } else {
+                                            pending_tools.insert_resolved(
+                                                req.id.clone(),
+                                                tool_coordinator.fold_decided_group(group),
+                                            );
                                         }
                                     }
                                     Err(resp) => {
@@ -905,9 +902,9 @@ pub(super) async fn run_turn_loop(
                         )
                         .await;
 
-                    for (_idx, exec) in executors {
-                        let id = exec.tool_id().to_owned();
-                        pending_tools.insert_approved(id, exec);
+                    for (_idx, group) in executors {
+                        let id = group.tool_id.clone();
+                        pending_tools.insert_approved(id, group);
                     }
                     for (_idx, resp) in skipped {
                         pending_tools.insert_resolved(resp.id.clone(), resp);
@@ -929,11 +926,11 @@ pub(super) async fn run_turn_loop(
 
                 let (items, orphaned) = plan.into_parts();
 
-                let mut approved: Vec<(usize, Box<dyn Executor>)> = Vec::new();
+                let mut approved: Vec<(usize, ExecutorGroup)> = Vec::new();
                 let mut pre_resolved: Vec<(usize, ToolCallResponse)> = Vec::new();
                 for item in items {
                     match item.work {
-                        PendingEntry::Approved(exec) => approved.push((item.index, exec)),
+                        PendingEntry::Approved(group) => approved.push((item.index, group)),
                         PendingEntry::Resolved(resp) => pre_resolved.push((item.index, resp)),
                     }
                 }

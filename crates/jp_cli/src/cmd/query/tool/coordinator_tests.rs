@@ -334,6 +334,7 @@ fn test_pre_render_for_prompt_function_call_fires_before_approval() {
         .with_arguments(args)
         .with_permission_info(PermissionInfo {
             tool_id: "call-1".into(),
+            state_key: "call-1".into(),
             tool_name: "fs_delete_file".into(),
             tool_source: ToolSource::Builtin { tool: None },
             run_mode: RunMode::Ask,
@@ -473,6 +474,7 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
         arguments: pre_edit_args.clone(),
         permission_info: PermissionInfo {
             tool_id: "call_1".into(),
+            state_key: "call_1".into(),
             tool_name: "fs_delete_file".into(),
             tool_source: ToolSource::Builtin { tool: None },
             run_mode: RunMode::Ask,
@@ -537,6 +539,7 @@ fn test_permission_decision_cache_is_isolated_from_answers() {
 
     let info = PermissionInfo {
         tool_id: "call_1".into(),
+        state_key: "call_1".into(),
         tool_name: "my_tool".into(),
         tool_source: ToolSource::Builtin { tool: None },
         run_mode: RunMode::Ask,
@@ -655,7 +658,7 @@ fn test_pending_prompt_result_mode_variant() {
 
     let pending = PendingPrompt::ResultMode {
         index: 1,
-        tool_id: "call_1".to_string(),
+        state_key: "call_1".to_string(),
         tool_name: "my_tool".to_string(),
         response: response.clone(),
         result_mode: ResultMode::Ask,
@@ -664,7 +667,7 @@ fn test_pending_prompt_result_mode_variant() {
     // Verify we can match and extract fields
     let PendingPrompt::ResultMode {
         index,
-        tool_id,
+        state_key,
         tool_name,
         response: r,
         result_mode,
@@ -673,7 +676,7 @@ fn test_pending_prompt_result_mode_variant() {
         panic!("Expected ResultMode variant");
     };
     assert_eq!(index, 1);
-    assert_eq!(tool_id, "call_1");
+    assert_eq!(state_key, "call_1");
     assert_eq!(tool_name, "my_tool");
     assert_eq!(r.id, "call_1");
     assert_eq!(result_mode, ResultMode::Ask);
@@ -693,7 +696,7 @@ fn test_pending_prompt_queue_fifo_order() {
     // Add a result mode prompt
     queue.push_back(PendingPrompt::ResultMode {
         index: 1,
-        tool_id: "call_1".to_string(),
+        state_key: "call_1".to_string(),
         tool_name: "tool_a".to_string(),
         response: ToolCallResponse {
             id: "call_1".to_string(),
@@ -723,11 +726,14 @@ fn test_pending_prompt_queue_fifo_order() {
     assert_eq!(question.id, "q1");
 
     // Second: ResultMode at index 1
-    let PendingPrompt::ResultMode { index, tool_id, .. } = queue.pop_front().unwrap() else {
+    let PendingPrompt::ResultMode {
+        index, state_key, ..
+    } = queue.pop_front().unwrap()
+    else {
         panic!("Expected ResultMode");
     };
     assert_eq!(index, 1);
-    assert_eq!(tool_id, "call_1");
+    assert_eq!(state_key, "call_1");
 
     // Third: Question at index 2
     let PendingPrompt::Question {
@@ -757,7 +763,7 @@ fn test_pending_prompt_mixed_types_interleaved() {
 
     queue.push_back(PendingPrompt::ResultMode {
         index: 1,
-        tool_id: "call_tool1".to_string(),
+        state_key: "call_tool1".to_string(),
         tool_name: "fs_read".to_string(),
         response: ToolCallResponse {
             id: "call_tool1".to_string(),
@@ -852,6 +858,7 @@ async fn remembered_denial_does_not_run_http_argument_formatter() {
         name: "example".into(),
         docs: ToolDocs::default(),
         parameters: json!({"type":"object","properties":{}}),
+        fan_out: false,
     }];
     let (source, owner) = TerminalExecutorSource::start(
         BuiltinExecutors::new(),
@@ -871,7 +878,9 @@ async fn remembered_denial_does_not_run_http_argument_formatter() {
             name: "example".into(),
             arguments: Map::new(),
         })
-        .unwrap();
+        .unwrap()
+        .pop()
+        .expect("a call without fan-out prepares one executor");
     let printer = Arc::new(Printer::sink());
     let prompter = ToolPrompter::with_prompt_backend(
         printer.clone(),

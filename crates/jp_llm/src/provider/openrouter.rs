@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{borrow::Cow, time::Duration};
 
 use async_stream::try_stream;
 use async_trait::async_trait;
@@ -741,13 +741,14 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> (Vec<Tool>, ArgumentDecoders) {
     let tools = tools
         .into_iter()
         .map(|tool| {
-            let (parameters, decoding) = parameters_with_decoding(&tool.parameters, true);
+            let (parameters, decoding) = parameters_with_decoding(&tool.provider_schema(), true);
             decoders.insert(&tool.name, decoding);
+            let description = tool.provider_description().map(Cow::into_owned);
             Tool::Function {
                 function: ToolFunction {
                     parameters,
                     name: tool.name,
-                    description: tool.docs.schema_description().map(str::to_owned),
+                    description,
                     strict: true,
                 },
             }

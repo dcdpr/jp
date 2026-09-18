@@ -153,7 +153,14 @@ struct CallSlot {
 
     /// The call as the assistant requested it.
     /// Argument edits do not change it.
+    ///
+    /// For one operation of a fanned-out call, the arguments are that
+    /// operation's alone.
     request: ToolCallRequest,
+
+    /// Which operation of a fanned-out call this is, or `None` when the call
+    /// carries one operation.
+    op: Option<usize>,
 
     /// Where the router forwards this call's interactions.
     sender: mpsc::Sender<HostRequest>,
@@ -212,31 +219,33 @@ struct CallSlot {
 ///
 /// Both maps hold the same slots: the router resolves an interaction by the
 /// correlation key it carries, and acknowledgement resolves a recorded response
-/// by the tool call id the conversation stores.
+/// by the tool call id the conversation stores, together with the operation
+/// when the call fanned out into several MCP calls.
 #[derive(Default)]
 struct Registry {
     by_key: HashMap<HostCallKey, Arc<CallSlot>>,
-    by_id: HashMap<String, Arc<CallSlot>>,
+    by_id: HashMap<(String, Option<usize>), Arc<CallSlot>>,
 }
 
 impl Registry {
     fn insert(&mut self, slot: &Arc<CallSlot>) {
         self.by_key.insert(slot.key.clone(), slot.clone());
-        self.by_id.insert(slot.request.id.clone(), slot.clone());
+        self.by_id
+            .insert((slot.request.id.clone(), slot.op), slot.clone());
     }
 
     /// Claim a call for acknowledgement, leaving its route in place.
     ///
     /// The service still has barriers to raise before the call finishes, and a
     /// request it cannot route fails closed, so the route outlives the claim.
-    fn claim(&mut self, id: &str) -> Option<Arc<CallSlot>> {
-        self.by_id.remove(id)
+    fn claim(&mut self, id: &str, op: Option<usize>) -> Option<Arc<CallSlot>> {
+        self.by_id.remove(&(id.to_owned(), op))
     }
 
-    /// The call `id` names, if it is waiting to be restarted.
-    fn restarting(&self, id: &str) -> Option<Arc<CallSlot>> {
+    /// The call `id` and `op` name, if it is waiting to be restarted.
+    fn restarting(&self, id: &str, op: Option<usize>) -> Option<Arc<CallSlot>> {
         self.by_id
-            .get(id)
+            .get(&(id.to_owned(), op))
             .filter(|slot| slot.restarting.load(Ordering::Acquire))
             .cloned()
     }
@@ -546,13 +555,14 @@ impl ExecutorSource for TerminalExecutorSource {
         &self,
         request: ToolCallRequest,
         config: ToolConfigWithDefaults,
+        op: Option<usize>,
     ) -> Option<Box<dyn Executor>> {
         self.definitions.get(&request.name)?;
 
         // A restarted call keeps its slot, and with it the service-side
         // invocation the paused attempt belongs to. Building a second slot
         // would strand that invocation and submit a duplicate call.
-        if let Some(slot) = locked(&self.calls).restarting(&request.id) {
+        if let Some(slot) = locked(&self.calls).restarting(&request.id, op) {
             return Some(Box::new(ToolExecutor {
                 arguments: slot.request.arguments.clone(),
                 config,
@@ -568,6 +578,7 @@ impl ExecutorSource for TerminalExecutorSource {
         let slot = Arc::new(CallSlot {
             key: HostCallKey::for_execution(execution, &request.id),
             request,
+            op,
             sender,
             invocation: SyncMutex::new(None),
             restarting: AtomicBool::new(false),
@@ -600,7 +611,7 @@ impl ExecutorSource for TerminalExecutorSource {
             // Claiming makes a second acknowledgement a no-op. Forgetting the
             // call afterwards is what bounds the registry; a turn that ends
             // without acknowledging every call drops the whole source.
-            let Some(slot) = locked(&self.calls).claim(&review.response.id) else {
+            let Some(slot) = locked(&self.calls).claim(&review.response.id, review.op) else {
                 return Ok(());
             };
             let result = slot.acknowledge(&review).await;
@@ -957,6 +968,10 @@ impl Executor for ToolExecutor {
         &self.slot.request.name
     }
 
+    fn op_index(&self) -> Option<usize> {
+        self.slot.op
+    }
+
     fn arguments(&self) -> &Map<String, Value> {
         &self.arguments
     }
@@ -976,6 +991,7 @@ impl Executor for ToolExecutor {
         }
         Some(PermissionInfo {
             tool_id: self.slot.request.id.clone(),
+            state_key: self.state_key(),
             tool_name: self.slot.request.name.clone(),
             tool_source: self.config.source().clone(),
             run_mode,

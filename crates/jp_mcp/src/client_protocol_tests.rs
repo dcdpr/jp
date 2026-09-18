@@ -104,6 +104,7 @@ async fn upstream_receives_context_options_and_accumulated_answers() {
         name: "alias".into(),
         docs: ToolDocs::default(),
         parameters: json!({"type":"object","properties":{"value":{"type":"string"}}}),
+        fan_out: false,
     };
     let invocation = InvocationContext {
         workspace_id: "workspace-1".into(),
