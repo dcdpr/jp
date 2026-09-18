@@ -15,7 +15,10 @@ use jp_tool::{Outcome, Question, ToolDefinition, ToolDocs};
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
-use super::{Executor, ExecutorResult, ExecutorSource, PermissionInfo};
+use super::{
+    CallExecutors, Executor, ExecutorError, ExecutorResult, ExecutorSource, FanOutCall,
+    PermissionInfo, Review,
+};
 
 /// A runner for a service whose tools run no local command.
 ///
@@ -75,6 +78,12 @@ pub(crate) struct MockExecutor {
     arguments: Map<String, Value>,
     permission_info: Option<PermissionInfo>,
     result: Mutex<Option<ExecutorResult>>,
+
+    /// The operation this executor stands for, when its call fans out.
+    op: Option<usize>,
+
+    /// Where what this executor is settled with goes, when a test watches.
+    settlements: Option<Arc<Mutex<Vec<Review>>>>,
 }
 
 impl MockExecutor {
@@ -98,7 +107,21 @@ impl MockExecutor {
                 id: tool_id.to_owned(),
                 result,
             }))),
+            op: None,
+            settlements: None,
         }
+    }
+
+    /// Stand for operation `op` of a fanned-out call.
+    pub(crate) fn for_operation(mut self, op: usize) -> Self {
+        self.op = Some(op);
+        self
+    }
+
+    /// Record each review this executor is settled with in `log`.
+    pub(crate) fn with_settlements(mut self, log: Arc<Mutex<Vec<Review>>>) -> Self {
+        self.settlements = Some(log);
+        self
     }
 
     /// Sets the arguments for this executor.
@@ -125,6 +148,10 @@ impl Executor for MockExecutor {
 
     fn tool_name(&self) -> &str {
         &self.tool_name
+    }
+
+    fn op_index(&self) -> Option<usize> {
+        self.op
     }
 
     fn arguments(&self) -> Map<String, Value> {
@@ -156,6 +183,26 @@ impl Executor for MockExecutor {
                 })
             })
     }
+
+    async fn settle(&self, review: Review) -> Result<(), ExecutorError> {
+        if let Some(log) = &self.settlements {
+            log.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(review);
+        }
+        Ok(())
+    }
+}
+
+/// A fanned-out call whose folded response is scripted, standing in for the one
+/// the execution service folds and records.
+pub(crate) struct ScriptedFanOut(pub(crate) ToolCallResponse);
+
+#[async_trait]
+impl FanOutCall for ScriptedFanOut {
+    async fn recorded(&self) -> Result<ToolCallResponse, ExecutorError> {
+        Ok(self.0.clone())
+    }
 }
 
 /// An executor source for testing that returns pre-registered mock executors.
@@ -175,11 +222,7 @@ impl Executor for MockExecutor {
 /// ```
 #[derive(Default)]
 pub(crate) struct TestExecutorSource {
-    #[expect(
-        clippy::type_complexity,
-        reason = "A boxed factory per tool name, named inline rather than aliased once"
-    )]
-    factories: HashMap<String, Box<dyn Fn(ToolCallRequest) -> Box<dyn Executor> + Send + Sync>>,
+    factories: HashMap<String, Box<dyn Fn(ToolCallRequest) -> CallExecutors + Send + Sync>>,
 }
 
 impl TestExecutorSource {
@@ -192,9 +235,20 @@ impl TestExecutorSource {
     ///
     /// When `create()` is called for this tool name, the factory will be
     /// invoked to create the executor.
-    pub(crate) fn with_executor<F>(mut self, tool_name: &str, factory: F) -> Self
+    pub(crate) fn with_executor<F>(self, tool_name: &str, factory: F) -> Self
     where
         F: Fn(ToolCallRequest) -> Box<dyn Executor> + Send + Sync + 'static,
+    {
+        self.with_call(tool_name, move |request| {
+            CallExecutors::call(factory(request))
+        })
+    }
+
+    /// Registers a factory for every executor a call to `tool_name` runs: one
+    /// for an ordinary call, one per operation for a fanned-out call.
+    pub(crate) fn with_call<F>(mut self, tool_name: &str, factory: F) -> Self
+    where
+        F: Fn(ToolCallRequest) -> CallExecutors + Send + Sync + 'static,
     {
         self.factories
             .insert(tool_name.to_owned(), Box::new(factory));
@@ -222,7 +276,7 @@ impl ExecutorSource for TestExecutorSource {
         &self,
         request: ToolCallRequest,
         _config: ToolConfigWithDefaults,
-    ) -> Option<Box<dyn Executor>> {
+    ) -> Option<CallExecutors> {
         let factory = self.factories.get(&request.name)?;
         Some(factory(request))
     }

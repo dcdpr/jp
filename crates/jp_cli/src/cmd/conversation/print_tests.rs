@@ -79,6 +79,7 @@ fn tool_with_style(style: DisplayStyleConfig) -> ToolConfig {
         questions: IndexMap::new().into(),
         options: IndexMap::new().into(),
         access: None,
+        fan_out: None,
     }
 }
 

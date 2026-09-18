@@ -201,6 +201,7 @@ fn asking_source(names: &[&str]) -> TestExecutorSource {
                         .with_arguments(req.arguments.clone())
                         .with_permission_info(PermissionInfo {
                             tool_id: req.id.clone(),
+                            state_key: req.id.clone(),
                             tool_name: req.name.clone(),
                             tool_source: ToolSource::Local { tool: None },
                             run_mode: RunMode::Ask,
@@ -377,6 +378,7 @@ impl Executor for StagedExecutor {
     fn permission_info(&self) -> Option<PermissionInfo> {
         self.asks.then(|| PermissionInfo {
             tool_id: self.tool_id.clone(),
+            state_key: self.tool_id.clone(),
             tool_name: self.tool_name.clone(),
             tool_source: ToolSource::Local { tool: None },
             run_mode: RunMode::Ask,

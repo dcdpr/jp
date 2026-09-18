@@ -556,6 +556,14 @@ conversation: ConversationConfig
                 state: bool | null
             |: null
           examples: string | null
+          fan_out:
+            |:
+              |: bool
+              | (expanded): FanOutConfig
+                concurrency: int | null
+                enabled: bool | null
+                on_error: "continue" | "stop" | null
+            |: null
           format: "ask" | "allow" | null
           options: MergeableMap_JsonValue
             |:
@@ -937,6 +945,14 @@ conversation: ConversationConfig
                   state: bool | null
               |: null
             examples: string | null
+            fan_out:
+              |:
+                |: bool
+                | (expanded): FanOutConfig
+                  concurrency: int | null
+                  enabled: bool | null
+                  on_error: "continue" | "stop" | null
+              |: null
             format: "ask" | "allow" | null
             options: MergeableMap_JsonValue
               |:

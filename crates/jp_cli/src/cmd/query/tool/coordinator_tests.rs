@@ -31,7 +31,7 @@ use crate::{
     access::approvals::ApprovalStore,
     cmd::query::{
         tool::{
-            executor::mock::{MockExecutor, TestExecutorSource},
+            executor::mock::{MockExecutor, ScriptedFanOut, TestExecutorSource},
             inquiry::MockInquiryBackend,
             mcp_executor::TerminalExecutorSource,
         },
@@ -359,6 +359,7 @@ fn test_pre_render_for_prompt_function_call_fires_before_approval() {
         .with_arguments(args)
         .with_permission_info(PermissionInfo {
             tool_id: "call-1".into(),
+            state_key: "call-1".into(),
             tool_name: "fs_delete_file".into(),
             tool_source: ToolSource::Builtin { tool: None },
             run_mode: RunMode::Ask,
@@ -545,6 +546,7 @@ async fn an_edit_at_the_approval_prompt_draws_the_call_again() {
             arguments: std::sync::Mutex::new(request.arguments.clone()),
             permission_info: PermissionInfo {
                 tool_id: request.id.clone(),
+                state_key: request.id.clone(),
                 tool_name: request.name.clone(),
                 tool_source: ToolSource::Builtin { tool: None },
                 run_mode: RunMode::Ask,
@@ -600,6 +602,125 @@ async fn an_edit_at_the_approval_prompt_draws_the_call_again() {
     );
 }
 
+/// A call carrying two operations of `my_tool`, which asks before running.
+///
+/// Each operation's executor records in `settlements` what it is settled with;
+/// the call is recorded with `folded`.
+fn fanned_out_source(
+    settlements: &Arc<std::sync::Mutex<Vec<Review>>>,
+    folded: &ToolCallResponse,
+) -> TestExecutorSource {
+    let (settlements, folded) = (Arc::clone(settlements), folded.clone());
+    TestExecutorSource::new().with_call("my_tool", move |request| {
+        let operations = (0..2)
+            .map(|op| {
+                Box::new(
+                    MockExecutor::completed(&request.id, &request.name, &format!("ran {op}"))
+                        .for_operation(op)
+                        .with_settlements(Arc::clone(&settlements))
+                        .with_permission_info(PermissionInfo {
+                            tool_id: request.id.clone(),
+                            state_key: format!("{}#{op}", request.id),
+                            tool_name: request.name.clone(),
+                            tool_source: ToolSource::Builtin { tool: None },
+                            run_mode: RunMode::Ask,
+                            arguments: Value::Object(Map::new()),
+                        }),
+                ) as Box<dyn Executor>
+            })
+            .collect();
+        CallExecutors {
+            operations,
+            fan_out: Some(Arc::new(ScriptedFanOut(folded.clone()))),
+        }
+    })
+}
+
+fn ask_tools() -> ToolsConfig {
+    let tool_config = ToolConfig::from_partial(
+        jp_config::conversation::tool::PartialToolConfig {
+            source: Some(ToolSource::Builtin { tool: None }),
+            run: Some(RunMode::Ask),
+            ..Default::default()
+        },
+        vec![],
+    )
+    .expect("valid tool config");
+    let mut tools_config = jp_config::AppConfig::new_test().conversation.tools;
+    tools_config.insert("my_tool".to_string(), tool_config);
+    tools_config
+}
+
+/// Each operation of a fanned-out call is asked about and settled on its own,
+/// and the call is recorded once, with the response its operations fold into.
+///
+/// The prompt state check is the regression this guards: every prompt state
+/// change has to name the operation, not the tool call id the operations share.
+/// A prompt state left under the shared id makes `is_prompting` report true for
+/// the rest of the turn, so every Ctrl-C is declined as though a prompt were
+/// still open and the tool cancellation menu never appears.
+#[tokio::test]
+async fn a_fanned_out_call_asks_about_each_operation_and_records_once() {
+    let settlements = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let folded = ToolCallResponse {
+        id: "call_1".into(),
+        result: Ok("[1/2] ok\nran 0\n\n[2/2] ok\nran 1\n".into()),
+    };
+    let mut coordinator = ToolCoordinator::new(
+        ask_tools(),
+        Box::new(fanned_out_source(&settlements, &folded)),
+    );
+    let printer = Arc::new(Printer::sink());
+    let (_workspace, lock) = test_lock();
+    let conv = lock.as_mut();
+    let mut turn_state = TurnState::default();
+
+    let result = drive(
+        &mut coordinator,
+        vec![ToolCallRequest {
+            id: "call_1".into(),
+            name: "my_tool".into(),
+            arguments: Map::new(),
+        }],
+        // One approval per operation.
+        Arc::new(MockPromptBackend::new().with_inline_responses(['y', 'y'])),
+        Arc::new(MockInquiryBackend::new(HashMap::new())),
+        &mut turn_state,
+        &conv,
+        &printer,
+    )
+    .await;
+
+    assert_eq!(result.outcome, ExecutionOutcome::Completed);
+    assert_eq!(
+        result
+            .reviews
+            .iter()
+            .map(|(id, review)| (id.as_str(), review.response.clone()))
+            .collect::<Vec<_>>(),
+        vec![("call_1", folded)],
+        "the call is recorded once, with its folded response"
+    );
+
+    let mut settled = settlements
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|review| review.response.result.clone())
+        .collect::<Vec<_>>();
+    settled.sort();
+    assert_eq!(
+        settled,
+        vec![Ok("ran 0".to_owned()), Ok("ran 1".to_owned())],
+        "each operation is settled with its own result"
+    );
+
+    assert!(
+        !coordinator.is_prompting(),
+        "no prompt state is left behind once the operations are approved"
+    );
+}
+
 #[test]
 fn test_permission_decision_cache_is_isolated_from_answers() {
     let mut coordinator = ToolCoordinator::new(
@@ -610,6 +731,7 @@ fn test_permission_decision_cache_is_isolated_from_answers() {
 
     let info = PermissionInfo {
         tool_id: "call_1".into(),
+        state_key: "call_1".into(),
         tool_name: "my_tool".into(),
         tool_source: ToolSource::Builtin { tool: None },
         run_mode: RunMode::Ask,
@@ -1173,6 +1295,7 @@ impl Executor for AskingFormatter {
     fn permission_info(&self) -> Option<PermissionInfo> {
         self.asks.then(|| PermissionInfo {
             tool_id: self.tool_id.clone(),
+            state_key: self.tool_id.clone(),
             tool_name: self.tool_name.clone(),
             tool_source: ToolSource::Builtin { tool: None },
             run_mode: RunMode::Ask,
@@ -1274,6 +1397,7 @@ async fn a_remembered_no_while_a_later_call_asks(
                     .with_arguments(request.arguments.clone())
                     .with_permission_info(PermissionInfo {
                         tool_id: request.id.clone(),
+                        state_key: request.id.clone(),
                         tool_name: request.name.clone(),
                         tool_source: ToolSource::Builtin { tool: None },
                         run_mode: RunMode::Ask,

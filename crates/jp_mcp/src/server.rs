@@ -10,6 +10,7 @@
 //! delivery barriers.
 
 pub mod builtin;
+pub mod fan_out;
 pub mod http;
 mod http_client;
 pub mod json_schema;
