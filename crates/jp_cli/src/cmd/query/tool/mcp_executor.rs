@@ -190,6 +190,13 @@ struct CallSlot {
     /// service-side call open.
     held: AtomicBool,
 
+    /// Whether the tool's own result was a failure when the service last asked
+    /// the Host to record the call.
+    ///
+    /// Read from the unedited result, not the recorded one: `result = "skip"`
+    /// records a success whatever the tool did.
+    tool_failed: AtomicBool,
+
     /// Where to show this tool's stderr, for the length of one attempt.
     ///
     /// Set when an attempt starts and cleared when it ends, so a display that
@@ -583,6 +590,7 @@ impl ExecutorSource for TerminalExecutorSource {
             invocation: SyncMutex::new(None),
             restarting: AtomicBool::new(false),
             held: AtomicBool::new(false),
+            tool_failed: AtomicBool::new(false),
             stderr: SyncMutex::new(None),
             state: Mutex::new(PendingCall {
                 receiver,
@@ -980,6 +988,10 @@ impl Executor for ToolExecutor {
         self.formatted.as_ref()
     }
 
+    fn tool_failed(&self) -> bool {
+        self.slot.tool_failed.load(Ordering::Acquire)
+    }
+
     fn needs_permission(&self) -> bool {
         !matches!(self.config.run(), RunMode::Unattended | RunMode::Skip)
     }
@@ -1224,6 +1236,11 @@ impl Executor for ToolExecutor {
                         Ok(ExecutorResult::Completed(offered))
                     }
                     Interaction::Record { recording, reply } => {
+                        let failed = recording
+                            .raw_result
+                            .as_ref()
+                            .is_some_and(ToolResult::is_error);
+                        self.slot.tool_failed.store(failed, Ordering::Release);
                         let response = response(id, &recording.result);
                         state.phase = Phase::Record(reply);
                         Ok(ExecutorResult::Completed(response))

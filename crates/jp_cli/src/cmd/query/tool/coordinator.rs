@@ -1496,6 +1496,14 @@ impl ToolCoordinator {
         let mut cancelled_indices: Vec<usize> = Vec::new();
 
         loop {
+            // Checked before the receive, not after handling one: a call whose
+            // `stop` policy ruled out every remaining operation spawned nothing
+            // at all, so no event will ever arrive to wake this loop. The
+            // senders are still alive, so `recv` would wait forever.
+            if schedule.all_accounted_for(&state.reviews) {
+                break;
+            }
+
             // A client's interrupt arrives on its own channel rather than
             // through the router, so it is polled alongside the tools rather
             // than forwarded by a task: the receiver belongs to the turn, and
@@ -1523,7 +1531,7 @@ impl ToolCoordinator {
                         warn!(index, "Received ToolResult for unknown tool.");
                         continue;
                     }
-                    self.handle_tool_result(
+                    let failed = self.handle_tool_result(
                         result,
                         index,
                         &mut state,
@@ -1531,6 +1539,13 @@ impl ToolCoordinator {
                         turn_state,
                         tool_renderer,
                     );
+
+                    // Recorded from the tool's own outcome rather than from
+                    // `state.reviews[index]`, which result-mode policy may
+                    // have already turned into a success.
+                    if failed {
+                        schedule.record_failure(index);
+                    }
                 }
                 ExecutionEvent::PromptAnswer {
                     index,
@@ -1691,10 +1706,11 @@ impl ToolCoordinator {
                 }
             }
 
-            // Tell the schedule which operations failed, so a call configured
-            // to stop on error starts none of the ones still queued.
-            // Re-scanning every finished operation each time is cheap at these
-            // sizes, and recording the same failure twice is a no-op.
+            // Backstop for the failure paths that write `state.reviews`
+            // directly (a cancelled prompt, an inquiry that could not be
+            // answered, a lost call). The execution outcome itself is recorded
+            // above, before result-mode policy can rewrite it. Recording the
+            // same failure twice is a no-op: the earliest position wins.
             for (index, review) in state.reviews.iter().enumerate() {
                 if let Some(review) = review {
                     schedule.record_outcome(index, &review.response);
@@ -1708,10 +1724,6 @@ impl ToolCoordinator {
                 for (index, executor) in schedule.release(&state.reviews) {
                     self.start_operation(index, executor, &mut state, &services, tool_renderer);
                 }
-            }
-
-            if schedule.all_accounted_for(&state.reviews) {
-                break;
             }
         }
 
@@ -2019,6 +2031,13 @@ impl ToolCoordinator {
     ///
     /// `index` names a call the phase started; the caller checks that before
     /// dispatching here.
+    ///
+    /// Returns whether the *tool* reported a failure, which is not the same as
+    /// whether the review recorded for it holds one: `result = "skip"` and a
+    /// declined `result = "ask"` prompt both answer the assistant with a
+    /// success.
+    /// A `stop` fan-out policy keys off this return value, so it acts on what
+    /// the tool did rather than on what the assistant was told.
     fn handle_tool_result(
         &mut self,
         result: ExecutorResult,
@@ -2027,7 +2046,7 @@ impl ToolCoordinator {
         services: &PhaseServices<'_>,
         turn_state: &mut TurnState,
         tool_renderer: &ToolRenderer,
-    ) {
+    ) -> bool {
         let PhaseState {
             tools,
             reviews,
@@ -2035,11 +2054,16 @@ impl ToolCoordinator {
             prompt_active,
         } = state;
         let Some(tool) = tools.get_mut(&index) else {
-            return;
+            return false;
         };
         let tracked_review = &mut reviews[index];
         match result {
             ExecutorResult::Completed(response) => {
+                // Read before any branch below can replace the response. The
+                // service substitutes its own text for `result = "skip"`, so
+                // the executor is asked what the tool itself reported.
+                let is_error = response.result.is_err() || tool.executor.tool_failed();
+
                 match self.result_mode(&tool.tool_name) {
                     ResultMode::Unattended => {
                         self.finish_tool_call(tool, response, tracked_review, tool_renderer);
@@ -2082,12 +2106,16 @@ impl ToolCoordinator {
                         }
                     }
                 }
+
+                is_error
             }
             ExecutorResult::Failed(error) => {
                 self.record_lost_call(tool, tracked_review, &error, false);
+                true
             }
             ExecutorResult::OutcomeUnknown(error) => {
                 self.record_lost_call(tool, tracked_review, &error, true);
+                true
             }
             ExecutorResult::NeedsInput {
                 tool_id,
@@ -2112,6 +2140,10 @@ impl ToolCoordinator {
                     services,
                     turn_state,
                 );
+
+                // Waiting on an answer, or failed in a way the review already
+                // carries, which the backstop in the execution loop records.
+                false
             }
         }
     }

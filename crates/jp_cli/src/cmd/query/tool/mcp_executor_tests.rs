@@ -57,6 +57,20 @@ impl BuiltinTool for EchoName {
     }
 }
 
+/// A tool that always reports a failure.
+struct FailingTool;
+
+#[async_trait]
+impl BuiltinTool for FailingTool {
+    async fn execute(&self, _: &Value, _: &IndexMap<String, Value>) -> Outcome {
+        Outcome::Error {
+            message: "disk full".into(),
+            trace: vec![],
+            transient: false,
+        }
+    }
+}
+
 /// A tool that runs until its attempt is abandoned, so an interrupt always
 /// lands while it is still in flight.
 struct BlockingTool(Arc<AtomicUsize>);
@@ -229,6 +243,71 @@ async fn each_operation_of_a_call_is_acknowledged_on_its_own_mcp_call() {
             .unwrap();
     }
     assert_eq!(fixture.attempts(), 2, "acknowledgement must not re-execute");
+    fixture.shutdown().await;
+}
+
+/// Run one unattended call to completion and return what the Host was handed.
+async fn run_to_completion(fixture: &Fixture) -> (ToolCallResponse, bool) {
+    let mut executor = fixture.executor(&json!({"name": "x"}));
+    assert!(executor.prepare(false).await.unwrap().is_none());
+    executor.approve().await.unwrap();
+    let result = executor
+        .execute(&IndexMap::new(), CancellationToken::new(), None)
+        .await;
+    let ExecutorResult::Completed(response) = result else {
+        panic!("expected a completed call, got {result:?}")
+    };
+    (response, executor.tool_failed())
+}
+
+/// `result = "skip"` hands the Host a success whatever the tool did, so the
+/// executor is what remembers that the tool itself failed.
+#[tokio::test]
+async fn a_skipped_result_still_reports_the_tools_own_failure() {
+    let fixture = Fixture::start(
+        json!({"source": "builtin", "run": "unattended", "result": "skip"}),
+        FailingTool,
+    )
+    .await;
+
+    let (response, tool_failed) = run_to_completion(&fixture).await;
+
+    assert_eq!(
+        response.result,
+        Ok("Result delivery skipped by configuration.".into()),
+        "the assistant is told the delivery was skipped"
+    );
+    assert!(tool_failed, "the tool's own failure is still known");
+
+    fixture
+        .acknowledge(Review::unchanged(response))
+        .await
+        .unwrap();
+    fixture.shutdown().await;
+}
+
+/// The counterpart: a skipped success is not reported as a failure.
+#[tokio::test]
+async fn a_skipped_success_is_not_reported_as_a_failure() {
+    let count = Arc::new(AtomicUsize::new(0));
+    let fixture = Fixture::start(
+        json!({"source": "builtin", "run": "unattended", "result": "skip"}),
+        EchoName(count),
+    )
+    .await;
+
+    let (response, tool_failed) = run_to_completion(&fixture).await;
+
+    assert_eq!(
+        response.result,
+        Ok("Result delivery skipped by configuration.".into())
+    );
+    assert!(!tool_failed);
+
+    fixture
+        .acknowledge(Review::unchanged(response))
+        .await
+        .unwrap();
     fixture.shutdown().await;
 }
 

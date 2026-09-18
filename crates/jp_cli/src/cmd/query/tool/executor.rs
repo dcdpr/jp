@@ -112,6 +112,18 @@ pub(crate) trait Executor: Send + Sync {
     /// request.
     fn set_arguments(&mut self, args: Value);
 
+    /// Whether the tool itself reported a failure on its last completed
+    /// attempt, whatever response the Host was handed for it.
+    ///
+    /// `result = "skip"` replaces a tool's result with the service's own
+    /// success text before [`execute`] returns it, so the response alone cannot
+    /// say whether the tool failed.
+    ///
+    /// [`execute`]: Self::execute
+    fn tool_failed(&self) -> bool {
+        false
+    }
+
     /// Hold this call's service-side invocation open while its current attempt
     /// is abandoned, so a replacement attempt continues the same logical call.
     ///

@@ -32,6 +32,117 @@ fn strip_ansi(text: &str) -> String {
     String::from_utf8(strip_ansi_escapes::strip(text)).expect("valid utf-8 after stripping ANSI")
 }
 
+/// A tool that never opted into fan-out keeps its failure a failure.
+///
+/// The argument formatter failing resolves the call's only operation to an
+/// `Err`, and folding it into `Ok` would reach Anthropic as `is_error: false`
+/// and render in the success style on replay.
+#[test]
+fn a_failure_on_a_tool_without_fan_out_stays_a_failure() {
+    let group = ExecutorGroup {
+        tool_id: "call_1".to_owned(),
+        tool_name: "fs_modify_file".to_owned(),
+        fan_out: None,
+        ops: vec![GroupOp::Resolved(ToolCallResponse {
+            id: "call_1".to_owned(),
+            result: Err(
+                "Tool 'fs_modify_file' was not executed because the argument formatter failed: \
+                 boom"
+                    .to_owned(),
+            ),
+        })],
+    };
+
+    let mut coordinator = ToolCoordinator::new(
+        jp_config::AppConfig::new_test().conversation.tools,
+        empty_executor_source(),
+    );
+    let response = coordinator.fold_decided_group(group);
+
+    assert_eq!(
+        response.result,
+        Err(
+            "Tool 'fs_modify_file' was not executed because the argument formatter failed: boom"
+                .to_owned()
+        ),
+        "no framing is added and the error variant survives"
+    );
+}
+
+/// A skip on a tool without fan-out answers with the skip message verbatim.
+#[test]
+fn a_skip_on_a_tool_without_fan_out_is_unframed() {
+    let group = ExecutorGroup {
+        tool_id: "call_1".to_owned(),
+        tool_name: "fs_delete_file".to_owned(),
+        fan_out: None,
+        ops: vec![GroupOp::Resolved(ToolCallResponse {
+            id: "call_1".to_owned(),
+            result: Ok("Tool skipped by user.".to_owned()),
+        })],
+    };
+
+    let mut coordinator = ToolCoordinator::new(
+        jp_config::AppConfig::new_test().conversation.tools,
+        empty_executor_source(),
+    );
+    let response = coordinator.fold_decided_group(group);
+
+    assert_eq!(response.result, Ok("Tool skipped by user.".to_owned()));
+    assert!(
+        coordinator.operation_reviews.is_empty(),
+        "the recorded response is the one its MCP call is acknowledged with"
+    );
+}
+
+/// A fanned-out call whose operations were all decided still frames them, so
+/// the assistant can tell which of the three it asked for was refused.
+#[test]
+fn a_fully_skipped_fan_out_call_frames_each_operation() {
+    let group = ExecutorGroup {
+        tool_id: "call_1".to_owned(),
+        tool_name: "fs_delete_file".to_owned(),
+        fan_out: Some(jp_config::conversation::tool::FanOut {
+            concurrency: None,
+            on_error: jp_config::conversation::tool::FanOutOnError::Continue,
+        }),
+        ops: vec![
+            GroupOp::Resolved(ToolCallResponse {
+                id: "call_1".to_owned(),
+                result: Ok("Tool skipped by user.".to_owned()),
+            }),
+            GroupOp::Resolved(ToolCallResponse {
+                id: "call_1".to_owned(),
+                result: Err("formatter failed".to_owned()),
+            }),
+        ],
+    };
+
+    let mut coordinator = ToolCoordinator::new(
+        jp_config::AppConfig::new_test().conversation.tools,
+        empty_executor_source(),
+    );
+    let response = coordinator.fold_decided_group(group);
+
+    assert_eq!(
+        response.result,
+        Ok("[1/2] ok\nTool skipped by user.\n\n[2/2] error\nformatter failed\n".to_owned())
+    );
+
+    // Each operation is its own MCP call, acknowledged with its own decision
+    // rather than the folded body.
+    assert_eq!(
+        coordinator.operation_reviews["call_1"]
+            .iter()
+            .map(|review| (review.op, review.response.result.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            (Some(0), Ok("Tool skipped by user.".to_owned())),
+            (Some(1), Err("formatter failed".to_owned())),
+        ]
+    );
+}
+
 #[test]
 fn test_is_prompting_default_false() {
     let coordinator = ToolCoordinator::new(
@@ -526,6 +637,79 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
     assert!(
         output.contains("src/bar.rs"),
         "post-approval re-render must reflect post-edit args; got: {output:?}"
+    );
+}
+
+/// Approving a fanned-out operation must leave no prompt state behind.
+///
+/// The permission prompt and its outcome have to name the same key.
+/// Writing `AwaitingPermission` under the shared tool call id and `Running`
+/// under the operation key strands the first entry: `is_prompting` then reports
+/// true for the rest of the turn, and `handle_tool_interrupt` declines every
+/// Ctrl-C as though a prompt were still open, so the tool cancellation menu
+/// never appears.
+#[tokio::test]
+async fn approving_a_fanned_out_operation_clears_its_prompt_state() {
+    let tool_config = ToolConfig::from_partial(
+        jp_config::conversation::tool::PartialToolConfig {
+            source: Some(ToolSource::Builtin { tool: None }),
+            run: Some(RunMode::Ask),
+            ..Default::default()
+        },
+        vec![],
+    )
+    .expect("valid tool config");
+
+    let mut tools_config = jp_config::AppConfig::new_test().conversation.tools;
+    tools_config.insert("my_tool".to_string(), tool_config);
+
+    let mut coordinator = ToolCoordinator::new(tools_config, empty_executor_source());
+
+    let (printer, _stdout, _stderr) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let tool_renderer = ToolRenderer::new(
+        ErrChannel::new(printer.clone()),
+        jp_config::AppConfig::new_test().style,
+    );
+
+    // Operation 1 of a fanned-out call: one id, its own state key.
+    let executor: Box<dyn Executor> = Box::new(
+        MockExecutor::completed("call_1", "my_tool", "done").with_permission_info(PermissionInfo {
+            tool_id: "call_1".into(),
+            state_key: "call_1#1".into(),
+            tool_name: "my_tool".into(),
+            tool_source: ToolSource::Builtin { tool: None },
+            run_mode: RunMode::Ask,
+            arguments: Value::Object(Map::new()),
+        }),
+    );
+
+    let prompter = ToolPrompter::with_prompt_backend(
+        printer.clone(),
+        None,
+        Arc::new(MockPromptBackend::new().with_inline_responses(['y'])),
+        ReplyEditMode::default(),
+    );
+    let mut turn_state = TurnState::default();
+
+    let decision = coordinator
+        .resolve_tool_call_decision(
+            executor,
+            &prompter,
+            true,
+            &mut turn_state,
+            &tool_renderer,
+            &printer,
+        )
+        .await;
+
+    assert!(
+        matches!(decision, ToolCallDecision::Approved { .. }),
+        "the user approved the operation"
+    );
+    assert!(
+        !coordinator.is_prompting(),
+        "no prompt is open once the operation is approved"
     );
 }
 

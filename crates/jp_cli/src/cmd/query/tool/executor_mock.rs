@@ -31,6 +31,9 @@ pub(crate) struct MockExecutor {
     arguments: Map<String, Value>,
     permission_info: Option<PermissionInfo>,
     result: Mutex<Option<ExecutorResult>>,
+
+    /// The diagnostic `prepare` rejects the call with, if it does.
+    prepare_error: Option<String>,
 }
 
 impl MockExecutor {
@@ -54,7 +57,17 @@ impl MockExecutor {
                 id: tool_id.to_owned(),
                 result,
             }))),
+            prepare_error: None,
         }
+    }
+
+    /// Makes `prepare` reject the call with `message`, the way the execution
+    /// service reports an argument formatter that failed.
+    ///
+    /// The call never reaches execution.
+    pub(crate) fn rejected_at_prepare(mut self, message: &str) -> Self {
+        self.prepare_error = Some(message.to_owned());
+        self
     }
 
     /// Sets the arguments for this executor.
@@ -75,6 +88,18 @@ impl MockExecutor {
 
 #[async_trait]
 impl Executor for MockExecutor {
+    async fn prepare(
+        &mut self,
+        _render_arguments: bool,
+    ) -> Result<Option<ToolCallResponse>, ExecutorError> {
+        match &self.prepare_error {
+            Some(message) => Err(ExecutorError::Rejected {
+                message: message.clone(),
+            }),
+            None => Ok(None),
+        }
+    }
+
     fn tool_id(&self) -> &str {
         &self.tool_id
     }
@@ -252,6 +277,10 @@ impl Executor for OpExecutor {
 
     fn set_arguments(&mut self, args: Value) {
         self.inner.set_arguments(args);
+    }
+
+    fn tool_failed(&self) -> bool {
+        self.inner.tool_failed()
     }
 
     fn pause_for_restart(&self) -> bool {
