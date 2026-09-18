@@ -373,6 +373,18 @@ impl State {
         reason = "Keep SDK message variants and their state updates in one dispatch point"
     )]
     pub(super) fn sdk(&mut self, notification: SdkNotification) -> Result<Vec<Event>, StreamError> {
+        // The only record JP keeps of this boundary. Every SDK message passes
+        // through here, including the ones that decide how a turn ends and
+        // never reach the stream-event translator that traces content.
+        //
+        // This is the message as JP understood it, not the bytes that arrived:
+        // anything the typed form does not model is already gone by this point,
+        // and an unrecognised message reads as `{"type":"other"}`.
+        trace!(
+            sdk = serde_json::to_string(&notification.message).unwrap_or_default(),
+            live = self.live,
+            "Received Claude Code SDK message."
+        );
         if !self.live || self.session.as_ref() != Some(&notification.session_id) {
             return Ok(vec![]);
         }
