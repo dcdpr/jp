@@ -101,7 +101,7 @@ impl AssignKeyValue for PartialLlmProviderConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
-            _ if kv.p("aliases") => kv.assign_to_entry(&mut self.aliases)?,
+            _ if kv.p("aliases") => kv.assign_to_mergeable_entry(&mut self.aliases)?,
             _ if kv.p("anthropic") => self.anthropic.assign(kv)?,
             _ if kv.p("cerebras") => self.cerebras.assign(kv)?,
             _ if kv.p("deepseek") => self.deepseek.assign(kv)?,

@@ -984,6 +984,51 @@ fn tools_map_accepts_a_replace_strategy() {
     assert!(config.tools.contains_key("my_tool"));
 }
 
+/// The strategy a config file states is the strategy `--cfg` states.
+///
+/// The two spellings reach different code — one the map's deserializer, the
+/// other the key-value dispatch — and the doc comments advertise the wrapper
+/// without saying which of them it is for.
+#[test]
+fn a_map_strategy_means_the_same_through_cfg_as_through_toml() {
+    use crate::types::map::MergedMapStrategy;
+
+    let from_toml: PartialToolsConfig = toml::from_str(
+        r#"
+        [cargo_check.options]
+        value = { profile = "release" }
+        strategy = "replace"
+        "#,
+    )
+    .expect("a strategy-carrying options map parses from TOML");
+
+    let mut from_cli = PartialToolsConfig::default();
+    let kv = KvAssignment::try_from_cli(
+        "cargo_check.options:",
+        r#"{"value":{"profile":"release"},"strategy":"replace"}"#,
+    )
+    .unwrap();
+    from_cli.assign(kv).unwrap();
+
+    for (source, config) in [("toml", &from_toml), ("cfg", &from_cli)] {
+        let options = &config.tools["cargo_check"].options;
+
+        assert!(
+            matches!(options, MergeableMap::Merged(merged)
+                if merged.strategy == Some(MergedMapStrategy::Replace)),
+            "{source}: the declared strategy is the map's, not an entry: {options:?}"
+        );
+        assert!(
+            options.contains_key("profile"),
+            "{source}: the option the user set is the one the tool receives: {options:?}"
+        );
+        assert!(
+            !options.contains_key("strategy"),
+            "{source}: the metadata is not an option: {options:?}"
+        );
+    }
+}
+
 /// A plain tools map keeps merging per key, and a tool may be named `value`.
 #[test]
 fn tools_map_without_a_strategy_merges_per_key() {

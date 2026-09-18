@@ -124,7 +124,7 @@ impl AssignKeyValue for PartialConversationConfig {
             _ if kv.p("tools") => self.tools.assign(kv)?,
             _ if kv.p("compaction") => self.compaction.assign(kv)?,
             _ if kv.p("attachments") => kv.try_vec_of_nested(self.attachments.as_mut())?,
-            _ if kv.p("labels") => kv.assign_to_entry(&mut self.labels)?,
+            _ if kv.p("labels") => kv.assign_to_mergeable_entry(&mut self.labels)?,
             _ if kv.p("inquiry") => self.inquiry.assign(kv)?,
             _ if kv.p("start_local") => self.start_local = kv.try_some_bool()?,
             "default_id" => self.default_id = kv.try_some_from_str()?,
