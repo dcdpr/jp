@@ -1,5 +1,6 @@
 use std::{error::Error as _, iter};
 
+use async_anthropic::types::JsonOutputFormat;
 use datetime_literal::datetime;
 use jp_config::{
     AppConfig,
@@ -305,6 +306,42 @@ fn reasoning_effort_reaches_the_sdk_options() {
     let prepared = prepared_with_reasoning(ReasoningEffort::Max);
     let metadata = options::metadata(&prepared, &BTreeMap::new()).unwrap();
     assert_eq!(metadata["claudeCode"]["options"]["effort"], json!("max"));
+}
+
+/// A structured request reaches Claude Code as its `outputFormat` option.
+/// The schema travels as the Anthropic request type rather than a bare map, so
+/// this pins the envelope that type serializes into.
+#[test]
+fn a_structured_request_carries_its_schema_as_the_sdk_output_format() {
+    let schema = json!({"type": "object", "properties": {"answer": {"type": "string"}}})
+        .as_object()
+        .unwrap()
+        .clone();
+    let mut prepared = prepared();
+    prepared.schema = Some(JsonOutputFormat::JsonSchema { schema });
+
+    let metadata = options::metadata(&prepared, &BTreeMap::new()).unwrap();
+
+    assert_eq!(
+        metadata["claudeCode"]["options"]["outputFormat"],
+        json!({
+            "type": "json_schema",
+            "schema": {"type": "object", "properties": {"answer": {"type": "string"}}}
+        })
+    );
+}
+
+/// An unstructured request leaves the key out entirely rather than sending
+/// `null`, which Claude Code would reject as a malformed output format.
+#[test]
+fn an_unstructured_request_sends_no_output_format() {
+    let metadata = options::metadata(&prepared(), &BTreeMap::new()).unwrap();
+
+    assert!(
+        metadata["claudeCode"]["options"]
+            .get("outputFormat")
+            .is_none()
+    );
 }
 
 #[test]

@@ -1,3 +1,4 @@
+use async_anthropic::types::JsonOutputFormat;
 use datetime_literal::datetime;
 use jp_config::{AppConfig, PartialAppConfig};
 use jp_conversation::{
@@ -212,7 +213,10 @@ fn changed_instructions_schema_and_tool_result_reach_the_next_request() {
     let model = super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query).unwrap();
     assert_eq!(prepared.system_prompt, "Replacement instructions.");
-    assert_eq!(prepared.schema, Some(schema));
+    assert_eq!(
+        prepared.schema,
+        Some(JsonOutputFormat::JsonSchema { schema })
+    );
     assert_eq!(
         serde_json::to_value(&prepared.history[2]).unwrap(),
         json!({"role":"user","content":[{"type":"tool_result","tool_use_id":"call-fixed","content":"CEDAR","is_error":false}]})
