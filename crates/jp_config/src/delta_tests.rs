@@ -2,13 +2,22 @@ use indexmap::IndexMap;
 use test_log::test;
 
 use super::*;
-use crate::providers::mcp::{PartialMcpProviderConfig, PartialStdioConfig};
+use crate::{
+    providers::mcp::{PartialMcpProviderConfig, PartialStdioConfig},
+    types::vec::{MergeableVec, MergedVec, MergedVecStrategy},
+};
 
 /// A server entry with `arguments` set and every other field unset.
 fn server(arguments: &[&str]) -> PartialMcpProviderConfig {
     PartialMcpProviderConfig::Stdio(PartialStdioConfig {
         command: Some("serve".into()),
-        arguments: Some(arguments.iter().map(|a| (*a).to_owned()).collect()),
+        arguments: Some(
+            arguments
+                .iter()
+                .map(|a| (*a).to_owned())
+                .collect::<Vec<_>>()
+                .into(),
+        ),
         ..PartialStdioConfig::default()
     })
 }
@@ -23,47 +32,75 @@ fn map(arguments: &[&str]) -> IndexMap<String, PartialMcpProviderConfig> {
 /// The `arguments` of a server entry, for asserting on a computed delta.
 fn arguments(entry: &PartialMcpProviderConfig) -> Option<&Vec<String>> {
     let PartialMcpProviderConfig::Stdio(config) = entry;
-    config.arguments.as_ref()
+    config.arguments.as_deref()
+}
+
+/// A list the fold appends, holding `values`.
+fn appended(values: &[&str]) -> MergeableVec<String> {
+    values.iter().map(|v| (*v).to_owned()).collect()
+}
+
+/// A list the fold replaces, holding `values`.
+fn replaced(values: &[&str]) -> MergeableVec<String> {
+    MergeableVec::Merged(MergedVec {
+        value: values.iter().map(|v| (*v).to_owned()).collect(),
+        strategy: Some(MergedVecStrategy::Replace),
+        dedup: None,
+        discard_when_merged: false,
+    })
 }
 
 #[test]
-fn vec_delta_holds_the_added_elements() {
-    let prev = vec!["--a".to_owned()];
-    let next = vec!["--a".to_owned(), "--b".to_owned()];
+fn vec_delta_appends_the_added_elements() {
+    let prev = MergeableVec::from(vec!["--a".to_owned()]);
 
     assert_eq!(
-        delta_opt_vec(Some(&prev), Some(next)),
-        Some(vec!["--b".to_owned()])
+        delta_opt_mergeable_vec(Some(&prev), Some(appended(&["--a", "--b"]))),
+        Some(appended(&["--b"]))
     );
 }
 
-/// The first element added to an empty vector is still an addition.
+/// The first element added to an empty list is still an addition.
 #[test]
-fn vec_delta_holds_the_first_added_element() {
-    let prev = vec![];
-    let next = vec!["--a".to_owned()];
+fn vec_delta_appends_the_first_added_element() {
+    let prev = MergeableVec::from(Vec::<String>::new());
 
     assert_eq!(
-        delta_opt_vec(Some(&prev), Some(next)),
-        Some(vec!["--a".to_owned()])
+        delta_opt_mergeable_vec(Some(&prev), Some(appended(&["--a"]))),
+        Some(appended(&["--a"]))
     );
 }
 
 #[test]
 fn unchanged_vec_has_no_delta() {
-    let prev = vec!["--a".to_owned()];
-    let next = vec!["--a".to_owned()];
+    let prev = MergeableVec::from(vec!["--a".to_owned()]);
 
-    assert_eq!(delta_opt_vec(Some(&prev), Some(next)), None);
+    assert_eq!(
+        delta_opt_mergeable_vec(Some(&prev), Some(appended(&["--a"]))),
+        None
+    );
 }
 
-/// Appending cannot take an element away, so a removal has no delta to record.
+/// Appending cannot take an element away, so a removal replaces the list.
 #[test]
-fn removed_vec_element_has_no_delta() {
-    let prev = vec!["--a".to_owned(), "--b".to_owned()];
-    let next = vec!["--a".to_owned()];
+fn removed_vec_element_replaces_the_list() {
+    let prev = MergeableVec::from(vec!["--a".to_owned(), "--b".to_owned()]);
 
-    assert_eq!(delta_opt_vec(Some(&prev), Some(next)), None);
+    assert_eq!(
+        delta_opt_mergeable_vec(Some(&prev), Some(appended(&["--a"]))),
+        Some(replaced(&["--a"]))
+    );
+}
+
+/// Order is part of the value, so a reorder replaces the list too.
+#[test]
+fn reordered_vec_replaces_the_list() {
+    let prev = MergeableVec::from(vec!["--a".to_owned(), "--b".to_owned()]);
+
+    assert_eq!(
+        delta_opt_mergeable_vec(Some(&prev), Some(appended(&["--b", "--a"]))),
+        Some(replaced(&["--b", "--a"]))
+    );
 }
 
 /// A one-server config, keyed as `kagi`.
@@ -92,35 +129,35 @@ fn an_appended_argument_reports_no_path() {
     );
 }
 
-/// A change appending cannot reach reports its path and carries the whole list.
+/// A change appending cannot reach carries the whole list with `replace`.
 ///
-/// The path is what the fold clears, which is what lets the list that follows
-/// land verbatim instead of being appended to the one already there.
+/// No path is reported: the field states the strategy itself, so the fold has
+/// nothing to clear first.
 #[test]
-fn a_dropped_argument_reports_its_path_and_carries_the_whole_list() {
+fn a_dropped_argument_is_recorded_as_a_replacement() {
     let prev = config_with_server(&["--a", "--b"]);
     let next = config_with_server(&["--a"]);
 
     let mut unsets = Vec::new();
     let delta = prev.delta_with_unsets(next, "", &mut unsets);
 
-    assert_eq!(unsets, ["providers.mcp.kagi.arguments"]);
+    assert!(unsets.is_empty(), "nothing to clear: {unsets:?}");
     assert_eq!(
         arguments(&delta.providers.mcp["kagi"]),
         Some(&vec!["--a".to_owned()])
     );
 }
 
-/// Reordering is not an extension either, so it clears too.
+/// Reordering is not an extension either, so it replaces too.
 #[test]
-fn a_reordered_argument_list_reports_its_path() {
+fn a_reordered_argument_list_is_recorded_as_a_replacement() {
     let prev = config_with_server(&["--a", "--b"]);
     let next = config_with_server(&["--b", "--a"]);
 
     let mut unsets = Vec::new();
     let delta = prev.delta_with_unsets(next, "", &mut unsets);
 
-    assert_eq!(unsets, ["providers.mcp.kagi.arguments"]);
+    assert!(unsets.is_empty(), "nothing to clear: {unsets:?}");
     assert_eq!(
         arguments(&delta.providers.mcp["kagi"]),
         Some(&vec!["--b".to_owned(), "--a".to_owned()])
@@ -129,7 +166,9 @@ fn a_reordered_argument_list_reports_its_path() {
 
 /// The report reaches a field nested several levels below the root.
 #[test]
-fn a_dropped_beta_header_reports_its_full_path() {
+fn a_dropped_beta_header_is_recorded_as_a_replacement() {
+    use crate::types::vec::{MergedVec, MergedVecStrategy};
+
     let headers = |values: &[&str]| {
         let mut partial = crate::PartialAppConfig::empty();
         partial.providers.llm.anthropic.beta_headers =
@@ -143,17 +182,30 @@ fn a_dropped_beta_header_reports_its_full_path() {
     let mut unsets = Vec::new();
     let delta = prev.delta_with_unsets(next, "", &mut unsets);
 
-    assert_eq!(unsets, ["providers.llm.anthropic.beta_headers"]);
+    assert!(
+        unsets.is_empty(),
+        "the field says `replace` itself, so no path needs reporting: {unsets:?}"
+    );
     assert_eq!(
         delta.providers.llm.anthropic.beta_headers,
-        Some(vec!["one".to_owned()])
+        Some(MergeableVec::Merged(MergedVec {
+            value: vec!["one".to_owned()],
+            strategy: Some(MergedVecStrategy::Replace),
+            dedup: None,
+            discard_when_merged: false,
+        }))
     );
 }
 
-/// `stop_words` is reached through four separate paths; each reports its own.
+/// A dropped stop word is recorded wherever the parameters are reached from.
+///
+/// The list carries its own strategy, so each site records a replacement and
+/// none needs a path reported.
 #[test]
-fn a_dropped_stop_word_reports_the_path_it_was_reached_by() {
-    let words = |values: &[&str]| Some(values.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>());
+fn a_dropped_stop_word_is_recorded_at_every_site() {
+    let words = |values: &[&str]| -> Option<MergeableVec<String>> {
+        Some(values.iter().map(|v| (*v).to_owned()).collect())
+    };
 
     let mut prev = crate::PartialAppConfig::empty();
     prev.assistant.model.parameters.stop_words = words(&["halt", "stop"]);
@@ -174,14 +226,29 @@ fn a_dropped_stop_word_reports_the_path_it_was_reached_by() {
     let mut unsets = Vec::new();
     let delta = prev.delta_with_unsets(next, "", &mut unsets);
 
-    unsets.sort();
-    assert_eq!(unsets, [
-        "assistant.model.parameters.stop_words",
-        "style.reasoning.summary_model.parameters.stop_words",
-    ]);
+    let replaced_with = |values: &[&str]| {
+        Some(MergeableVec::Merged(MergedVec {
+            value: values.iter().map(|v| (*v).to_owned()).collect(),
+            strategy: Some(MergedVecStrategy::Replace),
+            dedup: None,
+            discard_when_merged: false,
+        }))
+    };
+
+    assert!(unsets.is_empty(), "nothing to clear: {unsets:?}");
     assert_eq!(
         delta.assistant.model.parameters.stop_words,
-        Some(vec!["halt".to_owned()])
+        replaced_with(&["halt"])
+    );
+    assert_eq!(
+        delta
+            .style
+            .reasoning
+            .summary_model
+            .as_ref()
+            .map(|model| model.parameters.stop_words.clone()),
+        Some(replaced_with(&["halt"])),
+        "the second site records its own replacement"
     );
 }
 
@@ -204,14 +271,30 @@ fn map_delta_keeps_the_changed_fields_of_an_entry() {
     assert_eq!(arguments(&delta["kagi"]), Some(&vec!["--b".to_owned()]));
 }
 
-/// An entry that differs but has no expressible delta is left out entirely.
+/// An entry whose delta carries nothing is left out entirely.
 ///
 /// Keeping it would hand the caller a map with one entry holding nothing, which
 /// reads as a change to every emptiness check upstream.
+/// A stdio entry no longer reaches that state through its `arguments`, which
+/// can now say `replace`, so the case is built directly.
 #[test]
 fn map_delta_drops_an_entry_whose_delta_is_empty() {
-    let prev = map(&["--a", "--b"]);
-    let next = map(&["--a"]);
+    let entry = |command: &str| -> IndexMap<String, PartialMcpProviderConfig> {
+        let mut map = IndexMap::new();
+        map.insert(
+            "kagi".to_owned(),
+            PartialMcpProviderConfig::Stdio(PartialStdioConfig {
+                command: Some(command.into()),
+                ..PartialStdioConfig::default()
+            }),
+        );
+        map
+    };
 
-    assert!(delta_map(&prev, next).is_empty());
+    // Equal entries are dropped by the equality check ahead of the delta.
+    assert!(delta_map(&entry("serve"), entry("serve")).is_empty());
+
+    // A differing entry contributes only what changed.
+    let delta = delta_map(&entry("serve"), entry("other"));
+    assert_eq!(delta.len(), 1);
 }

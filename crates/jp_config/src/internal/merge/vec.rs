@@ -91,6 +91,33 @@ where
     }))
 }
 
+/// Merge two lists whose repetition is significant.
+///
+/// Identical to [`vec_with_strategy`] except that duplicates survive unless a
+/// config explicitly asks for deduplication, rather than the other way round.
+///
+/// An argument list is a command line: `["--flag", "x", "--flag", "y"]` means
+/// something different once the second `--flag` is dropped.
+/// Stating the opinion here rather than on the field's default is what makes it
+/// hold during config layering, which merges partials before any defaults are
+/// filled in.
+pub fn ordered_vec_with_strategy<T>(
+    prev: MergeableVec<T>,
+    next: MergeableVec<T>,
+    context: &(),
+) -> MergeResult<MergeableVec<T>>
+where
+    T: Clone + PartialEq + Serialize + DeserializeOwned + Schematic,
+{
+    let next = if dedup_flag(&prev).is_none() && dedup_flag(&next).is_none() {
+        with_dedup_flag(next, Some(false))
+    } else {
+        next
+    };
+
+    vec_with_strategy(prev, next, context)
+}
+
 /// Extract the explicit dedup flag from a `MergeableVec`.
 const fn dedup_flag<T>(v: &MergeableVec<T>) -> Option<bool> {
     match v {

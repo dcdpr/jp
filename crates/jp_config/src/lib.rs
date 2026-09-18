@@ -77,8 +77,9 @@ use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key, type_error},
     assistant::{AssistantConfig, PartialAssistantConfig},
     conversation::{ConversationConfig, PartialConversationConfig},
-    delta::{delta_opt_vec, delta_opt_vec_at, path as delta_path},
+    delta::{delta_opt_mergeable_vec, path as delta_path},
     editor::{EditorConfig, PartialEditorConfig},
+    internal::merge::vec_with_strategy,
     interrupt::{InterruptConfig, PartialInterruptConfig},
     loader::{LoaderConfig, PartialLoaderConfig},
     partial::partial_opt,
@@ -86,7 +87,7 @@ use crate::{
     providers::{PartialProviderConfig, ProviderConfig},
     style::{PartialStyleConfig, StyleConfig},
     template::{PartialTemplateConfig, TemplateConfig},
-    types::extending_path::ExtendingRelativePath,
+    types::{extending_path::ExtendingRelativePath, vec::MergeableVec},
     user::{PartialUserConfig, UserConfig},
 };
 
@@ -131,7 +132,10 @@ pub struct AppConfig {
     ///
     /// For example, to load `.jp/agents/dev.toml`, add `.jp/agents` to this
     /// list and run `jp query --cfg dev`.
-    #[setting(merge = internal::merge::append_vec_dedup)]
+    #[setting(
+        partial_via = MergeableVec::<RelativePathBuf>,
+        merge = internal::merge::vec_with_strategy,
+    )]
     pub config_load_paths: Vec<RelativePathBuf>,
 
     /// Extends the configuration from the given files.
@@ -238,7 +242,7 @@ impl AssignKeyValue for PartialAppConfig {
                     _ => type_error(kv.key(), &kv.value, &["string"]).map_err(Into::into),
                 };
 
-                kv.try_some_vec(&mut self.config_load_paths, parser)?;
+                kv.try_some_mergeable_vec(&mut self.config_load_paths, parser, vec_with_strategy)?;
             }
             _ if kv.p("assistant") => self.assistant.assign(kv)?,
             _ if kv.p("conversation") => self.conversation.assign(kv)?,
@@ -264,7 +268,7 @@ impl PartialConfigDelta for PartialAppConfig {
             inherit: None,
             loader: PartialLoaderConfig::default(),
 
-            config_load_paths: delta_opt_vec(
+            config_load_paths: delta_opt_mergeable_vec(
                 self.config_load_paths.as_ref(),
                 next.config_load_paths,
             ),
@@ -288,11 +292,9 @@ impl PartialConfigDelta for PartialAppConfig {
             inherit: None,
             loader: PartialLoaderConfig::default(),
 
-            config_load_paths: delta_opt_vec_at(
-                &delta_path(prefix, "config_load_paths"),
+            config_load_paths: delta_opt_mergeable_vec(
                 self.config_load_paths.as_ref(),
                 next.config_load_paths,
-                unsets,
             ),
 
             assistant: self.assistant.delta_with_unsets(
@@ -354,7 +356,10 @@ impl ToPartial for AppConfig {
 
         let mut partial = Self::Partial {
             inherit: partial_opt(&self.inherit, defaults.inherit),
-            config_load_paths: partial_opt(&self.config_load_paths, defaults.config_load_paths),
+            config_load_paths: partial_opt(
+                &MergeableVec::from(self.config_load_paths.clone()),
+                defaults.config_load_paths,
+            ),
             extends: partial_opt(&self.extends, defaults.extends),
             loader: self.loader.to_partial(),
             assistant: self.assistant.to_partial(),
@@ -845,3 +850,7 @@ mod tests;
 #[cfg(test)]
 #[path = "unset_tests.rs"]
 mod unset_tests;
+
+#[cfg(test)]
+#[path = "list_strategy_tests.rs"]
+mod list_strategy_tests;

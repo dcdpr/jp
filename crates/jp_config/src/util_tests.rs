@@ -972,9 +972,8 @@ fn test_load_partial_at_path_repeat_visit_keeps_last_position() {
 fn load_paths(partial: &PartialAppConfig) -> Vec<&str> {
     partial
         .config_load_paths
-        .as_deref()
-        .unwrap_or_default()
         .iter()
+        .flat_map(|paths| paths.iter())
         .map(|p| p.as_str())
         .collect()
 }
