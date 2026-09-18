@@ -147,6 +147,73 @@ fn draft(response: HostToPlugin) -> jp_plugin::message::DraftResponse {
     }
 }
 
+/// Unwrap an events response, or say what came back instead.
+fn events(response: HostToPlugin) -> jp_plugin::message::EventsResponse {
+    match response {
+        HostToPlugin::Events(events) => events,
+        other => panic!("expected an events response, got {other:?}"),
+    }
+}
+
+/// Every entry a plugin reads carries the `event_id` its stored form has.
+///
+/// This is the one user-visible consequence of stable event IDs: a plugin can
+/// name an entry it read and have that name still mean the same entry later.
+/// Asserted for every entry rather than the first, because only conversation
+/// events reach the iteration views — a compaction is addressable here and
+/// nowhere else.
+#[test]
+fn read_events_gives_a_plugin_each_entrys_id() {
+    let (ws, id, _tmp) = workspace_with_conversation();
+    let handle = ws.acquire_conversation(&id).unwrap();
+    let stored_ids = ws.test_lock(handle).as_mut().update_events(|stream| {
+        stream.start_turn("question");
+        stream.add_compaction(jp_conversation::Compaction::new(0, 0));
+        stream
+            .to_parts()
+            .unwrap()
+            .1
+            .iter()
+            .map(|event| event["event_id"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    });
+
+    let read = events(handle_read_events(&ws, &wire_id(id), None));
+
+    assert_eq!(read.conversation, wire_id(id));
+    let read_ids: Vec<_> = read
+        .data
+        .iter()
+        .map(|event| event["event_id"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(read_ids, stored_ids);
+    assert!(read_ids.iter().all(|id| !id.is_empty()));
+}
+
+/// Decoding content for the plugin must not disturb the entry's identity.
+#[test]
+fn read_events_decodes_content_without_touching_the_id() {
+    let (ws, id, _tmp) = workspace_with_conversation();
+    let handle = ws.acquire_conversation(&id).unwrap();
+    ws.test_lock(handle)
+        .as_mut()
+        .update_events(|stream| stream.start_turn("a question"));
+
+    let read = events(handle_read_events(&ws, &wire_id(id), None));
+
+    let request = read
+        .data
+        .iter()
+        .find(|event| event["type"] == "chat_request")
+        .expect("the turn's chat request");
+    assert_eq!(request["content"], "a question");
+    assert!(
+        request["event_id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+    );
+}
+
 /// A conversation with no draft reads back empty rather than as an error: most
 /// conversations never have one.
 #[test]

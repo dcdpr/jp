@@ -4,6 +4,7 @@ use chrono::{TimeZone as _, Utc};
 use proptest::prelude::*;
 use serde_json::Map;
 
+use super::assign_turn_indices;
 use crate::{
     ByteSize, Compaction, ConversationEvent, ConversationStream, EventKind, PolicySpec,
     ReasoningPolicy, SummaryPolicy, ToolCallPolicy,
@@ -2019,52 +2020,30 @@ proptest! {
 
 #[test]
 fn turn_indices_basic() {
-    use super::assign_turn_indices;
-    use crate::stream::InternalEvent;
+    let mut stream = ConversationStream::new_test();
+    stream.extend([
+        ConversationEvent::new(TurnStart, ts(0)),
+        ConversationEvent::new(ChatRequest::from("q1"), ts(0)),
+        ConversationEvent::new(TurnStart, ts(1)),
+        ConversationEvent::new(ChatRequest::from("q2"), ts(1)),
+        ConversationEvent::new(TurnStart, ts(2)),
+        ConversationEvent::new(ChatRequest::from("q3"), ts(2)),
+    ]);
 
-    let events = vec![
-        InternalEvent::Event(Box::new(ConversationEvent::new(TurnStart, ts(0)))),
-        InternalEvent::Event(Box::new(ConversationEvent::new(
-            ChatRequest::from("q1"),
-            ts(0),
-        ))),
-        InternalEvent::Event(Box::new(ConversationEvent::new(TurnStart, ts(1)))),
-        InternalEvent::Event(Box::new(ConversationEvent::new(
-            ChatRequest::from("q2"),
-            ts(1),
-        ))),
-        InternalEvent::Event(Box::new(ConversationEvent::new(TurnStart, ts(2)))),
-        InternalEvent::Event(Box::new(ConversationEvent::new(
-            ChatRequest::from("q3"),
-            ts(2),
-        ))),
-    ];
-
-    let indices = assign_turn_indices(&events);
+    let indices = assign_turn_indices(&stream.events);
     assert_eq!(indices, vec![0, 0, 1, 1, 2, 2]);
 }
 
 #[test]
 fn turn_indices_with_implicit_leading_turn() {
-    use super::assign_turn_indices;
-    use crate::stream::InternalEvent;
+    let mut stream = ConversationStream::new_test();
+    stream.extend([
+        ConversationEvent::new(ChatRequest::from("orphan"), ts(0)),
+        ConversationEvent::new(TurnStart, ts(1)),
+        ConversationEvent::new(ChatRequest::from("q1"), ts(1)),
+    ]);
 
-    // Events before the first `TurnStart` form an implicit turn 0, so the first
-    // explicit turn is turn 1 — matching `IterTurns` (see
-    // `turn_index_with_implicit_leading_turn` in turn_iter_tests).
-    let events = vec![
-        InternalEvent::Event(Box::new(ConversationEvent::new(
-            ChatRequest::from("orphan"),
-            ts(0),
-        ))),
-        InternalEvent::Event(Box::new(ConversationEvent::new(TurnStart, ts(1)))),
-        InternalEvent::Event(Box::new(ConversationEvent::new(
-            ChatRequest::from("q1"),
-            ts(1),
-        ))),
-    ];
-
-    let indices = assign_turn_indices(&events);
+    let indices = assign_turn_indices(&stream.events);
     assert_eq!(indices, vec![0, 1, 1]);
 }
 

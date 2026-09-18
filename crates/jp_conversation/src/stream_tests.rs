@@ -18,6 +18,14 @@ use crate::{
     resolve_range,
 };
 
+/// Wrap a payload with a fixed ID for serialization assertions.
+fn fixed_entry(payload: EventPayload) -> InternalEvent {
+    InternalEvent {
+        event_id: EventId::fixed("entry01"),
+        payload,
+    }
+}
+
 /// A fixed timestamp for config delta events.
 fn delta_timestamp() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap()
@@ -523,7 +531,34 @@ fn a_delta_carries_its_unsets_through_a_round_trip() {
     let json = serde_json::to_value(&delta).unwrap();
     assert_eq!(json["unsets"], serde_json::json!(["editor.envs"]));
 
-    assert_eq!(deserialize_config_delta(&json).unwrap(), delta);
+    assert_eq!(config_delta::deserialize(&json).unwrap(), delta);
+}
+
+/// A legacy delta carries its config fields beside the envelope keys, so
+/// `event_id` sits among them and must not be read back as a config field.
+///
+/// Reachable two ways — as the base config of a legacy file, and as a stream
+/// entry in one — so both are checked here.
+#[test]
+fn a_legacy_delta_does_not_read_its_entry_id_as_config() {
+    let raw = serde_json::json!({
+        "event_id": "entry01",
+        "type": "config_delta",
+        "timestamp": "2025-01-01 00:00:00.0",
+        "style": { "code": { "color": false } },
+    });
+
+    let subtree = config_delta::subtree(&raw);
+    assert!(
+        subtree.get("event_id").is_none(),
+        "the wrapper's key leaked into the config: {subtree}"
+    );
+    assert_eq!(subtree["style"]["code"]["color"], false);
+
+    let ConfigDelta::Apply(apply) = config_delta::deserialize(&raw).unwrap() else {
+        panic!("expected an apply");
+    };
+    assert_eq!(apply.delta.style.code.color, Some(false));
 }
 
 /// A delta written before clearing existed loads with nothing to clear.
@@ -535,7 +570,7 @@ fn a_delta_without_unsets_loads_with_none() {
         "delta": { "style": { "code": { "color": false } } },
     });
 
-    let ConfigDelta::Apply(apply) = deserialize_config_delta(&json).unwrap() else {
+    let ConfigDelta::Apply(apply) = config_delta::deserialize(&json).unwrap() else {
         panic!("expected an apply");
     };
 
@@ -554,13 +589,11 @@ fn an_unset_naming_no_field_does_not_stop_the_replay() {
     let mut partial = jp_config::PartialAppConfig::empty();
     partial.style.code.color = Some(false);
 
-    stream
-        .events
-        .push(InternalEvent::ConfigDelta(ConfigDelta::Apply(
-            ApplyDelta::with_unsets(delta_timestamp(), partial, vec![
-                "style.code.no_such_field".to_owned(),
-            ]),
-        )));
+    stream.append(EventPayload::ConfigDelta(ConfigDelta::Apply(
+        ApplyDelta::with_unsets(delta_timestamp(), partial, vec![
+            "style.code.no_such_field".to_owned(),
+        ]),
+    )));
 
     assert!(!stream.config().unwrap().style.code.color);
 }
@@ -887,19 +920,15 @@ fn test_to_parts_from_parts_roundtrip() {
     assert_eq!(stream, stream2);
 
     // Add some events and roundtrip again.
-    stream
-        .events
-        .push(InternalEvent::Event(Box::new(ConversationEvent::new(
-            ChatRequest::from("foo"),
-            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-        ))));
+    stream.push_event(ConversationEvent::new(
+        ChatRequest::from("foo"),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    ));
 
-    stream
-        .events
-        .push(InternalEvent::Event(Box::new(ConversationEvent::new(
-            ChatResponse::message("bar"),
-            Utc.with_ymd_and_hms(2020, 1, 2, 0, 0, 0).unwrap(),
-        ))));
+    stream.push_event(ConversationEvent::new(
+        ChatResponse::message("bar"),
+        Utc.with_ymd_and_hms(2020, 1, 2, 0, 0, 0).unwrap(),
+    ));
 
     let (base_config, events) = stream.to_parts().unwrap();
     assert_eq!(events.len(), 2);
@@ -1500,11 +1529,13 @@ fn test_sanitize_noop_on_healthy_stream() {
 
 /// Serialize a [`ConfigDelta`] as an [`InternalEvent`] and deserialize it back.
 fn roundtrip_delta(delta: ConfigDelta) -> ConfigDelta {
-    let event = InternalEvent::ConfigDelta(delta);
+    let event = fixed_entry(EventPayload::ConfigDelta(delta));
     let json = serde_json::to_value(&event).unwrap();
-    let deserialized: InternalEvent = serde_json::from_value(json).unwrap();
-    match deserialized {
-        InternalEvent::ConfigDelta(d) => d,
+    let deserialized = serde_json::from_value::<StoredEvent>(json)
+        .unwrap()
+        .into_entry();
+    match deserialized.payload {
+        EventPayload::ConfigDelta(d) => d,
         _ => panic!("expected ConfigDelta"),
     }
 }
@@ -1578,12 +1609,14 @@ fn test_roundtrip_delta_strip_unknown_field_preserves_rest() {
     partial.style.code.color = Some(false);
     let original = ConfigDelta::from(partial);
 
-    let event = InternalEvent::ConfigDelta(original);
+    let event = fixed_entry(EventPayload::ConfigDelta(original));
     let mut json = serde_json::to_value(&event).unwrap();
     json["delta"]["style"]["code"]["removed_field"] = serde_json::json!("stale");
 
-    let deserialized: InternalEvent = serde_json::from_value(json).unwrap();
-    let InternalEvent::ConfigDelta(ConfigDelta::Apply(result)) = deserialized else {
+    let deserialized = serde_json::from_value::<StoredEvent>(json)
+        .unwrap()
+        .into_entry();
+    let EventPayload::ConfigDelta(ConfigDelta::Apply(result)) = deserialized.payload else {
         panic!("expected Apply config delta");
     };
     assert_eq!(result.delta.style.code.color, Some(false));
@@ -1595,20 +1628,23 @@ fn test_internal_event_config_delta_reset_roundtrip() {
         timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
     });
 
-    let event = InternalEvent::ConfigDelta(reset.clone());
+    let event = fixed_entry(EventPayload::ConfigDelta(reset.clone()));
     let json = serde_json::to_value(&event).unwrap();
 
     assert_eq!(
         json,
         serde_json::json!({
+            "event_id": "entry01",
             "type": "config_delta",
             "op": "reset",
             "timestamp": "2020-01-01 00:00:00.0",
         })
     );
 
-    let deserialized: InternalEvent = serde_json::from_value(json).unwrap();
-    assert_eq!(deserialized, InternalEvent::ConfigDelta(reset));
+    let deserialized = serde_json::from_value::<StoredEvent>(json)
+        .unwrap()
+        .into_entry();
+    assert_eq!(deserialized, fixed_entry(EventPayload::ConfigDelta(reset)));
 }
 
 #[test]
@@ -1616,16 +1652,15 @@ fn test_internal_event_config_delta_apply_shape_has_no_op_field() {
     let mut partial = jp_config::PartialAppConfig::empty();
     partial.style.code.color = Some(false);
 
-    let event = InternalEvent::ConfigDelta(ConfigDelta::Apply(ApplyDelta::new(
-        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-        partial,
+    let event = fixed_entry(EventPayload::ConfigDelta(ConfigDelta::Apply(
+        ApplyDelta::new(Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(), partial),
     )));
 
     let json = serde_json::to_value(&event).unwrap();
     let mut keys: Vec<_> = json.as_object().unwrap().keys().cloned().collect();
     keys.sort();
 
-    assert_eq!(keys, ["delta", "timestamp", "type"]);
+    assert_eq!(keys, ["delta", "event_id", "timestamp", "type"]);
     assert_eq!(json["type"], "config_delta");
     assert_eq!(json["timestamp"], "2020-01-01 00:00:00.0");
     assert_eq!(json["delta"]["style"]["code"]["color"], false);
@@ -1641,8 +1676,10 @@ fn test_legacy_config_delta_without_op_decodes_as_apply() {
         "delta": { "style": { "code": { "color": false } } }
     });
 
-    let internal: InternalEvent = serde_json::from_value(raw).unwrap();
-    let InternalEvent::ConfigDelta(ConfigDelta::Apply(apply)) = internal else {
+    let internal = serde_json::from_value::<StoredEvent>(raw)
+        .unwrap()
+        .into_entry();
+    let EventPayload::ConfigDelta(ConfigDelta::Apply(apply)) = internal.payload else {
         panic!("expected Apply config delta");
     };
     assert_eq!(apply.delta.style.code.color, Some(false));
@@ -1657,8 +1694,10 @@ fn test_config_delta_with_explicit_apply_op_decodes_as_apply() {
         "delta": { "style": { "code": { "color": false } } }
     });
 
-    let internal: InternalEvent = serde_json::from_value(raw).unwrap();
-    let InternalEvent::ConfigDelta(ConfigDelta::Apply(apply)) = internal else {
+    let internal = serde_json::from_value::<StoredEvent>(raw)
+        .unwrap()
+        .into_entry();
+    let EventPayload::ConfigDelta(ConfigDelta::Apply(apply)) = internal.payload else {
         panic!("expected Apply config delta");
     };
     assert_eq!(apply.delta.style.code.color, Some(false));
@@ -1673,7 +1712,7 @@ fn test_config_delta_with_unknown_op_fails_deserialization() {
         "op": "unset",
         "timestamp": "2025-01-01 00:00:00.0",
     });
-    assert!(serde_json::from_value::<InternalEvent>(raw).is_err());
+    assert!(serde_json::from_value::<StoredEvent>(raw).is_err());
 
     // Non-string values are rejected too.
     let raw = serde_json::json!({
@@ -1681,7 +1720,7 @@ fn test_config_delta_with_unknown_op_fails_deserialization() {
         "op": 42,
         "timestamp": "2025-01-01 00:00:00.0",
     });
-    assert!(serde_json::from_value::<InternalEvent>(raw).is_err());
+    assert!(serde_json::from_value::<StoredEvent>(raw).is_err());
 }
 
 #[test]
@@ -1767,7 +1806,7 @@ fn test_config_fold_reset_discards_accumulated_state() {
             fresh,
         )),
     ] {
-        stream.events.push(InternalEvent::ConfigDelta(delta));
+        stream.append(EventPayload::ConfigDelta(delta));
     }
 
     let config = stream.config().unwrap();
@@ -1789,25 +1828,19 @@ fn test_iter_config_reflects_reset() {
     fresh.user.name = Some("fresh".to_owned());
 
     let mut stream = ConversationStream::new_test();
-    stream
-        .events
-        .push(InternalEvent::ConfigDelta(ConfigDelta::Apply(
-            ApplyDelta::new(Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(), dev),
-        )));
+    stream.append(EventPayload::ConfigDelta(ConfigDelta::Apply(
+        ApplyDelta::new(Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(), dev),
+    )));
     stream.push(ConversationEvent::new(
         ChatRequest::from("before reset"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
     ));
-    stream
-        .events
-        .push(InternalEvent::ConfigDelta(ConfigDelta::Reset(ResetDelta {
-            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
-        })));
-    stream
-        .events
-        .push(InternalEvent::ConfigDelta(ConfigDelta::Apply(
-            ApplyDelta::new(Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(), fresh),
-        )));
+    stream.append(EventPayload::ConfigDelta(ConfigDelta::Reset(ResetDelta {
+        timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
+    })));
+    stream.append(EventPayload::ConfigDelta(ConfigDelta::Apply(
+        ApplyDelta::new(Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(), fresh),
+    )));
     stream.push(ConversationEvent::new(
         ChatRequest::from("after reset"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 4).unwrap(),
@@ -1837,7 +1870,7 @@ fn test_deserialize_config_delta_extracts_timestamp_and_delta() {
         }
     });
 
-    let delta = deserialize_config_delta(&value).unwrap();
+    let delta = config_delta::deserialize(&value).unwrap();
     assert_eq!(delta.timestamp().to_string(), "2025-01-01 00:00:00 UTC");
     let ConfigDelta::Apply(apply) = delta else {
         panic!("expected Apply config delta");
@@ -1852,7 +1885,7 @@ fn test_deserialize_config_delta_preserves_timestamp_on_bad_delta() {
         "delta": "not an object at all"
     });
 
-    let delta = deserialize_config_delta(&value).unwrap();
+    let delta = config_delta::deserialize(&value).unwrap();
     assert_eq!(delta.timestamp().to_string(), "2024-12-25 18:30:00 UTC");
     let ConfigDelta::Apply(apply) = delta else {
         panic!("expected Apply config delta");
@@ -2707,7 +2740,7 @@ fn test_resolve_range_clamps_beyond_max() {
 #[test]
 fn test_internal_event_compaction_roundtrip() {
     let compaction = make_compaction(0, 5);
-    let event = InternalEvent::Compaction(compaction.clone());
+    let event = fixed_entry(EventPayload::Compaction(compaction.clone()));
     let json = serde_json::to_value(&event).unwrap();
 
     assert_eq!(json["type"], "compaction");
@@ -2715,8 +2748,10 @@ fn test_internal_event_compaction_roundtrip() {
     assert_eq!(json["to_turn"], 5);
     assert_eq!(json["reasoning"], "strip");
 
-    let deserialized: InternalEvent = serde_json::from_value(json).unwrap();
-    let InternalEvent::Compaction(result) = deserialized else {
+    let deserialized = serde_json::from_value::<StoredEvent>(json)
+        .unwrap()
+        .into_entry();
+    let EventPayload::Compaction(result) = deserialized.payload else {
         panic!("expected Compaction");
     };
     assert_eq!(result, compaction);
@@ -2743,7 +2778,7 @@ fn test_internal_event_overlay_roundtrip() {
         }],
     };
 
-    let event = InternalEvent::Overlay(overlay.clone());
+    let event = fixed_entry(EventPayload::Overlay(overlay.clone()));
     let json = serde_json::to_value(&event).unwrap();
 
     assert_eq!(json["type"], "event_overlay");
@@ -2751,8 +2786,10 @@ fn test_internal_event_overlay_roundtrip() {
     assert_eq!(json["patches"][0]["matcher"]["value"], "stale");
     assert_eq!(json["patches"][0]["action"]["action"], "remove_metadata");
 
-    let deserialized: InternalEvent = serde_json::from_value(json).unwrap();
-    let InternalEvent::Overlay(result) = deserialized else {
+    let deserialized = serde_json::from_value::<StoredEvent>(json)
+        .unwrap()
+        .into_entry();
+    let EventPayload::Overlay(result) = deserialized.payload else {
         panic!("expected Overlay");
     };
     assert_eq!(result, overlay);
@@ -2774,8 +2811,10 @@ fn test_internal_event_overlay_timestamp_accepts_storage_format() {
         }],
     });
 
-    let deserialized: InternalEvent = serde_json::from_value(json).unwrap();
-    let InternalEvent::Overlay(result) = deserialized else {
+    let deserialized = serde_json::from_value::<StoredEvent>(json)
+        .unwrap()
+        .into_entry();
+    let EventPayload::Overlay(result) = deserialized.payload else {
         panic!("expected Overlay");
     };
 
@@ -2788,7 +2827,7 @@ fn test_internal_event_overlay_timestamp_accepts_storage_format() {
 
     // And what it writes is the same format the siblings write, so a hand-edited
     // conversation round-trips byte-identically.
-    let json = serde_json::to_value(InternalEvent::Overlay(result)).unwrap();
+    let json = serde_json::to_value(fixed_entry(EventPayload::Overlay(result))).unwrap();
     assert_eq!(json["timestamp"], "2026-08-27 12:00:00.0");
 }
 
@@ -2858,7 +2897,7 @@ fn test_overlay_survives_turn_pruning() {
         stream
             .events
             .iter()
-            .any(|e| matches!(e, InternalEvent::Overlay(_))),
+            .any(|e| matches!(&e.payload, EventPayload::Overlay(_))),
         "pruning a turn must not drop the overlay"
     );
 }
@@ -2867,25 +2906,32 @@ fn test_overlay_survives_turn_pruning() {
 
 #[test]
 fn test_internal_event_known_kind_deserializes_as_event() {
-    let event = InternalEvent::Event(Box::new(ConversationEvent::now(ChatRequest::from("hi"))));
+    let event = fixed_entry(EventPayload::Event(Box::new(ConversationEvent::now(
+        ChatRequest::from("hi"),
+    ))));
     let json = serde_json::to_value(&event).unwrap();
 
-    let internal: InternalEvent = serde_json::from_value(json).unwrap();
-    assert!(matches!(internal, InternalEvent::Event(_)));
+    let internal = serde_json::from_value::<StoredEvent>(json)
+        .unwrap()
+        .into_entry();
+    assert!(matches!(&internal.payload, EventPayload::Event(_)));
 }
 
 #[test]
 fn test_internal_event_preserves_unknown_kind_verbatim() {
     // An event written by a newer jp with a kind this build doesn't know.
     let raw = serde_json::json!({
+        "event_id": "future1",
         "type": "unknown_future_kind",
         "timestamp": "2025-01-01 00:00:00.0",
         "summary": "a compacted summary",
         "metadata": { "foo": "YmFy" }
     });
 
-    let internal: InternalEvent = serde_json::from_value(raw.clone()).unwrap();
-    assert!(matches!(internal, InternalEvent::Unknown(_)));
+    let internal = serde_json::from_value::<StoredEvent>(raw.clone())
+        .unwrap()
+        .into_entry();
+    assert!(matches!(&internal.payload, EventPayload::Unknown(_)));
 
     // The payload round-trips byte-for-byte: no decode/re-encode is applied,
     // so the newer jp reads back exactly what it wrote.
@@ -2902,6 +2948,7 @@ fn test_from_parts_tolerates_unknown_event_kind() {
 
     // A newer jp appended an event kind this build doesn't understand.
     let unknown = serde_json::json!({
+        "event_id": "future1",
         "type": "unknown_future_kind",
         "timestamp": "2025-01-01 00:01:00.0",
         "summary": "a compacted summary"
@@ -2980,9 +3027,25 @@ fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
     let dest_view: Vec<_> = dest.iter().map(|e| (e.event.clone(), e.config)).collect();
     assert_eq!(source_view, dest_view);
 
-    // 2. The serialized storage shape must match. Extending an empty stream
-    //    from a source must reproduce the source's on-disk form exactly.
-    let source_parts = source.to_parts().unwrap();
-    let dest_parts = dest.to_parts().unwrap();
-    assert_eq!(source_parts, dest_parts);
+    // 2. Each conversation event keeps the ID it had in the source: identity
+    //    is per-stream, so a destination that has handed out no IDs takes the
+    //    source's verbatim.
+    let source_ids: Vec<_> = source.iter().map(|e| e.event_id.to_string()).collect();
+    let dest_ids: Vec<_> = dest.iter().map(|e| e.event_id.to_string()).collect();
+    assert_eq!(source_ids, dest_ids);
+
+    // 3. The serialized storage shape must match, apart from the config
+    //    deltas' IDs. `Extend` recomputes a delta against the destination's
+    //    running config state rather than copying the source's, so those
+    //    entries are new entries and are assigned new IDs.
+    let (source_base, mut source_events) = source.to_parts().unwrap();
+    let (dest_base, mut dest_events) = dest.to_parts().unwrap();
+    for event in source_events.iter_mut().chain(&mut dest_events) {
+        let event = event.as_object_mut().unwrap();
+        if event["type"] == "config_delta" {
+            event.shift_remove("event_id");
+        }
+    }
+    assert_eq!(source_base, dest_base);
+    assert_eq!(source_events, dest_events);
 }

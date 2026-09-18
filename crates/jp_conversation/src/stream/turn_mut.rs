@@ -2,7 +2,7 @@
 
 use tracing::warn;
 
-use super::{ConversationStream, InternalEvent, StreamError};
+use super::{ConversationStream, EventPayload, InternalEvent, StreamError};
 use crate::{
     ConversationEvent, EventKind,
     event::{
@@ -198,7 +198,7 @@ impl<'a> TurnMut<'a> {
             let events: &[InternalEvent] = &stream.events;
             let last_turn_start = events
                 .iter()
-                .rposition(|e| matches!(e, InternalEvent::Event(ev) if ev.is_turn_start()));
+                .rposition(|e| matches!(&e.payload, EventPayload::Event(ev) if ev.is_turn_start()));
 
             last_turn_start.map_or(events, |pos| &events[pos..])
         };

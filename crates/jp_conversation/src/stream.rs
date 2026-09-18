@@ -1,422 +1,55 @@
-//! See [`ConversationStream`].
+//! A conversation's event log.
+//!
+//! [`ConversationStream`] is the entry point: an ordered list of entries plus
+//! the base configuration they layer onto.
+//! It owns appending, pruning, repairing, and iterating, and is the only thing
+//! that hands out entry IDs.
+//!
+//! The surrounding modules hold the pieces it is built from:
+//!
+//! - [`entry`] — what one entry is, and how it is stored.
+//! - [`config_delta`] — the entries that change a conversation's config.
+//! - [`iter`] — walking the stream, resolving each event's config as it goes.
+//! - [`projection`] — the provider-facing view, with overlays applied.
+//! - [`turn_iter`] and [`turn_mut`] — reading and writing a turn at a time.
 
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
 };
 
 use chrono::{DateTime, Utc};
-use jp_config::{AppConfig, ConfigError, FillDefaults as _, PartialAppConfig, PartialConfig as _};
-use serde::{Deserialize, Serialize, Serializer};
+use jp_config::{AppConfig, FillDefaults as _, PartialAppConfig, PartialConfig as _};
 use serde_json::{Map, Value};
-use tracing::{error, warn};
+use tracing::warn;
 
+pub mod config_delta;
+mod entry;
+pub mod iter;
 mod projection;
 pub mod turn_iter;
 pub mod turn_mut;
+pub use config_delta::{ApplyDelta, ConfigDelta, ResetDelta};
+pub use iter::{
+    ConversationEventWithConfig, ConversationEventWithConfigMut, ConversationEventWithConfigRef,
+    EventInTurn, IntoIter, IterMut,
+};
 pub use projection::{AffectedItem, TurnOrigin};
 pub use turn_iter::{IterTurns, Turn};
 pub use turn_mut::TurnMut;
 
 use crate::{
-    Compaction, EventOverlay, OverlayPatch,
-    compat::deserialize_partial_config,
+    Compaction, EventId, EventOverlay, OverlayPatch,
     event::{ChatRequest, ConversationEvent, EventKind, InquiryId, ToolCallResponse, TurnStart},
-    storage::{decode_event_value, encode_event},
+    event_id::EventIds,
+    stream::{
+        entry::{EventPayload, EventScope, InternalEvent, StoredEvent},
+        iter::Iter,
+    },
 };
 
-/// An internal representation of events in a conversation stream.
-///
-/// This type handles base64-encoding of content fields (tool arguments, tool
-/// response content, metadata) during serialization, and decoding during
-/// deserialization.
-/// This keeps the encoding concern isolated to the storage layer — the inner
-/// [`ConversationEvent`] types serialize as plain text.
-#[derive(Debug, Clone, PartialEq)]
-enum InternalEvent {
-    /// The configuration state of the conversation is updated.
-    ///
-    /// When this event is emitted, all subsequent events in the stream are
-    /// bound to the new configuration.
-    ///
-    /// An [`Apply`] delta is merged on top of all previous `ConfigDelta` events
-    /// in the stream; a [`Reset`] discards the accumulated state, restarting
-    /// from program defaults.
-    ///
-    /// Any non-config events before the first `ConfigDelta` event are
-    /// considered to have the default configuration.
-    ///
-    /// [`Apply`]: ConfigDelta::Apply
-    /// [`Reset`]: ConfigDelta::Reset
-    ConfigDelta(ConfigDelta),
-    /// An event in the conversation stream.
-    Event(Box<ConversationEvent>),
-    /// A compaction overlay that modifies how preceding events are projected
-    /// when building the LLM request.
-    /// Does not modify or delete any existing events.
-    Compaction(Compaction),
-    /// A patch overlay that rewrites how matched events are projected when
-    /// building the LLM request.
-    /// Does not modify or delete any existing events.
-    Overlay(EventOverlay),
-    /// An event whose `type` tag this build does not recognize.
-    ///
-    /// Conversations are an append-only log that a newer `jp` may have written.
-    /// Rather than fail the entire stream load on an unknown event kind, the
-    /// raw JSON is retained verbatim so it round-trips losslessly on the next
-    /// save.
-    /// Unknown events are invisible to event iteration, config resolution, and
-    /// providers.
-    Unknown(Value),
-}
-
-impl Serialize for InternalEvent {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            Self::ConfigDelta(delta) => {
-                #[derive(Serialize)]
-                struct Tagged<'a> {
-                    #[serde(rename = "type")]
-                    tag: &'static str,
-                    #[serde(flatten)]
-                    inner: &'a ConfigDelta,
-                }
-
-                Tagged {
-                    tag: "config_delta",
-                    inner: delta,
-                }
-                .serialize(serializer)
-            }
-            Self::Event(event) => {
-                let mut value =
-                    serde_json::to_value(event.as_ref()).map_err(serde::ser::Error::custom)?;
-
-                // Base64-encode storage fields.
-                encode_event(&mut value, &event.kind);
-                value.serialize(serializer)
-            }
-            Self::Compaction(compaction) => {
-                #[derive(Serialize)]
-                struct Tagged<'a> {
-                    #[serde(rename = "type")]
-                    tag: &'static str,
-                    #[serde(flatten)]
-                    inner: &'a Compaction,
-                }
-
-                Tagged {
-                    tag: "compaction",
-                    inner: compaction,
-                }
-                .serialize(serializer)
-            }
-            Self::Overlay(overlay) => {
-                #[derive(Serialize)]
-                struct Tagged<'a> {
-                    #[serde(rename = "type")]
-                    tag: &'static str,
-                    #[serde(flatten)]
-                    inner: &'a EventOverlay,
-                }
-
-                Tagged {
-                    tag: "event_overlay",
-                    inner: overlay,
-                }
-                .serialize(serializer)
-            }
-            Self::Unknown(value) => value.serialize(serializer),
-        }
-    }
-}
-
-/// Whether an [`InternalEvent`] belongs to a single turn or applies to the
-/// conversation as a whole.
-///
-/// This is the single source of truth for which events survive turn-level
-/// pruning (`pop`, `trim_chat_request`, `pop_if`, `retain`).
-/// Adding a new `InternalEvent` variant forces a classification here —
-/// [`InternalEvent::scope`] is an exhaustive match — so no pruning caller can
-/// silently mistreat it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EventScope {
-    /// Survives turn pruning: config deltas and compaction overlays apply to
-    /// the conversation regardless of position.
-    Global,
-    /// Belongs to a turn and is removed when that turn is pruned.
-    Turn,
-}
-
-impl InternalEvent {
-    /// Convert an internal event into an [`ConversationEvent`].
-    /// Returns `None` if the event is a config delta.
-    #[must_use]
-    fn into_event(self) -> Option<ConversationEvent> {
-        match self {
-            Self::Event(event) => Some(*event),
-            Self::ConfigDelta(_) | Self::Compaction(_) | Self::Overlay(_) | Self::Unknown(_) => {
-                None
-            }
-        }
-    }
-
-    /// Get a reference to [`InternalEvent::Event`], if applicable.
-    #[must_use]
-    fn as_event(&self) -> Option<&ConversationEvent> {
-        match self {
-            Self::Event(event) => Some(event),
-            Self::ConfigDelta(_) | Self::Compaction(_) | Self::Overlay(_) | Self::Unknown(_) => {
-                None
-            }
-        }
-    }
-
-    /// Classify the event as turn-scoped or global.
-    /// See [`EventScope`].
-    #[must_use]
-    const fn scope(&self) -> EventScope {
-        match self {
-            Self::ConfigDelta(_) | Self::Compaction(_) | Self::Overlay(_) | Self::Unknown(_) => {
-                EventScope::Global
-            }
-            Self::Event(_) => EventScope::Turn,
-        }
-    }
-}
-
-/// A configuration delta.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ConfigDelta {
-    /// Merge a partial configuration on top of the accumulated config state.
-    Apply(ApplyDelta),
-
-    /// Discard the accumulated config state.
-    ///
-    /// Config resolution restarts from program defaults; subsequent [`Apply`]
-    /// events layer on top.
-    ///
-    /// [`Apply`]: Self::Apply
-    Reset(ResetDelta),
-}
-
-impl ConfigDelta {
-    /// The timestamp of the event, regardless of variant.
-    #[must_use]
-    pub const fn timestamp(&self) -> DateTime<Utc> {
-        match self {
-            Self::Apply(delta) => delta.timestamp,
-            Self::Reset(delta) => delta.timestamp,
-        }
-    }
-}
-
-// Hand-rolled so `Apply` keeps the legacy flat shape (no `op` field) and
-// `Reset` carries `"op": "reset"`. The variant discriminator must live inside
-// the event body: the outer `InternalEvent` envelope already claims the
-// top-level `type` key.
-impl Serialize for ConfigDelta {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            Self::Apply(delta) => delta.serialize(serializer),
-            Self::Reset(delta) => {
-                #[derive(Serialize)]
-                struct Tagged<'a> {
-                    op: &'static str,
-                    #[serde(flatten)]
-                    inner: &'a ResetDelta,
-                }
-
-                Tagged {
-                    op: "reset",
-                    inner: delta,
-                }
-                .serialize(serializer)
-            }
-        }
-    }
-}
-
-/// A configuration delta that merges on top of the accumulated config state.
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct ApplyDelta {
-    /// The timestamp of the event.
-    #[serde(serialize_with = "crate::serialize_dt")]
-    pub timestamp: DateTime<Utc>,
-
-    /// The configuration delta.
-    pub delta: Box<PartialAppConfig>,
-
-    /// Dotted paths of fields cleared before [`delta`] is merged.
-    ///
-    /// Merging is per field, so a field that merges by appending cannot reach a
-    /// value that drops one of its elements: whatever the delta carries is
-    /// added to what is already there.
-    /// Clearing the field first leaves the merge nothing to combine with, and
-    /// the delta's value lands whole.
-    ///
-    /// A path that names no field is ignored, so a delta written by a newer
-    /// version, or naming a field since removed, still replays.
-    ///
-    /// [`delta`]: Self::delta
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub unsets: Vec<String>,
-}
-
-impl ApplyDelta {
-    /// An apply that merges `delta` and clears nothing.
-    #[must_use]
-    pub fn new(timestamp: DateTime<Utc>, delta: impl Into<Box<PartialAppConfig>>) -> Self {
-        Self {
-            timestamp,
-            delta: delta.into(),
-            unsets: Vec::new(),
-        }
-    }
-
-    /// An apply that clears `unsets` before merging `delta`.
-    #[must_use]
-    pub fn with_unsets(
-        timestamp: DateTime<Utc>,
-        delta: impl Into<Box<PartialAppConfig>>,
-        unsets: Vec<String>,
-    ) -> Self {
-        Self {
-            timestamp,
-            delta: delta.into(),
-            unsets,
-        }
-    }
-}
-
-/// A configuration delta that discards the accumulated config state, resetting
-/// it to program defaults.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct ResetDelta {
-    /// The timestamp of the event.
-    #[serde(serialize_with = "crate::serialize_dt")]
-    pub timestamp: DateTime<Utc>,
-}
-
-impl From<ApplyDelta> for ConfigDelta {
-    fn from(delta: ApplyDelta) -> Self {
-        Self::Apply(delta)
-    }
-}
-
-impl From<ResetDelta> for ConfigDelta {
-    fn from(delta: ResetDelta) -> Self {
-        Self::Reset(delta)
-    }
-}
-
-impl From<PartialAppConfig> for ConfigDelta {
-    fn from(config: PartialAppConfig) -> Self {
-        Self::Apply(ApplyDelta::new(Utc::now(), config))
-    }
-}
-
-/// Extract the stored config subtree from a `config_delta` event.
-///
-/// Two on-disk shapes exist.
-/// Newer streams nest the config under a `delta` key; older ones carry the
-/// config fields as siblings of the envelope keys (`type`, `timestamp`, `op`),
-/// which are removed here so only config fields remain.
-fn config_delta_subtree(value: &Value) -> Value {
-    if let Some(delta) = value.get("delta") {
-        return delta.clone();
-    }
-
-    let mut obj = value.as_object().cloned().unwrap_or_default();
-    obj.remove("type");
-    obj.remove("timestamp");
-    obj.remove("op");
-    obj.remove("unsets");
-    Value::Object(obj)
-}
-
-/// Deserialize a [`ConfigDelta`] from a raw JSON value, tolerating schema
-/// changes within the stored config.
-///
-/// The `op` field selects the variant: absent (which covers every event written
-/// before the reset variant existed) or `"apply"` decodes as
-/// [`ConfigDelta::Apply`]; `"reset"` decodes as [`ConfigDelta::Reset`].
-/// Delegates to [`deserialize_partial_config`] for the config subtree and
-/// extracts the timestamp separately.
-///
-/// # Errors
-///
-/// Returns an error for any other `op` value: an op added by a newer version
-/// must fail loudly here instead of being misread as an apply and corrupting
-/// config resolution.
-pub(crate) fn deserialize_config_delta(value: &Value) -> Result<ConfigDelta, String> {
-    let timestamp = value
-        .get("timestamp")
-        .and_then(Value::as_str)
-        .and_then(|s| crate::parse_dt(s).ok())
-        .unwrap_or_else(Utc::now);
-
-    if let Some(op) = value.get("op") {
-        if op == "reset" {
-            return Ok(ConfigDelta::Reset(ResetDelta { timestamp }));
-        }
-
-        if op != "apply" {
-            return Err(format!("unknown config delta `op`: {op}"));
-        }
-    }
-
-    // The hand-rolled deserializer bypasses the derived one, so the field's
-    // `#[serde(default)]` never runs and the key has to be read here.
-    let unsets = value
-        .get("unsets")
-        .and_then(Value::as_array)
-        .map(|paths| {
-            paths
-                .iter()
-                .filter_map(|path| path.as_str().map(str::to_owned))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let delta = deserialize_partial_config(config_delta_subtree(value));
-
-    Ok(ConfigDelta::Apply(ApplyDelta {
-        timestamp,
-        delta: Box::new(delta),
-        unsets,
-    }))
-}
-
-/// Fold a single [`ConfigDelta`] into an accumulated partial config state.
-///
-/// [`Apply`] merges the delta on top of `state`.
-/// [`Reset`] discards `state`, restarting from the empty partial
-/// (`PartialAppConfig::default()`); program defaults are injected when the
-/// partial is finalized into an [`AppConfig`].
-///
-/// [`Apply`]: ConfigDelta::Apply
-/// [`Reset`]: ConfigDelta::Reset
-fn fold_config_delta(state: &mut PartialAppConfig, delta: ConfigDelta) -> Result<(), ConfigError> {
-    match delta {
-        ConfigDelta::Apply(apply) => {
-            for path in &apply.unsets {
-                if let Err(error) = state.unset(path) {
-                    warn!(%path, %error, "Ignoring a config delta unset for an unknown field.");
-                }
-            }
-
-            state.merge(&(), *apply.delta)
-        }
-        ConfigDelta::Reset(_) => {
-            *state = PartialAppConfig::default();
-            Ok(())
-        }
-    }
-}
-
 /// A stream of events that make up a conversation.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub struct ConversationStream {
     /// The base configuration for the conversation.
     ///
@@ -431,8 +64,46 @@ pub struct ConversationStream {
     /// The events in the stream.
     events: Vec<InternalEvent>,
 
+    /// Every entry ID this stream has handed out, including those whose entry
+    /// has since been removed.
+    ///
+    /// A superset of the IDs in `events`, and the invariant every insertion
+    /// path relies on: an ID is retired with its entry rather than returned to
+    /// circulation, so a reference to a deleted entry fails to resolve instead
+    /// of binding to a later one.
+    /// Not serialized, so retirement lasts as long as this stream does: a load
+    /// seeds the set from the entries the file still carries.
+    ///
+    /// An entry carrying an ID this set has not seen reaches `events` only
+    /// through [`Self::append`], [`Self::insert`], or [`Self::adopt`], which is
+    /// what keeps the two in step.
+    /// Moving an entry the stream already holds does not go through them, and
+    /// must not: those take an ID the set has not handed out, so passing one it
+    /// has would replace the entry's ID rather than preserve it.
+    event_ids: EventIds,
+
+    /// IDs more than one entry carried when this stream was loaded.
+    ///
+    /// Read through [`Self::duplicated_event_ids`], which states the deadline a
+    /// consumer is held to.
+    /// Not serialized.
+    duplicated_event_ids: HashSet<EventId>,
+
     /// The timestamp of the creation of the stream.
     pub created_at: DateTime<Utc>,
+}
+
+// Hand-rolled to compare what the stream *holds*, not how it came to hold it.
+// `event_ids` and `duplicated_event_ids` are load- and history-scoped: two
+// streams carrying identical entries would otherwise compare unequal because
+// one of them was loaded from a file with duplicate IDs, or because an entry
+// was pushed and popped along the way.
+impl PartialEq for ConversationStream {
+    fn eq(&self, other: &Self) -> bool {
+        self.base_config == other.base_config
+            && self.events == other.events
+            && self.created_at == other.created_at
+    }
 }
 
 impl ConversationStream {
@@ -442,6 +113,8 @@ impl ConversationStream {
         Self {
             base_config,
             events: Vec::new(),
+            event_ids: EventIds::default(),
+            duplicated_event_ids: HashSet::new(),
             created_at: Utc::now(),
         }
     }
@@ -460,14 +133,17 @@ impl ConversationStream {
         self
     }
 
-    /// Returns `true` if the stream is empty.
-    /// This only considers [`ConversationEvent`]s.
+    /// Returns `true` if the stream holds no [`ConversationEvent`]s.
+    ///
+    /// Entries of other kinds are not counted, so a stream carrying only config
+    /// deltas and compactions reports `true` here and still writes those
+    /// entries in [`Self::to_parts`].
     #[must_use]
     pub fn is_empty(&self) -> bool {
         !self
             .events
             .iter()
-            .any(|e| matches!(e, InternalEvent::Event(_)))
+            .any(|e| matches!(&e.payload, EventPayload::Event(_)))
     }
 
     /// Returns `true` if the stream contains at least one [`ChatRequest`].
@@ -475,16 +151,19 @@ impl ConversationStream {
     pub fn has_chat_request(&self) -> bool {
         self.events
             .iter()
-            .any(|e| matches!(e, InternalEvent::Event(event) if event.is_chat_request()))
+            .any(|e| matches!(&e.payload, EventPayload::Event(event) if event.is_chat_request()))
     }
 
-    /// Returns the number of events in the stream.
-    /// This only considers [`ConversationEvent`]s.
+    /// Returns the number of [`ConversationEvent`]s in the stream.
+    ///
+    /// Entries of other kinds are not counted, so this is at most the number of
+    /// entries [`Self::to_parts`] writes, and can be `0` for a stream that
+    /// stores several.
     #[must_use]
     pub fn len(&self) -> usize {
         self.events
             .iter()
-            .filter(|e| matches!(e, InternalEvent::Event(_)))
+            .filter(|e| matches!(&e.payload, EventPayload::Event(_)))
             .count()
     }
 
@@ -539,16 +218,16 @@ impl ConversationStream {
     /// Returns an error if a delta cannot be folded onto the accumulated state.
     pub fn config_partial(&self) -> Result<PartialAppConfig, StreamError> {
         let mut partial = self.base_config.to_partial();
-        let iter = self.events.iter().filter_map(|event| match event {
-            InternalEvent::ConfigDelta(delta) => Some(delta.clone()),
-            InternalEvent::Event(_)
-            | InternalEvent::Compaction(_)
-            | InternalEvent::Overlay(_)
-            | InternalEvent::Unknown(_) => None,
+        let iter = self.events.iter().filter_map(|event| match &event.payload {
+            EventPayload::ConfigDelta(delta) => Some(delta.clone()),
+            EventPayload::Event(_)
+            | EventPayload::Compaction(_)
+            | EventPayload::Overlay(_)
+            | EventPayload::Unknown(_) => None,
         });
 
         for delta in iter {
-            fold_config_delta(&mut partial, delta)?;
+            config_delta::fold(&mut partial, delta)?;
         }
 
         Ok(partial)
@@ -615,6 +294,10 @@ impl ConversationStream {
 
         // Re-append preserved overlays in their original order, whether or not
         // a request was found, so they survive the trim.
+        //
+        // Appended directly rather than through `adopt`: these are the entries
+        // just popped, so `event_ids` still holds their IDs and `adopt` would
+        // read that as a collision and reassign them.
         preserved.reverse();
         self.events.append(&mut preserved);
 
@@ -654,7 +337,7 @@ impl ConversationStream {
             return;
         }
 
-        self.events.push(InternalEvent::ConfigDelta(delta));
+        self.append(EventPayload::ConfigDelta(delta));
     }
 
     /// Append a config reset point followed by the state layered on top of it.
@@ -690,7 +373,7 @@ impl ConversationStream {
 
     /// Add a compaction overlay to the stream.
     pub fn add_compaction(&mut self, compaction: Compaction) {
-        self.events.push(InternalEvent::Compaction(compaction));
+        self.append(EventPayload::Compaction(compaction));
     }
 
     /// Append a patch overlay, returning how many events its patches change in
@@ -706,7 +389,7 @@ impl ConversationStream {
     pub fn add_overlay(&mut self, patches: Vec<OverlayPatch>) -> usize {
         let changed = self.count_overlay_changes(&patches);
 
-        self.events.push(InternalEvent::Overlay(EventOverlay {
+        self.append(EventPayload::Overlay(EventOverlay {
             timestamp: Utc::now(),
             patches,
         }));
@@ -720,8 +403,8 @@ impl ConversationStream {
         let existing: Vec<&OverlayPatch> = self
             .events
             .iter()
-            .filter_map(|e| match e {
-                InternalEvent::Overlay(overlay) => Some(&overlay.patches),
+            .filter_map(|e| match &e.payload {
+                EventPayload::Overlay(overlay) => Some(&overlay.patches),
                 _ => None,
             })
             .flatten()
@@ -750,7 +433,7 @@ impl ConversationStream {
     pub fn remove_compactions(&mut self) -> usize {
         let before = self.events.len();
         self.events
-            .retain(|e| !matches!(e, InternalEvent::Compaction(_)));
+            .retain(|e| !matches!(&e.payload, EventPayload::Compaction(_)));
         before - self.events.len()
     }
 
@@ -764,36 +447,36 @@ impl ConversationStream {
             .events
             .iter()
             .enumerate()
-            .filter(|(_, event)| matches!(event, InternalEvent::Compaction(_)))
+            .filter(|(_, event)| matches!(&event.payload, EventPayload::Compaction(_)))
             .map(|(position, _)| position)
             .nth(index)?;
 
-        match self.events.remove(position) {
-            InternalEvent::Compaction(compaction) => Some(compaction),
+        match self.events.remove(position).payload {
+            EventPayload::Compaction(compaction) => Some(compaction),
             _ => unreachable!("position points at a compaction event"),
         }
     }
 
     /// Returns an iterator over the [`Compaction`] events in the stream.
     pub fn compactions(&self) -> impl Iterator<Item = &Compaction> {
-        self.events.iter().filter_map(|e| match e {
-            InternalEvent::Compaction(c) => Some(c),
+        self.events.iter().filter_map(|e| match &e.payload {
+            EventPayload::Compaction(c) => Some(c),
             _ => None,
         })
     }
 
     /// Returns an iterator over the [`ConfigDelta`] events in the stream.
     pub fn config_deltas(&self) -> impl Iterator<Item = &ConfigDelta> {
-        self.events.iter().filter_map(|e| match e {
-            InternalEvent::ConfigDelta(delta) => Some(delta),
+        self.events.iter().filter_map(|e| match &e.payload {
+            EventPayload::ConfigDelta(delta) => Some(delta),
             _ => None,
         })
     }
 
     /// Returns an iterator over the [`EventOverlay`] events in the stream.
     pub fn overlays(&self) -> impl Iterator<Item = &EventOverlay> {
-        self.events.iter().filter_map(|e| match e {
-            InternalEvent::Overlay(o) => Some(o),
+        self.events.iter().filter_map(|e| match &e.payload {
+            EventPayload::Overlay(o) => Some(o),
             _ => None,
         })
     }
@@ -807,11 +490,17 @@ impl ConversationStream {
     /// patch overlays and events this build does not recognize have to survive
     /// as well.
     ///
+    /// Appended entries keep their IDs, so a reference into `other` still
+    /// resolves against the copy.
+    /// An ID this stream has already handed out is replaced on the incoming
+    /// entry.
     /// `other`'s config deltas are appended verbatim rather than recomputed, so
     /// the two streams must share a base config for the result to resolve the
     /// same way.
     pub fn append_stream(&mut self, other: Self) {
-        self.events.extend(other.events);
+        for entry in other.events {
+            self.adopt(entry);
+        }
     }
 
     /// Apply projection to the stream.
@@ -828,12 +517,15 @@ impl ConversationStream {
     /// When the stream carries neither patch overlays nor compactions, the
     /// events are left unchanged and every turn maps to its own index.
     ///
-    /// This method is called by [`Thread::into_parts()`] before provider
-    /// visibility filtering.
+    /// Apply this to a copy to preserve the raw stream.
+    /// Retained entries keep their IDs, which reference the original raw
+    /// entries even when projection changes their content in this view.
     ///
-    /// [`Thread::into_parts()`]: crate::thread::Thread::into_parts
+    /// Synthetic summary entries receive ephemeral IDs and have no
+    /// corresponding entry in `events.json`.
+    /// Do not use those synthetic IDs as references into the raw stream.
     pub fn apply_projection(&mut self) -> Vec<TurnOrigin> {
-        projection::apply(&mut self.events)
+        projection::apply(&mut self.events, &mut self.event_ids)
     }
 
     /// List the items `compaction`'s mechanical policies reach, in stream
@@ -885,7 +577,7 @@ impl ConversationStream {
         let has_turn = self
             .events
             .iter()
-            .any(|e| matches!(e, InternalEvent::Event(event) if event.is_turn_start()));
+            .any(|e| matches!(&e.payload, EventPayload::Event(event) if event.is_turn_start()));
 
         if !has_turn {
             self.push(ConversationEvent::now(TurnStart));
@@ -894,10 +586,89 @@ impl ConversationStream {
         TurnMut::new(self)
     }
 
-    /// Push a [`ConversationEvent`] onto the stream.
-    fn push(&mut self, event: impl Into<ConversationEvent>) {
+    /// Append a payload, returning the ID the stream assigned it.
+    fn append(&mut self, payload: EventPayload) -> EventId {
+        let event_id = self.event_ids.fresh();
+        self.events.push(InternalEvent {
+            event_id: event_id.clone(),
+            payload,
+        });
+        event_id
+    }
+
+    /// Insert a payload at `index`, returning the ID the stream assigned it.
+    fn insert(&mut self, index: usize, payload: EventPayload) -> EventId {
+        let event_id = self.event_ids.fresh();
+        self.events.insert(index, InternalEvent {
+            event_id: event_id.clone(),
+            payload,
+        });
+        event_id
+    }
+
+    /// Append an entry from another stream, keeping its ID when this stream has
+    /// not handed that ID out.
+    ///
+    /// IDs are unique within a stream, so an entry arriving from elsewhere can
+    /// keep the identity it already has, and references into the source stream
+    /// keep resolving against the copy.
+    /// Only a collision with an ID this stream has handed out forces a new one.
+    fn adopt(&mut self, entry: InternalEvent) -> EventId {
+        let event_id = self.event_ids.claim(entry.event_id);
+        self.events.push(InternalEvent {
+            event_id: event_id.clone(),
+            payload: entry.payload,
+        });
+        event_id
+    }
+
+    /// Append a [`ConversationEvent`], returning the ID the stream assigned it.
+    ///
+    /// The ID identifies this entry for as long as it is in the stream, and is
+    /// persisted with it.
+    /// Turn boundaries are not created here; use [`Self::start_turn`].
+    ///
+    /// There is no way back from an [`EventId`] to the entry holding it yet, so
+    /// a caller keeps the returned ID for what it writes elsewhere rather than
+    /// to look the entry up again.
+    ///
+    /// [`Self::push`] is the same append for a caller with no use for the ID.
+    pub fn push_event(&mut self, event: impl Into<ConversationEvent>) -> EventId {
+        self.append(EventPayload::Event(Box::new(event.into())))
+    }
+
+    /// Append entries carrying known IDs.
+    ///
+    /// IDs are normally assigned by the stream, so a test that needs to name
+    /// one builds the entries itself.
+    /// Going through here registers those IDs, which is what the uniqueness
+    /// invariant on `event_ids` needs; pushing onto `events` directly would
+    /// leave the stream able to hand out an ID it already holds.
+    #[cfg(test)]
+    fn extend_entries(&mut self, entries: impl IntoIterator<Item = InternalEvent>) {
+        for entry in entries {
+            self.adopt(entry);
+        }
+    }
+
+    /// Whether `event_ids` still holds every ID the stream's entries carry.
+    ///
+    /// The invariant that field documents, checked directly.
+    /// Watching for a reused ID would not: two generated IDs practically never
+    /// collide, so the check would hold whether or not the set was in step.
+    #[cfg(test)]
+    fn id_set_covers_entries(&self) -> bool {
         self.events
-            .push(InternalEvent::Event(Box::new(event.into())));
+            .iter()
+            .all(|entry| self.event_ids.contains(&entry.event_id))
+    }
+
+    /// Append a [`ConversationEvent`], discarding the ID it was given.
+    ///
+    /// [`Self::push_event`] for the many callers that only want the event in
+    /// the stream, so they do not each write `let _ =`.
+    fn push(&mut self, event: impl Into<ConversationEvent>) {
+        self.push_event(event);
     }
 
     /// Returns the structured output schema for the current turn.
@@ -917,7 +688,7 @@ impl ConversationStream {
         let turn_start = self
             .events
             .iter()
-            .rposition(|e| matches!(e, InternalEvent::Event(ev) if ev.is_turn_start()));
+            .rposition(|e| matches!(&e.payload, EventPayload::Event(ev) if ev.is_turn_start()));
 
         let search_from = turn_start.map_or(0, |pos| pos + 1);
 
@@ -981,10 +752,15 @@ impl ConversationStream {
             .last()
             .map_or_else(|| self.base_config.to_partial(), |v| v.config);
 
-        self.events
-            .remove(pos)
+        let internal = self.events.remove(pos);
+        let event_id = internal.event_id.clone();
+        internal
             .into_event()
-            .map(|event| ConversationEventWithConfig { event, config })
+            .map(|event| ConversationEventWithConfig {
+                event_id,
+                event,
+                config,
+            })
     }
 
     /// Returns the last turn-scoped [`ConversationEvent`] in the stream,
@@ -1060,14 +836,14 @@ impl ConversationStream {
     /// turn-truncation helpers and the `fork` time filter inherit it without
     /// each tracking overlay validity themselves.
     ///
-    /// [RFD 097]: https://github.com/dcdpr/jp/blob/main/docs/rfd/097-stable-event-identifiers.md
+    /// [RFD 097]: https://jp.computer/rfd/097
     pub fn retain(&mut self, mut f: impl FnMut(&ConversationEvent) -> bool) {
         // Fast path: with no overlays present there's nothing to invalidate, so
         // skip the turn-index bookkeeping.
         if !self
             .events
             .iter()
-            .any(|e| matches!(e, InternalEvent::Compaction(_)))
+            .any(|e| matches!(&e.payload, EventPayload::Compaction(_)))
         {
             self.events.retain(|event| match event.scope() {
                 EventScope::Global => true,
@@ -1097,8 +873,8 @@ impl ConversationStream {
         // Drop only overlays the removal could have invalidated: those whose
         // range reaches the earliest removed turn or beyond.
         if let Some(threshold) = first_removed_turn {
-            self.events.retain(|event| match event {
-                InternalEvent::Compaction(c) => c.to_turn < threshold,
+            self.events.retain(|event| match &event.payload {
+                EventPayload::Compaction(c) => c.to_turn < threshold,
                 _ => true,
             });
         }
@@ -1152,11 +928,9 @@ impl ConversationStream {
     /// maintain configuration state, and turn markers are invisible to
     /// providers but useful for `--last`.
     fn drop_leading_non_user_events(&mut self) {
-        let Some(pos) = self
-            .events
-            .iter()
-            .position(|e| matches!(e, InternalEvent::Event(event) if event.is_chat_request()))
-        else {
+        let Some(pos) = self.events.iter().position(
+            |e| matches!(&e.payload, EventPayload::Event(event) if event.is_chat_request()),
+        ) else {
             return;
         };
 
@@ -1167,12 +941,12 @@ impl ConversationStream {
             if i >= pos {
                 return true;
             }
-            match event {
-                InternalEvent::ConfigDelta(_)
-                | InternalEvent::Compaction(_)
-                | InternalEvent::Overlay(_)
-                | InternalEvent::Unknown(_) => true,
-                InternalEvent::Event(e) => e.is_turn_start(),
+            match &event.payload {
+                EventPayload::ConfigDelta(_)
+                | EventPayload::Compaction(_)
+                | EventPayload::Overlay(_)
+                | EventPayload::Unknown(_) => true,
+                EventPayload::Event(e) => e.is_turn_start(),
             }
         });
     }
@@ -1304,17 +1078,16 @@ impl ConversationStream {
         if self
             .events
             .iter()
-            .all(|e| !matches!(e, InternalEvent::Event(event) if !event.is_turn_start()))
+            .all(|e| !matches!(&e.payload, EventPayload::Event(event) if !event.is_turn_start()))
         {
             // Stream has no non-TurnStart events, nothing to normalize.
             return;
         }
 
         // Find the position of the first ChatRequest.
-        let first_chat_pos = self
-            .events
-            .iter()
-            .position(|e| matches!(e, InternalEvent::Event(event) if event.is_chat_request()));
+        let first_chat_pos = self.events.iter().position(
+            |e| matches!(&e.payload, EventPayload::Event(event) if event.is_chat_request()),
+        );
 
         // Remove all but the last TurnStart before the first ChatRequest. This
         // collapses multiple stale turn markers from filtered turns into a
@@ -1323,7 +1096,7 @@ impl ConversationStream {
             let leading_turn_starts: Vec<usize> = self.events[..chat_pos]
                 .iter()
                 .enumerate()
-                .filter(|(_, e)| matches!(e, InternalEvent::Event(event) if event.is_turn_start()))
+                .filter(|(_, e)| matches!(&e.payload, EventPayload::Event(event) if event.is_turn_start()))
                 .map(|(i, _)| i)
                 .collect();
 
@@ -1341,15 +1114,15 @@ impl ConversationStream {
         }
 
         // Ensure there's a TurnStart before the first ChatRequest.
-        let first_event_is_turn_start =
-            self.events
-                .iter()
-                .any(|e| matches!(e, InternalEvent::Event(event) if event.is_turn_start()))
-                && self.events.iter().position(
-                    |e| matches!(e, InternalEvent::Event(event) if event.is_turn_start()),
-                ) < self.events.iter().position(
-                    |e| matches!(e, InternalEvent::Event(event) if event.is_chat_request()),
-                );
+        let first_event_is_turn_start = self
+            .events
+            .iter()
+            .any(|e| matches!(&e.payload, EventPayload::Event(event) if event.is_turn_start()))
+            && self.events.iter().position(
+                |e| matches!(&e.payload, EventPayload::Event(event) if event.is_turn_start()),
+            ) < self.events.iter().position(
+                |e| matches!(&e.payload, EventPayload::Event(event) if event.is_chat_request()),
+            );
 
         if !first_event_is_turn_start {
             // Find where to insert (right before the first ChatRequest,
@@ -1357,7 +1130,9 @@ impl ConversationStream {
             let insert_pos = self
                 .events
                 .iter()
-                .position(|e| matches!(e, InternalEvent::Event(event) if event.is_chat_request()))
+                .position(
+                    |e| matches!(&e.payload, EventPayload::Event(event) if event.is_chat_request()),
+                )
                 .unwrap_or(0);
 
             let timestamp = self
@@ -1366,9 +1141,9 @@ impl ConversationStream {
                 .and_then(InternalEvent::as_event)
                 .map_or(DateTime::<Utc>::UNIX_EPOCH, |e| e.timestamp);
 
-            self.events.insert(
+            self.insert(
                 insert_pos,
-                InternalEvent::Event(Box::new(ConversationEvent::new(TurnStart, timestamp))),
+                EventPayload::Event(Box::new(ConversationEvent::new(TurnStart, timestamp))),
             );
         }
     }
@@ -1417,14 +1192,16 @@ impl ConversationStream {
         // Insert synthetic responses directly after each orphaned request.
         // Iterate in reverse so earlier indices remain valid.
         for (pos, id, timestamp) in orphans.into_iter().rev() {
-            let response = InternalEvent::Event(Box::new(ConversationEvent::new(
-                ToolCallResponse {
-                    id,
-                    result: Err("Tool call was interrupted.".to_string()),
-                },
-                timestamp,
-            )));
-            self.events.insert(pos + 1, response);
+            self.insert(
+                pos + 1,
+                EventPayload::Event(Box::new(ConversationEvent::new(
+                    ToolCallResponse {
+                        id,
+                        result: Err("Tool call was interrupted.".to_string()),
+                    },
+                    timestamp,
+                ))),
+            );
         }
     }
 
@@ -1441,8 +1218,8 @@ impl ConversationStream {
         IterTurns::new(self.iter())
     }
 
-    /// Returns each event paired with the 0-based index of the turn it belongs
-    /// to.
+    /// Iterate over the conversation events, each tagged with its 0-based turn
+    /// index and entry ID.
     ///
     /// Turn boundaries match [`Self::iter_turns`]: a [`TurnStart`] opens a new
     /// turn, and events before the first `TurnStart` form an implicit leading
@@ -1455,12 +1232,12 @@ impl ConversationStream {
     /// Prefer it whenever only event content is needed.
     ///
     /// [`TurnStart`]: crate::event::TurnStart
-    pub fn iter_events_by_turn(&self) -> impl Iterator<Item = (usize, &ConversationEvent)> {
+    pub fn iter_events_by_turn(&self) -> impl Iterator<Item = EventInTurn<'_>> {
         let mut turn = 0;
         let mut seen_event = false;
 
         self.events.iter().filter_map(move |internal| {
-            let InternalEvent::Event(event) = internal else {
+            let EventPayload::Event(event) = &internal.payload else {
                 return None;
             };
 
@@ -1471,7 +1248,11 @@ impl ConversationStream {
             }
             seen_event = true;
 
-            Some((turn, &**event))
+            Some(EventInTurn {
+                turn,
+                event_id: &internal.event_id,
+                event,
+            })
         })
     }
 
@@ -1486,7 +1267,7 @@ impl ConversationStream {
     pub fn turn_count(&self) -> usize {
         self.iter_events_by_turn()
             .last()
-            .map_or(0, |(turn, _)| turn + 1)
+            .map_or(0, |event| event.turn + 1)
     }
 
     /// Returns the turn that was active at the given time.
@@ -1529,7 +1310,7 @@ impl ConversationStream {
         let turn_count = self
             .events
             .iter()
-            .filter(|e| matches!(e, InternalEvent::Event(ev) if ev.is_turn_start()))
+            .filter(|e| matches!(&e.payload, EventPayload::Event(ev) if ev.is_turn_start()))
             .count();
 
         if turn_count <= n {
@@ -1595,8 +1376,8 @@ impl ConversationStream {
         if let Some(pos) = self
             .events
             .iter()
-            .rposition(|e| matches!(e, InternalEvent::Event(_)))
-            && let InternalEvent::Event(ref event) = self.events[pos]
+            .rposition(|e| matches!(&e.payload, EventPayload::Event(_)))
+            && let EventPayload::Event(event) = &self.events[pos].payload
             && event.is_turn_start()
         {
             self.events.remove(pos);
@@ -1637,366 +1418,25 @@ impl ConversationStream {
         Self {
             base_config: AppConfig::new_test().into(),
             events: vec![],
+            event_ids: EventIds::default(),
+            duplicated_event_ids: HashSet::new(),
             created_at: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
         }
     }
 }
 
-impl Extend<ConversationEventWithConfig> for ConversationStream {
-    fn extend<T: IntoIterator<Item = ConversationEventWithConfig>>(&mut self, iter: T) {
-        // Cache the running tail config across iterations. Without this, every
-        // push falls through `push_with_config_delta` → `self.last()`, which
-        // walks the whole stream and deep-clones `PartialAppConfig` on each
-        // step — making `extend(n)` O(n²) in clones.
-        let mut tail = self
-            .last()
-            .map_or_else(|| self.base_config.to_partial(), |v| v.config);
-
-        for v in iter {
-            let ConversationEventWithConfig { event, config } = v;
-            let config_delta = tail.delta(config.clone());
-
-            if !config_delta.is_empty() {
-                self.add_config_delta(ApplyDelta::new(event.timestamp, config_delta));
-            }
-
-            tail = config;
-            self.push(event);
-        }
-    }
-}
-
-impl Extend<ConversationEvent> for ConversationStream {
-    fn extend<T: IntoIterator<Item = ConversationEvent>>(&mut self, iter: T) {
-        for v in iter {
-            self.push(v);
-        }
-    }
-}
-
-impl IntoIterator for ConversationStream {
-    type Item = ConversationEventWithConfig;
-
-    type IntoIter = IntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        IntoIter {
-            current_config: self.base_config.to_partial(),
-            inner_iter: self.events.into_iter(),
-        }
-    }
-}
-
-/// An owned iterator over the events in a conversation stream.
-pub struct IntoIter {
-    /// The configuration state for the next event in the iterator.
-    current_config: PartialAppConfig,
-
-    /// The iterator over the events in the stream.
-    inner_iter: std::vec::IntoIter<InternalEvent>,
-}
-
-impl Iterator for IntoIter {
-    type Item = ConversationEventWithConfig;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let event = self.inner_iter.next()?;
-
-            match event {
-                InternalEvent::ConfigDelta(delta) => {
-                    if let Err(error) = fold_config_delta(&mut self.current_config, delta) {
-                        error!(%error, "Failed to merge config delta.");
-                    }
-                }
-                InternalEvent::Event(event) => {
-                    return Some(ConversationEventWithConfig {
-                        event: *event,
-                        config: self.current_config.clone(),
-                    });
-                }
-                InternalEvent::Compaction(_)
-                | InternalEvent::Overlay(_)
-                | InternalEvent::Unknown(_) => {}
-            }
-        }
-    }
-}
-
-impl DoubleEndedIterator for IntoIter {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        loop {
-            let event = self.inner_iter.next_back()?;
-
-            match event {
-                InternalEvent::ConfigDelta(_)
-                | InternalEvent::Compaction(_)
-                | InternalEvent::Overlay(_)
-                | InternalEvent::Unknown(_) => {
-                    // A delta/compaction at the very end of the list affects
-                    // nothing that follows it, and it doesn't affect previous
-                    // items. We simply discard it.
-                    // event at the tail likewise yields no ConversationEvent.
-                }
-                InternalEvent::Event(event) => {
-                    // Start with the state currently at the front of the line
-                    let mut config = self.current_config.clone();
-
-                    // Scan the remaining items in the middle (without consuming
-                    // them) to apply all pending deltas to our temporary
-                    // config.
-                    for internal_event in self.inner_iter.as_slice() {
-                        if let InternalEvent::ConfigDelta(delta) = internal_event
-                            && let Err(error) = fold_config_delta(&mut config, delta.clone())
-                        {
-                            error!(%error, "Failed to merge config delta.");
-                        }
-                    }
-
-                    return Some(ConversationEventWithConfig {
-                        event: *event,
-                        config,
-                    });
-                }
-            }
-        }
-    }
-}
-
-/// An iterator over the borrowed events in a conversation stream.
-struct Iter<'a> {
-    /// The stream being iterated over.
-    stream: &'a ConversationStream,
-
-    /// The configuration state for the first, next event in the iterator.
-    front_config: PartialAppConfig,
-
-    /// The index of the `next` event in the iterator.
-    front: usize,
-
-    /// The index of the `next_back` event in the iterator.
-    back: usize,
-}
-
-impl<'a> Iterator for Iter<'a> {
-    type Item = ConversationEventWithConfigRef<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while self.front < self.back {
-            let event = &self.stream.events[self.front];
-            self.front += 1;
-
-            match event {
-                InternalEvent::ConfigDelta(delta) => {
-                    if let Err(error) = fold_config_delta(&mut self.front_config, delta.clone()) {
-                        error!(%error, "Failed to merge config delta.");
-                    }
-                }
-                InternalEvent::Event(event) => {
-                    return Some(ConversationEventWithConfigRef {
-                        event,
-                        config: self.front_config.clone(),
-                    });
-                }
-                InternalEvent::Compaction(_)
-                | InternalEvent::Overlay(_)
-                | InternalEvent::Unknown(_) => {}
-            }
-        }
-
-        None
-    }
-}
-
-impl DoubleEndedIterator for Iter<'_> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        while self.back > self.front {
-            self.back -= 1;
-            let event = &self.stream.events[self.back];
-
-            let InternalEvent::Event(event) = event else {
-                continue;
-            };
-
-            let mut config = self.stream.base_config.to_partial();
-            for internal_event in &self.stream.events[..self.back] {
-                if let InternalEvent::ConfigDelta(delta) = internal_event
-                    && let Err(error) = fold_config_delta(&mut config, delta.clone())
-                {
-                    error!(%error, "Failed to merge config delta.");
-                }
-            }
-
-            return Some(ConversationEventWithConfigRef { event, config });
-        }
-
-        None
-    }
-}
-
-/// An iterator over the mutable events in a conversation stream.
-pub struct IterMut<'a> {
-    /// The configuration state for the first, next event in the iterator.
-    front_config: PartialAppConfig,
-
-    /// The iterator over the events in the stream.
-    iter: std::slice::IterMut<'a, InternalEvent>,
-}
-
-impl<'a> Iterator for IterMut<'a> {
-    type Item = ConversationEventWithConfigMut<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        for event in self.iter.by_ref() {
-            match event {
-                InternalEvent::ConfigDelta(delta) => {
-                    if let Err(error) = fold_config_delta(&mut self.front_config, delta.clone()) {
-                        error!(%error, "Failed to merge config delta.");
-                    }
-                }
-                InternalEvent::Event(event) => {
-                    return Some(ConversationEventWithConfigMut {
-                        event,
-                        config: self.front_config.clone(),
-                    });
-                }
-                InternalEvent::Compaction(_)
-                | InternalEvent::Overlay(_)
-                | InternalEvent::Unknown(_) => {}
-            }
-        }
-
-        None
-    }
-}
-
-/// A reference to a [`ConversationEvent`] with its configuration.
-#[derive(Debug, PartialEq, Clone)]
-pub struct ConversationEventWithConfigRef<'a> {
-    /// The event.
-    pub event: &'a ConversationEvent,
-
-    /// The configuration.
-    pub config: PartialAppConfig,
-}
-
-/// A mutable reference to a [`ConversationEvent`] with its configuration.
-#[derive(Debug, PartialEq)]
-pub struct ConversationEventWithConfigMut<'a> {
-    /// The event.
-    pub event: &'a mut ConversationEvent,
-
-    /// The configuration.
-    pub config: PartialAppConfig,
-}
-
-/// A [`ConversationEvent`] with its configuration.
-#[derive(Debug, PartialEq, Clone)]
-pub struct ConversationEventWithConfig {
-    /// The event.
-    pub event: ConversationEvent,
-
-    /// The configuration at the time the event was added.
-    ///
-    /// It should be noted that this is not necessarily the same as the current
-    /// active configuration of the application, even if this is the latest
-    /// event in the stream.
-    /// For one, the event may have been added a while ago, but more
-    /// importantly, not all configuration changes are automatically applied to
-    /// a [`ConversationStream`].
-    /// For example, if a new tool is added in the configuration, it will not
-    /// become available in the conversation stream until explicitly added using
-    /// the CLI flag `--tool` or `--cfg`, while *NEW* conversations *WILL* get
-    /// the new tool by default.
-    pub config: PartialAppConfig,
-}
-
-impl ConversationEventWithConfig {
-    /// Consume the type and return the underlying [`ConversationEvent`].
-    #[must_use]
-    pub fn into_inner(self) -> ConversationEvent {
-        self.event
-    }
-
-    /// Consume the type and return the underlying [`EventKind`].
-    #[must_use]
-    pub fn into_kind(self) -> EventKind {
-        self.event.kind
-    }
-
-    /// Return a reference to the underlying [`EventKind`].
-    #[must_use]
-    pub const fn kind(&self) -> &EventKind {
-        &self.event.kind
-    }
-}
-
-impl From<ConversationEventWithConfigRef<'_>> for ConversationEventWithConfig {
-    fn from(value: ConversationEventWithConfigRef<'_>) -> Self {
-        Self {
-            event: value.event.clone(),
-            config: value.config,
-        }
-    }
-}
-
-impl FromIterator<ConversationEventWithConfig> for Result<ConversationStream, StreamError> {
-    fn from_iter<T: IntoIterator<Item = ConversationEventWithConfig>>(iter: T) -> Self {
-        let mut events = iter.into_iter();
-
-        let Some((config, first_event)) = events.next().map(|e| (e.config, e.event)) else {
-            return Err(StreamError::FromEmptyIterator);
-        };
-
-        let mut stream = ConversationStream::new(jp_config::util::build(config)?.into());
-        stream.push(first_event);
-        stream.extend(events);
-
-        Ok(stream)
-    }
-}
-
-impl std::ops::Deref for ConversationEventWithConfig {
-    type Target = ConversationEvent;
-
-    fn deref(&self) -> &Self::Target {
-        &self.event
-    }
-}
-
-impl std::ops::Deref for ConversationEventWithConfigRef<'_> {
-    type Target = ConversationEvent;
-
-    fn deref(&self) -> &Self::Target {
-        self.event
-    }
-}
-
-impl std::ops::Deref for ConversationEventWithConfigMut<'_> {
-    type Target = ConversationEvent;
-
-    fn deref(&self) -> &Self::Target {
-        self.event
-    }
-}
-
-impl std::ops::DerefMut for ConversationEventWithConfigMut<'_> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.event
-    }
-}
-
-impl From<ConversationEvent> for ConversationEventWithConfig {
-    fn from(event: ConversationEvent) -> Self {
-        Self {
-            event,
-            config: PartialAppConfig::empty(),
-        }
-    }
-}
-
+/// The storage boundary: turning a stream into stored JSON and back.
+///
+/// This is where a file's shortcomings are dealt with — a legacy layout, an
+/// entry with no ID, two entries sharing one.
+/// A stream reaching the rest of JP has none of them, so everything above can
+/// assume its invariants instead of checking them.
 impl ConversationStream {
     /// Construct a stream from a base config and serialized events.
+    ///
+    /// Duplicate entry IDs are repaired on later occurrences, with a warning
+    /// for each replacement.
+    /// Payloads and timestamps are preserved.
     ///
     /// The storage layer reads `base_config.json` as a raw JSON [`Value`] and
     /// `events.json` as raw JSON values.
@@ -2025,16 +1465,72 @@ impl ConversationStream {
     ) -> Result<Self, StreamError> {
         let base_config = crate::compat::deserialize_partial_config(base_config);
 
-        let events = events
+        let stored = events
             .into_iter()
-            .map(|v| serde_json::from_value(v).map_err(StreamError::Json))
+            .map(|v| serde_json::from_value::<StoredEvent>(v).map_err(StreamError::Json))
             .collect::<Result<Vec<_>, _>>()?;
+
+        let mut event_ids = EventIds::default();
+        // Every ID the file carries is reserved before any entry is settled, so
+        // a generated replacement cannot take one belonging to an entry further
+        // down the file.
+        event_ids.reserve(stored.iter().filter_map(|e| e.event_id.clone()));
+
+        let mut seen = HashSet::with_capacity(stored.len());
+        let mut duplicated_event_ids = HashSet::new();
+        let events = stored
+            .into_iter()
+            .map(|StoredEvent { event_id, payload }| {
+                let event_id = match event_id {
+                    // A legacy entry has no identity yet; give it one.
+                    None => event_ids.fresh(),
+                    // The first entry to carry an ID keeps it.
+                    Some(id) if seen.insert(id.clone()) => id,
+                    // A later one cannot, so it is reassigned and the shared
+                    // value recorded: repair restores uniqueness, but it cannot
+                    // say which entry a reference to that value meant.
+                    Some(id) => {
+                        let replacement = event_ids.fresh();
+                        warn!(
+                            event_id = %id,
+                            replacement_event_id = %replacement,
+                            "Regenerated duplicate conversation event ID.",
+                        );
+                        duplicated_event_ids.insert(id);
+                        replacement
+                    }
+                };
+
+                InternalEvent { event_id, payload }
+            })
+            .collect();
 
         Ok(Self {
             base_config: finalize_recovered_config(base_config, fallback)?,
             events,
+            event_ids,
+            duplicated_event_ids,
             created_at: Utc::now(),
         })
+    }
+
+    /// The IDs this load found on more than one entry.
+    ///
+    /// Repair kept the first entry carrying such an ID and reassigned the rest,
+    /// which restores uniqueness but cannot say which entry a pre-existing
+    /// reference to the shared ID meant.
+    /// A feature that resolves references treats a reference to one of these as
+    /// unresolved, and must do so within this load cycle: once the repaired
+    /// stream is saved the file holds unique IDs, and a later load reports
+    /// nothing here.
+    ///
+    /// Scoped to this stream's own load.
+    /// Entries taken from another stream, through [`Self::append_stream`] or
+    /// [`Extend`], arrive without that stream's record, so a consumer resolving
+    /// a reference against a copy asks the stream that read the file.
+    #[must_use]
+    pub const fn duplicated_event_ids(&self) -> &HashSet<EventId> {
+        &self.duplicated_event_ids
     }
 
     /// Decompose the stream into its storable parts.
@@ -2093,7 +1589,7 @@ impl ConversationStream {
         }
 
         // Extract the config subtree as the base config value.
-        let base_config = config_delta_subtree(&events[0]);
+        let base_config = config_delta::subtree(&events[0]);
 
         // Remaining elements are events. from_parts handles compat stripping.
         let events = events.into_iter().skip(1).collect();
@@ -2207,72 +1703,14 @@ pub enum StreamError {
     },
 }
 
-// A custom deserializer for `InternalEvent` that avoids serde allocations when
-// trying to match `untagged` enum variants.
-//
-// Deserializes to a JSON `Value` first, then dispatches on the `type` tag. This
-// avoids the allocation overhead serde incurs when trying each variant of an
-// untagged enum. Base64-encoded storage fields are decoded before the final
-// deserialization into typed events.
-//
-// `cargo dhat` had shown the untagged approach to be a hotspot.
-impl<'de> Deserialize<'de> for InternalEvent {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let mut value = Value::deserialize(deserializer)?;
-
-        let tag = value
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-
-        if tag == "config_delta" {
-            return deserialize_config_delta(&value)
-                .map(Self::ConfigDelta)
-                .map_err(serde::de::Error::custom);
-        }
-
-        if tag == "compaction" {
-            return serde_json::from_value(value)
-                .map(Self::Compaction)
-                .map_err(serde::de::Error::custom);
-        }
-
-        if tag == "event_overlay" {
-            return serde_json::from_value(value)
-                .map(Self::Overlay)
-                .map_err(serde::de::Error::custom);
-        }
-
-        // Conversations are an append-only log a newer `jp` may have written.
-        // An unrecognized event kind is preserved verbatim instead of failing
-        // the whole stream load, so it round-trips on the next save. Corrupt
-        // *known* events still fail loudly below.
-        if !EventKind::TYPE_TAGS.contains(&tag) {
-            #[cfg(debug_assertions)]
-            {
-                let mut probe = value.clone();
-                decode_event_value(&mut probe);
-                debug_assert!(
-                    serde_json::from_value::<ConversationEvent>(probe).is_err(),
-                    "event tag `{tag}` is missing from EventKind::TYPE_TAGS",
-                );
-            }
-            warn!(%tag, "Unknown conversation event kind; preserving raw event.");
-            return Ok(Self::Unknown(value));
-        }
-
-        // Decode base64-encoded storage fields before deserializing.
-        decode_event_value(&mut value);
-
-        serde_json::from_value(value)
-            .map(|e| Self::Event(Box::new(e)))
-            .map_err(serde::de::Error::custom)
-    }
-}
-
 #[cfg(test)]
 #[path = "stream_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "stream/event_id_tests.rs"]
+mod event_id_tests;
+
+#[cfg(test)]
+#[path = "stream/event_id_repair_tests.rs"]
+mod event_id_repair_tests;

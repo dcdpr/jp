@@ -8,7 +8,7 @@
 //!
 //! See [RFD 064].
 //!
-//! [RFD 064]: https://github.com/dcdpr/jp/blob/main/docs/rfd/064-non-destructive-conversation-compaction.md
+//! [RFD 064]: https://jp.computer/rfd/064
 
 use chrono::{DateTime, Utc};
 pub use jp_config::types::{byte_size::ByteSize, policy_spec::PolicySpec};

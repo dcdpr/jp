@@ -73,6 +73,10 @@ pub(crate) struct Edit {
     no_title: bool,
 
     /// Open `events.json` in `$EDITOR`.
+    ///
+    /// Each entry carries an `event_id` identifying it.
+    /// Keep it when you edit an entry's content, and drop it when you add one:
+    /// a missing, empty, or duplicated ID is replaced on the next load.
     #[arg(long, short = 'e', group = "file", conflicts_with = "property")]
     events: bool,
 

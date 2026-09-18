@@ -6,6 +6,8 @@ Six terms describe its structure — a **Conversation** is the stored entity, a
 **Turn** is one slice of it, an **Event** is the atomic unit inside a Turn,
 **Tool Calls** and **Inquiries** are specific event kinds, and a **Thread** is
 the projection of a Conversation that gets sent to an LLM provider.
+An **Event ID** names one entry in the log, so a reference to it survives edits
+that move the entry.
 
 These terms are tightly coupled — paraphrasing one usually breaks the model for
 another.
@@ -17,8 +19,8 @@ annotated.
 second.
 
 > [!NOTE]
-> Cluster status: **Turn**, **Active Conversation**, **Live Conversation**,
-> **Archived Conversation**, and **Label** are defined below.
+> Cluster status: **Turn**, **Event ID**, **Active Conversation**, **Live
+> Conversation**, **Archived Conversation**, and **Label** are defined below.
 > The remaining terms are placeholders and will land in subsequent passes.
 > Until then, see the [legacy single-page glossary] for the older definitions of
 > the unfilled terms.
@@ -149,6 +151,47 @@ keeps one in `metadata.json`, a ticket writes one `- **Label**:` line per pair.
 When you mean a `key=value` pair stored on a conversation or a ticket, the word
 is **Label**.
 
+### Event ID
+
+The identity of one entry in a conversation's event log, unique within that
+stream.
+It belongs to the entry rather than to the entry's position, so editing an
+entry's content or moving it leaves its Event ID alone.
+Every entry has one, whatever it holds.
+
+**Implementation.** `EventId` in `jp_conversation`, held by the stream-entry
+wrapper and persisted as `event_id`.
+A stream hands out its own IDs, and a removed entry takes its ID with it for as
+long as that stream is in memory.
+Retired IDs are not persisted, so the guarantee is per-load rather than for all
+time.
+
+**In context.** The point of an intrinsic identity is that a reference to an
+entry survives the edits a reference to "the third entry" would not.
+A duplicate introduced by hand-editing is repaired on load, but the duplicated
+value is reported as ambiguous rather than silently bound to whichever entry
+kept it: a reference into an edited file resolves to the right entry or to
+nothing, never to the wrong one.
+Projection builds a provider-facing copy whose synthetic entries carry IDs of
+the same type, but those exist only in that copy and are not references into the
+stored stream.
+
+**Not the same as.** The payload `id` on a tool call or inquiry, which pairs a
+request with its response and means something to the provider.
+An entry can carry both, and they answer different questions.
+Also not a **Conversation**'s id, which names the whole log rather than one
+entry in it.
+
+**Scope.** An Event ID carries identity alone: no ordering, no content, and no
+uniqueness beyond its own stream.
+Two conversations may hold the same value, and code must not read one for
+anything but identity-within-a-stream.
+See [RFD-097].
+
+**Avoid.** *Event key*, *entry hash*, *event index*.
+The last is actively wrong — an index is the position an Event ID exists to
+replace.
+
 ### Turn
 
 A contiguous group of conversation events bracketed by a `TurnStart`: one user
@@ -175,5 +218,6 @@ None of these are project terms.
 When you mean a single user-prompt-to-final-response cycle with the assistant,
 the word is **Turn**.
 
+[RFD-097]: ../../rfd/097-stable-event-identifiers.md
 [`jp_label`]: https://github.com/dcdpr/jp/tree/main/crates/jp_label
 [legacy single-page glossary]: ../ubiquitous-language.md

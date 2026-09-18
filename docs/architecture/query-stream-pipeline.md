@@ -227,7 +227,7 @@ The architecture uses existing types from the codebase:
 
 ```rust
 pub struct ConversationEvent {
-    pub timestamp: UtcDateTime,
+    pub timestamp: DateTime<Utc>,
     pub kind: EventKind,
     pub metadata: Map<String, Value>,
 }
@@ -256,10 +256,63 @@ pub enum ChatResponse {
 ```rust
 pub struct ConversationStream {
     base_config: Arc<AppConfig>,
-    events: Vec<InternalEvent>,  // ConfigDelta or ConversationEvent
-    pub created_at: UtcDateTime,
+    events: Vec<InternalEvent>,
+    event_ids: EventIds,
+    duplicated_event_ids: HashSet<EventId>,
+    pub created_at: DateTime<Utc>,
+}
+
+struct InternalEvent {
+    event_id: EventId,
+    payload: EventPayload,
+}
+
+enum EventPayload {
+    Event(Box<ConversationEvent>),
+    ConfigDelta(ConfigDelta),
+    Compaction(Compaction),
+    Overlay(EventOverlay),
+    Unknown(Value),
 }
 ```
+
+The wrapper carries the entry's [Event ID] and the payload carries its
+timestamp, and the two serialize into one object:
+
+```json
+{"event_id":"k3m9x2a","timestamp":"2026-05-03 12:00:00.0","type":"chat_request","content":"Hello"}
+```
+
+Identity is the stream's to assign and the payload's timestamp is its producer's
+to report, which is why the two sit on different halves.
+`event_ids` holds every ID the stream has handed out, so an ID is retired with
+the entry that held it rather than returned to circulation.
+`duplicated_event_ids` records the IDs a load found duplicated, which a
+reference-bearing feature reads to tell an ambiguous reference from a resolvable
+one.
+Neither is serialized.
+
+A stored entry reads as a `StoredEvent`, whose `event_id` is `Option`: a legacy
+entry carries none, and a hand-edited file can give two entries the same one.
+`from_parts` settles those IDs as it builds the stream — assigning one to every
+entry that lacks one, and to every entry after the first to carry a given ID —
+and `from_legacy_events` delegates to it.
+An `InternalEvent` therefore only exists inside a stream, holding an ID that
+stream handed out, which is what makes uniqueness a property of the type rather
+than of a pass someone has to remember to run.
+This is separate from `sanitize()`, which repairs stream structure rather than
+identity, and which sees IDs that are already settled.
+
+The module is split by concern: `stream::entry` holds `InternalEvent`,
+`EventPayload`, `StoredEvent`, and the hand-rolled serde for all three;
+`stream::config_delta` holds `ConfigDelta` and the folding that resolves a
+conversation's config; `stream::iter` holds the three iterators and the
+`…WithConfig` views they yield; `stream::projection` builds the provider-facing
+view.
+`ConversationStream` itself is in `stream`, in two `impl` blocks: the stream's
+own behavior, and the storage boundary that reads and writes stored JSON.
+
+See [RFD 097] for the rules a consumer of these IDs is held to.
 
 **`Thread`** (`jp_conversation::thread`):
 
@@ -274,7 +327,8 @@ pub struct Thread {
 
 The pipeline builds `ConversationEvent` instances and pushes them to
 `ConversationStream`.
-Persistence serializes `ConversationStream` to disk.
+`ConversationStream::to_parts` provides the base configuration and serialized
+entries for storage in `base_config.json` and `events.json`, respectively.
 
 -----
 
@@ -1898,4 +1952,6 @@ This architecture addresses the key issues in the current implementation:
 The migration can be done incrementally, with each phase adding tests and
 maintaining backward compatibility until the final cleanup.
 
+[Event ID]: ubiquitous-language/conversation.md#event-id
+[RFD 097]: ../rfd/097-stable-event-identifiers.md
 [architecture.md]: architecture.md

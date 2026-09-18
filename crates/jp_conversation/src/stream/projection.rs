@@ -17,10 +17,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use chrono::{DateTime, Utc};
 use serde_json::{Map, Value};
 
-use super::InternalEvent;
+use super::{EventPayload, InternalEvent};
 use crate::{
     ByteSize, Compaction, PolicySpec, ReasoningPolicy, ToolCallPolicy,
     event::{ChatRequest, ChatResponse, ConversationEvent, TurnStart},
+    event_id::EventIds,
 };
 
 /// Which raw conversation turn(s) a projected turn stands for.
@@ -80,8 +81,8 @@ impl TurnOrigin {
 fn apply_overlays(events: &mut Vec<InternalEvent>) {
     let patches: Vec<_> = events
         .iter()
-        .filter_map(|e| match e {
-            InternalEvent::Overlay(overlay) => Some(overlay.patches.clone()),
+        .filter_map(|e| match &e.payload {
+            EventPayload::Overlay(overlay) => Some(overlay.patches.clone()),
             _ => None,
         })
         .flatten()
@@ -92,14 +93,14 @@ fn apply_overlays(events: &mut Vec<InternalEvent>) {
     }
 
     for event in events.iter_mut() {
-        if let InternalEvent::Event(conv_event) = event {
+        if let EventPayload::Event(conv_event) = &mut event.payload {
             for patch in &patches {
                 patch.apply(&mut conv_event.metadata);
             }
         }
     }
 
-    events.retain(|e| !matches!(e, InternalEvent::Overlay(_)));
+    events.retain(|e| !matches!(&e.payload, EventPayload::Overlay(_)));
 }
 
 /// Resolved compaction policies for a single turn.
@@ -151,14 +152,20 @@ struct ResolvedSummary {
 /// Returns one [`TurnOrigin`] per resulting turn, in turn order, mapping each
 /// projected turn back to the raw turn number(s) it represents.
 ///
+/// `event_ids` is the stream's own ID set, and the synthetic entries are drawn
+/// from it.
+/// It is taken rather than rebuilt here so the stream still holds every ID its
+/// entries carry once this returns: a set that had never seen the synthetic
+/// entries could hand one of their IDs to a later insertion.
+///
 /// [`Compaction`]: crate::Compaction
-pub(super) fn apply(events: &mut Vec<InternalEvent>) -> Vec<TurnOrigin> {
+pub(super) fn apply(events: &mut Vec<InternalEvent>, event_ids: &mut EventIds) -> Vec<TurnOrigin> {
     apply_overlays(events);
 
     let compactions: Vec<_> = events
         .iter()
-        .filter_map(|e| match e {
-            InternalEvent::Compaction(c) => Some(c.clone()),
+        .filter_map(|e| match &e.payload {
+            EventPayload::Compaction(c) => Some(c.clone()),
             _ => None,
         })
         .collect();
@@ -197,24 +204,24 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) -> Vec<TurnOrigin> {
     let mut event_origins: Vec<TurnOrigin> = Vec::with_capacity(events.len());
     let mut summaries_injected: HashSet<usize> = HashSet::new();
 
-    for (i, event) in std::mem::take(events).into_iter().enumerate() {
+    for (i, mut event) in std::mem::take(events).into_iter().enumerate() {
         let turn = turn_indices[i];
 
-        match event {
+        match &mut event.payload {
             // Config deltas carry global state; unknown (forward-compat) events
             // are opaque. Both pass through projection verbatim — the iterators
             // skip unknown events, so they stay invisible to providers.
-            InternalEvent::ConfigDelta(_) | InternalEvent::Unknown(_) => {
+            EventPayload::ConfigDelta(_) | EventPayload::Unknown(_) => {
                 projected.push(event);
                 event_origins.push(TurnOrigin::Kept(turn));
             }
             // Compaction events are consumed by projection — they've been
             // applied and should not survive into the projected stream.
             // Patch overlays were consumed by `apply_overlays` above.
-            InternalEvent::Compaction(_) | InternalEvent::Overlay(_) => {}
-            InternalEvent::Event(conv_event) => {
+            EventPayload::Compaction(_) | EventPayload::Overlay(_) => {}
+            EventPayload::Event(conv_event) => {
                 let Some(policy) = policies.get(turn) else {
-                    projected.push(InternalEvent::Event(conv_event));
+                    projected.push(event);
                     event_origins.push(TurnOrigin::Kept(turn));
                     continue;
                 };
@@ -236,6 +243,7 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) -> Vec<TurnOrigin> {
                         inject_summary(
                             &mut projected,
                             &mut event_origins,
+                            event_ids,
                             &summary.text,
                             conv_event.timestamp,
                             turn,
@@ -246,11 +254,11 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) -> Vec<TurnOrigin> {
                     continue;
                 }
 
-                let Some(event) = apply_mechanical(*conv_event, policy, tool_calls.get(&i)) else {
+                if apply_mechanical(conv_event, policy, tool_calls.get(&i)) == Projected::Dropped {
                     continue;
-                };
+                }
 
-                projected.push(InternalEvent::Event(Box::new(event)));
+                projected.push(event);
                 event_origins.push(TurnOrigin::Kept(turn));
             }
         }
@@ -359,23 +367,34 @@ pub(super) fn affected_items(
     items
 }
 
+/// Whether a mechanical policy left an event in the projected view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Projected {
+    /// The event stays, with its content possibly rewritten in place.
+    Kept,
+    /// The event is gone from the projected view.
+    Dropped,
+}
+
 /// Apply a turn's mechanical policies (reasoning and tool calls) to one event.
 ///
-/// Returns `None` when the policies drop the event from the projected view.
+/// The event is rewritten in place, which is what preserves its `event_id`: a
+/// projected entry still refers to the raw entry it came from, even when a
+/// policy blanks its content.
 /// A policy whose spec carries an `over` threshold reaches only the items
 /// larger than it; without one, every item in range is reached.
 fn apply_mechanical(
-    mut event: ConversationEvent,
+    event: &mut ConversationEvent,
     policy: &TurnPolicy,
     info: Option<&ToolCallInfo>,
-) -> Option<ConversationEvent> {
+) -> Projected {
     if let Some(spec) = &policy.reasoning
         && matches!(spec.policy, ReasoningPolicy::Strip)
         && let Some(response) = event.as_chat_response()
         && response.is_reasoning()
         && spec.covers(reasoning_size(response))
     {
-        return None;
+        return Projected::Dropped;
     }
 
     // A `None` tool-call policy means "no opinion", so the event passes through
@@ -394,23 +413,23 @@ fn apply_mechanical(
                 if (event.is_tool_call_request() || event.is_tool_call_response())
                     && spec.covers(pair)
                 {
-                    return None;
+                    return Projected::Dropped;
                 }
             }
             ToolCallPolicy::Strip { request, response } => {
                 // Each half is judged on its own size, so a call with a short
                 // request and a huge response loses only the response.
                 if *request && event.is_tool_call_request() && spec.covers(own) {
-                    strip_tool_request(&mut event);
+                    strip_tool_request(event);
                 }
                 if *response && event.is_tool_call_response() && spec.covers(own) {
-                    strip_tool_response(&mut event, info.map_or("unknown", |i| i.name.as_str()));
+                    strip_tool_response(event, info.map_or("unknown", |i| i.name.as_str()));
                 }
             }
         }
     }
 
-    Some(event)
+    Projected::Kept
 }
 
 /// Group projected events into turns (matching [`IterTurns`]) and return each
@@ -460,18 +479,18 @@ pub(super) fn assign_turn_indices(events: &[InternalEvent]) -> Vec<usize> {
     let mut current_has_event = false;
 
     for event in events {
-        match event {
-            InternalEvent::Event(ev) => {
+        match &event.payload {
+            EventPayload::Event(ev) => {
                 if ev.is_turn_start() && current_has_event {
                     turn += 1;
                 }
                 indices.push(turn);
                 current_has_event = true;
             }
-            InternalEvent::ConfigDelta(_)
-            | InternalEvent::Compaction(_)
-            | InternalEvent::Overlay(_)
-            | InternalEvent::Unknown(_) => {
+            EventPayload::ConfigDelta(_)
+            | EventPayload::Compaction(_)
+            | EventPayload::Overlay(_)
+            | EventPayload::Unknown(_) => {
                 indices.push(turn);
             }
         }
@@ -550,26 +569,27 @@ fn resolve_policies(max_turn: usize, compactions: &[crate::Compaction]) -> Vec<T
 fn inject_summary(
     events: &mut Vec<InternalEvent>,
     origins: &mut Vec<TurnOrigin>,
+    event_ids: &mut EventIds,
     summary: &str,
     timestamp: DateTime<Utc>,
     from: usize,
     to: usize,
 ) {
     let origin = TurnOrigin::Summary { from, to };
-    events.push(InternalEvent::Event(Box::new(ConversationEvent::new(
-        TurnStart, timestamp,
-    ))));
-    origins.push(origin);
-    events.push(InternalEvent::Event(Box::new(ConversationEvent::new(
-        ChatRequest::from("[Summary of previous conversation]"),
-        timestamp,
-    ))));
-    origins.push(origin);
-    events.push(InternalEvent::Event(Box::new(ConversationEvent::new(
-        ChatResponse::message(summary),
-        timestamp,
-    ))));
-    origins.push(origin);
+    for event in [
+        ConversationEvent::new(TurnStart, timestamp),
+        ConversationEvent::new(
+            ChatRequest::from("[Summary of previous conversation]"),
+            timestamp,
+        ),
+        ConversationEvent::new(ChatResponse::message(summary), timestamp),
+    ] {
+        events.push(InternalEvent {
+            event_id: event_ids.fresh(),
+            payload: EventPayload::Event(Box::new(event)),
+        });
+        origins.push(origin);
+    }
 }
 
 /// Blank a tool call request's arguments.
