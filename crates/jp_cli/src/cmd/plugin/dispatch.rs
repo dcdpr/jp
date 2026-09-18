@@ -40,11 +40,12 @@ use jp_plugin::{
         ComposeMode, ComposeOption, ComposeRequest, ComposeResponse, ConfigEntry, ConfigResponse,
         ConfigsResponse, ConversationSummary, ConversationsResponse, CreatedResponse,
         DescribeResponse, DoneResponse, DraftResponse, ErrorResponse, EventsResponse, HostToPlugin,
-        InitMessage, LogMessage, PathsInfo, PluginToHost, QueryCompleteResponse, QueryRequest,
-        SetTitleRequest, WorkspaceInfo, WriteDraftRequest,
+        InitMessage, LockState, LogMessage, OutputFormat as PluginOutputFormat, PathsInfo,
+        PluginToHost, QueryCompleteResponse, QueryRequest, SetTitleRequest, WorkspaceInfo,
+        WriteDraftRequest,
     },
 };
-use jp_printer::Printer;
+use jp_printer::{OutputFormat, Printer};
 use jp_storage::backend::{FsStorageBackend, Projection};
 use jp_workspace::{ConversationLock, LockResult, Workspace, session::Session};
 use serde_json::Value;
@@ -249,6 +250,7 @@ fn init_message(
     paths: PluginPaths<'_>,
     config: &Arc<AppConfig>,
     log_level: u8,
+    format: OutputFormat,
 ) -> Result<(HostToPlugin, Value), cmd::Error> {
     let config_json = serde_json::to_value(config.as_ref().to_partial())
         .map_err(|e| cmd::Error::from(format!("failed to serialize config: {e}")))?;
@@ -276,6 +278,7 @@ fn init_message(
         options,
         args: args.to_vec(),
         log_level,
+        output_format: output_format(format),
     });
 
     Ok((init, config_json))
@@ -313,6 +316,7 @@ pub(crate) async fn run_plugin(
         paths,
         &config,
         ctx.term.args.verbose,
+        ctx.printer.format(),
     )?;
 
     let composer = Composer {
@@ -528,6 +532,19 @@ fn stop_plugin(stdin: &Mutex<impl Write>, sent: &AtomicBool, child_id: u32, grac
     }
 
     kill_child(child_id);
+}
+
+/// The host's output format, in the protocol's vocabulary.
+///
+/// Two enums rather than one shared type: the protocol should not depend on a
+/// particular renderer, so it carries its own.
+fn output_format(format: OutputFormat) -> PluginOutputFormat {
+    match format {
+        OutputFormat::Text => PluginOutputFormat::Text,
+        OutputFormat::TextPretty => PluginOutputFormat::TextPretty,
+        OutputFormat::Json => PluginOutputFormat::Json,
+        OutputFormat::JsonPretty => PluginOutputFormat::JsonPretty,
+    }
 }
 
 /// The JP directories a plugin is told about, so it needs no platform logic of
@@ -1655,11 +1672,42 @@ fn handle_read_events(
         jp_conversation::decode_event_value(value);
     }
 
+    // Carried here so labelling one conversation doesn't cost a plugin the whole
+    // conversation list, which reads every conversation's metadata.
+    let title = workspace
+        .metadata(&handle)
+        .ok()
+        .and_then(|meta| meta.title.clone());
+
     HostToPlugin::Events(EventsResponse {
         id: req_id,
         conversation: conversation_id.to_owned(),
+        lock: lock_state(workspace, &conv_id),
+        title,
         data: event_values,
     })
+}
+
+/// Whether a turn is running on a conversation, and whose it is.
+///
+/// Read from the lock rather than from the transcript: a stream ending in a
+/// request looks identical whether a turn is running, was interrupted, or
+/// failed outright.
+///
+/// A lock file outlives the process that wrote it when that process is killed,
+/// so a recorded holder that is no longer alive counts as no holder at all.
+/// Otherwise a crashed run would leave a conversation looking busy forever.
+fn lock_state(workspace: &Workspace, id: &ConversationId) -> LockState {
+    workspace
+        .conversation_lock_info(id)
+        .filter(|info| is_process_alive(info.pid))
+        .map_or(LockState::Free, |info| {
+            if info.pid == std::process::id() {
+                LockState::Here
+            } else {
+                LockState::Elsewhere
+            }
+        })
 }
 
 fn handle_read_config(

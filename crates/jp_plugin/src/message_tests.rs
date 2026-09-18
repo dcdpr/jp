@@ -21,6 +21,7 @@ fn host_init_roundtrip() {
         options: Map::from_iter([("port".to_owned(), json!(8080))]),
         args: vec!["--web".to_owned()],
         log_level: 0,
+        output_format: OutputFormat::JsonPretty,
     });
 
     let json = serde_json::to_string(&msg).unwrap();

@@ -1,9 +1,11 @@
-//! `jp-serve-web`: read-only web UI plugin for JP.
+//! `jp-serve-web`: web UI plugin for JP.
 //!
 //! Communicates with the `jp` host over the JSON-lines plugin protocol
-//! (stdin/stdout) and serves a read-only conversation browser over HTTP.
+//! (stdin/stdout) and serves a conversation browser over HTTP.
+//! Turns composed in the browser are delegated to the host, which owns the
+//! agent loop.
 //!
-//! See: `docs/rfd/D17-command-plugin-system.md`
+//! See: `docs/rfd/072-command-plugin-system.md`
 
 mod client;
 mod log_layer;
@@ -28,27 +30,35 @@ use crate::{
 
 /// The protocol version this plugin needs from the host.
 ///
-/// It reads conversations, events, and config, all of which the first version
-/// carries.
-const REQUIRED_PROTOCOL: u32 = 1;
+/// It archives and renames conversations (3), syncs what is being typed through
+/// the draft messages (4), offers the configurations a turn can name (5), posts
+/// turns with `query` and learns their id from `created` (6), stops them with
+/// `interrupt` (7), and reads whether a turn is already running from `lock` on
+/// `events` (8).
+///
+/// The last is what makes 8 the floor rather than 7: defaulting `lock` to free
+/// would draw a send button for a conversation that is busy, and the request
+/// behind it would be refused as already-locked.
+const REQUIRED_PROTOCOL: u32 = 8;
 
 const HELP_TEXT: &str = "\
-Start the read-only web interface for browsing JP conversations.
+Start the web interface for browsing JP conversations and continuing them.
 
-Usage: jp serve web [OPTIONS]
+Usage: jp serve-web [OPTIONS]
 
 Options:
   --bind <ADDR>    Address to bind to [default: 127.0.0.1]
   --port <PORT>    Port to listen on [default: 3000]
 
 Configuration (in .jp/config.toml):
-  [plugins.command.serve.options]
+  [plugins.command.serve-web.options]
   bind = \"127.0.0.1\"
   port = 8080
 
 The server has no authentication and exposes every conversation in the
-workspace. Binding to a non-loopback address (e.g. 0.0.0.0) makes all of them
-reachable from the network.";
+workspace, and anyone who reaches it can start a turn, which spends tokens and
+runs whatever tools the conversation allows. Binding to a non-loopback address
+(e.g. 0.0.0.0) hands that to the network.";
 
 fn main() {
     let log_handle = init_tracing();
@@ -61,7 +71,7 @@ fn main() {
         drop(writeln!(err));
         drop(writeln!(
             err,
-            "Note: this binary is a JP plugin. Run it via `jp serve web`."
+            "Note: this binary is a JP plugin. Run it via `jp serve-web`."
         ));
         std::process::exit(0);
     }
@@ -142,7 +152,8 @@ fn run_server(
     if !is_loopback {
         warn!(
             %socket_addr,
-            "Binding to a non-loopback address exposes all conversations without authentication"
+            "Binding to a non-loopback address exposes all conversations, and lets anyone who \
+             reaches it start a turn, without authentication"
         );
     }
 
@@ -168,7 +179,8 @@ fn run_server(
             &mut stdout,
             &PluginToHost::Print(PrintMessage {
                 text: "Warning: bound to a non-loopback address; every conversation in this \
-                       workspace is reachable over the network without authentication.\n"
+                       workspace is readable over the network without authentication, and anyone \
+                       who reaches it can start a turn.\n"
                     .into(),
                 channel: "content".into(),
                 format: "plain".into(),
@@ -225,7 +237,7 @@ fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
         &PluginToHost::Describe(DescribeResponse {
             name: "serve-web".to_owned(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
-            description: "Read-only web UI for browsing conversations".to_owned(),
+            description: "Web UI for browsing conversations and continuing them".to_owned(),
             command: vec!["serve".to_owned(), "web".to_owned()],
             author: Some("Jean Mertz <git@jeanmertz.com>".to_owned()),
             help: Some(HELP_TEXT.to_owned()),
