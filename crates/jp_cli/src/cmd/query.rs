@@ -1091,7 +1091,12 @@ impl Query {
                 return Ok((source, PartialAppConfig::empty()));
             }
             None => return Err(Error::MissingEditor),
-            Some(_) => return Err(Error::NonInteractiveEditor),
+            Some(_) => {
+                return Err(Error::NonInteractiveEditor {
+                    suggestion: "Pass the query as an argument or on stdin, or use --no-edit to \
+                                 send a placeholder message.",
+                });
+            }
         };
 
         let (content, editor_provided_config) = editor::edit_query(

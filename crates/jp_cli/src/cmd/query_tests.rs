@@ -2371,7 +2371,7 @@ fn edit_message_without_a_query_is_an_error_when_non_interactive() {
         )
         .unwrap_err();
 
-    assert_matches!(error, Error::NonInteractiveEditor);
+    assert_matches!(error, Error::NonInteractiveEditor { .. });
     assert!(!dir.path().join(editor::QUERY_FILENAME).exists());
 }
 

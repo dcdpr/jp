@@ -522,17 +522,12 @@ impl From<crate::error::Error> for Error {
             ]
             .into(),
             MissingEditor => [("message", "Missing editor".to_owned())].into(),
-            NonInteractiveEditor => [
+            NonInteractiveEditor { suggestion } => [
                 (
                     "message",
                     "Cannot open the editor: nobody is present to close it".to_owned(),
                 ),
-                (
-                    "suggestion",
-                    "Pass the query as an argument or on stdin, or use --no-edit to send a \
-                     placeholder message."
-                        .to_owned(),
-                ),
+                ("suggestion", suggestion.to_owned()),
             ]
             .into(),
             Schema(error) => [("message", "Invalid schema".to_owned()), ("error", error)].into(),
