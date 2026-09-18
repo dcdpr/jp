@@ -153,8 +153,8 @@ fn an_entry_that_is_not_an_object_is_rejected() {
 #[test]
 fn an_entry_with_a_non_string_id_is_rejected() {
     // A corrupt ID is not an absent one: it fails loudly rather than being
-    // silently replaced.
-    for id in [Value::Null, json!(1), json!(true), json!([]), json!({})] {
+    // silently replaced. `null` is the exception, and spells absence.
+    for id in [json!(1), json!(true), json!([]), json!({})] {
         assert!(
             from_value::<StoredEvent>(json!({"type": "future_event", "event_id": id})).is_err(),
             "accepted {id}"
@@ -175,6 +175,18 @@ fn an_entry_missing_an_id_reads_as_having_none() {
 fn an_entry_with_an_empty_id_reads_as_having_none() {
     let stored =
         from_value::<StoredEvent>(json!({"type": "future_event", "event_id": ""})).unwrap();
+
+    assert!(stored.event_id.is_none());
+}
+
+#[test]
+fn an_entry_with_a_null_id_reads_as_having_none() {
+    // `null` is JSON's spelling of "no value", and a hand-edited file is
+    // invited to clear an ID. Rejecting it would fail the whole stream load
+    // over the one spelling the format itself suggests.
+    let stored =
+        from_value::<StoredEvent>(json!({"type": "future_event", "event_id": Value::Null}))
+            .unwrap();
 
     assert!(stored.event_id.is_none());
 }

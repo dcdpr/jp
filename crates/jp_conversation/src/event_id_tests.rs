@@ -206,7 +206,13 @@ fn a_draw_retries_past_an_id_the_set_handed_out_earlier() {
 }
 
 #[test]
-fn fresh_never_repeats_itself() {
+fn a_thousand_draws_produce_distinct_ids() {
+    // The weak half of the pair: a thousand draws from a 36^7 space are almost
+    // certainly distinct whether or not `fresh` checks the set, so what this
+    // pins is that `EventId::random` varies at all — a generator returning one
+    // value forever satisfies every other test in this file.
+    // `a_draw_retries_past_an_id_the_set_handed_out_earlier` pins the retry
+    // itself, deterministically.
     let mut ids = EventIds::default();
     let drawn: Vec<_> = (0..1_000).map(|_| ids.fresh()).collect();
 

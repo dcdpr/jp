@@ -68,7 +68,8 @@ fn a_replacement_avoids_an_id_the_repair_pass_has_not_reached() {
     // this pins is that the reservation covers the later entry at all:
     // `event_ids` is seeded from every loaded entry before repair runs, which
     // `EventIds::fresh` then draws against. See
-    // `fresh_skips_an_id_the_set_already_holds` for the deterministic half.
+    // `a_draw_retries_past_an_id_the_set_already_holds` for the deterministic
+    // half.
     let stream = load(vec![opaque("shared"), opaque("shared"), opaque("taken")]);
     let ids = ids(&stream);
 

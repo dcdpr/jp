@@ -297,9 +297,10 @@ impl StoredEvent {
 // writes exactly one back out. `shift_remove` keeps the remaining keys in their
 // stored order, so a hand-edited entry round-trips unreordered.
 //
-// A missing or empty `event_id` reads as absent, which is leniency the storage
-// boundary owes a legacy file; `EventId` itself stays strict. A non-string
-// `event_id` is a corrupt entry rather than an absent one, and fails loudly.
+// A missing, null, or empty `event_id` reads as absent, which is leniency the
+// storage boundary owes a legacy file; `EventId` itself stays strict. Any other
+// non-string `event_id` is a corrupt entry rather than an absent one, and fails
+// loudly.
 impl<'de> Deserialize<'de> for StoredEvent {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = Value::deserialize(deserializer)?;
@@ -307,7 +308,7 @@ impl<'de> Deserialize<'de> for StoredEvent {
             .as_object_mut()
             .ok_or_else(|| D::Error::custom("stream entry must be a JSON object"))?;
         let event_id = match object.shift_remove("event_id") {
-            None => None,
+            None | Some(Value::Null) => None,
             Some(Value::String(id)) if id.is_empty() => None,
             Some(id) => Some(from_value(id).map_err(D::Error::custom)?),
         };

@@ -171,6 +171,9 @@ impl<'de> Deserialize<'de> for EventId {
 /// is never handed out again, not even after the entry holding it is removed.
 /// A reference to a removed entry therefore fails to resolve instead of binding
 /// to a later, unrelated entry.
+///
+/// The set is built from the entries a stream loaded and is never persisted, so
+/// this covers one stream's lifetime rather than one conversation's history.
 #[expect(
     clippy::redundant_pub_crate,
     reason = "the module is private today; `pub` would read as public API"

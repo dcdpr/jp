@@ -257,11 +257,21 @@ injected entries (ephemeral; see [Projection views](#projection-views)).
 Because generation happens where stream context exists, "unique within its
 stream" holds at insertion, not merely after a load-time pass.
 
-An ID is retired with the entry that held it: the stream does not hand out an ID
-again after the entry holding it is removed.
+An ID is retired with the entry that held it: for as long as the stream is in
+memory, it does not hand out an ID again after the entry holding it is removed.
 Otherwise a reference to a deleted entry could silently rebind to a later,
 unrelated one — the positional aliasing this RFD exists to remove, reintroduced
 through the ID.
+
+Retirement lasts the lifetime of that in-memory stream, and no longer.
+Retired IDs are not persisted, so a load rebuilds the set from the entries the
+file still carries, and a later draw can in principle land on an ID a previous
+session deleted.
+The draw would have to hit that one value out of 36^7, so nothing is done about
+it: persisting tombstones would grow `events.json` without bound to guard a
+collision no input can force.
+A feature that resolves references should not read cross-load non-reuse into
+this paragraph.
 
 **An entry arriving from another stream keeps its ID.** Uniqueness is scoped to
 a single stream (see [Non-Goals](#non-goals)), so an entry copied between
@@ -406,6 +416,18 @@ as the IDs are settled and read through `duplicated_event_ids()` by reference
 resolution to classify a reference as ambiguous.
 Once the repaired stream is saved and reloaded, the file has unique IDs and the
 set is empty.
+
+The record covers the load that produced it, and does not travel with the
+entries.
+A stream that takes entries from another, through `append_stream` or `Extend`,
+reports only what its own load found: the ambiguity is a property of the file
+that was read, and `jp conversation fork` writes a file with unique IDs.
+A consumer resolving a reference therefore asks the stream that read the file
+the reference names, not a copy made from it.
+Unioning the record into the destination is deliberately not done: no consumer
+exists yet to say whether inherited ambiguity should read as ambiguous, and
+`Extend` recomputes config deltas rather than copying them, so the two paths do
+not share one answer.
 
 RFDs that introduce reference-bearing entries must consume this recorded
 ambiguity in the same load cycle, before the stream is persisted: resolve or

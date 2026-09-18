@@ -71,6 +71,8 @@ pub struct ConversationStream {
     /// path relies on: an ID is retired with its entry rather than returned to
     /// circulation, so a reference to a deleted entry fails to resolve instead
     /// of binding to a later one.
+    /// Not serialized, so retirement lasts as long as this stream does: a load
+    /// seeds the set from the entries the file still carries.
     ///
     /// An entry carrying an ID this set has not seen reaches `events` only
     /// through [`Self::append`], [`Self::insert`], or [`Self::adopt`], which is
@@ -1521,6 +1523,11 @@ impl ConversationStream {
     /// unresolved, and must do so within this load cycle: once the repaired
     /// stream is saved the file holds unique IDs, and a later load reports
     /// nothing here.
+    ///
+    /// Scoped to this stream's own load.
+    /// Entries taken from another stream, through [`Self::append_stream`] or
+    /// [`Extend`], arrive without that stream's record, so a consumer resolving
+    /// a reference against a copy asks the stream that read the file.
     #[must_use]
     pub const fn duplicated_event_ids(&self) -> &HashSet<EventId> {
         &self.duplicated_event_ids

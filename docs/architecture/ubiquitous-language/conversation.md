@@ -161,8 +161,10 @@ Every entry has one, whatever it holds.
 
 **Implementation.** `EventId` in `jp_conversation`, held by the stream-entry
 wrapper and persisted as `event_id`.
-A stream hands out its own IDs and never reissues one, so an entry that is
-removed takes its ID with it.
+A stream hands out its own IDs, and a removed entry takes its ID with it for as
+long as that stream is in memory.
+Retired IDs are not persisted, so the guarantee is per-load rather than for all
+time.
 
 **In context.** The point of an intrinsic identity is that a reference to an
 entry survives the edits a reference to "the third entry" would not.
