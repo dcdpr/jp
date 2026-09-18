@@ -121,10 +121,24 @@ impl Edit {
     /// edit (restoring the original files).
     /// In non-interactive mode an invalid edit is discarded with an error
     /// rather than prompting.
+    ///
+    /// A non-interactive invocation never opens the editor at all: the editor
+    /// is a child process that exits when a person saves and closes it, so with
+    /// nobody there it blocks forever on a buffer no one will close.
+    /// There is nothing else this command can do, so it fails instead.
     fn run_open_editor(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         let config = ctx.config();
-        let editor =
-            build_editor_backend(&config.editor, &ctx.printer).ok_or(Error::MissingEditor)?;
+        let editor = match build_editor_backend(&config.editor, &ctx.printer) {
+            Some(editor) if ctx.term.interactive => editor,
+            None => return Err(Error::MissingEditor.into()),
+            Some(_) => {
+                return Err(Error::NonInteractiveEditor {
+                    suggestion: "Run this from a terminal, or edit the files directly at the path \
+                                 from `jp conversation path`.",
+                }
+                .into());
+            }
+        };
 
         let fs = ctx
             .fs_backend
