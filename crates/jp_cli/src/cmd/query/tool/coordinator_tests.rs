@@ -473,6 +473,7 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
         arguments: pre_edit_args.clone(),
         permission_info: PermissionInfo {
             tool_id: "call_1".into(),
+            state_key: "call_1".into(),
             tool_name: "fs_delete_file".into(),
             tool_source: ToolSource::Builtin { tool: None },
             run_mode: RunMode::Ask,
@@ -530,6 +531,7 @@ fn test_permission_decision_cache_is_isolated_from_answers() {
 
     let info = PermissionInfo {
         tool_id: "call_1".into(),
+        state_key: "call_1".into(),
         tool_name: "my_tool".into(),
         tool_source: ToolSource::Builtin { tool: None },
         run_mode: RunMode::Ask,

@@ -538,6 +538,18 @@ pub struct ToolConfig {
     /// tool to default-deny.
     #[setting(nested)]
     pub access: Option<AccessConfig>,
+
+    /// Whether one call to this tool may carry several independent operations.
+    ///
+    /// When set, the tool's arguments are wrapped in an `ops` array whose
+    /// elements each hold one complete set of the tool's own arguments.
+    /// JP runs them as separate calls and folds the results into one response;
+    /// the tool itself still receives one operation at a time.
+    ///
+    /// Accepts a bool or a `{ enabled, concurrency, on_error }` table.
+    /// When unset, the tool takes one operation per call.
+    #[setting(nested)]
+    pub fan_out: Option<FanOutConfig>,
 }
 
 impl AssignKeyValue for PartialToolConfig {
@@ -560,6 +572,8 @@ impl AssignKeyValue for PartialToolConfig {
             "questions" => self.questions = kv.try_object()?,
             _ if kv.p("options") => kv.assign_to_entry(&mut self.options)?,
             _ if kv.p("access") => self.access.assign(kv)?,
+            "fan_out" => self.fan_out = kv.try_some_object_bool_or_from_str()?,
+            _ if kv.p("fan_out") => self.fan_out.assign(kv)?,
             _ => return missing_key(&kv),
         }
 
@@ -597,6 +611,7 @@ impl PartialConfigDelta for PartialToolConfig {
                 })
                 .collect(),
             access: delta_opt_partial(self.access.as_ref(), next.access),
+            fan_out: delta_opt_partial(self.fan_out.as_ref(), next.fan_out),
         }
     }
 }
@@ -636,6 +651,7 @@ impl ToPartial for ToolConfig {
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
             access: partial_opt_config(self.access.as_ref(), defaults.access),
+            fan_out: partial_opt_config(self.fan_out.as_ref(), defaults.fan_out),
         }
     }
 }
@@ -1251,6 +1267,19 @@ impl ToolConfigWithDefaults {
         None
     }
 
+    /// Return the fan-out policy for the tool, or `None` when one call carries
+    /// exactly one operation.
+    ///
+    /// Read from the tool's own config only.
+    /// There is no `'*'` default: fan-out changes the shape of a tool's
+    /// arguments, and a blanket key would rewrite the schema of every tool at
+    /// once, including the ones already shaped to take many targets in a single
+    /// call.
+    #[must_use]
+    pub fn fan_out(&self) -> Option<FanOut> {
+        self.tool.fan_out.as_ref()?.to_partial().effective()
+    }
+
     /// Return the question target for the given question ID.
     #[must_use]
     pub fn question_target(&self, question_id: &str) -> Option<&QuestionTarget> {
@@ -1672,6 +1701,287 @@ impl ToPartial for EnableConfig {
             state: self.state,
             allow_toggle: self.allow_toggle,
         }
+    }
+}
+
+/// What happens to the operations after one of them fails.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ConfigEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum FanOutOnError {
+    /// Run every operation, whatever the others do.
+    ///
+    /// Each failure is reported in its own section of the folded result.
+    #[default]
+    Continue,
+
+    /// Start no further operations once one has failed.
+    ///
+    /// Operations already in flight run to completion; nothing is aborted.
+    /// The folded result names the operations that never started.
+    Stop,
+}
+
+/// Resolved fan-out policy for a tool: how many operations may run at once and
+/// what happens after one fails.
+///
+/// Produced on demand by [`ToolConfigWithDefaults::fan_out`]; never stored
+/// directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct FanOut {
+    /// Maximum operations in flight at once.
+    ///
+    /// `None` is unbounded.
+    pub concurrency: Option<usize>,
+
+    /// What happens to the remaining operations after one fails.
+    pub on_error: FanOutOnError,
+}
+
+impl FanOut {
+    /// Returns whether operations run strictly one at a time, in the order the
+    /// assistant wrote them.
+    #[must_use]
+    pub const fn is_sequential(&self) -> bool {
+        matches!(self.concurrency, Some(1))
+    }
+
+    /// Returns whether a failure stops the operations that have not started.
+    #[must_use]
+    pub const fn stops_on_error(&self) -> bool {
+        matches!(self.on_error, FanOutOnError::Stop)
+    }
+}
+
+/// Whether a single tool call may carry several independent operations, and how
+/// they run.
+///
+/// A tool with fan-out enabled takes an `ops` array whose elements each hold
+/// one complete set of the tool's own arguments.
+/// JP runs them as if the assistant had issued separate calls, and folds the
+/// results back into one response.
+/// The tool itself is unchanged: it still receives one operation's arguments
+/// per invocation.
+///
+/// ```toml
+/// # Bool shorthand: enabled, unbounded, every failure reported.
+/// fan_out = true
+///
+/// # Table form. Omitted fields fall back to unbounded and `continue`.
+/// fan_out = { concurrency = 1, on_error = "stop" }  # ordered writes
+/// fan_out = { concurrency = 4 }                     # rate-limited endpoint
+/// ```
+///
+/// Omit the key entirely to leave the tool's schema untouched.
+/// Tools that already accept several targets in one call (`fs_modify_file`,
+/// `bash`) are a different shape and should not set this.
+#[derive(Debug, Clone, PartialEq, Config)]
+#[config(
+    rename_all = "snake_case",
+    no_deserialize_derive,
+    schema_union_with = fan_out_input_shapes
+)]
+pub struct FanOutConfig {
+    /// Whether the tool accepts several operations in one call.
+    ///
+    /// Defaults to `true` when the table form is used, so naming any other
+    /// field turns fan-out on.
+    pub enabled: Option<bool>,
+
+    /// Maximum operations in flight at once.
+    ///
+    /// Defaults to unbounded.
+    /// Set to `1` to run them one at a time, in the order the assistant wrote
+    /// them, which is what an ordered sequence of writes needs.
+    /// Set to a small number for an endpoint that rate-limits.
+    pub concurrency: Option<usize>,
+
+    /// What happens to the remaining operations after one fails.
+    ///
+    /// - `continue` (the default): every operation runs, and each failure is
+    ///   reported in its own section of the result.
+    /// - `stop`: no further operation is started.
+    ///   Operations already running finish; nothing is aborted.
+    ///   The result names the ones that never ran.
+    pub on_error: Option<FanOutOnError>,
+}
+
+impl PartialFanOutConfig {
+    /// Fan-out on, unbounded, reporting every failure.
+    pub const ON: Self = Self {
+        enabled: Some(true),
+        concurrency: None,
+        on_error: None,
+    };
+
+    /// Fan-out off.
+    pub const OFF: Self = Self {
+        enabled: Some(false),
+        concurrency: None,
+        on_error: None,
+    };
+
+    /// Resolve into the effective [`FanOut`], or `None` when fan-out is off.
+    ///
+    /// A `concurrency` of `0` is read as unbounded rather than as "never run
+    /// anything": a tool that accepts operations and then runs none of them is
+    /// not a state any configuration should be able to express by accident.
+    #[must_use]
+    pub fn effective(&self) -> Option<FanOut> {
+        if !self.enabled.unwrap_or(true) {
+            return None;
+        }
+
+        Some(FanOut {
+            concurrency: self.concurrency.filter(|v| *v > 0),
+            on_error: self.on_error.unwrap_or_default(),
+        })
+    }
+}
+
+/// The non-table shapes `fan_out` accepts, for the schema.
+///
+/// The table form is described by the derived struct schema; the bool shorthand
+/// is what its hand-written `Deserialize` also accepts, which the derive cannot
+/// see.
+fn fan_out_input_shapes(schema: &schematic::SchemaBuilder) -> Vec<schematic::Schema> {
+    use schematic::schema::BooleanType;
+
+    vec![schema.nest().boolean(BooleanType::default())]
+}
+
+impl From<bool> for PartialFanOutConfig {
+    fn from(enabled: bool) -> Self {
+        Self {
+            enabled: Some(enabled),
+            concurrency: None,
+            on_error: None,
+        }
+    }
+}
+
+impl FromStr for PartialFanOutConfig {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "true" | "on" => Self::ON,
+            "false" | "off" => Self::OFF,
+            _ => {
+                return Err(format!(
+                    "invalid fan_out value: '{s}', expected a boolean or a {{ enabled, \
+                     concurrency, on_error }} table"
+                ));
+            }
+        })
+    }
+}
+
+impl AssignKeyValue for PartialFanOutConfig {
+    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object_bool_or_from_str()?,
+            "enabled" => self.enabled = kv.try_some_bool()?,
+            "concurrency" => self.concurrency = kv.try_some_from_str()?,
+            "on_error" => self.on_error = kv.try_some_from_str()?,
+            _ => return missing_key(&kv),
+        }
+
+        Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialFanOutConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            enabled: delta_opt(self.enabled.as_ref(), next.enabled),
+            concurrency: delta_opt(self.concurrency.as_ref(), next.concurrency),
+            on_error: delta_opt(self.on_error.as_ref(), next.on_error),
+        }
+    }
+}
+
+impl ToPartial for FanOutConfig {
+    fn to_partial(&self) -> Self::Partial {
+        PartialFanOutConfig {
+            enabled: self.enabled,
+            concurrency: self.concurrency,
+            on_error: self.on_error,
+        }
+    }
+}
+
+/// Accept a bool or an `{ enabled, concurrency, on_error }` table on input.
+/// Output is always the table form (auto-derived), matching how
+/// [`PartialEnableConfig`] handles its own shorthand.
+impl<'de> Deserialize<'de> for PartialFanOutConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct FanOutVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for FanOutVisitor {
+            type Value = PartialFanOutConfig;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a boolean or an { enabled, concurrency, on_error } table")
+            }
+
+            fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<Self::Value, E> {
+                Ok(PartialFanOutConfig::from(v))
+            }
+
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                v.parse().map_err(serde::de::Error::custom)
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut enabled: Option<bool> = None;
+                let mut concurrency: Option<usize> = None;
+                let mut on_error: Option<FanOutOnError> = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "enabled" => {
+                            if enabled.is_some() {
+                                return Err(serde::de::Error::duplicate_field("enabled"));
+                            }
+                            enabled = Some(map.next_value()?);
+                        }
+                        "concurrency" => {
+                            if concurrency.is_some() {
+                                return Err(serde::de::Error::duplicate_field("concurrency"));
+                            }
+                            concurrency = Some(map.next_value()?);
+                        }
+                        "on_error" => {
+                            if on_error.is_some() {
+                                return Err(serde::de::Error::duplicate_field("on_error"));
+                            }
+                            on_error = Some(map.next_value()?);
+                        }
+                        other => {
+                            return Err(serde::de::Error::unknown_field(other, &[
+                                "enabled",
+                                "concurrency",
+                                "on_error",
+                            ]));
+                        }
+                    }
+                }
+
+                Ok(PartialFanOutConfig {
+                    enabled,
+                    concurrency,
+                    on_error,
+                })
+            }
+        }
+
+        deserializer.deserialize_any(FanOutVisitor)
     }
 }
 

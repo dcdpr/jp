@@ -24,16 +24,21 @@ use jp_conversation::{
     ConversationStream,
     event::{ToolCallRequest, ToolCallResponse},
 };
-use jp_llm::tool::executor::Executor;
+
+use super::ExecutorGroup;
 
 /// The work product for a single tool call, as decided during the streaming
 /// phase.
 pub(crate) enum PendingEntry {
-    /// Permission was approved and the executor is ready to run.
-    Approved(Box<dyn Executor>),
-    /// Permission was denied (`Skip`) or the tool couldn't be resolved
-    /// (`Unavailable`); the response is already determined and just needs to be
-    /// committed in the right order.
+    /// At least one of the call's operations was approved and is ready to run.
+    ///
+    /// The group carries every operation of the call, including any the user
+    /// skipped, so the folded response accounts for all of them.
+    Approved(ExecutorGroup),
+    /// Nothing is left to run: the tool couldn't be resolved, or the user
+    /// declined every operation.
+    /// The response is already determined and just needs to be committed in the
+    /// right order.
     Resolved(ToolCallResponse),
 }
 
@@ -53,9 +58,9 @@ impl PendingTools {
         Self::default()
     }
 
-    /// Record an approved executor for `id`.
-    pub(crate) fn insert_approved(&mut self, id: String, executor: Box<dyn Executor>) {
-        self.entries.insert(id, PendingEntry::Approved(executor));
+    /// Record a call's approved operations for `id`.
+    pub(crate) fn insert_approved(&mut self, id: String, group: ExecutorGroup) {
+        self.entries.insert(id, PendingEntry::Approved(group));
     }
 
     /// Record a pre-resolved response (skipped or unavailable) for `id`.

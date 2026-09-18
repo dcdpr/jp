@@ -1432,3 +1432,201 @@ fn test_delta_enable_records_only_changed_subfield() {
         })
     );
 }
+
+#[test]
+fn fan_out_bool_shorthand_means_enabled_and_unbounded() {
+    let partial: PartialFanOutConfig = serde_json::from_value(json!(true)).expect("parses");
+
+    assert_eq!(partial, PartialFanOutConfig::ON);
+    assert_eq!(
+        partial.effective(),
+        Some(FanOut {
+            concurrency: None,
+            on_error: FanOutOnError::Continue,
+        })
+    );
+}
+
+#[test]
+fn fan_out_false_resolves_to_no_fan_out() {
+    let partial: PartialFanOutConfig = serde_json::from_value(json!(false)).expect("parses");
+
+    assert_eq!(partial.effective(), None);
+}
+
+#[test]
+fn fan_out_table_form_is_enabled_without_naming_enabled() {
+    let partial: PartialFanOutConfig =
+        serde_json::from_value(json!({ "concurrency": 1, "on_error": "stop" })).expect("parses");
+
+    let resolved = partial.effective().expect("the table form enables fan-out");
+    assert_eq!(resolved, FanOut {
+        concurrency: Some(1),
+        on_error: FanOutOnError::Stop,
+    });
+    assert!(resolved.is_sequential());
+    assert!(resolved.stops_on_error());
+}
+
+/// A tool that accepts operations and then runs none of them is not a state any
+/// configuration should reach by accident, so `0` reads as unbounded.
+#[test]
+fn fan_out_concurrency_of_zero_reads_as_unbounded() {
+    let partial: PartialFanOutConfig =
+        serde_json::from_value(json!({ "concurrency": 0 })).expect("parses");
+
+    assert_eq!(
+        partial.effective(),
+        Some(FanOut {
+            concurrency: None,
+            on_error: FanOutOnError::Continue,
+        })
+    );
+}
+
+#[test]
+fn fan_out_rejects_an_unknown_field() {
+    let err = serde_json::from_value::<PartialFanOutConfig>(json!({ "mode": "sequential" }))
+        .expect_err("an unknown field is rejected");
+
+    assert!(
+        err.to_string().contains("unknown field `mode`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn fan_out_resolves_from_toml_through_the_loader() {
+    let loaded: PartialAppConfig = toml::from_str(
+        r#"
+[conversation.tools.'*']
+run = "unattended"
+
+[conversation.tools.reader]
+source = "local"
+fan_out = true
+
+[conversation.tools.writer]
+source = "local"
+fan_out = { concurrency = 1, on_error = "stop" }
+
+[conversation.tools.plain]
+source = "local"
+"#,
+    )
+    .expect("the fixture parses");
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools = loaded.conversation.tools;
+
+    let config = build(partial).expect("the fixture resolves");
+    let tools = &config.conversation.tools;
+
+    assert_eq!(
+        tools.get("reader").expect("reader is configured").fan_out(),
+        Some(FanOut {
+            concurrency: None,
+            on_error: FanOutOnError::Continue,
+        })
+    );
+    assert_eq!(
+        tools.get("writer").expect("writer is configured").fan_out(),
+        Some(FanOut {
+            concurrency: Some(1),
+            on_error: FanOutOnError::Stop,
+        })
+    );
+    assert_eq!(
+        tools.get("plain").expect("plain is configured").fan_out(),
+        None,
+        "a tool that says nothing takes one operation per call"
+    );
+}
+
+/// Fan-out rewrites a tool's argument shape, so a `'*'` block must not reach a
+/// tool that never asked for it.
+#[test]
+fn fan_out_is_not_inherited_from_the_defaults_block() {
+    let loaded: PartialAppConfig = toml::from_str(
+        r#"
+[conversation.tools.'*']
+run = "unattended"
+
+[conversation.tools.plain]
+source = "local"
+"#,
+    )
+    .expect("the fixture parses");
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools = loaded.conversation.tools;
+
+    let config = build(partial).expect("the fixture resolves");
+
+    assert_eq!(
+        config
+            .conversation
+            .tools
+            .get("plain")
+            .expect("plain is configured")
+            .fan_out(),
+        None
+    );
+}
+
+#[test]
+fn fan_out_assign_kv_accepts_the_shorthand_and_the_subfields() {
+    use crate::assignment::KvAssignment;
+
+    let mut tool = PartialToolConfig::default();
+
+    tool.assign(KvAssignment::try_from_cli("fan_out", "true").expect("parses"))
+        .expect("assigns");
+    assert_eq!(tool.fan_out, Some(PartialFanOutConfig::ON));
+
+    tool.assign(KvAssignment::try_from_cli("fan_out.concurrency", "4").expect("parses"))
+        .expect("assigns");
+    tool.assign(KvAssignment::try_from_cli("fan_out.on_error", "stop").expect("parses"))
+        .expect("assigns");
+
+    assert_eq!(
+        tool.fan_out
+            .as_ref()
+            .and_then(PartialFanOutConfig::effective),
+        Some(FanOut {
+            concurrency: Some(4),
+            on_error: FanOutOnError::Stop,
+        })
+    );
+}
+
+#[test]
+fn fan_out_delta_records_only_the_changed_subfield() {
+    use crate::delta::PartialConfigDelta as _;
+
+    let prev = PartialToolConfig {
+        fan_out: Some(PartialFanOutConfig {
+            enabled: Some(true),
+            concurrency: Some(4),
+            on_error: Some(FanOutOnError::Continue),
+        }),
+        ..Default::default()
+    };
+    let next = PartialToolConfig {
+        fan_out: Some(PartialFanOutConfig {
+            enabled: Some(true),
+            concurrency: Some(1),
+            on_error: Some(FanOutOnError::Continue),
+        }),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        prev.delta(next).fan_out,
+        Some(PartialFanOutConfig {
+            enabled: None,
+            concurrency: Some(1),
+            on_error: None,
+        })
+    );
+}

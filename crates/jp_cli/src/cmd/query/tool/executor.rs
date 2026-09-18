@@ -100,8 +100,13 @@ impl ExecutorSource for TerminalExecutorSource {
         &self,
         mut request: ToolCallRequest,
         config: ToolConfigWithDefaults,
+        op: Option<usize>,
     ) -> Option<Box<dyn Executor>> {
         let definition = self.definitions.get(&request.name)?.clone();
+
+        // Coercion reads the per-operation schema, and `request.arguments` is
+        // one operation's arguments whether or not the call fanned out, so a
+        // JSON-encoded number is repaired the same way either way.
         definition.coerce_arguments(&mut request.arguments);
 
         Some(Box::new(ToolExecutor::new(
@@ -111,6 +116,7 @@ impl ExecutorSource for TerminalExecutorSource {
             Arc::new(self.builtin_executors.clone()),
             self.approvals.clone(),
             self.invocation.clone(),
+            op,
         )))
     }
 }
@@ -132,9 +138,13 @@ pub struct ToolExecutor {
     builtin_executors: Arc<BuiltinExecutors>,
     approvals: Arc<ApprovalStore>,
     invocation: InvocationContext,
+
+    /// Which operation of the call this executor runs, when the call fans out.
+    op: Option<usize>,
 }
 
 impl ToolExecutor {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         request: ToolCallRequest,
         config: ToolConfigWithDefaults,
@@ -142,6 +152,7 @@ impl ToolExecutor {
         builtin_executors: Arc<BuiltinExecutors>,
         approvals: Arc<ApprovalStore>,
         invocation: InvocationContext,
+        op: Option<usize>,
     ) -> Self {
         Self {
             request,
@@ -150,6 +161,7 @@ impl ToolExecutor {
             builtin_executors,
             approvals,
             invocation,
+            op,
         }
     }
 
@@ -184,6 +196,10 @@ impl Executor for ToolExecutor {
         &self.request.name
     }
 
+    fn op_index(&self) -> Option<usize> {
+        self.op
+    }
+
     fn arguments(&self) -> &serde_json::Map<String, Value> {
         &self.request.arguments
     }
@@ -198,6 +214,7 @@ impl Executor for ToolExecutor {
 
         Some(PermissionInfo {
             tool_id: self.request.id.clone(),
+            state_key: self.state_key(),
             tool_name: self.request.name.clone(),
             tool_source: self.config.source().clone(),
             run_mode,
