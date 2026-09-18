@@ -397,6 +397,75 @@ fn a_predecided_failure_stops_the_operations_behind_it() {
     );
 }
 
+/// `result = "skip"` answers the assistant with a success even when the tool
+/// failed, so a `stop` policy reading the response alone would release the next
+/// operation after a failure it was configured to stop on.
+#[test]
+fn a_failure_hidden_by_result_policy_still_stops_the_rest() {
+    let mut schedule = Schedule::new(vec![(0, group("call_1", 3, Some(1), FanOutOnError::Stop))]);
+    let mut results: Vec<Option<ToolCallResponse>> = vec![None; schedule.total_ops()];
+
+    schedule.release(&results);
+
+    // What `result = "skip"` leaves behind: the tool failed, the assistant is
+    // told otherwise.
+    results[0] = Some(ok("call_1", "Result delivery skipped by configuration."));
+    schedule.record_failure(0);
+
+    assert!(
+        schedule.release(&results).is_empty(),
+        "the stop policy acts on what the tool did, not on what the assistant was told"
+    );
+    assert!(schedule.all_accounted_for(&results));
+}
+
+/// The response-reading path is the backstop, and must not invent a failure
+/// where the tool reported none.
+#[test]
+fn a_successful_operation_does_not_stop_the_rest() {
+    let mut schedule = Schedule::new(vec![(0, group("call_1", 3, Some(1), FanOutOnError::Stop))]);
+    let mut results: Vec<Option<ToolCallResponse>> = vec![None; schedule.total_ops()];
+
+    schedule.release(&results);
+    results[0] = Some(ok("call_1", "wrote"));
+    schedule.record_outcome(0, results[0].as_ref().expect("recorded"));
+
+    assert_eq!(
+        schedule
+            .release(&results)
+            .iter()
+            .map(|(i, _)| *i)
+            .collect::<Vec<_>>(),
+        vec![1],
+        "a success releases the next operation"
+    );
+}
+
+/// Abandoning is what every interrupt outcome that cancels the token reaches
+/// for: a restart re-runs the batch from the top and an escalation is a
+/// shutdown, so neither wants the schedule handing out more work on the way
+/// out.
+#[test]
+fn an_abandoned_schedule_releases_nothing_further() {
+    let mut schedule = Schedule::new(vec![(
+        0,
+        group("call_1", 4, Some(1), FanOutOnError::Continue),
+    )]);
+    let mut results: Vec<Option<ToolCallResponse>> = vec![None; schedule.total_ops()];
+
+    schedule.release(&results);
+    schedule.abandon_unstarted();
+
+    // The one running operation finishes, which would ordinarily free its slot.
+    results[0] = Some(ok("call_1", "wrote"));
+
+    assert!(
+        schedule.release(&results).is_empty(),
+        "a finished operation must not free a slot for one that was abandoned"
+    );
+    assert!(schedule.all_accounted_for(&results));
+}
+
 #[test]
 fn schedule_reports_the_tool_behind_a_local_index() {
     let schedule = Schedule::new(vec![

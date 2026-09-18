@@ -4949,9 +4949,9 @@ async fn a_fanned_out_call_runs_every_operation_and_answers_once() {
         let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
-        // Counts executions rather than trusting the response text: an
-        // implementation that ran one operation and printed three sections
-        // would satisfy the output assertions below but not this one.
+        // Counts how many executors the plan expanded the envelope into, which
+        // is decided in `prepare_one` before anything runs. The per-operation
+        // output asserted below is what proves each one then executed.
         let runs = Arc::new(AtomicUsize::new(0));
         let executor_source = TestExecutorSource::new().with_executor("fs_read_file", {
             let runs = Arc::clone(&runs);
@@ -5000,7 +5000,7 @@ async fn a_fanned_out_call_runs_every_operation_and_answers_once() {
         assert_eq!(
             runs.load(Ordering::SeqCst),
             3,
-            "the tool runs once per operation"
+            "the envelope expands into one executor per operation"
         );
 
         // One request in, one response out: the provider asked for one call and
@@ -5043,6 +5043,164 @@ async fn a_fanned_out_call_runs_every_operation_and_answers_once() {
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A `stop` policy that rules out every remaining operation before any of them
+/// started must still end the turn.
+///
+/// The first operation's argument formatter fails, which resolves it to an
+/// error before the execution loop begins.
+/// Under `on_error = "stop"` the second operation is then never released, so no
+/// tool task is spawned and no event will ever arrive.
+/// The loop has to notice it is already done rather than wait on a channel
+/// whose senders it holds itself.
+#[tokio::test]
+#[expect(clippy::too_many_lines)]
+async fn a_stop_policy_that_rules_out_every_operation_ends_the_turn() {
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+
+        // Exits non-zero for the first operation's path and succeeds for the
+        // second, so one operation is resolved to a failure before the loop
+        // starts while the other is still runnable.
+        let style = DisplayStyleConfig {
+            parameters: ParametersStyle::Custom(CommandConfigOrString::String(
+                "sh -c 'test \"{{tool.arguments.path}}\" != bad.rs || exit 1; echo ok'".to_owned(),
+            )),
+            ..non_joining_style()
+        };
+
+        config
+            .conversation
+            .tools
+            .insert("writer".to_string(), ToolConfig {
+                source: ToolSource::Local { tool: None },
+                command: None,
+                run: Some(RunMode::Unattended),
+                format: Some(jp_config::conversation::tool::FormatMode::Unattended),
+                enable: None,
+                summary: None,
+                description: None,
+                examples: None,
+                parameters: IndexMap::new(),
+                result: None,
+                style: Some(style),
+                questions: IndexMap::new(),
+                options: IndexMap::default(),
+                access: None,
+                cancellation_response: None,
+                fan_out: Some(jp_config::conversation::tool::FanOutConfig {
+                    enabled: Some(true),
+                    concurrency: Some(1),
+                    on_error: Some(jp_config::conversation::tool::FanOutOnError::Stop),
+                }),
+            });
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let args = json!({ "ops": [{ "path": "bad.rs" }, { "path": "good.rs" }] });
+
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                vec![
+                    Event::tool_call_start(0, "call_1".to_string(), "writer".to_string()),
+                    Event::tool_call_args(0, serde_json::to_string(&args).unwrap()),
+                    Event::flush(0),
+                    Event::Finished(FinishReason::Completed),
+                ],
+                vec![
+                    Event::message(0, "Done.\n\n"),
+                    Event::flush(0),
+                    Event::Finished(FinishReason::Completed),
+                ],
+            ],
+            call_index: AtomicUsize::new(0),
+            model: ModelDetails::empty(id::ModelIdConfig {
+                provider: ProviderId::Test,
+                name: "fan-out-stop-mock".parse().expect("valid name"),
+            }),
+        });
+
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        // The formatter reads the operation's arguments out of the executor, so
+        // the mock has to carry them.
+        let executor_source = TestExecutorSource::new().with_executor("writer", |req| {
+            Box::new(
+                MockExecutor::completed(&req.id, &req.name, "wrote")
+                    .with_arguments(req.arguments.clone()),
+            )
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            ChatRequest::from("Write two files"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
+        )
+        .await
+        .unwrap();
+
+        let conv = lock.as_mut();
+        let events = conv.events();
+        let response = events
+            .iter()
+            .filter_map(|e| e.event.as_tool_call_response())
+            .find(|r| r.id == "call_1")
+            .expect("the call is answered");
+
+        let content = response.content();
+        assert!(
+            content.starts_with("[1/2] error\n"),
+            "the formatter failure is reported as operation 1.\nGot:\n{content}"
+        );
+        assert!(
+            content.contains("[2/2] not run (stopped after operation 1 failed)"),
+            "the second operation never started, and says so.\nGot:\n{content}"
+        );
+        assert!(
+            !content.contains("wrote"),
+            "neither operation reached the tool.\nGot:\n{content}"
+        );
+    }))
+    .await;
+
+    assert!(
+        test_result.is_ok(),
+        "the turn hung: nothing was spawned, so no event ever arrived to wake the loop"
+    );
 }
 
 /// A malformed envelope answers with a message naming what went wrong, and the
@@ -8469,6 +8627,7 @@ async fn a_tool_that_does_not_join_reasoning_renders_unshaded_live() {
             options: IndexMap::default(),
             access: None,
             cancellation_response: None,
+            fan_out: None,
         });
 
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));

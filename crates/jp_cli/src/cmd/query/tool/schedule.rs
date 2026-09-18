@@ -222,11 +222,29 @@ impl Schedule {
     }
 
     /// Record that a local index finished, so a `stop` policy can act on it.
+    ///
+    /// Reads the failure off the response, which is what the assistant will
+    /// receive.
+    /// Use [`record_failure`] where the response has already been through
+    /// result-mode policy, which can replace a failure with a success.
+    ///
+    /// [`record_failure`]: Self::record_failure
     pub(crate) fn record_outcome(&mut self, local: usize, response: &ToolCallResponse) {
         if response.result.is_ok() {
             return;
         }
 
+        self.record_failure(local);
+    }
+
+    /// Record that a local index failed, whatever response the assistant ends
+    /// up seeing for it.
+    ///
+    /// `result = "skip"` and a declined `result = "ask"` prompt both replace a
+    /// failed response with a success before it reaches `results`, so a `stop`
+    /// policy reading the response alone would release the next operation after
+    /// a failure it was configured to stop on.
+    pub(crate) fn record_failure(&mut self, local: usize) {
         let group_id = self.owner[local];
         let group = &mut self.groups[group_id];
         let position = group
@@ -336,22 +354,9 @@ impl Schedule {
                     })
                     .collect();
 
-                // A call that does not fan out answers with its one operation's
-                // result verbatim, including whether it failed. Folding would
-                // flatten that into a success carrying error text.
-                let result = if group.fans_out {
-                    Ok(fan_out::fold(&outcomes))
-                } else {
-                    match outcomes.into_iter().next() {
-                        Some(OperationOutcome::Ok(content)) => Ok(content),
-                        Some(OperationOutcome::Error(message)) => Err(message),
-                        _ => Err("Tool did not complete".to_owned()),
-                    }
-                };
-
                 (group.plan_index, ToolCallResponse {
                     id: group.tool_id,
-                    result,
+                    result: fan_out::fold_call(group.fans_out, outcomes),
                 })
             })
             .collect()

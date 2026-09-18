@@ -33,9 +33,29 @@ pub const FAN_OUT_DESCRIPTION: &str = "This tool accepts several operations in a
 ///
 /// The result is always an object with one required array property, whatever
 /// shape `operation` has.
+///
+/// A `$defs` or `definitions` block moves from the operation schema to the
+/// envelope's root.
+/// Same-document references are anchored at the document root (`#/$defs/Name`),
+/// so leaving the block nested under `properties.ops.items` would point every
+/// reference at a root that no longer holds it: Ollama's inliner would give up
+/// and the property would reach the model with no type, and providers that
+/// validate references would reject the request.
+///
+/// A schema referring to its own root (`$ref: "#"`) is not rewritten, and would
+/// resolve to the envelope rather than the operation.
+/// No tool in the tree declares one.
 #[must_use]
 pub fn envelope(operation: &Value) -> Value {
-    json!({
+    let mut operation = operation.clone();
+    let definitions = operation.as_object_mut().map(|object| {
+        ["$defs", "definitions"]
+            .into_iter()
+            .filter_map(|key| object.remove(key).map(|block| (key.to_owned(), block)))
+            .collect::<Vec<_>>()
+    });
+
+    let mut envelope = json!({
         "type": "object",
         "properties": {
             FAN_OUT_KEY: {
@@ -43,12 +63,18 @@ pub fn envelope(operation: &Value) -> Value {
                 "minItems": 1,
                 "description": "The operations to perform. Each element is one complete set of \
                                 this tool's arguments.",
-                "items": operation.clone(),
+                "items": operation,
             }
         },
         "required": [FAN_OUT_KEY],
         "additionalProperties": false,
-    })
+    });
+
+    if let (Some(object), Some(definitions)) = (envelope.as_object_mut(), definitions) {
+        object.extend(definitions);
+    }
+
+    envelope
 }
 
 /// Why a call's arguments could not be taken apart into operations.
@@ -194,6 +220,29 @@ pub fn fold(outcomes: &[OperationOutcome]) -> String {
     }
 
     body
+}
+
+/// Fold one call's operation outcomes into the response it answers with.
+///
+/// This is the single rule for turning per-operation outcomes into a
+/// [`ToolCallResponse`] result, wherever the outcomes were collected.
+///
+/// A call that does not fan out answers with its one operation's result
+/// verbatim, error included: folding would flatten an error into a success
+/// carrying error text, which reaches Anthropic as `is_error: false` and
+/// renders in the success style on replay.
+///
+/// [`ToolCallResponse`]: jp_conversation::event::ToolCallResponse
+pub fn fold_call(fans_out: bool, outcomes: Vec<OperationOutcome>) -> Result<String, String> {
+    if fans_out {
+        return Ok(fold(&outcomes));
+    }
+
+    match outcomes.into_iter().next() {
+        Some(OperationOutcome::Ok(content)) => Ok(content),
+        Some(OperationOutcome::Error(message)) => Err(message),
+        Some(OperationOutcome::NotRun { .. }) | None => Err("Tool did not complete".to_owned()),
+    }
 }
 
 /// Whether the outcomes so far mean no further operation should start.

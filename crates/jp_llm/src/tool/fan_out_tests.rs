@@ -40,6 +40,60 @@ fn envelope_wraps_the_operation_schema_in_a_required_array() {
     );
 }
 
+/// A same-document reference is anchored at the document root, so the `$defs`
+/// block it points at has to move to the envelope's root when the operation
+/// schema is nested under it.
+#[test]
+fn envelope_hoists_definitions_so_references_still_resolve() {
+    let operation = json!({
+        "type": "object",
+        "properties": {
+            "kinds": { "type": "array", "items": { "$ref": "#/$defs/EntryType" } }
+        },
+        "required": ["kinds"],
+        "$defs": { "EntryType": { "type": "string", "enum": ["Enum", "Method"] } },
+    });
+
+    let wrapped = envelope(&operation);
+
+    assert_eq!(
+        wrapped["$defs"],
+        json!({ "EntryType": { "type": "string", "enum": ["Enum", "Method"] } }),
+        "the definitions block sits at the root the references name"
+    );
+    assert_eq!(
+        wrapped["properties"]["ops"]["items"]["$defs"],
+        Value::Null,
+        "and is gone from the nested copy, so it is defined exactly once"
+    );
+    assert_eq!(
+        wrapped["properties"]["ops"]["items"]["properties"]["kinds"]["items"],
+        json!({ "$ref": "#/$defs/EntryType" }),
+        "the reference itself is untouched"
+    );
+}
+
+/// The older `definitions` spelling moves too.
+#[test]
+fn envelope_hoists_the_legacy_definitions_spelling() {
+    let operation = json!({
+        "type": "object",
+        "properties": { "kind": { "$ref": "#/definitions/Kind" } },
+        "definitions": { "Kind": { "type": "string" } },
+    });
+
+    let wrapped = envelope(&operation);
+
+    assert_eq!(
+        wrapped["definitions"],
+        json!({ "Kind": { "type": "string" } })
+    );
+    assert_eq!(
+        wrapped["properties"]["ops"]["items"]["definitions"],
+        Value::Null
+    );
+}
+
 #[test]
 fn expand_returns_one_argument_map_per_operation() {
     let arguments = args(&json!({

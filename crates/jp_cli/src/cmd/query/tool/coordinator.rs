@@ -354,6 +354,7 @@ impl ExecutorGroup {
 
     /// Fold a group whose operations were all decided before running.
     fn fold_resolved(self) -> ToolCallResponse {
+        let fans_out = self.fan_out.is_some();
         let outcomes: Vec<_> = self
             .ops
             .into_iter()
@@ -368,12 +369,9 @@ impl ExecutorGroup {
             })
             .collect();
 
-        // Every operation was skipped or failed the same way, so the call as a
-        // whole did not run. `Ok` matches how a single skipped tool answers
-        // today: the user declining is not an error the assistant should retry.
         ToolCallResponse {
             id: self.tool_id,
-            result: Ok(fan_out::fold(&outcomes)),
+            result: fan_out::fold_call(fans_out, outcomes),
         }
     }
 }
@@ -657,7 +655,7 @@ impl ToolCoordinator {
                 return ToolCallDecision::Skipped(response);
             }
             PermissionDecision::NeedsPrompt { executor, info } => {
-                self.set_tool_state(&info.tool_id, ToolCallState::AwaitingPermission);
+                self.set_tool_state(&info.state_key, ToolCallState::AwaitingPermission);
 
                 // Pre-render before the prompt so the user sees the
                 // rendered call (not raw arguments) when deciding.
@@ -1246,7 +1244,25 @@ impl ToolCoordinator {
         let mut cancellation_message: Option<String> = None;
         let mut cancelled_indices: Vec<usize> = Vec::new();
 
-        while let Some(event) = event_rx.recv().await {
+        // Whether the schedule may still hand out queued operations. Every
+        // interrupt outcome that cancels the token clears this: restarting
+        // re-runs the batch from the top, and an escalation is a shutdown, so
+        // neither wants a fresh subprocess spawned on the way out.
+        let mut releasing = true;
+
+        loop {
+            // Checked before the receive, not after handling one: a call whose
+            // `stop` policy ruled out every remaining operation spawned nothing
+            // at all, so no event will ever arrive to wake this loop. The
+            // senders are still alive, so `recv` would wait forever.
+            if schedule.all_accounted_for(&results) {
+                break;
+            }
+
+            let Some(event) = event_rx.recv().await else {
+                break;
+            };
+
             match event {
                 ExecutionEvent::ToolResult { index, result } => {
                     let Some(tool) = executing_tools.get_mut(&index) else {
@@ -1254,7 +1270,7 @@ impl ToolCoordinator {
                         continue;
                     };
                     let response = &mut results[index];
-                    self.handle_tool_result(
+                    let failed = self.handle_tool_result(
                         result,
                         tool,
                         index,
@@ -1272,6 +1288,13 @@ impl ToolCoordinator {
                         interactive,
                         tool_renderer,
                     );
+
+                    // Recorded from the tool's own outcome rather than from
+                    // `results[index]`, which result-mode policy may have
+                    // already turned into a success.
+                    if failed {
+                        schedule.record_failure(index);
+                    }
                 }
                 ExecutionEvent::PromptAnswer {
                     index,
@@ -1381,10 +1404,10 @@ impl ToolCoordinator {
                     response,
                 } => {
                     prompt_active = false;
-                    let tool_name = executing_tools
-                        .get(&index)
-                        .map(|t| t.tool_name.clone())
-                        .unwrap_or_default();
+                    let (tool_name, state_key) = executing_tools.get(&index).map_or_else(
+                        || (String::new(), tool_id.clone()),
+                        |t| (t.tool_name.clone(), t.state_key.clone()),
+                    );
                     let is_error = response.result.is_err();
                     let (inline_results, results_file_link) = self
                         .tools_config
@@ -1405,7 +1428,7 @@ impl ToolCoordinator {
                         tool_renderer.render_result(&response, &inline_results, &results_file_link);
                     }
 
-                    self.set_tool_state(&tool_id, ToolCallState::Completed);
+                    self.set_tool_state(&state_key, ToolCallState::Completed);
                     results[index] = Some(response);
                     self.process_next_prompt(
                         &mut pending_prompts,
@@ -1459,17 +1482,14 @@ impl ToolCoordinator {
                             | ToolInterruptResult::PromptFailed
                             | ToolInterruptResult::Declined => {}
                             ToolInterruptResult::Restart => {
+                                schedule.abandon_unstarted();
+                                releasing = false;
                                 outcome.upgrade(ExecutionOutcome::Restart);
                             }
                             ToolInterruptResult::Cancelled { response, exit } => {
                                 cancelled_indices = schedule.unfinished(&results);
-
-                                // A call holding operations back behind a
-                                // concurrency limit would otherwise leave the
-                                // loop waiting on results that can never
-                                // arrive, because those operations were never
-                                // spawned.
                                 schedule.abandon_unstarted();
+                                releasing = false;
                                 tools_cancelled = true;
                                 cancellation_message = response;
                                 if exit {
@@ -1481,6 +1501,8 @@ impl ToolCoordinator {
                             // escalation so the turn loop begins a graceful
                             // shutdown.
                             ToolInterruptResult::Escalate => {
+                                schedule.abandon_unstarted();
+                                releasing = false;
                                 outcome.upgrade(ExecutionOutcome::Escalated);
                             }
                         }
@@ -1488,10 +1510,11 @@ impl ToolCoordinator {
                 }
             }
 
-            // Tell the schedule which operations failed, so a call configured
-            // to stop on error starts none of the ones still queued.
-            // Re-scanning every finished operation each time is cheap at these
-            // sizes, and recording the same failure twice is a no-op.
+            // Backstop for the failure paths that write `results` directly (a
+            // cancelled prompt, an inquiry that could not be answered). The
+            // execution outcome itself is recorded in `handle_tool_result`,
+            // before result-mode policy can rewrite it. Recording the same
+            // failure twice is a no-op: the earliest position wins.
             for (index, response) in results.iter().enumerate() {
                 if let Some(response) = response {
                     schedule.record_outcome(index, response);
@@ -1501,7 +1524,7 @@ impl ToolCoordinator {
             // Release whatever the finished operations made room for: the next
             // operation of a call with a concurrency limit, or nothing at all
             // for a call already running everything it has.
-            if !tools_cancelled {
+            if releasing {
                 for (index, executor) in schedule.release(&results) {
                     self.start_operation(
                         index,
@@ -1514,10 +1537,6 @@ impl ToolCoordinator {
                         &event_tx,
                     );
                 }
-            }
-
-            if schedule.all_accounted_for(&results) {
-                break;
             }
         }
 
@@ -1761,6 +1780,14 @@ impl ToolCoordinator {
         });
     }
 
+    /// Handle one operation's execution result.
+    ///
+    /// Returns whether the *tool* reported a failure, which is not the same as
+    /// whether `tracked_response` ends up holding one: `result = "skip"` and a
+    /// declined `result = "ask"` prompt both answer the assistant with a
+    /// success.
+    /// A `stop` fan-out policy keys off this return value, so it acts on what
+    /// the tool did rather than on what the assistant was told.
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_lines)]
     fn handle_tool_result(
@@ -1781,7 +1808,7 @@ impl ToolCoordinator {
         turn_state: &mut TurnState,
         interactive: bool,
         tool_renderer: &ToolRenderer,
-    ) {
+    ) -> bool {
         match result {
             ExecutorResult::Completed(response) => {
                 let is_error = response.result.is_err();
@@ -1836,7 +1863,7 @@ impl ToolCoordinator {
                             } else {
                                 *prompt_active = true;
                                 self.set_tool_state(
-                                    &tool.tool_id,
+                                    &tool.state_key,
                                     ToolCallState::AwaitingResultEdit,
                                 );
                                 Self::spawn_result_mode_prompt(
@@ -1866,6 +1893,10 @@ impl ToolCoordinator {
                         }
                     }
                 }
+
+                // Read off the executor's own result, before any of the
+                // branches above had a chance to replace it.
+                is_error
             }
             ExecutorResult::NeedsInput {
                 tool_id,
@@ -1920,7 +1951,7 @@ impl ToolCoordinator {
                             event_tx,
                             tool.stderr.clone(),
                         );
-                        return;
+                        return false;
                     }
                 }
 
@@ -1944,7 +1975,7 @@ impl ToolCoordinator {
                         event_tx,
                         tool.stderr.clone(),
                     );
-                    return;
+                    return false;
                 }
 
                 let target = self
@@ -1971,7 +2002,7 @@ impl ToolCoordinator {
                         });
                     } else {
                         *prompt_active = true;
-                        self.set_tool_state(&tool_id, ToolCallState::AwaitingInput);
+                        self.set_tool_state(&tool.state_key, ToolCallState::AwaitingInput);
                         Self::spawn_user_prompt(
                             index,
                             question,
@@ -2002,11 +2033,12 @@ impl ToolCoordinator {
                         )
                     };
                     Self::record_inquiry_cancelled(conv, &inquiry_id, reason);
-                    self.set_tool_state(&tool_id, ToolCallState::Completed);
+                    self.set_tool_state(&tool.state_key, ToolCallState::Completed);
                     *tracked_response = Some(ToolCallResponse {
                         id: tool_id.clone(),
                         result: Err(message),
                     });
+                    return true;
                 } else {
                     // The `InquiryRequest` is already recorded above; spawn the
                     // async inquiry on a cloned snapshot.
@@ -2021,8 +2053,11 @@ impl ToolCoordinator {
                         cancellation_token.child_token(),
                         event_tx.clone(),
                     );
-                    self.set_tool_state(&tool_id, ToolCallState::AwaitingInput);
+                    self.set_tool_state(&tool.state_key, ToolCallState::AwaitingInput);
                 }
+
+                // The operation has not finished: it is waiting on an answer.
+                false
             }
         }
     }
@@ -2246,7 +2281,9 @@ impl ToolCoordinator {
                 response,
                 result_mode,
             } => {
-                self.set_tool_state(&tool_id, ToolCallState::AwaitingResultEdit);
+                if let Some(tool) = executing_tools.get(&index) {
+                    self.set_tool_state(&tool.state_key, ToolCallState::AwaitingResultEdit);
+                }
                 Self::spawn_result_mode_prompt(
                     index,
                     tool_id,
