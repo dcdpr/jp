@@ -59,7 +59,7 @@ impl AssignKeyValue for PartialToolsConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             _ if kv.p("*") => self.defaults.assign(kv)?,
-            _ => kv.assign_to_entry(&mut self.tools)?,
+            _ => kv.assign_to_mergeable_entry(&mut self.tools)?,
         }
 
         Ok(())
@@ -637,7 +637,7 @@ impl AssignKeyValue for PartialToolConfig {
             "cancellation_response" => self.cancellation_response = kv.try_some_string()?,
             _ if kv.p("style") => self.style.assign(kv)?,
             "questions" => self.questions = kv.try_object()?,
-            _ if kv.p("options") => kv.assign_to_entry(&mut self.options)?,
+            _ if kv.p("options") => kv.assign_to_mergeable_entry(&mut self.options)?,
             _ if kv.p("access") => self.access.assign(kv)?,
             _ => return missing_key(&kv),
         }

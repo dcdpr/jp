@@ -29,7 +29,7 @@ impl AssignKeyValue for PartialTemplateConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> Result<(), crate::BoxedError> {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
-            _ if kv.p("values") => kv.assign_to_entry(&mut self.values)?,
+            _ if kv.p("values") => kv.assign_to_mergeable_entry(&mut self.values)?,
             _ => return missing_key(&kv),
         }
 
