@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use async_anthropic::types::{Effort, ExtendedThinking};
+use async_anthropic::types::{Effort, ExtendedThinking, ThinkingDisplay};
 use jp_config::{assistant::request::CachePolicy, model::id::Name};
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -48,6 +48,16 @@ enum CustomPrompt<'a> {
     Custom { prompt: &'a str, snapshot: bool },
 }
 
+/// Claude Code's `ThinkingConfig`.
+///
+/// Structurally identical to [`ExtendedThinking`] apart from `budgetTokens`,
+/// which the SDK spells in camelCase where the Anthropic API uses
+/// `budget_tokens`.
+/// That single difference is the only reason this type exists.
+///
+/// `display` carries more weight than its size suggests.
+/// Opus 4.7 and later default it to `omitted`, which leaves the model reasoning
+/// and billing for tokens that arrive as empty thinking blocks.
 #[derive(Serialize)]
 #[serde(
     tag = "type",
@@ -55,9 +65,37 @@ enum CustomPrompt<'a> {
     rename_all_fields = "camelCase"
 )]
 enum Thinking {
-    Enabled { budget_tokens: u32 },
-    Adaptive,
+    Enabled {
+        budget_tokens: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        display: Option<ThinkingDisplay>,
+    },
+    Adaptive {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        display: Option<ThinkingDisplay>,
+    },
     Disabled,
+}
+
+impl From<&ExtendedThinking> for Thinking {
+    // Every variant is destructured field by field, with no `..` rest pattern:
+    // a field added to `ExtendedThinking` has to fail the build here instead of
+    // being dropped silently on the way to Claude Code.
+    fn from(thinking: &ExtendedThinking) -> Self {
+        match thinking {
+            ExtendedThinking::Enabled {
+                budget_tokens,
+                display,
+            } => Self::Enabled {
+                budget_tokens: *budget_tokens,
+                display: display.clone(),
+            },
+            ExtendedThinking::Adaptive { display } => Self::Adaptive {
+                display: display.clone(),
+            },
+            ExtendedThinking::Disabled => Self::Disabled,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -83,13 +121,7 @@ pub(super) fn metadata(
     prepared: &PreparedRequest,
     env: &BTreeMap<String, String>,
 ) -> Result<Value, serde_json::Error> {
-    let thinking = prepared.thinking.as_ref().map(|thinking| match thinking {
-        ExtendedThinking::Enabled { budget_tokens, .. } => Thinking::Enabled {
-            budget_tokens: *budget_tokens,
-        },
-        ExtendedThinking::Adaptive { .. } => Thinking::Adaptive,
-        ExtendedThinking::Disabled => Thinking::Disabled,
-    });
+    let thinking = prepared.thinking.as_ref().map(Thinking::from);
     serde_json::to_value(Extension {
         claude_code: ClaudeCode {
             emit_raw_sdk_messages: true,
@@ -148,3 +180,7 @@ pub(super) fn environment(
     }
     environment
 }
+
+#[cfg(test)]
+#[path = "options_tests.rs"]
+mod tests;
