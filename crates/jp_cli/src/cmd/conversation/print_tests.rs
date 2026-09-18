@@ -70,14 +70,14 @@ fn tool_with_style(style: DisplayStyleConfig) -> ToolConfig {
         summary: None,
         description: None,
         examples: None,
-        parameters: IndexMap::new(),
+        parameters: IndexMap::new().into(),
         run: None,
         format: None,
         result: None,
         cancellation_response: None,
         style: Some(style),
-        questions: IndexMap::new(),
-        options: IndexMap::new(),
+        questions: IndexMap::new().into(),
+        options: IndexMap::new().into(),
         access: None,
     }
 }
