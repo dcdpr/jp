@@ -123,6 +123,9 @@ pub(crate) enum Error {
     #[error("Missing editor")]
     MissingEditor,
 
+    #[error("Editor unavailable in a non-interactive invocation")]
+    NonInteractiveEditor,
+
     #[error("Task error: {0}")]
     Task(Box<dyn std::error::Error + Send + Sync>),
 

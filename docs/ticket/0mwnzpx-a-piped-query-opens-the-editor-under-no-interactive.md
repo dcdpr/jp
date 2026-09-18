@@ -1,6 +1,6 @@
 # A piped query opens the editor under --no-interactive
 
-- **Status**: Todo
+- **Status**: Done
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-18
@@ -83,3 +83,31 @@ happened to exit zero.
 
 `--no-interactive`'s own help text names "a script or a CI job" as the case it
 exists for, which is exactly the case that hangs.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-09-18T15:10:12Z
+
+Fixed by gating the editor on interactivity at the point where the backend is
+resolved, rather than inside `force_no_edit()`.
+
+`force_no_edit()` also drives the branch above it, which synthesizes a
+`continue` message when the request is empty.
+Making that branch fire under `--no-interactive` would have turned `jp query`
+with no input into a silent request to the provider, replacing a hang with a
+surprise API call.
+Gating at the backend instead keeps the two cases apart:
+
+- Request has content (piped or inline): the editor is skipped and the text is
+  sent as-is.
+  This is the reported case.
+- Request is empty: `Error::NonInteractiveEditor`, which names the reason and
+  suggests passing the query as an argument or on stdin, or using `--no-edit`.
+
+Not done: rejecting an explicit `--edit` alongside `--no-interactive`.
+It is now ignored rather than honoured, which is the safe direction but still
+silent.
+Worth a separate ticket if it bites.

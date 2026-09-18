@@ -2180,6 +2180,7 @@ fn edit_message_synthesizes_when_no_edit_without_query() {
             &stream,
             &mut pending_trim,
             false,
+            true,
             &config,
             root,
             &Printer::sink(),
@@ -2201,6 +2202,7 @@ fn edit_message_synthesizes_when_no_edit_without_query() {
             &stream,
             &mut pending_trim,
             false,
+            true,
             &config,
             root,
             &Printer::sink(),
@@ -2240,6 +2242,7 @@ fn edit_message_quote_without_editor_is_synthesized() {
             &stream,
             &mut pending_trim,
             false,
+            true,
             &config,
             Utf8Path::new("/tmp"),
             &Printer::sink(),
@@ -2273,6 +2276,7 @@ fn edit_message_skips_editor_when_no_edit_with_piped_stdin() {
             &stream,
             &mut pending_trim,
             true,
+            true,
             &config,
             root,
             &Printer::sink(),
@@ -2282,6 +2286,93 @@ fn edit_message_skips_editor_when_no_edit_with_piped_stdin() {
     assert_eq!(source, QuerySource::Inline);
     assert_eq!(request.content, "hi");
     assert!(partial.is_empty());
+}
+
+#[test]
+fn edit_message_skips_editor_when_non_interactive() {
+    // A query arriving on stdin with nobody at the terminal: the editor would
+    // block on a buffer no one can save, so the piped text is sent as-is.
+    //
+    // The configured editor names a program that cannot be spawned, so
+    // reaching the editor branch fails loudly instead of passing by accident.
+    let dir = Utf8TempDir::new().unwrap();
+    let mut config = AppConfig::new_test();
+    config.editor.cmd = Some(CommandConfigOrString::String(
+        "jp-editor-that-does-not-exist".to_owned(),
+    ));
+
+    let mut request = ChatRequest::from("piped payload");
+    let stream = ConversationStream::new_test();
+    let mut pending_trim = PendingStreamTrim::default();
+    let (source, partial) = Query::default()
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            true,
+            false,
+            &config,
+            dir.path(),
+            &Printer::sink(),
+        )
+        .unwrap();
+
+    assert_eq!(source, QuerySource::Inline);
+    assert_eq!(request.content, "piped payload");
+    assert!(partial.is_empty());
+    // The draft file is written before the editor is spawned, so its absence
+    // proves the editor branch was never entered.
+    assert!(!dir.path().join(editor::QUERY_FILENAME).exists());
+
+    // The same call with a user present does reach the editor, which proves
+    // the assertions above are pinned on interactivity and not on some other
+    // reason to skip.
+    let mut request = ChatRequest::from("piped payload");
+    let mut pending_trim = PendingStreamTrim::default();
+    let error = Query::default()
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            true,
+            true,
+            &config,
+            dir.path(),
+            &Printer::sink(),
+        )
+        .unwrap_err();
+
+    assert_matches!(error, Error::Editor(_));
+}
+
+#[test]
+fn edit_message_without_a_query_is_an_error_when_non_interactive() {
+    // Nothing to send and no way to compose it: erroring out is the only
+    // honest outcome. The run used to hang in the editor instead.
+    let dir = Utf8TempDir::new().unwrap();
+    let mut config = AppConfig::new_test();
+    config.editor.cmd = Some(CommandConfigOrString::String(
+        "jp-editor-that-does-not-exist".to_owned(),
+    ));
+
+    let mut request = ChatRequest::default();
+    let stream = ConversationStream::new_test();
+    let mut pending_trim = PendingStreamTrim::default();
+    let error = Query::default()
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            false,
+            false,
+            &config,
+            dir.path(),
+            &Printer::sink(),
+        )
+        .unwrap_err();
+
+    assert_matches!(error, Error::NonInteractiveEditor);
+    assert!(!dir.path().join(editor::QUERY_FILENAME).exists());
 }
 
 #[test]
@@ -3297,6 +3388,7 @@ fn built_request_against(args: &[&str], stream: &ConversationStream) -> String {
             "",
             resolved.as_deref(),
             stream,
+            true,
             &AppConfig::new_test(),
             Utf8Path::new("/tmp"),
             &Printer::sink(),
@@ -3384,6 +3476,7 @@ fn build_conversation_prepends_query_to_piped_stdin() {
             "piped payload",
             Some("look at this"),
             &ConversationStream::new_test(),
+            true,
             &AppConfig::new_test(),
             Utf8Path::new("/tmp"),
             &Printer::sink(),
