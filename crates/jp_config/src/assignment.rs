@@ -12,7 +12,10 @@ use schematic::{MergeResult, PartialConfig};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, from_str};
 
-use crate::{AppConfig, BoxedError, types::vec::MergeableVec};
+use crate::{
+    AppConfig, BoxedError,
+    types::{map::MergeableMap, vec::MergeableVec},
+};
 
 /// The result of assigning a key-value pair to a configuration.
 pub type AssignResult = Result<(), BoxedError>;
@@ -350,6 +353,39 @@ impl KvAssignment {
         };
         map.entry(key).or_default().assign(self)?;
         Ok(())
+    }
+
+    /// Assign a key-value pair to an entry of a map that carries its own merge
+    /// strategy.
+    ///
+    /// Mirrors [`Self::assign_to_entry`], with one more shape to tell apart: a
+    /// whole-map object carrying `value` beside `strategy` is the wrapper that
+    /// states how the map merges, not two entries named after those keys.
+    ///
+    /// Told apart by the test the map's own deserializer uses, so a strategy
+    /// written on the command line and one written in a config file mean the
+    /// same thing.
+    /// An entry named `value` needs the sibling `strategy` before it reads as
+    /// the wrapper, which keeps a tool called `value` assignable.
+    ///
+    /// Anything else is an entry, and lands inside whatever wrapper the map
+    /// already carries: naming one entry says nothing about how the map
+    /// combines.
+    pub(crate) fn assign_to_mergeable_entry<V>(self, map: &mut MergeableMap<V>) -> AssignResult
+    where
+        V: AssignKeyValue + Default + Clone + DeserializeOwned,
+    {
+        if self.key.is_empty()
+            && let KvValue::Json(Value::Object(object)) = &self.value
+            && object.contains_key("value")
+            && object.contains_key("strategy")
+        {
+            let value = self.value.clone().into_value();
+            *map = serde_json::from_value(value).map_err(|error| kv_error(&self.key, error))?;
+            return Ok(());
+        }
+
+        self.assign_to_entry(map)
     }
 
     /// Parse an assignment from an environment variable.

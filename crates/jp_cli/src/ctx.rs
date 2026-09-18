@@ -130,7 +130,7 @@ impl Ctx {
         let config = config.into();
         let escalation_cooldown =
             Duration::from_secs(config.interrupt.escalation_cooldown_secs.into());
-        let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone())
+        let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone().into_map())
             .with_child_cwd(exec.child_cwd().map(|cwd| cwd.as_std_path().to_path_buf()));
 
         let is_tty = io::stdout().is_terminal();

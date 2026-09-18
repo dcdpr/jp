@@ -75,7 +75,9 @@ PartialAppConfig {
                 },
                 access: None,
             },
-            tools: {},
+            tools: Map(
+                {},
+            ),
         },
         compaction: PartialCompactionConfig {
             rules: Vec(
@@ -211,11 +213,15 @@ PartialAppConfig {
         },
     },
     template: PartialTemplateConfig {
-        values: {},
+        values: Map(
+            {},
+        ),
     },
     providers: PartialProviderConfig {
         llm: PartialLlmProviderConfig {
-            aliases: {},
+            aliases: Map(
+                {},
+            ),
             anthropic: PartialAnthropicConfig {
                 auth: None,
                 api_key_env: None,
@@ -253,12 +259,16 @@ PartialAppConfig {
                 base_url: None,
             },
         },
-        mcp: {},
+        mcp: Map(
+            {},
+        ),
     },
     plugins: PartialPluginsConfig {
         auto_install: None,
         shutdown_timeout_secs: None,
-        command: {},
+        command: Map(
+            {},
+        ),
     },
     user: PartialUserConfig {
         name: None,

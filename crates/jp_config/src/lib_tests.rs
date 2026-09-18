@@ -772,6 +772,119 @@ fn a_dropped_mcp_argument_is_recorded() {
     );
 }
 
+/// A server the user removed is recorded twice over, so the conversation stops
+/// starting it.
+///
+/// Entries merge by key, which is what lets a server the workspace config
+/// gained reach a conversation created before it existed.
+/// That same property means a deep merge would resurrect a removed one, so the
+/// delta states `replace` and carries the map the user is left with.
+///
+/// The value settles the conversation's own fold.
+/// The path settles the layer above it, where the conversation is filled from
+/// the config files and a server it does not hold would otherwise read as one
+/// it never mentioned.
+#[test]
+fn a_removed_mcp_server_is_recorded() {
+    use crate::providers::mcp::{McpProviderConfig, StdioConfig};
+
+    let mut prev = AppConfig::new_test();
+    prev.providers.mcp.insert(
+        "bookworm".to_owned(),
+        McpProviderConfig::Stdio(StdioConfig {
+            command: "just".into(),
+            arguments: vec!["serve".to_owned()],
+            variables: vec![],
+            checksum: None,
+            optional: false,
+            startup_timeout_secs: 60,
+        }),
+    );
+
+    let mut next = prev.clone();
+    next.providers.mcp.shift_remove("bookworm");
+
+    let mut unsets = Vec::new();
+    let delta = prev
+        .to_partial()
+        .delta_with_unsets(next.to_partial(), "", &mut unsets);
+
+    assert_eq!(
+        unsets,
+        ["providers.mcp.bookworm"],
+        "the removed key reports its path, so filling cannot restore it"
+    );
+    assert!(
+        delta.providers.mcp.discard_when_merged() || !delta.providers.mcp.is_empty(),
+        "the delta carries the map the user is left with"
+    );
+
+    let mut folded = prev.to_partial();
+    folded.merge(&(), delta).expect("folding cannot fail");
+
+    assert!(
+        !crate::util::build(folded)
+            .expect("valid config")
+            .providers
+            .mcp
+            .contains_key("bookworm"),
+        "the server is gone after the fold"
+    );
+}
+
+/// A server only the workspace config declares reaches an existing
+/// conversation.
+///
+/// The conversation layer is a resolved snapshot merged over the layer built
+/// from the config files.
+/// Stating `replace` on that snapshot would drop every server the files declare
+/// and the conversation does not, so it merges per key instead.
+#[test]
+fn a_server_added_to_the_workspace_reaches_an_existing_conversation() {
+    use schematic::PartialConfig as _;
+
+    use crate::providers::mcp::{McpProviderConfig, StdioConfig};
+
+    let server = |command: &str| {
+        McpProviderConfig::Stdio(StdioConfig {
+            command: command.into(),
+            arguments: vec![],
+            variables: vec![],
+            checksum: None,
+            optional: false,
+            startup_timeout_secs: 60,
+        })
+    };
+
+    // The conversation was created knowing only `bookworm`.
+    let mut conversation = AppConfig::new_test();
+    conversation
+        .providers
+        .mcp
+        .insert("bookworm".to_owned(), server("just"));
+
+    // The workspace config has since gained `kagi`.
+    let mut files = PartialAppConfig::new_test();
+    files
+        .providers
+        .mcp
+        .insert("kagi".to_owned(), server("kagi").to_partial());
+
+    files
+        .merge(&(), conversation.to_partial())
+        .expect("merging cannot fail");
+    let resolved = crate::util::build(files).expect("valid config");
+
+    assert!(
+        resolved.providers.mcp.contains_key("kagi"),
+        "a server only the files declare survives the conversation layer"
+    );
+    assert!(
+        resolved.providers.mcp.contains_key("bookworm"),
+        "the conversation's own server survives too"
+    );
+}
+
 /// A union that names an expanded form contributes both the shorthand path and
 /// the expanded keys; a union of distinct values contributes only its path.
 ///

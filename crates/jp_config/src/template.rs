@@ -1,15 +1,14 @@
 //! Template configuration for Jean-Pierre.
 
-use indexmap::IndexMap;
 use schematic::Config;
 
 use crate::{
     assignment::{AssignKeyValue, KvAssignment, missing_key},
-    delta::PartialConfigDelta,
+    delta::{PartialConfigDelta, delta_mergeable_value_map, delta_mergeable_value_map_at, path},
     fill::FillDefaults,
+    internal::merge::map_with_strategy,
     partial::ToPartial,
-    types::json_value::JsonValue,
-    util::merge_nested_indexmap,
+    types::{json_value::JsonValue, map::MergeableMap},
 };
 
 /// Template configuration.
@@ -17,15 +16,20 @@ use crate::{
 #[config(rename_all = "snake_case")]
 pub struct TemplateConfig {
     /// Template variable values used to render query templates.
-    #[setting(nested, merge = merge_nested_indexmap)]
-    pub values: IndexMap<String, JsonValue>,
+    ///
+    /// Entries merge by key, so a value set in a later layer joins the ones an
+    /// earlier layer set.
+    /// Declare the map as `{ value = { … }, strategy = "replace" }` to drop
+    /// them instead.
+    #[setting(nested, merge = map_with_strategy)]
+    pub values: MergeableMap<JsonValue>,
 }
 
 impl AssignKeyValue for PartialTemplateConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> Result<(), crate::BoxedError> {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
-            _ if kv.p("values") => kv.assign_to_entry(&mut self.values)?,
+            _ if kv.p("values") => kv.assign_to_mergeable_entry(&mut self.values)?,
             _ => return missing_key(&kv),
         }
 
@@ -36,34 +40,41 @@ impl AssignKeyValue for PartialTemplateConfig {
 impl PartialConfigDelta for PartialTemplateConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
-            values: next
-                .values
-                .into_iter()
-                .filter_map(|(name, next)| {
-                    if self.values.get(&name).is_some_and(|prev| prev == &next) {
-                        return None;
-                    }
-                    Some((name, next))
-                })
-                .collect(),
+            values: delta_mergeable_value_map(&self.values, next.values),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            values: delta_mergeable_value_map_at(
+                &path(prefix, "values"),
+                &self.values,
+                next.values,
+                unsets,
+            ),
         }
     }
 }
 
 impl FillDefaults for PartialTemplateConfig {
-    fn fill_from(self, _defaults: Self) -> Self {
-        self
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            values: self.values.fill_from(defaults.values),
+        }
     }
 }
 
 impl ToPartial for TemplateConfig {
     fn to_partial(&self) -> Self::Partial {
         Self::Partial {
-            values: self
-                .values
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
+            // Per key rather than `replace`: a value the workspace config
+            // gained after this conversation was created still reaches it.
+            values: MergeableMap::Map(
+                self.values
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            ),
         }
     }
 }
