@@ -312,6 +312,23 @@ impl ChatRenderer {
     }
 
     fn render_reasoning(&mut self, content: &str) {
+        // A thinking block can carry no text at all: a redacted one, or one whose
+        // text the provider withheld and streamed only a signature for. There is
+        // nothing to show and nothing to time, and opening a reasoning region on
+        // it would shade every tool call that followed without a word of
+        // reasoning on screen to account for the shading.
+        //
+        // Doing nothing also leaves an already-open region open, so a redacted
+        // block between two thinking blocks splits the text without splitting
+        // the region.
+        //
+        // Only the display is skipped. The event still reaches the event
+        // builder, so the signature it carries is recorded and replayed to the
+        // provider on the next request.
+        if content.is_empty() {
+            return;
+        }
+
         match self.config.reasoning.display {
             // Even though reasoning is hidden, a reasoning block is a
             // semantic boundary: flush any buffered message content so that
