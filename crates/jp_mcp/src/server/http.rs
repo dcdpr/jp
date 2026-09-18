@@ -9,6 +9,7 @@ use std::{
     io,
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 use axum::Router;
@@ -17,9 +18,9 @@ use rmcp::{
     ErrorData, ServerHandler, ServiceExt as _,
     model::{
         CallToolRequestParams, CallToolResult, ListToolsResult, Meta, PaginatedRequestParams,
-        ServerCapabilities, ServerInfo, Tool,
+        ProgressNotificationParam, ProgressToken, ServerCapabilities, ServerInfo, Tool,
     },
-    service::{RequestContext, RoleClient, RoleServer, RunningService},
+    service::{Peer, RequestContext, RoleClient, RoleServer, RunningService},
     transport::{
         StreamableHttpClientTransport,
         streamable_http_client::StreamableHttpClientTransportConfig,
@@ -31,15 +32,27 @@ use rmcp::{
 };
 use tokio::{
     net::TcpListener,
+    sync::broadcast,
     task::{JoinError, JoinHandle},
+    time::{MissedTickBehavior, interval},
 };
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use super::{
     http_client::LoopbackClient,
-    service::{CallRequest, Service, ServiceError},
+    service::{CallRequest, InvocationId, Progress, Service, ServiceError},
 };
+
+/// How often a running call tells its caller that it is still alive, when the
+/// tool itself has nothing to say.
+///
+/// A caller waiting on a call it has heard nothing from cannot tell a slow tool
+/// from a dead one, and clients commonly abandon such a call after a few
+/// minutes.
+/// This sits well inside those limits, and inside the idle window the transport
+/// applies to a session carrying no traffic.
+const PROGRESS_HEARTBEAT: Duration = Duration::from_secs(30);
 
 /// Failure starting, connecting to, or stopping the in-process endpoint.
 #[derive(Debug, thiserror::Error)]
@@ -83,6 +96,19 @@ impl Endpoint {
     /// Start the endpoint.
     /// Does not consume or drive the private Host receiver.
     pub async fn start(service: Service) -> Result<Self, EndpointError> {
+        Self::start_reporting_every(service, PROGRESS_HEARTBEAT).await
+    }
+
+    /// Start the endpoint, choosing how often a running call reports liveness.
+    ///
+    /// Separate from [`start`] so a test can observe repeated reports without
+    /// waiting out the interval a real caller is served.
+    ///
+    /// [`start`]: Self::start
+    async fn start_reporting_every(
+        service: Service,
+        heartbeat: Duration,
+    ) -> Result<Self, EndpointError> {
         let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).await?;
         let address = listener.local_addr()?;
         let origin = format!("http://{address}");
@@ -104,6 +130,7 @@ impl Endpoint {
             move || {
                 Ok(Handler {
                     service: factory.clone(),
+                    heartbeat,
                 })
             },
             Arc::new(LocalSessionManager::default()),
@@ -171,6 +198,72 @@ impl Drop for Endpoint {
 #[derive(Clone)]
 struct Handler {
     service: Arc<Service>,
+
+    /// How often a running call reports liveness while its tool is silent.
+    heartbeat: Duration,
+}
+
+/// Reports one call's progress for as long as it is held.
+///
+/// The work runs in its own task so that it continues for the whole call rather
+/// than only while the handler happens to be waiting on something.
+struct Reporter(JoinHandle<()>);
+
+impl Drop for Reporter {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Report a running call's output and liveness to the caller that asked for it.
+///
+/// Each line the tool writes to stderr becomes one notification, and a stretch
+/// in which it writes nothing produces one every `heartbeat`.
+/// The count rises by one per notification and carries no total, which is what
+/// MCP asks of work whose size is not known in advance.
+///
+/// Returns immediately when the caller supplied no progress token, since a
+/// notification has nowhere to go without one.
+async fn report_progress(
+    peer: Peer<RoleServer>,
+    id: InvocationId,
+    progress: Option<(ProgressToken, broadcast::Receiver<Progress>)>,
+    heartbeat: Duration,
+) {
+    let Some((token, mut lines)) = progress else {
+        return;
+    };
+    let mut ticker = interval(heartbeat);
+    // Catching up on the ticks missed during a burst of tool output would spend
+    // them all at once, on a call that plainly needs no reminder that it is
+    // alive.
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    // The first tick is immediate, and the caller has just been told the call
+    // began.
+    ticker.tick().await;
+    let started = Instant::now();
+    let mut count = 0_f64;
+    loop {
+        let message = tokio::select! {
+            received = lines.recv() => match received {
+                Ok(progress) if progress.id == id => progress.line,
+                // A line from another call in flight, or more lines than this
+                // receiver kept up with. Neither says anything about this call,
+                // and the receiver stays usable either way.
+                Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                // The service owning the sender is gone, so the call cannot
+                // still be running.
+                Err(broadcast::error::RecvError::Closed) => return,
+            },
+            _ = ticker.tick() => format!("running for {}s", started.elapsed().as_secs()),
+        };
+        count += 1.0;
+        let param = ProgressNotificationParam::new(token.clone(), count).with_message(message);
+        // A caller that stopped listening is no reason to stop the tool.
+        if peer.notify_progress(param).await.is_err() {
+            return;
+        }
+    }
 }
 
 impl ServerHandler for Handler {
@@ -233,6 +326,13 @@ impl ServerHandler for Handler {
                 None,
             ));
         }
+        // Subscribed before the call is submitted, because a broadcast receiver
+        // is sent only what is broadcast after it subscribes, and submitting the
+        // call starts the tool.
+        let progress = context
+            .meta
+            .get_progress_token()
+            .map(|token| (token, self.service.subscribe_progress()));
         let call = self
             .service
             .start_call(CallRequest {
@@ -246,6 +346,13 @@ impl ServerHandler for Handler {
         // separately owned invocation. A dropped HTTP response stream alone
         // does not destroy a stateful session's request handler.
         let _guard = cancellation.clone().drop_guard();
+        // Reporting ends with the call, however the call ends.
+        let _reporter = Reporter(tokio::spawn(report_progress(
+            context.peer.clone(),
+            call.id(),
+            progress,
+            self.heartbeat,
+        )));
         let result = call.finish_mcp();
         tokio::pin!(result);
         tokio::select! {

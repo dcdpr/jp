@@ -212,6 +212,40 @@ impl SseReader {
             }
         }
     }
+
+    /// Read up to the next notification of `method`, returning its parameters.
+    ///
+    /// A reply arriving first means the notification was never sent, so it
+    /// fails here rather than leaving the caller to wait out its own timeout.
+    async fn notification(&mut self, method: &str) -> Value {
+        loop {
+            let (_, Some(message)) = self.frame().await else {
+                continue;
+            };
+            assert_eq!(message["jsonrpc"], "2.0");
+            assert!(
+                message["id"].is_null(),
+                "expected a {method} notification, got the reply: {message}"
+            );
+            if message["method"] == method {
+                return message["params"].clone();
+            }
+        }
+    }
+
+    /// Read the reply with `id`, discarding notifications sent ahead of it.
+    async fn reply_after_notifications(mut self, id: u64) -> Value {
+        loop {
+            let (_, Some(message)) = self.frame().await else {
+                continue;
+            };
+            assert_eq!(message["jsonrpc"], "2.0");
+            if !message["id"].is_null() {
+                assert_eq!(message["id"], id);
+                return message;
+            }
+        }
+    }
 }
 
 /// The fixture client has to frame events the way a conforming server may send
@@ -243,6 +277,14 @@ impl Fixture {
 }
 
 async fn fixture(config: Value, builtins: BuiltinExecutors) -> Fixture {
+    fixture_reporting_every(config, builtins, super::PROGRESS_HEARTBEAT).await
+}
+
+async fn fixture_reporting_every(
+    config: Value,
+    builtins: BuiltinExecutors,
+    heartbeat: Duration,
+) -> Fixture {
     let root = tempdir().unwrap();
     let mut cfg = AppConfig::new_test();
     let config: PartialToolConfig = serde_json::from_value(config).unwrap();
@@ -279,7 +321,9 @@ async fn fixture(config: Value, builtins: BuiltinExecutors) -> Fixture {
     )
     .unwrap();
     Fixture {
-        endpoint: Endpoint::start(service).await.unwrap(),
+        endpoint: Endpoint::start_reporting_every(service, heartbeat)
+            .await
+            .unwrap(),
         host,
         root,
     }
@@ -341,6 +385,138 @@ async fn external_discovery_preserves_host_metadata_without_executing() {
     );
     assert_eq!(count.load(Ordering::SeqCst), 0);
     assert!(matches!(fixture.host.try_recv(), Err(TryRecvError::Empty)));
+    client.close().await;
+    fixture.shutdown().await;
+}
+
+/// A caller that supplies a progress token is told what the tool writes to
+/// stderr, line by line, while the call is still running.
+/// A caller given nothing to go on cannot tell a working tool from a stuck one,
+/// and clients abandon calls they have heard nothing about.
+#[tokio::test]
+#[cfg(unix)]
+async fn external_progress_token_receives_each_stderr_line_before_the_result() {
+    let mut fixture = fixture(
+        json!({
+            "source": "local",
+            "command": {"program": "sh", "shell": false, "args": [
+                "-c", "printf 'step one\\nstep two\\n' >&2; printf '%s' 'finished'",
+            ]},
+        }),
+        BuiltinExecutors::new(),
+    )
+    .await;
+    let client = ExternalClient::connect(fixture.endpoint.url()).await;
+    let mut response = client
+        .request(
+            7,
+            "tools/call",
+            json!({"name":"probe","arguments":{},"_meta":{"progressToken":"probe-7"}}),
+        )
+        .await;
+    let Interaction::Prepare { reply, .. } = next(&mut fixture.host).await.interaction else {
+        panic!("expected preparation")
+    };
+    reply
+        .send(Ok(Admission::Run {
+            arguments: Map::new(),
+        }))
+        .unwrap();
+    let Interaction::Release { reply, .. } = next(&mut fixture.host).await.interaction else {
+        panic!("expected release")
+    };
+    reply.send(Ok(ReleaseDecision::Execute)).unwrap();
+
+    // Read before answering the recording barrier: the point of these
+    // notifications is that they reach the caller while the call is in flight,
+    // and the barrier is what holds the result back until they have.
+    for (count, line) in [(1.0, "step one"), (2.0, "step two")] {
+        let params = timeout(
+            Duration::from_secs(5),
+            response.notification("notifications/progress"),
+        )
+        .await
+        .expect("a running call must report the output of the tool it started");
+        assert_eq!(
+            params,
+            json!({"progressToken":"probe-7", "progress":count, "message":line})
+        );
+    }
+
+    let Interaction::Record { reply, .. } = next(&mut fixture.host).await.interaction else {
+        panic!("expected record barrier")
+    };
+    reply.send(Ok(())).unwrap();
+    let result = response.reply_after_notifications(7).await;
+    assert_eq!(
+        result,
+        json!({"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"finished"}],"isError":false}})
+    );
+    client.close().await;
+    fixture.shutdown().await;
+}
+
+/// A call reports that it is still alive even when nothing is happening, so
+/// that the stretch spent waiting on the MCP Host for approval does not read as
+/// a tool that has died.
+#[tokio::test]
+async fn external_progress_token_receives_liveness_while_the_call_waits() {
+    let (count, heartbeat) = (Arc::new(AtomicUsize::new(0)), Duration::from_millis(40));
+    let mut fixture = fixture_reporting_every(
+        json!({"source":"builtin", "summary":"Probe"}),
+        BuiltinExecutors::new().register("probe", Ordinal(count.clone())),
+        heartbeat,
+    )
+    .await;
+    let client = ExternalClient::connect(fixture.endpoint.url()).await;
+    let mut response = client
+        .request(
+            9,
+            "tools/call",
+            json!({"name":"probe","arguments":{},"_meta":{"progressToken":"probe-9"}}),
+        )
+        .await;
+    let pending = next(&mut fixture.host).await;
+
+    // Deliberately left unanswered: the call is now waiting on the Host, the
+    // tool has not run, and there is nothing but the heartbeat to report.
+    for expected in [1.0, 2.0] {
+        let params = timeout(
+            Duration::from_secs(5),
+            response.notification("notifications/progress"),
+        )
+        .await
+        .expect("a call waiting on the Host must still report that it is alive");
+        assert_eq!(params["progressToken"], "probe-9");
+        assert_eq!(params["progress"], json!(expected));
+        // How long the fixture took to get here decides the seconds in the text,
+        // so only its shape is pinned.
+        let message = params["message"].as_str().unwrap();
+        assert!(
+            message.starts_with("running for ") && message.ends_with('s'),
+            "{message}"
+        );
+    }
+    assert_eq!(count.load(Ordering::SeqCst), 0);
+
+    let Interaction::Prepare { reply, .. } = pending.interaction else {
+        panic!("expected preparation")
+    };
+    reply
+        .send(Ok(Admission::Skip {
+            reason: "not today".into(),
+        }))
+        .unwrap();
+    let Interaction::Record { reply, .. } = next(&mut fixture.host).await.interaction else {
+        panic!("expected record barrier")
+    };
+    reply.send(Ok(())).unwrap();
+    let result = response.reply_after_notifications(9).await;
+    assert_eq!(
+        result,
+        json!({"jsonrpc":"2.0","id":9,"result":{"content":[{"type":"text","text":"not today"}],"isError":false}})
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 0);
     client.close().await;
     fixture.shutdown().await;
 }
