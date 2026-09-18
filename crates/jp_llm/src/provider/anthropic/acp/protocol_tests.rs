@@ -335,6 +335,47 @@ fn token_limit_is_not_reported_as_completion() {
     )]);
 }
 
+/// Every message, reasoning token and word of text JP renders on this route
+/// arrives as a partial-message stream event; the complete assistant messages
+/// are read for usage only.
+/// Claude Code emits those events only when the adapter asks it to, and JP is
+/// not the one asking.
+///
+/// A run that reaches its result without a single stream event has therefore
+/// produced nothing to show, and reporting it as a completed turn would hand
+/// the user an empty answer with no indication anything went wrong.
+#[test]
+fn a_turn_that_streamed_nothing_is_not_reported_as_completed() {
+    let mut state = state();
+
+    let error = state
+        .sdk(notification(
+            json!({"type":"result","subtype":"success","is_error":false}),
+        ))
+        .unwrap_err();
+
+    assert_eq!(
+        error.message(),
+        "Claude Code streamed no partial messages; JP cannot read a response without them"
+    );
+}
+
+#[test]
+fn a_turn_that_streamed_is_reported_as_completed() {
+    let mut state = state();
+    state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"Answer."}}}))).unwrap();
+
+    state
+        .sdk(notification(
+            json!({"type":"result","subtype":"success","is_error":false}),
+        ))
+        .unwrap();
+
+    assert_eq!(state.final_events.take().unwrap(), vec![Event::Finished(
+        FinishReason::Completed
+    )]);
+}
+
 #[test]
 fn persisted_tool_output_is_reported_instead_of_silently_accepted() {
     let mut state = state();

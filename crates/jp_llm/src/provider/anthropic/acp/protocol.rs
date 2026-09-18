@@ -183,6 +183,15 @@ pub(super) struct State {
     tools: HashMap<String, String>,
     structured: bool,
     inventory_checked: bool,
+    /// Whether Claude Code has streamed a partial message this request.
+    ///
+    /// JP reads its response entirely from these events; the complete assistant
+    /// messages are read for usage only.
+    /// Claude Code emits them only when the adapter enables
+    /// `includePartialMessages`, which is the adapter's decision rather than
+    /// JP's, so a request that never sees one has no response to read and must
+    /// say so instead of reporting an empty success.
+    partial_messages_seen: bool,
     seen_calls: HashSet<String>,
     observed_names: HashMap<String, String>,
     ignored: HashSet<usize>,
@@ -213,6 +222,7 @@ impl State {
             tools: tools.map(|name| (tool_name(&name), name)).collect(),
             structured,
             inventory_checked: false,
+            partial_messages_seen: false,
             seen_calls: HashSet::new(),
             observed_names: HashMap::new(),
             ignored: HashSet::new(),
@@ -461,7 +471,10 @@ impl State {
             SdkMessage::StreamEvent {
                 event,
                 parent_tool_use_id: None,
-            } => self.stream_event(event),
+            } => {
+                self.partial_messages_seen = true;
+                self.stream_event(event)
+            }
             SdkMessage::Result {
                 usage,
                 model_usage,
@@ -505,6 +518,12 @@ impl State {
                     if !self.inventory_checked {
                         return Err(StreamError::other(
                             "Claude Code did not report its tool inventory",
+                        ));
+                    }
+                    if !self.partial_messages_seen {
+                        return Err(StreamError::other(
+                            "Claude Code streamed no partial messages; JP cannot read a response \
+                             without them",
                         ));
                     }
                     if self.structured {
