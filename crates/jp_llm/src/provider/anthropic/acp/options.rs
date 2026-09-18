@@ -2,10 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use async_anthropic::types::{Effort, ExtendedThinking, ThinkingDisplay};
+use async_anthropic::types::{Effort, ExtendedThinking, JsonOutputFormat, ThinkingDisplay};
 use jp_config::{assistant::request::CachePolicy, model::id::Name};
 use serde::Serialize;
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use super::transcript::PreparedRequest;
 
@@ -39,7 +39,7 @@ struct Options<'a> {
     persist_session: bool,
     env: &'a BTreeMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    output_format: Option<OutputFormat<'a>>,
+    output_format: Option<&'a JsonOutputFormat>,
 }
 
 #[derive(Serialize)]
@@ -99,12 +99,6 @@ impl From<&ExtendedThinking> for Thinking {
 }
 
 #[derive(Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum OutputFormat<'a> {
-    JsonSchema { schema: &'a Map<String, Value> },
-}
-
-#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Settings {
     disable_all_hooks: bool,
@@ -148,10 +142,7 @@ pub(super) fn metadata(
                 },
                 persist_session: !prepared.history.is_empty(),
                 env,
-                output_format: prepared
-                    .schema
-                    .as_ref()
-                    .map(|schema| OutputFormat::JsonSchema { schema }),
+                output_format: prepared.schema.as_ref(),
             },
         },
     })
