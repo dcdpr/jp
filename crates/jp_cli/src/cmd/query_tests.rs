@@ -29,7 +29,7 @@ use jp_llm::{
 use jp_mcp::{Startup, StderrLine};
 use jp_printer::{OutputFormat, Printer, SharedBuffer, TerminalCapability};
 use jp_storage::{
-    backend::{FsStorageBackend, LoadBackend},
+    backend::{ConversationFilter, FsStorageBackend, LoadBackend},
     load::projected_conversation_ids,
 };
 use jp_term::width::display_width;
@@ -3494,6 +3494,39 @@ fn editor_ctx(
     (ctx, out, err, tmp)
 }
 
+/// A backend over the same two roots [`editor_ctx`] configures.
+fn test_backend(root: &Utf8Path) -> FsStorageBackend {
+    FsStorageBackend::new(&root.join(".jp"))
+        .unwrap()
+        .with_user_storage(&root.join("user"), None, "abc")
+        .unwrap()
+}
+
+/// Every conversation the backend can see, across both storage roots.
+///
+/// [`projected_conversation_ids`] scans the workspace root alone, so it cannot
+/// see the durable user-local store the editor's draft directory lives in.
+fn stored_conversation_ids(root: &Utf8Path) -> Vec<ConversationId> {
+    test_backend(root).load_conversation_ids(ConversationFilter::default())
+}
+
+/// Assert the store holds nothing for the next run's sanitization to repair.
+///
+/// A directory left behind without its managed files is indexed as a
+/// conversation and then trashed as corrupt, which an id assertion alone does
+/// not catch: the id is there either way.
+fn assert_store_needs_no_repair(root: &Utf8Path) {
+    let report = test_backend(root)
+        .sanitize()
+        .expect("sanitization succeeds");
+
+    assert!(
+        !report.has_repairs(),
+        "sanitization repaired: {:?}",
+        report.trashed
+    );
+}
+
 /// Run `jp query <args>` to completion, without `parse_query`'s `--no-edit`:
 /// opening the editor is the path these tests exercise.
 fn run_query(ctx: &mut Ctx, args: &[&str]) -> crate::cmd::Output {
@@ -3524,7 +3557,8 @@ fn run_empty_editor_query_stores_no_conversation() {
 
     assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
     assert_eq!(err.lock().as_str(), "");
-    assert_eq!(projected_conversation_ids(&tmp.path().join(".jp")), []);
+    assert_eq!(stored_conversation_ids(tmp.path()), []);
+    assert_store_needs_no_repair(tmp.path());
     assert_eq!(ctx.workspace.session_active_conversation(&session), None);
 }
 
@@ -3542,7 +3576,8 @@ fn run_empty_titled_query_stores_no_conversation() {
     run_query(&mut ctx, &["--new", "--title", "a title"]).unwrap();
 
     assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
-    assert_eq!(projected_conversation_ids(&tmp.path().join(".jp")), []);
+    assert_eq!(stored_conversation_ids(tmp.path()), []);
+    assert_store_needs_no_repair(tmp.path());
 }
 
 // A bare `--fork` keeps every turn, and a value keeps that many trailing turns.
@@ -3612,7 +3647,8 @@ fn run_empty_expiring_query_stores_no_conversation() {
     run_query(&mut ctx, &["--new", "--tmp=1h"]).unwrap();
 
     assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
-    assert_eq!(projected_conversation_ids(&tmp.path().join(".jp")), []);
+    assert_eq!(stored_conversation_ids(tmp.path()), []);
+    assert_store_needs_no_repair(tmp.path());
 }
 
 // A `--fork` query builds the fork before the request is composed, because the
@@ -3638,9 +3674,8 @@ fn run_empty_forking_query_leaves_only_the_source() {
     ctx.printer.flush();
 
     assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
-    assert_eq!(projected_conversation_ids(&tmp.path().join(".jp")), [
-        source_id
-    ]);
+    assert_eq!(stored_conversation_ids(tmp.path()), [source_id]);
+    assert_store_needs_no_repair(tmp.path());
 }
 
 // `--compact` is staged against the stream the request is composed against, so
@@ -3681,6 +3716,8 @@ fn run_empty_compacting_query_stores_no_compaction() {
         .load_conversation_stream(&source_id, &PartialAppConfig::empty())
         .unwrap();
     assert_eq!(stored.compactions().count(), 0);
+
+    assert_store_needs_no_repair(tmp.path());
 }
 
 // Not only the empty query: any failure before the turn starts leaves the
@@ -3699,7 +3736,8 @@ fn run_failing_before_the_turn_stores_no_conversation() {
     };
     assert_eq!(error.message.as_deref(), Some("Editor error"));
 
-    assert_eq!(projected_conversation_ids(&tmp.path().join(".jp")), []);
+    assert_eq!(stored_conversation_ids(tmp.path()), []);
+    assert_store_needs_no_repair(tmp.path());
 }
 
 // A run that renames the conversation composes its draft in the directory the

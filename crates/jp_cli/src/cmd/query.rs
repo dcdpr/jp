@@ -403,6 +403,16 @@ impl Query {
 
         let result = self.run_locked(ctx, &lock, query, fresh, staged).await;
 
+        // A run that never started a turn wrote nothing, so a directory the
+        // editor created to compose in is all that is left of the conversation.
+        // An editor that failed to open has already had its directory reclaimed
+        // by the draft's revert guard; one that closed successfully on an empty
+        // buffer has not.
+        //
+        // Done here, while the lock is still held, so no other process is
+        // mid-compose in the same directory.
+        remove_empty_conversation_dir(ctx.fs_backend.as_deref(), &lock.id());
+
         // Every exit from the locked region lands here, which is what makes
         // this the one reliable drain point: a mutation scope that dropped
         // while dirty recorded its persist failure on the lock, and any `?` in
@@ -3270,6 +3280,26 @@ fn cleanup_query_message_file(
         Ok(()) => {}
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
         Err(e) => warn!(path = %path, error = %e, "Failed to remove query message file."),
+    }
+}
+
+/// Remove a conversation's user-local directory when it holds nothing.
+///
+/// The editor composes into a directory named after the conversation, which it
+/// creates before anything about that conversation has been written.
+/// A run that ends without starting a turn writes nothing, so the directory is
+/// all that is left of it — and a directory without the managed files beside
+/// it is indexed as a conversation and then trashed as corrupt by the next run.
+///
+/// [`fs::remove_dir`] refuses a directory that is not empty, so a conversation
+/// with stored files, or a draft deliberately kept for recovery, is left alone.
+fn remove_empty_conversation_dir(fs_backend: Option<&FsStorageBackend>, id: &ConversationId) {
+    let Some(dir) = fs_backend.and_then(|fs| fs.find_user_local_conversation_dir(id)) else {
+        return;
+    };
+
+    if fs::remove_dir(&dir).is_ok() {
+        debug!(path = %dir, "Removed an empty conversation directory.");
     }
 }
 
