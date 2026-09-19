@@ -837,6 +837,38 @@ fn test_split_trims_whitespace() {
     assert_eq!(d, None);
 }
 
+/// Both routes to a tool command render this shape, so it is the contract a
+/// tool reads: the fields are pinned exactly, and the action is the only thing
+/// that distinguishes running a call from describing one.
+#[test]
+fn test_tool_context_renders_the_full_shape() {
+    let arguments = json!({ "title": "Bump the deny list" });
+    let answers = IndexMap::from([("shorter_title".to_owned(), json!("Bump deny list"))]);
+    let options = IndexMap::from([("max_title_length".to_owned(), JsonValue::from(json!(60)))]);
+    let access = jp_tool::AccessPolicy {
+        fs: vec![jp_tool::FsRule::new("docs")],
+        ..jp_tool::AccessPolicy::default()
+    };
+    let invocation = InvocationContext {
+        workspace_id: "ws-abc".to_owned(),
+        conversation_id: "conv-xyz".to_owned(),
+    };
+
+    let ctx = ToolContext {
+        action: Action::FormatArguments,
+        name: "ticket_create",
+        arguments: &arguments,
+        answers: &answers,
+        options: &options,
+        root: "/tmp".into(),
+        access: Some(&access),
+        invocation: &invocation,
+    };
+
+    let rendered = serde_json::to_string_pretty(&ctx.to_value()).unwrap();
+    insta::assert_snapshot!(rendered);
+}
+
 /// Regression: `{{tool}}` must render as valid JSON, including `null` for null
 /// fields (not Jinja2's `none`).
 /// Originally fixed with `AutoEscape::Json`, now handled by the custom

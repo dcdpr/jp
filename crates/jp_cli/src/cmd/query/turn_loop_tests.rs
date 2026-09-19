@@ -1258,6 +1258,10 @@ impl Executor for SleepingExecutor {
 
     fn set_arguments(&mut self, _args: Value) {}
 
+    fn access(&self, _root: &Utf8Path) -> Result<Option<jp_tool::AccessPolicy>, String> {
+        Ok(None)
+    }
+
     async fn execute(
         &self,
         _answers: &IndexMap<String, Value>,
@@ -4889,6 +4893,10 @@ impl Executor for TalkingExecutor {
 
     fn set_arguments(&mut self, _args: Value) {}
 
+    fn access(&self, _root: &Utf8Path) -> Result<Option<jp_tool::AccessPolicy>, String> {
+        Ok(None)
+    }
+
     async fn execute(
         &self,
         _answers: &IndexMap<String, Value>,
@@ -5832,6 +5840,10 @@ impl Executor for AskingTalkingExecutor {
 
     fn set_arguments(&mut self, _args: Value) {}
 
+    fn access(&self, _root: &Utf8Path) -> Result<Option<jp_tool::AccessPolicy>, String> {
+        Ok(None)
+    }
+
     async fn execute(
         &self,
         answers: &IndexMap<String, Value>,
@@ -5905,6 +5917,10 @@ impl Executor for InquiryMockExecutor {
         None
     }
     fn set_arguments(&mut self, _args: Value) {}
+
+    fn access(&self, _root: &camino::Utf8Path) -> Result<Option<jp_tool::AccessPolicy>, String> {
+        Ok(None)
+    }
 
     async fn execute(
         &self,

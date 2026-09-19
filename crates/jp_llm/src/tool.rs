@@ -11,7 +11,7 @@ use camino::Utf8Path;
 use indexmap::IndexMap;
 use jp_config::{
     conversation::tool::{CommandConfig, ToolConfigWithDefaults, ToolSource},
-    types::command::shell_command_line,
+    types::{command::shell_command_line, json_value::JsonValue},
 };
 use jp_conversation::event::ToolCallResponse;
 use jp_mcp::{
@@ -705,6 +705,68 @@ pub struct InvocationContext {
     pub conversation_id: String,
 }
 
+/// Everything a tool command is told about the call it was invoked for.
+///
+/// Both routes to a command build one of these: [`Action::Run`] executes the
+/// call, [`Action::FormatArguments`] describes it for display.
+/// They render to the same JSON, so a formatter reads exactly what the
+/// execution will run.
+///
+/// The rendered shape is:
+///
+/// ```json
+/// {
+///   "tool": { "name": ..., "arguments": ..., "answers": ..., "options": ... },
+///   "context": {
+///     "action": ..., "root": ..., "access": ...,
+///     "workspace_id": ..., "conversation_id": ...
+///   }
+/// }
+/// ```
+pub struct ToolContext<'a> {
+    /// Whether the command is being asked to run the call or to describe it.
+    pub action: Action,
+    /// The name the tool is invoked under, which a `source` override can make
+    /// different from the key the assistant called.
+    pub name: &'a str,
+    /// The call arguments, after defaults and coercion.
+    pub arguments: &'a Value,
+    /// Answers to questions the tool has asked so far, keyed by question ID.
+    pub answers: &'a IndexMap<String, Value>,
+    /// The tool's configured `options` block.
+    pub options: &'a IndexMap<String, JsonValue>,
+    /// Directory the command runs in.
+    pub root: &'a Utf8Path,
+    /// Filesystem grants the command must confine itself to.
+    ///
+    /// `None` grants unrestricted, workspace-confined access.
+    pub access: Option<&'a jp_tool::AccessPolicy>,
+    /// Identity of the conversation the call belongs to.
+    pub invocation: &'a InvocationContext,
+}
+
+impl ToolContext<'_> {
+    /// Render the context handed to the command template.
+    #[must_use]
+    pub fn to_value(&self) -> Value {
+        json!({
+            "tool": {
+                "name": self.name,
+                "arguments": self.arguments,
+                "answers": self.answers,
+                "options": self.options,
+            },
+            "context": {
+                "action": self.action,
+                "root": self.root.as_str(),
+                "access": self.access,
+                "workspace_id": &self.invocation.workspace_id,
+                "conversation_id": &self.invocation.conversation_id,
+            },
+        })
+    }
+}
+
 /// The definition of a tool.
 ///
 /// The definition source is either a [`ToolConfig`] for `local` tools, or a
@@ -880,21 +942,17 @@ impl ToolDefinition {
             }
         }
 
-        let ctx = json!({
-            "tool": {
-                "name": name,
-                "arguments": &arguments,
-                "answers": answers,
-                "options": config.options(),
-            },
-            "context": {
-                "action": Action::Run,
-                "root": root.as_str(),
-                "access": access,
-                "workspace_id": &invocation.workspace_id,
-                "conversation_id": &invocation.conversation_id,
-            },
-        });
+        let ctx = ToolContext {
+            action: Action::Run,
+            name,
+            arguments: &arguments,
+            answers,
+            options: config.options(),
+            root,
+            access,
+            invocation,
+        }
+        .to_value();
 
         let Some(command) = config.command() else {
             return Err(ToolError::MissingCommand);

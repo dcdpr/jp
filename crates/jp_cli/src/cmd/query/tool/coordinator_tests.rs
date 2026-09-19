@@ -321,13 +321,13 @@ async fn test_pre_render_for_prompt_function_call_fires_before_approval() {
     args.insert("path".into(), Value::String("src/foo.rs".into()));
 
     let result = coordinator
-        .pre_render_for_prompt("fs_delete_file", &args, &tool_renderer)
+        .pre_render_for_prompt("fs_delete_file", &args, None, &tool_renderer)
         .await;
 
     // Non-Custom styles should always pre-render. `content` is `None`
     // because only Custom formatters produce persistable rendered content.
     assert!(
-        matches!(result, Ok(Some(None))),
+        matches!(result, Ok(PreRender::Done { content: None })),
         "pre-render should fire for FunctionCall style, got: {result:?}"
     );
 
@@ -383,11 +383,11 @@ async fn test_pre_render_for_prompt_custom_ask_defers_rendering() {
     );
 
     let result = coordinator
-        .pre_render_for_prompt("custom_tool", &Map::new(), &tool_renderer)
+        .pre_render_for_prompt("custom_tool", &Map::new(), None, &tool_renderer)
         .await;
 
     assert!(
-        matches!(result, Ok(None)),
+        matches!(result, Ok(PreRender::Skipped)),
         "Custom + format=ask should defer rendering, got: {result:?}"
     );
 
@@ -429,6 +429,9 @@ impl Executor for EditableExecutor {
         if let Value::Object(map) = args {
             self.arguments = map;
         }
+    }
+    fn access(&self, _root: &camino::Utf8Path) -> Result<Option<jp_tool::AccessPolicy>, String> {
+        Ok(None)
     }
     async fn execute(
         &self,
@@ -835,7 +838,7 @@ async fn custom_formatter_receives_the_invoked_tool_name() {
     );
 
     let outcome = coordinator
-        .render_approved_tool("ls", &Map::new(), &tool_renderer)
+        .render_approved_tool("ls", &Map::new(), &IndexMap::new(), None, &tool_renderer)
         .await;
 
     match outcome {
@@ -843,6 +846,7 @@ async fn custom_formatter_receives_the_invoked_tool_name() {
             assert_eq!(content.as_deref(), Some("fs_list_files"));
         }
         RenderOutcome::Suppressed { error } => panic!("custom formatter failed: {error}"),
+        RenderOutcome::Deferred => panic!("custom formatter asked a question"),
     }
 
     // The header the user reads stays the name the assistant called.

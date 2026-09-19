@@ -13,21 +13,27 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use crossterm::style::Stylize as _;
+use indexmap::IndexMap;
 use jp_config::{
     conversation::tool::{
         CommandConfig,
         style::{InlineResults, LinkStyle, ParametersStyle, TruncateLines},
     },
     style::{StyleConfig, stderr_rows::StderrRows},
+    types::json_value::JsonValue,
 };
 use jp_conversation::event::ToolCallResponse;
-use jp_llm::{CommandResult, run_tool_command, tool::InvocationContext};
+use jp_llm::{
+    CommandResult, run_tool_command,
+    tool::{InvocationContext, ToolContext},
+};
 use jp_md::{
     format::{DefaultBackground, Formatter},
     shade::ShadedWriter,
 };
 use jp_printer::{ErrChannel, LineSink, OutputLines, RegionStyle, StatusRegion};
 use jp_term::osc::hyperlink;
+use jp_tool::AccessPolicy;
 use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
@@ -59,6 +65,12 @@ pub enum RenderOutcome {
     /// Header and arguments (if any) were printed.
     /// If a custom formatter produced output, it's returned for persistence.
     Rendered { content: Option<String> },
+    /// The custom formatter answered with a question rather than output: it
+    /// cannot describe the call until that question is answered.
+    ///
+    /// Nothing was printed and the call is still runnable.
+    /// The caller renders again once the answers are known.
+    Deferred,
     /// Custom formatter failed — nothing was printed.
     Suppressed {
         /// Error message from the custom formatter.
@@ -282,6 +294,12 @@ impl ToolRenderer {
     /// the header followed by the formatted output.
     /// If the custom formatter fails, nothing is printed and
     /// [`RenderOutcome::Suppressed`] is returned.
+    /// If it answers with a question, nothing is printed and
+    /// [`RenderOutcome::Deferred`] is returned.
+    ///
+    /// The formatter is handed the same [`ToolContext`] the execution route
+    /// builds, so it reads the call it is describing rather than a subset of
+    /// it.
     ///
     /// On success, returns `Rendered { content }` where `content` is the
     /// custom-formatted output (if any) so the caller can persist it for
@@ -296,12 +314,23 @@ impl ToolRenderer {
         name: &str,
         invoked_name: &str,
         arguments: &Map<String, Value>,
+        answers: &IndexMap<String, Value>,
+        options: &IndexMap<String, JsonValue>,
+        access: Option<&AccessPolicy>,
         style: &ParametersStyle,
     ) -> RenderOutcome {
         if let ParametersStyle::Custom(cmd_config) = style {
             let cmd = cmd_config.clone().command();
-            self.render_custom_tool_call(name, invoked_name, arguments, cmd)
-                .await
+            self.render_custom_tool_call(
+                name,
+                invoked_name,
+                arguments,
+                answers,
+                options,
+                access,
+                cmd,
+            )
+            .await
         } else {
             self.render_tool_call(name, arguments, style);
             RenderOutcome::Rendered { content: None }
@@ -313,17 +342,35 @@ impl ToolRenderer {
     /// Runs the custom formatter command first.
     /// If it succeeds, prints the "Calling tool X" header followed by the
     /// formatted output.
-    /// If it fails, nothing is printed — the tool call is suppressed from the
-    /// display.
+    /// If it fails or defers, nothing is printed — the tool call is kept off
+    /// the display.
     async fn render_custom_tool_call(
         &self,
         name: &str,
         invoked_name: &str,
         arguments: &Map<String, Value>,
+        answers: &IndexMap<String, Value>,
+        options: &IndexMap<String, JsonValue>,
+        access: Option<&AccessPolicy>,
         cmd: CommandConfig,
     ) -> RenderOutcome {
-        match format_args_custom(invoked_name, arguments, cmd, &self.root, &self.invocation).await {
-            Ok(content) if !content.is_empty() => {
+        let formatted = format_args_custom(
+            &ToolContext {
+                action: jp_tool::Action::FormatArguments,
+                name: invoked_name,
+                arguments: &Value::Object(arguments.clone()),
+                answers,
+                options,
+                root: &self.root,
+                access,
+                invocation: &self.invocation,
+            },
+            cmd,
+        )
+        .await;
+
+        match formatted {
+            Ok(Some(content)) if !content.is_empty() => {
                 let styled_name = name.yellow().bold();
                 self.write_chrome(self.current_region.as_ref(), |w| {
                     self.emit_separator_to(w)?;
@@ -334,7 +381,7 @@ impl ToolRenderer {
                     content: Some(content),
                 }
             }
-            Ok(_) => {
+            Ok(Some(_)) => {
                 // Custom formatter returned empty — just show the header.
                 let styled_name = name.yellow().bold();
                 self.write_chrome(self.current_region.as_ref(), |w| {
@@ -343,6 +390,7 @@ impl ToolRenderer {
                 });
                 RenderOutcome::Rendered { content: None }
             }
+            Ok(None) => RenderOutcome::Deferred,
             Err(error) => {
                 warn!(%error, tool = %name, "Custom formatter failed, suppressing tool call display");
                 RenderOutcome::Suppressed { error }
@@ -408,6 +456,11 @@ impl ToolRenderer {
             .stderr_rows
             .is_enabled()
             .then(|| self.progress.source(tool))
+    }
+
+    /// The directory custom formatter commands are run in.
+    pub fn root(&self) -> &Utf8Path {
+        &self.root
     }
 
     /// Renders a tool call result with language detection, truncation, and file
@@ -812,41 +865,35 @@ fn format_args_json(arguments: Map<String, Value>) -> String {
 
 /// Runs a custom arguments formatter command and returns the content.
 ///
-/// `tool_name` is the name the tool is invoked under, which is the name its own
+/// `ctx.name` is the name the tool is invoked under, which is the name its own
 /// implementation answers to rather than the key the assistant called.
+///
+/// `Ok(None)` means the formatter answered with a question: it cannot describe
+/// the call until that question is answered, and the caller should render again
+/// once the answers are known.
 async fn format_args_custom(
-    tool_name: &str,
-    arguments: &Map<String, Value>,
+    ctx: &ToolContext<'_>,
     cmd: CommandConfig,
-    root: &Utf8Path,
-    invocation: &InvocationContext,
-) -> Result<String, String> {
-    let ctx = serde_json::json!({
-        "tool": {
-            "name": tool_name,
-            "arguments": arguments,
-        },
-        "context": {
-            "action": jp_tool::Action::FormatArguments,
-            "root": root,
-            "workspace_id": &invocation.workspace_id,
-            "conversation_id": &invocation.conversation_id,
-        },
-    });
-
-    let result = run_tool_command(cmd.clone(), ctx, root, CancellationToken::new(), None)
-        .await
-        .map_err(|e| {
-            warn!(
-                command = %cmd,
-                error = %e,
-                "Custom parameters formatter failed"
-            );
-            format!("Custom parameters formatter '{cmd}' failed: {e}")
-        })?;
+) -> Result<Option<String>, String> {
+    let result = run_tool_command(
+        cmd.clone(),
+        ctx.to_value(),
+        ctx.root,
+        CancellationToken::new(),
+        None,
+    )
+    .await
+    .map_err(|e| {
+        warn!(
+            command = %cmd,
+            error = %e,
+            "Custom parameters formatter failed"
+        );
+        format!("Custom parameters formatter '{cmd}' failed: {e}")
+    })?;
 
     match result {
-        CommandResult::Success(content) => Ok(content.trim().to_owned()),
+        CommandResult::Success(content) => Ok(Some(content.trim().to_owned())),
         CommandResult::TransientError { message, trace } => {
             let detail = CommandResult::format_error(&message, &trace);
             warn!(
@@ -863,16 +910,8 @@ async fn format_args_custom(
             );
             Err(raw)
         }
-        CommandResult::NeedsInput(_) => {
-            warn!(
-                command = %cmd,
-                "Custom parameters formatter returned NeedsInput"
-            );
-            Err(format!(
-                "Custom parameters formatter '{cmd}' returned unexpected NeedsInput"
-            ))
-        }
-        CommandResult::Cancelled => Ok(String::new()),
+        CommandResult::NeedsInput(_) => Ok(None),
+        CommandResult::Cancelled => Ok(Some(String::new())),
         CommandResult::InvalidInquiry { question_id } => {
             warn!(
                 command = %cmd,
@@ -898,7 +937,7 @@ async fn format_args_custom(
             stdout,
             success: true,
             ..
-        } => Ok(stdout.trim().to_owned()),
+        } => Ok(Some(stdout.trim().to_owned())),
         CommandResult::RawOutput { stderr, .. } => {
             warn!(
                 command = %cmd,

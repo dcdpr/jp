@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults, ToolSource};
 use jp_conversation::event::{InquirySource, ToolCallRequest, ToolCallResponse};
 use jp_mcp::Client;
-use jp_tool::Question;
+use jp_tool::{AccessPolicy, Question};
 use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
 
@@ -54,6 +54,17 @@ pub trait Executor: Send + Sync {
     /// The new arguments replace the original arguments from the tool call
     /// request.
     fn set_arguments(&mut self, args: Value);
+
+    /// The filesystem grants this call is confined to, compiled against `root`.
+    ///
+    /// `Ok(None)` means unrestricted, workspace-confined access.
+    /// An error means the declared grants could not be compiled and the call
+    /// must not run: an empty policy reads as unrestricted at the tool, so
+    /// degrading to one would widen access rather than narrow it.
+    ///
+    /// Both the execution and the display of a call read the policy from here,
+    /// so a formatter is confined to the same paths the run is.
+    fn access(&self, root: &Utf8Path) -> Result<Option<AccessPolicy>, String>;
 
     /// Executes the tool once with the given answers.
     ///
@@ -244,6 +255,10 @@ impl Executor for MockExecutor {
     fn set_arguments(&mut self, _args: Value) {
         // No-op for mock executor - arguments don't affect the pre-configured
         // result
+    }
+
+    fn access(&self, _root: &Utf8Path) -> Result<Option<AccessPolicy>, String> {
+        Ok(None)
     }
 
     async fn execute(
