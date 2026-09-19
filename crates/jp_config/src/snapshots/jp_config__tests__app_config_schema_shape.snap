@@ -38,7 +38,7 @@ assistant: AssistantConfig
     id: ModelIdOrAliasConfig
       |: ModelIdConfig
         name: string
-        provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+        provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "vllm" | "xai"
       |: string
     parameters: ParametersConfig
       max_tokens: int | null
@@ -148,7 +148,7 @@ conversation: ConversationConfig
                   id: ModelIdOrAliasConfig
                     |: ModelIdConfig
                       name: string
-                      provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+                      provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "vllm" | "xai"
                     |: string
                   parameters: ParametersConfig
                     max_tokens: int | null
@@ -201,7 +201,7 @@ conversation: ConversationConfig
                     id: ModelIdOrAliasConfig
                       |: ModelIdConfig
                         name: string
-                        provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+                        provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "vllm" | "xai"
                       |: string
                     parameters: ParametersConfig
                       max_tokens: int | null
@@ -268,7 +268,7 @@ conversation: ConversationConfig
         id: ModelIdOrAliasConfig
           |: ModelIdConfig
             name: string
-            provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+            provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "vllm" | "xai"
           |: string
         parameters: ParametersConfig
           max_tokens: int | null
@@ -381,7 +381,7 @@ conversation: ConversationConfig
           id: ModelIdOrAliasConfig
             |: ModelIdConfig
               name: string
-              provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+              provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "vllm" | "xai"
             |: string
           parameters: ParametersConfig
             max_tokens: int | null
@@ -609,7 +609,7 @@ conversation: ConversationConfig
                       |: PartialModelIdOrAliasConfig
                         |: PartialModelIdConfig
                           name?: string | null
-                          provider?: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai" | null
+                          provider?: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "vllm" | "xai" | null
                         |: string
                       |: null
                     parameters?:
@@ -763,7 +763,7 @@ providers: ProviderConfig
       *: ModelIdOrAliasConfig
         |: ModelIdConfig
           name: string
-          provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+          provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "vllm" | "xai"
         |: string
     anthropic: AnthropicConfig
       api_key_env?: string
@@ -798,6 +798,9 @@ providers: ProviderConfig
       api_key_env?: string
       app_name?: string
       app_referrer: string | null
+      base_url?: string
+    vllm: VllmConfig
+      api_key_env?: string
       base_url?: string
   mcp:
     *: McpProviderConfig
@@ -858,7 +861,7 @@ style: StyleConfig
         id: ModelIdOrAliasConfig
           |: ModelIdConfig
             name: string
-            provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+            provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "vllm" | "xai"
           |: string
         parameters: ParametersConfig
           max_tokens: int | null

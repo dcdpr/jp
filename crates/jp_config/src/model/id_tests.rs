@@ -42,6 +42,7 @@ fn the_variant_list_leaves_out_the_test_provider() {
         "ollama",
         "openai",
         "openrouter",
+        "vllm",
         "xai"
     ]);
 }

@@ -473,6 +473,7 @@ pub async fn run_chat_completion(
         ProviderId::Ollama => config.ollama.base_url.clone(),
         ProviderId::Openai => config.openai.base_url.clone(),
         ProviderId::Openrouter => config.openrouter.base_url.clone(),
+        ProviderId::Vllm => config.vllm.base_url.clone(),
         _ => String::new(),
     })
     .with_fixture_suffix(&provider_id.as_str());
@@ -493,6 +494,7 @@ pub async fn run_chat_completion(
                 ProviderId::Ollama => config.ollama.base_url = url,
                 ProviderId::Openai => config.openai.base_url = url,
                 ProviderId::Openrouter => config.openrouter.base_url = url,
+                ProviderId::Vllm => config.vllm.base_url = url,
                 _ => {}
             }
 
@@ -506,6 +508,7 @@ pub async fn run_chat_completion(
                     ProviderId::Google => config.google.api_key_env = env,
                     ProviderId::Openai => config.openai.api_key_env = env,
                     ProviderId::Openrouter => config.openrouter.api_key_env = env,
+                    ProviderId::Vllm => config.vllm.api_key_env = env,
                     _ => {}
                 }
             }
@@ -791,6 +794,10 @@ pub(crate) fn fixture_attachment(path: impl AsRef<Path>) -> Attachment {
     Attachment::binary(path.as_ref().display().to_string(), data, media_type)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per provider; the table is flat by design"
+)]
 pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
     match id {
         ProviderId::Anthropic => ModelDetails {
@@ -876,6 +883,18 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             knowledge_cutoff: None,
             deprecated: None,
             structured_output: Some(true),
+            prefill: None,
+            features: vec![],
+        },
+        ProviderId::Vllm => ModelDetails {
+            id: "vllm/Qwen/Qwen3-8B".parse().unwrap(),
+            display_name: None,
+            context_window: Some(40_960),
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+            deprecated: None,
+            structured_output: None,
             prefill: None,
             features: vec![],
         },

@@ -595,6 +595,9 @@ pub enum ProviderId {
     /// Openrouter provider.
     /// See: <https://openrouter.io>.
     Openrouter,
+    /// vLLM provider: a self-hosted vLLM server with an OpenAI-compatible API.
+    /// See: <https://docs.vllm.ai>.
+    Vllm,
     /// xAI provider.
     /// See: <https://x.ai/api>.
     /// UNIMPLEMENTED.
@@ -619,6 +622,7 @@ impl ProviderId {
             Self::Ollama => "ollama",
             Self::Openai => "openai",
             Self::Openrouter => "openrouter",
+            Self::Vllm => "vllm",
             Self::Xai => "xai",
 
             Self::Test => "test",

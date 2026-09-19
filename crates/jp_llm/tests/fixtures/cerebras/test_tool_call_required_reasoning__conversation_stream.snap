@@ -211,6 +211,10 @@ expression: v
           "api_key_env": "OPENROUTER_API_KEY",
           "app_name": "JP",
           "base_url": "https://openrouter.ai"
+        },
+        "vllm": {
+          "api_key_env": "VLLM_API_KEY",
+          "base_url": "http://127.0.0.1:8000"
         }
       }
     },

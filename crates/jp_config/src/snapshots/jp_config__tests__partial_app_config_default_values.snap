@@ -524,6 +524,14 @@ Ok(
                             "https://openrouter.ai",
                         ),
                     },
+                    vllm: PartialVllmConfig {
+                        api_key_env: Some(
+                            "VLLM_API_KEY",
+                        ),
+                        base_url: Some(
+                            "http://127.0.0.1:8000",
+                        ),
+                    },
                 },
                 mcp: {},
             },
