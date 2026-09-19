@@ -141,6 +141,10 @@ pub(crate) fn trace_to_tmpfile(prefix: &str, value: &impl serde::Serialize) -> S
 }
 
 #[cfg(test)]
+#[path = "provider/tool_decoding_tests.rs"]
+mod tool_decoding_tests;
+
+#[cfg(test)]
 #[path = "provider_tests.rs"]
 mod tests;
 

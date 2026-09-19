@@ -1,5 +1,9 @@
+use std::sync::Arc;
+
 use jp_conversation::{ConversationStream, OverlayAction, OverlayMatcher, OverlayPatch};
 use serde_json::{Map, Value};
+
+use crate::tool::decoding::ArgumentDecoding;
 
 /// Represents a completed event from the LLM.
 ///
@@ -110,6 +114,9 @@ pub enum ToolCallPart {
 
         /// Name of the tool to execute.
         name: String,
+
+        /// Request-local decoding instructions, consumed before persistence.
+        decoding: Option<Arc<ArgumentDecoding>>,
     },
 
     /// A raw JSON chunk of tool call arguments.
@@ -281,6 +288,7 @@ impl Event {
             part: EventPart::ToolCall(ToolCallPart::Start {
                 id: id.into(),
                 name: name.into(),
+                decoding: None,
             }),
             metadata: Map::new(),
         }

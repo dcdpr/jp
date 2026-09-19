@@ -43,9 +43,10 @@ use crate::{
     event::{self, Event, EventPart, ToolCallPart},
     event_builder::EventBuilder,
     model::ReasoningDetails as ModelReasoningDetails,
-    provider::{Provider, openai::parameters_with_strict_mode, trace_to_tmpfile},
+    provider::{Provider, openai::parameters_with_decoding, trace_to_tmpfile},
     query::ChatQuery,
     stream::with_tool_call_keepalive,
+    tool::{ToolDefinition, decoding::ArgumentDecoders},
 };
 
 static PROVIDER: ProviderId = ProviderId::Openrouter;
@@ -141,14 +142,15 @@ impl Provider for Openrouter {
         model: &ModelDetails,
         query: ChatQuery,
     ) -> Result<EventStream> {
-        let (request, is_structured, forced_tool_fallback) = create_request(model, query)?;
+        let (request, is_structured, forced_tool_fallback, decoders) =
+            create_request(model, query)?;
 
-        Ok(call(
+        Ok(decoders.attach(call(
             self.client.clone(),
             request,
             is_structured,
             forced_tool_fallback,
-        ))
+        )))
     }
 }
 
@@ -667,7 +669,7 @@ impl Openrouter {
         model: &ModelDetails,
         query: ChatQuery,
     ) -> Result<serde_json::Value> {
-        let (request, _, _) = create_request(model, query)?;
+        let (request, ..) = create_request(model, query)?;
         Ok(serde_json::to_value(request)?)
     }
 }
@@ -732,14 +734,40 @@ fn force_nudge(choice: &tool::ToolChoice) -> String {
     }
 }
 
+fn convert_tools(tools: Vec<ToolDefinition>) -> (Vec<Tool>, ArgumentDecoders) {
+    let mut decoders = ArgumentDecoders::default();
+    let tools = tools
+        .into_iter()
+        .map(|tool| {
+            let (parameters, decoding) = parameters_with_decoding(&tool.parameters, true);
+            decoders.insert(&tool.name, decoding);
+            Tool::Function {
+                function: ToolFunction {
+                    parameters,
+                    name: tool.name,
+                    description: tool.docs.schema_description().map(str::to_owned),
+                    strict: true,
+                },
+            }
+        })
+        .collect();
+    (tools, decoders)
+}
+
 /// Create the request for the OpenRouter API.
 ///
 /// Returns the request, whether structured output is active, and any fallback
-/// required because reasoning prevents a forced tool choice on the wire.
+/// required because reasoning prevents a forced tool choice on the wire,
+/// followed by the tool argument decoding plans.
 fn create_request(
     model: &ModelDetails,
     query: ChatQuery,
-) -> Result<(request::ChatCompletion, bool, Option<ForcedToolFallback>)> {
+) -> Result<(
+    request::ChatCompletion,
+    bool,
+    Option<ForcedToolFallback>,
+    ArgumentDecoders,
+)> {
     let ChatQuery {
         thread,
         tools,
@@ -766,17 +794,7 @@ fn create_request(
     let reasoning = model.custom_reasoning_config(parameters.reasoning);
 
     let mut messages: RequestMessages = (&model.id, thread).try_into()?;
-    let tools = tools
-        .into_iter()
-        .map(|tool| Tool::Function {
-            function: ToolFunction {
-                parameters: parameters_with_strict_mode(&tool.parameters, true),
-                name: tool.name,
-                description: tool.docs.schema_description().map(str::to_owned),
-                strict: true,
-            },
-        })
-        .collect::<Vec<_>>();
+    let (tools, decoders) = convert_tools(tools);
     let thinking_active = reasoning.is_some()
         || model
             .reasoning
@@ -852,6 +870,7 @@ fn create_request(
         },
         is_structured,
         forced_tool_fallback,
+        decoders,
     ))
 }
 

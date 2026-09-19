@@ -1,6 +1,7 @@
 //! Tool call utilities.
 
 pub mod builtin;
+pub mod decoding;
 pub mod executor;
 pub mod json_schema;
 
