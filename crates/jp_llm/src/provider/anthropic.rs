@@ -1811,6 +1811,11 @@ fn model_overrides(id: &str) -> Option<ModelOverrides> {
     let cutoff = |year, month| NaiveDate::from_ymd_opt(year, month, 1);
 
     Some(match id {
+        "claude-fable-5-1" => ModelOverrides {
+            knowledge_cutoff: cutoff(2026, 6),
+            always_on: true,
+            ..Default::default()
+        },
         "claude-fable-5" => ModelOverrides {
             knowledge_cutoff: cutoff(2026, 1),
             always_on: true,
