@@ -426,5 +426,9 @@
   "107-background-task-infrastructure.md": {
     "hash": "a959c85b2a886843531a94ecf66fcb13a77c60fd0317a7dd6767aab2a3a16979",
     "summary": "`jp_task` provides bounded background task primitives for concurrent work that commits to the workspace before exit."
+  },
+  "108-transparent-tool-call-fan-out.md": {
+    "hash": "1ddb213dc7c5342b0c46babfde6f9ae85a7e22da73bb36001403eaccecec7a3d",
+    "summary": ""
   }
 }

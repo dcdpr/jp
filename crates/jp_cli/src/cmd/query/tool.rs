@@ -9,8 +9,9 @@ pub(crate) mod executor;
 pub(crate) mod inquiry;
 pub(crate) mod pending;
 pub(crate) mod prompter;
+pub(crate) mod schedule;
 
-pub(crate) use coordinator::{ToolCallDecision, ToolCallState, ToolCoordinator};
+pub(crate) use coordinator::{ExecutorGroup, ToolCallState, ToolCoordinator};
 pub(crate) use executor::TerminalExecutorSource;
 pub(crate) use pending::{PendingEntry, PendingTools, build_execution_plan};
 pub(crate) use prompter::ToolPrompter;

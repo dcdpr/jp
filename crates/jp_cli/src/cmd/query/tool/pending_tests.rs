@@ -2,10 +2,10 @@ use jp_conversation::{
     ConversationStream,
     event::{ChatRequest, ChatResponse, ToolCallRequest, ToolCallResponse},
 };
-use jp_llm::tool::executor::MockExecutor;
+use jp_llm::tool::executor::{Executor, MockExecutor};
 use serde_json::Map;
 
-use super::*;
+use super::{super::coordinator::GroupOp, *};
 
 fn req(id: &str, name: &str) -> ToolCallRequest {
     ToolCallRequest {
@@ -22,8 +22,17 @@ fn resp(id: &str, content: &str) -> ToolCallResponse {
     }
 }
 
-fn approved_executor(id: &str, name: &str) -> Box<dyn Executor> {
-    Box::new(MockExecutor::completed(id, name, "done"))
+/// A call carrying one approved operation, which is what a tool without fan-out
+/// produces.
+fn approved_executor(id: &str, name: &str) -> ExecutorGroup {
+    ExecutorGroup {
+        tool_id: id.to_owned(),
+        tool_name: name.to_owned(),
+        fan_out: None,
+        ops: vec![GroupOp::Run(
+            Box::new(MockExecutor::completed(id, name, "done")) as Box<dyn Executor>,
+        )],
+    }
 }
 
 #[test]

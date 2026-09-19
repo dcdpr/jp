@@ -2,15 +2,17 @@
 
 pub mod builtin;
 pub mod executor;
+pub mod fan_out;
 pub mod json_schema;
 
-use std::{ffi::OsStr, fmt, process::Stdio, sync::Arc};
+use std::{borrow::Cow, ffi::OsStr, fmt, process::Stdio, sync::Arc};
 
 pub use builtin::BuiltinTool;
 use camino::Utf8Path;
+use fan_out::{FAN_OUT_DESCRIPTION, envelope as fan_out_envelope};
 use indexmap::IndexMap;
 use jp_config::{
-    conversation::tool::{CommandConfig, ToolConfigWithDefaults, ToolSource},
+    conversation::tool::{CommandConfig, FanOut, ToolConfigWithDefaults, ToolSource},
     types::command::shell_command_line,
 };
 use jp_conversation::event::ToolCallResponse;
@@ -717,14 +719,41 @@ pub struct ToolDefinition {
     pub name: String,
     pub docs: ToolDocs,
 
-    /// JSON Schema for the tool's arguments, as its source declared it, with
-    /// configuration overrides applied.
+    /// JSON Schema for **one operation's** arguments, as the tool's source
+    /// declared it, with configuration overrides applied.
+    ///
+    /// Argument coercion, defaults, and validation all run against this, so a
+    /// tool receives and validates the same shape whether or not it fans out.
+    /// Use [`provider_schema`] for the document sent to the LLM.
     ///
     /// Adapting this to what a given API accepts belongs to that provider.
+    ///
+    /// [`provider_schema`]: Self::provider_schema
     pub parameters: Value,
+
+    /// Whether one call may carry several operations, and how they run.
+    ///
+    /// `Some` means the provider is shown the fan-out envelope rather than
+    /// `parameters` directly.
+    pub fan_out: Option<FanOut>,
 }
 
 impl ToolDefinition {
+    /// The JSON Schema shown to the LLM provider.
+    ///
+    /// Without fan-out this is [`parameters`] unchanged.
+    /// With fan-out it is the envelope: an object holding a single required
+    /// `ops` array whose items are [`parameters`].
+    ///
+    /// [`parameters`]: Self::parameters
+    #[must_use]
+    pub fn provider_schema(&self) -> Cow<'_, Value> {
+        match self.fan_out {
+            None => Cow::Borrowed(&self.parameters),
+            Some(_) => Cow::Owned(fan_out_envelope(&self.parameters)),
+        }
+    }
+
     /// Coerce JSON-encoded argument strings to non-string schema types.
     ///
     /// Strings stay unchanged when the schema accepts strings or their contents
@@ -1302,18 +1331,30 @@ async fn resolve_tool(
     mcp_client: &jp_mcp::Client,
 ) -> Result<ToolDefinition, ToolError> {
     let path = format!("conversation.tools.{name}.parameters");
-    let definition = match config.source() {
+    let mut definition = match config.source() {
         ToolSource::Local { .. } | ToolSource::Builtin { .. } => ToolDefinition {
             name: name.to_owned(),
             docs: ToolDocs::from_config(config),
             parameters: json_schema::from_config(&path, config.parameters())?,
+            fan_out: None,
         },
         ToolSource::Mcp { server, tool } => {
             resolve_mcp_tool(server, name, tool.as_deref(), config, mcp_client).await?
         }
     };
 
+    // Validated before the envelope is attached: what a tool must declare is a
+    // property of the operation it performs, and the envelope is JP's own
+    // construction rather than anything the tool's source said.
     json_schema::validate(&path, &definition.parameters)?;
+
+    if let Some(fan_out) = config.fan_out() {
+        definition.fan_out = Some(fan_out);
+        definition.docs.summary = Some(match definition.docs.summary.take() {
+            Some(summary) => format!("{summary} {FAN_OUT_DESCRIPTION}"),
+            None => FAN_OUT_DESCRIPTION.to_owned(),
+        });
+    }
 
     Ok(definition)
 }
@@ -1423,6 +1464,9 @@ async fn resolve_mcp_tool(
         name: name.to_owned(),
         docs,
         parameters,
+        // Attached by `resolve_tool` once the schema has been validated; an MCP
+        // server has no say in whether JP batches calls to it.
+        fan_out: None,
     })
 }
 

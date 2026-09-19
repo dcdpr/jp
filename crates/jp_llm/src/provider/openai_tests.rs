@@ -331,6 +331,7 @@ mod convert_tools {
         let tools = convert_tools(vec![ToolDefinition {
             name: "store".to_owned(),
             docs: ToolDocs::default(),
+            fan_out: None,
             parameters,
         }]);
 

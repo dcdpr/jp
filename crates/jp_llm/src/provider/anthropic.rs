@@ -2163,21 +2163,24 @@ fn convert_tools(
     let mut tools: Vec<_> = tools
         .into_iter()
         .map(|tool| {
+            // The document arrives as its source declared it. `$ref` and
+            // `$defs` are supported, so they pass through; strict mode
+            // additionally requires the closed-object subset, which
+            // `transform_schema` produces.
+            let document = tool
+                .provider_schema()
+                .as_object()
+                .cloned()
+                .unwrap_or_default();
+
             types::Tool::Custom(types::CustomTool {
                 name: tool.name,
                 description: tool.docs.schema_description().map(str::to_owned),
                 strict: strict.then_some(true),
-                input_schema: {
-                    // The document arrives as its source declared it. `$ref`
-                    // and `$defs` are supported, so they pass through; strict
-                    // mode additionally requires the closed-object subset,
-                    // which `transform_schema` produces.
-                    let document = tool.parameters.as_object().cloned().unwrap_or_default();
-                    if strict {
-                        transform_schema(document).into()
-                    } else {
-                        document.into()
-                    }
+                input_schema: if strict {
+                    transform_schema(document).into()
+                } else {
+                    document.into()
                 },
                 cache_control: None,
             })
