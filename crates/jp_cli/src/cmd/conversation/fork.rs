@@ -4,7 +4,7 @@ use jp_conversation::{ConversationId, ConversationStream, Error as ConversationE
 use jp_inquire::prompt::TerminalPromptBackend;
 use jp_printer::Printer;
 use jp_storage::backend::Projection;
-use jp_workspace::{ConversationHandle, ConversationLock};
+use jp_workspace::{ConversationHandle, ConversationLock, ConversationMut};
 use serde_json::Value;
 use tracing::debug;
 
@@ -71,10 +71,11 @@ impl Fork {
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         let mut forked = Vec::with_capacity(handles.len());
 
-        // A fork is persisted as soon as it is created, so work that fails
-        // after that point leaves it behind. Reporting the IDs either way keeps
-        // the created conversations addressable; the error still propagates, so
-        // the exit status says the run did not finish.
+        // A fork is reported once it is written, and a source whose fork fails
+        // to write leaves nothing behind. With several sources the earlier forks
+        // are already on disk, so reporting them keeps them addressable; the
+        // error still propagates, so the exit status says the run did not
+        // finish.
         let result = self.fork_each(ctx, handles, &mut forked).await;
         print_forked(&ctx.printer, &forked);
 
@@ -121,7 +122,7 @@ impl Fork {
                 None
             };
 
-            let lock = fork_conversation(ctx, source, |events| {
+            let (lock, mut conv) = fork_conversation(ctx, source, |events| {
                 if let Some(config) = &collapsed {
                     // Discard every turn; the merged config becomes the new
                     // base, making this fork identical to a conversation
@@ -144,10 +145,9 @@ impl Fork {
             })
             .await?;
 
-            // One mutable scope for both post-fork mutations, so they share a
-            // single write at the closing flush.
-            let mut conv = lock.as_mut();
-
+            // The fork's own stream and both post-fork mutations share one
+            // scope, so the whole fork lands in a single write at the closing
+            // flush.
             if self.compact.should_compact() {
                 let cfg = ctx.config();
                 let events_snapshot = conv.events().clone();
@@ -178,8 +178,9 @@ impl Fork {
                 });
             }
 
-            // Write before reporting success, so a failed write is an error
-            // rather than a confirmation the user cannot trust.
+            // The fork exists only in memory until here, so this is the write
+            // that creates it. Before reporting success, so a failed write is an
+            // error rather than a confirmation the user cannot trust.
             conv.flush()?;
             drop(conv);
 
@@ -216,7 +217,12 @@ fn print_forked(printer: &Printer, ids: &[ConversationId]) {
     }
 }
 
-/// Fork a conversation and return the new conversation's lock.
+/// Fork a conversation, returning its lock and the scope holding its inherited
+/// stream.
+///
+/// The fork exists in memory only, and the returned scope discards on drop:
+/// flushing it is what writes the fork, and every other way out leaves no trace
+/// of it.
 ///
 /// The fork inherits the source's labels, then every `apply_on.fork` rule is
 /// re-resolved over them.
@@ -227,10 +233,11 @@ pub(crate) async fn fork_conversation(
     ctx: &mut Ctx,
     source: &ConversationHandle,
     mut filter: impl FnMut(&mut ConversationStream),
-) -> crate::Result<ConversationLock> {
+) -> crate::Result<(ConversationLock, ConversationMut)> {
     let now = ctx.now();
 
-    // Resolved up front: everything below this line writes to disk.
+    // Resolved up front: a rule that cannot be confirmed must fail before the
+    // fork exists at all, even in memory.
     let config = ctx.config();
     let prompts = TerminalPromptBackend;
     let resolved = Resolver::new(
@@ -276,8 +283,9 @@ pub(crate) async fn fork_conversation(
     // fork see more history than the source, but dropping a patch overlay
     // replays metadata the provider already rejected, wedging the fork on its
     // first query.
-    lock.as_mut()
-        .update_events(|events| events.append_stream(new_events));
+    let mut staged = lock.as_mut();
+    staged.discard_on_drop();
+    staged.update_events(|events| events.append_stream(new_events));
 
     debug!(
         source = source.id().to_string(),
@@ -285,7 +293,7 @@ pub(crate) async fn fork_conversation(
         "Forked conversation."
     );
 
-    Ok(lock)
+    Ok((lock, staged))
 }
 
 #[cfg(test)]

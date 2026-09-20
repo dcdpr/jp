@@ -342,6 +342,32 @@ fn drop_skips_after_clear_dirty() {
 }
 
 #[test]
+fn drop_discards_staged_mutations_when_asked() {
+    let (lock, mock) = test_lock_with_mock();
+    let mut conv = lock.into_mut();
+    conv.discard_on_drop();
+    conv.update_metadata(|m| m.title = Some("staged".into()));
+
+    drop(conv);
+
+    assert_eq!(mock.writes().len(), 0);
+}
+
+#[test]
+fn flush_writes_even_when_dropping_would_discard() {
+    let (lock, mock) = test_lock_with_mock();
+    let mut conv = lock.into_mut();
+    conv.discard_on_drop();
+    conv.update_metadata(|m| m.title = Some("committed".into()));
+
+    conv.flush().unwrap();
+    drop(conv);
+
+    assert_eq!(mock.writes().len(), 1);
+    assert_eq!(mock.writes()[0].1.title.as_deref(), Some("committed"));
+}
+
+#[test]
 fn drop_skips_without_writer() {
     let lock = test_lock_no_writer();
     let conv = lock.into_mut();

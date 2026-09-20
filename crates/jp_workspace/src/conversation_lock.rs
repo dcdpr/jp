@@ -256,6 +256,7 @@ impl ConversationLock {
             dirty: AtomicBool::new(false),
             writer: Arc::clone(&self.writer),
             projection: self.projection,
+            discard_on_drop: false,
             persist: Arc::clone(&self.persist),
             written: Arc::clone(&self.written),
             _lock_guard: Arc::clone(&self.lock_guard),
@@ -276,6 +277,7 @@ impl ConversationLock {
             dirty: AtomicBool::new(false),
             writer: self.writer,
             projection: self.projection,
+            discard_on_drop: false,
             persist: self.persist,
             written: self.written,
             _lock_guard: self.lock_guard,
@@ -300,8 +302,11 @@ impl std::fmt::Debug for ConversationLock {
 ///
 /// When dropped, if any mutation occurred (the dirty flag is set), the
 /// conversation data is persisted to disk while the flock is still held.
+/// [`discard_on_drop()`] turns that off for a scope whose mutations are only
+/// provisional.
 ///
 /// [`as_mut()`]: ConversationLock::as_mut
+/// [`discard_on_drop()`]: Self::discard_on_drop
 /// [`into_mut()`]: ConversationLock::into_mut
 pub struct ConversationMut {
     id: ConversationId,
@@ -310,6 +315,10 @@ pub struct ConversationMut {
     dirty: AtomicBool,
     writer: Arc<dyn PersistBackend>,
     projection: Projection,
+
+    /// Whether dropping the scope throws its mutations away instead of writing
+    /// them.
+    discard_on_drop: bool,
 
     // Shared with the workspace, the originating lock, and every other scope
     // derived from it, so a failure recorded here survives this scope's drop.
@@ -530,6 +539,25 @@ impl ConversationMut {
     pub(crate) fn clear_dirty(&self) {
         self.dirty.store(false, Ordering::Relaxed);
     }
+
+    /// Discard staged mutations when the scope drops, instead of writing them.
+    ///
+    /// Inverts the default for a scope that stages work before knowing whether
+    /// the work will happen: [`flush`] becomes the only thing that writes, and
+    /// every other way out — an early return, a `?`, an unwind — leaves
+    /// storage untouched.
+    /// Without it the default holds, and a caller who never flushes still has
+    /// their changes written.
+    ///
+    /// Discarded mutations remain in the shared in-memory conversation, which
+    /// is where every scope on the same lock writes them.
+    /// Any *other* scope that persists afterwards therefore writes them too:
+    /// this is a statement about one scope, not a rollback.
+    ///
+    /// [`flush`]: Self::flush
+    pub fn discard_on_drop(&mut self) {
+        self.discard_on_drop = true;
+    }
 }
 
 // Static assertion: ConversationMut must be Send + Sync so it can be
@@ -542,7 +570,7 @@ const _: () = {
 
 impl Drop for ConversationMut {
     fn drop(&mut self) {
-        if !self.dirty.load(Ordering::Relaxed) {
+        if self.discard_on_drop || !self.dirty.load(Ordering::Relaxed) {
             return;
         }
 

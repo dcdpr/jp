@@ -112,7 +112,9 @@ use jp_printer::{LineSink, PrintableExt as _, Printer, RegionStyle, StatusRegion
 use jp_storage::backend::{FsStorageBackend, Projection};
 use jp_task::task::TitleGeneratorTask;
 use jp_term::width::{display_width, truncate_to_width};
-use jp_workspace::{ConversationHandle, ConversationLock, Id as WorkspaceId, Workspace};
+use jp_workspace::{
+    ConversationHandle, ConversationLock, ConversationMut, Id as WorkspaceId, Workspace,
+};
 use minijinja::{Environment, UndefinedBehavior};
 use strip_ansi_escapes::strip_str;
 use tokio::sync::broadcast::error::RecvError;
@@ -192,7 +194,6 @@ pub(crate) struct Query {
     #[arg(
         long = "fork",
         num_args = 0..=1,
-        default_missing_value = "",
         value_parser = parse_fork_turns,
         conflicts_with = "new",
     )]
@@ -394,9 +395,23 @@ impl Query {
         // 2. picker "start new": `start_new` is set, create a fresh conversation.
         // 3. --fork/--id/session: resolve an existing conversation, lock it.
         // 4. Lock contention: user picks "new" or "fork" from the prompt.
-        let (lock, fresh) = self.acquire_lock(ctx, handle, start_new).await?;
+        let AcquiredConversation {
+            lock,
+            fresh,
+            staged,
+        } = self.acquire_lock(ctx, handle, start_new).await?;
 
-        let result = self.run_locked(ctx, &lock, query, fresh).await;
+        let result = self.run_locked(ctx, &lock, query, fresh, staged).await;
+
+        // A run that never started a turn wrote nothing, so a directory the
+        // editor created to compose in is all that is left of the conversation.
+        // An editor that failed to open has already had its directory reclaimed
+        // by the draft's revert guard; one that closed successfully on an empty
+        // buffer has not.
+        //
+        // Done here, while the lock is still held, so no other process is
+        // mid-compose in the same directory.
+        remove_empty_conversation_dir(ctx.fs_backend.as_deref(), &lock.id());
 
         // Every exit from the locked region lands here, which is what makes
         // this the one reliable drain point: a mutation scope that dropped
@@ -409,6 +424,9 @@ impl Query {
     ///
     /// `fresh` is `true` when this run created the conversation, so no config
     /// state predates its base config.
+    /// `staged` carries mutations acquiring the conversation already made
+    /// without writing them, which this run either commits or discards along
+    /// with its own.
     ///
     /// Errors propagate freely: the caller drains any persist failure the
     /// unwinding left behind.
@@ -419,26 +437,36 @@ impl Query {
         lock: &ConversationLock,
         query: Option<String>,
         fresh: bool,
+        staged: Option<ConversationMut>,
     ) -> Output {
         let now = ctx.now();
         let cfg = ctx.config();
+
+        // One scope for everything this run changes about the conversation
+        // before the turn starts — whatever `--tmp`, `--title`, `--fork`,
+        // `--compact`, or `--cfg` put on it.
+        //
+        // It discards on drop, so the `flush` below, once the request is known
+        // to be non-empty, is the only thing that writes. A query the user walks
+        // away from, and any failure before the turn starts, leave the stored
+        // conversation exactly as they found it.
+        let mut setup = staged.unwrap_or_else(|| lock.as_mut());
+        setup.discard_on_drop();
 
         // Create symlinks and seed approvals for any `--mount` flags before the
         // turn runs, so tools can reach the mounted paths.
         create_mount_effects(&self.mount, &ctx.workspace, ctx.fs_backend.as_deref(), now)?;
 
-        // The two flags are mutually exclusive (enforced by clap), and the
-        // resolved conversation may be new, freshly forked (which clones the
-        // source's metadata, including any title), or resumed.
-        apply_title_override(lock, self.title.as_deref(), self.no_title);
+        // Stamp the expiry a fresh conversation was created with. An existing
+        // conversation keeps the expiry it has: `--tmp` describes a conversation
+        // this run starts, not one it continues, and clap rejects it without
+        // `--new`.
+        if fresh && let Some(duration) = self.expires_in_duration() {
+            let expires_at = chrono::Duration::from_std(duration)
+                .ok()
+                .and_then(|v| lock.id().timestamp().checked_add_signed(v));
 
-        // Record this conversation as the session's active conversation.
-        if let Some(session) = &ctx.session
-            && let Err(error) = ctx
-                .workspace
-                .activate_session_conversation(lock, session, now)
-        {
-            warn!(%error, "Failed to record activation.");
+            setup.update_metadata(|m| m.expires_at = expires_at);
         }
 
         // Fail fast on provider misconfiguration (e.g. a missing API key
@@ -456,9 +484,11 @@ impl Query {
         )
         .map_err(Error::from)?;
 
-        // Compact the conversation before querying, if requested.
+        // Compact the conversation before querying, if requested. Staged on
+        // `setup`, so the composed request and the editor's history preview see
+        // the compacted stream while nothing is written yet.
         if self.compact.should_compact() {
-            self.apply_pre_query_compaction(lock, &cfg).await?;
+            self.apply_pre_query_compaction(&setup, &cfg).await?;
         }
 
         // `-u`/`-U` never enter the config, so the turn's choice is resolved
@@ -471,7 +501,13 @@ impl Query {
             .configure_active_mcp_servers(forced_tool, McpServerScope::Exclusive)
             .await?;
 
-        let conv_title = lock.metadata().title.clone();
+        // The title this run ends with, resolved here because the terminal
+        // title is named after it. Writing it into metadata waits until the
+        // request is known to be non-empty, so an abandoned query leaves the
+        // conversation as it found it.
+        let stored_title = lock.metadata().title.clone();
+        let conv_title =
+            resolve_title_override(stored_title.clone(), self.title.as_deref(), self.no_title);
 
         // Show conversation identity in the terminal title.
         if ctx.term.is_tty {
@@ -479,16 +515,29 @@ impl Query {
         }
 
         let cid = lock.id();
+
+        // Where the editor composes the draft.
+        //
+        // Named for where the conversation lives now, not for the title it will
+        // end the run with: a write reconciles the id to a single directory,
+        // renaming the live one into the new name and deleting every other
+        // copy. Composing under the new name would put the draft in the copy
+        // that gets deleted, while the rename carries it across for free.
         let conversation_path = ctx.fs_backend.as_deref().map_or_else(
             || {
                 ctx.workspace
                     .root()
-                    .join(cid.to_dirname(conv_title.as_deref()))
+                    .join(cid.to_dirname(stored_title.as_deref()))
             },
             // The query draft is a transient editor scratch file, so it is
             // written to durable user-local storage (`user = true`) and never
             // projected into the committed workspace tree.
-            |fs| fs.build_conversation_dir(&cid, conv_title.as_deref(), true),
+            |fs| {
+                fs.find_user_local_conversation_dir(&cid)
+                    .unwrap_or_else(|| {
+                        fs.build_conversation_dir(&cid, stored_title.as_deref(), true)
+                    })
+            },
         );
 
         let piped = read_piped_stdin()?;
@@ -515,14 +564,31 @@ impl Query {
         })?;
 
         let Some(mut chat_request) = chat_request else {
-            // Empty query, early exit. Nothing was mutated and nothing is
-            // dirty: the persisted stream is untouched, even for `--replay`.
+            // Empty query, early exit. `setup` drops unflushed, discarding
+            // everything staged on it, and the request was composed against a
+            // view of the stream rather than the stream itself — so the stored
+            // conversation is untouched, even for `--replay`, and even when it
+            // was this run that created it.
             if query_source == QuerySource::Editor {
                 cleanup_query_message_file(ctx.fs_backend.as_deref(), &cid, DraftRemoval::Any);
             }
             ctx.printer.println("Query is empty, ignoring.");
             return Ok(());
         };
+
+        // Record this conversation as the session's active conversation.
+        //
+        // Deferred until the request is known to be non-empty: the metadata
+        // bump this performs is the first write a fresh conversation gets, so
+        // running it earlier would leave a stored, session-active conversation
+        // behind for a query that was ultimately ignored.
+        if let Some(session) = &ctx.session
+            && let Err(error) = ctx
+                .workspace
+                .activate_session_conversation(lock, session, now)
+        {
+            warn!(%error, "Failed to record activation.");
+        }
 
         // Stamp the request with the configured user name so transcripts
         // attribute each turn correctly even when teammates with different
@@ -587,10 +653,12 @@ impl Query {
             echo.render_user_request(&chat_request);
         }
 
-        // One mutable scope for the whole pre-turn setup. Every mutation below
-        // shares its single write at the closing `flush`, instead of each
-        // statement persisting the entire conversation on its own drop.
-        let mut setup = lock.as_mut();
+        // Store the title resolved before the draft was composed. A run that
+        // names the title the conversation already carries changes nothing, and
+        // leaves the scope clean rather than rewriting it.
+        if conv_title != stored_title {
+            setup.update_metadata(|m| m.title.clone_from(&conv_title));
+        }
 
         // Persist config state changes into the conversation stream, now that
         // the query is known to be non-empty. Recording them before the
@@ -891,6 +959,9 @@ impl Query {
     }
 
     /// Create a new conversation and return an exclusive lock.
+    ///
+    /// The conversation exists in memory only: nothing about it reaches storage
+    /// until a mutation scope on the returned lock is flushed.
     async fn create_new_conversation(&self, ctx: &mut Ctx) -> Result<ConversationLock> {
         let cfg = ctx.config();
 
@@ -922,16 +993,6 @@ impl Query {
             projection,
         )?;
         let id = lock.id();
-
-        if let Some(duration) = self.expires_in_duration() {
-            let mut conv = lock.as_mut();
-            conv.update_metadata(|m| {
-                m.expires_at = chrono::Duration::from_std(duration)
-                    .ok()
-                    .and_then(|v| id.timestamp().checked_add_signed(v));
-            });
-            conv.flush()?;
-        }
 
         debug!(
             id = id.to_string(),
@@ -1185,13 +1246,14 @@ impl Query {
     /// Apply compaction before the query turn starts.
     ///
     /// Applies all compaction rules from the resolved config and appends the
-    /// compaction events to the conversation.
+    /// compaction events to `conv`, which decides when — or whether — they
+    /// are written.
     async fn apply_pre_query_compaction(
         &self,
-        lock: &ConversationLock,
+        conv: &ConversationMut,
         cfg: &AppConfig,
     ) -> Result<()> {
-        let events = lock.events().clone();
+        let events = conv.events().clone();
 
         // The inline DSL plan never enters the config; assemble the effective
         // rules from the resolved config rules plus any `-k SPEC` here.
@@ -1213,27 +1275,23 @@ impl Query {
         )
         .await?;
 
-        super::conversation::compact::apply_compactions(&lock.as_mut(), compactions);
+        super::conversation::compact::apply_compactions(conv, compactions);
 
         Ok(())
     }
 
-    /// Resolve the target conversation and return its exclusive lock.
-    ///
-    /// The second element is `true` when the conversation was freshly created
-    /// by this call: its base config is this invocation's resolved config, so
-    /// no config state predates it.
-    /// Forks return `false` — a fork copies the source's base config and
-    /// events, and therefore carries config state from before this invocation.
+    /// Resolve the target conversation and acquire its exclusive lock.
     async fn acquire_lock(
         &self,
         ctx: &mut Ctx,
         handle: Option<ConversationHandle>,
         start_new: bool,
-    ) -> Result<(ConversationLock, bool)> {
+    ) -> Result<AcquiredConversation> {
         // Handle --new: create a fresh conversation.
         if self.is_new() {
-            return Ok((self.create_new_conversation(ctx).await?, true));
+            return Ok(AcquiredConversation::created(
+                self.create_new_conversation(ctx).await?,
+            ));
         }
 
         // Handle the picker's "start a new conversation" choice. It carries no
@@ -1243,7 +1301,9 @@ impl Query {
             if !self.allows_new_from_picker() {
                 return Err(Error::NewConflictsWithTarget);
             }
-            return Ok((self.create_new_conversation(ctx).await?, true));
+            return Ok(AcquiredConversation::created(
+                self.create_new_conversation(ctx).await?,
+            ));
         }
 
         // `--new` is only worth suggesting when it wouldn't conflict with a
@@ -1253,7 +1313,9 @@ impl Query {
 
         // Handle --fork: fork the conversation before locking.
         if let Some(fork_turns) = &self.fork {
-            return Ok((fork_conversation(ctx, &handle, *fork_turns).await?, false));
+            return Ok(AcquiredConversation::forked(
+                fork_conversation(ctx, &handle, *fork_turns).await?,
+            ));
         }
 
         let req = LockRequest::from_ctx(handle, ctx)
@@ -1261,11 +1323,62 @@ impl Query {
             .allow_fork(true);
 
         match acquire_lock(req).await? {
-            LockOutcome::Acquired(lock) => Ok((lock, false)),
-            LockOutcome::NewConversation => Ok((self.create_new_conversation(ctx).await?, true)),
-            LockOutcome::ForkConversation(handle) => {
-                Ok((fork_conversation(ctx, &handle, None).await?, false))
-            }
+            LockOutcome::Acquired(lock) => Ok(AcquiredConversation::resumed(lock)),
+            LockOutcome::NewConversation => Ok(AcquiredConversation::created(
+                self.create_new_conversation(ctx).await?,
+            )),
+            LockOutcome::ForkConversation(handle) => Ok(AcquiredConversation::forked(
+                fork_conversation(ctx, &handle, None).await?,
+            )),
+        }
+    }
+}
+
+/// The conversation a run targets, exclusively locked, and how it got there.
+struct AcquiredConversation {
+    lock: ConversationLock,
+
+    /// Whether this run created the conversation, so no config state predates
+    /// its base config.
+    ///
+    /// A fork is `false`: it copies the source's base config and events, and
+    /// therefore carries config state from before this invocation.
+    fresh: bool,
+
+    /// Mutations made while acquiring the conversation, held unwritten.
+    ///
+    /// A fork arrives with its inherited stream staged here.
+    /// The scope discards on drop, so whoever takes it decides whether the
+    /// conversation is ever written by flushing it.
+    staged: Option<ConversationMut>,
+}
+
+impl AcquiredConversation {
+    /// A conversation that already existed, with nothing staged on it.
+    fn resumed(lock: ConversationLock) -> Self {
+        Self {
+            lock,
+            fresh: false,
+            staged: None,
+        }
+    }
+
+    /// A conversation this run created, whose base config is this invocation's
+    /// resolved config.
+    fn created(lock: ConversationLock) -> Self {
+        Self {
+            lock,
+            fresh: true,
+            staged: None,
+        }
+    }
+
+    /// A fork, whose inherited stream is staged but not yet written.
+    fn forked((lock, staged): (ConversationLock, ConversationMut)) -> Self {
+        Self {
+            lock,
+            fresh: false,
+            staged: Some(staged),
         }
     }
 }
@@ -2194,7 +2307,7 @@ async fn fork_conversation(
     ctx: &mut Ctx,
     source: &ConversationHandle,
     fork_turns: Option<usize>,
-) -> Result<ConversationLock> {
+) -> Result<(ConversationLock, ConversationMut)> {
     fork::fork_conversation(ctx, source, |events| {
         if let Some(n) = fork_turns {
             events.retain_last_turns(n);
@@ -2271,25 +2384,29 @@ fn resolve_new_title(from_heading: bool, generate_auto: bool, content: &str) -> 
     NewTitle::Skip
 }
 
-/// Apply `--title` / `--no-title` to the resolved conversation.
+/// The title the conversation ends the run with, given the title it carries now
+/// and the `--title` / `--no-title` flags.
 ///
-/// Both flags act on `metadata.title` directly so the run ends with the title
-/// the user asked for, regardless of whether the conversation is new, freshly
-/// forked (which inherits the source's title), or resumed:
+/// The two flags are mutually exclusive (enforced by clap):
 ///
-/// - `--title T` sets the title to `Some(T)`.
-/// - `--no-title` clears any existing title.
-/// - Neither flag is a no-op.
-fn apply_title_override(lock: &ConversationLock, title: Option<&str>, no_title: bool) {
+/// - `--title T` names the title.
+/// - `--no-title` clears it.
+/// - Neither keeps `current`, whether that came from a fork inheriting the
+///   source's title, a resumed conversation, or a new one with none.
+fn resolve_title_override(
+    current: Option<String>,
+    title: Option<&str>,
+    no_title: bool,
+) -> Option<String> {
     if let Some(title) = title {
-        lock.as_mut().update_metadata(|m| {
-            m.title = Some(title.to_owned());
-        });
-    } else if no_title {
-        lock.as_mut().update_metadata(|m| {
-            m.title = None;
-        });
+        return Some(title.to_owned());
     }
+
+    if no_title {
+        return None;
+    }
+
+    current
 }
 
 /// Append a `--cfg` reset keyword's events to a conversation stream.
@@ -3166,6 +3283,26 @@ fn cleanup_query_message_file(
     }
 }
 
+/// Remove a conversation's user-local directory when it holds nothing.
+///
+/// The editor composes into a directory named after the conversation, which it
+/// creates before anything about that conversation has been written.
+/// A run that ends without starting a turn writes nothing, so the directory is
+/// all that is left of it — and a directory without the managed files beside
+/// it is indexed as a conversation and then trashed as corrupt by the next run.
+///
+/// [`fs::remove_dir`] refuses a directory that is not empty, so a conversation
+/// with stored files, or a draft deliberately kept for recovery, is left alone.
+fn remove_empty_conversation_dir(fs_backend: Option<&FsStorageBackend>, id: &ConversationId) {
+    let Some(dir) = fs_backend.and_then(|fs| fs.find_user_local_conversation_dir(id)) else {
+        return;
+    };
+
+    if fs::remove_dir(&dir).is_ok() {
+        debug!(path = %dir, "Removed an empty conversation directory.");
+    }
+}
+
 fn current_dir_utf8() -> BoxedResult<Utf8PathBuf> {
     let cwd = env::current_dir()?;
     Utf8PathBuf::from_path_buf(cwd)
@@ -3280,14 +3417,13 @@ fn parse_schema(s: String) -> Result<schemars::Schema> {
         .map_err(Into::into)
 }
 
-/// Parse the `--fork` value.
-/// Empty string means "all turns", a number means "keep last N turns".
-fn parse_fork_turns(s: &str) -> std::result::Result<Option<usize>, String> {
-    if s.is_empty() {
-        return Ok(None);
-    }
-    s.parse::<usize>()
-        .map(Some)
+/// Parse the `--fork` value: how many trailing turns the fork keeps.
+///
+/// Only reached when a value was written.
+/// A bare `--fork` keeps every turn and never lands here: clap reads the flag's
+/// absent value as `None` for the inner `Option`.
+fn parse_fork_turns(s: &str) -> std::result::Result<usize, String> {
+    s.parse()
         .map_err(|_| format!("expected a positive integer, got '{s}'"))
 }
 
