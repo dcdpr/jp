@@ -12,6 +12,7 @@ fn tool(name: &str, summary: Option<&str>) -> ToolDefinition {
             ..Default::default()
         },
         parameters: serde_json::json!({ "type": "object", "properties": {} }),
+        fan_out: None,
     }
 }
 

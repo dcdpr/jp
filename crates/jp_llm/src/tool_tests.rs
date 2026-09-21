@@ -230,6 +230,125 @@ fn param(kind: &str) -> Value {
     json!({ "type": kind })
 }
 
+#[test]
+fn provider_schema_is_the_operation_schema_without_fan_out() {
+    let parameters = schema([("path", param("string"), true)]);
+    let definition = ToolDefinition {
+        name: "fs_read_file".to_owned(),
+        docs: ToolDocs::default(),
+        parameters: parameters.clone(),
+        fan_out: None,
+    };
+
+    assert_eq!(*definition.provider_schema(), parameters);
+}
+
+#[test]
+fn provider_schema_wraps_the_operation_schema_when_fanning_out() {
+    let parameters = schema([("path", param("string"), true)]);
+    let definition = ToolDefinition {
+        name: "fs_read_file".to_owned(),
+        docs: ToolDocs::default(),
+        parameters: parameters.clone(),
+        fan_out: Some(jp_config::conversation::tool::FanOut {
+            concurrency: None,
+            on_error: jp_config::conversation::tool::FanOutOnError::Continue,
+        }),
+    };
+
+    let wrapped = definition.provider_schema();
+    assert_eq!(wrapped["properties"]["ops"]["items"], parameters);
+    assert_eq!(wrapped["required"], json!(["ops"]));
+
+    // The per-operation schema is what validation and defaults still see, so a
+    // tool receives the same shape either way.
+    assert_eq!(definition.parameters, parameters);
+}
+
+/// A tool configured for fan-out is shown the envelope, told about it in the
+/// text the provider receives, and keeps its own schema for validation.
+#[tokio::test]
+async fn resolve_tool_wraps_a_fan_out_tool_for_the_provider() {
+    let partial: PartialToolConfig = serde_json::from_value(json!({
+        "source": "local",
+        "summary": "Read a file.",
+        "fan_out": true,
+        "parameters": {
+            "path": { "type": "string", "required": true }
+        }
+    }))
+    .unwrap();
+    let tool = ToolConfig::from_partial(partial, vec![]).unwrap();
+    let mut app = AppConfig::new_test();
+    app.conversation
+        .tools
+        .insert("fs_read_file".to_owned(), tool);
+    let config = app.conversation.tools.get("fs_read_file").unwrap();
+
+    let definition = resolve_tool("fs_read_file", &config, &Client::new(IndexMap::new()))
+        .await
+        .expect("the tool resolves");
+
+    assert_eq!(
+        definition.parameters["properties"]["path"],
+        json!({ "type": "string" }),
+        "validation still sees one operation's schema"
+    );
+
+    let provider_schema = definition.provider_schema();
+    assert_eq!(provider_schema["required"], json!(["ops"]));
+    assert_eq!(
+        provider_schema["properties"]["ops"]["items"]["properties"]["path"],
+        json!({ "type": "string" }),
+        "the envelope's items are the tool's own schema"
+    );
+
+    let description = definition
+        .docs
+        .schema_description()
+        .expect("the tool has a summary");
+    assert!(
+        description.starts_with("Read a file."),
+        "the tool's own summary comes first: {description}"
+    );
+    assert!(
+        description.contains("`ops` array"),
+        "the model is told how the envelope relates to the documented parameters: {description}"
+    );
+}
+
+/// A tool that says nothing about fan-out is untouched, which is what keeps
+/// this feature invisible to every tool that has not opted in.
+#[tokio::test]
+async fn resolve_tool_leaves_a_plain_tool_alone() {
+    let partial: PartialToolConfig = serde_json::from_value(json!({
+        "source": "local",
+        "summary": "Read a file.",
+        "parameters": {
+            "path": { "type": "string", "required": true }
+        }
+    }))
+    .unwrap();
+    let tool = ToolConfig::from_partial(partial, vec![]).unwrap();
+    let mut app = AppConfig::new_test();
+    app.conversation
+        .tools
+        .insert("fs_read_file".to_owned(), tool);
+    let config = app.conversation.tools.get("fs_read_file").unwrap();
+
+    let definition = resolve_tool("fs_read_file", &config, &Client::new(IndexMap::new()))
+        .await
+        .expect("the tool resolves");
+
+    assert!(definition.fan_out.is_none());
+    assert_eq!(*definition.provider_schema(), definition.parameters);
+    assert_eq!(
+        definition.docs.schema_description(),
+        Some("Read a file."),
+        "no envelope instruction is added"
+    );
+}
+
 #[tokio::test]
 async fn local_tool_rejects_scalar_enum_on_array_parameter() {
     let partial: PartialToolConfig = serde_json::from_value(json!({
@@ -301,6 +420,7 @@ fn coerces_json_strings_to_declared_parameter_types() {
     ToolDefinition {
         name: "test".to_owned(),
         docs: ToolDocs::default(),
+        fan_out: None,
         parameters,
     }
     .coerce_arguments(&mut arguments);
@@ -328,6 +448,7 @@ fn leaves_strings_alone_for_a_parameter_with_no_declared_type() {
     ToolDefinition {
         name: "test".to_owned(),
         docs: ToolDocs::default(),
+        fan_out: None,
         parameters,
     }
     .coerce_arguments(&mut arguments);
@@ -345,6 +466,7 @@ fn coerces_a_string_the_enum_excludes_into_the_member_it_parses_to() {
     ToolDefinition {
         name: "test".to_owned(),
         docs: ToolDocs::default(),
+        fan_out: None,
         parameters,
     }
     .coerce_arguments(&mut arguments);
@@ -362,6 +484,7 @@ fn leaves_a_string_alone_when_the_enum_lists_it() {
     ToolDefinition {
         name: "test".to_owned(),
         docs: ToolDocs::default(),
+        fan_out: None,
         parameters,
     }
     .coerce_arguments(&mut arguments);
@@ -384,6 +507,7 @@ async fn execute_coerces_json_strings_before_calling_tool() {
     let definition = ToolDefinition {
         name: "echo_arguments".to_owned(),
         docs: ToolDocs::default(),
+        fan_out: None,
         parameters: schema([("start_line", param("integer"), false)]),
     };
     let builtins = builtin::BuiltinExecutors::new().register("echo_arguments", EchoArguments);
@@ -1061,6 +1185,7 @@ async fn test_execute_local_exposes_invocation_ids_in_context() {
     let definition = ToolDefinition {
         name: "echo_ids".to_owned(),
         docs: ToolDocs::default(),
+        fan_out: None,
         parameters: schema([]),
     };
     let invocation = InvocationContext {
@@ -1132,6 +1257,7 @@ async fn test_execute_builtin_dispatches_on_source_name() {
     let definition = ToolDefinition {
         name: "docs".to_owned(),
         docs: ToolDocs::default(),
+        fan_out: None,
         parameters: schema([]),
     };
     let mcp_client = Client::new(IndexMap::new());

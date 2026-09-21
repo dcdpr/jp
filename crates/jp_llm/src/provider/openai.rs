@@ -2018,18 +2018,22 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
     tools
         .into_iter()
         .map(|tool| {
+            let schema = tool.provider_schema();
+
             // The strict subset requires a type on every property, which a
             // parameter the server left free-form does not have. Dropping
             // strict mode for that one tool costs its adherence guarantee;
             // sending it strict costs the whole request, and every other tool
             // in it.
-            let strict = !json_schema::has_unconstrained_node(&tool.parameters);
+            let strict = !json_schema::has_unconstrained_node(&schema);
+            let parameters = parameters_with_strict_mode(&schema, strict).into();
+            drop(schema);
 
             types::Tool::Function {
                 name: tool.name,
                 strict,
                 description: tool.docs.schema_description().map(str::to_owned),
-                parameters: parameters_with_strict_mode(&tool.parameters, strict).into(),
+                parameters,
             }
         })
         .collect()
