@@ -25,7 +25,7 @@ use jp_printer::Printer;
 pub(crate) use parser::CUT_MARKER;
 pub(crate) use parser::draft_query_text;
 use sha2::{Digest as _, Sha256};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::{
     editor::parser::QueryDocument,
@@ -49,8 +49,11 @@ pub(crate) fn build_editor_backend(
     config: &EditorConfig,
     printer: &Printer,
 ) -> Option<Arc<dyn EditorBackend>> {
+    let command = config.resolve()?.to_string();
+
     config.command().map(|cmd| {
         Arc::new(SuspendingEditor {
+            command,
             inner: Arc::new(TerminalEditorBackend::new(cmd)),
             printer: printer.clone(),
         }) as Arc<dyn EditorBackend>
@@ -64,6 +67,12 @@ pub(crate) fn build_editor_backend(
 /// Suspending erases any status region and blocks redraws until the child
 /// exits, so the printer's worker never writes into the editor's display.
 struct SuspendingEditor {
+    /// The resolved editor command line (`code --wait`).
+    ///
+    /// Logged before each edit so a trace shows which program was handed the
+    /// terminal.
+    command: String,
+
     /// The backend that actually spawns the editor.
     inner: Arc<dyn EditorBackend>,
 
@@ -73,11 +82,13 @@ struct SuspendingEditor {
 
 impl EditorBackend for SuspendingEditor {
     fn edit_text(&self, content: &str) -> EditorResult<(EditOutcome, String)> {
+        info!(editor = %self.command, "Opening configured editor.");
         let _pause = self.printer.suspend_status();
         self.inner.edit_text(content)
     }
 
     fn edit_file(&self, req: EditRequest<'_>) -> EditorResult<EditOutcome> {
+        info!(editor = %self.command, "Opening configured editor.");
         let _pause = self.printer.suspend_status();
         self.inner.edit_file(req)
     }

@@ -93,6 +93,7 @@ fn an_edit_erases_the_status_region_before_the_editor_runs() {
         seen: SharedBuffer::default(),
     });
     let backend = SuspendingEditor {
+        command: "observing-editor".to_owned(),
         inner: Arc::clone(&observer) as Arc<dyn EditorBackend>,
         printer: printer.clone(),
     };

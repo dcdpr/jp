@@ -30,7 +30,7 @@ use camino::Utf8Path;
 use indexmap::IndexMap;
 use jp_config::{
     conversation::label::{LabelConfig, LabelRunMode, LabelValueRef},
-    types::command::{CommandConfig, shell_command_line},
+    types::command::CommandConfig,
 };
 use jp_inquire::{InlineOption, prompt::PromptBackend};
 use jp_printer::Printer;
@@ -321,11 +321,7 @@ async fn run_command(
     root: &Utf8Path,
 ) -> std::result::Result<Vec<String>, String> {
     let spec = if cmd.shell {
-        ProcessSpec::new(
-            "sh",
-            ["-c".to_owned(), shell_command_line(&cmd.program, &cmd.args)],
-            root,
-        )
+        ProcessSpec::new("sh", ["-c".to_owned(), cmd.shell_command_line()], root)
     } else {
         ProcessSpec::new(&cmd.program, &cmd.args, root)
     };

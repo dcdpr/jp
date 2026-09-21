@@ -356,3 +356,22 @@ fn command_env_skips_missing_binary() {
 
     assert!(cfg.command().is_none());
 }
+
+/// The env-var branch reports which program it resolved and how the value was
+/// split, not merely that something was found.
+#[cfg(unix)]
+#[test(serial(env_vars))]
+fn resolve_reports_the_env_program() {
+    let _env = EnvVarGuard::set("JP_EDITOR_TEST", "sh -c 'true'");
+    let cfg = EditorConfig {
+        cmd: None,
+        envs: vec!["JP_EDITOR_TEST".into()],
+        inline: InlineEditorConfig::default(),
+    };
+
+    assert_eq!(cfg.resolve().unwrap(), CommandConfig {
+        program: "sh".to_owned(),
+        args: vec!["-c".to_owned(), "true".to_owned()],
+        shell: false,
+    });
+}
