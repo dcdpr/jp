@@ -32,3 +32,11 @@ workspace = true
 
 [lib]
 doctest = false
+
+# A fixture the pty tests spawn, with no tests of its own: keeps cargo from
+# building and listing an empty test binary. The integration tests still get it
+# built, and reach it through `CARGO_BIN_EXE_region_probe`.
+[[bin]]
+name = "region_probe"
+path = "src/bin/region_probe.rs"
+test = false

@@ -63,6 +63,10 @@ impl ProtocolLogHandle {
     ///
     /// Flushes any buffered events that meet `min_level` through `writer`, then
     /// all future events are sent directly.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a previous log write panicked while holding the sink lock.
     pub fn activate(&self, writer: &SharedWriter, min_level: Level) {
         let buffer = {
             let mut sink = self.sink.lock().expect("sink lock");

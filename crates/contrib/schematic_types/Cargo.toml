@@ -39,3 +39,7 @@ url = ["dep:url"]
 
 [lints]
 workspace = true
+
+[lib]
+test = false
+doctest = false

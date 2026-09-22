@@ -3315,17 +3315,32 @@ test *FLAGS="--workspace": (_install "cargo-nextest@" + nextest_version + " carg
     # for itself, and why it passes where a plain `nextest` run does not.
     export INSTA_WORKSPACE_ROOT="{{justfile_directory()}}"
 
-    cargo nextest run --all-targets --cargo-profile=nextest --status-level=slow --failure-output=final "$@"
+    # No target selection, deliberately. Cargo's default already builds the lib
+    # and each bin as unit tests, every integration test, and the examples to
+    # check they still compile, so a new test target is picked up the day it
+    # appears. It is also the only selection that honours `test = false`: every
+    # explicit kind flag widens rather than narrows, and reaches the bins
+    # through a door of its own. `--bins` takes them regardless of the flag
+    # (rust-lang/cargo#8338), and `--benches` takes them because a bin defaults
+    # to `bench = true`. `--all-targets` is both. Each one costs a test binary
+    # per executable in the workspace, built, listed, and empty.
+    cargo nextest run --cargo-profile=nextest --status-level=slow --failure-output=final "$@"
 
 # Continuously run tests, using Bacon.
 [group('check')]
 testw *FLAGS:
     just _bacon test {{FLAGS}}
 
-# Check for unused dependencies.
+# Check for unused dependencies, and for `test` / `doctest` flags that disagree
+# with what a library actually holds.
+#
+# `--check-test-targets` catches both directions: a library that opts out while
+# its source has tests, and one left at the default while it has none. Those
+# flags decide whether a library becomes a test binary at all, so leaving them
+# unchecked means either tests that never run or empty binaries in every run.
 [group('check')]
 shear *FLAGS="--fix": (_install "cargo-shear@" + shear_version)
-    cargo shear {{FLAGS}}
+    cargo shear --check-test-targets {{FLAGS}}
 
 [group('check')]
 coverage: _coverage-setup
@@ -3472,6 +3487,28 @@ lint-ci: (_rustup_component "clippy") _install_ci_matchers
         exit 1
     fi
 
+    # A `[[bin]]` carrying `test = false` is never built as a test harness, so a
+    # `#[cfg(test)]` block inside one compiles nowhere and reports nothing: the
+    # tests are absent from every run, and nothing says so.
+    #
+    # Libraries are `cargo shear --check-test-targets`, which `just shear` runs.
+    # It skips binaries on purpose: a bin shares its source directory with the
+    # package's library, so it cannot tell whose tests it is reading. Each bin
+    # that opts out here declares no module of its own, which is what makes the
+    # single-file read below sound.
+    stray=$(cargo metadata --locked --no-deps --format-version=1 \
+        | jq -r '.packages[].targets[]
+                 | select(.test == false and .kind == ["bin"])
+                 | .src_path' \
+        | while IFS= read -r file; do grep -lE '#\[cfg\(test\)\]' "$file" || true; done)
+    if [ -n "$stray" ]; then
+        echo "$stray" | sed 's/^/error: tests that never run in /' >&2
+        echo "error: the binaries above set 'test = false', so nothing builds their" >&2
+        echo "error: tests. Move them into the crate's library, or drop the flag and" >&2
+        echo "error: accept the extra test binary." >&2
+        exit 1
+    fi
+
     cargo clippy --locked --workspace --all-targets --all-features --no-deps --profile=lint -- --deny warnings
 
 # Check code formatting on CI.
@@ -3496,7 +3533,8 @@ fmt-markdown-ci: _install-comfort _install_ci_matchers
 # full workspace.
 [group('ci')]
 test-ci SCOPE="workspace": (_install "cargo-nextest@" + nextest_version) _install_ci_matchers
-    cargo nextest run --locked --lib --tests --cargo-profile=nextest --status-level=slow --failure-output=immediate-final --workspace --no-fail-fast {{ if SCOPE == "jp-only" { non_jp_excludes } else { "" } }}
+    # No target selection, matching `just test`; see the reasoning there.
+    cargo nextest run --locked --cargo-profile=nextest --status-level=slow --failure-output=immediate-final --workspace --no-fail-fast {{ if SCOPE == "jp-only" { non_jp_excludes } else { "" } }}
 
 # Generate documentation on CI.
 [group('ci')]
@@ -3534,9 +3572,16 @@ insta-ci: _insta-ci-setup
 _insta-ci-setup: (_install "cargo-nextest@" + nextest_version + " cargo-insta@" + insta_version + " cargo-expand@" + expand_version)
 
 # Check for unused dependencies on CI.
+#
+# `--deny-warnings` is what makes the run fail on them. Every cargo-shear
+# diagnostic bar three is a warning, and a warning alone exits 0, which would
+# leave the `test` / `doctest` mismatches advisory: a test added to a library
+# that opted out would never run, and CI would stay green over it. The flag also
+# promotes unlinked files, empty files, unused optional dependencies, and the
+# redundant-ignore reports to failures.
 [group('ci')]
 shear-ci: (_install "cargo-expand@" + expand_version)
-    @just shear --expand
+    @just shear --expand --deny-warnings
 
 # Verify supply-chain audits on CI.
 [group('ci')]

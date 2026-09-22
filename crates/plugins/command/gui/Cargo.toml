@@ -30,6 +30,13 @@ description = "Open the current workspace in the JP macOS app"
 official = true
 repository = "https://github.com/dcdpr/jp"
 
+[lib]
+name = "jp_gui"
+path = "src/lib.rs"
+doctest = false
+
+# The binary is a shell around the library, and carries no tests of its own.
 [[bin]]
 name = "jp-gui"
 path = "src/main.rs"
+test = false

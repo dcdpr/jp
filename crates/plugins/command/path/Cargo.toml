@@ -27,6 +27,9 @@ description = "Print JP directory paths"
 official = true
 repository = "https://github.com/dcdpr/jp"
 
+# No tests of its own: keeps cargo from building and listing an empty test
+# binary.
 [[bin]]
 name = "jp-path"
 path = "src/main.rs"
+test = false
