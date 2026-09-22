@@ -1,6 +1,7 @@
 use std::fs;
 
 use jp_config::PartialAppConfig;
+use jp_conversation::stream::ApplyDelta;
 use jp_workspace::ConversationHandle;
 
 use crate::{
@@ -58,11 +59,12 @@ impl Set {
                 .events()
                 .config_partial()
                 .map_err(jp_conversation::Error::from)?;
-            let delta = config_pipeline::override_to_record(&current, config_delta.clone())?;
+            let record = config_pipeline::override_to_record(&current, config_delta.clone())?;
 
-            if let Some(delta) = delta {
+            if let Some((delta, unsets)) = record {
+                let apply = ApplyDelta::with_unsets(ctx.now(), delta, unsets);
                 lock.into_mut()
-                    .update_events_and_flush(|events| events.add_config_delta(delta))?;
+                    .update_events_and_flush(|events| events.add_config_delta(apply))?;
             }
 
             ctx.printer

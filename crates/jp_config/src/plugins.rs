@@ -48,10 +48,7 @@ impl AssignKeyValue for PartialPluginsConfig {
             "" => kv.try_merge_object(self)?,
             "auto_install" => self.auto_install = kv.try_some_bool()?,
             "shutdown_timeout_secs" => self.shutdown_timeout_secs = kv.try_some_from_str()?,
-            _ if kv.p("command") => match kv.trim_prefix_any() {
-                Some(name) => self.command.entry(name).or_default().assign(kv)?,
-                None => return missing_key(&kv),
-            },
+            _ if kv.p("command") => kv.assign_to_mergeable_entry(&mut self.command)?,
             _ => return missing_key(&kv),
         }
 

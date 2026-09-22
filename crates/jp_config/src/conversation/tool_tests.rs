@@ -962,10 +962,17 @@ fn test_tools_config() {
 }
 
 /// The tools map takes a strategy, even though its entries are flattened to sit
-/// directly under `conversation.tools`.
+/// directly under `conversation.tools`, and takes it the same way through TOML
+/// and through `--cfg`.
+///
+/// Flattened, the wrapper's own keys arrive where tool names arrive, so the
+/// whole-map assignment has to recognise them as the wrapper's before
+/// dispatching them as tool names.
 #[test]
 fn tools_map_accepts_a_replace_strategy() {
-    let config: PartialToolsConfig = toml::from_str(
+    use crate::types::map::MergedMapStrategy;
+
+    let from_toml: PartialToolsConfig = toml::from_str(
         r#"
         strategy = "replace"
 
@@ -975,13 +982,32 @@ fn tools_map_accepts_a_replace_strategy() {
     )
     .expect("a strategy-carrying tools map parses");
 
-    assert!(
-        matches!(&config.tools, MergeableMap::Merged(merged)
-            if merged.strategy == Some(crate::types::map::MergedMapStrategy::Replace)),
-        "expected the declared strategy to survive the flatten: {:?}",
-        config.tools
-    );
-    assert!(config.tools.contains_key("my_tool"));
+    let mut from_cli = PartialToolsConfig::default();
+    let kv = KvAssignment::try_from_cli(
+        ":",
+        r#"{"value":{"my_tool":{"source":"builtin"}},"strategy":"replace"}"#,
+    )
+    .unwrap();
+    from_cli.assign(kv).unwrap();
+
+    for (source, config) in [("toml", &from_toml), ("cfg", &from_cli)] {
+        assert!(
+            matches!(&config.tools, MergeableMap::Merged(merged)
+                if merged.strategy == Some(MergedMapStrategy::Replace)),
+            "{source}: expected the declared strategy to survive the flatten: {:?}",
+            config.tools
+        );
+        assert!(
+            config.tools.contains_key("my_tool"),
+            "{source}: the tool the user declared is the one that lands: {:?}",
+            config.tools
+        );
+        assert!(
+            !config.tools.contains_key("value"),
+            "{source}: the wrapper's keys are not tool names: {:?}",
+            config.tools
+        );
+    }
 }
 
 /// The strategy a config file states is the strategy `--cfg` states.
@@ -1027,6 +1053,59 @@ fn a_map_strategy_means_the_same_through_cfg_as_through_toml() {
             "{source}: the metadata is not an option: {options:?}"
         );
     }
+}
+
+/// Every field of a parameter is reachable by its own path.
+///
+/// A delta reports a field cleared inside a surviving parameter by path, and
+/// clearing runs through assignment, so a field assignment cannot reach is a
+/// clear that cannot be replayed.
+#[test]
+fn a_parameter_field_is_assignable_by_path() {
+    let mut config = PartialToolsConfig::default();
+
+    let mut assign = |key: &str, value: &str| {
+        let kv = KvAssignment::try_from_cli(key, value).unwrap();
+        config.assign(kv).unwrap();
+    };
+
+    assign("cargo_check.parameters.cmd.type", "string");
+    assign("cargo_check.parameters.cmd.required", "true");
+    assign("cargo_check.parameters.cmd.summary", "what to run");
+    assign("cargo_check.parameters.cmd.enum:", r#"["check","clippy"]"#);
+    assign("cargo_check.parameters.cmd.items.type", "string");
+    assign(
+        "cargo_check.parameters.opts.properties.quiet.type",
+        "boolean",
+    );
+
+    let string = Some(PartialOneOrManyTypes::One("string".to_owned()));
+    let parameters = &config.tools["cargo_check"].parameters;
+
+    assert_eq!(parameters["cmd"].kind, string);
+    assert_eq!(parameters["cmd"].required, Some(true));
+    assert_eq!(parameters["cmd"].summary.as_deref(), Some("what to run"));
+    assert_eq!(
+        parameters["cmd"].enumeration,
+        Some(vec![json!("check"), json!("clippy")])
+    );
+    assert_eq!(
+        parameters["cmd"].items.as_ref().map(|items| &items.kind),
+        Some(&string)
+    );
+    assert_eq!(
+        parameters["opts"].properties["quiet"].kind,
+        Some(PartialOneOrManyTypes::One("boolean".to_owned()))
+    );
+
+    // A clear takes the field it names, leaving the parameter holding it.
+    config
+        .assign(KvAssignment::unset("cargo_check.parameters.cmd.enum"))
+        .unwrap();
+
+    let parameters = &config.tools["cargo_check"].parameters;
+    assert_eq!(parameters["cmd"].enumeration, None);
+    assert_eq!(parameters["cmd"].kind, string);
 }
 
 /// A plain tools map keeps merging per key, and a tool may be named `value`.

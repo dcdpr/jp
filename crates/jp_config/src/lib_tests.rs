@@ -832,6 +832,69 @@ fn a_removed_mcp_server_is_recorded() {
     );
 }
 
+/// A field cleared inside a surviving parameter is gone after the fold.
+///
+/// No parameter key disappears, so the map merges key by key and the entry
+/// carries its own delta — which has no way to say a field went away.
+/// The path is what says it, and applying it is what removes the value, so the
+/// path has to be one assignment can reach.
+#[test]
+fn a_cleared_parameter_field_is_gone_after_the_fold() {
+    use indexmap::IndexMap;
+    use serde_json::json;
+
+    use crate::conversation::tool::{
+        PartialOneOrManyTypes, PartialToolConfig, PartialToolParameterConfig, ToolSource,
+    };
+
+    let with_enum = |enumeration: Option<Vec<serde_json::Value>>| {
+        let mut partial = PartialAppConfig::new_test();
+        partial
+            .conversation
+            .tools
+            .tools
+            .insert("bash".to_owned(), PartialToolConfig {
+                source: Some(ToolSource::Local { tool: None }),
+                parameters: IndexMap::from_iter([("cmd".to_owned(), PartialToolParameterConfig {
+                    kind: Some(PartialOneOrManyTypes::One("string".to_owned())),
+                    enumeration,
+                    ..PartialToolParameterConfig::default()
+                })])
+                .into(),
+                ..PartialToolConfig::default()
+            });
+
+        partial
+    };
+
+    let prev = with_enum(Some(vec![json!("check")]));
+    let next = with_enum(None);
+
+    let mut unsets = Vec::new();
+    let delta = prev.delta_with_unsets(next, "", &mut unsets);
+
+    assert_eq!(unsets, ["conversation.tools.bash.parameters.cmd.enum"]);
+
+    let mut folded = prev.clone();
+    for path in &unsets {
+        folded
+            .unset(path)
+            .expect("a reported path is one assignment can apply");
+    }
+    folded.merge(&(), delta).expect("folding cannot fail");
+
+    let parameters = &folded.conversation.tools.tools["bash"].parameters;
+    assert_eq!(
+        parameters["cmd"].enumeration, None,
+        "the values the user stopped accepting do not come back"
+    );
+    assert_eq!(
+        parameters["cmd"].kind,
+        Some(PartialOneOrManyTypes::One("string".to_owned())),
+        "and the parameter keeps the fields it still states"
+    );
+}
+
 /// A server only the workspace config declares reaches an existing
 /// conversation.
 ///

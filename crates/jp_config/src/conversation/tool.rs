@@ -57,6 +57,12 @@ pub struct ToolsConfig {
 impl AssignKeyValue for PartialToolsConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
+            // The tools map is flattened, so a wrapper stating how it merges
+            // arrives with no key of its own — where an object naming several
+            // tools also arrives. Its `value` and `strategy` are the wrapper's
+            // keys, not tool names, so it goes to the map rather than being
+            // dispatched key by key.
+            "" if kv.states_map_strategy() => kv.assign_to_mergeable_entry(&mut self.tools)?,
             "" => kv.try_merge_object(self)?,
             _ if kv.p("*") => self.defaults.assign(kv)?,
             _ => kv.assign_to_mergeable_entry(&mut self.tools)?,
@@ -630,7 +636,7 @@ impl AssignKeyValue for PartialToolConfig {
             "summary" => self.summary = kv.try_some_string()?,
             "description" => self.description = kv.try_some_string()?,
             "examples" => self.examples = kv.try_some_string()?,
-            "parameters" => self.parameters = kv.try_object()?,
+            _ if kv.p("parameters") => kv.assign_to_mergeable_entry(&mut self.parameters)?,
             "run" => self.run = kv.try_some_from_str()?,
             "format" => self.format = kv.try_some_from_str()?,
             "result" => self.result = kv.try_some_from_str()?,
@@ -850,6 +856,30 @@ pub struct ToolParameterConfig {
     #[serde(default, skip_serializing_if = "MergeableMap::is_empty")]
     #[expect(clippy::use_self, reason = "macro can't resolve `Self`")]
     pub properties: MergeableMap<ToolParameterConfig>,
+}
+
+impl AssignKeyValue for PartialToolParameterConfig {
+    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => kv.try_merge_object(self)?,
+            "type" => self.kind = kv.try_some_value()?,
+            "default" => self.default = kv.try_some_value()?,
+            "required" => self.required = kv.try_some_bool()?,
+            "summary" => self.summary = kv.try_some_string()?,
+            "description" => self.description = kv.try_some_string()?,
+            "examples" => self.examples = kv.try_some_string()?,
+            // Elements are whatever the parameter accepts, so they are carried
+            // as they arrive rather than parsed into a type.
+            _ if kv.p("enum") => {
+                kv.try_some_vec(&mut self.enumeration, |kv| Ok(kv.value.into_value()))?;
+            }
+            _ if kv.p("items") => self.items.assign(kv)?,
+            _ if kv.p("properties") => kv.assign_to_mergeable_entry(&mut self.properties)?,
+            _ => return missing_key(&kv),
+        }
+
+        Ok(())
+    }
 }
 
 impl PartialConfigDelta for PartialToolParameterConfig {
