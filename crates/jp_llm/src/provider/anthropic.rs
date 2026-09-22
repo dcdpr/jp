@@ -1822,6 +1822,11 @@ fn model_overrides(id: &str) -> Option<ModelOverrides> {
             always_on: true,
             ..Default::default()
         },
+        "claude-opus-5-5" => ModelOverrides {
+            knowledge_cutoff: cutoff(2026, 6),
+            always_on: true,
+            ..Default::default()
+        },
         "claude-opus-5" => ModelOverrides {
             knowledge_cutoff: cutoff(2026, 5),
             ..Default::default()
