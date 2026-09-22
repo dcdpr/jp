@@ -537,6 +537,40 @@ fn test_map_model_opus_5() {
     assert!(!details.supports_prefill());
 }
 
+/// Verify the `map_model` arm for Claude Opus 5.5.
+///
+/// Opus 5.5 always thinks, so JP must not send `thinking: disabled` and must
+/// not hard-force a `tool_choice`; both are rejected with a 400.
+#[test]
+fn test_map_model_opus_5_5() {
+    let model = adaptive_api_model("claude-opus-5-5", "Claude Opus 5.5", true, true);
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(
+        details.id,
+        (PROVIDER, "claude-opus-5-5").try_into().unwrap()
+    );
+    assert_eq!(details.display_name.as_deref(), Some("Claude Opus 5.5"));
+    assert_eq!(details.context_window, Some(1_000_000));
+    assert_eq!(details.max_output_tokens, Some(128_000));
+    assert_eq!(
+        details.knowledge_cutoff,
+        NaiveDate::from_ymd_opt(2026, 6, 1)
+    );
+    assert_eq!(
+        details.reasoning,
+        Some(ReasoningDetails::adaptive(true, true).always_on())
+    );
+    assert_eq!(details.structured_output, Some(true));
+    assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+    assert!(details.features.contains(&"adaptive-thinking"));
+    assert!(details.features.contains(&"interleaved-thinking"));
+    assert!(details.features.contains(&"context-editing"));
+    assert!(!details.supports_disabling_thinking());
+    assert!(!details.supports_prefill());
+}
+
 /// Verify the `map_model` arm for Claude Fable 5.1 produces the expected
 /// `ModelDetails`, including the `thinking-always-on` capability that stops JP
 /// from sending `thinking: disabled` and from hard-forcing a `tool_choice`,
