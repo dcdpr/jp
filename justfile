@@ -3504,10 +3504,41 @@ lint-ci: (_rustup_component "clippy") _install_ci_matchers
 # Gates on regression against the committed baselines rather than on an
 # absolute score. The workspace carries known findings; the bar for new code is
 # "no worse than what is already there". Refresh with `just qual-baseline`.
+#
+# `--no-fail` is required, and does not weaken the gate. `--fail-on-regression`
+# adds a failure condition rather than replacing the default one: rustqual
+# returns early when a comparison regresses, and otherwise falls through to a
+# gate that fails whenever any finding exists at all. On a baselined workspace
+# that is every run. `--no-fail` disables only that second gate; the regression
+# check runs first and returns before it is reached.
+#
+# Output is captured rather than streamed. Each pass prints every baselined
+# finding on every run, which buries the comparison block that carries the
+# verdict. On success only that block is shown; on regression the whole log is.
+# `--format github` is deliberately absent: it annotates all baselined findings
+# rather than the new ones, and GitHub caps the display at ten, so the
+# annotations would show pre-existing findings and hide the regression.
 [group('ci')]
 qual-ci: _install-rustqual _install_ci_matchers
-    rustqual -c .config/rustqual/config.toml --compare .config/rustqual/baseline.json --fail-on-regression --format github
-    rustqual -c .config/rustqual/dry.toml --compare .config/rustqual/baseline-dry.json --fail-on-regression --format github
+    #!/usr/bin/env sh
+    set -eu
+
+    qual_pass() {
+        if out=$(rustqual -c ".config/rustqual/$1" --no-fail \
+            --compare ".config/rustqual/$2" --fail-on-regression 2>&1)
+        then
+            printf '%s\n' "$out" | sed -n '/Baseline Comparison/,$p'
+        else
+            echo "::error::rustqual regression in the $1 pass"
+            printf '%s\n' "$out"
+            return 1
+        fi
+    }
+
+    status=0
+    qual_pass config.toml baseline.json || status=1
+    qual_pass dry.toml baseline-dry.json || status=1
+    exit "$status"
 
 # Check code formatting on CI.
 [group('ci')]
