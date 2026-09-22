@@ -1,0 +1,115 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Test received! How can I help you today?",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "We need answer to user: \"Repeat my previous message\". Need maybe mention previous user message was \"Test message\". Need likely respond exactly? Could say Your previous message was: \"Test message\". Need ensure no private chain of thought? Final concise.\n",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Your previous message was: “Test message”",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "chatcmpl-tool-b4ac3d9a0f62fbdb",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("Test message"),
+                            "bar": Array [
+                                String("foo"),
+                            ],
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The secret code is: 42",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "We need answer to user: \"What was the result of the previous tool call?\" Need likely state result was The secret code is: 42. Need maybe concise. Also consider \"Previous\" tool call was run_me returned secret code. We can answer. But hidden? User asks result of previous tool call, okay tool output visible? In this interaction, tool output is visible? The instruction likely test. Need not mention internal. Need final.\n",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The previous tool call returned: `The secret code is: 42`",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

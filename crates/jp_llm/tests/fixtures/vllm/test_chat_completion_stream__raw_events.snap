@@ -1,0 +1,145 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: Reasoning(
+                "We",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " need respond to user",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "Test message\". Simple",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ". Need final.",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " Maybe",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "Test received",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ".",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " How can I help",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "?\" in",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " English.\n",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "Test re",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ce",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ived",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ". I’m h",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ere and ready t",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "o help.",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

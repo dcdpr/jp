@@ -23,6 +23,102 @@ fn flush_indices(events: &[Result<Event, StreamError>]) -> Vec<usize> {
         .collect()
 }
 
+fn message_text(events: &[Result<Event, StreamError>]) -> String {
+    events
+        .iter()
+        .filter_map(|e| match e.as_ref().ok() {
+            Some(Event::Part {
+                part: EventPart::Message(text),
+                ..
+            }) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Some servers (vLLM) pass the chat template's separator between the reasoning
+/// block and the answer through as content, so the answer would otherwise open
+/// with the template's blank lines.
+#[test]
+fn strips_the_template_separator_between_reasoning_and_content() {
+    let mut state = StreamState::new("test", false);
+
+    let reasoning = json!({
+        "choices": [{
+            "delta": { "reasoning": "Deciding what to say.\n" },
+            "index": 0,
+            "finish_reason": null
+        }]
+    });
+    handle_sse_event_sync(Ok(sse_message(&reasoning.to_string())), &mut state).unwrap();
+
+    let content = json!({
+        "choices": [{
+            "delta": { "content": "\n\nTest received." },
+            "index": 0,
+            "finish_reason": null
+        }]
+    });
+    let mut events =
+        handle_sse_event_sync(Ok(sse_message(&content.to_string())), &mut state).unwrap();
+    events.extend(handle_sse_event_sync(Ok(sse_message("[DONE]")), &mut state).unwrap());
+
+    assert_eq!(message_text(&events), "Test received.");
+}
+
+/// The separator is only stripped where a reasoning block precedes the content.
+/// Without one, leading blank lines are the model's own output and are kept.
+#[test]
+fn keeps_leading_blank_lines_when_no_reasoning_precedes_them() {
+    let mut state = StreamState::new("test", false);
+
+    let content = json!({
+        "choices": [{
+            "delta": { "content": "\n\nTest received." },
+            "index": 0,
+            "finish_reason": null
+        }]
+    });
+    let mut events =
+        handle_sse_event_sync(Ok(sse_message(&content.to_string())), &mut state).unwrap();
+    events.extend(handle_sse_event_sync(Ok(sse_message("[DONE]")), &mut state).unwrap());
+
+    assert_eq!(message_text(&events), "\n\nTest received.");
+}
+
+/// A separator split across frames is stripped whole: the flag survives a frame
+/// that turns out to be blank once trimmed.
+#[test]
+fn strips_a_separator_split_across_frames() {
+    let mut state = StreamState::new("test", false);
+
+    let reasoning = json!({
+        "choices": [{
+            "delta": { "reasoning": "Deciding what to say.\n" },
+            "index": 0,
+            "finish_reason": null
+        }]
+    });
+    handle_sse_event_sync(Ok(sse_message(&reasoning.to_string())), &mut state).unwrap();
+
+    let mut events = vec![];
+    for chunk in ["\n", "\n", "Test received."] {
+        let content = json!({
+            "choices": [{
+                "delta": { "content": chunk },
+                "index": 0,
+                "finish_reason": null
+            }]
+        });
+        events.extend(
+            handle_sse_event_sync(Ok(sse_message(&content.to_string())), &mut state).unwrap(),
+        );
+    }
+    events.extend(handle_sse_event_sync(Ok(sse_message("[DONE]")), &mut state).unwrap());
+
+    assert_eq!(message_text(&events), "Test received.");
+}
+
 #[test_log::test(tokio::test)]
 async fn surfaces_stream_error_before_completion() {
     // A transport error before `[DONE]` (a dropped or stalled connection) must

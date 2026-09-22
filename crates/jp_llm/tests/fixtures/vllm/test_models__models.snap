@@ -1,0 +1,44 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Vllm,
+            name: Name(
+                "Qwen/Qwen3.8-Flash-Next-NVFP4",
+            ),
+        },
+        display_name: None,
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Vllm,
+            name: Name(
+                "rtx6000",
+            ),
+        },
+        display_name: None,
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+]

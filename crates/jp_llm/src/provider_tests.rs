@@ -17,6 +17,7 @@ macro_rules! test_all_providers {
             mod openrouter{ use super::*; $(test_all_providers!(func; $fn, ProviderId::Openrouter);)* }
             mod ollama    { use super::*; $(test_all_providers!(func; $fn, ProviderId::Ollama);)* }
             mod llamacpp  { use super::*; $(test_all_providers!(func; $fn, ProviderId::Llamacpp);)* }
+            mod vllm      { use super::*; $(test_all_providers!(func; $fn, ProviderId::Vllm);)* }
         };
         (func; $fn:ident, $provider:ty) => {
             paste::paste! {

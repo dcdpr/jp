@@ -1,0 +1,693 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 1,
+            part: Message(
+                "Test r",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "eceiv",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ed! How can I h",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "elp you",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " today?",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            part: Reasoning(
+                "We",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " need answer to",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " user: \"Repeat",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " my previous message",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\". Need maybe",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " mention previous user",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " message was \"Test",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " message\". Need likely",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " respond",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " exactly",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "?",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " Could",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " say",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " Your",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " previous message was:",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " \"Test message\".",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " Need ensure",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " no private",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " chain",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " of thought? Final",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " concise.\n",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "Your previous ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "message w",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "as: “Test mes",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "sage”",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                Start {
+                    id: "chatcmpl-tool-b4ac3d9a0f62fbdb",
+                    name: "run_me",
+                },
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "{\"foo\": ",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\"Test message\", \"bar\": ",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "[\"foo\"]}",
+                ),
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Flush {
+            index: 2,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 1,
+            part: Message(
+                "The secret c",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ode",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " is: 42",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            part: Reasoning(
+                "We",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " need answer to",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " user: \"What",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " was the result of",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " the previous tool call",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "?\" Need likely state",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " result was",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " The",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " secret code is:",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " 42.",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " Need maybe concise",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ". Also",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " consider",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "Previous",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\" tool",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " call was",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " run_me returned",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " secret",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " code. We",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " can answer. But",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " hidden",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "? User",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " asks result of",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " previous tool call,",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " okay",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " tool",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " output",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " visible?",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " In",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " this",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " interaction",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ", tool output is",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " visible",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "? The",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " instruction",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " likely",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " test",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ". Need not",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " mention",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " internal",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ". Need",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " final.\n",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "The p",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "revious tool call re",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "tu",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "rned: `The secret ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "code",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "is: 42`",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

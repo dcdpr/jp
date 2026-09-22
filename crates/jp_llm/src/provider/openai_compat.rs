@@ -340,6 +340,10 @@ pub(crate) struct StreamState {
     /// Captured from `finish_reason` in the last choice delta.
     /// Emitted as `Event::Finished` when the `[DONE]` sentinel arrives.
     pub(crate) finish_reason: Option<FinishReason>,
+    /// Set when server-separated reasoning arrives, and cleared by the first
+    /// content frame that holds anything other than whitespace.
+    /// While set, leading whitespace is stripped from each content frame.
+    trim_content_prefix: bool,
     is_structured: bool,
 }
 
@@ -353,6 +357,7 @@ impl StreamState {
             message_flushed: false,
             finished: false,
             finish_reason: None,
+            trim_content_prefix: false,
             is_structured,
         }
     }
@@ -424,6 +429,7 @@ pub(crate) fn handle_sse_event_sync(
                     && !reasoning.is_empty()
                 {
                     events.push(Ok(Event::reasoning(0, reasoning.clone())));
+                    state.trim_content_prefix = true;
                 }
 
                 // Content
@@ -435,23 +441,38 @@ pub(crate) fn handle_sse_event_sync(
                 if let Some(content) = &delta.content
                     && !content.is_empty()
                 {
-                    // Server separated reasoning; content is pure text.
-                    if delta.reasoning_content.is_some() {
-                        flush_reasoning_if_needed(&mut events, &mut state.reasoning_flushed);
-
-                        if state.is_structured {
-                            events.push(Ok(Event::structured(1, content.clone())));
-                        } else {
-                            events.push(Ok(Event::message(1, content.clone())));
-                        }
+                    // A chat template puts a separator between the reasoning
+                    // block and the answer. Some servers (vLLM) pass it through
+                    // as content, others (llama.cpp) strip it before it reaches
+                    // the wire; dropping it here spares the answer a pair of
+                    // leading blank lines.
+                    let content = if state.trim_content_prefix {
+                        content.trim_start()
                     } else {
-                        // Might contain <think> tags — feed through extractor.
-                        state.extractor.handle(content);
-                        events.extend(
-                            drain_extractor(&mut state.extractor, state.is_structured)
-                                .into_iter()
-                                .map(Ok),
-                        );
+                        content.as_str()
+                    };
+
+                    if !content.is_empty() {
+                        state.trim_content_prefix = false;
+
+                        // Server separated reasoning; content is pure text.
+                        if delta.reasoning_content.is_some() {
+                            flush_reasoning_if_needed(&mut events, &mut state.reasoning_flushed);
+
+                            if state.is_structured {
+                                events.push(Ok(Event::structured(1, content.to_owned())));
+                            } else {
+                                events.push(Ok(Event::message(1, content.to_owned())));
+                            }
+                        } else {
+                            // Might contain <think> tags — feed through extractor.
+                            state.extractor.handle(content);
+                            events.extend(
+                                drain_extractor(&mut state.extractor, state.is_structured)
+                                    .into_iter()
+                                    .map(Ok),
+                            );
+                        }
                     }
                 }
 
