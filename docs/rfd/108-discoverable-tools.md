@@ -1,4 +1,4 @@
-# RFD 107: Discoverable Tools
+# RFD 108: Discoverable Tools
 
 - **Status**: Discussion
 - **Category**: Design

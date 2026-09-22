@@ -1301,4 +1301,4 @@ Depends on: Phase 2.
 [RFD 042]: 042-tool-options.md
 [RFD 070]: 070-negative-config-deltas.md
 [RFD 076]: 076-tool-access-grants.md
-[RFD 107]: 107-discoverable-tools.md
+[RFD 107]: 108-discoverable-tools.md

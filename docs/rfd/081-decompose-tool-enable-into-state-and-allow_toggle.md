@@ -886,4 +886,4 @@ Phase 4 (tests and RFD updates) lands in the same PR.
 [RFD 078]: 078-tool-config-mutation.md
 [RFD 079]: 079-config-sources-and-load-order.md
 [RFD 083]: 083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md
-[RFD 107]: 107-discoverable-tools.md
+[RFD 107]: 108-discoverable-tools.md
