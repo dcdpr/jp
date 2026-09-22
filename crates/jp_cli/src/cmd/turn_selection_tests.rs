@@ -728,6 +728,105 @@ fn check_turn_range_rejects_endpoints_past_the_conversation() {
     assert!(selection.check_turn_range(5).is_ok());
 }
 
+/// `--turns` is accepted as a plural spelling of `--turn`.
+#[test]
+fn the_turns_alias_parses_the_same_value_as_turn() {
+    #[derive(clap::Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        range: TurnSelection,
+    }
+
+    let parse = |flag: &str| {
+        <TestCli as clap::Parser>::try_parse_from(["x", flag, "2..4"])
+            .unwrap()
+            .range
+            .turn
+    };
+
+    assert_eq!(parse("--turn"), parse("--turns"));
+    assert_eq!(
+        parse("--turns"),
+        Some(TurnSpec::Range(
+            Some(TurnPos::Absolute(2)),
+            Some(TurnPos::Absolute(4))
+        ))
+    );
+}
+
+/// A backward range names no turn in any conversation, so it is malformed
+/// rather than empty: rejecting it here keeps it from resolving into a
+/// selection and being reported against the conversation's size instead.
+#[test]
+fn check_turn_range_rejects_a_range_that_ends_before_it_starts() {
+    let selection = TurnSelection {
+        turn: Some(TurnSpec::Range(
+            Some(TurnPos::Absolute(2)),
+            Some(TurnPos::Absolute(1)),
+        )),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        selection.check_turn_range(5).unwrap_err(),
+        "range 2..1 is not valid: turn 1 comes before turn 2"
+    );
+
+    // The same range resolves to nothing, which is what the rejection replaces.
+    assert!(selection.resolve(&stream(5)).is_empty());
+}
+
+/// From-end positions cross too, and the error resolves them: `-1..-3` reads as
+/// ascending, so naming only what was written would not show the problem.
+#[test]
+fn check_turn_range_resolves_from_end_positions_before_comparing_them() {
+    let selection = TurnSelection {
+        turn: Some(TurnSpec::Range(
+            Some(TurnPos::FromEnd(1)),
+            Some(TurnPos::FromEnd(3)),
+        )),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        selection.check_turn_range(5).unwrap_err(),
+        "range -1..-3 is not valid: turn 3 comes before turn 5"
+    );
+
+    // The ascending spelling of the same pair is fine.
+    let selection = TurnSelection {
+        turn: Some(TurnSpec::Range(
+            Some(TurnPos::FromEnd(3)),
+            Some(TurnPos::FromEnd(1)),
+        )),
+        ..Default::default()
+    };
+    assert!(selection.check_turn_range(5).is_ok());
+}
+
+/// A single turn and an open-ended range have nothing to cross.
+#[test]
+fn check_turn_range_accepts_every_range_with_an_open_end() {
+    for spec in [
+        TurnSpec::Single(TurnPos::Absolute(3)),
+        TurnSpec::Range(Some(TurnPos::Absolute(3)), None),
+        TurnSpec::Range(None, Some(TurnPos::Absolute(3))),
+        TurnSpec::Range(None, None),
+        // Equal ends are a one-turn range, not a crossing.
+        TurnSpec::Range(Some(TurnPos::Absolute(3)), Some(TurnPos::Absolute(3))),
+    ] {
+        let selection = TurnSelection {
+            turn: Some(spec.clone()),
+            ..Default::default()
+        };
+        assert!(
+            selection.check_turn_range(5).is_ok(),
+            "rejected {spec:?}: {:?}",
+            selection.check_turn_range(5)
+        );
+    }
+}
+
 #[test]
 fn is_set_reports_whether_the_user_named_a_subset() {
     assert!(!TurnSelection::default().is_set());

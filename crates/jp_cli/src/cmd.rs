@@ -586,6 +586,17 @@ impl From<crate::error::Error> for Error {
             )]
             .into(),
             Compaction(error) => [("message", "Compaction error".into()), ("error", error)].into(),
+            // One line, no suggestion: the neighbouring variants' `suggestion`
+            // field renders as an extra row under the message, which is more
+            // than this is worth saying.
+            NothingToCompact { turns } => [(
+                "message",
+                format!(
+                    "No turns to compact, the selection resolves to 0 of this conversation's \
+                     {turns} turns."
+                ),
+            )]
+            .into(),
             SummaryOverlap {
                 authored,
                 from,
