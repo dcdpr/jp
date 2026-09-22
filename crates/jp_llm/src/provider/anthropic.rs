@@ -2447,6 +2447,8 @@ fn model_overrides(id: &str) -> Option<&'static ModelOverrides> {
 }
 
 /// The facts the capabilities API cannot supply, per model.
+// qual:allow(complexity, magic_numbers) reason: "model catalogue: cutoff dates
+// are data maintained by hand against Anthropic's published documentation"
 static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
     let cutoff = |year, month| NaiveDate::from_ymd_opt(year, month, 1);
 

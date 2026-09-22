@@ -1717,6 +1717,8 @@ fn model_overrides(id: &str) -> Option<&'static ModelDetails> {
 /// Unlike the Anthropic, OpenRouter, and Cerebras providers, there is nothing
 /// to derive from, so every value here is maintained by hand against OpenAI's
 /// published model documentation.
+// qual:allow(complexity, magic_numbers) reason: "model catalogue: context
+// windows, output limits and cutoff dates are data, not constants"
 static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
     let date = |year, month, day| NaiveDate::from_ymd_opt(year, month, day).unwrap();
     let id = |name: &str| ModelIdConfig::try_from((PROVIDER, name)).unwrap();
