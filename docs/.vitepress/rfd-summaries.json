@@ -332,7 +332,7 @@
     "summary": "Built-in tool for assistant to ask typed questions mid-turn with human-only enforcement and optional answer persistence."
   },
   "084-configurable-markdown-element-coloring.md": {
-    "hash": "48dd417dffbbf3e3b33e33d5b7a979d3b2bb59549257696ca8c00c43cc5cbf1b",
+    "hash": "4443e0fbeaae88b9600430d1b5d878e07969dfbaa9f4c9ae726e4b51d74d7c0a",
     "summary": "Introduce configurable per-markdown-element styling via MarkdownStyleSheet, replacing hard-coded SGR escapes."
   },
   "085-query-explain.md": {
@@ -360,7 +360,7 @@
     "summary": "JP gains Anthropic subscription auth with automatic fallback to API key billing when quotas exhaust."
   },
   "091-printer-owned-status-region.md": {
-    "hash": "9f50bec24fd8434ab87f60ece312c4ec6492f67fcb8014e2d8afc33e9d31e286",
+    "hash": "d3390e6cac0f31c93011259a56cf0cf0041bba2e0e01957bcfa44ee48acfd4ae",
     "summary": "Consolidates nine ephemeral terminal indicators into a printer-owned status region primitive, showing live child-process output with multi-row windows and standardized chrome lifecycle."
   },
   "092-predictable-and-responsive-interrupt-escalation.md": {
