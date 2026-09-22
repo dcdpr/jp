@@ -332,7 +332,9 @@ user-local copy immediately — byte-for-byte, preserving the user's exact
 content — so both copies stay consistent rather than deferring the sync.
 An edit that fails to load is never committed: JP prints the error and asks
 whether to re-open the editor to fix it or discard the edit (restoring the
-original files); a non-interactive run discards it with an error.
+original files).
+A non-interactive run never opens the editor, since nobody is there to close it;
+it fails with an error pointing at `jp conversation path`.
 Manual edits made outside JP are reconciled lazily on the next load by the
 stream/metadata mtime rules below.
 

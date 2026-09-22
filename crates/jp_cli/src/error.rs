@@ -123,6 +123,12 @@ pub(crate) enum Error {
     #[error("Missing editor")]
     MissingEditor,
 
+    /// `suggestion` names what the caller can do instead, and differs per
+    /// command: a query has text to send without an editor, an explicit edit
+    /// has nothing to fall back to.
+    #[error("Editor unavailable in a non-interactive invocation")]
+    NonInteractiveEditor { suggestion: &'static str },
+
     #[error("Task error: {0}")]
     Task(Box<dyn std::error::Error + Send + Sync>),
 
