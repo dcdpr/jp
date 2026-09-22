@@ -307,6 +307,54 @@ fn merge_delta_preserves_inline_table_enable_siblings() {
     );
 }
 
+/// Setting a provider parameter in a file that still nests them under `other`
+/// takes effect on the next load.
+///
+/// `merge_delta` writes the parameter where the current spelling puts it and
+/// removes nothing, so the legacy table survives beside it.
+/// The read has to resolve that collision toward the value just written, or the
+/// command reports success and changes nothing.
+#[test]
+fn merge_delta_of_a_provider_parameter_beats_a_legacy_other_table() {
+    use indexmap::IndexMap;
+    use serde_json::json;
+
+    use crate::types::json_value::JsonValue;
+
+    let mut config = ConfigFile {
+        path: "test.toml".into(),
+        format: Format::Toml,
+        content: indoc! {r#"
+            [assistant.model]
+            id = "anthropic/test"
+
+            [assistant.model.parameters.other]
+            verbosity = "low"
+        "#}
+        .to_owned(),
+    };
+
+    let mut delta = PartialAppConfig::default();
+    let mut parameters = IndexMap::new();
+    parameters.insert("verbosity".to_owned(), JsonValue(json!("high")));
+    delta.assistant.model.parameters.other = Some(parameters);
+
+    config.merge_delta(&delta).unwrap();
+
+    let parameters = toml::from_str::<PartialAppConfig>(&config.content)
+        .expect("the merged file parses")
+        .assistant
+        .model
+        .parameters;
+
+    assert_eq!(
+        parameters.other.as_ref().and_then(|o| o.get("verbosity")),
+        Some(&JsonValue(json!("high"))),
+        "the written value is the one that loads, from: {}",
+        config.content
+    );
+}
+
 #[test]
 fn merge_delta_into_empty_file() {
     let mut config = ConfigFile {

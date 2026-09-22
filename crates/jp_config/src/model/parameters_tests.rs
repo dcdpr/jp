@@ -62,6 +62,58 @@ fn other_is_flattened_on_the_wire() {
     assert_eq!(back.other.as_ref().map(IndexMap::len), Some(1));
 }
 
+/// A provider parameter set on the assistant reaches an inquiry request that
+/// sets a typed parameter of its own.
+///
+/// The inquiry block inherits field by field from the assistant, and an unset
+/// field is what inheritance looks for.
+/// A collector holding no parameters has to read as unset for that to work,
+/// since a block naming only typed parameters says nothing about the provider
+/// ones.
+#[test]
+fn an_inquiry_inherits_the_assistant_s_provider_parameters() {
+    use camino_tempfile::tempdir;
+    use schematic::ConfigLoader;
+
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("config.toml");
+
+    std::fs::write(&path, indoc::indoc! {r#"
+            [assistant.model]
+            id = "anthropic/test"
+
+            [conversation.tools.'*']
+            run = "unattended"
+
+            [assistant.model.parameters]
+            verbosity = "high"
+
+            [conversation.inquiry.assistant.model.parameters]
+            temperature = 0.2
+        "#})
+    .unwrap();
+
+    let partial = ConfigLoader::<crate::AppConfig>::new()
+        .file(&*path)
+        .unwrap()
+        .load_partial(&())
+        .unwrap();
+
+    let config = crate::util::build(partial).expect("valid config");
+    let inquiry = &config.conversation.inquiry.assistant.model.parameters;
+
+    assert_eq!(
+        inquiry.temperature,
+        Some(0.2),
+        "the inquiry keeps the parameter it set"
+    );
+    assert_eq!(
+        inquiry.other.get("verbosity"),
+        Some(&JsonValue(json!("high"))),
+        "and inherits the provider parameter it did not mention"
+    );
+}
+
 /// Deserialize a `[parameters]` block through the production path: the
 /// collector is wired up on `ModelConfig::parameters`, not on the parameter
 /// config itself.
@@ -112,8 +164,15 @@ fn deserialize_hoists_a_legacy_other_table() {
     );
 }
 
+/// A parameter written in the block wins over one of the same name nested in a
+/// legacy table.
+///
+/// The nested form is migrated input, so a writer that only knows the current
+/// spelling has to be able to override it.
+/// Otherwise a `jp config set` writes its value and the stale nested one
+/// shadows it on the next read.
 #[test]
-fn deserialize_prefers_the_explicit_other_entry_on_collision() {
+fn deserialize_prefers_the_current_spelling_on_collision() {
     let p = parameters_from_toml(indoc::indoc!(
         r"
             presence_penalty = 0.1
@@ -125,7 +184,24 @@ fn deserialize_prefers_the_explicit_other_entry_on_collision() {
 
     assert_eq!(
         p.other.as_ref().unwrap()["presence_penalty"],
-        JsonValue(json!(0.9))
+        JsonValue(json!(0.1))
+    );
+}
+
+/// A provider parameter named `other` survives a read when its value is not a
+/// table.
+///
+/// Only a table can be the legacy collector, so anything else by that name is a
+/// parameter and has to be left where it is.
+#[test]
+fn deserialize_keeps_a_scalar_parameter_named_other() {
+    let p = parameters_from_toml("other = 5");
+
+    assert_eq!(
+        p.other.as_ref().and_then(|other| other.get("other")),
+        Some(&JsonValue(json!(5))),
+        "expected a parameter named `other`, got: {:?}",
+        p.other
     );
 }
 
@@ -134,10 +210,9 @@ fn deserialize_collects_nothing_when_every_key_is_known() {
     let p = parameters_from_toml("top_k = 40");
 
     assert_eq!(p.top_k, Some(40));
-    assert!(
-        p.other.as_ref().is_none_or(IndexMap::is_empty),
-        "expected no collected parameters, got: {:?}",
-        p.other
+    assert_eq!(
+        p.other, None,
+        "a block naming no provider parameter leaves the collector unset"
     );
 }
 
@@ -170,15 +245,17 @@ fn deserialize_preserves_the_untagged_reasoning_field() {
 fn deserialize_hoists_an_empty_legacy_other_table() {
     let p = parameters_from_toml("other = {}");
 
-    assert!(
-        p.other.as_ref().is_none_or(IndexMap::is_empty),
-        "an empty legacy table leaves no parameter behind, got: {:?}",
-        p.other
+    assert_eq!(
+        p.other, None,
+        "an empty legacy table leaves no parameter behind"
     );
 }
 
 /// A provider parameter that is itself called `other` is written like any
 /// other, now that the name is not a wrapper.
+///
+/// Carried through serialization and back, since the read side has a legacy
+/// table to tell it apart from and the write side does not mark which it is.
 #[test]
 fn a_parameter_named_other_is_not_a_wrapper() {
     let mut p = PartialParametersConfig::default();
@@ -186,6 +263,18 @@ fn a_parameter_named_other_is_not_a_wrapper() {
         .unwrap();
 
     assert_eq!(p.other.as_ref().unwrap()["other"], JsonValue(json!("5")));
+
+    let json = serde_json::to_value(&p).unwrap();
+    assert_eq!(json.get("other"), Some(&json!("5")));
+
+    let toml = toml::to_string(&p).unwrap();
+    let back = parameters_from_toml(&toml);
+    assert_eq!(
+        back.other.as_ref().and_then(|other| other.get("other")),
+        Some(&JsonValue(json!("5"))),
+        "the parameter survives the round trip, got: {:?}",
+        back.other
+    );
 }
 
 #[test]
@@ -261,11 +350,9 @@ fn deserialize_reads_service_tier_from_the_parameter_block() {
     assert_eq!(p.service_tier, Some(ServiceTier::Flex));
 
     // Collected instead, it would reach the provider as a raw parameter rather
-    // than through the per-provider tier mapping. The collector is flattened,
-    // so it is present and empty rather than absent.
-    assert!(
-        p.other.as_ref().is_none_or(IndexMap::is_empty),
-        "a typed field must not land in the collector, got: {:?}",
-        p.other
+    // than through the per-provider tier mapping.
+    assert_eq!(
+        p.other, None,
+        "a typed field must not land in the collector"
     );
 }

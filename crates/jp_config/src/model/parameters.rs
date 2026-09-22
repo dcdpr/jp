@@ -141,6 +141,10 @@ pub struct ParametersConfig {
     /// That is also what keeps them: the compat layer strips whatever the
     /// schema does not name, and skips a struct holding a flattened field for
     /// exactly this reason.
+    ///
+    /// A parameter may itself be called `other`, with one exception: a *table*
+    /// by that name is read as the form earlier versions nested parameters
+    /// under, and its entries become parameters of the block.
     #[setting(flatten, default, merge = schematic::merge::merge_iter)]
     pub other: IndexMap<String, JsonValue>,
 }
@@ -152,6 +156,10 @@ pub struct ParametersConfig {
 /// Config files and stored conversation configs written before that nested them
 /// under an explicit `other` table, and left alone those entries would land in
 /// a parameter *named* `other` and reach the provider as one.
+///
+/// A nested entry loses to a parameter of the same name written in the block,
+/// and a value named `other` that is not a table is a parameter rather than the
+/// legacy collector.
 ///
 /// Applied through `#[setting(deserialize_with = ...)]` on the field holding
 /// this config, so the generated field-by-field deserializer still does the
@@ -169,14 +177,38 @@ where
 {
     let mut map = serde_json::Map::<String, serde_json::Value>::deserialize(deserializer)?;
 
-    // Hoisted after the siblings so a nested entry still wins a collision with
-    // one of the same name, which is what the nested form did when it was the
-    // documented spelling.
-    if let Some(serde_json::Value::Object(legacy)) = map.remove("other") {
-        map.extend(legacy);
+    if let Some(value) = map.remove("other") {
+        match value {
+            // Hoisted beneath the block's own parameters rather than over them:
+            // the nested form is input being migrated, so a writer that knows
+            // only the current spelling has to be able to override it.
+            serde_json::Value::Object(legacy) => {
+                for (key, value) in legacy {
+                    map.entry(key).or_insert(value);
+                }
+            }
+
+            // Only a table can be the collector, so a value of any other type
+            // is a parameter that happens to be called `other`.
+            value => {
+                map.insert("other".to_owned(), value);
+            }
+        }
     }
 
-    serde_json::from_value(serde_json::Value::Object(map)).map_err(DeError::custom)
+    let mut partial: PartialParametersConfig =
+        serde_json::from_value(serde_json::Value::Object(map)).map_err(DeError::custom)?;
+
+    // A block naming no provider parameter has said nothing about them, which
+    // is what an absent field means everywhere it is read: an inquiry block
+    // inherits one, and a delta records no change to one. Collecting into an
+    // empty map would instead pin the field to "no parameters" and stop the
+    // assistant's from arriving.
+    if partial.other.as_ref().is_some_and(IndexMap::is_empty) {
+        partial.other = None;
+    }
+
+    Ok(partial)
 }
 
 impl AssignKeyValue for PartialParametersConfig {
