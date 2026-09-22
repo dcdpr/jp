@@ -87,6 +87,7 @@ fn create_request_joins_system_parts_into_one_message() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let (body, _) = create_request(&qwen_details(), query).unwrap();
@@ -152,7 +153,10 @@ fn create_request_tool_call_round_trip() {
         ConversationEvent::now(ToolCallRequest {
             id: "call_1".into(),
             name: "read_file".into(),
-            arguments: serde_json::from_value(json!({ "path": "a.txt" })).unwrap(),
+            arguments: serde_json::from_value(json!({
+              "path": "a.txt"
+            }))
+            .unwrap(),
         }),
         ConversationEvent::now(ToolCallResponse {
             id: "call_1".into(),
