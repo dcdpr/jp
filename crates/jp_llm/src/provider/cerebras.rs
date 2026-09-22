@@ -847,7 +847,10 @@ fn handle_sse_event_sync(
                 return Ok(events);
             }
 
-            let Some(chunk) = parse_chunk(&msg.data, "cerebras") else {
+            // An error payload is logged and dropped rather than failing the
+            // stream: Cerebras reports every failure it produces as an HTTP
+            // status before the stream opens.
+            let Ok(Some(chunk)) = parse_chunk(&msg.data, "cerebras") else {
                 return Ok(vec![]);
             };
 

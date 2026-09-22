@@ -50,10 +50,10 @@ pub(crate) struct StreamChunk {
     /// already returned 200.
     ///
     /// Held as raw JSON because nothing interprets the provider's error schema;
-    /// [`parse_chunk`] only checks whether it is present and logs it verbatim.
-    /// Every failure these providers are known to produce arrives as an HTTP
-    /// status before the stream opens, so this field exists for [`parse_chunk`]
-    /// to say something out loud if that ever stops being true.
+    /// [`parse_chunk`] hands the payload back so the caller can fail the stream
+    /// rather than complete it on partial output. vLLM sends one when
+    /// generation fails mid-stream and then closes with the `[DONE]` sentinel,
+    /// which would otherwise read as an ordinary finish.
     #[serde(default)]
     pub error: Option<Value>,
 }
@@ -107,41 +107,50 @@ pub(crate) struct FunctionDelta {
 
 /// Parse one SSE `data:` payload from `provider` into a chunk.
 ///
-/// Returns `None` when the payload yields nothing to emit, having logged the
-/// reason.
-pub(crate) fn parse_chunk(data: &str, provider: &str) -> Option<StreamChunk> {
-    let chunk: StreamChunk = match serde_json::from_str(data) {
+/// Returns `Ok(None)` when the payload yields nothing to emit, having logged
+/// the reason.
+/// Returns `Err` with the provider's raw error payload when the payload reports
+/// a failure rather than carrying generated output.
+pub(crate) fn parse_chunk(data: &str, provider: &str) -> Result<Option<StreamChunk>, Value> {
+    let mut chunk: StreamChunk = match serde_json::from_str(data) {
         Ok(chunk) => chunk,
         Err(error) => {
             warn!(provider, %error, data, "Failed to parse chunk.");
-            return None;
+            return Ok(None);
         }
     };
 
-    // Nothing downstream can act on this, so at least record it. A stream that
-    // reports a failure this way and then stops has sent no terminal event,
-    // which reads to the retry layer as a dropped connection: it resends the
-    // request blind, several times, and the user is told the connection failed.
-    if let Some(error) = &chunk.error {
+    if let Some(error) = chunk.error.take() {
         warn!(
             provider,
             error = %error,
-            "Provider reported an error inside the stream; dropping this chunk."
+            "Provider reported an error inside the stream."
         );
-        return None;
+        return Err(error);
     }
 
     if chunk.choices.is_empty() {
         debug!(provider, data, "Chunk carried no choices.");
-        return None;
+        return Ok(None);
     }
 
     if !chunk.choices.iter().any(StreamChoice::is_actionable) {
         debug!(provider, data, "Chunk carried no actionable choices.");
-        return None;
+        return Ok(None);
     }
 
-    Some(chunk)
+    Ok(Some(chunk))
+}
+
+/// The human-readable message from an in-stream error payload.
+///
+/// Reads the payload's `message`, and falls back to the whole value when it
+/// carries none, so nothing the server said is dropped on the way to the user.
+fn stream_error_message(payload: &Value) -> String {
+    payload
+        .get("message")
+        .and_then(Value::as_str)
+        .map_or_else(|| payload.to_string(), str::to_owned)
 }
 
 /// Merge consecutive assistant messages in an OpenAI-compatible
@@ -337,12 +346,17 @@ pub(crate) struct StreamState {
     /// Once set, a subsequent stream error is the benign connection close that
     /// follows `[DONE]` and is dropped rather than surfaced to the retry layer.
     finished: bool,
+    /// Whether the provider reported a failure inside the stream.
+    /// The failure has already been surfaced as a [`StreamError`], so the
+    /// `[DONE]` that follows must not flush the partial output or report a
+    /// successful finish on top of it.
+    errored: bool,
     /// Captured from `finish_reason` in the last choice delta.
     /// Emitted as `Event::Finished` when the `[DONE]` sentinel arrives.
     pub(crate) finish_reason: Option<FinishReason>,
     /// Set when server-separated reasoning arrives, and cleared by the first
-    /// content frame that holds anything other than whitespace.
-    /// While set, leading whitespace is stripped from each content frame.
+    /// content frame that holds anything other than newlines.
+    /// While set, leading newlines are stripped from each content frame.
     trim_content_prefix: bool,
     is_structured: bool,
 }
@@ -356,6 +370,7 @@ impl StreamState {
             reasoning_flushed: false,
             message_flushed: false,
             finished: false,
+            errored: false,
             finish_reason: None,
             trim_content_prefix: false,
             is_structured,
@@ -377,6 +392,15 @@ pub(crate) fn handle_sse_event_sync(
             trace!(provider = state.provider, event = %msg.data, "Received event.");
 
             if msg.data == "[DONE]" {
+                // The provider already reported a failure and it has been
+                // surfaced: what arrived before it is a truncated answer, not a
+                // completed one. Marking the stream finished keeps the
+                // connection close that follows from surfacing a second error.
+                if state.errored {
+                    state.finished = true;
+                    return Ok(vec![]);
+                }
+
                 // Finalize the reasoning extractor on stream end.
                 state.extractor.finalize();
                 let mut events: Vec<Result<Event, StreamError>> =
@@ -415,8 +439,19 @@ pub(crate) fn handle_sse_event_sync(
                 return Ok(events);
             }
 
-            let Some(chunk) = parse_chunk(&msg.data, state.provider) else {
-                return Ok(vec![]);
+            let chunk = match parse_chunk(&msg.data, state.provider) {
+                Ok(Some(chunk)) => chunk,
+                Ok(None) => return Ok(vec![]),
+                // Generation failed after the response had already returned
+                // 200. Surface it as transient: the request itself was
+                // accepted, so a fresh attempt is worth making, and the retry
+                // layer reports the server's own message if they all fail.
+                Err(payload) => {
+                    state.errored = true;
+                    return Ok(vec![Err(StreamError::transient(stream_error_message(
+                        &payload,
+                    )))]);
+                }
             };
 
             let mut events = Vec::new();
@@ -446,8 +481,12 @@ pub(crate) fn handle_sse_event_sync(
                     // as content, others (llama.cpp) strip it before it reaches
                     // the wire; dropping it here spares the answer a pair of
                     // leading blank lines.
+                    //
+                    // Only newlines go: a template separator is made of them,
+                    // and an answer that opens with an indented line owns its
+                    // leading spaces.
                     let content = if state.trim_content_prefix {
-                        content.trim_start()
+                        content.trim_start_matches('\n')
                     } else {
                         content.as_str()
                     };

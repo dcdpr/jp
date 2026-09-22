@@ -119,6 +119,70 @@ fn strips_a_separator_split_across_frames() {
     assert_eq!(message_text(&events), "Test received.");
 }
 
+/// Only the newlines a chat template puts between the reasoning block and the
+/// answer are dropped.
+/// An answer that opens with an indented line owns those spaces: they are the
+/// source text the user asked for, not presentation.
+#[test]
+fn keeps_the_indentation_an_answer_opens_with() {
+    let mut state = StreamState::new("test", false);
+
+    let reasoning = json!({
+        "choices": [{
+            "delta": { "reasoning": "They want the body only.\n" },
+            "index": 0,
+            "finish_reason": null
+        }]
+    });
+    handle_sse_event_sync(Ok(sse_message(&reasoning.to_string())), &mut state).unwrap();
+
+    let content = json!({
+        "choices": [{
+            "delta": { "content": "\n\n    return value\n" },
+            "index": 0,
+            "finish_reason": null
+        }]
+    });
+    let mut events =
+        handle_sse_event_sync(Ok(sse_message(&content.to_string())), &mut state).unwrap();
+    events.extend(handle_sse_event_sync(Ok(sse_message("[DONE]")), &mut state).unwrap());
+
+    assert_eq!(message_text(&events), "    return value\n");
+}
+
+/// The indentation survives arriving in a frame of its own, after the separator
+/// has already been trimmed away to nothing.
+#[test]
+fn keeps_indentation_that_arrives_after_the_separator() {
+    let mut state = StreamState::new("test", false);
+
+    let reasoning = json!({
+        "choices": [{
+            "delta": { "reasoning": "They want the body only.\n" },
+            "index": 0,
+            "finish_reason": null
+        }]
+    });
+    handle_sse_event_sync(Ok(sse_message(&reasoning.to_string())), &mut state).unwrap();
+
+    let mut events = vec![];
+    for chunk in ["\n\n", "    return value\n"] {
+        let content = json!({
+            "choices": [{
+                "delta": { "content": chunk },
+                "index": 0,
+                "finish_reason": null
+            }]
+        });
+        events.extend(
+            handle_sse_event_sync(Ok(sse_message(&content.to_string())), &mut state).unwrap(),
+        );
+    }
+    events.extend(handle_sse_event_sync(Ok(sse_message("[DONE]")), &mut state).unwrap());
+
+    assert_eq!(message_text(&events), "    return value\n");
+}
+
 #[test_log::test(tokio::test)]
 async fn surfaces_stream_error_before_completion() {
     // A transport error before `[DONE]` (a dropped or stalled connection) must
@@ -159,6 +223,74 @@ async fn swallows_stream_error_after_completion() {
         matches!(out.last(), Some(Ok(Event::Finished(_)))),
         "stream must end with Finished, got {:?}",
         out.last(),
+    );
+}
+
+/// A generation that fails after the response has already returned 200 arrives
+/// as an error payload followed by `[DONE]`, which is what vLLM sends.
+/// The failure must reach the retry layer, and the sentinel must not report the
+/// partial answer before it as a successful finish.
+#[test_log::test(tokio::test)]
+async fn surfaces_an_in_stream_error_instead_of_finishing() {
+    let content = sse_message(
+        r#"{"choices":[{"delta":{"content":"partial"},"index":0,"finish_reason":null}]}"#,
+    );
+    let error = sse_message(
+        r#"{"error":{"message":"Internal server error","type":"InternalServerError","param":null,"code":500}}"#,
+    );
+    let events = stream::iter(vec![Ok(content), Ok(error), Ok(sse_message("[DONE]"))]);
+
+    let out: Vec<_> = assemble_event_stream(events, "test", false).collect().await;
+
+    let errors: Vec<_> = out.iter().filter_map(|e| e.as_ref().err()).collect();
+    assert_eq!(errors.len(), 1, "expected one error, got {out:?}");
+    assert_eq!(errors[0].message(), "Internal server error");
+    assert!(
+        errors[0].is_retryable(),
+        "the request was accepted, so a fresh attempt is worth making"
+    );
+    assert!(
+        !out.iter().any(|e| matches!(e, Ok(Event::Finished(_)))),
+        "a failed stream must not report a finish, got {out:?}"
+    );
+}
+
+/// A tool call still buffered when the failure lands is as truncated as the
+/// answer.
+/// The `[DONE]` safety net must not flush it: a flush commits the arguments and
+/// downstream dispatches the call.
+#[test]
+fn an_in_stream_error_drops_pending_tool_calls() {
+    let mut state = StreamState::new("test", false);
+
+    let tool_chunk = r#"{
+        "choices": [{
+            "delta": {
+                "tool_calls": [{
+                    "index": 0,
+                    "id": "call_abc",
+                    "function": { "name": "run_me", "arguments": "{\"path\":" }
+                }]
+            },
+            "index": 0,
+            "finish_reason": null
+        }]
+    }"#;
+    handle_sse_event_sync(Ok(sse_message(tool_chunk)), &mut state).unwrap();
+    assert_eq!(state.tool_call_indices, vec![2]);
+
+    let error = r#"{"error":{"message":"Internal server error","code":500}}"#;
+    let error_events = handle_sse_event_sync(Ok(sse_message(error)), &mut state).unwrap();
+    assert!(
+        error_events.iter().all(std::result::Result::is_err),
+        "the error frame carries the failure and nothing else, got {error_events:?}"
+    );
+
+    let done_events = handle_sse_event_sync(Ok(sse_message("[DONE]")), &mut state).unwrap();
+
+    assert!(
+        done_events.is_empty(),
+        "[DONE] after a failure must emit nothing, got {done_events:?}"
     );
 }
 
@@ -414,7 +546,9 @@ fn convert_tool_choice_values() {
 fn parse_chunk_accepts_an_ordinary_chunk() {
     let data = r#"{"choices":[{"delta":{"content":"hi"},"index":0}]}"#;
 
-    let chunk = parse_chunk(data, "test").expect("chunk with choices is kept");
+    let chunk = parse_chunk(data, "test")
+        .expect("an ordinary chunk is not an error")
+        .expect("chunk with choices is kept");
 
     assert_eq!(chunk.choices.len(), 1);
     assert_eq!(chunk.choices[0].delta.content.as_deref(), Some("hi"));
@@ -422,7 +556,11 @@ fn parse_chunk_accepts_an_ordinary_chunk() {
 
 #[test]
 fn parse_chunk_drops_a_malformed_payload() {
-    assert!(parse_chunk("{not json", "test").is_none());
+    assert!(
+        parse_chunk("{not json", "test")
+            .expect("a malformed payload is not reported as a provider error")
+            .is_none()
+    );
 }
 
 /// A chunk with no choices yields no events, so there is nothing to hand back.
@@ -433,7 +571,7 @@ fn parse_chunk_drops_a_malformed_payload() {
 fn parse_chunk_drops_a_chunk_without_choices() {
     let data = r#"{"choices":[],"usage":{"total_tokens":7}}"#;
 
-    assert!(parse_chunk(data, "test").is_none());
+    assert!(parse_chunk(data, "test").expect("not an error").is_none());
 }
 
 /// llama.cpp opens every stream with a role-only delta, and repeats it on each
@@ -443,25 +581,45 @@ fn parse_chunk_drops_a_chunk_without_choices() {
 fn parse_chunk_drops_a_role_only_chunk() {
     let data = r#"{"choices":[{"finish_reason":null,"index":0,"delta":{"role":"assistant","content":null}}]}"#;
 
-    assert!(parse_chunk(data, "test").is_none());
+    assert!(parse_chunk(data, "test").expect("not an error").is_none());
 }
 
-/// An error reported inside the stream is the shape worth noticing.
-///
-/// The chunk types ignore unknown fields, so before `error` was captured this
-/// payload deserialized into a chunk with an empty `choices` and was
-/// indistinguishable from the benign case above.
+/// An error reported inside the stream is handed back rather than dropped: the
+/// chunk types ignore unknown fields, so an uncaptured `error` would
+/// deserialize into a chunk with an empty `choices` and be indistinguishable
+/// from the benign case above.
 #[test]
 fn parse_chunk_captures_an_in_stream_error() {
     let data = r#"{"error":{"message":"upstream exploded","type":"server_error"}}"#;
 
-    let chunk: StreamChunk = serde_json::from_str(data).expect("chunk parses");
+    assert_eq!(
+        parse_chunk(data, "test").unwrap_err(),
+        json!({"message":"upstream exploded","type":"server_error"})
+    );
+}
+
+/// The message the user is shown comes from the payload's `message`.
+#[test]
+fn stream_error_message_reads_the_message_field() {
+    let payload = json!({
+        "message": "Internal server error",
+        "type": "InternalServerError",
+        "code": 500,
+    });
+
+    assert_eq!(stream_error_message(&payload), "Internal server error");
+}
+
+/// A payload that spells the text some other way still reaches the user whole,
+/// rather than being reported as an empty failure.
+#[test]
+fn stream_error_message_falls_back_to_the_whole_payload() {
+    let payload = json!({ "detail": "out of memory" });
 
     assert_eq!(
-        chunk.error,
-        Some(json!({"message":"upstream exploded","type":"server_error"}))
+        stream_error_message(&payload),
+        r#"{"detail":"out of memory"}"#
     );
-    assert!(parse_chunk(data, "test").is_none());
 }
 
 /// Capturing `error` must not disturb the ordinary path.

@@ -226,6 +226,13 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
         body["top_p"] = json!(top_p);
     }
 
+    // vLLM takes `top_k` as a sampling extension to the OpenAI body. Qwen3, the
+    // family most often served this way, documents a `top_k` alongside its
+    // `top_p`, so leaving it behind changes what the model was tuned for.
+    if let Some(top_k) = parameters.top_k {
+        body["top_k"] = json!(top_k);
+    }
+
     if let Some(max_tokens) = parameters.max_tokens {
         body["max_tokens"] = json!(max_tokens);
     }

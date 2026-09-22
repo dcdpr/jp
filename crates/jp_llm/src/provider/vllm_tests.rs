@@ -106,6 +106,36 @@ fn create_request_joins_system_parts_into_one_message() {
     );
 }
 
+/// The sampling settings reach the wire, including `top_k`, which vLLM accepts
+/// as an extension to the OpenAI body.
+/// A Qwen3 deployment is typically configured with one alongside `top_p`.
+#[test]
+fn create_request_forwards_sampling_parameters() {
+    let mut events = ConversationStream::new_test().with_turn("Hello");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.temperature = Some(0.5);
+    delta.assistant.model.parameters.top_p = Some(0.75);
+    delta.assistant.model.parameters.top_k = Some(20);
+    delta.assistant.model.parameters.max_tokens = Some(256);
+    events.add_config_delta(delta);
+
+    let (body, _) = create_request(&qwen_details(), query(events, vec![])).unwrap();
+
+    assert_eq!(
+        body,
+        json!({
+            "model": "Qwen/Qwen3-8B",
+            "messages": [{ "role": "user", "content": "Hello" }],
+            "stream": true,
+            "chat_template_kwargs": { "enable_thinking": false },
+            "temperature": 0.5,
+            "top_p": 0.75,
+            "top_k": 20,
+            "max_tokens": 256,
+        })
+    );
+}
+
 /// Whether the model thinks at all is the chat template's decision, driven by
 /// `enable_thinking`.
 #[test]
