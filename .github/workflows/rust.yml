@@ -39,6 +39,7 @@ jobs:
       insta: ${{ steps.filter.outputs.insta }}
       shear: ${{ steps.filter.outputs.shear }}
       vet: ${{ steps.filter.outputs.vet }}
+      qual: ${{ steps.filter.outputs.qual }}
     steps:
       - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
         with:
@@ -90,13 +91,14 @@ jobs:
           set_task insta "$source|$snapshots"
           set_task shear "$source"
           set_task vet "$cargo|^\.config/supply-chain/|$workflow|$justfile"
+          set_task qual "$source|^\.config/rustqual/"
   rust:
     needs: changes
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest]
-        task: [lint, fmt, fmt-comments, fmt-markdown, test, docs, coverage, deny, insta, shear, vet]
+        task: [lint, fmt, fmt-comments, fmt-markdown, test, docs, coverage, deny, insta, shear, vet, qual]
         include:
           - task: test
             os: windows-latest

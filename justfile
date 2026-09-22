@@ -10,6 +10,7 @@ insta_version        := "1.48.0"
 jilu_version         := "0.13.2"
 llvm_cov_version     := "0.8.7"
 nextest_version      := "0.9.143"
+rustqual_version     := "1.8.2"
 shear_version        := "1.13.4"
 vet_version          := "0.10.2"
 
@@ -3298,6 +3299,30 @@ check-all *FLAGS:
 check-and-fix *FLAGS:
     @just check --fix --allow-dirty {{FLAGS}}
 
+# Run the structural quality checks (rustqual) over the workspace.
+#
+# Two passes, because rustqual's DRY dimension cannot enable dead-code
+# detection without also firing on the repeated setup blocks that `*_tests.rs`
+# files are deliberately built from. `.config/rustqual/config.toml` covers
+# every other dimension across the full workspace; `dry.toml` covers DRY over
+# production code only. Both configs carry the full rationale.
+#
+# Never fails: this is the exploratory entry point. `just qual-ci` is the gate.
+[group('check')]
+qual *FLAGS: (_install "rustqual@" + rustqual_version)
+    rustqual -c .config/rustqual/config.toml --no-fail {{FLAGS}}
+    rustqual -c .config/rustqual/dry.toml --no-fail {{FLAGS}}
+
+# Re-record the rustqual baselines that `qual-ci` gates against.
+#
+# Run after a change that deliberately moves the finding count — a refactor
+# that removes findings, or an accepted batch of new ones — and commit the
+# result alongside it, so the diff shows what moved and why.
+[group('check')]
+qual-baseline: (_install "rustqual@" + rustqual_version)
+    rustqual -c .config/rustqual/config.toml --no-fail --save-baseline .config/rustqual/baseline.json
+    rustqual -c .config/rustqual/dry.toml --no-fail --save-baseline .config/rustqual/baseline-dry.json
+
 # Run tests, using nextest.
 [group('check')]
 [group('main')]
@@ -3448,7 +3473,7 @@ fmt: (_rustup_component "rustfmt") _install-comfort
 
 # Run all ci tasks.
 [group('ci')]
-ci: lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci
+ci: lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci qual-ci
 
 # Lint the code on CI.
 [group('ci')]
@@ -3473,6 +3498,16 @@ lint-ci: (_rustup_component "clippy") _install_ci_matchers
     fi
 
     cargo clippy --locked --workspace --all-targets --all-features --no-deps --profile=lint -- --deny warnings
+
+# Check structural code quality on CI.
+#
+# Gates on regression against the committed baselines rather than on an
+# absolute score. The workspace carries known findings; the bar for new code is
+# "no worse than what is already there". Refresh with `just qual-baseline`.
+[group('ci')]
+qual-ci: (_install "rustqual@" + rustqual_version) _install_ci_matchers
+    rustqual -c .config/rustqual/config.toml --compare .config/rustqual/baseline.json --fail-on-regression --format github
+    rustqual -c .config/rustqual/dry.toml --compare .config/rustqual/baseline-dry.json --fail-on-regression --format github
 
 # Check code formatting on CI.
 [group('ci')]

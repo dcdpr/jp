@@ -485,6 +485,9 @@ fn create_request(
 /// See: <https://ai.google.dev/gemini-api/docs/models> See:
 /// <https://ai.google.dev/gemini-api/docs/deprecations> See:
 /// <https://ai.google.dev/gemini-api/docs/thinking#levels-budgets>
+// qual:allow(complexity, magic_numbers) reason: "model catalogue: thinking
+// budgets and cutoff dates are data maintained against Google's published
+// documentation"
 #[expect(clippy::too_many_lines)]
 fn map_model(model: types::Model) -> ModelDetails {
     let name = model.base_model_id.as_str();
