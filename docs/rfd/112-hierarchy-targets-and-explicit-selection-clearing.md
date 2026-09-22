@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-09
 - **Extends**: [RFD 087]
+- **Summary**: Hierarchy targets `.`, `..`, and `/` navigate workspaces and
+  conversations; `--clear` replaces `jp w use cwd` for dropping a selection.
 
 ## Summary
 
