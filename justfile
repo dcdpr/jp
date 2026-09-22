@@ -3646,7 +3646,7 @@ check-and-fix *FLAGS:
 #
 # Never fails: this is the exploratory entry point. `just qual-ci` is the gate.
 [group('check')]
-qual *FLAGS: (_install "rustqual@" + rustqual_version)
+qual *FLAGS: _install-rustqual
     rustqual -c .config/rustqual/config.toml --no-fail {{FLAGS}}
     rustqual -c .config/rustqual/dry.toml --no-fail {{FLAGS}}
 
@@ -3656,7 +3656,7 @@ qual *FLAGS: (_install "rustqual@" + rustqual_version)
 # that removes findings, or an accepted batch of new ones — and commit the
 # result alongside it, so the diff shows what moved and why.
 [group('check')]
-qual-baseline: (_install "rustqual@" + rustqual_version)
+qual-baseline: _install-rustqual
     rustqual -c .config/rustqual/config.toml --no-fail --save-baseline .config/rustqual/baseline.json
     rustqual -c .config/rustqual/dry.toml --no-fail --save-baseline .config/rustqual/baseline-dry.json
 
@@ -3893,7 +3893,7 @@ lint-ci: (_rustup_component "clippy") _install_ci_matchers
 # absolute score. The workspace carries known findings; the bar for new code is
 # "no worse than what is already there". Refresh with `just qual-baseline`.
 [group('ci')]
-qual-ci: (_install "rustqual@" + rustqual_version) _install_ci_matchers
+qual-ci: _install-rustqual _install_ci_matchers
     rustqual -c .config/rustqual/config.toml --compare .config/rustqual/baseline.json --fail-on-regression --format github
     rustqual -c .config/rustqual/dry.toml --compare .config/rustqual/baseline-dry.json --fail-on-regression --format github
 
@@ -4062,6 +4062,7 @@ _install-serve-web *args:
     chmod 755 "$dir/.jp-serve-web.new"
     mv -f "$dir/.jp-serve-web.new" "$dir/jp-serve-web"
     echo "Installed jp-serve-web to $dir" >&2
+<<<<<<< HEAD
 
 # Build and install the `bookworm` MCP server that `.jp/config.toml` runs.
 _install-bookworm *args:
@@ -4072,6 +4073,22 @@ _install-bookworm *args:
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path crates/contrib/bookworm {{args}}
+||||||| parent of dd64ec494 (chore(rustqual): Install from source instead of via binstall)
+=======
+
+# Build and install `rustqual`, the structural quality analyser.
+#
+# Built from source rather than `_install`: rustqual publishes no release
+# binaries (every tag from v0.4.2 to v1.8.2 has zero assets), declares no
+# `[package.metadata.binstall]`, and is absent from quickinstall, so
+# `cargo binstall --only-signed` has nothing to resolve.
+#
+# `cargo install` is a sub-second no-op once the pinned version is present, so
+# this is safe to depend on from every recipe. A version bump reinstalls
+# without needing `JP_INSTALL=1`, unlike the path-installed tools below.
+_install-rustqual *args:
+    cargo install {{quiet_flag}} --locked rustqual@{{rustqual_version}} {{args}}
+>>>>>>> dd64ec494 (chore(rustqual): Install from source instead of via binstall)
 
 _install-comfort *args:
     #!/usr/bin/env sh
