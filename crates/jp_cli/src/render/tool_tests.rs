@@ -7,8 +7,8 @@ use jp_config::{
     style::stderr_rows::{RowCount, StderrRows},
 };
 use jp_conversation::event::ToolCallResponse;
-use jp_md::format::{BackgroundFill, DefaultBackground};
 use jp_printer::{ErrChannel, OutputFormat, Printer, SharedBuffer, TerminalCapability};
+use jp_term::background::{BackgroundFill, DefaultBackground};
 use serde_json::{Map, Value};
 
 use super::*;

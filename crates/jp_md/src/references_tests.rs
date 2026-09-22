@@ -1,4 +1,6 @@
-use crate::format::{BackgroundFill, DefaultBackground, Formatter, TerminalOptions};
+use jp_term::background::{BackgroundFill, DefaultBackground};
+
+use crate::format::{Formatter, TerminalOptions};
 
 #[test]
 fn reference_definitions_survive_beside_other_blocks() {

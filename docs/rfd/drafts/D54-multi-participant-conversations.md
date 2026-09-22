@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-07
-- **Requires**: [RFD 097], [RFD 070], [RFD D51], [RFD 098], [RFD D53]
+- **Requires**: [RFD 070], [RFD D51], [RFD 098], [RFD D53]
 
 ## Summary
 
@@ -26,7 +26,7 @@ First, multi-participant conversations rest on several capabilities that are
 valuable on their own and should land first: assistant-scoped tool
 configuration, explicit request-to-response event linking, inline attachment URI
 parsing (which frees the `@` prefix this design needs for addressing), stable
-event identifiers (RFD 097), and negative config deltas (RFD 070).
+event identifiers ([RFD 097]), and negative config deltas (RFD 070).
 Each is independently useful to single-assistant JP and is being written as its
 own RFD.
 Second, once those exist — negative deltas in particular — a blank-sheet

@@ -20,8 +20,8 @@ use std::sync::{
 
 use jp_config::style::StyleConfig;
 use jp_conversation::event::{ChatRequest, ChatResponse};
-use jp_md::format::DefaultBackground;
 use jp_printer::Printer;
+use jp_term::background::DefaultBackground;
 
 use super::{ChatRenderer, RenderFlow, StructuredRenderer};
 

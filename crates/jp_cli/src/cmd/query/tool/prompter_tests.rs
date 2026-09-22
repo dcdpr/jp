@@ -2,8 +2,8 @@ use std::{sync::Arc, time::Duration};
 
 use jp_editor::MockEditorBackend;
 use jp_inquire::{ReplyOutcome, prompt::MockPromptBackend};
-use jp_md::format::BackgroundFill;
 use jp_printer::{OutputFormat, PrintableExt as _, SharedBuffer};
+use jp_term::background::BackgroundFill;
 use serde_json::json;
 
 use super::*;
