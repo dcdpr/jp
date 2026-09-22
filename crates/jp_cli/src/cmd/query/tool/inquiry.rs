@@ -29,7 +29,7 @@ use jp_llm::{
     Provider,
     event_builder::structured_data,
     model::ModelDetails,
-    query::ChatQuery,
+    query::{ChatQuery, Truncation},
     retry::{RetryConfig, collect_with_retry},
     tool::ToolDefinition,
     window,
@@ -310,6 +310,7 @@ impl InquiryBackend for LlmInquiryBackend {
             thread,
             tools: self.tools.clone(),
             tool_choice: ToolChoice::None,
+            truncation: Truncation::Allowed,
         };
 
         let retry_config =

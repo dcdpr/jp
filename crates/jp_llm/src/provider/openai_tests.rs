@@ -6,7 +6,11 @@ mod service_tier {
     use serde_json::json;
 
     use super::super::create_request;
-    use crate::{model::ModelDetails, provider::ProviderId, query::ChatQuery};
+    use crate::{
+        model::ModelDetails,
+        provider::ProviderId,
+        query::{ChatQuery, Truncation},
+    };
 
     fn request_tier(tier: Option<ServiceTier>) -> Option<serde_json::Value> {
         let mut events = ConversationStream::new_test().with_turn("test");
@@ -23,6 +27,7 @@ mod service_tier {
             },
             tools: vec![],
             tool_choice: ToolChoice::Auto,
+            truncation: Truncation::default(),
         };
 
         let model = ModelDetails::empty((ProviderId::Openai, "gpt-5.6").try_into().unwrap());
@@ -59,6 +64,61 @@ mod service_tier {
         assert_eq!(
             request_tier(Some(ServiceTier::Priority)),
             Some(json!("priority"))
+        );
+    }
+}
+
+mod truncation {
+    use jp_config::assistant::tool_choice::ToolChoice;
+    use jp_conversation::{ConversationStream, thread::Thread};
+    use serde_json::json;
+
+    use super::super::create_request;
+    use crate::{
+        model::ModelDetails,
+        provider::ProviderId,
+        query::{ChatQuery, Truncation},
+    };
+
+    /// The value the built request sends in its `truncation` field.
+    fn request_truncation(truncation: Truncation) -> Option<serde_json::Value> {
+        let query = ChatQuery {
+            thread: Thread {
+                system_prompt: None,
+                sections: vec![],
+                attachments: vec![],
+                events: ConversationStream::new_test().with_turn("test"),
+            },
+            tools: vec![],
+            tool_choice: ToolChoice::Auto,
+            truncation,
+        };
+
+        let model = ModelDetails::empty((ProviderId::Openai, "gpt-5.6").try_into().unwrap());
+        let (request, ..) = create_request(&model, query).unwrap();
+
+        serde_json::to_value(request)
+            .unwrap()
+            .get("truncation")
+            .cloned()
+    }
+
+    /// A request that may be truncated lets the API drop input to fit, which
+    /// keeps a long conversation answerable rather than failing it outright.
+    #[test]
+    fn an_allowed_request_asks_for_auto() {
+        assert_eq!(request_truncation(Truncation::Allowed), Some(json!("auto")));
+    }
+
+    /// A caller that stores the answer as standing for its input needs the
+    /// request rejected rather than silently shortened: `auto` drops items from
+    /// the middle of the conversation and answers anyway, which reads as an
+    /// ordinary success.
+    #[test]
+    fn a_forbidden_request_asks_for_disabled() {
+        assert_eq!(
+            request_truncation(Truncation::Forbidden),
+            Some(json!("disabled"))
         );
     }
 }

@@ -15,7 +15,10 @@ use serde_json::Map;
 use test_log::test;
 
 use super::*;
-use crate::test::{TestRequest, run_test};
+use crate::{
+    query::Truncation,
+    test::{TestRequest, run_test},
+};
 
 const MAGIC_STRING: &str = "ANTHROPIC_MAGIC_STRING_TRIGGER_REDACTED_THINKING_46C9A13E193C177646C7398A98432ECCCE4C1253D5E2D82641AC0E52CC2876CB";
 
@@ -278,6 +281,7 @@ fn test_opus_4_6_request_uses_adaptive_thinking() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -334,6 +338,7 @@ fn test_opus_4_7_xhigh_effort_mapping() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -385,6 +390,7 @@ fn test_opus_4_6_xhigh_falls_back_to_high() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -429,6 +435,7 @@ fn test_opus_4_6_max_effort_mapping() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -768,6 +775,7 @@ fn test_unknown_model_requests_summarized_thinking() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -845,6 +853,7 @@ fn test_unknown_reasoning_infers_adaptive_thinking() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -882,6 +891,7 @@ fn tier_request(
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     create_request(&model, query, true, &BetaFeatures(vec![])).map(|(request, ..)| request)
@@ -987,6 +997,7 @@ fn test_off_on_unknown_model_attempts_disable() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -1104,6 +1115,7 @@ fn test_fable_5_reasoning_off_omits_disabled_thinking() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -1139,6 +1151,7 @@ fn test_opus_4_5_uses_budgetted_thinking() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -1191,6 +1204,7 @@ fn test_structured_output_sets_format() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -1265,6 +1279,7 @@ fn test_schema_ignored_when_last_event_is_not_chat_request() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -1305,6 +1320,7 @@ fn test_adaptive_thinking_with_structured_output() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -1367,6 +1383,7 @@ fn test_forced_tool_with_reasoning_returns_fallback() {
             parameters: json!({ "type": "object", "properties": {} }),
         }],
         tool_choice: ToolChoice::Function("my_tool".into()),
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -1439,6 +1456,7 @@ fn test_forced_tool_thinking_always_on_uses_escalating_nudge() {
             parameters: json!({ "type": "object", "properties": {} }),
         }],
         tool_choice: ToolChoice::Function("my_tool".into()),
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -1523,6 +1541,7 @@ fn test_forced_tool_thinking_always_on_reasoning_off_still_soft_forces() {
             parameters: json!({ "type": "object", "properties": {} }),
         }],
         tool_choice: ToolChoice::Function("my_tool".into()),
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -1588,6 +1607,7 @@ fn test_forced_tool_function_multi_tool_preserves_name() {
             },
         ],
         tool_choice: ToolChoice::Function("commit".into()),
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -1655,6 +1675,7 @@ fn test_forced_tool_without_reasoning_no_fallback() {
             parameters: json!({ "type": "object", "properties": {} }),
         }],
         tool_choice: ToolChoice::Required,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -1694,6 +1715,7 @@ fn test_auto_tool_choice_with_reasoning_no_fallback() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -1836,6 +1858,7 @@ fn test_continue_injected_when_prefill_unsupported() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -1885,6 +1908,7 @@ fn test_prefill_preserved_for_supported_models() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -1924,6 +1948,7 @@ fn test_no_injection_when_last_message_is_user() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -1967,6 +1992,7 @@ fn test_create_request_resends_signed_thinking_as_native_block() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -2023,6 +2049,7 @@ fn test_create_request_resends_redacted_thinking_as_native_block() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -2075,6 +2102,7 @@ fn test_create_request_falls_back_to_think_tags_without_signature() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -2133,6 +2161,7 @@ fn test_create_request_drops_empty_reasoning_instead_of_empty_think_tags() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -2189,6 +2218,7 @@ fn test_create_request_downgrades_trailing_assistant_thinking() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);
@@ -2254,6 +2284,7 @@ fn test_create_request_drops_trailing_redacted_thinking() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let beta = BetaFeatures(vec![]);

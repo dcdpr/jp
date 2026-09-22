@@ -26,7 +26,7 @@ use crate::{
     event_builder::EventBuilder,
     model::{ModelDetails, ReasoningDetails},
     provider::get_provider,
-    query::ChatQuery,
+    query::{ChatQuery, Truncation},
     tool::{ToolDefinition, ToolDocs},
 };
 
@@ -225,6 +225,7 @@ impl TestRequest {
                     .unwrap(),
                 tools: vec![],
                 tool_choice: ToolChoice::default(),
+                truncation: Truncation::default(),
             },
             assert: Arc::new(|_| {}),
             assert_history: Arc::new(|_| {}),

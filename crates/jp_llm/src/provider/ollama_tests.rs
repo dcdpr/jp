@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use super::*;
-use crate::tool::ToolDocs;
+use crate::{query::Truncation, tool::ToolDocs};
 
 /// Ollama drops `$ref` while decoding a tool's parameters, so a referenced type
 /// has to arrive expanded or the model sees a property with no type.
@@ -80,6 +80,7 @@ fn reasoning_query(
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     }
 }
 
