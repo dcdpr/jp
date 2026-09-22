@@ -43,8 +43,6 @@ fn query(events: ConversationStream, tools: Vec<ToolDefinition>) -> ChatQuery {
     }
 }
 
-/// vLLM reports the served context window as `max_model_len`, and the model id
-/// keeps its vendor prefix because vLLM accepts only the full id.
 #[test]
 fn map_model_keeps_full_id_and_reads_max_model_len() {
     let details = map_model(&qwen_model()).unwrap();
@@ -54,10 +52,9 @@ fn map_model_keeps_full_id_and_reads_max_model_len() {
     assert_eq!(details.reasoning, None);
 }
 
-/// A plain message becomes one user message, with streaming on and thinking
-/// off, because the test config has no reasoning setting.
 #[test]
 fn create_request_plain_message() {
+    // Thinking is off because the test config carries no reasoning setting.
     let events = ConversationStream::new_test().with_turn("Hello");
 
     let (body, is_structured) = create_request(&qwen_details(), query(events, vec![])).unwrap();
@@ -74,13 +71,10 @@ fn create_request_plain_message() {
     );
 }
 
-/// Regression: vLLM renders the request through the served model's own chat
-/// template, and several of those templates reject a system message that isn't
-/// the first message.
-/// The prompt, its sections, and the attachment XML must therefore arrive as a
-/// single system message.
 #[test]
 fn create_request_joins_system_parts_into_one_message() {
+    // Regression: vLLM renders through the served model's own chat template,
+    // and several templates reject a system message that isn't first.
     let query = ChatQuery {
         thread: Thread {
             system_prompt: Some("You are JP.".to_owned()),
@@ -106,11 +100,10 @@ fn create_request_joins_system_parts_into_one_message() {
     );
 }
 
-/// The sampling settings reach the wire, including `top_k`, which vLLM accepts
-/// as an extension to the OpenAI body.
-/// A Qwen3 deployment is typically configured with one alongside `top_p`.
 #[test]
 fn create_request_forwards_sampling_parameters() {
+    // `top_k` is a vLLM extension to the OpenAI body, not part of the dialect.
+    // A Qwen3 deployment is usually configured with one alongside `top_p`.
     let mut events = ConversationStream::new_test().with_turn("Hello");
     let mut delta = jp_config::PartialAppConfig::empty();
     delta.assistant.model.parameters.temperature = Some(0.5);
@@ -136,8 +129,6 @@ fn create_request_forwards_sampling_parameters() {
     );
 }
 
-/// Whether the model thinks at all is the chat template's decision, driven by
-/// `enable_thinking`.
 #[test]
 fn create_request_asks_the_template_to_think_when_reasoning_is_on() {
     let mut events = ConversationStream::new_test().with_turn("Hello");
@@ -154,8 +145,6 @@ fn create_request_asks_the_template_to_think_when_reasoning_is_on() {
     assert!(body.get("reasoning_format").is_none());
 }
 
-/// A tool call and its result become one assistant message with `tool_calls`
-/// and one `tool` message, and the tool list uses the strict function shape.
 #[test]
 fn create_request_tool_call_round_trip() {
     let mut events = ConversationStream::new_test().with_turn("Read the file");
@@ -221,7 +210,6 @@ fn create_request_tool_call_round_trip() {
     );
 }
 
-/// A schema on the request becomes a strict `json_schema` response format.
 #[test]
 fn create_request_structured_schema() {
     let schema: Map<String, serde_json::Value> = serde_json::from_value(json!({
@@ -254,7 +242,6 @@ fn create_request_structured_schema() {
     );
 }
 
-/// The prior assistant reply stays a plain message in the history.
 #[test]
 fn create_request_keeps_assistant_history() {
     let mut events = ConversationStream::new_test().with_turn("Hi");

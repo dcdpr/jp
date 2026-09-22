@@ -36,9 +36,6 @@ fn message_text(events: &[Result<Event, StreamError>]) -> String {
         .collect()
 }
 
-/// Some servers (vLLM) pass the chat template's separator between the reasoning
-/// block and the answer through as content, so the answer would otherwise open
-/// with the template's blank lines.
 #[test]
 fn strips_the_template_separator_between_reasoning_and_content() {
     let mut state = StreamState::new("test", false);
@@ -66,8 +63,6 @@ fn strips_the_template_separator_between_reasoning_and_content() {
     assert_eq!(message_text(&events), "Test received.");
 }
 
-/// The separator is only stripped where a reasoning block precedes the content.
-/// Without one, leading blank lines are the model's own output and are kept.
 #[test]
 fn keeps_leading_blank_lines_when_no_reasoning_precedes_them() {
     let mut state = StreamState::new("test", false);
@@ -86,8 +81,6 @@ fn keeps_leading_blank_lines_when_no_reasoning_precedes_them() {
     assert_eq!(message_text(&events), "\n\nTest received.");
 }
 
-/// A separator split across frames is stripped whole: the flag survives a frame
-/// that turns out to be blank once trimmed.
 #[test]
 fn strips_a_separator_split_across_frames() {
     let mut state = StreamState::new("test", false);
@@ -119,10 +112,6 @@ fn strips_a_separator_split_across_frames() {
     assert_eq!(message_text(&events), "Test received.");
 }
 
-/// Only the newlines a chat template puts between the reasoning block and the
-/// answer are dropped.
-/// An answer that opens with an indented line owns those spaces: they are the
-/// source text the user asked for, not presentation.
 #[test]
 fn keeps_the_indentation_an_answer_opens_with() {
     let mut state = StreamState::new("test", false);
@@ -150,8 +139,6 @@ fn keeps_the_indentation_an_answer_opens_with() {
     assert_eq!(message_text(&events), "    return value\n");
 }
 
-/// The indentation survives arriving in a frame of its own, after the separator
-/// has already been trimmed away to nothing.
 #[test]
 fn keeps_indentation_that_arrives_after_the_separator() {
     let mut state = StreamState::new("test", false);
@@ -226,12 +213,10 @@ async fn swallows_stream_error_after_completion() {
     );
 }
 
-/// A generation that fails after the response has already returned 200 arrives
-/// as an error payload followed by `[DONE]`, which is what vLLM sends.
-/// The failure must reach the retry layer, and the sentinel must not report the
-/// partial answer before it as a successful finish.
 #[test_log::test(tokio::test)]
 async fn surfaces_an_in_stream_error_instead_of_finishing() {
+    // vLLM reports a mid-generation failure this way: the response has already
+    // returned 200, so the error arrives as a payload followed by `[DONE]`.
     let content = sse_message(
         r#"{"choices":[{"delta":{"content":"partial"},"index":0,"finish_reason":null}]}"#,
     );
@@ -255,14 +240,13 @@ async fn surfaces_an_in_stream_error_instead_of_finishing() {
     );
 }
 
-/// A tool call still buffered when the failure lands is as truncated as the
-/// answer.
-/// The `[DONE]` safety net must not flush it: a flush commits the arguments and
-/// downstream dispatches the call.
 #[test]
 fn an_in_stream_error_drops_pending_tool_calls() {
     let mut state = StreamState::new("test", false);
 
+    // Arguments cut off mid-JSON, as they are when a failure lands while the
+    // call is still streaming. Flushing this buffer commits them, and
+    // downstream dispatches the call.
     let tool_chunk = r#"{
         "choices": [{
             "delta": {
@@ -294,17 +278,13 @@ fn an_in_stream_error_drops_pending_tool_calls() {
     );
 }
 
-/// `finish_reason: "length"` followed by `[DONE]` must not flush any pending
-/// tool-call buffers.
-/// When the model hits the token limit mid-tool-call, the arguments are
-/// structurally incomplete; the safety-net drain on `[DONE]` would otherwise
-/// commit them with truncated JSON (degraded to `{}`), which could re-dispatch
-/// a partial call.
 #[test]
 fn length_finish_reason_drops_pending_tool_calls() {
     let mut state = StreamState::new("test", false);
 
-    // Tool call delta with partial arguments.
+    // Tool call delta with partial arguments, as the model leaves them when it
+    // hits the token limit. Committing these parses the truncated JSON down to
+    // `{}` and re-dispatches the call with no arguments at all.
     let tool_chunk = r#"{
         "choices": [{
             "delta": {
@@ -360,21 +340,14 @@ fn length_finish_reason_drops_pending_tool_calls() {
     );
 }
 
-/// A tool-call frame must release the extractor's held-back tail before
-/// emitting any tool-call parts.
-///
-/// The `ReasoningExtractor` withholds the last bytes of content (one less than
-/// the `<think>\n` opener) in case a tag is split across frames.
-/// Downstream drains the in-progress markdown paragraph at the tool-call
-/// boundary, so if the tail were released after `ToolCallPart::Start`, it would
-/// land in a fresh paragraph and render as a mid-word blank-line split (e.g.
-/// `…directo` then a blank line then `ries.`).
 #[test]
 fn tool_call_frame_releases_extractor_tail_before_tool_call_parts() {
     let mut state = StreamState::new("test", false);
 
     // A full paragraph in one frame, ending in a word long enough that the
-    // hold-back window splits it.
+    // hold-back window splits it. Released after the tool-call parts instead,
+    // the tail lands in a fresh paragraph and renders as `…directo`, a blank
+    // line, then `ries.`.
     let content =
         "Let me first check what tools are available to me for reading files and directories.\n\n";
     let content_chunk = json!({
@@ -541,7 +514,6 @@ fn convert_tool_choice_values() {
     );
 }
 
-/// A chunk carrying content parses and is handed back.
 #[test]
 fn parse_chunk_accepts_an_ordinary_chunk() {
     let data = r#"{"choices":[{"delta":{"content":"hi"},"index":0}]}"#;
@@ -563,33 +535,29 @@ fn parse_chunk_drops_a_malformed_payload() {
     );
 }
 
-/// A chunk with no choices yields no events, so there is nothing to hand back.
-///
-/// This is the benign shape: a server that reports usage in its own chunk sends
-/// one, and it is not worth a warning.
 #[test]
 fn parse_chunk_drops_a_chunk_without_choices() {
+    // The benign shape: a server reporting usage in a chunk of its own sends
+    // one, and it is not worth a warning.
     let data = r#"{"choices":[],"usage":{"total_tokens":7}}"#;
 
     assert!(parse_chunk(data, "test").expect("not an error").is_none());
 }
 
-/// llama.cpp opens every stream with a role-only delta, and repeats it on each
-/// progress update.
-/// It carries a choice, but nothing a handler can emit.
 #[test]
 fn parse_chunk_drops_a_role_only_chunk() {
+    // llama.cpp opens every stream with one of these and repeats it on each
+    // progress update. It carries a choice, but nothing a handler can emit.
     let data = r#"{"choices":[{"finish_reason":null,"index":0,"delta":{"role":"assistant","content":null}}]}"#;
 
     assert!(parse_chunk(data, "test").expect("not an error").is_none());
 }
 
-/// An error reported inside the stream is handed back rather than dropped: the
-/// chunk types ignore unknown fields, so an uncaptured `error` would
-/// deserialize into a chunk with an empty `choices` and be indistinguishable
-/// from the benign case above.
 #[test]
 fn parse_chunk_captures_an_in_stream_error() {
+    // The chunk types ignore unknown fields, so an uncaptured `error` would
+    // deserialize into a chunk with empty `choices` and be indistinguishable
+    // from a usage-only chunk.
     let data = r#"{"error":{"message":"upstream exploded","type":"server_error"}}"#;
 
     assert_eq!(
@@ -598,7 +566,6 @@ fn parse_chunk_captures_an_in_stream_error() {
     );
 }
 
-/// The message the user is shown comes from the payload's `message`.
 #[test]
 fn stream_error_message_reads_the_message_field() {
     let payload = json!({
@@ -610,8 +577,6 @@ fn stream_error_message_reads_the_message_field() {
     assert_eq!(stream_error_message(&payload), "Internal server error");
 }
 
-/// A payload that spells the text some other way still reaches the user whole,
-/// rather than being reported as an empty failure.
 #[test]
 fn stream_error_message_falls_back_to_the_whole_payload() {
     let payload = json!({ "detail": "out of memory" });
@@ -622,7 +587,6 @@ fn stream_error_message_falls_back_to_the_whole_payload() {
     );
 }
 
-/// Capturing `error` must not disturb the ordinary path.
 #[test]
 fn an_ordinary_chunk_carries_no_error() {
     let data = r#"{"choices":[{"delta":{"content":"hi"},"index":0}]}"#;

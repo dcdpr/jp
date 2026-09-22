@@ -460,19 +460,21 @@ pub async fn run_test(
 }
 
 /// Environment variable naming the server to record against.
+///
+/// Has no effect on playback, which answers from the cassette and never
+/// forwards.
 const UPSTREAM_ENV: &str = "JP_TEST_UPSTREAM";
 
-/// The server the recorder forwards to, which is the provider's configured base
-/// URL unless `JP_TEST_UPSTREAM` names another one.
+/// The server the recorder forwards to.
 ///
-/// A self-hosted provider is configured with a loopback address, which reaches
-/// a server only on the machine doing the recording.
-/// Naming a deployment in the environment records against that one instead.
-/// It redirects the upstream alone: requests still travel through the mock
-/// server that writes the cassette.
+/// The provider's configured base URL, unless `JP_TEST_UPSTREAM` names another
+/// one.
+/// A self-hosted provider is configured with a loopback address, which finds a
+/// server only on the machine doing the recording; the variable aims the
+/// recording at a deployment elsewhere.
 ///
-/// Read on playback too, where it has no effect, because playback never
-/// forwards.
+/// Only the upstream moves.
+/// Requests still travel through the mock server that writes the cassette.
 fn record_upstream(provider_id: ProviderId, config: &LlmProviderConfig) -> String {
     if let Ok(url) = env::var(UPSTREAM_ENV) {
         return url;

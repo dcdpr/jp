@@ -3,7 +3,7 @@
 //!
 //! This is the `/v1/chat/completions` dialect: SSE chunks carrying
 //! `choices[].delta`, terminated by a `[DONE]` sentinel.
-//! The `llamacpp` and `cerebras` providers both stream it.
+//! The `cerebras`, `llamacpp`, and `vllm` providers all stream it.
 //! It is a different protocol from the OpenAI Responses API that the `openai`
 //! provider uses, which has its own typed event enum.
 //!
@@ -18,7 +18,7 @@
 //! optional fields default, so a provider adding a field to a chunk does not
 //! break the stream.
 //! `StreamChoice::delta` is the one required field; a chunk whose choice omits
-//! it fails to parse, and both providers log a warning and skip that chunk.
+//! it fails to parse, and the provider logs a warning and skips that chunk.
 
 use std::mem;
 
@@ -255,8 +255,8 @@ pub(crate) fn convert_events(events: ConversationStream) -> Vec<Value> {
 /// Convert tool definitions to the OpenAI-compatible JSON format.
 ///
 /// If [`ToolChoice::Function`] is set, only include the named tool.
-/// These servers don't support calling a specific tool by name, but they
-/// support `required` mode, so we limit the tool list instead.
+/// The chat-completions dialect has no way to demand one tool by name, but it
+/// has `required` mode, so narrowing the list to one tool gets the same result.
 pub(crate) fn convert_tools(tools: Vec<ToolDefinition>, tool_choice: &ToolChoice) -> Vec<Value> {
     tools
         .into_iter()
@@ -476,15 +476,13 @@ pub(crate) fn handle_sse_event_sync(
                 if let Some(content) = &delta.content
                     && !content.is_empty()
                 {
-                    // A chat template puts a separator between the reasoning
-                    // block and the answer. Some servers (vLLM) pass it through
-                    // as content, others (llama.cpp) strip it before it reaches
-                    // the wire; dropping it here spares the answer a pair of
-                    // leading blank lines.
+                    // A chat template separates the reasoning block from the
+                    // answer with newlines. Some servers (vLLM) send them as
+                    // content, others (llama.cpp) strip them first; dropping
+                    // them here gives every provider the same answer text.
                     //
-                    // Only newlines go: a template separator is made of them,
-                    // and an answer that opens with an indented line owns its
-                    // leading spaces.
+                    // Newlines only. Leading spaces belong to the answer, such
+                    // as the indentation on a line of code.
                     let content = if state.trim_content_prefix {
                         content.trim_start_matches('\n')
                     } else {
