@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use jp_config::{AppConfig, style::typewriter::DelayDuration, types::color::Color};
 use jp_printer::{OutputFormat, OutputWidth, SharedBuffer, TerminalCapability};
 
@@ -1002,6 +1004,99 @@ fn test_reasoning_background_not_applied_to_messages() {
         !output.contains("\x1b[48;5;236m"),
         "Message should not have reasoning background, got: {output:?}"
     );
+}
+
+/// A prompt taken while a reasoning region is open carries its background, and
+/// one taken after the region has ended does not.
+///
+/// The interrupt menu is what bites: it takes its writer from the same printer
+/// a tool decision last named a region on, at a point where the assistant has
+/// moved on to an ordinary message.
+/// Nothing about that menu knows a region ever existed, so the region has to
+/// stop claiming it.
+#[test]
+fn a_message_after_reasoning_closes_the_region_for_later_prompts() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mut renderer = ChatRenderer::new(printer.clone(), config.style, RenderFlow::Live);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Checking the README.\n\n".into(),
+    });
+    printer.flush();
+    out.lock().clear();
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "Interrupted").unwrap();
+    }
+    printer.flush();
+    assert_eq!(
+        *out.lock(),
+        "\x1b[48;5;236mInterrupted\x1b[49m",
+        "a prompt inside the region is a visual row like any other"
+    );
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "The title is `# Jean-Pierre`.\n\n".into(),
+    });
+    printer.flush();
+    out.lock().clear();
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "Interrupted").unwrap();
+    }
+    printer.flush();
+    assert_eq!(*out.lock(), "Interrupted");
+}
+
+/// The clear covers a background the tool-call path named, not just one this
+/// renderer opened.
+///
+/// A tool decision resolves the per-tool region itself — it can leave the
+/// reasoning region or opt out of it per tool — and sets it on the printer
+/// directly.
+/// The message that ends the reasoning has to take that back, or the last tool
+/// of the turn keeps colouring every prompt after it.
+#[test]
+fn a_tool_calls_region_does_not_outlive_the_reasoning_it_came_from() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mut renderer = ChatRenderer::new(printer.clone(), config.style, RenderFlow::Live);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Checking the README.\n\n".into(),
+    });
+    renderer.enter_tool_call();
+
+    // Stands in for `ToolCoordinator::resolve_tool_call_decision`, which names
+    // the region once the per-tool answer is known.
+    printer.set_prompt_background(Some(DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Terminal,
+    }));
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "The title is `# Jean-Pierre`.\n\n".into(),
+    });
+    printer.flush();
+    out.lock().clear();
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "Interrupted").unwrap();
+    }
+    printer.flush();
+    assert_eq!(*out.lock(), "Interrupted");
 }
 
 #[test]

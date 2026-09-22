@@ -207,7 +207,7 @@ impl ChatRenderer {
         self.last_content_kind = Some(ContentKind::Message);
         // A user message ends any reasoning region; a tool call that follows
         // must not continue the previous response's reasoning.
-        self.last_response_kind = None;
+        self.set_response_kind(None);
     }
 
     /// Render a labeled role-boundary header.
@@ -244,7 +244,7 @@ impl ChatRenderer {
         self.last_content_kind = None;
         // A role boundary ends any reasoning region: a region never spans a
         // turn boundary or survives a user message.
-        self.last_response_kind = None;
+        self.set_response_kind(None);
     }
 
     /// Print a line of turn framing on the channel this flow puts it on.
@@ -431,7 +431,7 @@ impl ChatRenderer {
         // tell whether a following tool call continues a reasoning region.
         // Ephemeral reasoning chrome never reaches this path, so it can't mark
         // the region as reasoning.
-        self.last_response_kind = self.last_content_kind;
+        self.set_response_kind(self.last_content_kind);
         self.buffer.push(content);
         self.flush_buffer_blocks();
     }
@@ -818,6 +818,42 @@ impl ChatRenderer {
         self.last_content_kind = Some(ContentKind::ToolCall);
     }
 
+    /// Record which kind of chat response last rendered, and republish the
+    /// region a prompt taken now would sit inside.
+    ///
+    /// The two belong together: a reasoning region is open exactly while the
+    /// last response was reasoning, and a prompt drawn inside one carries its
+    /// background like every other row (RFD 095).
+    /// Every prompt goes through the printer, so naming it here is what keeps a
+    /// later one — the interrupt menu during an ordinary message, say — from
+    /// inheriting a region that has since ended.
+    fn set_response_kind(&mut self, kind: Option<ContentKind>) {
+        self.last_response_kind = kind;
+
+        // A replay builds a document out of stored events and is never
+        // prompted against; only the live renderer's region governs what a
+        // prompt shows.
+        if self.flow == RenderFlow::Live {
+            self.printer.set_prompt_background(self.open_region());
+        }
+    }
+
+    /// The shaded region a prompt taken right now would sit inside.
+    ///
+    /// `None` outside a reasoning region, and `None` when no background is
+    /// configured for one.
+    /// A tool call narrows this further, since its chrome can leave the region
+    /// (`style.reasoning.extend_across_tool_calls`) or opt out per tool
+    /// (`conversation.tools.<name>.style.joins_reasoning`), so the tool-call
+    /// path publishes its own answer over this one.
+    fn open_region(&self) -> Option<DefaultBackground> {
+        if self.last_response_kind != Some(ContentKind::Reasoning) {
+            return None;
+        }
+
+        self.reasoning_background()
+    }
+
     /// Whether a tool call at the current point continues a reasoning region.
     ///
     /// True when the last chat response was reasoning and
@@ -894,7 +930,7 @@ impl ChatRenderer {
         self.formatter =
             formatter_from_config(&self.config, pretty, self.printer.output_width().columns());
         self.last_content_kind = None;
-        self.last_response_kind = None;
+        self.set_response_kind(None);
         self.pending_separator = None;
         self.reasoning_chars_count = 0;
         self.code_block = None;
@@ -919,7 +955,7 @@ impl ChatRenderer {
         self.reset();
 
         self.last_content_kind = last_content_kind;
-        self.last_response_kind = last_response_kind;
+        self.set_response_kind(last_response_kind);
         self.pending_separator = pending_separator;
     }
 }
