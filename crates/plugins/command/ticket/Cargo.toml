@@ -34,6 +34,13 @@ camino-tempfile = { workspace = true }
 [lints]
 workspace = true
 
+[lib]
+name = "jp_ticket"
+path = "src/lib.rs"
+doctest = false
+
+# The binary is a shell around the library, and carries no tests of its own.
 [[bin]]
 name = "jp-ticket"
 path = "src/main.rs"
+test = false

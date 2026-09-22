@@ -4,13 +4,13 @@
 use std::process::Command;
 
 /// Starts the app on a workspace.
-pub(crate) trait Launcher {
+pub trait Launcher {
     /// Open the app identified by `bundle_id`, showing the workspace at `path`.
     fn launch(&self, bundle_id: &str, path: &str) -> Result<(), String>;
 }
 
 /// Launches through macOS Launch Services.
-pub(crate) struct SystemLauncher;
+pub struct SystemLauncher;
 
 /// Why `target_os` cannot open the app, or `None` if it can.
 ///

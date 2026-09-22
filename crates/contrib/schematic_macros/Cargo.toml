@@ -8,6 +8,8 @@ version = "0.19.3"
 
 [lib]
 proc-macro = true
+test = false
+doctest = false
 
 [dependencies]
 convert_case = { workspace = true }

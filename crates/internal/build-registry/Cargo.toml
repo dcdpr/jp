@@ -24,6 +24,9 @@ toml = { workspace = true, features = ["parse", "serde"] }
 [lints]
 workspace = true
 
+# No tests of its own: keeps cargo from building and listing an empty test
+# binary.
 [[bin]]
 name = "build-registry"
 path = "src/main.rs"
+test = false

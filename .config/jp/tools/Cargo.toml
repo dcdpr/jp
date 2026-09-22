@@ -70,9 +70,12 @@ toml = { workspace = true, features = ["parse"] }
 [lints]
 workspace = true
 
+# No tests of its own: keeps cargo from building and listing an empty test
+# binary.
 [[bin]]
 name = "jp-tools"
 path = "src/main.rs"
+test = false
 
 [lib]
 doctest = false

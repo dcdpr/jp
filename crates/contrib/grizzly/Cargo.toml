@@ -27,9 +27,12 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 [lints]
 workspace = true
 
+# No tests of its own: keeps cargo from building and listing an empty test
+# binary.
 [[bin]]
 name = "grizzly"
 path = "src/main.rs"
+test = false
 
 [lib]
 doctest = false

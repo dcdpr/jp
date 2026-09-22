@@ -234,3 +234,9 @@ inherits = "dev"
 
 [profile.nextest]
 inherits = "test"
+# A test run links around 60 binaries and then executes each one to list its
+# tests, so their size is paid twice over. Line tables are the part of the debug
+# info a test failure needs, and they cost a fraction of the full DWARF the
+# `test` profile inherits: backtraces keep their file and line numbers, and a
+# debugger loses its locals.
+debug = "line-tables-only"

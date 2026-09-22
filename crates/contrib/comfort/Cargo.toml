@@ -34,3 +34,15 @@ workspace = true
 
 [lib]
 doctest = false
+
+# Neither binary carries tests of its own: keeps cargo from building and listing
+# two empty test binaries.
+[[bin]]
+name = "comfort"
+path = "src/bin/comfort.rs"
+test = false
+
+[[bin]]
+name = "cargo-comfort"
+path = "src/bin/cargo-comfort.rs"
+test = false

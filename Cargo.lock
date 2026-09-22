@@ -4062,7 +4062,6 @@ dependencies = [
 name = "schematic"
 version = "0.19.4"
 dependencies = [
- "convert_case 0.11.0",
  "indexmap",
  "json-strip-comments",
  "schematic",

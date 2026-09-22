@@ -127,9 +127,12 @@ test-log = { workspace = true }
 [lints]
 workspace = true
 
+# No tests of its own: keeps cargo from building and listing an empty test
+# binary.
 [[bin]]
 name = "jp"
 path = "src/main.rs"
+test = false
 
 [features]
 dhat = ["dep:dhat"]

@@ -11,6 +11,7 @@ version = "0.1.0"
 [lib]
 name = "xct2cli"
 path = "src/lib.rs"
+doctest = false
 
 [dependencies]
 addr2line = { workspace = true }
