@@ -134,6 +134,7 @@ jobs:
           INSTA: ${{ needs.changes.outputs.insta }}
           SHEAR: ${{ needs.changes.outputs.shear }}
           VET: ${{ needs.changes.outputs.vet }}
+          QUAL: ${{ needs.changes.outputs.qual }}
         run: |
           set -euo pipefail
 
@@ -149,6 +150,7 @@ jobs:
             insta) run="$INSTA" ;;
             shear) run="$SHEAR" ;;
             vet) run="$VET" ;;
+            qual) run="$QUAL" ;;
             *) echo "unknown task: $TASK" >&2; exit 1 ;;
           esac
 
