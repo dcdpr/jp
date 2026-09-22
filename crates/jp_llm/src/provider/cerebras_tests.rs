@@ -58,6 +58,7 @@ fn create_request_joins_system_parts_into_one_message() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let (body, _) = create_request(&model, query).unwrap();
