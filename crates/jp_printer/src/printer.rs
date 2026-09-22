@@ -582,9 +582,9 @@ impl Printer {
     ///
     /// `None` while no shaded region is open, which is the common case.
     /// A prompt drawn inside one is a visual row like any other and shows the
-    /// same background to the right edge (RFD 095); whoever owns the region
-    /// names it here, and every prompt taken afterwards picks it up without its
-    /// call site knowing a region exists.
+    /// same background to the right edge (RFD 095).
+    /// Every prompt the printer hands out picks this up, so no prompt site
+    /// takes a background as an argument.
     pub fn set_prompt_background(&self, background: Option<DefaultBackground>) {
         *self.prompt_background.lock() = background;
     }
@@ -923,9 +923,9 @@ impl Drop for PromptTrace {
 /// A prompt's writes, shaded with the open region background if there is one.
 ///
 /// A prompt drawn inside a shaded region shows that region's background like
-/// every other row (RFD 095), and a widget owns its own cursor — it rewrites
-/// its line with `\r\x1b[K` on each keystroke, and that erase fills with
-/// whatever background is active.
+/// every other row (RFD 095).
+/// A widget owns its own cursor: it rewrites its line with `\r\x1b[K` on each
+/// keystroke, and that erase fills with whatever background is active.
 /// [`ShadedWriter`] is what keeps the fill right across the widget's own
 /// escapes, including the resets it emits mid-line.
 enum Canvas<W: fmt::Write> {
@@ -946,6 +946,9 @@ impl<W: fmt::Write> Canvas<W> {
     }
 
     /// The writer underneath the shading.
+    ///
+    /// Reached for the operations [`Write`] cannot express, of which flushing
+    /// is the only one here.
     fn get_mut(&mut self) -> &mut W {
         match self {
             Self::Plain(writer) => writer,
@@ -976,9 +979,8 @@ impl<W: fmt::Write> fmt::Write for Canvas<W> {
 
 /// A writer for interactive prompt output.
 ///
-/// The terminal is quiet and clean when the writer is acquired, and stays that
-/// way until it drops: status rows are erased, ordinary output waits, and no
-/// redraw lands between the widget's own writes.
+/// From acquisition until it drops, status rows stay erased, ordinary output is
+/// held back, and no redraw lands between the widget's own writes.
 /// Writes carry the open region background, when there is one.
 /// Returned by [`Printer::prompt_writer`].
 pub struct PromptWriter<'a> {
@@ -986,7 +988,7 @@ pub struct PromptWriter<'a> {
     /// is open.
     writer: Canvas<PrinterWriter<'a>>,
 
-    /// Holds the terminal for the writer's lifetime.
+    /// Keeps status rows erased and ordinary output held back until it drops.
     _suspension: SuspendGuard,
 
     /// Records the session's lifetime for the trace log.
@@ -1062,16 +1064,18 @@ impl io::Write for OwnedPrinterWriter {
     }
 }
 
-/// The owned counterpart of [`PromptWriter`], for components that need to own
-/// their output stream.
+/// A writer for interactive prompt output that owns its stream.
 ///
-/// Returned (boxed) by [`Printer::owned_prompt_writer`], and carries the same
-/// guarantees.
+/// From acquisition until it drops, status rows stay erased, ordinary output is
+/// held back, and no redraw lands between the widget's own writes.
+/// Writes carry the open region background, when there is one.
+/// Returned (boxed) by [`Printer::owned_prompt_writer`] for a component that
+/// needs a `'static` stream of its own.
 struct OwnedPromptWriter {
     /// The underlying channel, shaded when a region is open.
     writer: Canvas<OwnedPrinterWriter>,
 
-    /// Holds the terminal for the writer's lifetime.
+    /// Keeps status rows erased and ordinary output held back until it drops.
     _suspension: SuspendGuard,
 
     /// Records the session's lifetime for the trace log.

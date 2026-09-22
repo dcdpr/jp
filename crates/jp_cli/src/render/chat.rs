@@ -818,15 +818,14 @@ impl ChatRenderer {
         self.last_content_kind = Some(ContentKind::ToolCall);
     }
 
-    /// Record which kind of chat response last rendered, and republish the
-    /// region a prompt taken now would sit inside.
+    /// Record which kind of chat response last rendered, and publish the region
+    /// a prompt taken now would sit inside.
     ///
-    /// The two belong together: a reasoning region is open exactly while the
-    /// last response was reasoning, and a prompt drawn inside one carries its
-    /// background like every other row (RFD 095).
-    /// Every prompt goes through the printer, so naming it here is what keeps a
-    /// later one — the interrupt menu during an ordinary message, say — from
-    /// inheriting a region that has since ended.
+    /// A reasoning region is open exactly while the last response was
+    /// reasoning, so the two move together, and a prompt drawn inside one
+    /// carries its background like every other row (RFD 095).
+    /// Every change is published, so a prompt taken once the region has ended
+    /// is drawn without it.
     fn set_response_kind(&mut self, kind: Option<ContentKind>) {
         self.last_response_kind = kind;
 
@@ -842,10 +841,11 @@ impl ChatRenderer {
     ///
     /// `None` outside a reasoning region, and `None` when no background is
     /// configured for one.
-    /// A tool call narrows this further, since its chrome can leave the region
+    /// A tool call resolves its own region, which can be narrower: its chrome
+    /// may leave the reasoning region
     /// (`style.reasoning.extend_across_tool_calls`) or opt out per tool
-    /// (`conversation.tools.<name>.style.joins_reasoning`), so the tool-call
-    /// path publishes its own answer over this one.
+    /// (`conversation.tools.<name>.style.joins_reasoning`).
+    /// That answer is published over this one.
     fn open_region(&self) -> Option<DefaultBackground> {
         if self.last_response_kind != Some(ContentKind::Reasoning) {
             return None;

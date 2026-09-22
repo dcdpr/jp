@@ -289,10 +289,9 @@ impl PromptBackend for MockPromptBackend {
 
     /// Writes `message` to `output` before answering.
     ///
-    /// The real widget draws on the stream it is handed, so a mock that never
-    /// touched it could not tell a caller's writer apart from any other — a
-    /// test asserting on what a prompt renders would pass against no prompt at
-    /// all.
+    /// The real widget draws on the stream it is handed.
+    /// Left untouched, the stream would let a test assert on what a prompt
+    /// renders and pass with no prompt rendered at all.
     fn inline_reply(
         &self,
         message: &str,

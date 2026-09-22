@@ -173,9 +173,9 @@ fn a_crlf_pair_split_across_writes_is_kept_together() {
 
 #[test]
 fn a_held_carriage_return_still_rewrites_when_no_newline_follows() {
-    // Holding the `\r` must be invisible to the rewrite it usually is: the
-    // next write settles which reading was right, and a bare one behaves
-    // exactly as it does when the whole stream arrives in one write.
+    // The hold must not change what a bare `\r` does. The next write settles
+    // which reading applies, and a rewrite renders the same whether or not the
+    // stream was split.
     let mut buffer = String::new();
     {
         let mut writer = ShadedWriter::new(&mut buffer, &terminal_bg());

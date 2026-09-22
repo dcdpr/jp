@@ -33,10 +33,9 @@ fn terminal_region() -> DefaultBackground {
 
 #[test]
 fn prompting_a_question_carries_the_reasoning_background() {
-    // `jp_printer` owns the shading and pins its escapes; what this covers is
-    // that a real prompt method reaches it, rather than building a writer of
-    // its own. The pre-amble is the one part of a prompt written by the
-    // prompter rather than by the widget.
+    // `jp_printer` owns the shading and pins its escapes, so what this covers
+    // is that a real prompt method reaches it. The pre-amble is the one part
+    // of a prompt written by the prompter rather than by the widget.
     let (prompter, out) =
         prompter_with_output(MockPromptBackend::new().with_inline_responses(['y']));
     prompter

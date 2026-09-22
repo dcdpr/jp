@@ -1058,8 +1058,8 @@ fn a_message_after_reasoning_closes_the_region_for_later_prompts() {
 /// The clear covers a background the tool-call path named, not just one this
 /// renderer opened.
 ///
-/// A tool decision resolves the per-tool region itself — it can leave the
-/// reasoning region or opt out of it per tool — and sets it on the printer
+/// A tool decision resolves the per-tool region itself, which can leave the
+/// reasoning region or opt out of it per tool, and sets it on the printer
 /// directly.
 /// The message that ends the reasoning has to take that back, or the last tool
 /// of the turn keeps colouring every prompt after it.

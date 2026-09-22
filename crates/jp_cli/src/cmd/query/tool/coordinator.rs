@@ -588,10 +588,10 @@ impl ToolCoordinator {
         printer: &Printer,
     ) -> ToolCallDecision {
         // A tool call reached from a reasoning block sits inside that block's
-        // shading, and a prompt is a visual row like any other (RFD 095). This
-        // is the one place holding both the renderer that owns the region and
-        // the printer that draws the prompts, and the region is per tool, so
-        // the read happens here rather than at the tool-call boundary.
+        // shading, and a prompt is a visual row like any other (RFD 095). The
+        // region is resolved per tool call, so it is read once this tool is
+        // known, from the one place holding both the renderer that owns it and
+        // the printer that draws the prompts.
         printer.set_prompt_background(tool_renderer.current_region());
 
         // Asking the service to format arguments for a call the user already

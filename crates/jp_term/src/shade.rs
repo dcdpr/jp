@@ -108,10 +108,11 @@ impl<W: Write> ShadedWriter<W> {
 
     /// End the shaded region.
     ///
-    /// Flushes anything still buffered from a split write — a half-formed
-    /// escape, or a `\r` whose `\n` never arrived and so was a row rewrite all
-    /// along — then emits `\x1b[49m` so the region background does not leak
-    /// past the region.
+    /// Flushes anything still buffered from a split write: a half-formed
+    /// escape, or a `\r` whose `\n` never came and so was a row rewrite after
+    /// all.
+    /// Then emits `\x1b[49m` so the region background does not leak past the
+    /// region.
     /// A region whose last write ended on a line break is already closed and
     /// emits nothing here.
     /// Call once after the last write.
@@ -185,9 +186,9 @@ impl<W: Write> ShadedWriter<W> {
                     i += 1;
                     start = i;
                 }
-                // A `\r` on its own rewrites the row in place — a progress
-                // line redrawing itself. No line was completed, so there is
-                // nothing to fill and nothing to close.
+                // A `\r` on its own rewrites the row in place, the way a
+                // progress line redraws itself. No line was completed, so
+                // there is nothing to fill and nothing to close.
                 b'\r' => {
                     self.emit_run(&text[start..i])?;
                     self.output.write_str("\r")?;
@@ -202,8 +203,11 @@ impl<W: Write> ShadedWriter<W> {
         self.emit_run(&text[start..])
     }
 
-    /// Complete the current line with `run`, fill it to the right edge, close
-    /// the region background, and write `terminator`.
+    /// End the line `run` completes, then write `terminator`.
+    ///
+    /// The fill and the background close both land while the cursor is still at
+    /// the end of `run`, which is where the terminator would otherwise move it
+    /// from.
     fn end_line(&mut self, run: &str, terminator: &str) -> fmt::Result {
         self.emit_run(run)?;
         self.fill_line()?;
@@ -287,8 +291,9 @@ impl<W: Write> Write for ShadedWriter<W> {
                 Segment::Escape(esc) => self.process_escape(esc)?,
                 // A trailing `\r` is ambiguous until the next byte arrives: it
                 // ends the line when a `\n` follows, and rewrites the row in
-                // place otherwise. Forwarding it now would commit to the second
-                // reading and leave the fill nowhere to go but column zero.
+                // place otherwise. Forwarding it now commits to the second
+                // reading, and the fill for a line it turns out to have ended
+                // would run from column zero.
                 Segment::Text(text) if i == last && text.ends_with('\r') => {
                     self.process_text(&text[..text.len() - 1])?;
                     self.pending.push('\r');
