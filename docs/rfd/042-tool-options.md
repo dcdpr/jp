@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-09
+- **Summary**: Introduces per-tool options field for static user-defined
+  configuration passed to tools at runtime.
 
 ## Summary
 

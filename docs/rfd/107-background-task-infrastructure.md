@@ -4,6 +4,8 @@
 - **Category**: Guide
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-22
+- **Summary**: `jp_task` provides bounded background task primitives for
+  concurrent work that commits to the workspace before exit.
 
 ## Summary
 

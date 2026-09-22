@@ -5,6 +5,9 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-02
 - **Extends**: [RFD 058]
+- **Summary**: Mid-turn tool for assistant to deliver user-visible messages;
+  activates generic audience-filtering and markdown rendering mechanisms across
+  conversation events.
 
 ## Summary
 

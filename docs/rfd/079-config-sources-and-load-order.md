@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-20
 - **Required by**: [RFD 080]
+- **Summary**: JP loads config from four implicit sources plus environment
+  variables, with extends directives and inherit flags controlling precedence.
 
 ## Summary
 

@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-26
+- **Summary**: Mid-conversation system and tool changes anchored in message
+  stream preserve Anthropic's prompt cache via positional directives.
 
 ## Summary
 

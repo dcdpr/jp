@@ -5,6 +5,9 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
 - **Requires**: [RFD 023], [RFD 026], [RFD 049]
+- **Summary**: Client-server architecture unifying foreground, detached, and
+  reattached query execution with IPC-based output streaming and inquiry
+  routing.
 
 > [!WARNING]
 > This RFD is an early draft and incomplete.

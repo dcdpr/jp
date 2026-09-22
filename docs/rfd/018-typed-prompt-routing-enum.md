@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-01
 - **Required by**: [RFD 049]
+- **Summary**: Codify prompt types as `Prompt` enum variants for unified
+  routing, config, and extensibility.
 
 ## Summary
 

@@ -7,6 +7,8 @@
 - **Requires**: [RFD 065]
 - **Required by**: [RFD 066], [RFD 067]
 - **Extended by**: [RFD 094]
+- **Summary**: Replace opaque tool output strings with typed content blocks
+  (text, resource, question) mirroring MCP's CallToolResult model.
 
 ## Summary
 

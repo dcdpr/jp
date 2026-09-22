@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-23
 - **Required by**: [RFD 010], [RFD 037]
+- **Summary**: Unifies one-shot and long-running tool execution under a stateful
+  protocol enabling multi-step interactive workflows.
 
 ## Summary
 

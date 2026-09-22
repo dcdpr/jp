@@ -6,6 +6,8 @@
 - **Date**: 2026-03-13
 - **Tracking Issue**: [\#437]
 - **Extended by**: [RFD 081]
+- **Summary**: Make CLI tool flags order-sensitive, processing `--tool` and
+  `--no-tools` left-to-right instead of in fixed order.
 
 ## Summary
 

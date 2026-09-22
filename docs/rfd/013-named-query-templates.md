@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-25
+- **Summary**: Add reusable, config-defined query templates with interactive
+  prompts for collecting variables before rendering.
 
 ## Summary
 

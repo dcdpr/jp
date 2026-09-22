@@ -56,6 +56,6 @@ export default {
             if (warning) console.warn(`[rfd-drafts] ${warning}`)
         }
 
-        return buildEntries(draftsDir, files, {}, '/rfd/drafts')
+        return buildEntries(draftsDir, files, '/rfd/drafts')
     },
 }

@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-20
 - **Extended by**: [RFD 056]
+- **Summary**: Named tool groups enable CLI shortcuts and exhaustive validation
+  ensuring every tool is classified relative to a group.
 
 ## Summary
 

@@ -5,6 +5,9 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-02
 - **Extends**: [RFD 088]
+- **Summary**: Bare `jp query` composes inline by default; `Ctrl+X` escapes to
+  external editor, with fallback modes configurable via
+  `query.compose_in_editor`.
 
 ## Summary
 

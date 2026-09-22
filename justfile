@@ -1653,7 +1653,18 @@ _rfd-link SOURCE TARGET FORWARD INVERSE:
             sed "1,${header_end}s|^- \\*\\*${field}\\*\\*: .*|&, ${link}|" "$f" > "$f.tmp"
             mv "$f.tmp" "$f"
         else
-            last_meta=$(head -n "$header_end" "$f" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
+            # Insert after the metadata block's last line, which is not the
+            # same as its last `- **` line: a value long enough to wrap
+            # continues on indented lines, and splicing between them would
+            # strand the remainder as prose. The block runs from its first
+            # entry to the blank line that closes it, and `Summary` keeps the
+            # bottom of it.
+            last_meta=$(head -n "$header_end" "$f" | awk '
+                !start && /^- \*\*/ { start = NR; next }
+                start && /^- \*\*Summary\*\*:/ { print NR - 1; found = 1; exit }
+                start && /^[[:space:]]*$/ { print NR - 1; found = 1; exit }
+                END { if (!found && start) print NR }
+            ')
             awk -v ln="$last_meta" -v entry="- **${field}**: ${link}" '
                 NR == ln { print; print entry; next }
                 { print }
@@ -2420,8 +2431,7 @@ _rfd-plan NNN FILE:
 # and listed at the end, as is the board entry; `<old>-slug` link targets carry
 # the slug and are still rewritten.
 #
-# Renumbering a published RFD changes its site URL and invalidates its
-# summary-cache entry; run `just rfd-summaries` afterwards.
+# Renumbering a published RFD changes its site URL.
 [group('rfd')]
 rfd-renumber NNN MMM="":
     #!/usr/bin/env sh
@@ -2581,10 +2591,6 @@ rfd-renumber NNN MMM="":
         echo "$leftovers" | sed 's/^/  /' >&2
     fi
 
-    if [ "$is_draft" = false ]; then
-        echo "Run \`just rfd-summaries\` to refresh the summary cache." >&2
-    fi
-
 # Retitle an RFD, renaming its file to match.
 #
 # NNN is the RFD to retitle: a permanent number (95, 095) or a draft ID (D24).
@@ -2595,8 +2601,7 @@ rfd-renumber NNN MMM="":
 # link targets under `docs/` are rewritten, and matches outside `docs/` are
 # reported but not rewritten.
 #
-# Retitling a published RFD changes its site URL and invalidates its
-# summary-cache entry; run `just rfd-summaries` afterwards.
+# Retitling a published RFD changes its site URL.
 [group('rfd')]
 rfd-rename NNN +TITLE:
     #!/usr/bin/env sh
@@ -2673,11 +2678,6 @@ rfd-rename NNN +TITLE:
         echo "Warning: references outside docs/ still name ${old_basename}:" >&2
         echo "$leftovers" | sed 's/^/  /' >&2
     fi
-
-    case "$rfd_id" in
-        D*) ;;
-        *)  echo "Run \`just rfd-summaries\` to refresh the summary cache." >&2 ;;
-    esac
 
 # Internal: print the commit author as `Name <email>`.
 #
@@ -2886,96 +2886,6 @@ rfd-abandon NNN +REASON:
         done
         echo "Their dependency on RFD ${rfd_id} is now broken — review and update." >&2
     fi
-
-# Generate or update AI summaries for RFD documents.
-#
-# Only re-generates summaries for RFDs whose content has changed since
-# the last run (based on SHA-256). Pass `--force` to regenerate all.
-#
-# Usage:
-#   just rfd-summaries              # changed RFDs only, default model
-#   just rfd-summaries --force       # regenerate all
-#   just rfd-summaries flash         # use a different model
-#   just rfd-summaries flash --force # both
-[group('rfd')]
-rfd-summaries *ARGS: _install-jp
-    #!/usr/bin/env sh
-    set -eu
-
-    CACHE="docs/.vitepress/rfd-summaries.json"
-    MODEL="haiku"
-    FORCE=false
-    BASE_PROMPT="summarize this document in one sentence of max 20 words, don't start with 'The/This RFD ...'"
-    SCHEMA='{"type":"object","properties":{"changed":{"type":"boolean","description":"false if the existing summary is still accurate, true if you wrote a new one"},"summary":{"type":"string"}},"required":["changed","summary"]}'
-
-    for arg in {{ARGS}}; do
-        case "$arg" in
-            --force) FORCE=true ;;
-            *)       MODEL="$arg" ;;
-        esac
-    done
-
-    [ -f "$CACHE" ] || echo '{}' > "$CACHE"
-
-    generated=0
-    kept=0
-    skipped=0
-
-    for file in docs/rfd/[0-9][0-9][0-9]-*.md; do
-        [ -f "$file" ] || continue
-        basename=$(basename "$file")
-        case "$basename" in 000-*) continue ;; esac
-
-        hash=$(shasum -a 256 "$file" | cut -d' ' -f1)
-        cached_hash=$(jq -r --arg f "$basename" '.[$f].hash // ""' "$CACHE")
-
-        if [ "$FORCE" = false ] && [ "$hash" = "$cached_hash" ]; then
-            skipped=$((skipped + 1))
-            continue
-        fi
-
-        num=$(echo "$basename" | sed 's/-.*//')
-        existing=$(jq -r --arg f "$basename" '.[$f].summary // ""' "$CACHE")
-
-        if [ -n "$existing" ]; then
-            PROMPT="The current summary is: \"${existing}\". If this still accurately captures the document, set changed=false and return it as-is. Otherwise set changed=true and ${BASE_PROMPT}"
-        else
-            PROMPT="Set changed=true and ${BASE_PROMPT}"
-        fi
-
-        printf "RFD %s..." "$num" >&2
-
-        result=$(
-            jp -! q --format=json --no-tools --new \
-                --schema "$SCHEMA" --no-reasoning \
-                --attachment "$file" --model "$MODEL" \
-                "$PROMPT" \
-            | jq -s '.[-1]'
-        )
-
-        changed=$(echo "$result" | jq -r '.changed')
-
-        if [ "$changed" = "true" ]; then
-            summary=$(echo "$result" | jq -r '.summary')
-            generated=$((generated + 1))
-            printf " updated\n" >&2
-        else
-            summary="$existing"
-            kept=$((kept + 1))
-            printf " kept\n" >&2
-        fi
-
-        jq --arg f "$basename" --arg h "$hash" --arg s "$summary" \
-            '.[$f] = {hash: $h, summary: $s}' "$CACHE" > "${CACHE}.tmp"
-        mv "${CACHE}.tmp" "$CACHE"
-    done
-
-    # Remove entries for deleted RFDs.
-    existing=$(ls -1 docs/rfd/[0-9][0-9][0-9]-*.md 2>/dev/null | xargs -I{} basename {} | jq -R -s 'split("\n") | map(select(. != ""))')
-    jq --argjson keep "$existing" 'with_entries(select(.key as $k | $keep | index($k)))' "$CACHE" > "${CACHE}.tmp"
-    mv "${CACHE}.tmp" "$CACHE"
-
-    printf "\nDone: %d updated, %d kept, %d cached\n" "$generated" "$kept" "$skipped" >&2
 
 # Search across all RFD documents.
 [group('rfd')]
@@ -3338,7 +3248,7 @@ ticket-grep +ARGS:
 
 # Locally develop the documentation, with hot-reloading.
 [group('docs')]
-develop-docs *FLAGS="--host --allowedHosts --open": rfd-summaries _install-ticket
+develop-docs *FLAGS="--host --allowedHosts --open": _install-ticket
     just _docs "dev" {{FLAGS}}
 
 # Open the RFD priority board for drag-and-drop reordering.
@@ -3348,8 +3258,21 @@ develop-docs *FLAGS="--host --allowedHosts --open": rfd-summaries _install-ticke
 # file to publish the new order. The board is read-only in the production build
 # — the write endpoint only exists on the dev server.
 [group('rfd')]
-rfd-manage: rfd-summaries
+rfd-manage:
     just _docs "dev" "--host" "--allowedHosts" "--open" "/rfd/priority"
+
+# Test the documentation site's own tooling.
+#
+# The site is assembled by the `.mjs` modules under `docs/.vitepress/`, which
+# Cargo knows nothing about. `node --test` needs no dependency beyond the Node
+# the site build already requires.
+#
+# The pattern is quoted so node globs it rather than the shell: a positional
+# argument to `--test` is a glob, `sh` has no `**`, and an unmatched pattern
+# would otherwise arrive as a literal path node tries to execute.
+[group('docs')]
+test-docs *FLAGS:
+    node --test {{FLAGS}} 'docs/.vitepress/**/*.test.mjs'
 
 # Build the statically built documentation.
 [group('docs')]

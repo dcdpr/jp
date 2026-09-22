@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-07
 - **Extends**: [RFD 097]
+- **Summary**: Request-response linking via persistent event IDs detects answer
+  scope under structural edits.
 
 ## Summary
 

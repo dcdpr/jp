@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-05
+- **Summary**: Make JP scriptable with concise schema DSL and inferred clean
+  JSON output when piping or with --schema flag.
 
 ## Summary
 

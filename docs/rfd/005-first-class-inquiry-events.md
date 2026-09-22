@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-17
 - **Extended by**: [RFD 082]
+- **Summary**: Record inquiry events in conversation stream with centralized
+  filtering to keep them hidden from LLM providers.
 
 ## Summary
 

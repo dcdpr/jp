@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-16
+- **Summary**: Add `jp conversation edit` (opens directory in $EDITOR) and `jp
+  conversation path` (prints conversation filesystem path).
 
 ## Summary
 

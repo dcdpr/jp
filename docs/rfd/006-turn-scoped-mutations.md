@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-18
+- **Summary**: Restrict stream mutations to turn-scoped accessors, preventing
+  invalid event sequences through compile-time guarantees.
 
 ## Summary
 

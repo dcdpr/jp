@@ -5,6 +5,9 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-20
 - **Required by**: [RFD 058], [RFD 066], [RFD 067]
+- **Summary**: Replace opaque attachments with typed MCP-aligned resources on
+  ChatRequest at attachment turn, enabling deduplication and preventing cache
+  invalidation.
 
 ## Summary
 

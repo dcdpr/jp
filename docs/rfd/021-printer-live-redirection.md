@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
+- **Summary**: Adds runtime output redirection to Printer via SwapWriters
+  command, enabling mid-stream destination changes without replacing instances.
 
 ## Summary
 

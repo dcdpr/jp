@@ -6,6 +6,8 @@
 - **Date**: 2026-03-07
 - **Supersedes**: [RFD 033]
 - **Extends**: [RFD 028]
+- **Summary**: Route inquiries to cheaper models with stable schemas for 5-25x
+  cost reduction via configurable assistant overrides.
 
 ## Summary
 

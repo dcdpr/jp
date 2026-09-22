@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-03
 - **Required by**: [RFD 078]
+- **Summary**: Introduces `-C` flag to selectively revert previously applied
+  config sources using provenance tracking via claims maps.
 
 ## Summary
 

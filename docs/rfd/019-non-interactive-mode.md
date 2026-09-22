@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-01
+- **Summary**: Abandoned RFD split into RFD 048 and RFD 049; preserved for
+  historical context on non-interactive mode design.
 
 > [!IMPORTANT]
 > This RFD is **Abandoned**.

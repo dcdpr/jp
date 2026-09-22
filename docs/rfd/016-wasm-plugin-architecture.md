@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-28
 - **Required by**: [RFD 017]
+- **Summary**: Sandboxed Wasm plugin system with WIT interfaces, dynamic
+  capability discovery, and per-plugin sandbox configuration for extensibility.
 
 ## Summary
 

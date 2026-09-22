@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-24
 - **Extended by**: [RFD 092]
+- **Summary**: Replace JP's ad-hoc interrupt handling with a layered LIFO
+  handler stack, routing OS signals through scoped notification channels.
 
 ## Summary
 

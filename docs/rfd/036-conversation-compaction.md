@@ -5,6 +5,9 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
 - **Superseded by**: [RFD 064]
+- **Summary**: Composable conversation compaction via mechanical strategies,
+  tool-aware deduplication, LLM summarization, and protocol extensions for
+  declarative compaction hints.
 
 ## Summary
 

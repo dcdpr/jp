@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
 - **Required by**: [RFD 027]
+- **Summary**: Extract the agent turn loop from jp_cli into a new jp_agent crate
+  with trait-based I/O hooks.
 
 ## Summary
 

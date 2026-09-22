@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-21
+- **Summary**: Add `jp completions` and `jp manpage` subcommands using
+  clap_complete and clap_mangen for shell integration.
 
 ## Summary
 

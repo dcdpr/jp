@@ -4,6 +4,9 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-07
+- **Summary**: Sanitize terminal output by allowlisting safe ANSI sequences
+  (colors) and dropping dangerous ones (cursor, erase, OSC) to prevent escape
+  injection attacks from untrusted content.
 
 ## Summary
 

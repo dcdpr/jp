@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-11
 - **Extends**: [RFD 008]
+- **Summary**: Split tool enable into state and allow_toggle to fix directive
+  bugs and eliminate variant proliferation.
 
 ## Summary
 

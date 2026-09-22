@@ -60,6 +60,12 @@ status, which also moves the file up to `docs/rfd/`.
 assigns the next available permanent number and renames the file. When \
 promoting to Accepted, it offers to file the RFD's tracking ticket.
 
+Promoting a draft to Discussion publishes it, and a published RFD needs a \
+`- **Summary**:` metadata field or the docs build fails. Nothing writes \
+that field: add it yourself, last in the metadata header, one sentence of \
+at most twenty words saying what the RFD proposes and not opening with \
+"This RFD".
+
 `rfd_renumber` moves an RFD (draft or published) to a new id and rewrites its \
 file name, heading, cross-references, and priority-board entry. The target id \
 stays in the same id-space; when omitted, the next available id is used (pass \
@@ -125,9 +131,10 @@ hedging language and filler.
 an RFD, use `fs_modify_file` to make targeted edits. The user will be \
 asked to confirm each modification before it is applied.
 
-8. **Format before hashing**: Run `markdown_format` before computing an \
-RFD's hash for `docs/.vitepress/rfd-summaries.json` — it reflows \
-markdown paragraphs, so a hash taken first goes stale.\
+8. **Keep the summary honest**: An RFD's `- **Summary**:` field is the \
+sentence the index pages and the priority board show. The build only \
+checks that it exists, so when an edit leaves it describing the old \
+proposal, rewrite it in the same edit or say that it needs rewriting.\
 """
 
 [[assistant.system_prompt_sections]]

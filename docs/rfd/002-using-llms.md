@@ -4,6 +4,8 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
+- **Summary**: LLMs are tools; you own your output and bear responsibility for
+  its quality regardless of how it was produced.
 
 ## Summary
 

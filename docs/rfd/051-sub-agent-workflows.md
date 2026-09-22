@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
 - **Requires**: [RFD 039], [RFD 040], [RFD 049], [RFD 050]
+- **Summary**: Guide for building sub-agent workflows using local tools, config
+  overlays, and conversation trees to delegate scoped tasks cheaply.
 
 ## Summary
 

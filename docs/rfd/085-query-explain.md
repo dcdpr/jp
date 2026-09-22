@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-12
+- **Summary**: Add --explain flag to jp query showing rendered system prompt,
+  tools, attachments, and final request without calling the LLM provider.
 
 ## Summary
 

@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
 - **Required by**: [RFD 051]
+- **Summary**: Hide conversations from default listings and expose
+  conversation_id to tools for sub-agent workflows.
 
 ## Summary
 

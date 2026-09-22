@@ -8,8 +8,8 @@ renaming its file to the slug the new title produces. The id is kept, so \
 `RFD <id>` mentions elsewhere stay correct; `<id>-slug.md` link targets under \
 `docs/` are rewritten, and matches outside `docs/` are reported but not \
 rewritten. This is the only way to move an RFD file's slug: `fs_move_file` \
-refuses paths under `docs/rfd/`. Retitling a published RFD changes its site URL \
-and requires `just rfd-summaries` afterwards."""
+refuses paths under `docs/rfd/`. Retitling a published RFD changes its site \
+URL."""
 
 [conversation.tools.rfd_rename.style]
 inline_results = "full"

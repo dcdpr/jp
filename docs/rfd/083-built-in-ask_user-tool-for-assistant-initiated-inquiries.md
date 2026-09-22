@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
+- **Summary**: Built-in tool for assistant to ask typed questions mid-turn with
+  human-only enforcement and optional answer persistence.
 
 ## Summary
 

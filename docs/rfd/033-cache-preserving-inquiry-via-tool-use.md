@@ -5,6 +5,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-07
+- **Summary**: Replace structured output with a tool-use-based inquiry system to
+  preserve prompt cache and reduce LLM costs.
 
 ## Summary
 

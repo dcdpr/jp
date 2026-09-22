@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-04
 - **Extended by**: [RFD 034]
+- **Summary**: Replace tool re-invocation with async inquiries to avoid token
+  waste and latency when tools need LLM answers.
 
 ## Summary
 

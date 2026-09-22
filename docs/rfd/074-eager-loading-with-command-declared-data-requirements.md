@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-15
+- **Summary**: Commands declare data needs upfront; startup eagerly loads and
+  validates it, enabling infallible access during execution.
 
 ## Summary
 

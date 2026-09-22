@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-15
 - **Requires**: [RFD 065], [RFD 066], [RFD 058]
+- **Summary**: Detects redundant resource deliveries to LLM via URI and checksum
+  matching, replacing duplicates with brief references.
 
 ## Summary
 

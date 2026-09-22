@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
 - **Extended by**: [RFD 100][tickets]
+- **Summary**: Establishes a lightweight Request for Discussion process for
+  proposing and tracking design decisions with clear lifecycle states.
 
 ## Summary
 
@@ -335,7 +337,10 @@ All categories use the same metadata:
 - **Required by**: RFD NNN (if another RFD depends on this one)
 - **Supersedes**: RFD NNN (if applicable)
 - **Superseded by**: RFD NNN (if applicable)
+- **Summary**: One sentence, written once the RFD has a permanent number
 ```
+
+`Summary` is always last; the section below covers it.
 
 Implementation progress is tracked in [tickets], not in the metadata header.
 When `just rfd-promote` advances an RFD from Discussion to Accepted, it offers
@@ -405,6 +410,32 @@ RFDs are suppressed: a published RFD never lists a draft under `Required by` or
 When a draft is promoted, missing back-links on its dependency targets are
 filled in automatically by `rfd-promote`.
 
+#### Summary
+
+Every published RFD carries a `Summary` field: one sentence, shown on the index
+pages and the [priority board].
+It is the last entry in the metadata header, and the docs build rejects a
+published RFD without one.
+
+```markdown
+- **Summary**: Establishes a lightweight process for proposing and tracking
+  design decisions.
+```
+
+This is not the document's Summary section, which has room for the two or three
+sentences a reader needs before deciding to read on.
+The field is the one line that fits in a list.
+
+The author writes it, like every other line of the document.
+The build checks that it is there; nothing checks that it still describes what
+follows it.
+It lives in the file it summarises, so a pull request that rewrites an RFD and
+leaves the sentence untouched shows that in its diff, where a reviewer can judge
+whether it still fits.
+
+Drafts are exempt: the field is due when the RFD is promoted to Discussion and
+gets its permanent number.
+
 ### Writing Style
 
 - **Use present tense.** "This RFD describes..." not "This RFD was created to
@@ -438,9 +469,11 @@ filled in automatically by `rfd-promote`.
 
 1. Run `just rfd-promote D01` to advance the status to **Discussion**.
    This assigns a permanent number and renames the file.
-2. Open a pull request to merge your branch into `main`.
-3. Tag reviewers — people with context on the problem area.
-4. Engage with feedback.
+2. Add the `Summary` field to the metadata header.
+   The docs build rejects a published RFD without one.
+3. Open a pull request to merge your branch into `main`.
+4. Tag reviewers — people with context on the problem area.
+5. Engage with feedback.
    Update the document as the discussion evolves.
 
 ### Accepting an RFD

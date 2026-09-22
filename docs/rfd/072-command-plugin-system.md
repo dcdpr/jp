@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-06
 - **Required by**: [RFD 077]
+- **Summary**: Standalone command plugins communicate with JP via JSON-lines
+  protocol to extend subcommands across languages.
 
 ## Summary
 

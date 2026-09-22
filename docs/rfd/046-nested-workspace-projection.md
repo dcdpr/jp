@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-16
 - **Extends**: [RFD 039]
+- **Summary**: Nested workspace directories project conversation trees visually;
+  user-local storage stays flat for durability.
 
 ## Summary
 

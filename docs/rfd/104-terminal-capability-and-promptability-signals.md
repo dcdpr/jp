@@ -6,6 +6,8 @@
 - **Date**: 2026-09-04
 - **Extends**: [RFD 048]
 - **Required by**: [RFD 049]
+- **Summary**: Separate four terminal-capability questions onto different
+  signals to fix prompts and repaints in piped and redirected runs.
 
 ## Summary
 

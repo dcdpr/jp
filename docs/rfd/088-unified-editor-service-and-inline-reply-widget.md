@@ -6,6 +6,8 @@
 - **Date**: 2026-05-08
 - **Extends**: [RFD 048]
 - **Extended by**: [RFD 092], [RFD 093]
+- **Summary**: Unify editor invocation through EditorBackend trait; add vendored
+  reedline-based InlineReply widget for interrupt menu replies.
 
 ## Summary
 

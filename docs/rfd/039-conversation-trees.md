@@ -6,6 +6,9 @@
 - **Date**: 2026-03-08
 - **Extended by**: [RFD 046]
 - **Required by**: [RFD 051]
+- **Summary**: Add parent-child conversation relationships via metadata field,
+  enabling fork lineage and hierarchical organization without nested
+  directories.
 
 ## Summary
 

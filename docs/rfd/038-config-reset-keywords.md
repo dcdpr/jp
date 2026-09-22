@@ -4,6 +4,9 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
+- **Summary**: UPPERCASE keywords NONE and WORKSPACE reset config state;
+  loader.reset entry setting provides local resets; ConfigDelta becomes enum to
+  persist resets.
 
 ## Summary
 

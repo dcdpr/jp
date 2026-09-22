@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-12
 - **Extends**: [RFD 004]
+- **Summary**: Introduce configurable per-markdown-element styling via
+  MarkdownStyleSheet, replacing hard-coded SGR escapes.
 
 ## Summary
 

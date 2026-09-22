@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-14
 - **Required by**: [RFD 075], [RFD 078]
+- **Summary**: Adds typed access policy grants for tools to declare and enforce
+  what workspace resources they can access.
 
 ## Summary
 

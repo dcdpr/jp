@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-15
+- **Summary**: Decouple streaming transport from persistence by replacing
+  ConversationEvent in Event::Part with a purpose-built EventPart enum.
 
 ## Summary
 

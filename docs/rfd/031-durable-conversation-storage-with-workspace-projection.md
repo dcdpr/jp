@@ -6,6 +6,8 @@
 - **Date**: 2026-03-05
 - **Tracking Issue**: [\#788]
 - **Extended by**: [RFD 106]
+- **Summary**: Make user-local storage the durable source; workspace copies
+  become optional projections for git visibility.
 
 ## Summary
 

@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-19
 - **Extended by**: [RFD 084], [RFD 089]
+- **Summary**: Buffer segments streaming markdown blocks; TerminalRenderer
+  applies ANSI-aware terminal formatting; comrak chosen over pulldown-cmark.
 
 ## Summary
 

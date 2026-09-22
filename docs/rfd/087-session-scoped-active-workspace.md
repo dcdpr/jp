@@ -6,6 +6,8 @@
 - **Date**: 2026-06-01
 - **Extends**: [RFD 020]
 - **Tracking Issue**: [\#793]
+- **Summary**: Session-scoped active workspace lets JP commands run from
+  anywhere after selecting a workspace with `jp w use`.
 
 ## Summary
 
