@@ -5,8 +5,8 @@ use clap::Parser as _;
 use jp_config::{
     AppConfig, PartialAppConfig,
     conversation::compaction::{
-        CompactionConfig, CompactionRuleConfig, PartialCompactionRuleConfig, PartialSummaryConfig,
-        ReasoningMode, RuleBound, ToolCallsMode,
+        CompactionConfig, CompactionRuleConfig, PartialCompactionConfig,
+        PartialCompactionRuleConfig, PartialSummaryConfig, ReasoningMode, RuleBound, ToolCallsMode,
     },
     model::{PartialModelConfig, id::PartialModelIdOrAliasConfig},
 };
@@ -507,6 +507,122 @@ fn preview_rejects_a_blank_verbatim_summary() {
         "error 1: Compaction error (error:\"the summary text is empty; drop the value to generate \
          a summary instead\")"
     );
+}
+
+/// The built-in rules, as an unconfigured workspace resolves them.
+fn default_rules() -> Vec<CompactionRuleConfig> {
+    CompactionConfig::finalize_rules(PartialCompactionConfig::builtin_rules()).unwrap()
+}
+
+/// The reported bug: the defaults keep the first and last turn, so on a short
+/// conversation they cover every turn and compact nothing.
+#[test]
+fn the_default_rules_cannot_satisfy_a_conversation_shorter_than_three_turns() {
+    let selection = parse_compact(&[]).range;
+
+    for turns in [1, 2] {
+        let compactions = runtime()
+            .block_on(build_compaction_events(
+                &stream_of(turns),
+                &AppConfig::new_test(),
+                &default_rules(),
+                &selection,
+                Some(&Printer::sink()),
+            ))
+            .unwrap();
+        assert!(
+            compactions.is_empty(),
+            "{turns} turns planned {compactions:?}"
+        );
+    }
+}
+
+/// Three turns is the first size the defaults can satisfy, so the error must
+/// not fire there: it compacts the middle turn.
+#[test]
+fn the_default_rules_compact_the_middle_of_a_three_turn_conversation() {
+    let compactions = runtime()
+        .block_on(build_compaction_events(
+            &stream_of(3),
+            &AppConfig::new_test(),
+            &default_rules(),
+            &parse_compact(&[]).range,
+            Some(&Printer::sink()),
+        ))
+        .unwrap();
+
+    assert_eq!(compactions.len(), 1);
+    assert_eq!((compactions[0].from_turn, compactions[0].to_turn), (1, 1));
+}
+
+/// A range flag overrides only the side it names, so the rule's `keep_last` can
+/// still empty a range the user bounded explicitly.
+///
+/// `--from 3` on a three-turn conversation asks to start at the last turn,
+/// which the built-in `keep_last = 1` is protecting.
+/// Neither bound is malformed, so this reaches the empty-selection error rather
+/// than `check_turn_range`.
+#[test]
+fn an_explicit_start_still_collides_with_the_rule_s_protected_end() {
+    let (ctx, _out, _tmp) = preview_ctx();
+
+    let error = Compact::preview_compaction(
+        &ctx,
+        &stream_of(3),
+        &default_rules(),
+        &parse_compact(&["--from", "3"]).range,
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error.message.as_deref(),
+        Some("No turns to compact, the selection resolves to 0 of this conversation's 3 turns.")
+    );
+}
+
+/// A selection that names no window at all is empty like any other, rather than
+/// a special case.
+#[test]
+fn a_selection_with_no_window_is_rejected_too() {
+    let (ctx, _out, _tmp) = preview_ctx();
+
+    let error = Compact::preview_compaction(
+        &ctx,
+        &stream_of(3),
+        &default_rules(),
+        &parse_compact(&["--first", "0"]).range,
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error.message.as_deref(),
+        Some("No turns to compact, the selection resolves to 0 of this conversation's 3 turns.")
+    );
+}
+
+/// The preview refuses what the real run refuses, so `--dry-run` on a selection
+/// that compacts nothing is the same error rather than a successful empty
+/// preview.
+#[test]
+fn preview_rejects_a_selection_that_compacts_nothing() {
+    let (ctx, _out, _tmp) = preview_ctx();
+
+    let error = Compact::preview_compaction(
+        &ctx,
+        &stream_of(2),
+        &default_rules(),
+        &parse_compact(&[]).range,
+    )
+    .unwrap_err();
+
+    // The rendered command error's message, which is the whole of what reaches
+    // the terminal: the error carries no metadata, and metadata is what `details`
+    // renders under the message.
+    assert_eq!(
+        error.message.as_deref(),
+        Some("No turns to compact, the selection resolves to 0 of this conversation's 2 turns.")
+    );
+    assert!(error.metadata.is_empty(), "got {:?}", error.metadata);
 }
 
 #[test]

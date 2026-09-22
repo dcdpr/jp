@@ -494,7 +494,9 @@ fn overlap_error(overlap: &SummaryOverlap) -> crate::error::Error {
 /// already-resolved range.
 ///
 /// A rule carrying `summary.text` is satisfied without contacting a provider.
-/// Otherwise the summarizer reads the raw events in `events` for the range.
+/// Otherwise the summarizer reads the range in `events` as this rule's
+/// mechanical policies leave it, so the text stands in for the turns the stored
+/// event will actually project.
 async fn build_compaction_for_range(
     events: &ConversationStream,
     cfg: &jp_config::AppConfig,
@@ -522,6 +524,7 @@ async fn build_compaction_for_range(
         events,
         range.from_turn,
         range.to_turn,
+        &compaction,
         Some(summary),
         cfg,
     )
@@ -947,9 +950,14 @@ impl Compact {
         )
         .await?;
 
+        // A run that compacts nothing is an error rather than a silent no-op: a
+        // rule's bounds can come from config the user never typed, so without
+        // this the only signal is the absence of one.
         if compactions.is_empty() {
-            ctx.printer.println("Nothing to compact.");
-            return Ok(());
+            return Err(crate::error::Error::NothingToCompact {
+                turns: events_snapshot.turn_count(),
+            }
+            .into());
         }
 
         let last_turn = events_snapshot.turn_count().saturating_sub(1);
@@ -1087,9 +1095,13 @@ impl Compact {
             }
         }
 
+        // The preview refuses what the real run refuses, so an empty plan is the
+        // same error here.
         if new_segments.is_empty() {
-            ctx.printer.println("Nothing to compact.");
-            return Ok(());
+            return Err(crate::error::Error::NothingToCompact {
+                turns: events_snapshot.turn_count(),
+            }
+            .into());
         }
 
         // Prepend the pre-existing compactions so already-compacted turns aren't

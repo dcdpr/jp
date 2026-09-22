@@ -1,13 +1,15 @@
 use jp_config::model::id::{ModelIdConfig, ProviderId};
 use jp_conversation::{
-    ConversationEvent, ConversationStream,
-    event::{ChatRequest, ChatResponse},
+    Compaction, ConversationEvent, ConversationStream, EventKind, PolicySpec, ReasoningPolicy,
+    ToolCallPolicy,
+    event::{ChatRequest, ChatResponse, ToolCallRequest, ToolCallResponse},
 };
 use jp_llm::{
     event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction},
     model::ModelDetails,
     provider::mock::MockProvider,
 };
+use serde_json::Map;
 
 use super::{
     Error, StreamOutcome, build_range_stream, collect_range_events, failure_reason,
@@ -194,8 +196,7 @@ fn range_stream_carries_the_source_repairs() {
     );
     assert_eq!(changed, 1, "the overlay changes the source projection");
 
-    let mut range = build_range_stream(&source, 0, 0);
-    range.apply_projection();
+    let range = build_range_stream(&source, 0, 0, &Compaction::new(0, 0));
 
     let signatures: Vec<_> = range
         .iter()
@@ -206,6 +207,187 @@ fn range_stream_carries_the_source_repairs() {
         signatures.is_empty(),
         "stale signature reaches the summary request: {signatures:?}"
     );
+}
+
+/// A turn holding reasoning, a tool call pair, and an answer.
+fn turn_with_everything() -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("do the thing"));
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::reasoning("a long deliberation"))
+        .add_tool_call_request(ToolCallRequest {
+            id: "call-1".to_owned(),
+            name: "grep_files".to_owned(),
+            arguments: Map::new(),
+        })
+        .add_tool_call_response(ToolCallResponse {
+            id: "call-1".to_owned(),
+            result: Ok("three matches".to_owned()),
+        })
+        .add_chat_response(ChatResponse::message("done"))
+        .build()
+        .unwrap();
+    stream
+}
+
+/// The text a summary request would carry, in stream order.
+fn request_payloads(stream: &ConversationStream) -> Vec<String> {
+    stream
+        .iter()
+        .filter_map(|e| match &e.event.kind {
+            EventKind::ChatRequest(r) => Some(r.content.clone()),
+            EventKind::ChatResponse(ChatResponse::Message { message }) => Some(message.clone()),
+            EventKind::ChatResponse(ChatResponse::Reasoning { reasoning }) => {
+                Some(reasoning.clone())
+            }
+            EventKind::ToolCallResponse(r) => r.result.as_ref().ok().cloned(),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `--summary` on its own summarizes the turn whole: the reasoning and the tool
+/// results are part of what the summary has to stand in for, so they are part
+/// of what the summarizer reads.
+#[test]
+fn a_summary_only_rule_sends_the_whole_turn() {
+    let range = build_range_stream(&turn_with_everything(), 0, 0, &Compaction::new(0, 0));
+
+    assert_eq!(request_payloads(&range), vec![
+        "do the thing",
+        "a long deliberation",
+        "three matches",
+        "done",
+    ]);
+}
+
+/// A compaction already on the conversation does not reach the summarizer.
+///
+/// Stripping reasoning over a range and later summarizing part of it are two
+/// decisions, and the second is allowed to disagree with the first: the summary
+/// is built from what the turns hold, so it can take the reasoning into account
+/// even though the projected conversation no longer shows it.
+/// Only the policies of the rule generating this summary narrow what is sent.
+#[test]
+fn an_existing_compaction_does_not_narrow_what_is_summarized() {
+    let mut source = turn_with_everything();
+    source.add_compaction(Compaction::new(0, 0).with_reasoning(PolicySpec {
+        policy: ReasoningPolicy::Strip,
+        over: None,
+    }));
+
+    // The projected conversation has lost the reasoning, which is what makes
+    // this worth pinning: the summarizer reads the stored events instead.
+    let mut projected = source.clone();
+    projected.apply_projection();
+    assert!(
+        !request_payloads(&projected).contains(&"a long deliberation".to_owned()),
+        "the existing compaction must strip reasoning from the projection"
+    );
+
+    let range = build_range_stream(&source, 0, 0, &Compaction::new(0, 0));
+
+    assert_eq!(request_payloads(&range), vec![
+        "do the thing",
+        "a long deliberation",
+        "three matches",
+        "done",
+    ]);
+}
+
+/// A rule that strips reasoning summarizes a range with no reasoning in it.
+///
+/// The reported failure: a turn whose reasoning stream alone fills the window
+/// could not be summarized, because the request carried the reasoning the same
+/// rule was about to discard.
+#[test]
+fn a_rule_that_strips_reasoning_does_not_send_it() {
+    let policies = Compaction::new(0, 0).with_reasoning(PolicySpec {
+        policy: ReasoningPolicy::Strip,
+        over: None,
+    });
+
+    let range = build_range_stream(&turn_with_everything(), 0, 0, &policies);
+
+    assert_eq!(request_payloads(&range), vec![
+        "do the thing",
+        "three matches",
+        "done",
+    ]);
+}
+
+/// A rule that omits tool calls summarizes a range with no tool calls in it.
+#[test]
+fn a_rule_that_omits_tool_calls_does_not_send_them() {
+    let policies = Compaction::new(0, 0).with_tool_calls(PolicySpec {
+        policy: ToolCallPolicy::Omit,
+        over: None,
+    });
+
+    let range = build_range_stream(&turn_with_everything(), 0, 0, &policies);
+
+    assert_eq!(request_payloads(&range), vec![
+        "do the thing",
+        "a long deliberation",
+        "done",
+    ]);
+}
+
+/// The policies are renumbered onto the range stream, whose turns start at
+/// zero.
+///
+/// Carrying the source's turn numbers would point the policies past the end of
+/// a range that doesn't start at turn 0, silently sending the range unstripped.
+#[test]
+fn policies_reach_a_range_that_does_not_start_at_turn_zero() {
+    let mut source = ConversationStream::new_test();
+    source.start_turn(ChatRequest::from("first"));
+    source.extend(turn_with_everything().iter().map(|e| e.event.clone()));
+
+    let policies = Compaction::new(1, 1).with_reasoning(PolicySpec {
+        policy: ReasoningPolicy::Strip,
+        over: None,
+    });
+
+    let range = build_range_stream(&source, 1, 1, &policies);
+
+    assert_eq!(request_payloads(&range), vec![
+        "do the thing",
+        "three matches",
+        "done",
+    ]);
+}
+
+/// A stripped range is measured at its stripped size.
+///
+/// The window check runs on the stream this builds, so a range that only fits
+/// once its reasoning is stripped has to be measured that way or it is rejected
+/// for a size the request never has.
+#[test]
+fn a_stripped_range_is_measured_without_what_was_stripped() {
+    let mut source = ConversationStream::new_test();
+    source.start_turn(ChatRequest::from("do the thing"));
+    source
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::reasoning("z".repeat(100_000)))
+        .add_chat_response(ChatResponse::message("done"))
+        .build()
+        .unwrap();
+
+    let policies = Compaction::new(0, 0).with_reasoning(PolicySpec {
+        policy: ReasoningPolicy::Strip,
+        over: None,
+    });
+    let range = build_range_stream(&source, 0, 0, &policies);
+
+    // Roughly "do the thing" plus "done", nowhere near the 100k of reasoning.
+    assert!(
+        jp_llm::window::estimate_chars(&range) < 100,
+        "got {}",
+        jp_llm::window::estimate_chars(&range)
+    );
+    assert_eq!(window_overflow(&range, Some(1000), 0), None);
 }
 
 #[test]

@@ -5,7 +5,7 @@ use jp_config::{
     model::id::ModelIdConfig,
 };
 use jp_conversation::{
-    ConversationEvent, ConversationStream,
+    Compaction, ConversationEvent, ConversationStream,
     event::{ChatRequest, ChatResponse},
     thread::ThreadBuilder,
 };
@@ -40,11 +40,20 @@ Be concise but thorough. The reader should be able to continue the conversation 
 ///
 /// The summary is a plain text string suitable for storing in a
 /// `SummaryPolicy`.
-/// The summarizer reads the raw (non-compacted) events.
+///
+/// `policies` is the mechanical compaction the same rule produces for this
+/// range.
+/// The summarizer reads the range as those policies leave it, so a rule that
+/// strips reasoning summarizes a range without reasoning in it.
+/// It reads the range's stored events otherwise, not the conversation's
+/// projection: an older compaction over the same turns is another rule's
+/// opinion, and a summary standing in for these turns is built from what they
+/// actually hold.
 pub async fn generate_summary(
     events: &ConversationStream,
     range_from: usize,
     range_to: usize,
+    policies: &Compaction,
     summary_cfg: Option<&SummaryConfig>,
     app_cfg: &AppConfig,
 ) -> Result<String> {
@@ -57,7 +66,7 @@ pub async fn generate_summary(
     // is reused for provider lookup below.
     let model_id = model.id.resolved().clone();
 
-    let mut stream = build_range_stream(events, range_from, range_to);
+    let mut stream = build_range_stream(events, range_from, range_to, policies);
 
     // Override the full assistant model (id plus parameters) so a
     // summary-specific model can also set max tokens, temperature, reasoning,
@@ -329,10 +338,18 @@ fn failure_reason(finish: Option<&FinishReason>) -> String {
 /// request replays the stale metadata and pays for the same repair again.
 /// Overlays match by value, so copying all of them is safe: one whose target
 /// falls outside the range matches nothing.
+///
+/// `policies` carries the range's mechanical policies, renumbered onto this
+/// stream, whose turns start at zero.
+/// The result is projected, so the stripping is baked into the events: a caller
+/// measuring the stream against a context window sees the size the request will
+/// actually be.
+/// A `policies` with no mechanical opinion projects to no change.
 fn build_range_stream(
     events: &ConversationStream,
     range_from: usize,
     range_to: usize,
+    policies: &Compaction,
 ) -> ConversationStream {
     let mut stream = ConversationStream::new(events.base_config());
     stream.extend(collect_range_events(events, range_from, range_to));
@@ -340,6 +357,17 @@ fn build_range_stream(
     for overlay in events.overlays() {
         stream.add_overlay(overlay.patches.clone());
     }
+
+    // The summary belongs to the compaction being built, not to the request that
+    // produces its text: carrying it here would replace the range with an
+    // empty summary and leave nothing to summarize.
+    stream.add_compaction(Compaction {
+        from_turn: 0,
+        to_turn: range_to.saturating_sub(range_from),
+        summary: None,
+        ..policies.clone()
+    });
+    stream.apply_projection();
 
     stream
 }
