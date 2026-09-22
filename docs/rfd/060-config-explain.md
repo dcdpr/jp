@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-21
 - **Required by**: [RFD 061], [RFD 063]
+- **Summary**: Global `--explain` flag traces config resolution through 9
+  layers, showing where each field value originates.
 
 ## Summary
 

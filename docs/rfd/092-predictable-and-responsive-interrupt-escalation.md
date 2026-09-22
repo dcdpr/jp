@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-03
 - **Extends**: [RFD 045], [RFD 088]
+- **Summary**: Hardened interrupt model with predictable three-rung escalation,
+  menus at every stage, and watchdog-bounded graceful shutdown.
 
 ## Summary
 

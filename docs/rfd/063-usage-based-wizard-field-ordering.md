@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-21
 - **Requires**: [RFD 061], [RFD 062], [RFD 060]
+- **Summary**: Extend config wizard with frecency-based field ordering using CLI
+  usage tracking data.
 
 ## Summary
 

@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-20
 - **Extends**: [RFD 056]
+- **Summary**: Adds group `overrides` section to enforce tool configuration that
+  outlasts tool-level settings but yields to CLI flags.
 
 ## Summary
 

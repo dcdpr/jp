@@ -5,6 +5,9 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-28
 - **Extends**: [RFD 004]
+- **Summary**: Stream paragraphs incrementally while guaranteeing byte-identical
+  output to non-streaming, with four guards managing block-start ambiguity,
+  setext reinterpretation, inline spans, and wrap-in-progress stability.
 
 ## Summary
 

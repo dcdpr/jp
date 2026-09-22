@@ -6,6 +6,9 @@
 - **Date**: 2026-04-01
 - **Extends**: [RFD 016]
 - **Requires**: [RFD 076]
+- **Summary**: Mandatory OS-level sandboxing for tool subprocesses using
+  platform-native mechanisms, extending access policy with subprocess and
+  environment controls.
 
 ## Summary
 

@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-15
 - **Extends**: [RFD 100]
+- **Summary**: Move ticket ids from sequential counters to collision-resistant
+  base-32 time-bucketed random ids.
 
 ## Summary
 

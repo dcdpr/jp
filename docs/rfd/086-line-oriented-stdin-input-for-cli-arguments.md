@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-17
 - **Extends**: [RFD 048]
+- **Summary**: Convention for multi-value CLI arguments: `-` reads line-oriented
+  values from stdin, starting with conversation targeting.
 
 ## Summary
 

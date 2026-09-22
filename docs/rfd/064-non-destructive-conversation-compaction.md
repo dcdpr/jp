@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
 - **Supersedes**: [RFD 036]
+- **Summary**: Non-destructive conversation compaction through overlay events
+  that project reduced views without mutating stored data.
 
 ## Summary
 

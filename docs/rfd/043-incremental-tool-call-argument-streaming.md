@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-24
+- **Summary**: Extend EventBuilder to incrementally parse and emit tool call
+  arguments as typed fragments during streaming.
 
 ## Summary
 

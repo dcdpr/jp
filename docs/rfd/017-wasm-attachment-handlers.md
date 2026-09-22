@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-28
 - **Requires**: [RFD 015], [RFD 016]
+- **Summary**: Wasm plugins export an attachment interface, wrapped in a native
+  Handler adapter for transparent integration.
 
 ## Summary
 

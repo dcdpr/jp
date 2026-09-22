@@ -6,6 +6,8 @@
 - **Date**: 2025-07-20
 - **Extends**: [RFD 055]
 - **Extended by**: [RFD 057]
+- **Summary**: Groups can declare default tool configuration, allowing tool
+  inheritance without per-tool repetition.
 
 ## Summary
 

@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-31
+- **Summary**: Native macOS app for browsing JP conversations via FFI, with
+  public Workspace::open API extracted from CLI.
 
 ## Summary
 

@@ -5,6 +5,9 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-26
 - **Extends**: [RFD 020]
+- **Summary**: Guard-scoped persistence: ConversationMut auto-persists on drop
+  while holding cross-process file lock, with callback-based writes and explicit
+  flush for checkpoints.
 
 ## Summary
 

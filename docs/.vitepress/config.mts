@@ -5,6 +5,7 @@ import { dirname, posix, resolve } from 'node:path'
 import { defineConfig } from 'vitepress'
 import abnfGrammar from './grammars/abnf.tmLanguage.json'
 import { joinMultilineInlineCode } from './join-inline-code.mjs'
+import { field } from './loaders/metadata.mjs'
 import { inDevelopmentRfds, parseTicket, readLabels } from './loaders/ticket-shared.mjs'
 import { rfdRedirectServer, writeRfdRedirects } from './rfd-redirects.mjs'
 
@@ -189,23 +190,20 @@ const ticketBoardWriter = {
                 if (!/^[0-9a-z]{7}-.+\.md$/.test(name)) continue
                 const file = resolve(dir, name)
                 const content = readFileSync(file, 'utf-8')
-                const field = (key) =>
-                    content.match(new RegExp(`^- \\*\\*${key}\\*\\*:\\s*(.+)`, 'm'))?.[1]?.trim()
-                        ?? null
                 const id = `T-${name.slice(0, 7)}`
+                // The shared readers, so the dev board and the published one
+                // agree: both are scoped to the header block, where a scan of
+                // the whole file would also collect a metadata or label line
+                // quoted in a description or a comment.
                 tickets.set(id, {
                     id,
                     file,
                     title: content.match(/^# (.+)/m)?.[1]?.trim() ?? name,
-                    status: field('Status'),
-                    kind: field('Kind'),
-                    blockedBy: field('Blocked by'),
-                    // The shared reader, so the dev board and the published
-                    // one agree: it is scoped to the header block, where a
-                    // scan of the whole file would also collect a label line
-                    // quoted in a description or a comment.
+                    status: field(content, 'Status'),
+                    kind: field(content, 'Kind'),
+                    blockedBy: field(content, 'Blocked by'),
                     labels: readLabels(content),
-                    implements: field('Implements'),
+                    implements: field(content, 'Implements'),
                     path: `/ticket/${name.replace(/\.md$/, '')}`,
                 })
             }

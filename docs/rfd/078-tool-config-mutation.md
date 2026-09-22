@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
 - **Requires**: [RFD 076], [RFD 070]
+- **Summary**: Scoped tool config access via `access.config` rules, with
+  re-invocation on delta rejection and per-cycle commit buffering.
 
 ## Summary
 

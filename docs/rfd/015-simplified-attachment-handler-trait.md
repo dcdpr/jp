@@ -6,6 +6,8 @@
 - **Date**: 2026-02-27
 - **Supersedes**: [RFD 014]
 - **Required by**: [RFD 017]
+- **Summary**: Simplify attachment handlers from stateful (five methods) to
+  stateless (three methods), moving URL tracking to the host.
 
 ## Summary
 

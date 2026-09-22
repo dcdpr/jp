@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-11
 - **Extended by**: [RFD 106]
+- **Summary**: Split conversation storage: extract immutable base config
+  snapshot into separate base_config.json file from events.json.
 
 ## Summary
 

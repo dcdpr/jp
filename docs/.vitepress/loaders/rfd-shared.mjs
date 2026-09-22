@@ -1,8 +1,7 @@
-import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { field } from './metadata.mjs'
+import { field, wrappedField } from './metadata.mjs'
 import {
     checkMilestones,
     normalizePriority,
@@ -42,6 +41,8 @@ export function parseMeta(content, filename) {
             ?? null,
         authors: field(content, 'Authors'),
         date: field(content, 'Date'),
+        // Long enough to wrap, unlike every other field here.
+        summary: wrappedField(content, 'Summary'),
         slug: filename.replace(/\.md$/, ''),
     }
 }
@@ -93,14 +94,13 @@ export function referencedLabels(content) {
 // `referencedBy` is computed within the given file set only. Published RFDs
 // can't reference drafts, so a draft's `referencedBy` lists drafts; a
 // published RFD's stays published-only.
-export function buildEntries(dir, files, summaries, basePath) {
+export function buildEntries(dir, files, basePath) {
     const rfds = files.map(f => {
         const content = readFileSync(resolve(dir, f), 'utf-8')
         const meta = parseMeta(content, f)
         return {
             ...meta,
             path: `${basePath}/${meta.slug}`,
-            summary: summaries[f]?.summary ?? null,
             references: parseReferences(content, meta.num),
             // Cross-kind links, resolved in the browser against both sets.
             links: referencedLabels(content).filter(label => label !== meta.num),
@@ -118,10 +118,8 @@ export function buildEntries(dir, files, summaries, basePath) {
 
 // Read the priority board state. This is human-curated source of truth: the
 // prioritised `planned` milestone groups (see `normalizePriority` for the
-// exact shape) and the unsorted `backlog` below the cutoff. Kept deliberately
-// separate from the regenerable
-// `rfd-summaries.json` cache, so clearing the cache never loses the board. A
-// missing file is an empty board.
+// exact shape) and the unsorted `backlog` below the cutoff. A missing file is
+// an empty board.
 export function loadPriority(path) {
     let raw
     try {
@@ -246,36 +244,24 @@ export function findDuplicateIds(files) {
         `Each RFD id must map to exactly one file.`
 }
 
-// Every published RFD needs a current one-line summary in the cache. Drafts
-// are exempt (they carry no cached summaries).
-export function checkSummaries(dir, files, summaries) {
-    const missing = []
-    const stale = []
-    for (const f of files) {
-        const entry = summaries[f]
-        if (!entry?.summary) {
-            missing.push(f)
-            continue
-        }
-        const content = readFileSync(resolve(dir, f))
-        const hash = createHash('sha256').update(content).digest('hex')
-        if (hash !== entry.hash) {
-            stale.push(f)
-        }
-    }
+// Every published RFD needs a one-line summary for the index pages and the
+// priority board. Drafts are exempt: they are unpublished, and nothing indexes
+// them by summary.
+//
+// Whether a summary still describes the document is left to whoever reviews
+// the change. It sits in the same file as the prose it summarises, so a pull
+// request that moves one and not the other says so in its diff.
+export function checkSummaries(dir, files) {
+    const missing = files.filter(f =>
+        !wrappedField(readFileSync(resolve(dir, f), 'utf-8'), 'Summary'))
 
-    const problems = []
-    if (missing.length > 0) {
-        const nums = missing.map(f => f.match(/^(\d+)/)?.[1]).join(', ')
-        problems.push(`Missing summaries for: ${nums}`)
-    }
-    if (stale.length > 0) {
-        const nums = stale.map(f => f.match(/^(\d+)/)?.[1]).join(', ')
-        problems.push(`Stale summaries for: ${nums}`)
-    }
-    if (problems.length === 0) return null
+    if (missing.length === 0) return null
 
-    return `${problems.join('. ')}. Run \`just rfd-summaries\` to update.`
+    const nums = missing.map(f => f.match(/^(\d+)/)?.[1]).join(', ')
+    return `Missing summaries for: ${nums}.\n\n` +
+        `Add a \`- **Summary**:\` field to the metadata header of each, one ` +
+        `sentence saying what the RFD proposes. It is what the index pages ` +
+        `and the priority board show.`
 }
 
 // Reject `DNN`-style references in published RFDs.
@@ -636,7 +622,6 @@ export function checkRequiresOnImplemented(graph) {
 export function assembleBoard() {
     const rfdDir = resolve(import.meta.dirname, '../../rfd')
     const draftsDir = resolve(import.meta.dirname, '../../rfd/drafts')
-    const cachePath = resolve(import.meta.dirname, '../rfd-summaries.json')
     const priorityPath = resolve(import.meta.dirname, '../../rfd/.priority.json')
 
     const publishedFiles = readdirSync(rfdDir)
@@ -646,16 +631,9 @@ export function assembleBoard() {
         .filter(f => /^D\d{2}-.+\.md$/.test(f))
         .sort()
 
-    let summaries
-    try {
-        summaries = JSON.parse(readFileSync(cachePath, 'utf-8'))
-    } catch {
-        summaries = {}
-    }
-
     const entries = [
-        ...buildEntries(rfdDir, publishedFiles, summaries, '/rfd'),
-        ...buildEntries(draftsDir, draftFiles, {}, '/rfd/drafts'),
+        ...buildEntries(rfdDir, publishedFiles, '/rfd'),
+        ...buildEntries(draftsDir, draftFiles, '/rfd/drafts'),
     ]
 
     // Combined graph so the ordering constraint spans both id spaces (a draft

@@ -4,6 +4,9 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-18
+- **Summary**: Introduces Workspace::sanitize() method that validates .jp data
+  store, moves corrupt conversations to .trash/ with error explanations, and
+  ensures four invariants before CLI commands run.
 
 ## Summary
 

@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-12
 - **Extends**: [RFD 005][RFD 005-2]
+- **Summary**: Unify inquiry event recording across all routing paths; add
+  cancellation/redaction variants; track attempts per turn.
 
 ## Summary
 

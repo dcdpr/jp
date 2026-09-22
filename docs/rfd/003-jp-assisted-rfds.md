@@ -4,6 +4,9 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
+- **Summary**: Propose an `rfd` skill configuration enabling JP to assist RFD
+  writing through research, structure, and collaborative editing—not
+  authorship.
 
 ## Summary
 

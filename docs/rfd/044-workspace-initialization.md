@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-14
+- **Summary**: Redesign `jp init` to generate schema-driven config with
+  interactive model/mode selection and curated commented fields.
 
 ## Summary
 

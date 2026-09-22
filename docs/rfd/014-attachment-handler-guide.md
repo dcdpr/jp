@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-27
 - **Superseded by**: [RFD 015]
+- **Summary**: Guide for implementing attachment handlers: URL parsing, trait
+  methods, registration, and conventions for fetching user-provided context.
 
 ## Summary
 

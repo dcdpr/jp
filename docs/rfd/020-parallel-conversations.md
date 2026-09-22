@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
 - **Extended by**: [RFD 069], [RFD 087]
+- **Summary**: Replace global active conversation with per-session tracking and
+  add conversation locks for parallel terminal work.
 
 ## Summary
 

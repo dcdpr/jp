@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-27
+- **Summary**: Automatically retry forced tool calls with reasoning disabled if
+  the model ignores soft-force directives.
 
 ## Summary
 

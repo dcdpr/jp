@@ -5,6 +5,9 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-21
 - **Extends**: [RFD 101]
+- **Summary**: Multi-valued labels replacing single-valued ones; add/set/rm
+  verbs, set-membership filtering, config list-values, removes --label from
+  query/fork.
 
 ## Summary
 

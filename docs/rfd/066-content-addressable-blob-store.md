@@ -6,6 +6,8 @@
 - **Date**: 2025-07-17
 - **Requires**: [RFD 065], [RFD 058]
 - **Required by**: [RFD 067]
+- **Summary**: Externalizes all content payloads to gzip-compressed
+  SHA-256-addressed blob store; events.json carries only metadata references.
 
 ## Summary
 

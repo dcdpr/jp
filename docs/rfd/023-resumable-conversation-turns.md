@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
 - **Required by**: [RFD 027]
+- **Summary**: Persist tool results incrementally, split incomplete turns from
+  stream, resume with interactive prompt or --continue-turn flag.
 
 ## Summary
 

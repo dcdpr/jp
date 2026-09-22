@@ -5,6 +5,9 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-23
 - **Required by**: [RFD 037]
+- **Summary**: System notification queue delivers asynchronous subsystem
+  notifications to the assistant by embedding them in existing conversation
+  messages.
 
 ## Summary
 

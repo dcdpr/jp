@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-18
+- **Summary**: Llamacpp provider will drop the openai crate to properly extract
+  reasoning content from all three llama.cpp reasoning formats.
 
 ## Summary
 

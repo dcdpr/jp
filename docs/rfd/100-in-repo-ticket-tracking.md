@@ -6,6 +6,9 @@
 - **Date**: 2026-08-05
 - **Extends**: [RFD 001], [RFD 041]
 - **Extended by**: [RFD 102]
+- **Summary**: Lightweight markdown-based work items tracked in-repo, displacing
+  GitHub issues from assistant context with kanban board and RFD promotion
+  mechanics.
 
 ## Summary
 

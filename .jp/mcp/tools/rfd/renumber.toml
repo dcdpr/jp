@@ -9,8 +9,7 @@ link targets across all RFDs, and the priority board. The target id must stay \
 in the same id-space (drafts move to another draft slot, published RFDs to \
 another permanent number; moving between spaces is `rfd_promote`'s job). \
 References outside `docs/rfd/` (code comments, other docs) are reported but \
-not rewritten. Renumbering a published RFD changes its site URL and requires \
-`just rfd-summaries` afterwards."""
+not rewritten. Renumbering a published RFD changes its site URL."""
 
 [conversation.tools.rfd_renumber.style]
 inline_results = "full"

@@ -1,6 +1,6 @@
 # Renaming or renumbering an RFD orphans its summary-cache entry
 
-- **Status**: Todo
+- **Status**: Done
 - **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-07
@@ -27,3 +27,28 @@ Two ways out, and the second looks better:
 
 The second keeps the recipes ignorant of the cache and fixes the orphan left by
 every rename already committed.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-09-22T10:56:16Z
+
+Resolved by removing the cache, not by fixing either of the two ways out.
+
+An RFD's summary is a `- **Summary**:` field in its metadata header, so it moves
+with the file.
+`rfd-rename` and `rfd-renumber` have nothing left to re-key, and both lost the
+`Run \`just rfd-summaries\`` line they printed.
+
+`rfd-summaries` is gone with it.
+The author writes the sentence; the docs build rejects a published RFD that has
+none (`checkSummaries` in `docs/.vitepress/loaders/rfd-shared.mjs`).
+Whether a summary still describes its document is a question for whoever reviews
+the diff, which now shows the prose and the sentence describing it in the same
+file.
+
+`docs/.vitepress/rfd-summaries.json` was the merge-conflict hotspot that
+prompted the change: 113 commits touched it in twelve months, and every new RFD
+appended at EOF, which conflicts between any two branches that add one.

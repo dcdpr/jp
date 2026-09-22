@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
+- **Summary**: Abandoned design for live re-attachment to detached query
+  processes via Unix domain sockets; superseded by RFD 027.
 
 > [!IMPORTANT]
 > This RFD is **Abandoned**.

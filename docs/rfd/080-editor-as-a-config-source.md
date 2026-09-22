@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-04
 - **Requires**: [RFD 079]
+- **Summary**: Move editor invocation into startup pipeline to treat it as a
+  config source, fixing phantom deltas.
 
 ## Summary
 

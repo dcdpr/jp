@@ -6,6 +6,9 @@
 - **Date**: 2026-03-17
 - **Required by**: [RFD 027], [RFD 051]
 - **Requires**: [RFD 018], [RFD 104]
+- **Summary**: Introduces configurable detached prompt policy,
+  `--non-interactive` flag, and `exclusive` question property for
+  non-interactive environments.
 
 ## Summary
 

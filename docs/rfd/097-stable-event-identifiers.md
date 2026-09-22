@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-03
 - **Extended by**: [RFD 098]
+- **Summary**: Assign stable, stream-unique identifiers to every conversation
+  event for safe manual editing and future reference features.
 
 ## Summary
 

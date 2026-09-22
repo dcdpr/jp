@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-07
+- **Summary**: Add FTS5 full-text search, typo tolerance, and local semantic
+  vector search to grizzly's note_search tool.
 
 ## Summary
 

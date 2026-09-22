@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
 - **Extended by**: [RFD 106]
+- **Summary**: Replace Workspace's optional Storage with four focused trait
+  objects (Persist, Load, Lock, Session) for cleaner polymorphism.
 
 ## Summary
 

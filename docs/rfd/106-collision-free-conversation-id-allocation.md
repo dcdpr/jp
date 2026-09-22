@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-05
 - **Extends**: [RFD 031], [RFD 054], [RFD 073]
+- **Summary**: Allocate collision-free conversation IDs by scanning for
+  occupancy and claiming the first unoccupied slot under a stable lock.
 
 ## Summary
 

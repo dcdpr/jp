@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
+- **Summary**: Adds conversation archiving to JP, moving inactive conversations
+  to a hidden partition while preserving them.
 
 ## Summary
 

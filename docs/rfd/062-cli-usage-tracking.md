@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-21
 - **Required by**: [RFD 063]
+- **Summary**: Adds local-only CLI usage tracking to record command invocations
+  and argument patterns per workspace for adaptive features.
 
 ## Summary
 

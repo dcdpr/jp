@@ -5,6 +5,9 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-03
 - **Extends**: [RFD 048]
+- **Summary**: Consolidates nine ephemeral terminal indicators into a
+  printer-owned status region primitive, showing live child-process output with
+  multi-row windows and standardized chrome lifecycle.
 
 ## Summary
 

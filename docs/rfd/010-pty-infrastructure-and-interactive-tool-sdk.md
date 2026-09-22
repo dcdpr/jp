@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-23
 - **Requires**: [RFD 009]
+- **Summary**: Proposes jp_pty crate and interactive SDK for building stateful
+  tools that wrap interactive CLI programs.
 
 ## Summary
 
