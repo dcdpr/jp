@@ -199,36 +199,29 @@ expression: v
             ),
             metadata: {},
         },
-        Part {
-            index: 1,
-            part: Message(
-                "Your previous ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "message w",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "as: “Test mes",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "sage”",
-            ),
-            metadata: {},
-        },
         Flush {
             index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "Your previous message",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " was: “",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "Test message”",
+            ),
             metadata: {},
         },
         Flush {
@@ -629,57 +622,50 @@ expression: v
             ),
             metadata: {},
         },
-        Part {
-            index: 1,
-            part: Message(
-                "The p",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "revious tool call re",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "tu",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "rned: `The secret ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "code",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "is: 42`",
-            ),
-            metadata: {},
-        },
         Flush {
             index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "The previous",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " tool call returned:",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "The secret code is",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ": 42",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "`",
+            ),
             metadata: {},
         },
         Flush {

@@ -48,7 +48,8 @@ fn provider_config() -> LlmProviderConfig {
     config.cerebras.api_key_env = env.clone();
     config.google.api_key_env = env.clone();
     config.openai.api_key_env = env.clone();
-    config.openrouter.api_key_env = env;
+    config.openrouter.api_key_env = env.clone();
+    config.vllm.api_key_env = env;
     config
 }
 
@@ -238,6 +239,7 @@ macro_rules! request_for_all_providers {
         mod ollama     { use super::*; $(request_for_all_providers!(@case $scenario, ProviderId::Ollama);)* }
         mod openai     { use super::*; $(request_for_all_providers!(@case $scenario, ProviderId::Openai);)* }
         mod openrouter { use super::*; $(request_for_all_providers!(@case $scenario, ProviderId::Openrouter);)* }
+        mod vllm       { use super::*; $(request_for_all_providers!(@case $scenario, ProviderId::Vllm);)* }
     };
     (@case $scenario:ident, $provider:expr) => {
         paste::paste! {

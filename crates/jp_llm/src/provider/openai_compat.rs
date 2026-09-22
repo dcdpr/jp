@@ -254,9 +254,10 @@ pub(crate) fn convert_events(events: ConversationStream) -> Vec<Value> {
 
 /// Convert tool definitions to the OpenAI-compatible JSON format.
 ///
-/// If [`ToolChoice::Function`] is set, only include the named tool.
-/// The chat-completions dialect has no way to demand one tool by name, but it
-/// has `required` mode, so narrowing the list to one tool gets the same result.
+/// If [`ToolChoice::Function`] is set, only include the named tool. llama.cpp
+/// doesn't support naming a tool in `tool_choice`, so the list is narrowed to
+/// one tool and paired with `required` mode instead, which reaches the same
+/// outcome on every server speaking this dialect.
 pub(crate) fn convert_tools(tools: Vec<ToolDefinition>, tool_choice: &ToolChoice) -> Vec<Value> {
     tools
         .into_iter()
@@ -358,6 +359,15 @@ pub(crate) struct StreamState {
     /// content frame that holds anything other than newlines.
     /// While set, leading newlines are stripped from each content frame.
     trim_content_prefix: bool,
+    /// Whether the server has separated reasoning from content in this stream.
+    ///
+    /// The `reasoning_content` field rides the reasoning frames only; the
+    /// answer frames that follow carry `content` alone.
+    /// Remembering that the server does its own separation keeps the answer
+    /// away from the `<think>` extractor, which would otherwise treat a literal
+    /// tag in the answer as a reasoning block and move the text behind it out
+    /// of the message.
+    server_separated_reasoning: bool,
     is_structured: bool,
 }
 
@@ -373,6 +383,7 @@ impl StreamState {
             errored: false,
             finish_reason: None,
             trim_content_prefix: false,
+            server_separated_reasoning: false,
             is_structured,
         }
     }
@@ -460,6 +471,14 @@ pub(crate) fn handle_sse_event_sync(
                 let delta = &choice.delta;
 
                 // Reasoning via `reasoning_content` (deepseek / deepseek-legacy formats)
+                //
+                // The field's presence is what marks the server as one that
+                // separates reasoning itself, so it is recorded even when this
+                // frame carries no reasoning text to emit.
+                if delta.reasoning_content.is_some() {
+                    state.server_separated_reasoning = true;
+                }
+
                 if let Some(reasoning) = &delta.reasoning_content
                     && !reasoning.is_empty()
                 {
@@ -469,9 +488,8 @@ pub(crate) fn handle_sse_event_sync(
 
                 // Content
                 //
-                // If reasoning_content was present, the server already
-                // separated reasoning from content (deepseek /
-                // deepseek-legacy). Otherwise, content may contain <think> tags
+                // Once the server has sent reasoning of its own, content is
+                // pure answer text. Otherwise content may carry <think> tags
                 // (none format) and needs the extractor.
                 if let Some(content) = &delta.content
                     && !content.is_empty()
@@ -492,8 +510,7 @@ pub(crate) fn handle_sse_event_sync(
                     if !content.is_empty() {
                         state.trim_content_prefix = false;
 
-                        // Server separated reasoning; content is pure text.
-                        if delta.reasoning_content.is_some() {
+                        if state.server_separated_reasoning {
                             flush_reasoning_if_needed(&mut events, &mut state.reasoning_flushed);
 
                             if state.is_structured {

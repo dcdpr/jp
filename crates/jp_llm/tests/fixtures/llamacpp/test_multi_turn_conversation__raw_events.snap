@@ -1886,22 +1886,22 @@ expression: v
             ),
             metadata: {},
         },
-        Part {
-            index: 1,
-            part: Message(
-                "Test ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "message",
-            ),
-            metadata: {},
-        },
         Flush {
             index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "Test",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " message",
+            ),
             metadata: {},
         },
         Flush {
@@ -2581,6 +2581,10 @@ expression: v
             ),
             metadata: {},
         },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
         Part {
             index: 1,
             part: Message(
@@ -2591,138 +2595,134 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " re",
+                " result",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "sult",
+                " of",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " of the p",
+                " the",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "revio",
+                " previous",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "us to",
+                " tool",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ol c",
+                " call",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "a",
+                " was",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ll",
+                ":",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " w",
+                "\n\n",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "as:",
+                "**",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "\n\n**The",
+                "The",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " secr",
+                " secret",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "et ",
+                " code",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "c",
+                " is",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "o",
+                ":",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "d",
+                " ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "e",
+                "4",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " i",
+                "2",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "s: 42**",
+                "**",
             ),
-            metadata: {},
-        },
-        Flush {
-            index: 0,
             metadata: {},
         },
         Flush {

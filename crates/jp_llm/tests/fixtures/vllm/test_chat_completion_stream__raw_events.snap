@@ -88,50 +88,43 @@ expression: v
             ),
             metadata: {},
         },
-        Part {
-            index: 1,
-            part: Message(
-                "Test re",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "ce",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "ived",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                ". I’m h",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "ere and ready t",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "o help.",
-            ),
-            metadata: {},
-        },
         Flush {
             index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "Test received.",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " I",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "’m",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " here and",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " ready to help.",
+            ),
             metadata: {},
         },
         Flush {

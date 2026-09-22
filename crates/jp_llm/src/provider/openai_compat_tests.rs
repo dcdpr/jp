@@ -36,6 +36,19 @@ fn message_text(events: &[Result<Event, StreamError>]) -> String {
         .collect()
 }
 
+fn reasoning_text(events: &[Result<Event, StreamError>]) -> String {
+    events
+        .iter()
+        .filter_map(|e| match e.as_ref().ok() {
+            Some(Event::Part {
+                part: EventPart::Reasoning(text),
+                ..
+            }) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn strips_the_template_separator_between_reasoning_and_content() {
     let mut state = StreamState::new("test", false);
@@ -168,6 +181,63 @@ fn keeps_indentation_that_arrives_after_the_separator() {
     events.extend(handle_sse_event_sync(Ok(sse_message("[DONE]")), &mut state).unwrap());
 
     assert_eq!(message_text(&events), "    return value\n");
+}
+
+/// A server that sends its own reasoning has already done the separating, so
+/// the answer is left alone.
+/// Asking a locally-served model about chat templates gets a literal `<think>`
+/// block back; scanning for one here would delete the tags and move the text
+/// behind them out of the answer and into the reasoning region.
+#[test]
+fn keeps_a_literal_think_block_in_an_answer_the_server_separated() {
+    let mut state = StreamState::new("test", false);
+
+    let reasoning = json!({
+        "choices": [{
+            "delta": { "reasoning": "They want the template.\n" },
+            "index": 0,
+            "finish_reason": null
+        }]
+    });
+    let mut events =
+        handle_sse_event_sync(Ok(sse_message(&reasoning.to_string())), &mut state).unwrap();
+
+    let answer = "Qwen renders it as:\n\n```\n<think>\nplan\n</think>\nanswer\n```\n";
+    let content = json!({
+        "choices": [{
+            "delta": { "content": answer },
+            "index": 0,
+            "finish_reason": null
+        }]
+    });
+    events
+        .extend(handle_sse_event_sync(Ok(sse_message(&content.to_string())), &mut state).unwrap());
+    events.extend(handle_sse_event_sync(Ok(sse_message("[DONE]")), &mut state).unwrap());
+
+    assert_eq!(message_text(&events), answer);
+    assert_eq!(reasoning_text(&events), "They want the template.\n");
+}
+
+/// With no reasoning field anywhere in the stream, the server is leaving the
+/// tags in the content for us to parse (llama.cpp's `--reasoning-format none`),
+/// so the extractor still runs.
+#[test]
+fn still_extracts_think_tags_when_the_server_sends_no_reasoning_field() {
+    let mut state = StreamState::new("test", false);
+
+    let content = json!({
+        "choices": [{
+            "delta": { "content": "<think>\nLet me reason...\n</think>\nThe answer." },
+            "index": 0,
+            "finish_reason": null
+        }]
+    });
+    let mut events =
+        handle_sse_event_sync(Ok(sse_message(&content.to_string())), &mut state).unwrap();
+    events.extend(handle_sse_event_sync(Ok(sse_message("[DONE]")), &mut state).unwrap());
+
+    assert_eq!(reasoning_text(&events), "Let me reason...\n");
+    assert_eq!(message_text(&events), "The answer.");
 }
 
 #[test_log::test(tokio::test)]
