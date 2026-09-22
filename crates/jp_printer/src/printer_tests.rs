@@ -997,6 +997,30 @@ fn an_owned_prompt_writer_carries_the_background_too() {
 }
 
 #[test]
+fn an_owned_prompt_writer_keeps_a_crlf_line_intact() {
+    // The inline reply widget paints in raw mode, where a bare `\n` does not
+    // return to column zero, so `reedline` coerces every buffer newline to
+    // `\r\n` before it reaches this writer. Seeded with pretty-printed tool
+    // arguments, that is most of what it writes.
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    printer.set_prompt_background(Some(shaded_region()));
+
+    {
+        let mut prompt = printer.owned_prompt_writer();
+        write!(prompt, "{{\r\n  \"path\": \"src/lib.rs\"\r\n}}").unwrap();
+    }
+    printer.flush();
+
+    // Each line is filled from where its own content ends, ahead of the `\r`
+    // that puts the cursor back at the margin.
+    assert_eq!(
+        *out.lock(),
+        "\x1b[48;5;236m{\x1b[K\x1b[49m\r\n\x1b[48;5;236m  \"path\": \
+         \"src/lib.rs\"\x1b[K\x1b[49m\r\n\x1b[48;5;236m}\x1b[49m"
+    );
+}
+
+#[test]
 fn a_prompt_outside_a_shaded_region_is_unshaded() {
     let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
 

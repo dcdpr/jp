@@ -133,6 +133,74 @@ fn carriage_return_rewrite_keeps_the_background_active() {
 }
 
 #[test]
+fn a_crlf_line_is_filled_before_its_carriage_return() {
+    // A widget painting in raw mode terminates every line with `\r\n`. Filled
+    // after the `\r` the erase would run from column zero and wipe the line it
+    // was meant to extend, so the pair has to be recognised as one terminator.
+    assert_eq!(
+        shade("ab\r\ncd\r\n", &terminal_bg()),
+        "\x1b[48;5;236mab\x1b[K\x1b[49m\r\n\x1b[48;5;236mcd\x1b[K\x1b[49m\r\n"
+    );
+}
+
+#[test]
+fn a_crlf_line_is_padded_before_its_carriage_return() {
+    // Same hazard for the pad, which would overwrite the line with spaces
+    // rather than erase it.
+    assert_eq!(
+        shade("ab\r\nc\r\n", &column_bg(4)),
+        "\x1b[48;5;236mab  \x1b[49m\r\n\x1b[48;5;236mc   \x1b[49m\r\n"
+    );
+}
+
+#[test]
+fn a_crlf_pair_split_across_writes_is_kept_together() {
+    // The painter can flush a frame in several writes, so the `\r` and its
+    // `\n` need not arrive together. Held back, the pair reads the same as if
+    // it had.
+    let mut buffer = String::new();
+    {
+        let mut writer = ShadedWriter::new(&mut buffer, &terminal_bg());
+        writer.write_str("ab\r").unwrap();
+        writer.write_str("\ncd").unwrap();
+        writer.finish().unwrap();
+    }
+    assert_eq!(
+        buffer,
+        "\x1b[48;5;236mab\x1b[K\x1b[49m\r\n\x1b[48;5;236mcd\x1b[49m"
+    );
+}
+
+#[test]
+fn a_held_carriage_return_still_rewrites_when_no_newline_follows() {
+    // Holding the `\r` must be invisible to the rewrite it usually is: the
+    // next write settles which reading was right, and a bare one behaves
+    // exactly as it does when the whole stream arrives in one write.
+    let mut buffer = String::new();
+    {
+        let mut writer = ShadedWriter::new(&mut buffer, &terminal_bg());
+        writer.write_str("foo\r").unwrap();
+        writer.write_str("bar").unwrap();
+        writer.finish().unwrap();
+    }
+    assert_eq!(buffer, shade("foo\rbar", &terminal_bg()));
+    assert_eq!(buffer, "\x1b[48;5;236mfoo\rbar\x1b[49m");
+}
+
+#[test]
+fn a_carriage_return_left_hanging_at_the_end_is_still_written() {
+    // Nothing follows to disambiguate it, so it was a rewrite; `finish` has to
+    // release it rather than swallow it.
+    let mut buffer = String::new();
+    {
+        let mut writer = ShadedWriter::new(&mut buffer, &terminal_bg());
+        writer.write_str("ab\r").unwrap();
+        writer.finish().unwrap();
+    }
+    assert_eq!(buffer, "\x1b[48;5;236mab\r\x1b[49m");
+}
+
+#[test]
 fn erase_under_a_content_background_keeps_the_content_fill() {
     // When the content has its own background, its `\x1b[K` erase must fill with
     // that background — the region background is never injected before it.

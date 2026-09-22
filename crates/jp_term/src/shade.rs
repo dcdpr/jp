@@ -73,8 +73,11 @@ pub struct ShadedWriter<W: Write> {
     /// nothing new can be painted and no re-assert is owed.
     needs_background: bool,
 
-    /// Holds a trailing escape sequence split across a write boundary,
-    /// completed and processed on the next write.
+    /// Holds the tail of a write that cannot be interpreted until the next one
+    /// arrives: an escape sequence cut before its terminator, or a `\r` that
+    /// may yet turn out to be the first half of a `\r\n` pair.
+    ///
+    /// Re-attached to the front of the following write and processed there.
     pending: String,
 }
 
@@ -105,8 +108,10 @@ impl<W: Write> ShadedWriter<W> {
 
     /// End the shaded region.
     ///
-    /// Flushes any escape sequence still buffered from a split write, then
-    /// emits `\x1b[49m` so the region background does not leak past the region.
+    /// Flushes anything still buffered from a split write — a half-formed
+    /// escape, or a `\r` whose `\n` never arrived and so was a row rewrite all
+    /// along — then emits `\x1b[49m` so the region background does not leak
+    /// past the region.
     /// A region whose last write ended on a line break is already closed and
     /// emits nothing here.
     /// Call once after the last write.
@@ -160,27 +165,52 @@ impl<W: Write> ShadedWriter<W> {
     /// Forward visible text, asserting the region background under it and
     /// filling each completed line to the right edge.
     fn process_text(&mut self, text: &str) -> fmt::Result {
+        let bytes = text.as_bytes();
         let mut start = 0;
-        for (i, byte) in text.bytes().enumerate() {
-            match byte {
-                b'\n' => {
-                    self.emit_run(&text[start..i])?;
-                    self.fill_line()?;
-                    self.close_line()?;
-                    self.output.write_str("\n")?;
-                    self.column = 0;
-                    start = i + 1;
+        let mut i = 0;
+
+        while i < bytes.len() {
+            match bytes[i] {
+                // `\r\n` is one line terminator, so the line ends before the
+                // `\r` rather than after it. A fill written afterwards starts
+                // from the column the `\r` returned to, erasing or padding over
+                // the line it was meant to extend.
+                b'\r' if bytes.get(i + 1) == Some(&b'\n') => {
+                    self.end_line(&text[start..i], "\r\n")?;
+                    i += 2;
+                    start = i;
                 }
+                b'\n' => {
+                    self.end_line(&text[start..i], "\n")?;
+                    i += 1;
+                    start = i;
+                }
+                // A `\r` on its own rewrites the row in place — a progress
+                // line redrawing itself. No line was completed, so there is
+                // nothing to fill and nothing to close.
                 b'\r' => {
                     self.emit_run(&text[start..i])?;
                     self.output.write_str("\r")?;
                     self.column = 0;
-                    start = i + 1;
+                    i += 1;
+                    start = i;
                 }
-                _ => {}
+                _ => i += 1,
             }
         }
+
         self.emit_run(&text[start..])
+    }
+
+    /// Complete the current line with `run`, fill it to the right edge, close
+    /// the region background, and write `terminator`.
+    fn end_line(&mut self, run: &str, terminator: &str) -> fmt::Result {
+        self.emit_run(run)?;
+        self.fill_line()?;
+        self.close_line()?;
+        self.output.write_str(terminator)?;
+        self.column = 0;
+        Ok(())
     }
 
     /// Emit a run of visible text with the region background asserted under it.
@@ -239,8 +269,9 @@ impl<W: Write> ShadedWriter<W> {
 
 impl<W: Write> Write for ShadedWriter<W> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        // Re-attach any escape sequence held back from the previous write, so a
-        // sequence split across writes is processed as a whole.
+        // Re-attach whatever the previous write could not interpret on its own,
+        // so a sequence or a `\r\n` pair split across writes is processed as a
+        // whole.
         let mut combined = std::mem::take(&mut self.pending);
         combined.push_str(s);
 
@@ -254,6 +285,14 @@ impl<W: Write> Write for ShadedWriter<W> {
                     self.pending.push_str(esc);
                 }
                 Segment::Escape(esc) => self.process_escape(esc)?,
+                // A trailing `\r` is ambiguous until the next byte arrives: it
+                // ends the line when a `\n` follows, and rewrites the row in
+                // place otherwise. Forwarding it now would commit to the second
+                // reading and leave the fill nowhere to go but column zero.
+                Segment::Text(text) if i == last && text.ends_with('\r') => {
+                    self.process_text(&text[..text.len() - 1])?;
+                    self.pending.push('\r');
+                }
                 Segment::Text(text) => self.process_text(text)?,
             }
         }
