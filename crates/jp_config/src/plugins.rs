@@ -6,17 +6,17 @@
 
 pub mod command;
 
-use indexmap::IndexMap;
 use schematic::Config;
 
 use crate::{
     FillDefaults,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::PartialConfigDelta,
+    delta::{PartialConfigDelta, delta_mergeable_map, delta_mergeable_map_at, delta_opt, path},
     fill::fill_map,
+    internal::merge::map_with_strategy,
     partial::ToPartial,
     plugins::command::CommandPluginConfig,
-    util::merge_nested_indexmap,
+    types::map::{MergeableMap, map_to_partial_per_key},
 };
 
 /// Plugin configuration.
@@ -33,8 +33,13 @@ pub struct PluginsConfig {
     pub shutdown_timeout_secs: u16,
 
     /// Command plugin configurations, keyed by plugin name (e.g. `serve`).
-    #[setting(nested, merge = merge_nested_indexmap)]
-    pub command: IndexMap<String, CommandPluginConfig>,
+    ///
+    /// Entries merge by key, so a plugin configured in a later layer joins the
+    /// ones an earlier layer set.
+    /// Declare the map as `{ value = { … }, strategy = "replace" }` to drop
+    /// them instead.
+    #[setting(nested, merge = map_with_strategy)]
+    pub command: MergeableMap<CommandPluginConfig>,
 }
 
 impl AssignKeyValue for PartialPluginsConfig {
@@ -43,10 +48,7 @@ impl AssignKeyValue for PartialPluginsConfig {
             "" => kv.try_merge_object(self)?,
             "auto_install" => self.auto_install = kv.try_some_bool()?,
             "shutdown_timeout_secs" => self.shutdown_timeout_secs = kv.try_some_from_str()?,
-            _ if kv.p("command") => match kv.trim_prefix_any() {
-                Some(name) => self.command.entry(name).or_default().assign(kv)?,
-                None => return missing_key(&kv),
-            },
+            _ if kv.p("command") => kv.assign_to_mergeable_entry(&mut self.command)?,
             _ => return missing_key(&kv),
         }
 
@@ -56,26 +58,29 @@ impl AssignKeyValue for PartialPluginsConfig {
 
 impl PartialConfigDelta for PartialPluginsConfig {
     fn delta(&self, next: Self) -> Self {
-        use crate::delta::delta_opt;
-
         Self {
             auto_install: delta_opt(self.auto_install.as_ref(), next.auto_install),
             shutdown_timeout_secs: delta_opt(
                 self.shutdown_timeout_secs.as_ref(),
                 next.shutdown_timeout_secs,
             ),
-            command: next
-                .command
-                .into_iter()
-                .filter_map(|(name, next)| {
-                    let next = match self.command.get(&name) {
-                        Some(prev) if prev == &next => return None,
-                        Some(prev) => prev.delta(next),
-                        None => next,
-                    };
-                    Some((name, next))
-                })
-                .collect(),
+            command: delta_mergeable_map(&self.command, next.command),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            auto_install: delta_opt(self.auto_install.as_ref(), next.auto_install),
+            shutdown_timeout_secs: delta_opt(
+                self.shutdown_timeout_secs.as_ref(),
+                next.shutdown_timeout_secs,
+            ),
+            command: delta_mergeable_map_at(
+                &path(prefix, "command"),
+                &self.command,
+                next.command,
+                unsets,
+            ),
         }
     }
 }
@@ -87,7 +92,13 @@ impl FillDefaults for PartialPluginsConfig {
             shutdown_timeout_secs: self
                 .shutdown_timeout_secs
                 .or(defaults.shutdown_timeout_secs),
-            command: fill_map(self.command, defaults.command),
+            // Key by key, so a plugin only the defaults declare is added
+            // while one this layer already has keeps its own value. A map
+            // that states a strategy is left alone.
+            command: match self.command {
+                merged @ MergeableMap::Merged(_) => merged,
+                MergeableMap::Map(entries) => fill_map(entries, defaults.command.into_map()).into(),
+            },
         }
     }
 }
@@ -102,11 +113,9 @@ impl ToPartial for PluginsConfig {
                 &self.shutdown_timeout_secs,
                 defaults.shutdown_timeout_secs,
             ),
-            command: self
-                .command
-                .iter()
-                .map(|(k, v)| (k.clone(), v.to_partial()))
-                .collect(),
+            // Per key rather than `replace`: a plugin the workspace config
+            // gained after this conversation was created still reaches it.
+            command: map_to_partial_per_key(self.command.iter()),
         }
     }
 }

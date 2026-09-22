@@ -699,10 +699,11 @@ impl Query {
                 .config_partial()
                 .map_err(jp_conversation::Error::from)?;
 
-            if let Some(delta) =
+            if let Some((delta, unsets)) =
                 config_pipeline::override_to_record(&current, editor_provided_config)?
             {
-                setup.update_events(|events| events.add_config_delta(delta));
+                let apply = ApplyDelta::with_unsets(now, delta, unsets);
+                setup.update_events(|events| events.add_config_delta(apply));
             }
         }
 
@@ -2675,12 +2676,12 @@ fn apply_enable_tools(
     for d in directives.iter() {
         match d {
             ToolDirective::EnableAll => {
-                for (name, tool) in &mut partial.conversation.tools.tools {
+                for (name, tool) in partial.conversation.tools.tools.iter_mut() {
                     apply_directive_to_tool(name, tool, &defaults, ToggleScope::Bulk, true)?;
                 }
             }
             ToolDirective::DisableAll => {
-                for (name, tool) in &mut partial.conversation.tools.tools {
+                for (name, tool) in partial.conversation.tools.tools.iter_mut() {
                     apply_directive_to_tool(name, tool, &defaults, ToggleScope::Bulk, false)?;
                 }
             }

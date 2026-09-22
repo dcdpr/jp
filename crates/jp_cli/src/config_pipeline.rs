@@ -15,7 +15,7 @@ use std::path::Path;
 
 use camino::Utf8PathBuf;
 use jp_config::{
-    FillDefaults as _, PartialAppConfig, PartialConfig as _,
+    FillDefaults as _, PartialAppConfig, PartialConfig as _, PartialConfigDelta as _,
     assignment::{AssignKeyValue as _, KvAssignment},
     fs::{load_partial, user_global_config_dir},
     loader::PartialLoaderConfig,
@@ -29,7 +29,8 @@ use tracing::{debug, error, warn};
 use super::{CfgKeyword, KeyValueOrPath};
 use crate::error::{Error, Result};
 
-/// The config override to record on a conversation, if it changes anything.
+/// The config override to record on a conversation, if it changes anything,
+/// with the paths applying it removes.
 ///
 /// `overrides` holds values to set, in the shape a config layer arrives in: an
 /// appending list carries the elements to add rather than the whole list.
@@ -61,20 +62,33 @@ use crate::error::{Error, Result};
 /// Catching it would need the comparison to read the metadata itself, which no
 /// two partials can be compared for — merging is not shape-preserving, so
 /// equal metadata can sit in unequal shapes.
+///
+/// The paths returned alongside are the ones merging the override removes.
+/// Merging only ever adds, with one exception: a map the override stamps
+/// `replace` keeps the keys it carries and drops the rest, and a key that is
+/// gone cannot be spelled by a value that merges key by key.
+/// The override is recorded as it stands — its merge semantics are the point
+/// — and the paths travel beside it, so the layer that fills a conversation
+/// from the config files knows not to put the dropped key back.
 pub(crate) fn override_to_record(
     current: &PartialAppConfig,
     overrides: PartialAppConfig,
-) -> Result<Option<PartialAppConfig>> {
+) -> Result<Option<(PartialAppConfig, Vec<String>)>> {
     let mut merged = current.clone();
     merged
         .merge(&(), overrides.clone())
         .map_err(jp_config::Error::from)?;
 
+    // Only the paths are wanted: the values to record are the override as it
+    // stands, not a diff of the state applying it produces.
+    let mut unsets = Vec::new();
+    drop(current.delta_with_unsets(merged.clone(), "", &mut unsets));
+
     let (Ok(before), Ok(after)) = (build(current.clone()), build(merged)) else {
-        return Ok(Some(overrides));
+        return Ok(Some((overrides, unsets)));
     };
 
-    Ok((before != after).then_some(overrides))
+    Ok((before != after).then_some((overrides, unsets)))
 }
 
 /// A config reset point encountered in the `--cfg` directive stream.

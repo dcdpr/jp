@@ -933,18 +933,21 @@ fn test_tools_config() {
 
     assert_eq!(
         p.tools,
-        IndexMap::<_, _>::from_iter(vec![("cargo_check".to_owned(), PartialToolConfig {
-            enable: Some(PartialEnableConfig::ON),
-            source: Some(ToolSource::Local { tool: None }),
-            ..Default::default()
-        })])
+        MergeableMap::from(IndexMap::<_, _>::from_iter(vec![(
+            "cargo_check".to_owned(),
+            PartialToolConfig {
+                enable: Some(PartialEnableConfig::ON),
+                source: Some(ToolSource::Local { tool: None }),
+                ..Default::default()
+            }
+        )]))
     );
 
     let kv = KvAssignment::try_from_cli("foo:", r#"{"source":"builtin"}"#).unwrap();
     p.assign(kv).unwrap();
     assert_eq!(
         p.tools,
-        IndexMap::<_, _>::from_iter(vec![
+        MergeableMap::from(IndexMap::<_, _>::from_iter(vec![
             ("cargo_check".to_owned(), PartialToolConfig {
                 enable: Some(PartialEnableConfig::ON),
                 source: Some(ToolSource::Local { tool: None }),
@@ -954,7 +957,176 @@ fn test_tools_config() {
                 source: Some(ToolSource::Builtin { tool: None }),
                 ..Default::default()
             })
-        ])
+        ]))
+    );
+}
+
+/// The tools map takes a strategy, even though its entries are flattened to sit
+/// directly under `conversation.tools`, and takes it the same way through TOML
+/// and through `--cfg`.
+///
+/// Flattened, the wrapper's own keys arrive where tool names arrive, so the
+/// whole-map assignment has to recognise them as the wrapper's before
+/// dispatching them as tool names.
+#[test]
+fn tools_map_accepts_a_replace_strategy() {
+    use crate::types::map::MergedMapStrategy;
+
+    let from_toml: PartialToolsConfig = toml::from_str(
+        r#"
+        strategy = "replace"
+
+        [value.my_tool]
+        source = "builtin"
+        "#,
+    )
+    .expect("a strategy-carrying tools map parses");
+
+    let mut from_cli = PartialToolsConfig::default();
+    let kv = KvAssignment::try_from_cli(
+        ":",
+        r#"{"value":{"my_tool":{"source":"builtin"}},"strategy":"replace"}"#,
+    )
+    .unwrap();
+    from_cli.assign(kv).unwrap();
+
+    for (source, config) in [("toml", &from_toml), ("cfg", &from_cli)] {
+        assert!(
+            matches!(&config.tools, MergeableMap::Merged(merged)
+                if merged.strategy == Some(MergedMapStrategy::Replace)),
+            "{source}: expected the declared strategy to survive the flatten: {:?}",
+            config.tools
+        );
+        assert!(
+            config.tools.contains_key("my_tool"),
+            "{source}: the tool the user declared is the one that lands: {:?}",
+            config.tools
+        );
+        assert!(
+            !config.tools.contains_key("value"),
+            "{source}: the wrapper's keys are not tool names: {:?}",
+            config.tools
+        );
+    }
+}
+
+/// The strategy a config file states is the strategy `--cfg` states.
+///
+/// The two spellings reach different code — one the map's deserializer, the
+/// other the key-value dispatch — and the doc comments advertise the wrapper
+/// without saying which of them it is for.
+#[test]
+fn a_map_strategy_means_the_same_through_cfg_as_through_toml() {
+    use crate::types::map::MergedMapStrategy;
+
+    let from_toml: PartialToolsConfig = toml::from_str(
+        r#"
+        [cargo_check.options]
+        value = { profile = "release" }
+        strategy = "replace"
+        "#,
+    )
+    .expect("a strategy-carrying options map parses from TOML");
+
+    let mut from_cli = PartialToolsConfig::default();
+    let kv = KvAssignment::try_from_cli(
+        "cargo_check.options:",
+        r#"{"value":{"profile":"release"},"strategy":"replace"}"#,
+    )
+    .unwrap();
+    from_cli.assign(kv).unwrap();
+
+    for (source, config) in [("toml", &from_toml), ("cfg", &from_cli)] {
+        let options = &config.tools["cargo_check"].options;
+
+        assert!(
+            matches!(options, MergeableMap::Merged(merged)
+                if merged.strategy == Some(MergedMapStrategy::Replace)),
+            "{source}: the declared strategy is the map's, not an entry: {options:?}"
+        );
+        assert!(
+            options.contains_key("profile"),
+            "{source}: the option the user set is the one the tool receives: {options:?}"
+        );
+        assert!(
+            !options.contains_key("strategy"),
+            "{source}: the metadata is not an option: {options:?}"
+        );
+    }
+}
+
+/// Every field of a parameter is reachable by its own path.
+///
+/// A delta reports a field cleared inside a surviving parameter by path, and
+/// clearing runs through assignment, so a field assignment cannot reach is a
+/// clear that cannot be replayed.
+#[test]
+fn a_parameter_field_is_assignable_by_path() {
+    let mut config = PartialToolsConfig::default();
+
+    let mut assign = |key: &str, value: &str| {
+        let kv = KvAssignment::try_from_cli(key, value).unwrap();
+        config.assign(kv).unwrap();
+    };
+
+    assign("cargo_check.parameters.cmd.type", "string");
+    assign("cargo_check.parameters.cmd.required", "true");
+    assign("cargo_check.parameters.cmd.summary", "what to run");
+    assign("cargo_check.parameters.cmd.enum:", r#"["check","clippy"]"#);
+    assign("cargo_check.parameters.cmd.items.type", "string");
+    assign(
+        "cargo_check.parameters.opts.properties.quiet.type",
+        "boolean",
+    );
+
+    let string = Some(PartialOneOrManyTypes::One("string".to_owned()));
+    let parameters = &config.tools["cargo_check"].parameters;
+
+    assert_eq!(parameters["cmd"].kind, string);
+    assert_eq!(parameters["cmd"].required, Some(true));
+    assert_eq!(parameters["cmd"].summary.as_deref(), Some("what to run"));
+    assert_eq!(
+        parameters["cmd"].enumeration,
+        Some(vec![json!("check"), json!("clippy")])
+    );
+    assert_eq!(
+        parameters["cmd"].items.as_ref().map(|items| &items.kind),
+        Some(&string)
+    );
+    assert_eq!(
+        parameters["opts"].properties["quiet"].kind,
+        Some(PartialOneOrManyTypes::One("boolean".to_owned()))
+    );
+
+    // A clear takes the field it names, leaving the parameter holding it.
+    config
+        .assign(KvAssignment::unset("cargo_check.parameters.cmd.enum"))
+        .unwrap();
+
+    let parameters = &config.tools["cargo_check"].parameters;
+    assert_eq!(parameters["cmd"].enumeration, None);
+    assert_eq!(parameters["cmd"].kind, string);
+}
+
+/// A plain tools map keeps merging per key, and a tool may be named `value`.
+#[test]
+fn tools_map_without_a_strategy_merges_per_key() {
+    let config: PartialToolsConfig = toml::from_str(
+        r#"
+        [value]
+        source = "builtin"
+        "#,
+    )
+    .expect("a plain tools map parses");
+
+    assert!(
+        matches!(&config.tools, MergeableMap::Map(_)),
+        "expected a plain map: {:?}",
+        config.tools
+    );
+    assert!(
+        config.tools.contains_key("value"),
+        "`value` alone names a tool, since a strategy needs both keys"
     );
 }
 

@@ -144,7 +144,9 @@ Ok(
                         },
                         access: None,
                     },
-                    tools: {},
+                    tools: Map(
+                        {},
+                    ),
                 },
                 compaction: PartialCompactionConfig {
                     rules: Merged(
@@ -441,11 +443,15 @@ Ok(
                 },
             },
             template: PartialTemplateConfig {
-                values: {},
+                values: Map(
+                    {},
+                ),
             },
             providers: PartialProviderConfig {
                 llm: PartialLlmProviderConfig {
-                    aliases: {},
+                    aliases: Map(
+                        {},
+                    ),
                     anthropic: PartialAnthropicConfig {
                         auth: Some(
                             [
@@ -525,7 +531,9 @@ Ok(
                         ),
                     },
                 },
-                mcp: {},
+                mcp: Map(
+                    {},
+                ),
             },
             plugins: PartialPluginsConfig {
                 auto_install: Some(
@@ -534,7 +542,9 @@ Ok(
                 shutdown_timeout_secs: Some(
                     5,
                 ),
-                command: {},
+                command: Map(
+                    {},
+                ),
             },
             user: PartialUserConfig {
                 name: None,

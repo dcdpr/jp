@@ -14,16 +14,19 @@ use crate::{
     conversation::{
         attachment::{AttachmentConfig, PartialAttachmentConfig},
         compaction::{CompactionConfig, PartialCompactionConfig},
-        label::{LabelConfig, PartialLabelConfig},
+        label::LabelConfig,
         title::{PartialTitleConfig, TitleConfig},
         tool::{PartialToolsConfig, ToolsConfig},
     },
-    delta::{PartialConfigDelta, delta_mergeable_vec, delta_opt, delta_opt_at, path},
+    delta::{
+        PartialConfigDelta, delta_mergeable_map, delta_mergeable_map_at, delta_mergeable_vec,
+        delta_opt, delta_opt_at, path,
+    },
     fill::FillDefaults,
     internal::merge::{map_with_strategy, vec_with_strategy},
     partial::{ToPartial, partial_opt},
     types::{
-        map::{MergeableMap, MergedMap, MergedMapStrategy, map_to_mergeable_partial},
+        map::{MergeableMap, map_to_mergeable_partial},
         vec::{MergeableVec, MergedVec, vec_to_mergeable_partial},
     },
     validate::Validator,
@@ -121,7 +124,7 @@ impl AssignKeyValue for PartialConversationConfig {
             _ if kv.p("tools") => self.tools.assign(kv)?,
             _ if kv.p("compaction") => self.compaction.assign(kv)?,
             _ if kv.p("attachments") => kv.try_vec_of_nested(self.attachments.as_mut())?,
-            _ if kv.p("labels") => kv.assign_to_entry(&mut self.labels)?,
+            _ if kv.p("labels") => kv.assign_to_mergeable_entry(&mut self.labels)?,
             _ if kv.p("inquiry") => self.inquiry.assign(kv)?,
             _ if kv.p("start_local") => self.start_local = kv.try_some_bool()?,
             "default_id" => self.default_id = kv.try_some_from_str()?,
@@ -129,41 +132,6 @@ impl AssignKeyValue for PartialConversationConfig {
         }
 
         Ok(())
-    }
-}
-
-impl PartialConversationConfig {
-    /// The label rules `next` changes.
-    fn labels_delta(
-        &self,
-        next: MergeableMap<PartialLabelConfig>,
-    ) -> MergeableMap<PartialLabelConfig> {
-        // A key in the previous state that is absent from the next one
-        // can only have been dropped by a replacing layer, and a
-        // minimal delta has no way to spell "removed": it carries
-        // entries, and a missing entry means "unchanged". Emit the
-        // whole wrapper in that case so the fold replaces the map
-        // instead of deep-merging the dropped rule back in.
-        let dropped = self.labels.keys().any(|key| !next.contains_key(key));
-
-        if dropped {
-            // Force replace semantics rather than trusting the shape
-            // `next` arrived in: a plain `Map` deep-merges on the fold
-            // and resurrects the dropped rule.
-            MergeableMap::Merged(MergedMap {
-                value: next.into_map(),
-                strategy: Some(MergedMapStrategy::Replace),
-                discard_when_merged: false,
-            })
-        } else {
-            next.into_iter()
-                .filter_map(|(key, next)| match self.labels.get(&key) {
-                    Some(prev) if prev == &next => None,
-                    Some(prev) => Some((key, prev.delta(next))),
-                    None => Some((key, next)),
-                })
-                .collect()
-        }
     }
 }
 
@@ -177,7 +145,7 @@ impl PartialConfigDelta for PartialConversationConfig {
             inquiry: self.inquiry.delta(next.inquiry),
             start_local: delta_opt(self.start_local.as_ref(), next.start_local),
             default_id: delta_opt(self.default_id.as_ref(), next.default_id),
-            labels: self.labels_delta(next.labels),
+            labels: delta_mergeable_map(&self.labels, next.labels),
         }
     }
 
@@ -186,7 +154,9 @@ impl PartialConfigDelta for PartialConversationConfig {
             title: self
                 .title
                 .delta_with_unsets(next.title, &path(prefix, "title"), unsets),
-            tools: self.tools.delta(next.tools),
+            tools: self
+                .tools
+                .delta_with_unsets(next.tools, &path(prefix, "tools"), unsets),
             compaction: self.compaction.delta(next.compaction),
             attachments: delta_mergeable_vec(&self.attachments, next.attachments),
             inquiry: self
@@ -199,7 +169,12 @@ impl PartialConfigDelta for PartialConversationConfig {
                 next.default_id,
                 unsets,
             ),
-            labels: self.labels_delta(next.labels),
+            labels: delta_mergeable_map_at(
+                &path(prefix, "labels"),
+                &self.labels,
+                next.labels,
+                unsets,
+            ),
         }
     }
 }

@@ -8,11 +8,15 @@
 use std::{fmt, str::FromStr};
 
 use indexmap::IndexMap;
-use schematic::{MergeResult, PartialConfig};
+use schematic::{MergeResult, PartialConfig, Schematic};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, from_str};
 
-use crate::{AppConfig, BoxedError, types::vec::MergeableVec};
+use crate::{
+    AppConfig, BoxedError,
+    internal::merge::map_with_strategy,
+    types::{map::MergeableMap, vec::MergeableVec},
+};
 
 /// The result of assigning a key-value pair to a configuration.
 pub type AssignResult = Result<(), BoxedError>;
@@ -26,6 +30,15 @@ pub trait AssignKeyValue {
     /// Can return any error that implements [`std::error::Error`], when
     /// assignment fails (e.g. type error, parse error, unknown key, etc.).
     fn assign(&mut self, kv: KvAssignment) -> AssignResult;
+}
+
+impl<T> AssignKeyValue for Box<T>
+where
+    T: AssignKeyValue,
+{
+    fn assign(&mut self, kv: KvAssignment) -> Result<(), BoxedError> {
+        (**self).assign(kv)
+    }
 }
 
 impl<T> AssignKeyValue for Option<T>
@@ -352,6 +365,72 @@ impl KvAssignment {
         Ok(())
     }
 
+    /// Whether this assignment names a whole map and carries the wrapper that
+    /// states how that map merges.
+    ///
+    /// The test is the one the map's own deserializer uses, so a strategy
+    /// written on the command line and one written in a config file mean the
+    /// same thing: an object carrying `value` beside `strategy` is the wrapper.
+    /// An entry named `value` needs the sibling `strategy` before it reads as
+    /// one, which keeps a tool called `value` assignable.
+    pub(crate) fn states_map_strategy(&self) -> bool {
+        self.key.is_empty()
+            && matches!(&self.value, KvValue::Json(Value::Object(object))
+                if object.contains_key("value") && object.contains_key("strategy"))
+    }
+
+    /// Assign a key-value pair to an entry of a map that carries its own merge
+    /// strategy.
+    ///
+    /// Mirrors [`Self::assign_to_entry`], with one more shape to tell apart: a
+    /// whole-map object carrying `value` beside `strategy` is the wrapper that
+    /// states how the map merges, not two entries named after those keys.
+    /// See [`Self::states_map_strategy`] for how the two are told apart.
+    ///
+    /// A wrapper assigned with `:=` states the map outright.
+    /// One assigned with `:+=` combines with what is already there, under the
+    /// strategy the wrapper names — which is what keeps a merge assignment
+    /// from dropping the entries earlier layers contributed.
+    ///
+    /// Anything else is an entry, and lands inside whatever wrapper the map
+    /// already carries: naming one entry says nothing about how the map
+    /// combines.
+    pub(crate) fn assign_to_mergeable_entry<V>(self, map: &mut MergeableMap<V>) -> AssignResult
+    where
+        V: AssignKeyValue
+            + Default
+            + Clone
+            + PartialEq
+            + Serialize
+            + DeserializeOwned
+            + Schematic
+            + PartialConfig<Context = ()>,
+    {
+        if !self.states_map_strategy() {
+            return self.assign_to_entry(map);
+        }
+
+        let value = self.value.clone().into_value();
+        let next = serde_json::from_value(value).map_err(|error| kv_error(&self.key, error))?;
+
+        if !self.is_merge() {
+            *map = next;
+            return Ok(());
+        }
+
+        let merged = map_with_strategy(map.clone(), next, &()).or_else(|error| {
+            assignment_error(&self.key, self.value.clone().into_value(), error.into())
+        })?;
+
+        // A merge that produces no value leaves the field as it was; the
+        // strategies here all produce one.
+        if let Some(merged) = merged {
+            *map = merged;
+        }
+
+        Ok(())
+    }
+
     /// Parse an assignment from an environment variable.
     ///
     /// The environment variable is expected to be in the format
@@ -510,6 +589,28 @@ impl KvAssignment {
     /// `key=…` value is a string, whatever it contains.
     pub(crate) const fn is_json_object(&self) -> bool {
         matches!(&self.value, KvValue::Json(Value::Object(_)))
+    }
+
+    /// Try to parse the value as whatever `T` deserializes from.
+    ///
+    /// The bare form (`key=value`) arrives as a string, so a type that
+    /// deserializes from a string accepts both spellings, and a type that needs
+    /// a list or an object needs the JSON form (`key:=[…]`).
+    ///
+    /// A `null` clears the field, which also means a field assigned this way
+    /// cannot be set to JSON `null`.
+    pub(crate) fn try_some_value<T: DeserializeOwned>(
+        self,
+    ) -> Result<Option<T>, KvAssignmentError> {
+        if self.is_json_null() {
+            return Ok(None);
+        }
+
+        let Self { key, value, .. } = self;
+
+        serde_json::from_value(value.into_value())
+            .map(Some)
+            .map_err(|err| kv_error(&key, err))
     }
 
     /// Try to parse the value as a JSON object.

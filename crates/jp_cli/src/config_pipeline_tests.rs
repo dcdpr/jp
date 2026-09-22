@@ -264,6 +264,172 @@ fn conversation_clears_prevent_base_values_from_returning() {
     assert!(!partial.providers.mcp.contains_key("kagi"));
 }
 
+/// A server the conversation removed stays removed on the next invocation, with
+/// the paths taken from the delta rather than named by hand.
+///
+/// The two halves have to meet: the delta reports the key it dropped, and the
+/// pipeline clears it after filling.
+/// Either alone puts the server back, since filling reads a key the
+/// conversation does not hold as one it never mentioned.
+#[test]
+fn a_removed_server_survives_the_next_invocation() {
+    use jp_config::PartialConfigDelta as _;
+
+    let mut pipeline = empty_pipeline();
+    pipeline
+        .base
+        .providers
+        .mcp
+        .insert("bookworm".to_owned(), mcp_server("serve"));
+    pipeline
+        .base
+        .providers
+        .mcp
+        .insert("kagi".to_owned(), mcp_server("search"));
+
+    // The invocation that removed `kagi`, as the producer sees it: the
+    // conversation's state before, against the config the turn ran with.
+    let before = pipeline.base.clone();
+    let mut after = pipeline.base.clone();
+    after.providers.mcp.shift_remove("kagi");
+
+    let mut unsets = Vec::new();
+    let delta = before.delta_with_unsets(after.clone(), "", &mut unsets);
+
+    assert!(
+        !delta.providers.mcp.contains_key("kagi"),
+        "the delta carries the map the user is left with"
+    );
+
+    let partial = pipeline.partial_with_conversation(after, &unsets).unwrap();
+
+    assert!(
+        !partial.providers.mcp.contains_key("kagi"),
+        "the workspace must not restore a server the conversation removed"
+    );
+    assert!(
+        partial.providers.mcp.contains_key("bookworm"),
+        "and the servers it kept are still there"
+    );
+}
+
+/// A server removed through `jp config set --id` stays removed on the next
+/// invocation.
+///
+/// The override is recorded as it stands, so its `replace` is what removes the
+/// server from the conversation.
+/// That alone does not survive: the layer below fills the conversation from the
+/// config files, where a key the conversation does not hold reads as one it
+/// never mentioned.
+/// The paths recorded beside the override are what says otherwise.
+#[test]
+fn a_server_removed_by_config_set_survives_the_next_invocation() {
+    let mut pipeline = empty_pipeline();
+    pipeline
+        .base
+        .providers
+        .mcp
+        .insert("bookworm".to_owned(), mcp_server("serve"));
+    pipeline
+        .base
+        .providers
+        .mcp
+        .insert("kagi".to_owned(), mcp_server("search"));
+
+    // The conversation knows both servers, as `config set` finds it.
+    let current = pipeline.base.clone();
+
+    // `--cfg 'providers.mcp:={"value":{"kagi":…},"strategy":"replace"}'`, as
+    // `build_partial_from_cfg_args` produces it: applied to nothing, so it
+    // carries only what the user typed.
+    let mut overrides = PartialAppConfig::empty();
+    overrides
+        .assign(
+            r#"providers.mcp:={"value":{"kagi":{"type":"stdio","command":"just"}},"strategy":"replace"}"#
+                .parse::<KvAssignment>()
+                .unwrap(),
+        )
+        .unwrap();
+
+    let (delta, unsets) = override_to_record(&current, overrides)
+        .unwrap()
+        .expect("removing a server changes the config");
+
+    assert_eq!(
+        unsets,
+        ["providers.mcp.bookworm"],
+        "the override drops a key that merging cannot spell"
+    );
+
+    // The conversation, after the event is folded onto it.
+    let mut folded = current;
+    folded.merge(&(), delta).expect("folding cannot fail");
+    assert!(
+        !folded.providers.mcp.contains_key("bookworm"),
+        "the replacement removes the server from the conversation"
+    );
+
+    let partial = pipeline.partial_with_conversation(folded, &unsets).unwrap();
+
+    assert!(
+        !partial.providers.mcp.contains_key("bookworm"),
+        "and the workspace must not put it back"
+    );
+    assert!(
+        partial.providers.mcp.contains_key("kagi"),
+        "the server the user kept is still there"
+    );
+}
+
+/// A plugin the conversation removed stays removed on the next invocation.
+///
+/// Mirrors [`a_removed_server_survives_the_next_invocation`] for
+/// `plugins.command`, whose entries are filled from the config files the same
+/// way.
+#[test]
+fn a_removed_command_plugin_survives_the_next_invocation() {
+    use jp_config::{PartialConfigDelta as _, plugins::command::PartialCommandPluginConfig};
+
+    let plugin = |install: bool| PartialCommandPluginConfig {
+        install: Some(install),
+        ..PartialCommandPluginConfig::default()
+    };
+
+    let mut pipeline = empty_pipeline();
+    pipeline
+        .base
+        .plugins
+        .command
+        .insert("serve".to_owned(), plugin(true));
+    pipeline
+        .base
+        .plugins
+        .command
+        .insert("ticket".to_owned(), plugin(false));
+
+    let before = pipeline.base.clone();
+    let mut after = pipeline.base.clone();
+    after.plugins.command.shift_remove("serve");
+
+    let mut unsets = Vec::new();
+    let delta = before.delta_with_unsets(after.clone(), "", &mut unsets);
+
+    assert_eq!(unsets, ["plugins.command.serve"]);
+    assert!(!delta.plugins.command.contains_key("serve"));
+
+    let partial = pipeline.partial_with_conversation(after, &unsets).unwrap();
+
+    assert!(
+        !partial.plugins.command.contains_key("serve"),
+        "clearing the path has to remove the entry, not empty it: an entry that is there is not a \
+         gap for filling to close"
+    );
+    assert!(
+        partial.plugins.command.contains_key("ticket"),
+        "and the plugin it kept is still there"
+    );
+}
+
 #[test]
 fn conversation_clears_allow_explicit_cfg_values() {
     let mut pipeline = empty_pipeline();

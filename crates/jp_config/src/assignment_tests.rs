@@ -2,7 +2,7 @@ use assert_matches::assert_matches;
 use serde_json::json;
 
 use super::*;
-use crate::types::json_value::JsonValue;
+use crate::types::{json_value::JsonValue, map::MergedMapStrategy};
 
 #[test]
 fn test_kv_assignment_from_str() {
@@ -692,6 +692,78 @@ fn test_assign_to_entry_object_with_nested_values() {
     kv.assign_to_entry(&mut map).unwrap();
 
     assert_eq!(map["web"], JsonValue(json!({"port": "3000"})));
+}
+
+/// A wrapper naming a strategy states how the map merges, and with `:=` states
+/// the map itself.
+#[test]
+fn mergeable_entry_set_replaces_the_whole_map() {
+    let mut map = MergeableMap::<JsonValue>::default();
+    map.insert("stale".to_owned(), JsonValue(json!("gone")));
+
+    let kv =
+        KvAssignment::try_from_cli(":", r#"{"value":{"a":"1"},"strategy":"replace"}"#).unwrap();
+    kv.assign_to_mergeable_entry(&mut map).unwrap();
+
+    assert_matches!(&map, MergeableMap::Merged(merged) if merged.strategy == Some(MergedMapStrategy::Replace));
+    assert_eq!(map["a"], JsonValue(json!("1")));
+    assert!(!map.contains_key("stale"), "`:=` states the map outright");
+}
+
+/// The same wrapper assigned with `:+=` combines with the entries already
+/// there.
+///
+/// `--cfg` assigns onto the accumulated partial, which holds every entry the
+/// config files declared, so replacing here deletes entries the user never
+/// named — and the turn then records the deletion.
+#[test]
+fn mergeable_entry_merge_keeps_the_entries_already_there() {
+    let mut map = MergeableMap::<JsonValue>::default();
+    map.insert("bookworm".to_owned(), JsonValue(json!("serve")));
+
+    let kv = KvAssignment::try_from_cli(
+        ":+",
+        r#"{"value":{"kagi":"search"},"strategy":"deep_merge"}"#,
+    )
+    .unwrap();
+    kv.assign_to_mergeable_entry(&mut map).unwrap();
+
+    assert_eq!(map["bookworm"], JsonValue(json!("serve")));
+    assert_eq!(map["kagi"], JsonValue(json!("search")));
+}
+
+/// A merge-assigned wrapper combines under the strategy it names.
+///
+/// `keep` is the one that can be told from every other by its result alone: it
+/// is the only strategy under which an entry both maps hold keeps the value it
+/// already had.
+#[test]
+fn mergeable_entry_merge_applies_the_strategy_the_wrapper_names() {
+    let mut map = MergeableMap::<JsonValue>::default();
+    map.insert("bookworm".to_owned(), JsonValue(json!("serve")));
+
+    let kv = KvAssignment::try_from_cli(
+        ":+",
+        r#"{"value":{"bookworm":"other","kagi":"search"},"strategy":"keep"}"#,
+    )
+    .unwrap();
+    kv.assign_to_mergeable_entry(&mut map).unwrap();
+
+    assert_eq!(map["bookworm"], JsonValue(json!("serve")));
+    assert_eq!(map["kagi"], JsonValue(json!("search")));
+}
+
+/// An entry named `value` needs the sibling `strategy` before the object reads
+/// as the wrapper.
+#[test]
+fn mergeable_entry_value_alone_names_an_entry() {
+    let mut map = MergeableMap::<JsonValue>::default();
+
+    let kv = KvAssignment::try_from_cli(":", r#"{"value":"1"}"#).unwrap();
+    kv.assign_to_mergeable_entry(&mut map).unwrap();
+
+    assert_matches!(&map, MergeableMap::Map(_));
+    assert_eq!(map["value"], JsonValue(json!("1")));
 }
 
 #[test]

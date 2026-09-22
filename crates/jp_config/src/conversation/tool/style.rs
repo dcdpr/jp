@@ -30,7 +30,7 @@ use crate::{
     BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     conversation::tool::CommandConfigOrString,
-    delta::{PartialConfigDelta, delta_opt},
+    delta::{PartialConfigDelta, delta_opt, delta_opt_at, path},
     fill::FillDefaults,
     partial::{ToPartial, partial_opt, partial_opts},
 };
@@ -179,6 +179,50 @@ impl PartialConfigDelta for PartialDisplayStyleConfig {
             error: self.error.delta(next.error),
         }
     }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            hidden: delta_opt_at(
+                &path(prefix, "hidden"),
+                self.hidden.as_ref(),
+                next.hidden,
+                unsets,
+            ),
+            joins_reasoning: delta_opt_at(
+                &path(prefix, "joins_reasoning"),
+                self.joins_reasoning.as_ref(),
+                next.joins_reasoning,
+                unsets,
+            ),
+            inline_results: delta_opt_at(
+                &path(prefix, "inline_results"),
+                self.inline_results.as_ref(),
+                next.inline_results,
+                unsets,
+            ),
+            results_file_link: delta_opt_at(
+                &path(prefix, "results_file_link"),
+                self.results_file_link.as_ref(),
+                next.results_file_link,
+                unsets,
+            ),
+            parameters: delta_opt_at(
+                &path(prefix, "parameters"),
+                self.parameters.as_ref(),
+                next.parameters,
+                unsets,
+            ),
+            print_stderr: delta_opt_at(
+                &path(prefix, "print_stderr"),
+                self.print_stderr.as_ref(),
+                next.print_stderr,
+                unsets,
+            ),
+            error: self
+                .error
+                .delta_with_unsets(next.error, &path(prefix, "error"), unsets),
+        }
+    }
 }
 
 impl FillDefaults for PartialDisplayStyleConfig {
@@ -244,6 +288,23 @@ impl PartialConfigDelta for PartialErrorStyleConfig {
         Self {
             inline_results: delta_opt(self.inline_results.as_ref(), next.inline_results),
             results_file_link: delta_opt(self.results_file_link.as_ref(), next.results_file_link),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            inline_results: delta_opt_at(
+                &path(prefix, "inline_results"),
+                self.inline_results.as_ref(),
+                next.inline_results,
+                unsets,
+            ),
+            results_file_link: delta_opt_at(
+                &path(prefix, "results_file_link"),
+                self.results_file_link.as_ref(),
+                next.results_file_link,
+                unsets,
+            ),
         }
     }
 }

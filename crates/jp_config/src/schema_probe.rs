@@ -209,14 +209,17 @@ fn collect_type(
                 }
             }
         }
+        // A collection's contents sit below the keys that identify its variant,
+        // so the document is unambiguous there and the conservative fill
+        // applies, exactly as it does below a struct's own keys.
         SchemaType::Object(object) => {
             path.push(Step::MapEntry);
-            collect(&object.value_type, path, out, enclosing, strings);
+            collect(&object.value_type, path, out, enclosing, StringFill::Skip);
             path.pop();
         }
         SchemaType::Array(array) => {
             path.push(Step::Item);
-            collect(&array.items_type, path, out, enclosing, strings);
+            collect(&array.items_type, path, out, enclosing, StringFill::Skip);
             path.pop();
         }
         SchemaType::Union(union) => {
@@ -419,12 +422,12 @@ fn collect_rejections(
         }
         SchemaType::Object(object) => {
             path.push(Step::MapEntry);
-            collect_rejections(&object.value_type, path, out, enclosing, strings);
+            collect_rejections(&object.value_type, path, out, enclosing, StringFill::Skip);
             path.pop();
         }
         SchemaType::Array(array) => {
             path.push(Step::Item);
-            collect_rejections(&array.items_type, path, out, enclosing, strings);
+            collect_rejections(&array.items_type, path, out, enclosing, StringFill::Skip);
             path.pop();
         }
         SchemaType::Union(union) => {

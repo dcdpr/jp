@@ -245,6 +245,41 @@ fn strip_descends_into_a_tool_named_after_the_flattened_field() {
 }
 
 #[test]
+fn strip_descends_into_a_flattened_map_stating_a_strategy() {
+    // Removing one of a conversation's tools records the map the user is left
+    // with, stamped `replace`. Flattened, that wrapper's own keys sit where
+    // tool names otherwise do, so `value` holds the map rather than a tool.
+    let schema = AppConfig::schema();
+    let mut value = json!({
+        "conversation": {
+            "tools": {
+                "value": {
+                    "bash": { "source": "local", "from_a_newer_jp": 1 }
+                },
+                "strategy": "replace"
+            }
+        }
+    });
+
+    let stripped = strip_unknown_fields(&mut value, &schema);
+    assert_eq!(stripped, 1);
+    assert_eq!(
+        value,
+        json!({
+            "conversation": {
+                "tools": {
+                    "value": {
+                        "bash": { "source": "local" }
+                    },
+                    "strategy": "replace"
+                }
+            }
+        }),
+        "the retained tool survives and the strategy is left alone"
+    );
+}
+
+#[test]
 fn strip_descends_into_array_items() {
     let schema = AppConfig::schema();
     let mut value = json!({
@@ -860,6 +895,32 @@ fn legacy_enable_strings_survive_compat_deserialization() {
         "legacy `explicit` must map to off-unless-named"
     );
     assert_eq!(tools["off_tool"].enable, Some(PartialEnableConfig::OFF));
+}
+
+#[test]
+fn a_removed_tool_leaves_the_others_standing() {
+    // Removing one of two tools stores the map the user is left with, stamped
+    // `replace`. Reading that back has to keep the tool they kept: an empty
+    // replacement would take every tool the conversation had.
+    let value = json!({
+        "conversation": {
+            "tools": {
+                "value": {
+                    "bash": { "source": "local", "from_a_newer_jp": 1 }
+                },
+                "strategy": "replace"
+            }
+        }
+    });
+
+    let config = deserialize_partial_config(value);
+    let tools = &config.conversation.tools.tools;
+
+    assert!(
+        tools.contains_key("bash"),
+        "the retained tool survives the read: {tools:?}"
+    );
+    assert_eq!(tools.len(), 1, "and nothing else joins it");
 }
 
 #[test]
