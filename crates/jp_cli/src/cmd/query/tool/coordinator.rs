@@ -215,8 +215,8 @@ impl ExecutionOutcome {
     /// Record a newly observed outcome, keeping the most severe one.
     ///
     /// Without this, a second interrupt during the cancellation drain could
-    /// downgrade the outcome — e.g. a "Stop & respond" reply clearing an
-    /// earlier "Stop (cancel & exit)".
+    /// downgrade the outcome, e.g. a "Stop & respond" reply clearing an earlier
+    /// "Stop (cancel & exit)".
     fn upgrade(&mut self, next: Self) {
         *self = (*self).max(next);
     }
@@ -358,7 +358,7 @@ pub enum PermissionDecision {
     },
 }
 
-/// Final outcome of [`ToolCoordinator::resolve_tool_call_decision`] — the
+/// Final outcome of [`ToolCoordinator::resolve_tool_call_decision`], the
 /// per-tool permission pipeline.
 ///
 /// This wraps the full decide → pre-render → prompt → apply → post-render
@@ -368,8 +368,8 @@ pub enum PermissionDecision {
 /// [`ToolCoordinator::run_permission_phase`]).
 pub enum ToolCallDecision {
     /// Tool is approved and ready to be queued for execution.
-    /// Includes any rendered argument content from the formatter — the caller
-    /// is responsible for persisting it (typically into a `ToolCallRequest`
+    /// Includes any rendered argument content from the formatter, which the
+    /// caller is responsible for persisting (typically into a `ToolCallRequest`
     /// event's metadata).
     Approved {
         executor: Box<dyn Executor>,
@@ -380,7 +380,7 @@ pub enum ToolCallDecision {
     /// The response is the synthesized skip message ready to be appended to the
     /// conversation stream.
     Skipped(ToolCallResponse),
-    /// Tool failed before it could run — typically because a custom-format
+    /// Tool failed before it could run, typically because a custom-format
     /// formatter command errored.
     /// The response tells the LLM the tool was not executed and may be retried.
     Failed(ToolCallResponse),
@@ -526,8 +526,8 @@ impl ToolCoordinator {
     /// A formatter configured with `format = "ask"` has not run yet at this
     /// point, which is [`PreRender::Deferred`].
     ///
-    /// Returns `Err` if a formatter failed — the caller should treat that as a
-    /// tool failure and skip prompting.
+    /// Returns `Err` if a formatter failed.
+    /// The caller should treat that as a tool failure and skip prompting.
     fn pre_render_for_prompt(
         &self,
         executor: &dyn Executor,
@@ -558,7 +558,7 @@ impl ToolCoordinator {
     /// shape.
     ///
     /// This is the seam where new permission-related features should land:
-    /// telemetry, sandboxing decisions, alternate prompting modes — anything
+    /// telemetry, sandboxing decisions, alternate prompting modes, anything
     /// that needs to apply uniformly to both the streaming path (in
     /// `turn_loop.rs`) and the batch/restart path
     /// ([`Self::run_permission_phase`]).
@@ -652,7 +652,7 @@ impl ToolCoordinator {
                 // Snapshot the args we just rendered so we can detect a
                 // user edit. If `e` changes the arguments, the pre-render
                 // reflects pre-edit values and would diverge from what
-                // actually executes — drop it so step 3 re-renders with
+                // actually executes, so drop it and let step 3 re-render with
                 // the post-edit args.
                 let pre_edit_args = executor.arguments().clone();
 
@@ -708,8 +708,8 @@ impl ToolCoordinator {
     /// A `Custom` parameter style shows what the execution service's formatter
     /// produced.
     /// The formatter is a user-configured command, so it runs once, there,
-    /// under the call's access policy and cancellation token — never a second
-    /// time here.
+    /// under the call's access policy and cancellation token, and never a
+    /// second time here.
     fn render_executor(&self, executor: &dyn Executor, renderer: &ToolRenderer) -> RenderOutcome {
         let name = executor.tool_name();
         if self.is_hidden(name) {
@@ -894,10 +894,10 @@ impl ToolCoordinator {
     ///
     /// Returns one of:
     ///
-    /// - `Approved` — tool can run immediately (unattended, persisted "y",
+    /// - `Approved`: tool can run immediately (unattended, persisted "y",
     ///   non-interactive)
-    /// - `Skipped` — tool should not run (persisted "n")
-    /// - `NeedsPrompt` — requires an interactive user prompt
+    /// - `Skipped`: tool should not run (persisted "n")
+    /// - `NeedsPrompt`: requires an interactive user prompt
     ///
     /// [`render_approved_tool`]: Self::render_approved_tool
     pub fn decide_permission(

@@ -91,7 +91,7 @@ fn test_flush_instant_with_no_pending_tasks() {
     printer.print("already sent");
     printer.flush();
 
-    // Nothing pending — should be a no-op
+    // Nothing pending, so this should be a no-op
     printer.flush_instant();
 
     assert_eq!(*out.lock(), "already sent");
@@ -400,7 +400,7 @@ fn effective_delay_in_drain_mode_can_speed_up_further() {
     // pending), the controller speeds up to the new floor rather than
     // sticking with the old drain pace. This codifies that any new
     // typewriter task is also expected to clear the snapshot via
-    // `track_pending` — the max() is just a safety net.
+    // `track_pending`; the max() is just a safety net.
     let dc = DelayControl {
         skip: Mutex::new(false),
         wake: Condvar::new(),
@@ -711,8 +711,8 @@ fn releasing_a_shaded_region_leaves_no_paint_behind() {
 
     // The row is shaded while the region owns it, and the release clears it to
     // the terminal default. A background on the erase would paint the row to
-    // the right edge instead, and whatever wrote there next — including the
-    // shell prompt after `jp` exits — would sit in front of that paint.
+    // the right edge instead, and whatever wrote there next (including the
+    // shell prompt after `jp` exits) would sit in front of that paint.
     assert_eq!(
         *err.lock(),
         "\r\x1b[Kwaiting\r\x1b[48;5;236m\x1b[Kwaiting\x1b[49m\r\x1b[K"
@@ -786,7 +786,7 @@ fn acquiring_a_prompt_writer_drains_the_queue_first() {
     // No flush: acquisition is the barrier. A widget changes the terminal mode
     // and takes the cursor directly, neither of which travels through the
     // printer's queue, so anything still in it would land on a terminal the
-    // widget has already reconfigured — line feeds with no carriage return,
+    // widget has already reconfigured: line feeds with no carriage return,
     // under a cursor the widget believes it owns.
     let start = Instant::now();
     let _prompt = printer.prompt_writer();

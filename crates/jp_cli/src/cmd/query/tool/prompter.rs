@@ -162,7 +162,7 @@ impl ToolPrompter {
     /// Returns `SelectOption`s that can be rendered as an inline select.
     fn permission_options() -> Vec<SelectOption> {
         // `r` (skip & reply) and `e` (edit arguments) drive the inline reply
-        // widget, which needs only a tty — they no longer require a configured
+        // widget, which needs only a tty, so they do not require a configured
         // editor (the `Ctrl+X` escape does, but it is a no-op without one).
         vec![
             SelectOption::new("y", "Run tool"),
@@ -313,7 +313,7 @@ impl ToolPrompter {
                         Ok(value) => return Ok(EditResult::Edited(value)),
                         Err(e) => {
                             // Re-seed with the user's text and surface the error
-                            // in the prompt line — no process re-spawn.
+                            // in the prompt line, with no process re-spawn.
                             text = edited;
                             message = format!("Invalid JSON: {e}");
                         }

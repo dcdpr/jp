@@ -208,9 +208,9 @@ impl Printer {
 
     /// Set whether chrome reaches the error stream.
     ///
-    /// [`Chrome::Silenced`] discards everything written to that stream —
-    /// [`Self::eprint`], [`Self::eprintln`], [`Self::erase_line`], and
-    /// [`Self::err_writer`] — and leaves stdout and the prompt stream alone.
+    /// [`Chrome::Silenced`] discards everything written to that stream
+    /// ([`Self::eprint`], [`Self::eprintln`], [`Self::erase_line`], and
+    /// [`Self::err_writer`]) and leaves stdout and the prompt stream alone.
     ///
     /// Call before the printer is shared; clones inherit the value.
     #[must_use]
@@ -279,7 +279,7 @@ impl Printer {
     /// before any printer-managed write reaches the terminal.
     /// Dropping the returned handle releases the claim and erases the row.
     ///
-    /// Returns an inert handle when regions are disabled — silenced chrome, a
+    /// Returns an inert handle when regions are disabled: silenced chrome, a
     /// non-pretty format, a stderr that isn't a terminal, or live logs on
     /// stderr.
     #[must_use]
@@ -343,8 +343,8 @@ impl Printer {
     /// This allows prompts to render on the terminal even when stdout and
     /// stderr are redirected.
     ///
-    /// The chrome channel's capabilities are measured here — stderr's tty-ness
-    /// and the terminal's width — so status regions know whether they may
+    /// The chrome channel's capabilities are measured here, stderr's tty-ness
+    /// and the terminal's width, so status regions know whether they may
     /// render.
     #[must_use]
     pub fn terminal(format: OutputFormat) -> Self {
@@ -465,8 +465,8 @@ impl Printer {
 
     /// Erase the current line on the chrome channel.
     ///
-    /// For chrome that repaints in place — status lines, progress counters,
-    /// the retry notice.
+    /// For chrome that repaints in place: status lines, progress counters, the
+    /// retry notice.
     /// A no-op whenever [`Self::chrome_repaints`] is false: under a JSON format
     /// `\r\x1b[K` is neither a record nor part of one, and would break `2>&1 |
     /// jq` to redraw something a JSON consumer cannot see.
@@ -591,7 +591,7 @@ impl Printer {
 
     /// Print a line on the prompt stream.
     ///
-    /// For the context a question needs to be answerable — the identity of a
+    /// For the context a question needs to be answerable: the identity of a
     /// binary awaiting approval, the details of a conversation about to be
     /// removed.
     /// Such a line travels with its question rather than as chrome, so
@@ -610,17 +610,17 @@ impl Printer {
 
     /// Print a line of chrome that must not wait for a prompt session.
     ///
-    /// The same stream and the same record shape as [`Self::eprintln`] —
-    /// `--quiet` silences it, `2>` captures it — but the line belongs to the
-    /// prompt session, so it lands while a widget still owns the terminal
-    /// rather than queueing behind it.
+    /// The same stream and the same record shape as [`Self::eprintln`], so
+    /// `--quiet` silences it and `2>` captures it, but the line belongs to the
+    /// prompt session and lands while a widget still owns the terminal rather
+    /// than queueing behind it.
     /// For a notice about the question itself: held back, it arrives once the
     /// question it explains is already answered.
     ///
     /// The caller owns the timing.
     /// This bypasses the wait that keeps ordinary output off a screen someone
     /// else is drawing on, so it is safe only when the widget has left the
-    /// terminal in cooked mode — between two of its frames, not during one.
+    /// terminal in cooked mode: between two of its frames, not during one.
     pub fn prompt_eprintln<P: Printable>(&self, p: P) {
         let mut task = p.into_task();
         if self.format.is_json() {
@@ -1179,7 +1179,7 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
             }
         }
 
-        // A run can end with a widget still holding the terminal — a `Ctrl+C`
+        // A run can end with a widget still holding the terminal: a `Ctrl+C`
         // at a prompt, an error unwinding past one. Nothing is going to give it
         // back, and what is held is the answer the user asked for, so it goes
         // out anyway: a last frame the widget left untidy is a smaller loss
@@ -1358,7 +1358,7 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
                 // ~15.6ms on Windows), and a sub-tick sleep still costs
                 // a full tick of wall clock. Without batching, a burst
                 // of 200 chars at 1ms each takes ~3.1s on Windows
-                // instead of the 200ms the controller asked for —
+                // instead of the 200ms the controller asked for,
                 // silently violating the configured `max_latency`.
                 let mut credit = Duration::ZERO;
                 for (c, visible) in VisibleCharsIterator::new(content) {
@@ -1511,13 +1511,13 @@ pub enum PrintMode {
 /// The target output stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrintTarget {
-    /// Output stream (stdout) — assistant responses, structured data.
+    /// Output stream (stdout): assistant responses, structured data.
     Out,
 
-    /// Error stream (stderr) — chrome, progress, status.
+    /// Error stream (stderr): chrome, progress, status.
     Err,
 
-    /// TTY stream (`/dev/tty`) — interactive prompts.
+    /// TTY stream (`/dev/tty`): interactive prompts.
     ///
     /// Bypasses stdout/stderr redirections so prompts always render on the
     /// terminal.
@@ -1538,8 +1538,8 @@ pub enum PrintOrigin {
     #[default]
     Content,
 
-    /// Part of a prompt session — the widget's own drawing, or a line written
-    /// to give its question the context it needs to be answerable.
+    /// Part of a prompt session: the widget's own drawing, or a line written to
+    /// give its question the context it needs to be answerable.
     Prompt,
 }
 
@@ -1744,9 +1744,9 @@ impl DelayControl {
 /// On Linux/macOS that's well under 1ms, so per-character sleeps are honored as
 /// requested and the typewriter looks smooth.
 /// On Windows the default tick is ~15.6ms, so any sub-tick request still parks
-/// the worker for a full tick — without batching, a 200- character burst at
-/// 1ms each takes ~3.1s instead of the 200ms the bounded-latency controller
-/// asked for, silently violating the configured `max_latency`.
+/// the worker for a full tick. Without batching, a 200-character burst at 1ms
+/// each takes ~3.1s instead of the 200ms the bounded-latency controller asked
+/// for, silently violating the configured `max_latency`.
 ///
 /// The worker accumulates effective per-character delays and only parks once
 /// the accumulated credit reaches this threshold.
@@ -1761,7 +1761,7 @@ impl DelayControl {
 /// `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` since Rust 1.75 (Win 10 1803+), so
 /// true sub-millisecond per-character pacing is possible.
 /// Reaching it from here means dropping the `Condvar`-based wake and polling
-/// the `skip` flag between short `thread::sleep` calls — trading immediate
+/// the `skip` flag between short `thread::sleep` calls, trading immediate
 /// `flush_instant` wake-up for up-to-poll-interval wake-up latency, plus extra
 /// syscall overhead from re-creating the waitable timer on every sleep.
 /// We've taken the simpler batching fix here on the assumption that ~10ms

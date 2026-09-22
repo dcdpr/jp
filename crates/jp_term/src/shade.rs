@@ -2,15 +2,15 @@
 //! stream.
 //!
 //! [`ShadedWriter`] wraps another [`Write`] and keeps a region background `B`
-//! showing from column 0 to the right edge of every visual line — including
-//! lines produced by carriage-return rewrites (`\r`) and `\x1b[K` erases —
-//! while stepping out of the way for any background the content sets itself.
+//! showing from column 0 to the right edge of every visual line, including
+//! lines produced by carriage-return rewrites (`\r`) and `\x1b[K` erases, while
+//! stepping out of the way for any background the content sets itself.
 //! `B` is closed before every line break and re-asserted on the next line, so
 //! no row past the region is painted.
 //! [`shade`] is the buffer-at-a-time convenience built on the same core.
 //!
 //! The writer holds its state across `write_str` calls, so `B` survives a
-//! cursor rewrite or an escape sequence split between two writes — the cases a
+//! cursor rewrite or an escape sequence split between two writes, the cases a
 //! per-line transform over a finished string cannot express.
 
 use std::fmt::{self, Write};
@@ -46,21 +46,21 @@ pub struct ShadedWriter<W: Write> {
     ///
     /// The full policy, not a boolean: [`BackgroundFill::Terminal`] defers the
     /// fill to the terminal via `\x1b[K`, while [`BackgroundFill::Column`] pads
-    /// with real spaces — the only form a host that lays out its own
-    /// sub-window (an `fzf` preview pane) renders.
+    /// with real spaces, the only form a host that lays out its own sub-window
+    /// (an `fzf` preview pane) renders.
     fill: BackgroundFill,
 
     /// Visible column of the write cursor on the current line.
     ///
     /// Only meaningful for [`BackgroundFill::Column`], which needs to know how
     /// far to pad.
-    /// Counted in display columns over escape-free text runs — with tabs
-    /// advancing to the next tab stop, as the display does — and reset by `\n`
+    /// Counted in display columns over escape-free text runs, with tabs
+    /// advancing to the next tab stop as the display does, and reset by `\n`
     /// and `\r`.
     column: usize,
 
     /// The content's currently active attributes, fed only the content's own
-    /// escapes — never the writer's injected background.
+    /// escapes, never the writer's injected background.
     content: AnsiState,
 
     /// Whether the region background must be (re-)asserted before the next
@@ -99,7 +99,7 @@ impl<W: Write> ShadedWriter<W> {
     /// The writer being shaded.
     ///
     /// A decorator has to stay transparent to whatever the wrapped writer can
-    /// do beyond [`Write`] — flushing an `io::Write`, most often.
+    /// do beyond [`Write`], flushing an `io::Write` most often.
     /// Any escape sequence held back from a split write stays held: forwarding
     /// a half-formed sequence is the one thing this writer exists to prevent.
     pub const fn get_mut(&mut self) -> &mut W {
@@ -243,7 +243,7 @@ impl<W: Write> ShadedWriter<W> {
     ///
     /// A terminal scrolling to make room for the next row fills that row with
     /// the background active at the time (the `bce` capability), so a `\n`
-    /// written under `B` paints a row that isn't part of the region — the row
+    /// written under `B` paints a row that isn't part of the region: the row
     /// the next command's output lands on.
     /// The line's own fill has already been written, so closing here costs
     /// nothing visually.

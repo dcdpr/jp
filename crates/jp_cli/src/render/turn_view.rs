@@ -1,7 +1,7 @@
 //! Shared role-aware rendering for both replay and live streaming.
 //!
 //! [`TurnView`] coordinates the chat and structured sub-renderers and tracks
-//! turn-level state — most importantly, whether the assistant role header has
+//! turn-level state, most importantly whether the assistant role header has
 //! been emitted yet.
 //!
 //! Both [`TurnRenderer`] (replay, e.g. `jp conversation print`) and
@@ -104,8 +104,8 @@ impl TurnView {
     /// Set the dimmed detail attached to the first role header of the upcoming
     /// turn (e.g. `turn 2, 12 minutes ago`).
     ///
-    /// Consumed by whichever header — user or assistant — renders first;
-    /// later headers in the same turn render without it.
+    /// Consumed by whichever header (user or assistant) renders first; later
+    /// headers in the same turn render without it.
     pub(crate) fn set_turn_detail(&mut self, detail: Option<String>) {
         self.pending_turn_detail = detail;
     }
@@ -229,9 +229,9 @@ impl TurnView {
     /// returning the region background (or `None` when the tool call doesn't
     /// continue a shaded reasoning region).
     /// When the chrome is not visible, the reasoning separator is left for the
-    /// next visible content and no transition occurs — a reasoning region
-    /// stays continuous across the invisible tool — and `None` is returned,
-    /// since there is no chrome to shade.
+    /// next visible content and no transition occurs, so a reasoning region
+    /// stays continuous across the invisible tool, and `None` is returned since
+    /// there is no chrome to shade.
     pub(crate) fn enter_tool_call_region(
         &mut self,
         chrome_visible: bool,

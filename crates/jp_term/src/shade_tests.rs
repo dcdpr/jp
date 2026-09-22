@@ -203,7 +203,7 @@ fn a_carriage_return_left_hanging_at_the_end_is_still_written() {
 #[test]
 fn erase_under_a_content_background_keeps_the_content_fill() {
     // When the content has its own background, its `\x1b[K` erase must fill with
-    // that background — the region background is never injected before it.
+    // that background, and the region background is never injected before it.
     let output = shade("\x1b[48;5;52m\x1b[Kx", &terminal_bg());
     assert_eq!(output, "\x1b[48;5;52m\x1b[Kx\x1b[49m");
     assert!(

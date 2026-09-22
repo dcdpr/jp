@@ -51,7 +51,7 @@ fn prompting_a_question_carries_the_reasoning_background() {
     prompter.printer.flush();
 
     // Background asserted, text, fill to the right edge, then the background
-    // closed *before* the line break — a `\n` written under an active
+    // closed *before* the line break: a `\n` written under an active
     // background paints the row the terminal scrolls in.
     assert_eq!(
         *out.lock(),
@@ -286,7 +286,7 @@ fn edit_result_preserves_multiline_content() {
 fn edit_result_editor_escape_failure_keeps_buffer_and_notifies_chrome() {
     // Ctrl+X -> editor can't start -> the typed buffer is kept and the widget
     // re-prompts, so a second submit still returns the text (the spawn failure
-    // must NOT propagate as a fatal prompt error — the old `?` behavior). The
+    // must NOT propagate as a fatal prompt error). The
     // failure is surfaced on the chrome channel (stderr), not just the tracing
     // log, so the user knows their editor didn't open.
     let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
