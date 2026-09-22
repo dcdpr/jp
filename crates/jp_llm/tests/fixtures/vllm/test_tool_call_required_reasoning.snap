@@ -1,0 +1,57 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user wants me to run the tool with whatever arguments I want. Let me look at the schema:\n- foo: string or null, required\n- bar: string or array, required, enum [\"foo\"], items enum [\"foo\", \"bar\"]\n\nWait, bar has enum [\"foo\"] at the top level and items enum [\"foo\",\"bar\"]. That's a bit odd. If bar is a string, it must be \"foo\". If it's an array, items must be \"foo\" or \"bar\".\n\nLet me just call it with foo = \"hello\" and bar = [\"foo\", \"bar\"].\n",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "chatcmpl-tool-a561ff74956ad924",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("hello world"),
+                            "bar": Array [
+                                String("foo"),
+                                String("bar"),
+                            ],
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "I ran the `run_me` tool with:\n\n- **`foo`**: `\"hello world\"` (a string)\n- **`bar`**: `[\"foo\", \"bar\"]` (an array of valid enum items)\n\nAnd it returned: **working!** 🎉",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

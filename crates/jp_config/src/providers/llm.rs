@@ -8,6 +8,7 @@ pub mod llamacpp;
 pub mod ollama;
 pub mod openai;
 pub mod openrouter;
+pub mod vllm;
 
 use indexmap::IndexMap;
 use schematic::{Config, ConfigError};
@@ -28,6 +29,7 @@ use crate::{
         ollama::{OllamaConfig, PartialOllamaConfig},
         openai::{OpenaiConfig, PartialOpenaiConfig},
         openrouter::{OpenrouterConfig, PartialOpenrouterConfig},
+        vllm::{PartialVllmConfig, VllmConfig},
     },
     types::map::{MergeableMap, map_to_partial_per_key},
     validate::Validator,
@@ -89,6 +91,10 @@ pub struct LlmProviderConfig {
     /// Openrouter API configuration.
     #[setting(nested)]
     pub openrouter: OpenrouterConfig,
+
+    /// vLLM API configuration.
+    #[setting(nested)]
+    pub vllm: VllmConfig,
 }
 
 impl Validator for LlmProviderConfig {
@@ -110,6 +116,7 @@ impl AssignKeyValue for PartialLlmProviderConfig {
             _ if kv.p("ollama") => self.ollama.assign(kv)?,
             _ if kv.p("openai") => self.openai.assign(kv)?,
             _ if kv.p("openrouter") => self.openrouter.assign(kv)?,
+            _ if kv.p("vllm") => self.vllm.assign(kv)?,
             _ => return missing_key(&kv),
         }
 
@@ -132,6 +139,7 @@ impl PartialConfigDelta for PartialLlmProviderConfig {
             ollama: self.ollama.delta(next.ollama),
             openai: self.openai.delta(next.openai),
             openrouter: self.openrouter.delta(next.openrouter),
+            vllm: self.vllm.delta(next.vllm),
         }
     }
 
@@ -159,6 +167,7 @@ impl PartialConfigDelta for PartialLlmProviderConfig {
                 &path(prefix, "openrouter"),
                 unsets,
             ),
+            vllm: self.vllm.delta(next.vllm),
         }
     }
 }
@@ -181,6 +190,7 @@ impl FillDefaults for PartialLlmProviderConfig {
             ollama: self.ollama.fill_from(defaults.ollama),
             openai: self.openai.fill_from(defaults.openai),
             openrouter: self.openrouter.fill_from(defaults.openrouter),
+            vllm: self.vllm.fill_from(defaults.vllm),
         }
     }
 }
@@ -199,6 +209,7 @@ impl ToPartial for LlmProviderConfig {
             ollama: self.ollama.to_partial(),
             openai: self.openai.to_partial(),
             openrouter: self.openrouter.to_partial(),
+            vllm: self.vllm.to_partial(),
         }
     }
 }

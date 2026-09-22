@@ -1,4 +1,4 @@
-use std::{panic, path::Path, sync::Arc};
+use std::{env, panic, path::Path, sync::Arc};
 
 use chrono::{TimeZone as _, Utc};
 use futures::TryStreamExt as _;
@@ -459,14 +459,28 @@ pub async fn run_test(
     .await
 }
 
-#[expect(clippy::too_many_lines)]
-pub async fn run_chat_completion(
-    test_name: impl AsRef<str>,
-    provider_id: ProviderId,
-    mut config: LlmProviderConfig,
-    requests: Vec<TestRequest>,
-) -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let vcr = Vcr::new(match provider_id {
+/// Environment variable naming the server to record against.
+///
+/// Has no effect on playback, which answers from the cassette and never
+/// forwards.
+const UPSTREAM_ENV: &str = "JP_TEST_UPSTREAM";
+
+/// The server the recorder forwards to.
+///
+/// The provider's configured base URL, unless `JP_TEST_UPSTREAM` names another
+/// one.
+/// A self-hosted provider is configured with a loopback address, which finds a
+/// server only on the machine doing the recording; the variable aims the
+/// recording at a deployment elsewhere.
+///
+/// Only the upstream moves.
+/// Requests still travel through the mock server that writes the cassette.
+fn record_upstream(provider_id: ProviderId, config: &LlmProviderConfig) -> String {
+    if let Ok(url) = env::var(UPSTREAM_ENV) {
+        return url;
+    }
+
+    match provider_id {
         ProviderId::Anthropic => config.anthropic.base_url.clone(),
         ProviderId::Cerebras => config.cerebras.base_url.clone(),
         ProviderId::Google => config.google.base_url.clone(),
@@ -474,9 +488,20 @@ pub async fn run_chat_completion(
         ProviderId::Ollama => config.ollama.base_url.clone(),
         ProviderId::Openai => config.openai.base_url.clone(),
         ProviderId::Openrouter => config.openrouter.base_url.clone(),
+        ProviderId::Vllm => config.vllm.base_url.clone(),
         _ => String::new(),
-    })
-    .with_fixture_suffix(&provider_id.as_str());
+    }
+}
+
+#[expect(clippy::too_many_lines)]
+pub async fn run_chat_completion(
+    test_name: impl AsRef<str>,
+    provider_id: ProviderId,
+    mut config: LlmProviderConfig,
+    requests: Vec<TestRequest>,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let vcr =
+        Vcr::new(record_upstream(provider_id, &config)).with_fixture_suffix(&provider_id.as_str());
 
     vcr.cassette(
         test_name.as_ref(),
@@ -494,6 +519,7 @@ pub async fn run_chat_completion(
                 ProviderId::Ollama => config.ollama.base_url = url,
                 ProviderId::Openai => config.openai.base_url = url,
                 ProviderId::Openrouter => config.openrouter.base_url = url,
+                ProviderId::Vllm => config.vllm.base_url = url,
                 _ => {}
             }
 
@@ -507,6 +533,7 @@ pub async fn run_chat_completion(
                     ProviderId::Google => config.google.api_key_env = env,
                     ProviderId::Openai => config.openai.api_key_env = env,
                     ProviderId::Openrouter => config.openrouter.api_key_env = env,
+                    ProviderId::Vllm => config.vllm.api_key_env = env,
                     _ => {}
                 }
             }
@@ -792,6 +819,10 @@ pub(crate) fn fixture_attachment(path: impl AsRef<Path>) -> Attachment {
     Attachment::binary(path.as_ref().display().to_string(), data, media_type)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per provider; the table is flat by design"
+)]
 pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
     match id {
         ProviderId::Anthropic => ModelDetails {
@@ -877,6 +908,18 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             knowledge_cutoff: None,
             deprecated: None,
             structured_output: Some(true),
+            prefill: None,
+            features: vec![],
+        },
+        ProviderId::Vllm => ModelDetails {
+            id: "vllm/Qwen/Qwen3.8-Flash-Next-NVFP4".parse().unwrap(),
+            display_name: None,
+            context_window: Some(131_072),
+            max_output_tokens: None,
+            reasoning: None,
+            knowledge_cutoff: None,
+            deprecated: None,
+            structured_output: None,
             prefill: None,
             features: vec![],
         },

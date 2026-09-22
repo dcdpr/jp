@@ -1,0 +1,82 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 1,
+            part: Structured(
+                "{\n  ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "\"tit",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "les\": [\n    \"Conve",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "rsatio",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "n Title Gen",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "e",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "ratio",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "n",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "\"\n  ]\n}",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]
