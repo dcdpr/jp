@@ -818,6 +818,18 @@ impl ChatRenderer {
         self.last_content_kind = Some(ContentKind::ToolCall);
     }
 
+    /// End the chat-response region without rendering into it.
+    ///
+    /// Call this when content this renderer did not draw has reached the
+    /// screen.
+    /// It cannot see that content, so it would otherwise go on reporting the
+    /// region it last rendered: a prompt taken afterwards would carry a
+    /// background that is no longer on screen, and a tool call would continue a
+    /// region that has ended.
+    pub(crate) fn leave_response_region(&mut self) {
+        self.set_response_kind(None);
+    }
+
     /// Record which kind of chat response last rendered, and publish the region
     /// a prompt taken now would sit inside.
     ///

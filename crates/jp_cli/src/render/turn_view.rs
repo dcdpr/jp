@@ -183,6 +183,10 @@ impl TurnView {
 
         if resp.is_structured() {
             self.chat.flush();
+            // The chat renderer draws none of this, so it has to be told the
+            // region ended: a JSON answer on screen is not reasoning, and a
+            // prompt taken over it carries no background.
+            self.chat.leave_response_region();
             self.structured.render_chunk(resp);
         } else {
             self.structured.flush();
