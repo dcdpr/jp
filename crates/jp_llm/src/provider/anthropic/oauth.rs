@@ -61,26 +61,31 @@ pub enum OauthError {
     #[error("could not reach the Anthropic OAuth endpoint")]
     Transport(#[from] reqwest::Error),
 
-    /// The endpoint refused the grant.
-    ///
-    /// A refused refresh token cannot be recovered by retrying; the profile
-    /// needs a fresh login.
-    #[error("OAuth request rejected (HTTP {status}): {body}")]
-    Rejected { status: u16, body: String },
+    /// The endpoint answered with a non-success status.
+    #[error("OAuth request failed (HTTP {status}): {body}")]
+    Status { status: u16, body: String },
 
     #[error("could not parse the OAuth token response: {0}")]
     Malformed(#[from] serde_json::Error),
 }
 
 impl OauthError {
-    /// Whether the grant itself was refused, as opposed to the request not
-    /// getting through.
+    /// Whether the grant itself was refused, rather than the request failing to
+    /// get through.
     ///
-    /// Only a refusal means the stored credential is dead; a transport failure
-    /// is worth another attempt later.
+    /// Only a refusal means the stored credential is dead and the profile needs
+    /// a fresh login.
+    /// A throttle or a server fault says nothing about the credential, and
+    /// retiring the profile over one would send the user to per-token billing
+    /// over an outage they had no part in.
+    ///
+    /// A refused grant is `400` (RFC 6749 reports `invalid_grant` there),
+    /// `401`, or `403`.
+    /// Every other status, including `429` and the `5xx` range, is worth
+    /// another attempt later.
     #[must_use]
     pub fn is_rejection(&self) -> bool {
-        matches!(self, Self::Rejected { .. })
+        matches!(self, Self::Status { status, .. } if matches!(status, 400 | 401 | 403))
     }
 }
 
@@ -256,7 +261,7 @@ async fn post_token(body: Value, now: DateTime<Utc>) -> Result<Tokens, OauthErro
     let text = response.text().await?;
 
     if !status.is_success() {
-        return Err(OauthError::Rejected {
+        return Err(OauthError::Status {
             status: status.as_u16(),
             body: text,
         });

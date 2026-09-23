@@ -175,12 +175,34 @@ fn test_empty_account_fields_are_not_an_identity() {
 /// another attempt; the caller marks a profile for re-login on the former only.
 #[test]
 fn test_only_a_refusal_is_a_rejection() {
-    let rejected = OauthError::Rejected {
-        status: 400,
-        body: "invalid_grant".to_owned(),
-    };
-    assert!(rejected.is_rejection());
+    for status in [400, 401, 403] {
+        let refused = OauthError::Status {
+            status,
+            body: "invalid_grant".to_owned(),
+        };
+        assert!(refused.is_rejection(), "HTTP {status}");
+    }
 
     let malformed = OauthError::Malformed(serde_json::from_str::<Value>("{").unwrap_err());
     assert!(!malformed.is_rejection());
+}
+
+/// The token endpoint being throttled or down says nothing about the stored
+/// credential.
+///
+/// Retiring a profile over one would skip it on every later invocation and move
+/// the user onto per-token billing, diagnosed as a session that never expired.
+#[test]
+fn test_a_throttle_or_outage_is_not_a_rejection() {
+    for status in [408, 429, 500, 502, 503, 504] {
+        let transient = OauthError::Status {
+            status,
+            body: "upstream unavailable".to_owned(),
+        };
+
+        assert!(
+            !transient.is_rejection(),
+            "HTTP {status} must not retire the profile"
+        );
+    }
 }
