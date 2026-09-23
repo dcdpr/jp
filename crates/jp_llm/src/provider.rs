@@ -26,8 +26,8 @@ use llamacpp::Llamacpp;
 use ollama::Ollama;
 use openai::Openai;
 use openrouter::Openrouter;
-use vllm::Vllm;
 use serde_json::{Map, Value};
+use vllm::Vllm;
 
 use crate::{
     error::Result,

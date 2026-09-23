@@ -21,12 +21,12 @@ use jp_conversation::{
 };
 use jp_inquire::prompt::MockPromptBackend;
 use jp_llm::{Provider, provider::mock::MockProvider};
+use jp_mcp::{Startup, StartupSet, id::McpServerId, server::tool_definitions};
+use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_storage::{
     backend::{ConversationFilter, FsStorageBackend, LoadBackend},
     load::projected_conversation_ids,
 };
-use jp_mcp::{Startup, StartupSet, id::McpServerId};
-use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_workspace::{
     ConversationHandle, Workspace,
     session::{Session, SessionId, SessionSource},
@@ -1404,7 +1404,7 @@ async fn test_describe_tools_reaches_the_llm_tool_list() {
 
     let cfg = build(partial).unwrap();
     let client = jp_mcp::Client::new(IndexMap::new());
-    let defs = jp_llm::tool::tool_definitions(cfg.conversation.tools.iter(), &client, None)
+    let defs = tool_definitions(cfg.conversation.tools.iter(), &client, None)
         .await
         .unwrap();
 

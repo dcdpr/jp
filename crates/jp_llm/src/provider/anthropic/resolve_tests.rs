@@ -119,8 +119,8 @@ fn acp_subscription_does_not_require_stored_tokens() {
 
 /// A spent ACP subscription falls through to the entry behind it.
 ///
-/// Claude Code owns the login, so there is no stored profile to cool down;
-/// only the request's record of what it tried moves the walk past it.
+/// Claude Code owns the login, so there is no stored profile to cool down; only
+/// the request's record of what it tried moves the walk past it.
 #[test(tokio::test)]
 async fn a_spent_acp_subscription_falls_through_to_the_api_key() {
     let mut config = anthropic_config(&["subscription", "api_key"], SET_ENV_VAR);
@@ -151,8 +151,7 @@ fn acp_rejects_named_subscription_without_paid_fallback() {
 fn api_entry_before_acp_keeps_its_route() {
     let mut config = anthropic_config(&["api_key", "subscription"], SET_ENV_VAR);
     config.subscription_flow = SubscriptionFlow::Acp;
-    let (landing, selected, _) =
-        walk_chain(&config, None, MODEL, NOW(), &HashSet::new()).unwrap();
+    let (landing, selected, _) = walk_chain(&config, None, MODEL, NOW(), &HashSet::new()).unwrap();
     assert_matches!(landing, Landing::Ready(Credential::ApiKey(_)));
     assert_eq!(selected.entry, AuthEntry::ApiKey(None));
 }

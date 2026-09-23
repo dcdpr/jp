@@ -263,8 +263,7 @@ fn summarize_events(events: Vec<Event>) -> StreamOutcome {
             Event::KeepAlive
             | Event::Notice(_)
             | Event::ToolCallPending { .. }
-            | Event::ToolCallPendingEnd { .. } => {
-            }
+            | Event::ToolCallPendingEnd { .. } => {}
         }
     }
 
