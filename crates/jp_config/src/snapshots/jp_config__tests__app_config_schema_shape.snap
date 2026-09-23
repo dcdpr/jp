@@ -42,7 +42,7 @@ assistant: AssistantConfig
       |: string
     parameters: ParametersConfig
       max_tokens: int | null
-      other?:
+      other? (flattened):
         *: unknown
       reasoning:
         |: ReasoningConfig
@@ -152,7 +152,7 @@ conversation: ConversationConfig
                     |: string
                   parameters: ParametersConfig
                     max_tokens: int | null
-                    other?:
+                    other? (flattened):
                       *: unknown
                     reasoning:
                       |: ReasoningConfig
@@ -211,7 +211,7 @@ conversation: ConversationConfig
                       |: string
                     parameters: ParametersConfig
                       max_tokens: int | null
-                      other?:
+                      other? (flattened):
                         *: unknown
                       reasoning:
                         |: ReasoningConfig
@@ -284,7 +284,7 @@ conversation: ConversationConfig
           |: string
         parameters: ParametersConfig
           max_tokens: int | null
-          other?:
+          other? (flattened):
             *: unknown
           reasoning:
             |: ReasoningConfig
@@ -397,7 +397,7 @@ conversation: ConversationConfig
             |: string
           parameters: ParametersConfig
             max_tokens: int | null
-            other?:
+            other? (flattened):
               *: unknown
             reasoning:
               |: ReasoningConfig
@@ -649,7 +649,7 @@ conversation: ConversationConfig
                         parameters?:
                           |: PartialParametersConfig
                             max_tokens?: int | null
-                            other?:
+                            other? (flattened):
                               |:
                                 *: unknown
                               |: null
@@ -778,7 +778,7 @@ conversation: ConversationConfig
                           parameters?:
                             |: PartialParametersConfig
                               max_tokens?: int | null
-                              other?:
+                              other? (flattened):
                                 |:
                                   *: unknown
                                 |: null
@@ -1030,7 +1030,7 @@ conversation: ConversationConfig
                           parameters?:
                             |: PartialParametersConfig
                               max_tokens?: int | null
-                              other?:
+                              other? (flattened):
                                 |:
                                   *: unknown
                                 |: null
@@ -1159,7 +1159,7 @@ conversation: ConversationConfig
                             parameters?:
                               |: PartialParametersConfig
                                 max_tokens?: int | null
-                                other?:
+                                other? (flattened):
                                   |:
                                     *: unknown
                                   |: null
@@ -1463,7 +1463,7 @@ style: StyleConfig
           |: string
         parameters: ParametersConfig
           max_tokens: int | null
-          other?:
+          other? (flattened):
             *: unknown
           reasoning: @ReasoningConfig | null
           service_tier: "off" | "flex" | "standard" | "priority" | null

@@ -23,24 +23,95 @@ fn assign_unknown_nested_key_delegates_to_other() {
     assert_eq!(other["custom"], JsonValue(json!({"depth": "3"})));
 }
 
+/// A provider parameter is cleared by its own name, with no wrapper in the
+/// path.
 #[test]
-fn known_keys_match_the_schema() {
-    use schematic::{SchemaBuilder, SchemaType, Schematic as _};
+fn assign_clears_a_collected_parameter() {
+    let mut p = PartialParametersConfig::default();
+    p.assign(KvAssignment::try_from_cli("seed", "42").unwrap())
+        .unwrap();
+    p.assign(KvAssignment::unset("seed")).unwrap();
 
-    // `deserialize_collecting_other` splits the parameter block using this
-    // list. A field added to the struct but missed here would be rerouted into
-    // `other` and forwarded to the provider as a raw parameter instead.
-    let schema = ParametersConfig::build_schema(SchemaBuilder::default());
-    let SchemaType::Struct(struct_type) = &schema.ty else {
-        panic!("expected a struct schema");
-    };
+    assert!(
+        p.other.as_ref().is_none_or(IndexMap::is_empty),
+        "expected the parameter gone, got: {:?}",
+        p.other
+    );
+}
 
-    let mut fields: Vec<&str> = struct_type.fields.keys().map(String::as_str).collect();
-    let mut known = KNOWN_KEYS.to_vec();
-    fields.sort_unstable();
-    known.sort_unstable();
+/// The collector is flattened, so a provider parameter is written and read back
+/// under its own name with no wrapper key in between.
+#[test]
+fn other_is_flattened_on_the_wire() {
+    let mut p = PartialParametersConfig::default();
+    p.assign(KvAssignment::try_from_cli("seed", "42").unwrap())
+        .unwrap();
 
-    assert_eq!(fields, known);
+    let json = serde_json::to_value(&p).unwrap();
+    assert_eq!(
+        json.get("seed"),
+        Some(&json!("42")),
+        "the parameter sits in the block: {json}"
+    );
+    assert!(
+        json.get("other").is_none(),
+        "no wrapper key reaches the wire: {json}"
+    );
+
+    let back: PartialParametersConfig = serde_json::from_value(json).unwrap();
+    assert_eq!(back.other.as_ref().map(IndexMap::len), Some(1));
+}
+
+/// A provider parameter set on the assistant reaches an inquiry request that
+/// sets a typed parameter of its own.
+///
+/// The inquiry block inherits field by field from the assistant, and an unset
+/// field is what inheritance looks for.
+/// A collector holding no parameters has to read as unset for that to work,
+/// since a block naming only typed parameters says nothing about the provider
+/// ones.
+#[test]
+fn an_inquiry_inherits_the_assistant_s_provider_parameters() {
+    use camino_tempfile::tempdir;
+    use schematic::ConfigLoader;
+
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("config.toml");
+
+    std::fs::write(&path, indoc::indoc! {r#"
+            [assistant.model]
+            id = "anthropic/test"
+
+            [conversation.tools.'*']
+            run = "unattended"
+
+            [assistant.model.parameters]
+            verbosity = "high"
+
+            [conversation.inquiry.assistant.model.parameters]
+            temperature = 0.2
+        "#})
+    .unwrap();
+
+    let partial = ConfigLoader::<crate::AppConfig>::new()
+        .file(&*path)
+        .unwrap()
+        .load_partial(&())
+        .unwrap();
+
+    let config = crate::util::build(partial).expect("valid config");
+    let inquiry = &config.conversation.inquiry.assistant.model.parameters;
+
+    assert_eq!(
+        inquiry.temperature,
+        Some(0.2),
+        "the inquiry keeps the parameter it set"
+    );
+    assert_eq!(
+        inquiry.other.get("verbosity"),
+        Some(&JsonValue(json!("high"))),
+        "and inherits the provider parameter it did not mention"
+    );
 }
 
 /// Deserialize a `[parameters]` block through the production path: the
@@ -73,10 +144,10 @@ fn deserialize_collects_unknown_keys_into_other() {
     assert_eq!(other.len(), 2, "known keys must not leak into `other`");
 }
 
+/// A stored config or user file written before `other` was flattened nested its
+/// parameters under it, and those still land as parameters.
 #[test]
-fn deserialize_accepts_an_explicit_other_table() {
-    // The nested form is what every stored conversation config and existing
-    // user file writes, so it has to keep working.
+fn deserialize_hoists_a_legacy_other_table() {
     let p = parameters_from_toml(indoc::indoc!(
         r"
             temperature = 0.7
@@ -93,8 +164,15 @@ fn deserialize_accepts_an_explicit_other_table() {
     );
 }
 
+/// A parameter written in the block wins over one of the same name nested in a
+/// legacy table.
+///
+/// The nested form is migrated input, so a writer that only knows the current
+/// spelling has to be able to override it.
+/// Otherwise a `jp config set` writes its value and the stale nested one
+/// shadows it on the next read.
 #[test]
-fn deserialize_prefers_the_explicit_other_entry_on_collision() {
+fn deserialize_prefers_the_current_spelling_on_collision() {
     let p = parameters_from_toml(indoc::indoc!(
         r"
             presence_penalty = 0.1
@@ -106,16 +184,36 @@ fn deserialize_prefers_the_explicit_other_entry_on_collision() {
 
     assert_eq!(
         p.other.as_ref().unwrap()["presence_penalty"],
-        JsonValue(json!(0.9))
+        JsonValue(json!(0.1))
+    );
+}
+
+/// A provider parameter named `other` survives a read when its value is not a
+/// table.
+///
+/// Only a table can be the legacy collector, so anything else by that name is a
+/// parameter and has to be left where it is.
+#[test]
+fn deserialize_keeps_a_scalar_parameter_named_other() {
+    let p = parameters_from_toml("other = 5");
+
+    assert_eq!(
+        p.other.as_ref().and_then(|other| other.get("other")),
+        Some(&JsonValue(json!(5))),
+        "expected a parameter named `other`, got: {:?}",
+        p.other
     );
 }
 
 #[test]
-fn deserialize_leaves_other_unset_when_every_key_is_known() {
+fn deserialize_collects_nothing_when_every_key_is_known() {
     let p = parameters_from_toml("top_k = 40");
 
     assert_eq!(p.top_k, Some(40));
-    assert_eq!(p.other, None);
+    assert_eq!(
+        p.other, None,
+        "a block naming no provider parameter leaves the collector unset"
+    );
 }
 
 #[test]
@@ -144,12 +242,39 @@ fn deserialize_preserves_the_untagged_reasoning_field() {
 }
 
 #[test]
-fn deserialize_keeps_an_explicit_empty_other() {
-    // Serialization emits `other = {}` for a present-but-empty map, so dropping
-    // it here would make a stored config lossy on round-trip.
+fn deserialize_hoists_an_empty_legacy_other_table() {
     let p = parameters_from_toml("other = {}");
 
-    assert_eq!(p.other, Some(IndexMap::new()));
+    assert_eq!(
+        p.other, None,
+        "an empty legacy table leaves no parameter behind"
+    );
+}
+
+/// A provider parameter that is itself called `other` is written like any
+/// other, now that the name is not a wrapper.
+///
+/// Carried through serialization and back, since the read side has a legacy
+/// table to tell it apart from and the write side does not mark which it is.
+#[test]
+fn a_parameter_named_other_is_not_a_wrapper() {
+    let mut p = PartialParametersConfig::default();
+    p.assign(KvAssignment::try_from_cli("other", "5").unwrap())
+        .unwrap();
+
+    assert_eq!(p.other.as_ref().unwrap()["other"], JsonValue(json!("5")));
+
+    let json = serde_json::to_value(&p).unwrap();
+    assert_eq!(json.get("other"), Some(&json!("5")));
+
+    let toml = toml::to_string(&p).unwrap();
+    let back = parameters_from_toml(&toml);
+    assert_eq!(
+        back.other.as_ref().and_then(|other| other.get("other")),
+        Some(&JsonValue(json!("5"))),
+        "the parameter survives the round trip, got: {:?}",
+        back.other
+    );
 }
 
 #[test]
@@ -223,5 +348,11 @@ fn deserialize_reads_service_tier_from_the_parameter_block() {
     let p = parameters_from_toml(r#"service_tier = "flex""#);
 
     assert_eq!(p.service_tier, Some(ServiceTier::Flex));
-    assert_eq!(p.other, None);
+
+    // Collected instead, it would reach the provider as a raw parameter rather
+    // than through the per-provider tier mapping.
+    assert_eq!(
+        p.other, None,
+        "a typed field must not land in the collector"
+    );
 }
