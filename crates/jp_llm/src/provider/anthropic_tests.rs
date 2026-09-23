@@ -126,6 +126,70 @@ async fn chaining_is_bounded_by_the_continuation_budget() {
     );
 }
 
+/// A response that reports a spent allowance must not chain.
+///
+/// The continuation would run on the client already built for that credential,
+/// billing paid extra usage against a profile the same response just had JP
+/// mark spent.
+/// The turn ends at `max_tokens` instead.
+#[test(tokio::test)]
+async fn a_spent_window_stops_the_continuation() {
+    let server = MockServer::start_async().await;
+    let endpoint = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "text/event-stream; charset=utf-8")
+                .header("anthropic-ratelimit-unified-status", "rejected")
+                .body(max_tokens_sse_body());
+        })
+        .await;
+
+    let mut builder = Client::builder();
+    builder
+        .api_key("test-key")
+        .base_url(server.base_url())
+        .version("2023-06-01");
+    let client = builder.build().expect("a client for the mock server");
+
+    let request = types::CreateMessagesRequestBuilder::default()
+        .model("claude-test".to_owned())
+        .messages(vec![types::Message {
+            role: types::MessageRole::User,
+            content: types::MessageContentList(vec![types::MessageContent::Text(
+                "go on then".into(),
+            )]),
+        }])
+        .max_tokens(16)
+        .stream(true)
+        .build()
+        .expect("a valid request");
+
+    let events: Vec<_> = call(
+        client,
+        request,
+        MAX_CHAIN_DEPTH,
+        false,
+        None,
+        resolve::QuotaWatch::new(None, None),
+    )
+    .collect()
+    .await;
+
+    assert!(
+        events.iter().all(std::result::Result::is_ok),
+        "the turn should end cleanly, got: {events:?}"
+    );
+
+    // The budget was `MAX_CHAIN_DEPTH`, so without the spent-window check this
+    // is `MAX_CHAIN_DEPTH + 1` requests, each billed as extra usage.
+    assert_eq!(
+        endpoint.calls_async().await,
+        1,
+        "a spent allowance must not be chained against"
+    );
+}
+
 /// A thinking block the API refuses is a request-validation failure, so it is
 /// answered at admission rather than on the stream.
 ///

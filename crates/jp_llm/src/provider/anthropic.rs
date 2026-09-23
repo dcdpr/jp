@@ -627,7 +627,7 @@ impl ForcedToolFallback {
 fn call(
     client: Client,
     request: types::CreateMessagesRequest,
-    chains_remaining: u8,
+    mut chains_remaining: u8,
     is_structured: bool,
     forced_tool_fallback: Option<ForcedToolFallback>,
     watch: resolve::QuotaWatch,
@@ -681,6 +681,21 @@ fn call(
         // when the request succeeded.
         for notice in watch.observe(&response.limits, Utc::now()) {
             yield Event::Notice(notice);
+        }
+
+        // A spent window reported on a success means paid extra usage served
+        // the request, and `observe` has just recorded the cooldown that moves
+        // the next resolution off this profile. A continuation runs on the
+        // client already built for that credential, so it would bill against a
+        // profile JP has just marked spent. The turn stops at `max_tokens`
+        // instead, and the caller asks for the rest on a fresh resolution.
+        //
+        // Only the continuation budget is dropped. The forced-tool retry below
+        // keeps its request: a truncated answer is something the caller can
+        // continue, but a required tool that never ran has no such recovery.
+        if response.limits.is_rejected() {
+            debug!("Subscription window spent; not chaining past this response.");
+            chains_remaining = 0;
         }
 
         let stream = response
