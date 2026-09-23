@@ -767,11 +767,10 @@ pub async fn run_chat_completion_mode(
                             }
                         }
 
-                        // A turn that decodes nothing is a turn that proves
-                        // nothing, and it is indistinguishable from a passing
-                        // one once its assertions are all satisfied vacuously.
-                        // A provider answering a chat request owes at least one
-                        // event, whatever it contains.
+                        // A turn that decodes no events satisfies every
+                        // per-event assertion vacuously, so it would pass
+                        // whatever the provider sent. A provider answering a
+                        // chat request owes at least one event.
                         assert!(
                             !all_events[index].is_empty(),
                             "request {index} produced no events; the provider answered with \

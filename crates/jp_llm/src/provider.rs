@@ -242,7 +242,7 @@ pub(crate) trait ProviderTestSupport: Sync {
     /// things in different dialects: `input` holds a tool call's arguments for
     /// one provider and the entire conversation for another.
     ///
-    /// What survives is what JP decides — the order and roles of the
+    /// What survives is what JP decides: the order and roles of the
     /// conversation, the tools it offered, the results it returned, and the
     /// pairing between a call and its result.
     /// [`number_ids`] handles the last of those.

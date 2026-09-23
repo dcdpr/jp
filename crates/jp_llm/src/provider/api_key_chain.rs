@@ -76,9 +76,9 @@ pub enum ChainError {
 ///
 /// # Errors
 ///
-/// A single-entry chain returns [`ChainError::MissingEnv`], matching what a
-/// bare environment read reported before chains existed; a longer one returns
-/// [`ChainError::Exhausted`] naming every entry it skipped.
+/// A single-entry chain returns [`ChainError::MissingEnv`] naming its variable;
+/// a longer one returns [`ChainError::Exhausted`] naming every entry it
+/// skipped.
 ///
 /// A `subscription` entry, or a name no configured key answers to, is an error
 /// rather than a skip.

@@ -10,8 +10,8 @@
 //!
 //! Outcomes are recorded through the core-owned credential store
 //! (`jp_credentials`): a refused profile gets a re-login marker, a spent one a
-//! cooldown, and the recorded state is what routes the next resolution past it
-//! — a mid-turn switch and a fresh invocation share one code path.
+//! cooldown, and the recorded state is what routes the next resolution past it.
+//! A mid-turn switch and a fresh invocation share that one code path.
 //!
 //! A request also remembers which entries it has already tried, which covers
 //! what the store cannot: an `api_key` has no stored profile to mark, and a
@@ -285,7 +285,7 @@ async fn resolve_skipping(
     refresh: &Refresh,
 ) -> Result<Attempt, ResolveError> {
     // Each pass either resolves or retires one chain entry, so the walk cannot
-    // cycle; the bound is belt against a profile that refuses to settle.
+    // cycle; the bound still ends the loop if a profile never settles.
     for _ in 0..=config.auth.len() {
         let snapshot = store.map(CredentialStore::load).transpose()?;
         let (landing, selected, generation, notices) =
@@ -678,8 +678,8 @@ fn walk_chain(
                     ));
                 }
 
-                // Under the single-entry default chain, a missing key is the
-                // same failure it was before chains existed.
+                // A single-entry chain reports the missing variable by name,
+                // rather than as an exhausted chain of one.
                 if config.auth.len() == 1 {
                     return Err(ResolveError::MissingEnv(variable.to_owned()));
                 }

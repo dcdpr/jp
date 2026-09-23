@@ -92,7 +92,7 @@ fn test_a_blank_key_falls_through_to_the_next_entry() {
     unsafe { std::env::remove_var(BLANK_IN_CHAIN) }
 }
 
-/// The default chain, behaving as a bare environment read always did.
+/// The default chain resolves the one key `api_key_env` names.
 #[test]
 fn test_single_entry_resolves_the_sole_key() {
     let expected = std::env::var(set()).unwrap();

@@ -693,8 +693,8 @@ impl From<crate::provider::openai::resolve::ResolveError> for Error {
     fn from(error: crate::provider::openai::resolve::ResolveError) -> Self {
         use crate::provider::openai::resolve::ResolveError;
 
-        // The single-entry `["api_key"]` chain fails the same way it did
-        // before credential chains existed.
+        // A single-entry `["api_key"]` chain surfaces as `MissingEnv`, which
+        // names the variable to set.
         match error {
             ResolveError::MissingEnv(var) => Self::MissingEnv(var),
             error => Self::OpenaiCredentialChain(error),
@@ -706,8 +706,8 @@ impl From<crate::provider::api_key_chain::ChainError> for Error {
     fn from(error: crate::provider::api_key_chain::ChainError) -> Self {
         use crate::provider::api_key_chain::ChainError;
 
-        // The single-entry `["api_key"]` chain fails the same way it did
-        // before credential chains existed.
+        // A single-entry `["api_key"]` chain surfaces as `MissingEnv`, which
+        // names the variable to set.
         match error {
             ChainError::MissingEnv(var) => Self::MissingEnv(var),
             error => Self::ApiKeyChain(error),
@@ -719,8 +719,8 @@ impl From<crate::provider::anthropic::resolve::ResolveError> for Error {
     fn from(error: crate::provider::anthropic::resolve::ResolveError) -> Self {
         use crate::provider::anthropic::resolve::ResolveError;
 
-        // The single-entry `["api_key"]` chain fails the same way it did
-        // before credential chains existed.
+        // A single-entry `["api_key"]` chain surfaces as `MissingEnv`, which
+        // names the variable to set.
         match error {
             ResolveError::MissingEnv(var) => Self::MissingEnv(var),
             error => Self::CredentialChain(error),

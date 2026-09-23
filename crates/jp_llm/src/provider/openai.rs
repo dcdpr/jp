@@ -705,7 +705,8 @@ async fn start_streaming(
 /// A subscription credential reaches a smaller set of models than an API key,
 /// and the host answers an unavailable model exactly as it answers one that
 /// does not exist.
-/// Naming both possibilities beats asserting the wrong one.
+/// The message names both possibilities, since the response does not say which
+/// one applies.
 fn annotate(error: StreamError, subscription: bool, model: &str) -> StreamError {
     if !subscription || !looks_like_unknown_model(&error) {
         return error;
@@ -798,7 +799,7 @@ fn strip_explicit_cache_controls(request: &mut Request) {
 ///
 /// `max_output_tokens` is refused by name (measured).
 /// The rest are dropped because the first-party client does not send them
-/// either, and the host reports only one unsupported parameter per request —
+/// either, and the host reports only one unsupported parameter per request:
 /// discovering them one `400` at a time costs a round-trip each.
 ///
 /// Sampling controls go with them.
@@ -1526,9 +1527,8 @@ fn is_api_only(model: &str) -> bool {
 /// `None` for an id the catalog does not list.
 fn catalog_entry(model: ModelResponse) -> Result<Option<ModelDetails>> {
     let details = match model.id.as_str() {
-        // The Codex model set. `subscription: Some(true)` is what lets a
-        // subscription credential list and name these; every other entry
-        // below is API-only.
+        // An entry marked `subscription: Some(true)` is one a subscription
+        // credential can list and name; one marked `Some(false)` is API-only.
         "gpt-6-astra" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some("GPT-6 Astra".to_owned()),

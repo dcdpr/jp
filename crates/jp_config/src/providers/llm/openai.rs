@@ -92,8 +92,8 @@ pub struct OpenaiConfig {
     ///
     /// Used by `subscription` entries in the `auth` chain, which bill against a
     /// `ChatGPT` plan's allowance rather than per token.
-    /// That host serves the responses endpoint at `/responses` rather than
-    /// `/v1/responses`, and JP adjusts the path accordingly.
+    /// Requests go to `<codex_base_url>/responses`, without the `/v1` prefix
+    /// `base_url` uses.
     ///
     /// Used if `JP_OPENAI_CODEX_BASE_URL` is not set.
     #[setting(default = "https://chatgpt.com/backend-api/codex")]
@@ -102,9 +102,8 @@ pub struct OpenaiConfig {
     /// Environment variable that contains the subscription base URL.
     ///
     /// If set, the value of this environment variable overrides
-    /// `codex_base_url`.
-    /// Point it at a local recorder to exercise the subscription request path
-    /// without reaching `OpenAI`.
+    /// `codex_base_url`, for example to route subscription requests through a
+    /// local proxy.
     #[setting(default = "JP_OPENAI_CODEX_BASE_URL")]
     pub codex_base_url_env: String,
 }

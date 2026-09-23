@@ -3163,8 +3163,9 @@ fn strip_identity_line(body: &mut Value) {
 /// Erase what the model contributed to one content block of an assistant turn.
 ///
 /// The Messages dialect files it three ways, and `input` here holds a tool
-/// call's arguments — the same key names an entire conversation in other
-/// dialects, which is why this reading belongs to Anthropic alone.
+/// call's arguments.
+/// Other dialects use the same key for the entire conversation, which is why
+/// this reading belongs to Anthropic alone.
 #[cfg(test)]
 fn erase_model_output(block: &mut Value) {
     match block

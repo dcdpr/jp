@@ -92,9 +92,8 @@ fn test_auth_target_parses_only_supported_providers() {
     );
 
     // A real provider with no stored-credential support, an unknown provider,
-    // and the old category-qualified form are all rejected. The category lives
-    // in the command path now, so a dotted target is a stale invocation rather
-    // than a provider.
+    // and a category-qualified form are all rejected. The category is part of
+    // the command path, so a dotted target is not a provider.
     for input in ["ollama", "bogus", "llm.anthropic"] {
         assert!(input.parse::<AuthTarget>().is_err(), "input: {input:?}");
     }
@@ -157,9 +156,9 @@ fn test_list_renders_profiles_and_states_as_json() {
 
     // The payload is built for machine consumption rather than derived from
     // the table's display strings: keys are snake_case like every other JSON
-    // surface, and every value is something a caller can branch on — a variant
-    // name, a boolean, a number of seconds — rather than a sentence it would
-    // have to parse. `select(.state == "needs_relogin")` is the point.
+    // surface, and every value is something a caller can branch on (a variant
+    // name, a boolean, a number of seconds) rather than a sentence it would
+    // have to parse, so `select(.state == "needs_relogin")` works.
     let expected = serde_json::json!([
         {
             "provider": "anthropic",

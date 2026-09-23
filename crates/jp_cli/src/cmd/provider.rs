@@ -863,7 +863,7 @@ fn highlight_faults(state: &str) -> String {
         .fold(state.to_owned(), |state, fault| emphasize(&state, fault))
 }
 
-/// Style the first occurrence of `needle` within `text` as a fault.
+/// Style every occurrence of `needle` within `text` as a fault.
 fn emphasize(text: &str, needle: &str) -> String {
     if !text.contains(needle) {
         return text.to_owned();

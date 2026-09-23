@@ -103,7 +103,7 @@ fn test_a_text_content_system_message_folds_too() {
 #[test]
 fn test_prepare_drops_the_parameters_the_host_refuses() {
     // The host answers `max_output_tokens` with `400 Unsupported parameter`
-    // (measured), and reports only one such parameter per request — so every
+    // (measured), and reports only one such parameter per request, so every
     // field the first-party client omits goes in the same pass.
     let mut request = request(system_then_user(&["prompt"]));
     request.max_output_tokens = Some(4096);
