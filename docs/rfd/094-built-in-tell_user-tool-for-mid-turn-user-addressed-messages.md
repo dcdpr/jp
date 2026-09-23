@@ -486,6 +486,7 @@ distribution for bundled tools.
 
 - **[RFD 058] is in Discussion.** This RFD tracks its content block model,
   including the optional text-block `mimeType` field defined there.
+
 - **Live/replay equivalence.** The live path renders blocks at outcome time;
   terminal replay renders from raw events, applying the same display policy
   (`hidden`, `header`, `inline_results`) per turn.
@@ -494,6 +495,7 @@ distribution for bundled tools.
   One required appearance, two code paths — pinned by an equivalence test
   comparing live terminal output against terminal replay, in the spirit of the
   streaming-identity suite.
+
 - **Elicitation.** Models may under-call the tool without system-prompt
   encouragement.
   This is a utilization gap, not a correctness one: the tool description (always
@@ -503,22 +505,35 @@ distribution for bundled tools.
   builtin-contributed prompt sections that ship with the tool and follow its
   enable state, rather than JP injecting per-tool text into system prompts ad
   hoc.
+
 - **serve-web.** The web viewer needs the block-aware update [RFD 058] forces
   anyway; rendering user-audience markdown blocks reuses its existing markdown
   path.
   Under the `user` view its tool rendering keys on responses rather than folding
   responses into requests; that inversion folds into the same update.
+
 - **Inquiry events and the user view.** User-facing inquiry exchanges belong in
   the user view — the user's own answers are user content — but
   assistant-resolved inquiries do not, and the distinction requires [RFD 082]'s
   source attribution.
   The inquiry-family rules are deferred to that work.
+
 - **Compaction.** Tool-call compaction policies drop request/response pairs
   wholesale, so a compacted history loses `tell_user` messages from its user
   view.
   Whether user-audience blocks deserve retention through compaction (the way
   [RFD 058] retains resource metadata when content is dropped) is an open
   question, deferred until compaction and this design coexist.
+
+  > [!WARNING]
+  > Compaction ranges are becoming assistant-selectable rather than user-chosen:
+  > a built-in compaction tool lets the assistant propose the ranges itself.
+  > An assistant compacting a range containing user-audience blocks would drop
+  > them from the user view without the user having picked that range, so this
+  > question has to be answered as part of this RFD's promotion rather than
+  > deferred further.
+  > The raw events are always preserved, so this is a view-fidelity problem, not
+  > data loss.
 
 ## Implementation Plan
 
