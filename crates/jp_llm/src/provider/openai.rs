@@ -372,8 +372,7 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
     // Stable cache identity for this conversation. On load the stream's
     // creation timestamp is derived from the conversation ID, so every
     // request in a conversation produces the same key. A fork is a new
-    // conversation with its own timestamp: its first request misses the
-    // parent's warm cache and starts a cache lineage of its own.
+    // conversation with its own timestamp and its own key.
     let conversation_created_at = thread.events.created_at;
 
     // Parse verbosity from the catch-all parameters map.
@@ -601,15 +600,24 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
         }),
         top_p,
         text,
-        // OpenAI routes requests by prompt prefix; a stable per-conversation
-        // key improves cache-hit rates, and GPT-5.6+ models require it for
-        // reliable cache matching.
-        prompt_cache_key: cache_enabled.then(|| {
-            format!(
-                "jp:conversation:{}",
-                conversation_created_at.timestamp_micros()
-            )
-        }),
+        // Models that bill cache writes route by prefix on their own, and a key
+        // there only partitions the cache: two keys never share an entry, even
+        // for identical prefixes. Omitting it lets a new conversation or fork
+        // read the tools and system prompt an earlier one already wrote.
+        //
+        // Older models route by the key, and one machine serves a key's cache
+        // up to roughly 15 requests per minute before overflowing to machines
+        // without it. A key per conversation keeps each conversation's growing
+        // history on its own machine, at the cost of re-reading the shared
+        // tools and system prompt once per conversation, which these models do
+        // not bill extra for.
+        prompt_cache_key: (cache_enabled && !model.features.contains(&EXPLICIT_PROMPT_CACHING))
+            .then(|| {
+                format!(
+                    "jp:conversation:{}",
+                    conversation_created_at.timestamp_micros()
+                )
+            }),
         // Explicit mode with no marked breakpoints disables cache reads and
         // writes; the only way to opt out of caching on models that bill
         // cache writes. Models without the feature flag cache automatically
@@ -662,6 +670,46 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             // Reasoning is always active, so TEMP_REQUIRES_NO_REASONING drops
             // temperature and top_p on every request — which is what this
             // model wants: it rejects both outright.
+            features: vec![
+                TEMP_REQUIRES_NO_REASONING,
+                REASONING_PRO_MODE,
+                PERSISTED_REASONING,
+                EXPLICIT_PROMPT_CACHING,
+            ],
+        },
+        "gpt-6-sol" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-6 Sol".to_owned()),
+            context_window: Some(1_050_000),
+            max_output_tokens: Some(128_000),
+            // Reasoning.effort supports: none, low, medium, high, xhigh, max.
+            reasoning: Some(ReasoningDetails::leveled(
+                false, true, true, true, true, true,
+            )),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 4, 20).unwrap()),
+            deprecated: Some(ModelDeprecation::Active),
+            structured_output: None,
+            prefill: None,
+            features: vec![
+                TEMP_REQUIRES_NO_REASONING,
+                REASONING_PRO_MODE,
+                PERSISTED_REASONING,
+                EXPLICIT_PROMPT_CACHING,
+            ],
+        },
+        "gpt-6-luna" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-6 Luna".to_owned()),
+            context_window: Some(1_050_000),
+            max_output_tokens: Some(128_000),
+            // Reasoning.effort supports: none, low, medium, high, xhigh, max.
+            reasoning: Some(ReasoningDetails::leveled(
+                false, true, true, true, true, true,
+            )),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 5, 18).unwrap()),
+            deprecated: Some(ModelDeprecation::Active),
+            structured_output: None,
+            prefill: None,
             features: vec![
                 TEMP_REQUIRES_NO_REASONING,
                 REASONING_PRO_MODE,

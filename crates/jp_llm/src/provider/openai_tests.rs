@@ -1017,6 +1017,59 @@ mod map_model {
     }
 
     #[test]
+    fn gpt_6_sol_uses_latest_metadata() {
+        let details = map_model(model("gpt-6-sol")).unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-6 Sol"));
+        assert_eq!(details.context_window, Some(1_050_000));
+        assert_eq!(details.max_output_tokens, Some(128_000));
+        // Unlike Astra, `none` is accepted, so reasoning stays disableable.
+        assert_eq!(
+            details.reasoning,
+            Some(ReasoningDetails::leveled(
+                false, true, true, true, true, true,
+            ))
+        );
+        assert_eq!(
+            details.knowledge_cutoff,
+            chrono::NaiveDate::from_ymd_opt(2026, 4, 20)
+        );
+        assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+        assert_eq!(details.features, vec![
+            TEMP_REQUIRES_NO_REASONING,
+            REASONING_PRO_MODE,
+            PERSISTED_REASONING,
+            EXPLICIT_PROMPT_CACHING
+        ]);
+    }
+
+    #[test]
+    fn gpt_6_luna_uses_latest_metadata() {
+        let details = map_model(model("gpt-6-luna")).unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-6 Luna"));
+        assert_eq!(details.context_window, Some(1_050_000));
+        assert_eq!(details.max_output_tokens, Some(128_000));
+        assert_eq!(
+            details.reasoning,
+            Some(ReasoningDetails::leveled(
+                false, true, true, true, true, true,
+            ))
+        );
+        assert_eq!(
+            details.knowledge_cutoff,
+            chrono::NaiveDate::from_ymd_opt(2026, 5, 18)
+        );
+        assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+        assert_eq!(details.features, vec![
+            TEMP_REQUIRES_NO_REASONING,
+            REASONING_PRO_MODE,
+            PERSISTED_REASONING,
+            EXPLICIT_PROMPT_CACHING
+        ]);
+    }
+
+    #[test]
     fn gpt_5_6_sol_uses_latest_metadata() {
         let details = map_model(model("gpt-5.6-sol")).unwrap();
 
@@ -1162,7 +1215,7 @@ mod map_model {
 }
 
 mod create_request {
-    use chrono::{TimeZone as _, Utc};
+    use chrono::{DateTime, TimeZone as _, Utc};
     use jp_config::{
         AppConfig,
         model::{
@@ -1176,9 +1229,87 @@ mod create_request {
         event::{ChatRequest, ConversationEvent, TurnStart},
         thread::ThreadBuilder,
     };
+    use serde_json::{Value, json};
 
     use super::super::{ModelResponse, map_model};
     use crate::{provider::build_request_value, query::ChatQuery};
+
+    /// Build the request body for a one-question conversation on `model`,
+    /// created at `created_at`, with the default cache policy.
+    fn request_for(model: &str, created_at: DateTime<Utc>) -> Value {
+        let mut config = AppConfig::new_test();
+        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Openai,
+            name: model.parse().unwrap(),
+        });
+
+        let mut stream = ConversationStream::new(config.into()).with_created_at(created_at);
+        stream.extend([
+            ConversationEvent::new(TurnStart, created_at),
+            ConversationEvent::new(ChatRequest::from("A question"), created_at),
+        ]);
+
+        let thread = ThreadBuilder::new().with_events(stream).build().unwrap();
+
+        // Dummy API key env var, mirroring the VCR harness.
+        let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
+        let mut providers = LlmProviderConfig::default();
+        providers.openai.api_key_env = env;
+
+        let details = map_model(ModelResponse {
+            id: model.to_owned(),
+            _object: "model".to_owned(),
+            _created: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            _owned_by: "openai".to_owned(),
+        })
+        .unwrap();
+
+        build_request_value(
+            ProviderId::Openai,
+            &providers,
+            &details,
+            ChatQuery::from(thread),
+        )
+        .unwrap()
+    }
+
+    /// On models that bill cache writes, a `prompt_cache_key` only partitions
+    /// the cache: two keys never share an entry, even for identical prefixes.
+    /// Sending none lets a new conversation read the tools and system prompt
+    /// that an earlier one already wrote.
+    #[test]
+    fn explicit_caching_model_sends_no_prompt_cache_key() {
+        let created_at = Utc.with_ymd_and_hms(2026, 9, 1, 0, 0, 0).unwrap();
+
+        let request = request_for("gpt-6-sol", created_at);
+
+        assert_eq!(request.get("prompt_cache_key"), None);
+    }
+
+    /// Older models route requests to a cache by `prompt_cache_key`, and one
+    /// key's machine overflows past roughly 15 requests per minute.
+    /// Each conversation gets its own key, so concurrent conversations do not
+    /// push each other's history off the machine that caches it.
+    #[test]
+    fn implicit_caching_model_keys_the_cache_per_conversation() {
+        let first = request_for(
+            "gpt-5.5",
+            Utc.with_ymd_and_hms(2026, 9, 1, 0, 0, 0).unwrap(),
+        );
+        let second = request_for(
+            "gpt-5.5",
+            Utc.with_ymd_and_hms(2026, 9, 2, 0, 0, 0).unwrap(),
+        );
+
+        assert_eq!(
+            first["prompt_cache_key"],
+            json!("jp:conversation:1788220800000000")
+        );
+        assert_eq!(
+            second["prompt_cache_key"],
+            json!("jp:conversation:1788307200000000")
+        );
+    }
 
     /// GPT-6 Astra rejects `effort: none`, so `reasoning = "off"` falls back to
     /// its lowest supported level instead of the explicit disable other OpenAI
@@ -1239,6 +1370,67 @@ mod create_request {
         assert!(
             request.contains(r#""top_p":null"#),
             "top_p not stripped: {request}"
+        );
+    }
+
+    /// GPT-6 Sol and Luna accept `effort: none`, so `reasoning = "off"`
+    /// disables reasoning outright.
+    /// With reasoning off, `temperature` and `top_p` are valid and must reach
+    /// the request.
+    #[test]
+    fn sol_reasoning_off_sends_none_effort_and_keeps_sampling() {
+        let ts = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+
+        let mut config = AppConfig::new_test();
+        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Openai,
+            name: "gpt-6-sol".parse().unwrap(),
+        });
+        config.assistant.model.parameters.reasoning = Some(ReasoningConfig::Off);
+        config.assistant.model.parameters.temperature = Some(0.5);
+        config.assistant.model.parameters.top_p = Some(0.25);
+
+        let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
+        stream.extend([
+            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(ChatRequest::from("A question"), ts),
+        ]);
+
+        let thread = ThreadBuilder::new().with_events(stream).build().unwrap();
+
+        // Dummy API key env var, mirroring the VCR harness.
+        let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
+        let mut providers = LlmProviderConfig::default();
+        providers.openai.api_key_env = env;
+
+        let details = map_model(ModelResponse {
+            id: "gpt-6-sol".to_owned(),
+            _object: "model".to_owned(),
+            _created: Utc.with_ymd_and_hms(2026, 9, 22, 0, 0, 0).unwrap(),
+            _owned_by: "openai".to_owned(),
+        })
+        .unwrap();
+
+        let request = build_request_value(
+            ProviderId::Openai,
+            &providers,
+            &details,
+            ChatQuery::from(thread),
+        )
+        .unwrap()
+        .to_string();
+
+        assert!(
+            request.contains(r#""effort":"none""#),
+            "reasoning not explicitly disabled: {request}"
+        );
+        assert!(
+            request.contains(r#""temperature":0.5"#),
+            "temperature dropped: {request}"
+        );
+        assert!(
+            request.contains(r#""top_p":0.25"#),
+            "top_p dropped: {request}"
         );
     }
 }
@@ -2338,9 +2530,8 @@ mod recorded {
     }
 
     /// GPT-5.6 wire features against the real API: `reasoning.mode: "pro"`,
-    /// `reasoning.context: "all_turns"`, explicit prompt-cache breakpoints
-    /// (after the system prompt and after the attachments), and
-    /// `prompt_cache_key`.
+    /// `reasoning.context: "all_turns"`, and explicit prompt-cache breakpoints
+    /// (after the system prompt and after the attachments).
     /// The second turn replays the first turn's reasoning items natively.
     ///
     /// The cassette pins the exact request bodies; the history assertion proves
