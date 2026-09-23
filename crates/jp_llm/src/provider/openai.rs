@@ -5,7 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use base64::Engine as _;
-use chrono::{NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use futures::{StreamExt as _, TryStreamExt as _, future, stream};
 use jp_attachment::AttachmentContent;
 use jp_config::{
@@ -73,6 +73,10 @@ mod redeem_tests;
 #[cfg(test)]
 #[path = "openai/switchable_tests.rs"]
 mod switchable_tests;
+
+#[cfg(test)]
+#[path = "openai/usage_limit_tests.rs"]
+mod usage_limit_tests;
 
 /// The path the subscription host serves the responses endpoint at.
 ///
@@ -2339,6 +2343,20 @@ fn map_error(error: OpenaiStreamError, model: &str) -> StreamError {
                 return StreamError::auth_rejected(error.message().to_owned());
             }
 
+            // The subscription host names a spent plan in the body's type,
+            // whether or not the usage headers came with it. Read as a plain
+            // rate limit, it would be retried in place against a window that
+            // stays closed for hours.
+            if status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                && let Some(resets_at) = usage_limit_reached(&body)
+            {
+                error = StreamError::subscription_exhausted(
+                    error.message().to_owned(),
+                    resets_at,
+                    None,
+                );
+            }
+
             // The body says a limit was hit; the headers say which one and
             // when it reopens, which is what a cooldown needs to expire on its
             // own instead of on a guess.
@@ -2357,6 +2375,36 @@ fn map_error(error: OpenaiStreamError, model: &str) -> StreamError {
             StreamError::other(error.to_string()).with_source(error)
         }
     }
+}
+
+/// The reset instant a `usage_limit_reached` body reports, or `None` when the
+/// body is not one.
+///
+/// The inner `None` is a body of that type that gave no reset time.
+fn usage_limit_reached(body: &str) -> Option<Option<DateTime<Utc>>> {
+    #[derive(Deserialize)]
+    struct Envelope {
+        error: Body,
+    }
+
+    #[derive(Deserialize)]
+    struct Body {
+        #[serde(rename = "type")]
+        kind: Option<String>,
+        resets_at: Option<i64>,
+    }
+
+    let envelope: Envelope = serde_json::from_str(body).ok()?;
+    if envelope.error.kind.as_deref() != Some("usage_limit_reached") {
+        return None;
+    }
+
+    Some(
+        envelope
+            .error
+            .resets_at
+            .and_then(|seconds| DateTime::from_timestamp(seconds, 0)),
+    )
 }
 
 /// Tracks the last text-bearing reasoning item within one provider response.

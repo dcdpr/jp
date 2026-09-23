@@ -131,3 +131,29 @@ fn the_snapshot_header_is_stripped_whole() {
 
     assert_eq!(snapshot_body(raw), Some("{ \"events\": [] }\n"));
 }
+
+/// A Windows checkout converts the fixtures to CRLF, and the body has to read
+/// the same way it does on every other platform.
+#[test]
+fn a_crlf_snapshot_reads_like_an_lf_one() {
+    let lf =
+        "---\nsource: crates/jp_test/src/mock.rs\nexpression: v\n---\n{\n  \"events\": [\n    { \
+         \"type\": \"chat_request\", \"content\": \"hi\" }\n  ]\n}\n";
+    let crlf = lf.replace('\n', "\r\n");
+
+    let read = |raw: &str| -> Value {
+        project_conversation(&serde_json::from_str(snapshot_body(raw).unwrap()).unwrap())
+    };
+
+    assert_eq!(read(&crlf), read(lf));
+    assert_eq!(
+        read(lf),
+        json!([{ "type": "chat_request", "content": "hi" }])
+    );
+}
+
+/// A file that does not open with the header is not a snapshot.
+#[test]
+fn a_body_without_a_header_is_rejected() {
+    assert_eq!(snapshot_body("{ \"events\": [] }\n---\n"), None);
+}

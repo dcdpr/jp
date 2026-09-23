@@ -204,11 +204,28 @@ fn recorded_conversation(dir: &str, scenario: &str) -> Option<Value> {
 }
 
 /// The body of an insta snapshot, after its `---` delimited header.
+///
+/// Lines may end in `\r\n`: a Windows checkout converts the fixtures unless
+/// told otherwise.
 fn snapshot_body(raw: &str) -> Option<&str> {
-    let header = raw.strip_prefix("---\n")?;
-    let (_, body) = header.split_once("\n---\n")?;
+    let mut offset = 0;
+    let mut delimiters = 0;
 
-    Some(body)
+    for line in raw.split_inclusive('\n') {
+        offset += line.len();
+
+        if line.trim_end_matches(['\r', '\n']) == "---" {
+            delimiters += 1;
+            if delimiters == 2 {
+                return Some(&raw[offset..]);
+            }
+        } else if delimiters == 0 {
+            // The header has to open the file.
+            return None;
+        }
+    }
+
+    None
 }
 
 /// Reduce a recorded conversation to what two routes must agree on.
