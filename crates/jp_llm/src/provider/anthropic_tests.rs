@@ -126,6 +126,81 @@ async fn chaining_is_bounded_by_the_continuation_budget() {
     );
 }
 
+/// A thinking block the API refuses is a request-validation failure, so it is
+/// answered at admission rather than on the stream.
+///
+/// Drives a real 400 through `call`: a stale signature must produce the patch
+/// and retry that let the caller rebuild its history, not a terminal error the
+/// user cannot act on.
+#[test(tokio::test)]
+async fn a_rejected_thinking_block_is_repaired_at_admission() {
+    let server = MockServer::start_async().await;
+    let endpoint = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/v1/messages");
+            then.status(400)
+                .header("content-type", "application/json")
+                .body(
+                    r#"{"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0: Invalid `signature` in `thinking` block"}}"#,
+                );
+        })
+        .await;
+
+    let mut builder = Client::builder();
+    builder
+        .api_key("test-key")
+        .base_url(server.base_url())
+        .version("2023-06-01");
+    let client = builder.build().expect("a client for the mock server");
+
+    let request = types::CreateMessagesRequestBuilder::default()
+        .model("claude-test".to_owned())
+        .messages(vec![
+            types::Message {
+                role: types::MessageRole::User,
+                content: types::MessageContentList(vec![types::MessageContent::Text(
+                    "hello".into(),
+                )]),
+            },
+            types::Message {
+                role: types::MessageRole::Assistant,
+                content: types::MessageContentList(vec![types::MessageContent::Thinking(
+                    types::Thinking {
+                        thinking: "deep thought".to_owned(),
+                        signature: Some("sig_1".to_owned()),
+                    },
+                )]),
+            },
+        ])
+        .max_tokens(16)
+        .stream(true)
+        .build()
+        .expect("a valid request");
+
+    let events: Vec<Event> = call(
+        client,
+        request,
+        0,
+        false,
+        None,
+        resolve::QuotaWatch::new(None, None),
+    )
+    .collect::<Vec<_>>()
+    .await
+    .into_iter()
+    .collect::<std::result::Result<_, _>>()
+    .expect("a rejected thinking block is repaired, not reported");
+
+    assert_eq!(endpoint.calls_async().await, 1);
+    assert_eq!(
+        events.len(),
+        2,
+        "expected a patch and a retry, got: {events:?}"
+    );
+    assert_matches!(&events[0], Event::Patch(patches) if patches.len() == 1);
+    assert_matches!(events[1], Event::Finished(FinishReason::Retry));
+}
+
 #[test]
 fn chaining_stops_when_the_budget_is_exhausted() {
     let max_tokens = Event::Finished(FinishReason::MaxTokens);
@@ -407,6 +482,7 @@ fn test_bearer_mode_prepends_identity_line_and_override() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let config = jp_config::providers::llm::LlmProviderConfig::default().anthropic;

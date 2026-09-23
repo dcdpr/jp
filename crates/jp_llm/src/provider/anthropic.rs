@@ -655,13 +655,27 @@ fn call(
         // tool).
         let mut tool_names_called: Vec<String> = vec![];
 
-        // An admission rejection (a spent quota, a refused credential)
-        // surfaces here, before any event exists.
-        let response = client
-            .messages()
-            .create_stream(request.clone())
-            .await
-            .map_err(StreamError::from)?;
+        // An admission rejection (a spent quota, a refused credential, a
+        // thinking block the API will not accept) surfaces here, before any
+        // event exists.
+        let response = match client.messages().create_stream(request.clone()).await {
+            Ok(response) => response,
+            Err(error) => {
+                let error = StreamError::from(error);
+
+                // A stale signature fails request validation, so it is
+                // answered at admission rather than on the stream. The repair
+                // is the same one the stream loop performs below.
+                if let Some(patches) = thinking_repair(&request, &error) {
+                    yield Event::Patch(patches);
+                    yield Event::Finished(FinishReason::Retry);
+                    return;
+                }
+
+                Err(error)?;
+                return;
+            }
+        };
 
         // The response's quota headers report the subscription's state even
         // when the request succeeded.
@@ -678,18 +692,9 @@ fn call(
 
         pin_mut!(stream);
         while let Some(result) = stream.next().await {
-            // Anthropic rejects requests carrying thinking blocks it won't
-            // accept as a 400 `invalid_request_error`. Emit a patch to strip the
-            // offending metadata and ask the caller to retry.
             if let Err(ref err) = result
-                && let Some(rejection) = classify_thinking_rejection(err)
-                && let Some(patches) = build_thinking_patches(&request, err, rejection)
+                && let Some(patches) = thinking_repair(&request, err)
             {
-                warn!(
-                    ?rejection,
-                    patches = patches.len(),
-                    "Thinking block rejected by the API, patching history and retrying: {err}"
-                );
                 yield Event::Patch(patches);
                 yield Event::Finished(FinishReason::Retry);
                 return;
@@ -1110,6 +1115,32 @@ enum ThinkingRejection {
     /// This always concerns the final assistant turn, whatever position the
     /// message names.
     UnmodifiableTurn,
+}
+
+/// The patches that repair a request Anthropic refused over a `thinking` block.
+///
+/// Anthropic answers such a request with a 400 `invalid_request_error`, which
+/// reaches the caller either at admission or as a stream error depending on how
+/// far the request got.
+/// Both routes repair the same way: strip the offending metadata from the
+/// conversation and ask the caller to retry.
+///
+/// Returns `None` when the error is about something else, or when no thinking
+/// block can be located to patch.
+fn thinking_repair(
+    request: &types::CreateMessagesRequest,
+    error: &StreamError,
+) -> Option<Vec<EventPatch>> {
+    let rejection = classify_thinking_rejection(error)?;
+    let patches = build_thinking_patches(request, error, rejection)?;
+
+    warn!(
+        ?rejection,
+        patches = patches.len(),
+        "Thinking block rejected by the API, patching history and retrying: {error}"
+    );
+
+    Some(patches)
 }
 
 /// Classify an Anthropic `invalid_request_error` about a `thinking` block the
