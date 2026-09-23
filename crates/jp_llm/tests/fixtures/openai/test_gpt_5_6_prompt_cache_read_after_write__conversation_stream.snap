@@ -248,7 +248,7 @@ expression: v
       "type": "chat_response",
       "message": "The quick brown fox.",
       "metadata": {
-        "openai_item_id": "bXNnXzA2ZjM3YTdjNTBmZGFkZDkwMTZhODg2ZDc3M2Y3ODg3ZDJhOTk4MzRkN2I1NTc5Yzgz",
+        "openai_item_id": "bXNnXzBiMzAyZGMyYTZmYjczODUwMTZhYjM5YTllODhkNDg3ZDJhZjc5ZmU3MDdhMDAzMjAx",
         "openai_phase": "ZmluYWxfYW5zd2Vy"
       }
     },
@@ -276,7 +276,7 @@ expression: v
       "type": "chat_response",
       "message": "The lazy dog.",
       "metadata": {
-        "openai_item_id": "bXNnXzA2ZjM3YTdjNTBmZGFkZDkwMTZhODg2ZDc4NGViNDg3ZDJhMzNmNjdmMzZjMjM1MjRi",
+        "openai_item_id": "bXNnXzBiMzAyZGMyYTZmYjczODUwMTZhYjM5YWExODU3MDg3ZDJiNjNjZTdkODgxZDc1OTIx",
         "openai_phase": "ZmluYWxfYW5zd2Vy"
       }
     }
