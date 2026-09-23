@@ -38,9 +38,14 @@ fn test_auth_entry_from_str() {
         // where an unknown one is caught, and it reports what is configured.
         ("API_KEY", Ok(AuthEntry::Named("API_KEY".to_owned()))),
         ("token", Ok(AuthEntry::Named("token".to_owned()))),
-        // The old spelling, which no longer names a kind. Written with a name
-        // it is a kind that does not exist, and says so.
-        ("profile:work", Err(())),
+        // The spelling the chain first shipped with, which stored
+        // conversations still carry.
+        ("profile", Ok(AuthEntry::Subscription(None))),
+        (
+            "profile:work",
+            Ok(AuthEntry::Subscription(Some("work".to_owned()))),
+        ),
+        ("profile:", Err(())),
         ("", Err(())),
     ];
 
@@ -93,6 +98,8 @@ fn test_auth_entry_shorthands_are_written_back_in_full() {
         ("api:work", "api_key:work"),
         ("sub", "subscription"),
         ("sub:personal", "subscription:personal"),
+        ("profile", "subscription"),
+        ("profile:personal", "subscription:personal"),
     ] {
         let entry: AuthEntry = shorthand.parse().unwrap();
         assert_eq!(entry.to_string(), canonical);

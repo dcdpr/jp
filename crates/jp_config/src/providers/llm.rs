@@ -247,7 +247,11 @@ impl FromStr for AuthEntry {
 
         match (kind, name) {
             ("api_key" | "api", name) => Ok(Self::ApiKey(name)),
-            ("subscription" | "sub", name) => Ok(Self::Subscription(name)),
+            // `profile` is the spelling the Anthropic chain shipped with. Stored
+            // conversation configs still carry it, and the compat pass drops an
+            // entry that fails to parse, which would silently move the chain
+            // onto the API key. Written back as `subscription`.
+            ("subscription" | "sub" | "profile", name) => Ok(Self::Subscription(name)),
 
             // A bare word that is not a kind names a credential. A typo lands
             // here and is reported at resolution, which knows what exists.

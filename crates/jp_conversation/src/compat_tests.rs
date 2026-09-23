@@ -915,6 +915,36 @@ fn a_type_change_under_the_flattened_tool_map_drops_the_whole_subtree() {
     assert!(config.conversation.tools.tools.is_empty());
 }
 
+/// A conversation stored before the chain's kinds were renamed keeps its
+/// subscription-first order.
+///
+/// Dropping the `profile:<name>` entry as unparseable would leave
+/// `["api_key"]`, which this stored layer then imposes over whatever the user's
+/// own config says, billing per token without a word.
+#[test]
+fn legacy_profile_auth_entries_survive_load_and_save() {
+    let value = json!({
+        "providers": {
+            "llm": {
+                "anthropic": { "auth": ["profile:personal", "profile", "api_key"] }
+            }
+        }
+    });
+
+    let config = deserialize_partial_config(value);
+    let auth = config.providers.llm.anthropic.auth.clone().unwrap();
+
+    assert_eq!(auth.iter().map(ToString::to_string).collect::<Vec<_>>(), [
+        "subscription:personal",
+        "subscription",
+        "api_key"
+    ]);
+    assert_eq!(
+        serde_json::to_value(&config).unwrap()["providers"]["llm"]["anthropic"]["auth"],
+        json!(["subscription:personal", "subscription", "api_key"])
+    );
+}
+
 #[test]
 fn partial_config_falls_back_on_non_object() {
     let config = deserialize_partial_config(json!("not an object at all"));

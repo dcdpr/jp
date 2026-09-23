@@ -14,7 +14,10 @@ use crate::credential::Credential;
 
 /// Serve the credit listing and the redemption endpoint until the test ends,
 /// recording each redemption body.
-async fn serve(listener: TcpListener, redemptions: Arc<Mutex<Vec<Value>>>) {
+///
+/// With `answer_consume` unset, a redemption is recorded and its connection
+/// closed without a response: the backend committed, the client never heard.
+async fn serve(listener: TcpListener, redemptions: Arc<Mutex<Vec<Value>>>, answer_consume: bool) {
     loop {
         let Ok((mut socket, _)) = listener.accept().await else {
             return;
@@ -29,6 +32,12 @@ async fn serve(listener: TcpListener, redemptions: Arc<Mutex<Vec<Value>>>) {
                 .lock()
                 .unwrap()
                 .push(serde_json::from_str(&body).unwrap());
+
+            if !answer_consume {
+                drop(socket);
+                continue;
+            }
+
             r#"{ "code": "reset", "windows_reset": 1 }"#
         } else {
             "{}"
@@ -84,7 +93,7 @@ async fn test_two_redemptions_in_one_conversation_use_distinct_keys() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let redemptions = Arc::new(Mutex::new(vec![]));
-    let server = tokio::spawn(serve(listener, redemptions.clone()));
+    let server = tokio::spawn(serve(listener, redemptions.clone(), true));
 
     let mut config = AppConfig::new_test().providers.llm.openai;
     config.codex_base_url = format!("http://{address}/backend-api/codex");
@@ -114,4 +123,39 @@ async fn test_two_redemptions_in_one_conversation_use_distinct_keys() {
         assert_ne!(body["redeem_request_id"], "session-1");
         assert!(body.get("credit_id").is_none(), "{body}");
     }
+}
+
+/// A redemption the backend received but never answered may have reopened the
+/// window, so it is not reported as a refusal: that would send the request down
+/// the path that records the subscription as exhausted.
+#[tokio::test]
+async fn test_an_unanswered_redemption_retries_the_subscription() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let redemptions = Arc::new(Mutex::new(vec![]));
+    let server = tokio::spawn(serve(listener, redemptions.clone(), false));
+
+    let mut config = AppConfig::new_test().providers.llm.openai;
+    config.codex_base_url = format!("http://{address}/backend-api/codex");
+    let provider = Openai::with_credential(&config, Credential::Bearer("token".to_owned()));
+    let attempt = resolve::Attempt::injected(
+        Credential::Bearer("token".to_owned()),
+        resolve::Attribution::default(),
+    );
+
+    let notice = provider.redeem_reset_credit(&attempt, "session-1").await;
+    server.abort();
+
+    assert_eq!(
+        redemptions.lock().unwrap().len(),
+        1,
+        "the redemption was sent"
+    );
+    assert_eq!(
+        notice.as_deref(),
+        Some(
+            "subscription limit reached, redeeming a usage reset went unconfirmed; retrying the \
+             subscription"
+        )
+    );
 }

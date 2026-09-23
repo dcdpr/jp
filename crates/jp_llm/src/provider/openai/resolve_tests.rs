@@ -292,7 +292,7 @@ async fn test_a_model_scoped_cooldown_only_blocks_that_model() {
     assert!(blocked.is_err(), "expected the chain to be exhausted");
 
     // A different model on the same account still resolves.
-    let allowed = resolve(&chain, Some(&store), "gpt-5.4-mini", now())
+    let allowed = resolve(&chain, Some(&store), "gpt-5.5", now())
         .await
         .unwrap();
     assert_eq!(
@@ -887,6 +887,59 @@ async fn test_an_entry_is_tried_once_per_request() {
 
     let third = advance(&chain, None, &second, &refused, "gpt-5.6", now()).await;
     assert!(third.is_none(), "the chain offered a key it already tried");
+}
+
+/// A model only the API serves is reached through the key behind a
+/// subscription, rather than sent to a host that answers it with a `404`.
+#[tokio::test]
+async fn test_an_api_only_model_skips_the_subscription() {
+    let store = store();
+    insert(&store, "personal", &token_credential("bearer-1"));
+    let mut chain = config(vec![AuthEntry::Subscription(None), AuthEntry::ApiKey(None)]);
+    chain.api_key_env = SET_ENV_VAR.into();
+
+    let attempt = resolve(&chain, Some(&store), "gpt-4.1", now())
+        .await
+        .unwrap();
+
+    assert_eq!(attempt.selected, Some(AuthEntry::ApiKey(None)));
+    assert_eq!(attempt.notices, vec![
+        "skipping subscription:personal does not serve gpt-4.1; only an `api_key` entry reaches it"
+            .to_owned()
+    ]);
+
+    // A model the plan does serve still lands on the subscription.
+    let attempt = resolve(&chain, Some(&store), "gpt-5.6-luna", now())
+        .await
+        .unwrap();
+    assert!(attempt.is_subscription());
+}
+
+/// With no key behind it, the chain says why the subscription could not serve
+/// the model, and records nothing against a credential that did no wrong.
+#[tokio::test]
+async fn test_an_api_only_model_on_a_subscription_only_chain_names_the_fix() {
+    let store = store();
+    insert(&store, "personal", &token_credential("bearer-1"));
+
+    let error = resolve(
+        &config(vec![AuthEntry::Subscription(None)]),
+        Some(&store),
+        "gpt-4.1",
+        now(),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        matches!(error, ResolveError::ChainExhausted { .. }),
+        "unexpected error: {error}"
+    );
+    assert!(error.to_string().contains("`api_key`"), "{error}");
+
+    let stored = stored(&store, "personal");
+    assert!(stored.cooldowns.is_empty());
+    assert!(!stored.needs_relogin);
 }
 
 /// Every chain entry an error tells the user to write has to parse, or

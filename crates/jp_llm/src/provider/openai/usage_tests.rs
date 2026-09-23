@@ -49,24 +49,31 @@ fn a_redemption_leaves_the_choice_of_credit_to_the_backend() {
 
 #[test]
 fn a_reset_reopens_the_window() {
-    assert!(window_reopened(
-        r#"{ "code": "reset", "windows_reset": 1 }"#
-    ));
-    assert!(window_reopened(
-        r#"{ "code": "already_redeemed", "windows_reset": 1 }"#
-    ));
+    for body in [
+        r#"{ "code": "reset", "windows_reset": 1 }"#,
+        r#"{ "code": "already_redeemed", "windows_reset": 1 }"#,
+    ] {
+        assert_eq!(redemption_outcome(body), Redemption::Reopened, "{body}");
+    }
 }
 
 /// The endpoint answers `200` for a redemption that did nothing.
 #[test]
-fn a_200_that_redeemed_nothing_does_not_reopen_the_window() {
+fn a_200_that_redeemed_nothing_is_a_refusal() {
     for body in [
         r#"{ "code": "no_credit", "windows_reset": 0 }"#,
         r#"{ "code": "nothing_to_reset", "windows_reset": 0 }"#,
-        r#"{ "code": "something_new" }"#,
-        "{}",
     ] {
-        assert!(!window_reopened(body), "{body}");
+        assert_eq!(redemption_outcome(body), Redemption::Refused, "{body}");
+    }
+}
+
+/// A body that names no known outcome confirms nothing, so it is not read as a
+/// refusal the caller would record a cooldown over.
+#[test]
+fn an_unreadable_outcome_is_unknown() {
+    for body in [r#"{ "code": "something_new" }"#, "{}", "not json"] {
+        assert_eq!(redemption_outcome(body), Redemption::Unknown, "{body}");
     }
 }
 

@@ -55,6 +55,10 @@ pub(crate) mod resolve;
 pub mod usage;
 
 #[cfg(test)]
+#[path = "openai/auth_rejected_tests.rs"]
+mod auth_rejected_tests;
+
+#[cfg(test)]
 #[path = "openai/fold_tests.rs"]
 mod fold_tests;
 
@@ -326,8 +330,15 @@ impl Openai {
     /// Spend a reset credit to reopen a spent usage window.
     ///
     /// Returns the notice announcing it, or `None` when the account has no
-    /// credit to spend or the redemption did not reopen a window, in which case
-    /// the caller falls through to the next credential as it would have anyway.
+    /// credit to spend or the backend confirmed nothing was redeemed, in which
+    /// case the caller falls through to the next credential as it would have
+    /// anyway.
+    ///
+    /// A redemption whose outcome no answer confirms also returns a notice: the
+    /// credit may be spent and the window open, so the caller retries the same
+    /// subscription rather than recording it as exhausted.
+    /// A window that is in fact still closed fails that retry, and the caller
+    /// moves on then.
     async fn redeem_reset_credit(
         &self,
         attempt: &resolve::Attempt,
@@ -343,13 +354,20 @@ impl Openai {
         // in the same conversation is a new redemption, and reusing an earlier
         // id would replay that one instead of spending a credit.
         let redeem_request_id = oauth::random_token();
-        let redeemed =
-            usage::consume_reset_credit(&http, &self.codex_base_url, &redeem_request_id).await;
-
-        redeemed.then(|| {
-            let left = credits.available_count - 1;
-            format!("subscription limit reached, redeemed a usage reset ({left} left)")
-        })
+        match usage::consume_reset_credit(&http, &self.codex_base_url, &redeem_request_id).await {
+            usage::Redemption::Reopened => {
+                let left = credits.available_count - 1;
+                Some(format!(
+                    "subscription limit reached, redeemed a usage reset ({left} left)"
+                ))
+            }
+            usage::Redemption::Unknown => Some(
+                "subscription limit reached, redeeming a usage reset went unconfirmed; retrying \
+                 the subscription"
+                    .to_owned(),
+            ),
+            usage::Redemption::Refused => None,
+        }
     }
 
     /// The headers a subscription request carries beyond its bearer token.
@@ -617,7 +635,13 @@ async fn start_buffered(
     let response = client
         .create(request)
         .await
-        .map_err(StreamError::from)?
+        .map_err(|error| {
+            if error.status() == Some(reqwest::StatusCode::UNAUTHORIZED) {
+                return StreamError::auth_rejected(error.to_string()).with_source(error);
+            }
+
+            StreamError::from(error)
+        })?
         .map_err(classify_stream_error)?;
 
     let events = map_non_streaming_response(response, is_structured, reasoning_enabled)
@@ -1460,8 +1484,33 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
     Ok((request, is_structured, reasoning_enabled))
 }
 
-#[expect(clippy::too_many_lines)]
 /// Map an OpenAI model id onto its capabilities.
+///
+/// An id the catalog does not know maps to empty details, with a warning.
+fn map_model(model: ModelResponse) -> Result<ModelDetails> {
+    let id = model.id.clone();
+    if let Some(details) = catalog_entry(model)? {
+        return Ok(details);
+    }
+
+    warn!(model = id, "Missing model details.");
+    Ok(ModelDetails::empty((PROVIDER, id).try_into()?))
+}
+
+/// Whether the catalog marks `model` as served only through the API.
+///
+/// A model the catalog does not know is not API-only: the plan's model set
+/// changes without a JP release, and refusing it here would hide a model the
+/// subscription may well serve.
+fn is_api_only(model: &str) -> bool {
+    catalog_entry(ModelResponse::named(model.to_owned()))
+        .ok()
+        .flatten()
+        .is_some_and(|details| details.subscription == Some(false))
+}
+
+#[expect(clippy::too_many_lines)]
+/// Look up an OpenAI model id in the capability catalog.
 ///
 /// This table is authoritative rather than a fallback: `GET /v1/models/{id}`
 /// returns only `{id, object, created, owned_by}`, reporting neither context
@@ -1469,7 +1518,9 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
 /// Unlike the Anthropic, OpenRouter, and Cerebras providers, there is nothing
 /// to derive from, so every value here is maintained by hand against OpenAI's
 /// published model documentation.
-fn map_model(model: ModelResponse) -> Result<ModelDetails> {
+///
+/// `None` for an id the catalog does not list.
+fn catalog_entry(model: ModelResponse) -> Result<Option<ModelDetails>> {
     let details = match model.id.as_str() {
         // The Codex model set. `subscription: Some(true)` is what lets a
         // subscription credential list and name these; every other entry
@@ -2243,13 +2294,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             subscription: Some(false),
             features: vec![],
         },
-        id => {
-            warn!(model = id, ?model, "Missing model details.");
-            ModelDetails::empty((PROVIDER, id).try_into()?)
-        }
+        _ => return Ok(None),
     };
 
-    Ok(details)
+    Ok(Some(details))
 }
 
 /// Filter out unknown event types from the OpenAI SSE stream.
@@ -2282,6 +2330,15 @@ fn map_error(error: OpenaiStreamError, model: &str) -> StreamError {
             body,
         } => {
             let mut error = StreamError::from_http(status, &headers, &body);
+
+            // A 401 refuses the credential itself, which only another entry in
+            // the chain can get past. A 403 is left alone: OpenAI also answers
+            // it for region and organization restrictions that no other
+            // credential of the same account would clear.
+            if status == reqwest::StatusCode::UNAUTHORIZED {
+                return StreamError::auth_rejected(error.message().to_owned());
+            }
+
             // The body says a limit was hit; the headers say which one and
             // when it reopens, which is what a cooldown needs to expire on its
             // own instead of on a guess.

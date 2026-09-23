@@ -710,6 +710,19 @@ fn walk_chain(
                     continue;
                 }
 
+                // Not a fault of the credential, so nothing is recorded: the
+                // same subscription serves the next request for another model.
+                if super::is_api_only(model) {
+                    skip(
+                        &mut notices,
+                        &mut reasons,
+                        format!(
+                            "{selected} does not serve {model}; only an `api_key` entry reaches it"
+                        ),
+                    );
+                    continue;
+                }
+
                 if stored.needs_relogin {
                     skip(
                         &mut notices,

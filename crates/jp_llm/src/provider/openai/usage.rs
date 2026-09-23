@@ -53,6 +53,21 @@ struct ConsumeResponse {
     code: ConsumeCode,
 }
 
+/// What a redemption attempt is known to have done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Redemption {
+    /// The backend confirmed a spent window reopened.
+    Reopened,
+
+    /// The backend confirmed nothing was redeemed.
+    Refused,
+
+    /// The request may have reached the backend, but no answer confirms either
+    /// way: the connection dropped, the server failed, or the body could not be
+    /// read.
+    Unknown,
+}
+
 /// The reset credits the account has left.
 ///
 /// Errors are reported as `None` rather than propagated: a credit that cannot
@@ -88,11 +103,13 @@ pub async fn reset_credits(http: &Client, base_url: &str) -> Option<ResetCredits
 /// id spends the same credit once.
 /// The backend picks which credit to spend.
 ///
-/// Returns whether a window reopened.
-/// A refusal is reported as `false` rather than an error for the same reason as
-/// [`reset_credits`]: the caller's fallback is the chain it was already about
-/// to walk.
-pub async fn consume_reset_credit(http: &Client, base_url: &str, redeem_request_id: &str) -> bool {
+/// An outcome no answer confirms is reported as [`Redemption::Unknown`] rather
+/// than as a refusal: the credit may be spent and the window open.
+pub async fn consume_reset_credit(
+    http: &Client,
+    base_url: &str,
+    redeem_request_id: &str,
+) -> Redemption {
     let url = format!(
         "{}/{ACCOUNT_PATH}/rate-limit-reset-credits/consume",
         root(base_url)
@@ -105,22 +122,33 @@ pub async fn consume_reset_credit(http: &Client, base_url: &str, redeem_request_
         .await
     {
         Ok(response) => response,
-        Err(error) => {
+
+        // A connection that never opened carried no request.
+        Err(error) if error.is_connect() => {
             warn!(%error, "Could not reach the reset-credit endpoint.");
-            return false;
+            return Redemption::Refused;
+        }
+        Err(error) => {
+            warn!(%error, "Redemption request failed after it was sent.");
+            return Redemption::Unknown;
         }
     };
 
-    if !response.status().is_success() {
-        debug!(status = %response.status(), "Redeeming a reset credit was refused.");
-        return false;
+    let status = response.status();
+    if status.is_server_error() {
+        warn!(%status, "Reset-credit endpoint failed; the redemption may have happened.");
+        return Redemption::Unknown;
+    }
+    if !status.is_success() {
+        debug!(%status, "Redeeming a reset credit was refused.");
+        return Redemption::Refused;
     }
 
     match response.text().await {
-        Ok(body) => window_reopened(&body),
+        Ok(body) => redemption_outcome(&body),
         Err(error) => {
-            debug!(%error, "Could not read the redemption result.");
-            false
+            warn!(%error, "Could not read the redemption result.");
+            Redemption::Unknown
         }
     }
 }
@@ -140,22 +168,25 @@ fn consume_body(redeem_request_id: &str) -> Value {
     json!({ "redeem_request_id": redeem_request_id })
 }
 
-/// Whether a redemption's `200` body reports a reopened window.
+/// What a redemption's `200` body reports.
 ///
 /// The endpoint answers `200` for a redemption that did nothing, with a `code`
 /// saying why, so the status alone proves nothing.
-fn window_reopened(body: &str) -> bool {
+/// A body with a code this build does not know, or no code at all, confirms
+/// nothing either way.
+fn redemption_outcome(body: &str) -> Redemption {
     match serde_json::from_str::<ConsumeResponse>(body) {
         Ok(response) => {
             debug!(code = ?response.code, "Reset credit redemption answered.");
-            matches!(
-                response.code,
-                ConsumeCode::Reset | ConsumeCode::AlreadyRedeemed
-            )
+            match response.code {
+                ConsumeCode::Reset | ConsumeCode::AlreadyRedeemed => Redemption::Reopened,
+                ConsumeCode::NothingToReset | ConsumeCode::NoCredit => Redemption::Refused,
+                ConsumeCode::Unknown => Redemption::Unknown,
+            }
         }
         Err(error) => {
             debug!(%error, "Could not parse the redemption result.");
-            false
+            Redemption::Unknown
         }
     }
 }
