@@ -2675,6 +2675,7 @@ fn apply_auth(
         ProviderId::Google => llm.google.auth = Some(auth),
         ProviderId::Openai => llm.openai.auth = Some(auth),
         ProviderId::Openrouter => llm.openrouter.auth = Some(auth),
+        ProviderId::Vllm => llm.vllm.auth = Some(auth),
 
         provider @ (ProviderId::Llamacpp
         | ProviderId::Ollama
