@@ -680,6 +680,8 @@ fn configured_api_keys(printer: &Printer) -> Vec<(String, String, String)> {
 ///
 /// Reads the partial rather than a built [`AppConfig`], so a validation error
 /// anywhere else in the config does not erase every row.
+///
+/// [`AppConfig`]: jp_config::AppConfig
 fn read_api_keys() -> Result<Vec<(String, String, String)>, crate::Error> {
     let cwd = env::current_dir().map_err(|error| {
         crate::Error::CliConfig(format!("cannot read the current directory: {error}"))
