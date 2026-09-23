@@ -18,8 +18,8 @@ pub mod store;
 
 pub use store::{
     CredentialBackend, CredentialSecret, CredentialStore, DEFAULT_COOLDOWN, FsCredentialBackend,
-    InMemoryCredentialBackend, MAX_COOLDOWN, SCOPE_ACCOUNT, StoreDocument, StoreError,
-    StoredCredential, cooldown_until,
+    InMemoryCredentialBackend, MAX_COOLDOWN, SCOPE_ACCOUNT, StoreDocument, StoreError, StoreGuard,
+    StoredCredential, UpdateOutcome, cooldown_until,
 };
 
 /// The store category for LLM provider credentials.

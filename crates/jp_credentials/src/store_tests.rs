@@ -14,7 +14,13 @@ fn token_credential(token: &str) -> StoredCredential {
         email: Some("jean@example.com".to_owned()),
         cooldowns: BTreeMap::new(),
         needs_relogin: false,
+        generation: 0,
     }
+}
+
+/// The generation a profile is stored at, which its guarded writes must match.
+fn generation_of(store: &CredentialStore, profile: &str) -> u64 {
+    store.load().unwrap().profiles("llm", "anthropic").unwrap()[profile].generation
 }
 
 fn file_store(dir: &Utf8TempDir) -> CredentialStore {
@@ -241,11 +247,13 @@ fn test_record_cooldown_and_relogin() {
             })
             .unwrap();
 
+        let generation = generation_of(&store, "personal");
+
         let until = datetime!(2026-07-03 13:00:00 Z);
-        let found = store
-            .record_cooldown("llm", "anthropic", "personal", "opus", until)
+        let outcome = store
+            .record_cooldown("llm", "anthropic", "personal", generation, "opus", until)
             .unwrap();
-        assert!(found, "store: {name}");
+        assert_eq!(outcome, UpdateOutcome::Updated, "store: {name}");
 
         let document = store.load().unwrap();
         let credential = &document.profiles("llm", "anthropic").unwrap()["personal"];
@@ -256,7 +264,7 @@ fn test_record_cooldown_and_relogin() {
         // that saw the longer one must not be undercut.
         let shorter = datetime!(2026-07-03 12:30:00 Z);
         store
-            .record_cooldown("llm", "anthropic", "personal", "opus", shorter)
+            .record_cooldown("llm", "anthropic", "personal", generation, "opus", shorter)
             .unwrap();
         let document = store.load().unwrap();
         assert_eq!(
@@ -267,7 +275,7 @@ fn test_record_cooldown_and_relogin() {
 
         // Re-login state is independent of cooldowns.
         store
-            .mark_needs_relogin("llm", "anthropic", "personal")
+            .mark_needs_relogin("llm", "anthropic", "personal", generation)
             .unwrap();
         let document = store.load().unwrap();
         let credential = &document.profiles("llm", "anthropic").unwrap()["personal"];
@@ -276,10 +284,113 @@ fn test_record_cooldown_and_relogin() {
 
         // A chain entry with no stored profile has nothing to record
         // against, and that is not an error.
-        let found = store
-            .record_cooldown("llm", "anthropic", "absent", "account", until)
+        let outcome = store
+            .record_cooldown("llm", "anthropic", "absent", 0, "account", until)
             .unwrap();
-        assert!(!found, "store: {name}");
+        assert_eq!(outcome, UpdateOutcome::Missing, "store: {name}");
+    }
+}
+
+/// A login replacing a profile raises its generation, and a refresh rotating
+/// the same credential's tokens does not.
+///
+/// The distinction is what lets a request tell "my credential was replaced"
+/// from "my credential's access token was renewed".
+#[test]
+fn test_only_a_replacement_raises_the_generation() {
+    for (name, store, _dir) in stores() {
+        store
+            .mutate(|document| {
+                document.insert_profile("llm", "anthropic", "personal", token_credential("sk-a"));
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(generation_of(&store, "personal"), 0, "store: {name}");
+
+        store
+            .mutate(|document| {
+                let credential = document
+                    .profile_mut("llm", "anthropic", "personal")
+                    .unwrap();
+                credential.secret = CredentialSecret::Token {
+                    token: "sk-rotated".to_owned(),
+                };
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            generation_of(&store, "personal"),
+            0,
+            "a rotation is the same credential: {name}"
+        );
+
+        store
+            .mutate(|document| {
+                document.insert_profile("llm", "anthropic", "personal", token_credential("sk-b"));
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            generation_of(&store, "personal"),
+            1,
+            "a login replaces the credential: {name}"
+        );
+    }
+}
+
+/// State recorded by a request that ran under a replaced credential must not
+/// land on the credential that replaced it.
+///
+/// A user whose token was refused re-logs in while the failing request is still
+/// in flight; without the guard, that request's `401` marks the fresh
+/// credential as needing another login.
+#[test]
+fn test_a_replaced_profile_does_not_inherit_the_old_credentials_state() {
+    for (name, store, _dir) in stores() {
+        store
+            .mutate(|document| {
+                document.insert_profile("llm", "anthropic", "personal", token_credential("sk-old"));
+                Ok(())
+            })
+            .unwrap();
+        let resolved_at = generation_of(&store, "personal");
+
+        // The user logs in again while a request under `sk-old` is in flight.
+        store
+            .mutate(|document| {
+                document.insert_profile("llm", "anthropic", "personal", token_credential("sk-new"));
+                Ok(())
+            })
+            .unwrap();
+
+        let relogin = store
+            .mark_needs_relogin("llm", "anthropic", "personal", resolved_at)
+            .unwrap();
+        let cooldown = store
+            .record_cooldown(
+                "llm",
+                "anthropic",
+                "personal",
+                resolved_at,
+                "account",
+                datetime!(2026-07-03 13:00:00 Z),
+            )
+            .unwrap();
+
+        assert_eq!(relogin, UpdateOutcome::Superseded, "store: {name}");
+        assert_eq!(cooldown, UpdateOutcome::Superseded, "store: {name}");
+
+        let document = store.load().unwrap();
+        let credential = &document.profiles("llm", "anthropic").unwrap()["personal"];
+        assert!(!credential.needs_relogin, "store: {name}");
+        assert!(credential.cooldowns.is_empty(), "store: {name}");
+        assert_eq!(
+            credential.secret,
+            CredentialSecret::Token {
+                token: "sk-new".to_owned()
+            },
+            "store: {name}"
+        );
     }
 }
 

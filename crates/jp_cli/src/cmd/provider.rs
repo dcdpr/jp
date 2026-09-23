@@ -235,6 +235,9 @@ impl Login {
                         email: email.clone(),
                         cooldowns: std::collections::BTreeMap::new(),
                         needs_relogin: false,
+                        // Assigned by `insert_profile`, which raises it past
+                        // whatever this login replaces.
+                        generation: 0,
                     },
                 );
 

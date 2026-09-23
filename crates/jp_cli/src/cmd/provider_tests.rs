@@ -24,6 +24,7 @@ fn token_profile(token: &str, account_id: Option<&str>) -> StoredCredential {
         email: account_id.map(|_| "jean@example.com".to_owned()),
         cooldowns: BTreeMap::new(),
         needs_relogin: false,
+        generation: 0,
     }
 }
 
@@ -327,6 +328,7 @@ fn test_credential_state_variants() {
         email: None,
         cooldowns: BTreeMap::new(),
         needs_relogin: false,
+        generation: 0,
     };
     assert_eq!(credential_state(&oauth, now), "expired");
 

@@ -22,7 +22,7 @@ use std::{
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::NamedUtf8TempFile;
 use chrono::{DateTime, Utc};
-use jp_storage::resource_lock::{FsResourceLocker, LockError, ResourceLocker};
+use jp_storage::resource_lock::{FsResourceLocker, LockError, ResourceGuard, ResourceLocker};
 use serde::{Deserialize, Serialize};
 
 /// The store filename inside JP's user data directory.
@@ -267,19 +267,76 @@ impl CredentialStore {
         &self,
         f: impl FnOnce(&mut StoreDocument) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
-        let _guard = self.locker.lock(LOCK_RESOURCE, None)?;
+        let guard = self.lock()?;
 
-        let mut document = self.load()?;
+        let mut document = guard.load()?;
         let value = f(&mut document)?;
+        guard.persist(&document)?;
 
+        Ok(value)
+    }
+
+    /// Acquire the store's cross-process mutation lock.
+    ///
+    /// [`mutate`] covers a change that can be decided from the document alone.
+    /// This is for one that has to reach the network between reading and
+    /// writing: the guard can be held across an `await`, so another process
+    /// cannot read the same document and race the same call.
+    ///
+    /// Acquisition blocks, so an async caller should take it off the executor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the lock cannot be acquired.
+    ///
+    /// [`mutate`]: Self::mutate
+    pub fn lock(&self) -> Result<StoreGuard, StoreError> {
+        let guard = self.locker.lock(LOCK_RESOURCE, None)?;
+
+        Ok(StoreGuard {
+            store: self.clone(),
+            _guard: guard,
+        })
+    }
+
+    /// Serialize and write a document through the backend.
+    fn persist(&self, document: &StoreDocument) -> Result<(), StoreError> {
         let content =
-            serde_json::to_string_pretty(&document).map_err(|source| StoreError::Malformed {
+            serde_json::to_string_pretty(document).map_err(|source| StoreError::Malformed {
                 location: self.backend.describe(),
                 source,
             })?;
-        self.backend.persist(&content)?;
 
-        Ok(value)
+        self.backend.persist(&content)
+    }
+}
+
+/// The credential store's mutation lock, held.
+///
+/// Released on drop.
+#[derive(Debug)]
+pub struct StoreGuard {
+    store: CredentialStore,
+    _guard: Box<dyn ResourceGuard>,
+}
+
+impl StoreGuard {
+    /// Read the store as it stands under the lock.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the store cannot be read or is malformed.
+    pub fn load(&self) -> Result<StoreDocument, StoreError> {
+        self.store.load()
+    }
+
+    /// Replace the stored document.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the store cannot be written.
+    pub fn persist(&self, document: &StoreDocument) -> Result<(), StoreError> {
+        self.store.persist(document)
     }
 }
 
@@ -291,8 +348,8 @@ impl CredentialStore {
     /// A later expiry never shortens an existing cooldown for the same scope,
     /// so a concurrent process that saw a longer window wins.
     ///
-    /// Returns whether the profile was found; a chain entry with no stored
-    /// profile (`api_key`) has nothing to record against.
+    /// `generation` is the value the caller resolved the credential at; the
+    /// write is dropped when the stored profile has moved past it.
     ///
     /// # Errors
     ///
@@ -302,10 +359,11 @@ impl CredentialStore {
         category: &str,
         provider: &str,
         profile: &str,
+        generation: u64,
         scope: &str,
         until: DateTime<Utc>,
-    ) -> Result<bool, StoreError> {
-        self.update_profile(category, provider, profile, |credential| {
+    ) -> Result<UpdateOutcome, StoreError> {
+        self.update_profile(category, provider, profile, generation, |credential| {
             let entry = credential
                 .cooldowns
                 .entry(scope.to_owned())
@@ -316,7 +374,8 @@ impl CredentialStore {
 
     /// Mark a stored profile as needing a fresh login.
     ///
-    /// Returns whether the profile was found.
+    /// `generation` is the value the caller resolved the credential at; the
+    /// write is dropped when the stored profile has moved past it.
     ///
     /// # Errors
     ///
@@ -326,31 +385,55 @@ impl CredentialStore {
         category: &str,
         provider: &str,
         profile: &str,
-    ) -> Result<bool, StoreError> {
-        self.update_profile(category, provider, profile, |credential| {
+        generation: u64,
+    ) -> Result<UpdateOutcome, StoreError> {
+        self.update_profile(category, provider, profile, generation, |credential| {
             credential.needs_relogin = true;
         })
     }
 
-    /// Apply `f` to a stored profile under the store lock.
-    ///
-    /// Returns whether the profile was found.
+    /// Apply `f` to a stored profile under the store lock, if it is still the
+    /// credential the caller acted on.
     fn update_profile(
         &self,
         category: &str,
         provider: &str,
         profile: &str,
+        generation: u64,
         f: impl FnOnce(&mut StoredCredential),
-    ) -> Result<bool, StoreError> {
+    ) -> Result<UpdateOutcome, StoreError> {
         self.mutate(|document| {
             let Some(credential) = document.profile_mut(category, provider, profile) else {
-                return Ok(false);
+                return Ok(UpdateOutcome::Missing);
             };
 
+            if credential.generation != generation {
+                return Ok(UpdateOutcome::Superseded);
+            }
+
             f(credential);
-            Ok(true)
+            Ok(UpdateOutcome::Updated)
         })
     }
+}
+
+/// What a guarded write to a stored profile did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateOutcome {
+    /// The profile was found at the generation the caller expected, and
+    /// updated.
+    Updated,
+
+    /// No profile of that name is stored.
+    Missing,
+
+    /// A different credential holds the profile name than the one the caller
+    /// acted on, so the write was dropped.
+    ///
+    /// The caller's request ran against a credential a login has since
+    /// replaced; recording its outcome would put a cooldown or a re-login
+    /// marker on the fresh credential.
+    Superseded,
 }
 
 /// Parse and version-check a serialized store document.
@@ -418,19 +501,32 @@ impl StoreDocument {
     }
 
     /// Insert or replace a profile.
+    ///
+    /// The stored credential's [`generation`] is assigned here rather than
+    /// taken from `credential`: a replacement outranks what it replaced, so a
+    /// request still in flight under the old credential cannot record state
+    /// against the new one.
+    ///
+    /// [`generation`]: StoredCredential::generation
     pub fn insert_profile(
         &mut self,
         category: &str,
         provider: &str,
         profile: &str,
-        credential: StoredCredential,
+        mut credential: StoredCredential,
     ) {
-        self.credentials
+        let profiles = self
+            .credentials
             .entry(category.to_owned())
             .or_default()
             .entry(provider.to_owned())
-            .or_default()
-            .insert(profile.to_owned(), credential);
+            .or_default();
+
+        credential.generation = profiles
+            .get(profile)
+            .map_or(0, |replaced| replaced.generation.saturating_add(1));
+
+        profiles.insert(profile.to_owned(), credential);
     }
 
     /// Remove a profile, pruning empty parent maps.
@@ -502,6 +598,18 @@ pub struct StoredCredential {
     /// `jp provider auth login`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub needs_relogin: bool,
+
+    /// Which credential has held this profile name.
+    ///
+    /// [`StoreDocument::insert_profile`] raises it whenever a login replaces
+    /// the profile, and nothing else changes it: a token refresh rotates the
+    /// secret of the same credential and leaves this alone.
+    ///
+    /// A request carries the generation it resolved, so state recorded against
+    /// a credential that has since been replaced can be recognised and dropped
+    /// rather than landing on its successor.
+    #[serde(default)]
+    pub generation: u64,
 }
 
 impl StoredCredential {

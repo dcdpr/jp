@@ -253,11 +253,7 @@ impl Anthropic {
     /// credential handed back is good for the request about to be sent.
     async fn resolve(&self, model: &str) -> Result<resolve::Attempt> {
         if let Some(credential) = &self.fixed_credential {
-            return Ok(resolve::Attempt {
-                credential: credential.clone(),
-                selected: None,
-                notices: vec![],
-            });
+            return Ok(resolve::Attempt::injected(credential.clone()));
         }
 
         Ok(resolve::resolve(&self.config, self.store.as_ref(), model, Utc::now()).await?)
@@ -273,11 +269,10 @@ impl Anthropic {
         error: &StreamError,
         model: &str,
     ) -> Option<resolve::Attempt> {
-        let spent = attempt.selected.as_ref()?;
         resolve::advance(
             &self.config,
             self.store.as_ref(),
-            spent,
+            attempt,
             error,
             model,
             Utc::now(),

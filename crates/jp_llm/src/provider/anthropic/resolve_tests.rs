@@ -44,6 +44,7 @@ fn token_profile(token: &str) -> StoredCredential {
         email: None,
         cooldowns: BTreeMap::new(),
         needs_relogin: false,
+        generation: 0,
     }
 }
 
@@ -58,11 +59,35 @@ fn oauth_profile(access_token: &str, expires_at: DateTime<Utc>) -> StoredCredent
         email: None,
         cooldowns: BTreeMap::new(),
         needs_relogin: false,
+        generation: 0,
     }
 }
 
 fn profile(name: &str) -> AuthEntry {
     AuthEntry::Profile(Some(name.to_owned()))
+}
+
+/// A stored profile as a resolution would report it, at its first generation.
+fn selected_profile(name: &str) -> Selected {
+    Selected {
+        entry: profile(name),
+        generation: Some(0),
+    }
+}
+
+/// An attempt that resolved to `selected`, for driving [`advance`].
+fn attempt_on(selected: Selected) -> Attempt {
+    Attempt {
+        credential: Credential::Bearer("resolved".to_owned()),
+        selected: Some(selected),
+        notices: vec![],
+        tried: HashSet::new(),
+    }
+}
+
+/// The chain entry an attempt landed on.
+fn entry_of(attempt: &Attempt) -> Option<AuthEntry> {
+    attempt.selected.as_ref().map(|s| s.entry.clone())
 }
 
 /// The credential a walk landed on, failing the test if it needs a refresh.
@@ -80,7 +105,8 @@ fn test_named_profile_resolves_to_bearer() {
     let config = anthropic_config(&["profile:personal"], UNSET_ENV_VAR);
     let store = store_with(&[("personal", token_profile("sk-ant-token"))]);
 
-    let (landing, _selected, notices) = walk_chain(&config, Some(&store), MODEL, NOW()).unwrap();
+    let (landing, _selected, notices) =
+        walk_chain(&config, Some(&store), MODEL, NOW(), &HashSet::new()).unwrap();
 
     assert_eq!(
         ready(landing),
@@ -94,7 +120,7 @@ fn test_bare_profile_resolves_sole_profile() {
     let config = anthropic_config(&["profile"], UNSET_ENV_VAR);
     let store = store_with(&[("personal", token_profile("sk-ant-token"))]);
 
-    let (landing, ..) = walk_chain(&config, Some(&store), MODEL, NOW()).unwrap();
+    let (landing, ..) = walk_chain(&config, Some(&store), MODEL, NOW(), &HashSet::new()).unwrap();
     assert_eq!(
         ready(landing),
         Credential::Bearer("sk-ant-token".to_owned())
@@ -106,7 +132,7 @@ fn test_bare_profile_with_zero_profiles_is_error() {
     let config = anthropic_config(&["profile"], UNSET_ENV_VAR);
     let store = store_with(&[]);
 
-    let error = walk_chain(&config, Some(&store), MODEL, NOW()).unwrap_err();
+    let error = walk_chain(&config, Some(&store), MODEL, NOW(), &HashSet::new()).unwrap_err();
     assert_matches!(error, ResolveError::NoProfiles);
 }
 
@@ -118,7 +144,7 @@ fn test_bare_profile_with_multiple_profiles_is_error() {
         ("work", token_profile("sk-b")),
     ]);
 
-    let error = walk_chain(&config, Some(&store), MODEL, NOW()).unwrap_err();
+    let error = walk_chain(&config, Some(&store), MODEL, NOW(), &HashSet::new()).unwrap_err();
     assert_matches!(
         error,
         ResolveError::AmbiguousProfile { names } if names == vec!["personal", "work"]
@@ -133,7 +159,7 @@ fn test_unknown_profile_is_error_even_with_later_entries() {
     let config = anthropic_config(&["profile:missing", "api_key"], SET_ENV_VAR);
     let store = store_with(&[("personal", token_profile("sk-a"))]);
 
-    let error = walk_chain(&config, Some(&store), MODEL, NOW()).unwrap_err();
+    let error = walk_chain(&config, Some(&store), MODEL, NOW(), &HashSet::new()).unwrap_err();
     assert_matches!(error, ResolveError::UnknownProfile { name } if name == "missing");
 }
 
@@ -144,7 +170,8 @@ fn test_needs_relogin_profile_falls_through_with_notice() {
     profile.needs_relogin = true;
     let store = store_with(&[("personal", profile)]);
 
-    let (landing, _selected, notices) = walk_chain(&config, Some(&store), MODEL, NOW()).unwrap();
+    let (landing, _selected, notices) =
+        walk_chain(&config, Some(&store), MODEL, NOW(), &HashSet::new()).unwrap();
 
     assert_matches!(ready(landing), Credential::ApiKey(_));
     assert_eq!(notices.len(), 1);
@@ -161,13 +188,20 @@ fn test_cooldown_scoped_to_model_family() {
     let store = store_with(&[("personal", profile)]);
 
     // An Opus request skips the cooling-down profile.
-    let (landing, _selected, notices) = walk_chain(&config, Some(&store), MODEL, NOW()).unwrap();
+    let (landing, _selected, notices) =
+        walk_chain(&config, Some(&store), MODEL, NOW(), &HashSet::new()).unwrap();
     assert_matches!(ready(landing), Credential::ApiKey(_));
     assert!(notices[0].contains("cooling down"), "{notices:?}");
 
     // A Haiku request on the same account resolves the profile.
-    let (landing, _selected, notices) =
-        walk_chain(&config, Some(&store), "claude-haiku-4-5", NOW()).unwrap();
+    let (landing, _selected, notices) = walk_chain(
+        &config,
+        Some(&store),
+        "claude-haiku-4-5",
+        NOW(),
+        &HashSet::new(),
+    )
+    .unwrap();
     assert_eq!(ready(landing), Credential::Bearer("sk-a".to_owned()));
     assert!(notices.is_empty());
 }
@@ -182,11 +216,12 @@ fn test_expired_oauth_token_is_stale_rather_than_skipped() {
         oauth_profile("at", datetime!(2026-07-03 11:00:00 Z)),
     )]);
 
-    let (landing, selected, notices) = walk_chain(&config, Some(&store), MODEL, NOW()).unwrap();
+    let (landing, selected, notices) =
+        walk_chain(&config, Some(&store), MODEL, NOW(), &HashSet::new()).unwrap();
 
     assert_matches!(landing, Landing::Stale { profile, refresh_token }
         if profile == "personal" && refresh_token == "rt");
-    assert_eq!(selected, profile("personal"));
+    assert_eq!(selected.entry, profile("personal"));
     assert!(notices.is_empty(), "{notices:?}");
 }
 
@@ -201,7 +236,7 @@ fn test_token_expiring_within_the_buffer_is_stale() {
         oauth_profile("at", datetime!(2026-07-03 12:02:00 Z)),
     )]);
 
-    let (landing, ..) = walk_chain(&config, Some(&store), MODEL, NOW()).unwrap();
+    let (landing, ..) = walk_chain(&config, Some(&store), MODEL, NOW(), &HashSet::new()).unwrap();
     assert_matches!(landing, Landing::Stale { .. });
 }
 
@@ -213,7 +248,7 @@ fn test_live_oauth_token_resolves() {
         oauth_profile("at", datetime!(2026-07-03 13:00:00 Z)),
     )]);
 
-    let (landing, ..) = walk_chain(&config, Some(&store), MODEL, NOW()).unwrap();
+    let (landing, ..) = walk_chain(&config, Some(&store), MODEL, NOW(), &HashSet::new()).unwrap();
     assert_eq!(ready(landing), Credential::Bearer("at".to_owned()));
 }
 
@@ -222,7 +257,7 @@ fn test_default_chain_missing_env_reports_missing_env() {
     // Same failure shape as before credential chains existed.
     let config = anthropic_config(&["api_key"], UNSET_ENV_VAR);
 
-    let error = walk_chain(&config, None, MODEL, NOW()).unwrap_err();
+    let error = walk_chain(&config, None, MODEL, NOW(), &HashSet::new()).unwrap_err();
     assert_matches!(error, ResolveError::MissingEnv(var) if var == UNSET_ENV_VAR);
 }
 
@@ -233,7 +268,7 @@ fn test_multi_entry_chain_exhaustion_lists_reasons() {
     profile.needs_relogin = true;
     let store = store_with(&[("personal", profile)]);
 
-    let error = walk_chain(&config, Some(&store), MODEL, NOW()).unwrap_err();
+    let error = walk_chain(&config, Some(&store), MODEL, NOW(), &HashSet::new()).unwrap_err();
     assert_matches!(error, ResolveError::ChainExhausted { reasons } if reasons.len() == 2);
 }
 
@@ -245,13 +280,17 @@ fn test_selected_entry_names_the_resolved_profile() {
     let config = anthropic_config(&["profile"], UNSET_ENV_VAR);
     let store = store_with(&[("personal", token_profile("sk-a"))]);
 
-    let (_, selected, _) = walk_chain(&config, Some(&store), MODEL, NOW()).unwrap();
-    assert_eq!(selected, AuthEntry::Profile(Some("personal".to_owned())));
+    let (_, selected, _) =
+        walk_chain(&config, Some(&store), MODEL, NOW(), &HashSet::new()).unwrap();
+    assert_eq!(
+        selected.entry,
+        AuthEntry::Profile(Some("personal".to_owned()))
+    );
 
     // An `api_key` entry reports itself.
     let config = anthropic_config(&["api_key"], SET_ENV_VAR);
-    let (_, selected, _) = walk_chain(&config, None, MODEL, NOW()).unwrap();
-    assert_eq!(selected, AuthEntry::ApiKey);
+    let (_, selected, _) = walk_chain(&config, None, MODEL, NOW(), &HashSet::new()).unwrap();
+    assert_eq!(selected.entry, AuthEntry::ApiKey);
 }
 
 #[test]
@@ -284,18 +323,99 @@ fn test_switch_notice_names_both_credentials_and_the_reason() {
     );
 }
 
-/// Advancing away from `api_key` is impossible: it has no store entry to record
-/// against, so re-resolution lands on the same entry and the failure is
-/// terminal.
+/// A one-entry `api_key` chain has nothing to advance to.
 #[test(tokio::test)]
 async fn test_advance_from_api_key_is_terminal() {
     let config = anthropic_config(&["api_key"], SET_ENV_VAR);
     let error = StreamError::new(StreamErrorKind::InsufficientQuota, "no credit");
+    let spent = attempt_on(Selected {
+        entry: AuthEntry::ApiKey,
+        generation: None,
+    });
 
     assert!(
-        advance(&config, None, &AuthEntry::ApiKey, &error, MODEL, NOW())
+        advance(&config, None, &spent, &error, MODEL, NOW())
             .await
             .is_none()
+    );
+}
+
+/// A refused API key falls through to a profile listed behind it.
+///
+/// An `api_key` has no stored profile to cool down, so nothing the store holds
+/// can move resolution off it.
+/// Without the request's own record of what it has already tried, the chain
+/// re-resolves the dead key and the request ends there, with a usable
+/// subscription sitting untouched behind it.
+#[test(tokio::test)]
+async fn test_a_refused_api_key_falls_through_to_a_profile() {
+    let config = anthropic_config(&["api_key", "profile:personal"], SET_ENV_VAR);
+    let store = memory_store(&[("personal", token_profile("sk-personal"))]);
+    let spent = attempt_on(Selected {
+        entry: AuthEntry::ApiKey,
+        generation: None,
+    });
+
+    let next = advance(
+        &config,
+        Some(&store),
+        &spent,
+        &StreamError::auth_rejected("revoked key"),
+        MODEL,
+        NOW(),
+    )
+    .await
+    .expect("the profile behind the key can serve the request");
+
+    assert_eq!(entry_of(&next), Some(profile("personal")));
+    assert_eq!(
+        next.credential,
+        Credential::Bearer("sk-personal".to_owned())
+    );
+    assert_eq!(
+        next.notices.last().unwrap(),
+        "credential rejected (api_key) \u{2014} continuing with personal"
+    );
+}
+
+/// An entry already tried is not offered again, even when the store write that
+/// would have moved resolution off it failed.
+///
+/// The in-memory record is what makes a best-effort store write safe to lose.
+#[test(tokio::test)]
+async fn test_an_entry_is_tried_once_per_request() {
+    let config = anthropic_config(&["profile:personal", "profile:work"], UNSET_ENV_VAR);
+    let store = memory_store(&[
+        ("personal", token_profile("sk-personal")),
+        ("work", token_profile("sk-work")),
+    ]);
+
+    // Neither failure records anything: `advance` is handed an attempt whose
+    // generation no longer matches, so both writes are dropped.
+    let mut spent = attempt_on(Selected {
+        entry: profile("personal"),
+        generation: Some(99),
+    });
+    let error = StreamError::auth_rejected("refused");
+
+    spent = advance(&config, Some(&store), &spent, &error, MODEL, NOW())
+        .await
+        .expect("the second profile is usable");
+    assert_eq!(entry_of(&spent), Some(profile("work")));
+
+    // Both entries have now been tried, so the chain is out even though the
+    // store never recorded a reason to skip either.
+    assert!(
+        advance(&config, Some(&store), &spent, &error, MODEL, NOW())
+            .await
+            .is_none()
+    );
+
+    let document = store.load().unwrap();
+    let profiles = document.profiles(CATEGORY_LLM, PROVIDER_ANTHROPIC).unwrap();
+    assert!(
+        !profiles["personal"].needs_relogin,
+        "a superseded write must not land"
     );
 }
 
@@ -356,7 +476,7 @@ async fn test_advance_records_scoped_cooldown_and_moves_to_next_profile() {
     let next = advance(
         &config,
         Some(&store),
-        &profile("personal"),
+        &attempt_on(selected_profile("personal")),
         &error,
         MODEL,
         NOW(),
@@ -364,7 +484,7 @@ async fn test_advance_records_scoped_cooldown_and_moves_to_next_profile() {
     .await
     .expect("the chain has a second profile to fall to");
 
-    assert_eq!(next.selected, Some(profile("work")));
+    assert_eq!(entry_of(&next), Some(profile("work")));
     assert_eq!(next.credential, Credential::Bearer("sk-work".to_owned()));
     assert_eq!(
         next.notices.last().unwrap(),
@@ -380,14 +500,14 @@ async fn test_advance_records_scoped_cooldown_and_moves_to_next_profile() {
     // A resolution after the switch skips the spent profile on its own,
     // without being told which entry was spent.
     let after = resolve(&config, Some(&store), MODEL, NOW()).await.unwrap();
-    assert_eq!(after.selected, Some(profile("work")));
+    assert_eq!(entry_of(&after), Some(profile("work")));
 
     // The cooldown is scoped to the Opus family, so a Haiku request on the
     // same account still resolves the profile that was spent for Opus.
     let haiku = resolve(&config, Some(&store), "claude-haiku-4-5", NOW())
         .await
         .unwrap();
-    assert_eq!(haiku.selected, Some(profile("personal")));
+    assert_eq!(entry_of(&haiku), Some(profile("personal")));
 }
 
 /// A refused credential is marked for re-login rather than cooled down: no
@@ -403,7 +523,7 @@ async fn test_advance_marks_refused_credential_for_relogin() {
     let next = advance(
         &config,
         Some(&store),
-        &profile("personal"),
+        &attempt_on(selected_profile("personal")),
         &StreamError::auth_rejected("OAuth token has been revoked"),
         MODEL,
         NOW(),
@@ -411,7 +531,7 @@ async fn test_advance_marks_refused_credential_for_relogin() {
     .await
     .expect("the chain has a second profile to fall to");
 
-    assert_eq!(next.selected, Some(profile("work")));
+    assert_eq!(entry_of(&next), Some(profile("work")));
     assert_eq!(
         next.notices.last().unwrap(),
         "credential rejected (personal) \u{2014} continuing with work"
@@ -436,7 +556,7 @@ async fn test_advance_past_the_last_entry_is_terminal_but_still_records() {
         advance(
             &config,
             Some(&store),
-            &profile("personal"),
+            &attempt_on(selected_profile("personal")),
             &error,
             MODEL,
             NOW()
@@ -473,7 +593,7 @@ fn spent_window_limits() -> UnifiedRateLimit {
 #[test(tokio::test)]
 async fn test_spent_window_on_a_successful_response_records_a_cooldown() {
     let store = memory_store(&[("personal", token_profile("sk-personal"))]);
-    let watch = QuotaWatch::new(Some(&store), Some(&profile("personal")));
+    let watch = QuotaWatch::new(Some(&store), Some(&selected_profile("personal")));
 
     let notices = watch.observe(&spent_window_limits(), NOW());
 
@@ -491,7 +611,7 @@ async fn test_spent_window_on_a_successful_response_records_a_cooldown() {
     // The next resolution moves off the profile on its own.
     let config = anthropic_config(&["profile:personal", "api_key"], SET_ENV_VAR);
     let after = resolve(&config, Some(&store), MODEL, NOW()).await.unwrap();
-    assert_eq!(after.selected, Some(AuthEntry::ApiKey));
+    assert_eq!(entry_of(&after), Some(AuthEntry::ApiKey));
 }
 
 /// An `api_key` request has no stored profile, so there is nothing to record
@@ -499,7 +619,13 @@ async fn test_spent_window_on_a_successful_response_records_a_cooldown() {
 #[test]
 fn test_spent_window_without_a_profile_records_nothing() {
     let store = memory_store(&[("personal", token_profile("sk-personal"))]);
-    let watch = QuotaWatch::new(Some(&store), Some(&AuthEntry::ApiKey));
+    let watch = QuotaWatch::new(
+        Some(&store),
+        Some(&Selected {
+            entry: AuthEntry::ApiKey,
+            generation: None,
+        }),
+    );
 
     let notices = watch.observe(&spent_window_limits(), NOW());
     assert_eq!(notices.len(), 1);
@@ -515,7 +641,7 @@ fn test_spent_window_without_a_profile_records_nothing() {
 #[test]
 fn test_warning_threshold_is_surfaced_without_recording() {
     let store = memory_store(&[("personal", token_profile("sk-personal"))]);
-    let watch = QuotaWatch::new(Some(&store), Some(&profile("personal")));
+    let watch = QuotaWatch::new(Some(&store), Some(&selected_profile("personal")));
 
     let limits = UnifiedRateLimit {
         status: Some("allowed_warning".to_owned()),
@@ -544,7 +670,7 @@ fn test_warning_threshold_is_surfaced_without_recording() {
 #[test]
 fn test_response_without_quota_headers_is_silent() {
     let store = memory_store(&[("personal", token_profile("sk-personal"))]);
-    let watch = QuotaWatch::new(Some(&store), Some(&profile("personal")));
+    let watch = QuotaWatch::new(Some(&store), Some(&selected_profile("personal")));
 
     assert!(
         watch
