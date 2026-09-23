@@ -18,6 +18,7 @@ use jp_config::model::id::ProviderId;
 use jp_credentials::{
     CATEGORY_LLM, CredentialSecret, CredentialStore, StoreError, StoredCredential,
 };
+use jp_inquire::prompt::{PromptBackend as _, TerminalPromptBackend};
 use jp_printer::Printer;
 
 use crate::{
@@ -373,16 +374,21 @@ impl Logout {
 ///
 /// Tokens are never accepted as process arguments, which leak into shell
 /// history and `ps` output.
+/// On a terminal the input is not echoed, so a pasted token does not land in
+/// scrollback or a screen recording.
 fn read_setup_token(printer: &Printer, hint: &str) -> Result<String, Error> {
-    if io::stdin().is_terminal() {
-        printer.eprintln(format!("Paste the setup token and press Enter.\n{hint}"));
-    }
-
-    let mut raw = String::new();
-    io::stdin()
-        .lock()
-        .read_line(&mut raw)
-        .map_err(|error| Error::from(format!("failed to read setup token from stdin: {error}")))?;
+    let raw = if io::stdin().is_terminal() {
+        printer.eprintln(hint.to_owned());
+        TerminalPromptBackend
+            .password("Setup token", &mut printer.prompt_writer())
+            .map_err(|error| Error::from(format!("failed to read setup token: {error}")))?
+    } else {
+        let mut raw = String::new();
+        io::stdin().lock().read_line(&mut raw).map_err(|error| {
+            Error::from(format!("failed to read setup token from stdin: {error}"))
+        })?;
+        raw
+    };
 
     sanitize_setup_token(&raw, hint).map_err(Error::from)
 }

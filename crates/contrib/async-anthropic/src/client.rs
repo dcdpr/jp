@@ -351,10 +351,19 @@ async fn response_error(response: reqwest::Response) -> AnthropicError {
         // Read the quota headers before consuming the body: they are
         // the only thing that distinguishes a spent usage window from
         // capacity throttling, and the body often says nothing.
-        let limits = UnifiedRateLimit::from_headers(response.headers());
+        let reported = UnifiedRateLimit::from_headers(response.headers());
 
         let text = response.text().await.unwrap_or_default();
-        tracing::warn!(?limits, "Rate limited: {text}");
+        tracing::warn!(%status, limits = ?reported, "Rate limited: {text}");
+
+        // An overloaded server says nothing about the account's allowance,
+        // whatever quota headers ride along with it. Only a `429` can report
+        // a spent window; a `529` stays capacity throttling and is retried.
+        let limits = if status == overloaded_status {
+            UnifiedRateLimit::default()
+        } else {
+            reported
+        };
 
         return AnthropicError::RateLimit {
             retry_after,

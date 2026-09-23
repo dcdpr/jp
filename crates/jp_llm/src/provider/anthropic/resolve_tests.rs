@@ -81,6 +81,7 @@ fn attempt_on(selected: Selected) -> Attempt {
         credential: Credential::Bearer("resolved".to_owned()),
         selected: Some(selected),
         notices: vec![],
+        switch: None,
         tried: HashSet::new(),
     }
 }
@@ -373,7 +374,7 @@ async fn test_a_refused_api_key_falls_through_to_a_profile() {
         Credential::Bearer("sk-personal".to_owned())
     );
     assert_eq!(
-        next.notices.last().unwrap(),
+        next.switch.as_deref().unwrap(),
         "credential rejected (api_key) \u{2014} continuing with personal"
     );
 }
@@ -487,7 +488,7 @@ async fn test_advance_records_scoped_cooldown_and_moves_to_next_profile() {
     assert_eq!(entry_of(&next), Some(profile("work")));
     assert_eq!(next.credential, Credential::Bearer("sk-work".to_owned()));
     assert_eq!(
-        next.notices.last().unwrap(),
+        next.switch.as_deref().unwrap(),
         "subscription limit reached (personal) \u{2014} continuing with work"
     );
 
@@ -533,7 +534,7 @@ async fn test_advance_marks_refused_credential_for_relogin() {
 
     assert_eq!(entry_of(&next), Some(profile("work")));
     assert_eq!(
-        next.notices.last().unwrap(),
+        next.switch.as_deref().unwrap(),
         "credential rejected (personal) \u{2014} continuing with work"
     );
 
@@ -663,6 +664,63 @@ fn test_warning_threshold_is_surfaced_without_recording() {
         stored(&store, "personal").cooldowns.is_empty(),
         "a warning is not an exhausted window"
     );
+}
+
+/// A warning threshold stays crossed on every response until the window resets,
+/// so a provider reports it once rather than on every request of a turn.
+///
+/// A new threshold is new information and is reported again; a spent window is
+/// reported on every request, since each one is billed.
+#[test]
+fn test_notices_for_a_standing_condition_are_reported_once() {
+    let seen = SeenNotices::default();
+    let watch = || QuotaWatch::new(None, None).with_seen(seen.clone());
+
+    let warning = |utilization, threshold| UnifiedRateLimit {
+        status: Some("allowed_warning".to_owned()),
+        windows: vec![WindowUtilization {
+            claim: "seven_day".to_owned(),
+            utilization: Some(utilization),
+            reset: None,
+            surpassed_threshold: Some(threshold),
+        }],
+        ..UnifiedRateLimit::default()
+    };
+
+    assert_eq!(watch().observe(&warning(0.80, 0.75), NOW()), vec![
+        "weekly limit 80% used".to_owned()
+    ]);
+
+    // Same threshold on a later request, one point further along.
+    assert!(watch().observe(&warning(0.81, 0.75), NOW()).is_empty());
+
+    // A higher threshold is worth hearing about.
+    assert_eq!(watch().observe(&warning(0.91, 0.9), NOW()), vec![
+        "weekly limit 91% used".to_owned()
+    ]);
+
+    assert_eq!(watch().observe(&spent_window_limits(), NOW()).len(), 1);
+    assert_eq!(watch().observe(&spent_window_limits(), NOW()).len(), 1);
+}
+
+/// A skip restates a standing condition and is reported once per provider; a
+/// switch is an event and is reported every time it happens.
+#[test]
+fn test_skip_notices_are_reported_once_and_switches_always() {
+    let seen = SeenNotices::default();
+    let attempt = || Attempt {
+        notices: vec!["skipping api_key: environment variable X is not set".to_owned()],
+        switch: Some("credential rejected (work) \u{2014} continuing with personal".to_owned()),
+        ..attempt_on(selected_profile("personal"))
+    };
+
+    assert_eq!(attempt().take_notices(&seen), [
+        "skipping api_key: environment variable X is not set",
+        "credential rejected (work) \u{2014} continuing with personal",
+    ]);
+    assert_eq!(attempt().take_notices(&seen), ["credential rejected \
+                                                (work) \u{2014} \
+                                                continuing with personal"]);
 }
 
 /// A response with no quota headers at all (an API key account, or a provider

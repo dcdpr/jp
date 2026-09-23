@@ -189,6 +189,13 @@ pub struct Anthropic {
     /// A credential switch replaces the entry, since the auth material is baked
     /// into the client's default headers.
     client_cache: Arc<Mutex<Option<(Credential, Client, bool)>>>,
+
+    /// Notices this provider has already surfaced.
+    ///
+    /// A skipped credential or a crossed warning threshold stays true for every
+    /// request a turn sends, so each is shown once rather than on every
+    /// tool-call cycle.
+    seen_notices: resolve::SeenNotices,
 }
 
 impl Anthropic {
@@ -221,6 +228,7 @@ impl Anthropic {
             store,
             fixed_credential: None,
             client_cache: Arc::new(Mutex::new(None)),
+            seen_notices: resolve::SeenNotices::default(),
         };
 
         // No model is named at construction, so only account-scoped cooldowns
@@ -244,6 +252,7 @@ impl Anthropic {
             store: None,
             fixed_credential: Some(credential),
             client_cache: Arc::new(Mutex::new(None)),
+            seen_notices: resolve::SeenNotices::default(),
         }
     }
 
@@ -375,7 +384,7 @@ impl Provider for Anthropic {
         let mut attempt = self.resolve(name).await?;
 
         loop {
-            for notice in mem::take(&mut attempt.notices) {
+            for notice in attempt.take_notices(&self.seen_notices) {
                 warn!("{notice}");
             }
 
@@ -393,7 +402,7 @@ impl Provider for Anthropic {
         let mut attempt = self.resolve("").await?;
 
         'attempt: loop {
-            for notice in mem::take(&mut attempt.notices) {
+            for notice in attempt.take_notices(&self.seen_notices) {
                 warn!("{notice}");
             }
 
@@ -452,7 +461,7 @@ impl Provider for Anthropic {
             let mut attempt = attempt;
 
             'attempt: loop {
-                for notice in mem::take(&mut attempt.notices) {
+                for notice in attempt.take_notices(&this.seen_notices) {
                     yield Event::Notice(notice);
                 }
 
@@ -492,7 +501,8 @@ impl Provider for Anthropic {
                     chains_remaining,
                     is_structured,
                     forced_tool,
-                    resolve::QuotaWatch::new(this.store.as_ref(), attempt.selected.as_ref()),
+                    resolve::QuotaWatch::new(this.store.as_ref(), attempt.selected.as_ref())
+                        .with_seen(this.seen_notices.clone()),
                 );
                 pin_mut!(inner);
 
@@ -508,7 +518,7 @@ impl Provider for Anthropic {
                             yield event;
                         }
                         Err(error) if error.needs_credential_switch() => {
-                            let Some(next) = this.advance(&attempt, &error, model.name()).await
+                            let Some(mut next) = this.advance(&attempt, &error, model.name()).await
                             else {
                                 // Chain exhausted: the failure that prompted
                                 // the switch is terminal, reported as itself.
@@ -525,7 +535,7 @@ impl Provider for Anthropic {
                                 // existing retry flow (flush partial content,
                                 // rebuild the thread, fresh stream) takes it
                                 // from here.
-                                for notice in next.notices {
+                                for notice in next.take_notices(&this.seen_notices) {
                                     yield Event::Notice(notice);
                                 }
                                 Err(StreamError::transient(error.to_string()))?;

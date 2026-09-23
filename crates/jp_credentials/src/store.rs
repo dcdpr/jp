@@ -648,8 +648,9 @@ impl StoredCredential {
 
 /// Whether a recorded cooldown scope covers `model`.
 ///
-/// [`SCOPE_ACCOUNT`] and the account-wide usage windows (`five_hour`,
-/// `seven_day`) cover every model.
+/// [`SCOPE_ACCOUNT`], the account-wide usage windows (`five_hour`,
+/// `seven_day`), and the paid extra-usage allowance (`overage`) cover every
+/// model.
 /// A window naming a model family covers only that family, whether it is
 /// recorded as the provider reports it (`seven_day_opus`) or as the bare family
 /// name (`opus`).
@@ -659,7 +660,7 @@ impl StoredCredential {
 /// use.
 fn scope_covers(scope: &str, model: &str) -> bool {
     match scope {
-        SCOPE_ACCOUNT | "five_hour" | "seven_day" => true,
+        SCOPE_ACCOUNT | "five_hour" | "seven_day" | "overage" => true,
         scope => {
             let family = scope
                 .strip_prefix("seven_day_")

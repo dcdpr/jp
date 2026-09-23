@@ -222,6 +222,79 @@ async fn test_default_backoff_retries() {
     }
 }
 
+/// An overloaded server is retried in place, even when the response carries
+/// quota headers that would otherwise mark a spent window.
+///
+/// A quota rejection is never retried, so a `529` misread as one would end the
+/// request after the first call.
+#[tokio::test]
+async fn test_overloaded_with_quota_headers_is_retried() {
+    let server = TestSetup::setup().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(
+            ResponseTemplate::new(529)
+                .insert_header(
+                    "anthropic-ratelimit-unified-representative-claim",
+                    "five_hour",
+                )
+                .insert_header("anthropic-ratelimit-unified-overage-status", "rejected")
+                .set_body_json(json!({
+                    "type": "error",
+                    "error": { "type": "overloaded_error", "message": "Overloaded" }
+                })),
+        )
+        .up_to_n_times(1)
+        .with_priority(1)
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "content": [{"type": "text", "text": "retried response"}]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let backoff = ExponentialBuilder::default()
+        .with_min_delay(Duration::from_millis(10))
+        .with_max_delay(Duration::from_millis(50));
+
+    let client = Client::builder()
+        .base_url(server.uri())
+        .api_key("test_secret")
+        .build()
+        .unwrap()
+        .with_backoff(backoff);
+
+    let request = CreateMessagesRequestBuilder::default()
+        .model("test-model".to_string())
+        .messages(vec![
+            MessageBuilder::default()
+                .role(MessageRole::User)
+                .content("Hello world!")
+                .build()
+                .unwrap(),
+        ])
+        .build()
+        .unwrap();
+
+    let result = client
+        .messages()
+        .create(request)
+        .await
+        .expect("the overloaded response is retried");
+
+    assert_eq!(
+        result.content[0].as_text().map(|t| t.text.as_str()),
+        Some("retried response")
+    );
+}
+
 #[tokio::test]
 async fn test_error_handling_bad_request() {
     let server = TestSetup::setup().await;

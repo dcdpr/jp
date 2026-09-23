@@ -215,6 +215,14 @@ fn test_active_cooldown_scoping() {
         credential.active_cooldown("claude-haiku-4-5", now),
         Some(("account", future))
     );
+
+    // A spent extra-usage allowance is account-wide too, not a model family.
+    let mut overage = token_credential("sk-b");
+    overage.cooldowns.insert("overage".to_owned(), future);
+    assert_eq!(
+        overage.active_cooldown("claude-haiku-4-5", now),
+        Some(("overage", future))
+    );
 }
 
 #[test]

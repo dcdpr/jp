@@ -59,10 +59,11 @@ pub struct UnifiedRateLimit {
     pub status: Option<String>,
 
     /// The window that is exhausted: `five_hour`, `seven_day`,
-    /// `seven_day_opus`, or `seven_day_sonnet`.
+    /// `seven_day_opus`, `seven_day_sonnet`, or `overage` (the paid extra-usage
+    /// allowance).
     ///
-    /// The first two cover the whole account; the others cover one model
-    /// family.
+    /// `five_hour`, `seven_day`, and `overage` cover the whole account; the
+    /// others cover one model family.
     pub representative_claim: Option<String>,
 
     /// When the exhausted window resets, as Unix seconds.
@@ -183,9 +184,19 @@ impl UnifiedRateLimit {
     /// spillover, is about an allowance being spent.
     /// One that carries neither is not a quota limit at all, however much its
     /// status code resembles one.
+    ///
+    /// A status that explicitly reports the allowance as still available
+    /// (`allowed`, `allowed_warning`) overrides both: the request was refused
+    /// for another reason.
+    /// A missing status does not, since a quota rejection is not known to
+    /// always carry one.
     #[must_use]
     pub fn is_quota_rejection(&self) -> bool {
-        self.representative_claim.is_some() || self.overage_status.is_some()
+        let allowance_available =
+            matches!(self.status.as_deref(), Some("allowed" | "allowed_warning"));
+
+        !allowance_available
+            && (self.representative_claim.is_some() || self.overage_status.is_some())
     }
 
     /// Whether none of the unified headers were present.
@@ -338,6 +349,31 @@ mod tests {
         assert!(limits.is_rejected());
         assert!(limits.is_quota_rejection());
         assert_eq!(limits.representative_claim.as_deref(), Some("seven_day"));
+    }
+
+    /// A rejection whose status says the allowance is still available was
+    /// refused for some other reason, even when it names a window.
+    #[test]
+    fn test_available_allowance_is_not_a_quota_rejection() {
+        for status in ["allowed", "allowed_warning"] {
+            let limits = UnifiedRateLimit::from_headers(&headers(&[
+                ("anthropic-ratelimit-unified-status", status),
+                (
+                    "anthropic-ratelimit-unified-representative-claim",
+                    "five_hour",
+                ),
+                ("anthropic-ratelimit-unified-overage-status", "allowed"),
+            ]));
+
+            assert!(!limits.is_quota_rejection(), "status: {status}");
+        }
+
+        // Without a status header, the named window is enough.
+        let limits = UnifiedRateLimit::from_headers(&headers(&[(
+            "anthropic-ratelimit-unified-representative-claim",
+            "five_hour",
+        )]));
+        assert!(limits.is_quota_rejection());
     }
 
     #[test]

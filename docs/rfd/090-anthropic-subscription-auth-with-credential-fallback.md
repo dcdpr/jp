@@ -206,13 +206,12 @@ crash mid-refresh cannot lose a rotated refresh token.
 The lock-mutate-persist cycle lives in the `jp_credentials` crate:
 `CredentialStore` owns the semantics every backend shares — the document
 encoding, the schema-version check, and the mutation cycle — while storage
-backends implement the `keyring-core` store interface, holding the document as a
-single entry.
-A file-based store is the baseline backend, and the macOS keyring (Phase 4)
-swaps in behind the same interface.
-A file-based backend must replace its file atomically (temp file and rename) and
-create it with `0600` permissions; if `keyring-core`'s bundled file store does
-not provide both, JP's file persistence implements the store interface itself.
+backends implement `CredentialBackend`, which reads and writes the document as a
+single opaque unit.
+A file-based backend is the baseline, and the macOS Keychain (Phase 4) swaps in
+behind the same trait by adapting a `keyring-core` store to it.
+The file backend replaces its file atomically (temp file and rename) and creates
+it with `0600` permissions.
 The mutation lock is a `ResourceLocker` (`jp_storage`), the same file-based
 locking primitive conversation locks are built on, and stays file-based for
 every store backend, since keyring stores provide no locking.
@@ -220,8 +219,9 @@ A refresh rejected by the token endpoint marks the profile as needing re-login;
 resolution skips it with a notice and continues down the chain.
 
 `cooldowns` persists quota cooldowns across invocations, keyed by the window
-Anthropic reports as exhausted: `five_hour` and `seven_day` cover the whole
-account, while `seven_day_opus` and `seven_day_sonnet` cover one model family.
+Anthropic reports as exhausted: `five_hour`, `seven_day`, and `overage` (the paid
+extra-usage allowance) cover the whole account, while `seven_day_opus` and
+`seven_day_sonnet` cover one model family.
 A single profile-wide timestamp would let an exhausted Opus window block the
 same account's Haiku title generation.
 Resolution skips a profile only when a cooldown scope matching the requested
@@ -361,13 +361,13 @@ the same status and an opaque body.
 
 The headers also carry what the cooldown needs:
 
-| Header                                             | Use                                                                                  |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `anthropic-ratelimit-unified-status`               | `allowed`, `allowed_warning`, `rejected`                                             |
-| `anthropic-ratelimit-unified-representative-claim` | the exhausted window: `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet` |
-| `anthropic-ratelimit-unified-reset`                | when that window resets, as Unix seconds                                             |
-| `anthropic-ratelimit-unified-overage-status`       | whether paid spillover can serve the request                                         |
-| `retry-after`                                      | present only when rejected with no overage available                                 |
+| Header                                             | Use                                                                                             |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `anthropic-ratelimit-unified-status`               | `allowed`, `allowed_warning`, `rejected`                                                        |
+| `anthropic-ratelimit-unified-representative-claim` | the exhausted window: `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`, `overage` |
+| `anthropic-ratelimit-unified-reset`                | when that window resets, as Unix seconds                                                        |
+| `anthropic-ratelimit-unified-overage-status`       | whether paid spillover can serve the request                                                    |
+| `retry-after`                                      | present only when rejected with no overage available                                            |
 
 JP never chooses paid spillover.
 A quota rejection is treated the same whether `overage-status` says spillover is
@@ -595,8 +595,9 @@ server, browser opening, and store I/O form the thin imperative shell around it.
   scope.
 
 - **Keyring backends beyond macOS.** Phase 4 adds the macOS keyring backend.
-  Linux secret-service and Windows Credential Manager stores exist behind the
-  same `keyring-core` interface and can follow, but are not part of this design.
+  Linux secret-service and Windows Credential Manager stores exist in
+  `keyring-core` and can be adapted to `CredentialBackend` the same way, but are
+  not part of this design.
 
 - **Sharing tokens with Claude Code.** JP's login is independent.
   Users who log the same account into both tools may see one tool's session
@@ -676,8 +677,9 @@ The remaining trims are read against that signature, because a rejected
 fingerprint is otherwise indistinguishable from ordinary throttling, and a
 subscription window that expires mid-campaign would read as a trim result.
 It also constrains Phase 2: status alone cannot separate a fingerprint
-rejection, a transient rate limit, and subscription-window exhaustion, so the
-classifier keys on the error body.
+rejection, a transient rate limit, and subscription-window exhaustion, and the
+body of the first is opaque, so the classifier keys on the quota headers
+described below.
 
 **Measured: the bootstrap endpoint rejects setup tokens.** It answers HTTP 403
 `permission_error` with `scope requirement any_of(user:ccr_inference,
@@ -707,6 +709,11 @@ them as "not a quota limit" and surfaces whatever the API said.
 That predicate is what separates exhaustion from capacity throttling and from
 the fingerprint rejection measured above, all three of which are `429`
 `rate_limit_error`.
+Two refinements JP adds: a `529` (overloaded) is never a quota rejection,
+whatever headers it carries, and a status header that explicitly reports the
+allowance as available (`allowed`, `allowed_warning`) overrides a named window.
+A missing status header does not, since Claude Code's own client never reads it
+on a rejection.
 The `representative-claim` values are the cooldown scopes the store records, and
 `anthropic-ratelimit-unified-reset` carries the reset instant as Unix seconds,
 so reset timing needs no separate usage endpoint.
@@ -734,8 +741,8 @@ in-flight switching moves from the CLI's stream-retry path into the provider's
 request admission; the switch notice becomes a provider-emitted notice event;
 provider construction returns to config-only, uniform across providers; and the
 shell's per-call-site credential resolution is deleted.
-The store adopts the `keyring-core` store interface behind the existing
-lock-mutate-persist cycle.
+Storage backends sit behind a `CredentialBackend` trait under the existing
+lock-mutate-persist cycle, so a Keychain backend needs no change above it.
 User-visible behavior is unchanged, except that fallback now applies to every
 request the provider sends rather than only the query streaming loop.
 It is numbered `2c` although it runs before Phase 2b: 2b was already named when
@@ -868,9 +875,9 @@ the documented contingency.
 
 ### Phase 4: macOS keyring store backend
 
-The macOS Keychain behind the `keyring-core` store interface
-(`apple-native-keyring-store`), replacing the file store on macOS and restoring
-parity for users migrating from Claude Code there.
+The macOS Keychain as a `CredentialBackend`, adapting the `keyring-core` Apple
+store (`apple-native-keyring-store`) to it, replacing the file store on macOS and
+restoring parity for users migrating from Claude Code there.
 The backend stores the same versioned JSON document as a single entry, so
 cooldowns and re-login state move with the secrets; the store's `ResourceLocker`
 lock file keeps serializing mutations, since the Keychain provides no locking.

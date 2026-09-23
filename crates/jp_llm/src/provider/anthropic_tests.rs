@@ -564,6 +564,17 @@ fn test_only_quota_headers_make_a_rate_limit_exhaustion() {
     }));
     assert_eq!(overage.kind, StreamErrorKind::SubscriptionExhausted);
     assert_eq!(overage.quota_scope, None, "no window was named");
+
+    // A status reporting the allowance as still available outranks a named
+    // window: the request was refused for another reason, so there is
+    // nothing to cool down and no credential to switch away from.
+    let available = StreamError::from(rate_limit(None, UnifiedRateLimit {
+        status: Some("allowed".to_owned()),
+        representative_claim: Some("five_hour".to_owned()),
+        ..UnifiedRateLimit::default()
+    }));
+    assert_eq!(available.kind, StreamErrorKind::RateLimit);
+    assert!(!available.needs_credential_switch());
 }
 
 /// A refused credential cannot be fixed by retrying, and the shell needs to

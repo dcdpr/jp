@@ -19,7 +19,11 @@
 //! Without it either would resolve again and strand the request on a credential
 //! already known to be out.
 
-use std::{collections::HashSet, env};
+use std::{
+    collections::HashSet,
+    env, mem,
+    sync::{Arc, Mutex},
+};
 
 use async_anthropic::errors::{UnifiedRateLimit, WindowUtilization};
 use chrono::{DateTime, Utc};
@@ -142,6 +146,12 @@ pub(super) struct Attempt {
     /// User-facing notices for skipped entries, surfaced as chrome.
     pub notices: Vec<String>,
 
+    /// The notice announcing that a failed request moved onto this credential.
+    ///
+    /// Kept apart from `notices` because a switch is a new event each time it
+    /// happens, while a skip restates the same standing condition.
+    pub switch: Option<String>,
+
     /// Chain entries this request has already tried and had fail.
     ///
     /// Resolution skips them.
@@ -162,8 +172,39 @@ impl Attempt {
             credential,
             selected: None,
             notices: vec![],
+            switch: None,
             tried: HashSet::new(),
         }
+    }
+
+    /// The notices to surface for this attempt, leaving none behind.
+    ///
+    /// A skip notice `seen` already holds is dropped; the switch notice is
+    /// always kept.
+    pub(super) fn take_notices(&mut self, seen: &SeenNotices) -> Vec<String> {
+        let mut notices: Vec<String> = mem::take(&mut self.notices)
+            .into_iter()
+            .filter(|notice| seen.first(notice))
+            .collect();
+
+        notices.extend(self.switch.take());
+        notices
+    }
+}
+
+/// Notices one provider has already surfaced.
+///
+/// A notice that restates a standing condition (a credential skipped for the
+/// same reason, a warning threshold already crossed) is shown once per provider
+/// rather than on every request it sends.
+/// Clones share one record.
+#[derive(Debug, Clone, Default)]
+pub(super) struct SeenNotices(Arc<Mutex<HashSet<String>>>);
+
+impl SeenNotices {
+    /// Record `key`, returning whether it had not been seen before.
+    pub(super) fn first(&self, key: &str) -> bool {
+        self.0.lock().expect("poisoned").insert(key.to_owned())
     }
 }
 
@@ -234,6 +275,7 @@ async fn resolve_skipping(
                     credential,
                     selected: Some(selected),
                     notices,
+                    switch: None,
                     tried,
                 });
             }
@@ -401,8 +443,8 @@ fn retire(document: &mut StoreDocument, profile: &str) {
 /// Records why `spent` is out (a scoped cooldown, or a re-login marker) and
 /// re-resolves the chain; the recorded state is what makes resolution skip the
 /// spent entry.
-/// The returned attempt carries the switch notice, appended after any skip
-/// notices resolution produced.
+/// The returned attempt carries the switch notice, alongside any skip notices
+/// resolution produced.
 ///
 /// Returns `None` when the chain has nothing further to offer, which the caller
 /// surfaces as the original, now-terminal error.
@@ -438,7 +480,7 @@ pub(super) async fn advance(
         }
     };
 
-    attempt.notices.push(switch_notice(
+    attempt.switch = Some(switch_notice(
         error,
         &selected.entry,
         attempt.selected.as_ref().map(|next| &next.entry),
@@ -523,6 +565,10 @@ pub(super) struct QuotaWatch {
     /// The stored profile the request authenticated as, and the generation it
     /// resolved at.
     profile: Option<(String, u64)>,
+
+    /// Warnings already surfaced, so a threshold crossed once is not reported
+    /// on every later response.
+    seen: SeenNotices,
 }
 
 impl QuotaWatch {
@@ -536,7 +582,16 @@ impl QuotaWatch {
         Self {
             store: profile.is_some().then(|| store.cloned()).flatten(),
             profile,
+            seen: SeenNotices::default(),
         }
+    }
+
+    /// Share `seen` with the rest of the provider, so a warning surfaced by one
+    /// request is not repeated by the next.
+    #[must_use]
+    pub(super) fn with_seen(mut self, seen: SeenNotices) -> Self {
+        self.seen = seen;
+        self
     }
 
     /// Act on what a response's quota headers reported.
@@ -566,8 +621,16 @@ impl QuotaWatch {
             )];
         }
 
+        // Keyed on the window and threshold rather than the text, which
+        // changes with every percentage point the window fills.
         limits
             .warning()
+            .filter(|window| {
+                self.seen.first(&format!(
+                    "{}@{:?}",
+                    window.claim, window.surpassed_threshold
+                ))
+            })
             .map(|window| vec![warning_notice(window)])
             .unwrap_or_default()
     }
@@ -617,6 +680,7 @@ fn window_name(claim: &str) -> &str {
         "seven_day" => "weekly limit",
         "seven_day_opus" => "Opus weekly limit",
         "seven_day_sonnet" => "Sonnet weekly limit",
+        "overage" => "extra usage limit",
         other => other,
     }
 }
