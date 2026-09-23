@@ -3,11 +3,10 @@ use std::{pin::Pin, time::Duration};
 use backon::{ExponentialBuilder, Retryable as _};
 use derive_builder::Builder;
 use eventsource_stream::Eventsource as _;
-use futures::StreamExt as _;
+use futures::{Stream, StreamExt as _};
 use reqwest::StatusCode;
 use secrecy::ExposeSecret;
 use serde::{Serialize, de::DeserializeOwned};
-use tokio_stream::Stream;
 
 use crate::{
     bearer,

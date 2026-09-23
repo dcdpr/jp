@@ -13,6 +13,8 @@
 //! measurement (RFD 090, Phase 1); trim or extend these constants once that
 //! measurement lands.
 
+use std::fmt::Write as _;
+
 use reqwest::header::{HeaderMap, HeaderValue};
 
 /// Beta identifier that switches the API into OAuth mode.
@@ -88,6 +90,33 @@ pub fn stainless_arch() -> String {
     }
 }
 
+/// A random version 4 UUID in its hyphenated form, as Claude Code sends in
+/// `x-client-request-id`.
+///
+/// # Panics
+///
+/// Panics when the operating system's random source fails, as a UUID library
+/// generating a v4 would.
+fn request_id() -> String {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).expect("OS random source failed");
+
+    // RFC 9562: version 4 in the high nibble of byte 6, variant `10` in the
+    // top two bits of byte 8.
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    let mut id = String::with_capacity(36);
+    for (index, byte) in bytes.iter().enumerate() {
+        if matches!(index, 4 | 6 | 8 | 10) {
+            id.push('-');
+        }
+        let _ = write!(id, "{byte:02x}");
+    }
+
+    id
+}
+
 /// Merge the fingerprint betas with user-configured extras.
 ///
 /// Fingerprint betas come first and cannot be removed; extras are appended in
@@ -132,7 +161,7 @@ pub(crate) fn headers(token: &str, version: &str, extra_betas: Option<&str>) -> 
     insert("anthropic-client-version", CLAUDE_CLIENT_VERSION.to_owned());
     insert("user-agent", user_agent());
     insert("x-app", X_APP.to_owned());
-    insert("x-client-request-id", uuid::Uuid::new_v4().to_string());
+    insert("x-client-request-id", request_id());
     insert("x-stainless-os", stainless_os());
     insert("x-stainless-arch", stainless_arch());
     for (name, value) in STAINLESS_HEADERS {

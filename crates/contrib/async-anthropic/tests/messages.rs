@@ -1,132 +1,139 @@
 use std::{
-    sync::{Arc, Mutex},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 
 use async_anthropic::{
     Client,
     errors::{AnthropicError, ApiError},
-    types::{CreateMessagesRequestBuilder, MessageBuilder, MessageContent, MessageRole},
+    types::{CreateMessagesRequest, CreateMessagesRequestBuilder, MessageBuilder, MessageRole},
 };
-use async_trait::async_trait;
 use backon::ExponentialBuilder;
-use serde_json::json;
-use wiremock::{
-    Mock, MockServer, ResponseTemplate,
-    matchers::{method, path},
-};
+use httpmock::{HttpMockRequest, HttpMockResponse, MockServer, prelude::POST};
+use serde_json::{Value, json};
 
-// Helper trait for setting up and tearing down mock server
-#[async_trait]
-pub trait MockApp {
-    async fn setup() -> MockServer;
+fn client_for(server: &MockServer) -> Client {
+    Client::builder()
+        .api_key("test_secret")
+        .base_url(server.base_url())
+        .build()
+        .unwrap()
 }
 
-struct TestSetup;
+/// A backoff short enough that a retrying test finishes quickly.
+fn fast_backoff() -> ExponentialBuilder {
+    ExponentialBuilder::default()
+        .with_min_delay(Duration::from_millis(10))
+        .with_factor(2.0)
+        .with_max_delay(Duration::from_millis(100))
+}
 
-#[async_trait]
-impl MockApp for TestSetup {
-    async fn setup() -> MockServer {
-        MockServer::start().await
-    }
+fn hello_request() -> CreateMessagesRequest {
+    CreateMessagesRequestBuilder::default()
+        .model("test-model".to_string())
+        .messages(vec![
+            MessageBuilder::default()
+                .role(MessageRole::User)
+                .content("Hello world!")
+                .build()
+                .unwrap(),
+        ])
+        .build()
+        .unwrap()
+}
+
+fn json_response(status: u16, body: &Value) -> HttpMockResponse {
+    HttpMockResponse::builder()
+        .status(status)
+        .header("content-type", "application/json")
+        .body(body.to_string())
+        .build()
+}
+
+/// Answer the first `failures` requests with `failure`, and every later one
+/// with a successful message.
+///
+/// Returns a counter of the requests the responder saw.
+fn fail_then_succeed(
+    failures: usize,
+    failure: HttpMockResponse,
+) -> (
+    impl Fn(&HttpMockRequest) -> HttpMockResponse + Send + Sync + 'static,
+    Arc<AtomicUsize>,
+) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let responder = {
+        let calls = Arc::clone(&calls);
+        move |_: &HttpMockRequest| {
+            if calls.fetch_add(1, Ordering::SeqCst) < failures {
+                return failure.clone();
+            }
+
+            json_response(
+                200,
+                &json!({ "content": [{"type": "text", "text": "retried response"}] }),
+            )
+        }
+    };
+
+    (responder, calls)
 }
 
 #[tokio::test]
 async fn test_client_build_request() {
-    let secret_key = "test_secret";
-
-    let request = Client::builder().api_key(secret_key).build();
+    let request = Client::builder().api_key("test_secret").build();
 
     assert!(request.is_ok());
 }
 
 #[test_log::test(tokio::test)]
 async fn test_successful_request_execution() {
-    let server = TestSetup::setup().await;
-    let secret_key = "test_secret";
+    let server = MockServer::start_async().await;
 
-    // Mock successful response
-    Mock::given(method("POST"))
-        .and(path("/v1/messages"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "content": [{"type": "text", "text": "mocked response"}]
-        })))
-        .expect(1)
-        .mount(&server)
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/v1/messages");
+            then.status(200).json_body(json!({
+                "content": [{"type": "text", "text": "mocked response"}]
+            }));
+        })
         .await;
 
-    let client = Client::builder()
-        .api_key(secret_key)
-        .base_url(server.uri())
-        .build()
+    let result = client_for(&server)
+        .messages()
+        .create(hello_request())
+        .await
         .unwrap();
 
-    let request = CreateMessagesRequestBuilder::default()
-        .model("test-model".to_string())
-        .stream(true)
-        .messages(vec![
-            MessageBuilder::default()
-                .role(MessageRole::User)
-                .content("Hello world!")
-                .build()
-                .unwrap(),
-        ])
-        .build()
-        .unwrap();
-
-    let result = client.messages().create(request).await.unwrap();
-
-    if let MessageContent::Text(text) = &result.content[0] {
-        assert_eq!(text.text, "mocked response");
-    }
+    mock.assert_calls_async(1).await;
+    assert_eq!(
+        result.content[0].as_text().map(|t| t.text.as_str()),
+        Some("mocked response")
+    );
 }
 
+/// Throttling that never lets up is retried until the backoff is exhausted, and
+/// then surfaces as a rate limit.
 #[tokio::test]
 async fn test_with_backoff_basic() {
-    let server = TestSetup::setup().await;
-    let secret_key = "test_secret";
+    let server = MockServer::start_async().await;
 
-    // Mock 429 Too Many Requests, expecting retries
-    Mock::given(method("POST"))
-        .and(path("/v1/messages"))
-        .respond_with(
-            ResponseTemplate::new(429)
-                .set_body_string("Too Many Requests")
-                .set_delay(Duration::from_millis(10)),
-        )
-        .up_to_n_times(20)
-        .expect(1..)
-        .mount(&server)
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/v1/messages");
+            then.status(429).body("Too Many Requests");
+        })
         .await;
 
-    let backoff = ExponentialBuilder::default()
-        .with_min_delay(Duration::from_millis(10))
-        .with_factor(2.0)
-        .with_max_delay(Duration::from_millis(100));
+    let result = client_for(&server)
+        .with_backoff(fast_backoff())
+        .messages()
+        .create(hello_request())
+        .await;
 
-    let client = Client::builder()
-        .base_url(server.uri())
-        .api_key(secret_key)
-        .build()
-        .unwrap()
-        .with_backoff(backoff);
-
-    let request = CreateMessagesRequestBuilder::default()
-        .model("test-model".to_string())
-        .stream(true)
-        .messages(vec![
-            MessageBuilder::default()
-                .role(MessageRole::User)
-                .content("Hello world!")
-                .build()
-                .unwrap(),
-        ])
-        .build()
-        .unwrap();
-
-    let result = client.messages().create(request).await;
-
-    assert!(result.is_err());
     assert!(
         matches!(
             result.as_ref().unwrap_err(),
@@ -135,91 +142,41 @@ async fn test_with_backoff_basic() {
         "actual: {:?}",
         &result
     );
-}
 
-pub struct RetryResponder {
-    num_calls_before_success: Arc<Mutex<u64>>,
-    calls_made: Arc<Mutex<u64>>,
-}
-
-impl RetryResponder {
-    #[must_use]
-    pub fn new(num_calls_before_success: u64) -> Self {
-        Self {
-            num_calls_before_success: Arc::new(Mutex::new(num_calls_before_success)),
-            calls_made: Arc::new(Mutex::new(0)),
-        }
-    }
-}
-
-impl wiremock::Respond for RetryResponder {
-    fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
-        let i = *self.calls_made.lock().unwrap();
-        let succ_calls = *self.num_calls_before_success.lock().unwrap();
-
-        if i < succ_calls {
-            *self.calls_made.lock().unwrap() += 1;
-            ResponseTemplate::new(429)
-                .set_body_string("Too Many Requests")
-                .set_delay(Duration::from_millis(10))
-        } else {
-            ResponseTemplate::new(200).set_body_json(json!({
-                "content": [{"type": "text", "text": "retried response"}]
-            }))
-        }
-    }
+    // The first attempt plus the backoff's three retries.
+    mock.assert_calls_async(4).await;
 }
 
 #[tokio::test]
 async fn test_default_backoff_retries() {
-    let server = TestSetup::setup().await;
-    let secret_key = "test_secret";
+    let server = MockServer::start_async().await;
 
-    let bad_calls = 3;
-    let expected_calls = bad_calls + 1; // + 1 good call at the end
+    let throttled = HttpMockResponse::builder()
+        .status(429)
+        .body("Too Many Requests")
+        .build();
+    let (responder, calls) = fail_then_succeed(3, throttled);
 
-    let rr = RetryResponder::new(bad_calls);
-
-    // Mock 429 Too Many Requests, expecting retries
-    Mock::given(method("POST"))
-        .and(path("/v1/messages"))
-        .respond_with(rr)
-        .expect(expected_calls)
-        .mount(&server)
+    server
+        .mock_async(|when, then| {
+            when.method(POST).path("/v1/messages");
+            then.respond_with(responder);
+        })
         .await;
 
-    let backoff = ExponentialBuilder::default()
-        .with_min_delay(Duration::from_millis(10))
-        .with_factor(2.0)
-        .with_max_delay(Duration::from_millis(200));
+    let result = client_for(&server)
+        .with_backoff(fast_backoff())
+        .messages()
+        .create(hello_request())
+        .await
+        .expect("the request succeeds once throttling stops");
 
-    let client = Client::builder()
-        .base_url(server.uri())
-        .api_key(secret_key)
-        .build()
-        .unwrap()
-        .with_backoff(backoff);
-
-    let request = CreateMessagesRequestBuilder::default()
-        .model("test-model".to_string())
-        .stream(true)
-        .messages(vec![
-            MessageBuilder::default()
-                .role(MessageRole::User)
-                .content("Hello world!")
-                .build()
-                .unwrap(),
-        ])
-        .build()
-        .unwrap();
-
-    let result = client.messages().create(request).await;
-    assert!(result.is_ok());
-    let result = result.unwrap();
-
-    if let MessageContent::Text(text) = &result.content[0] {
-        assert_eq!(text.text, "retried response");
-    }
+    // Three throttled attempts, then the one that succeeded.
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+    assert_eq!(
+        result.content[0].as_text().map(|t| t.text.as_str()),
+        Some("retried response")
+    );
 }
 
 /// An overloaded server is retried in place, even when the response carries
@@ -229,66 +186,41 @@ async fn test_default_backoff_retries() {
 /// request after the first call.
 #[tokio::test]
 async fn test_overloaded_with_quota_headers_is_retried() {
-    let server = TestSetup::setup().await;
+    let server = MockServer::start_async().await;
 
-    Mock::given(method("POST"))
-        .and(path("/v1/messages"))
-        .respond_with(
-            ResponseTemplate::new(529)
-                .insert_header(
-                    "anthropic-ratelimit-unified-representative-claim",
-                    "five_hour",
-                )
-                .insert_header("anthropic-ratelimit-unified-overage-status", "rejected")
-                .set_body_json(json!({
-                    "type": "error",
-                    "error": { "type": "overloaded_error", "message": "Overloaded" }
-                })),
+    let overloaded = HttpMockResponse::builder()
+        .status(529)
+        .header(
+            "anthropic-ratelimit-unified-representative-claim",
+            "five_hour",
         )
-        .up_to_n_times(1)
-        .with_priority(1)
-        .expect(1)
-        .mount(&server)
+        .header("anthropic-ratelimit-unified-overage-status", "rejected")
+        .header("content-type", "application/json")
+        .body(
+            json!({
+                "type": "error",
+                "error": { "type": "overloaded_error", "message": "Overloaded" }
+            })
+            .to_string(),
+        )
+        .build();
+    let (responder, calls) = fail_then_succeed(1, overloaded);
+
+    server
+        .mock_async(|when, then| {
+            when.method(POST).path("/v1/messages");
+            then.respond_with(responder);
+        })
         .await;
 
-    Mock::given(method("POST"))
-        .and(path("/v1/messages"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "content": [{"type": "text", "text": "retried response"}]
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let backoff = ExponentialBuilder::default()
-        .with_min_delay(Duration::from_millis(10))
-        .with_max_delay(Duration::from_millis(50));
-
-    let client = Client::builder()
-        .base_url(server.uri())
-        .api_key("test_secret")
-        .build()
-        .unwrap()
-        .with_backoff(backoff);
-
-    let request = CreateMessagesRequestBuilder::default()
-        .model("test-model".to_string())
-        .messages(vec![
-            MessageBuilder::default()
-                .role(MessageRole::User)
-                .content("Hello world!")
-                .build()
-                .unwrap(),
-        ])
-        .build()
-        .unwrap();
-
-    let result = client
+    let result = client_for(&server)
+        .with_backoff(fast_backoff())
         .messages()
-        .create(request)
+        .create(hello_request())
         .await
         .expect("the overloaded response is retried");
 
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
     assert_eq!(
         result.content[0].as_text().map(|t| t.text.as_str()),
         Some("retried response")
@@ -297,45 +229,24 @@ async fn test_overloaded_with_quota_headers_is_retried() {
 
 #[tokio::test]
 async fn test_error_handling_bad_request() {
-    let server = TestSetup::setup().await;
-    let secret_key = "test_secret";
+    let server = MockServer::start_async().await;
 
-    // Mock 400 Bad Request response
-    Mock::given(method("POST"))
-        .and(path("/v1/messages"))
-        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
-            "type": "error",
-            "error": {
-                "type": "invalid_request_error",
-                "message": "Bad request"
-            }
-        })))
-        .expect(1)
-        .mount(&server)
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/v1/messages");
+            then.status(400).json_body(json!({
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": "Bad request"
+                }
+            }));
+        })
         .await;
 
-    let client = Client::builder()
-        .base_url(server.uri())
-        .api_key(secret_key)
-        .build()
-        .unwrap();
+    let result = client_for(&server).messages().create(hello_request()).await;
 
-    let request = CreateMessagesRequestBuilder::default()
-        .model("test-model".to_string())
-        .stream(true)
-        .messages(vec![
-            MessageBuilder::default()
-                .role(MessageRole::User)
-                .content("Hello world!")
-                .build()
-                .unwrap(),
-        ])
-        .build()
-        .unwrap();
-
-    let result = client.messages().create(request).await;
-
-    assert!(result.is_err());
+    mock.assert_calls_async(1).await;
     assert!(
         matches!(
             result.as_ref().unwrap_err(),
@@ -348,45 +259,24 @@ async fn test_error_handling_bad_request() {
 
 #[tokio::test]
 async fn test_error_handling_unauthorized() {
-    let server = TestSetup::setup().await;
-    let secret_key = "test_secret";
+    let server = MockServer::start_async().await;
 
-    // Mock 401 Unauthorized response
-    Mock::given(method("POST"))
-        .and(path("/v1/messages"))
-        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
-            "type": "error",
-            "error": {
-                "type": "authentication_error",
-                "message": "Unauthorized"
-            }
-        })))
-        .expect(1)
-        .mount(&server)
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/v1/messages");
+            then.status(401).json_body(json!({
+                "type": "error",
+                "error": {
+                    "type": "authentication_error",
+                    "message": "Unauthorized"
+                }
+            }));
+        })
         .await;
 
-    let client = Client::builder()
-        .base_url(server.uri())
-        .api_key(secret_key)
-        .build()
-        .unwrap();
+    let result = client_for(&server).messages().create(hello_request()).await;
 
-    let request = CreateMessagesRequestBuilder::default()
-        .model("test-model".to_string())
-        .stream(true)
-        .messages(vec![
-            MessageBuilder::default()
-                .role(MessageRole::User)
-                .content("Hello world!")
-                .build()
-                .unwrap(),
-        ])
-        .build()
-        .unwrap();
-
-    let result = client.messages().create(request).await;
-
-    assert!(result.is_err());
+    mock.assert_calls_async(1).await;
     assert!(
         matches!(
             result.as_ref().unwrap_err(),

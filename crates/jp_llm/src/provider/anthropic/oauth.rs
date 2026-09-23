@@ -126,13 +126,15 @@ pub struct Tokens {
 
 /// 256 bits of URL-safe randomness, for a PKCE verifier or an OAuth `state`.
 ///
-/// Sourced from v4 UUIDs, which are drawn from the platform's cryptographic
-/// random number generator.
+/// Drawn from the operating system's cryptographic random source.
+///
+/// # Panics
+///
+/// Panics when that random source fails.
 #[must_use]
 pub fn random_token() -> String {
     let mut bytes = [0u8; 32];
-    bytes[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-    bytes[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
+    getrandom::fill(&mut bytes).expect("OS random source failed");
 
     base64_url(&bytes)
 }
