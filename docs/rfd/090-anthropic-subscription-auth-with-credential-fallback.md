@@ -219,8 +219,8 @@ A refresh rejected by the token endpoint marks the profile as needing re-login;
 resolution skips it with a notice and continues down the chain.
 
 `cooldowns` persists quota cooldowns across invocations, keyed by the window
-Anthropic reports as exhausted: `five_hour`, `seven_day`, and `overage` (the paid
-extra-usage allowance) cover the whole account, while `seven_day_opus` and
+Anthropic reports as exhausted: `five_hour`, `seven_day`, and `overage` (the
+paid extra-usage allowance) cover the whole account, while `seven_day_opus` and
 `seven_day_sonnet` cover one model family.
 A single profile-wide timestamp would let an exhausted Opus window block the
 same account's Haiku title generation.
@@ -876,8 +876,8 @@ the documented contingency.
 ### Phase 4: macOS keyring store backend
 
 The macOS Keychain as a `CredentialBackend`, adapting the `keyring-core` Apple
-store (`apple-native-keyring-store`) to it, replacing the file store on macOS and
-restoring parity for users migrating from Claude Code there.
+store (`apple-native-keyring-store`) to it, replacing the file store on macOS
+and restoring parity for users migrating from Claude Code there.
 The backend stores the same versioned JSON document as a single entry, so
 cooldowns and re-login state move with the secrets; the store's `ResourceLocker`
 lock file keeps serializing mutations, since the Keychain provides no locking.
