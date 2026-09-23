@@ -1,4 +1,4 @@
-# RFD D52: Built-in compact tool for assistant-driven compaction
+# RFD D69: Built-in compact tool for assistant-driven compaction
 
 - **Status**: Draft
 - **Category**: Design
