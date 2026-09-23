@@ -523,7 +523,10 @@ fn tool_interrupt_cancelled_empty_reply_has_no_custom_message() {
         },
         "Expected Cancelled without a custom message, got {result:?}",
     );
-    assert!(token.is_cancelled(), "Cancel should stop current execution");
+    assert!(
+        !token.is_cancelled(),
+        "The coordinator must hold MCP calls before cancelling workers"
+    );
 }
 
 #[test]
@@ -556,7 +559,10 @@ fn tool_interrupt_cancelled_with_custom_response() {
         response: Some("wrong tool, use grep instead".into()),
         exit: false
     });
-    assert!(token.is_cancelled(), "Cancel should stop current execution");
+    assert!(
+        !token.is_cancelled(),
+        "The coordinator must hold MCP calls before cancelling workers"
+    );
 }
 
 #[test]
@@ -648,14 +654,11 @@ fn tool_interrupt_handled_when_not_prompting() {
         &tool_prompt(),
     );
 
-    // Should process the interrupt and cancel
+    // The menu runs when no prompt is active; the coordinator, not this
+    // handler, cancels the running tools.
     assert!(
         matches!(result, ToolInterruptResult::Cancelled { .. }),
         "Expected Cancelled variant when not prompting, got {result:?}"
-    );
-    assert!(
-        token.is_cancelled(),
-        "Should cancel when no prompt is active"
     );
 }
 

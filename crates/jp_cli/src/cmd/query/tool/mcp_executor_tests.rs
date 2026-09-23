@@ -1,6 +1,9 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
+use std::{
+    future::pending,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use async_trait::async_trait;
@@ -40,6 +43,18 @@ impl BuiltinTool for InquiringTool {
     }
 }
 
+/// A tool that runs until its attempt is abandoned, so an interrupt always
+/// lands while it is still in flight.
+struct BlockingTool(Arc<AtomicUsize>);
+
+#[async_trait]
+impl BuiltinTool for BlockingTool {
+    async fn execute(&self, _: &Value, _: &IndexMap<String, Value>) -> Outcome {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        pending().await
+    }
+}
+
 struct Fixture {
     source: TerminalExecutorSource,
     owner: ExecutionOwner,
@@ -49,7 +64,7 @@ struct Fixture {
 
 impl Fixture {
     /// Start a service exposing one `example` tool with the given config.
-    async fn start(config: Value, tool: InquiringTool) -> Self {
+    async fn start(config: Value, tool: impl BuiltinTool + 'static) -> Self {
         let partial: PartialToolConfig = serde_json::from_value(config).unwrap();
         let mut cfg = AppConfig::new_test();
         cfg.conversation.tools.insert(
@@ -362,6 +377,91 @@ async fn cancellation_before_release_does_not_execute() {
         .acknowledge(Review::unchanged(response))
         .await
         .unwrap();
+    fixture.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_held_call_delivers_the_recorded_response_to_its_agent() {
+    // An agent owns the MCP request and builds its own transcript from the
+    // response, so the text the Host recorded for a cancelled call is only seen
+    // by the model if it is what the agent receives.
+    let count = Arc::new(AtomicUsize::new(0));
+    let mut fixture = Fixture::start(
+        json!({"source": "builtin", "run": "unattended"}),
+        BlockingTool(count.clone()),
+    )
+    .await;
+    fixture.count = count;
+    fixture
+        .source
+        .set_execution(ToolExecution::Agent {
+            correlation_key: "test/agentId",
+        })
+        .unwrap();
+    let mut executor = fixture.executor(&json!({}));
+
+    let mut params = CallToolRequestParams::new("example");
+    params.arguments = Some(Map::new());
+    params.meta = Some(Meta(Map::from_iter([(
+        "test/agentId".into(),
+        "call-1".into(),
+    )])));
+    let peer = fixture.source.peer.clone();
+    let agent = tokio::spawn(async move { peer.call_tool(params).await });
+
+    assert!(executor.prepare(false).await.unwrap().is_none());
+    executor.approve().await.unwrap();
+
+    let token = CancellationToken::new();
+    let answers = IndexMap::new();
+    let running = executor.execute(&answers, token.clone(), None);
+    tokio::pin!(running);
+    let started = async {
+        while fixture.attempts() == 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    };
+    timeout(Duration::from_secs(5), async {
+        tokio::select! {
+            result = &mut running => panic!("the tool must still be running, got {result:?}"),
+            () = started => {}
+        }
+    })
+    .await
+    .expect("the tool never started");
+
+    assert!(executor.hold_for_response(), "a named call can be held");
+    token.cancel();
+    let result = running.await;
+    assert!(
+        matches!(result, ExecutorResult::Completed(_)),
+        "a held call reports its attempt as over, got {result:?}"
+    );
+
+    fixture
+        .acknowledge(recorded(Ok(
+            "Tool run cancelled by user with a custom message:\n\nuse grep instead"
+        )))
+        .await
+        .unwrap();
+
+    let delivered = timeout(Duration::from_secs(5), agent)
+        .await
+        .expect("the agent's call must finish")
+        .unwrap()
+        .map(|result| serde_json::to_value(result).unwrap())
+        .map_err(|error| error.to_string());
+    assert_eq!(
+        delivered,
+        Ok(json!({
+            "content": [{
+                "type": "text",
+                "text": "Tool run cancelled by user with a custom message:\n\nuse grep instead",
+            }],
+            "isError": false,
+        }))
+    );
+    assert_eq!(fixture.attempts(), 1, "holding must not run the tool again");
     fixture.shutdown().await;
 }
 

@@ -102,6 +102,17 @@ pub(crate) trait Executor: Send + Sync {
         false
     }
 
+    /// Stop this call's current attempt but keep its service-side invocation
+    /// open, so the response the Host records for it is what the MCP caller
+    /// receives once that response is acknowledged.
+    ///
+    /// Returns `false` when there is nothing to hold, the service has not named
+    /// the call yet, or this executor has no service behind it.
+    /// The call is then torn down when its attempt is cancelled.
+    fn hold_for_response(&self) -> bool {
+        false
+    }
+
     /// Advance the call to its next input request or result.
     ///
     /// An MCP-backed executor releases prepared work or answers the pending

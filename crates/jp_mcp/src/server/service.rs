@@ -413,6 +413,10 @@ struct CallControl {
     lifetime: CancellationToken,
     attempt: CancellationToken,
     resume: Arc<Notify>,
+
+    /// The result the Host resolved this call with, delivered in place of
+    /// another attempt when the paused call wakes.
+    completion: Option<ToolResult>,
 }
 
 impl Inner {
@@ -530,6 +534,7 @@ impl Service {
             lifetime: cancellation.clone(),
             attempt: attempt.clone(),
             resume: resume.clone(),
+            completion: None,
         });
         drop(state);
         let (sender, result) = oneshot::channel();
@@ -559,6 +564,17 @@ impl Service {
                     () = task_token.cancelled() => break Err(ServiceError::Cancelled),
                     () = inner.host.closed() => break Err(ServiceError::HostDisconnected),
                     () = resume.notified() => {},
+                }
+                let completion = inner
+                    .state()
+                    .active
+                    .get_mut(&id)
+                    .and_then(|control| control.completion.take());
+                if let Some(result) = completion {
+                    break Ok(CallOutput {
+                        result,
+                        delivery_decided: true,
+                    });
                 }
                 attempt = task_token.child_token();
                 if let Some(control) = inner.state().active.get_mut(&id) {
@@ -603,6 +619,26 @@ impl Service {
         if let Some(control) = self.inner.state().active.get(&id) {
             control.resume.notify_one();
         }
+    }
+
+    /// Resolve an invocation with `result` in place of its current attempt.
+    ///
+    /// The attempt stops, and `result` is what the MCP caller receives.
+    /// No review or recording interaction follows: the Host supplies a result
+    /// it has already recorded.
+    ///
+    /// Returns `false` when the invocation has left the active set, in which
+    /// case its caller already has a result.
+    #[must_use]
+    pub fn complete_call(&self, id: InvocationId, result: ToolResult) -> bool {
+        let mut state = self.inner.state();
+        let Some(control) = state.active.get_mut(&id) else {
+            return false;
+        };
+        control.completion = Some(result);
+        control.attempt.cancel();
+        control.resume.notify_one();
+        true
     }
 
     /// Cancel an invocation identified through the private Host channel.

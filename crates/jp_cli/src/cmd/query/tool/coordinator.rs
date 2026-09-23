@@ -1325,6 +1325,18 @@ impl ToolCoordinator {
                                     .filter(|(_, r)| r.is_none())
                                     .map(|(i, _)| i)
                                     .collect();
+                                // Hold each unfinished call open before
+                                // cancelling the Host workers, so the
+                                // cancellation response recorded below is what
+                                // its MCP caller receives. An agent that owns
+                                // the call builds its transcript from that, not
+                                // from the conversation.
+                                for index in &cancelled_indices {
+                                    if let Some(tool) = state.tools.get(index) {
+                                        tool.executor.hold_for_response();
+                                    }
+                                }
+                                cancellation_token.cancel();
                                 tools_cancelled = true;
                                 cancellation_message = response;
                                 if exit {

@@ -21,7 +21,7 @@ use jp_config::{
 use jp_tool::{Outcome, Question, ToolDefinition, ToolDocs};
 use serde_json::{Value, json};
 use tokio::{
-    sync::Notify,
+    sync::{Notify, mpsc::error::TryRecvError},
     time::{Duration, timeout},
 };
 
@@ -596,6 +596,70 @@ async fn cancellation_drops_an_in_flight_builtin_attempt() {
     call.cancel();
     assert!(matches!(call.finish().await, Err(ServiceError::Cancelled)));
     assert_eq!(dropped.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_completed_call_delivers_the_host_result_in_place_of_its_attempt() {
+    let entered = Arc::new(Notify::new());
+    let dropped = Arc::new(AtomicUsize::new(0));
+    let (service, mut host) = service(
+        json!({"source": "builtin", "run": "ask", "result": "unattended"}),
+        "/tmp".into(),
+        BuiltinExecutors::new().register("count", BlockedTool {
+            entered: entered.clone(),
+            dropped: dropped.clone(),
+        }),
+        InvocationContext::default(),
+    );
+    let call = service.start_call(request()).unwrap();
+    let id = call.id();
+    release(&mut host).await;
+    timeout(Duration::from_secs(2), entered.notified())
+        .await
+        .unwrap();
+
+    assert!(service.complete_call(id, ToolResult::text("stopped by the user")));
+
+    let finished = timeout(Duration::from_secs(2), call.finish())
+        .await
+        .expect("a completed call must finish");
+    assert_matches!(finished, Ok(result) if result == ToolResult::text("stopped by the user"));
+    assert_eq!(dropped.load(Ordering::SeqCst), 1, "the attempt must stop");
+    // The Host recorded the result before completing the call, so it is not
+    // asked to record or review it again.
+    assert!(matches!(host.try_recv(), Err(TryRecvError::Empty)));
+    service.shutdown().await;
+}
+
+#[tokio::test]
+async fn completing_a_finished_call_is_refused() {
+    let (service, mut host, _count) = fixture("ask", "unattended");
+    let call = service.start_call(request()).unwrap();
+    let id = call.id();
+    let Interaction::Prepare { reply, .. } = next(&mut host).await.interaction else {
+        panic!("expected preparation")
+    };
+    reply
+        .send(Ok(Admission::Complete {
+            result: ToolResult::text("denied"),
+        }))
+        .unwrap();
+    let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
+        panic!("expected recording")
+    };
+    reply.send(Ok(())).unwrap();
+    assert_eq!(call.finish().await.unwrap(), ToolResult::text("denied"));
+    // The result is sent before the call leaves the active set.
+    timeout(Duration::from_secs(2), async {
+        while service.call_cancellation(id).is_some() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+
+    assert!(!service.complete_call(id, ToolResult::text("too late")));
+    service.shutdown().await;
 }
 
 #[tokio::test]

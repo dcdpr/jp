@@ -174,6 +174,15 @@ struct CallSlot {
     /// does not tear the service-side call down.
     restarting: AtomicBool,
 
+    /// Whether this call's attempt was stopped so the Host can answer it with
+    /// the response it records instead.
+    ///
+    /// Set by [`Executor::hold_for_response`] and cleared by the
+    /// acknowledgement that delivers that response.
+    /// While set, the cancellation that ends the attempt leaves the
+    /// service-side call open.
+    held: AtomicBool,
+
     /// Where to show this tool's stderr, for the length of one attempt.
     ///
     /// Set when an attempt starts and cleared when it ends, so a display that
@@ -562,6 +571,7 @@ impl ExecutorSource for TerminalExecutorSource {
             sender,
             invocation: SyncMutex::new(None),
             restarting: AtomicBool::new(false),
+            held: AtomicBool::new(false),
             stderr: SyncMutex::new(None),
             state: Mutex::new(PendingCall {
                 receiver,
@@ -790,6 +800,9 @@ impl CallSlot {
     /// content, then drain the call to its MCP response.
     async fn acknowledge(&self, review: &Review) -> Result<(), ExecutorError> {
         let mut state = self.state.lock().await;
+        if self.held.swap(false, Ordering::AcqRel) {
+            return self.deliver_held(&mut state, review).await;
+        }
         let recorded = matches!(state.phase, Phase::Record(_));
         match mem::replace(&mut state.phase, Phase::Finished) {
             // Nothing is outstanding: the call already delivered its result, or
@@ -813,6 +826,30 @@ impl CallSlot {
             return Ok(());
         }
         self.drain(&mut state, review).await
+    }
+
+    /// Hand a held call the content the Host recorded for it.
+    ///
+    /// The attempt already stopped, so no barrier is outstanding: the service
+    /// delivers this content as the call's MCP response.
+    async fn deliver_held(
+        &self,
+        state: &mut PendingCall,
+        review: &Review,
+    ) -> Result<(), ExecutorError> {
+        state.phase = Phase::Finished;
+        let Some(id) = *locked(&self.invocation) else {
+            return Ok(());
+        };
+        // `false` means the call finished on its own first; its caller already
+        // has that result.
+        if !state.service.complete_call(id, approved(None, review)) {
+            return Ok(());
+        }
+        if state.submitted_elsewhere() {
+            return Ok(());
+        }
+        self.drain(state, review).await
     }
 
     /// Answer the service's remaining barriers and check what it delivered.
@@ -929,6 +966,20 @@ impl Executor for ToolExecutor {
             return true;
         }
         self.slot.restarting.store(false, Ordering::Release);
+        false
+    }
+
+    fn hold_for_response(&self) -> bool {
+        let Some(id) = *locked(&self.slot.invocation) else {
+            return false;
+        };
+        // Set before pausing, so the cancellation that follows sees a held
+        // call rather than one to tear down.
+        self.slot.held.store(true, Ordering::Release);
+        if self.service.pause_call(id) {
+            return true;
+        }
+        self.slot.held.store(false, Ordering::Release);
         false
     }
 
@@ -1135,10 +1186,13 @@ impl Executor for ToolExecutor {
         // to receive. A question's next attempt brings its own.
         *locked(&self.slot.stderr) = None;
         result.unwrap_or_else(|error| {
-            // A paused call is meant to come back, so its invocation stays
-            // alive and the cancellation that ended this attempt is reported
-            // without tearing the service-side call down.
-            if self.slot.restarting.load(Ordering::Acquire) {
+            // A paused call is meant to come back, and a held one waits for the
+            // Host's response, so either way its invocation stays alive and the
+            // cancellation that ended this attempt is reported without tearing
+            // the service-side call down.
+            if self.slot.restarting.load(Ordering::Acquire)
+                || self.slot.held.load(Ordering::Acquire)
+            {
                 return ExecutorResult::Completed(ToolCallResponse {
                     id: self.slot.request.id.clone(),
                     result: Err(error.to_string()),

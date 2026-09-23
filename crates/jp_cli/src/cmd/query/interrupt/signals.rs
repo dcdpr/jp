@@ -303,7 +303,6 @@ pub fn handle_tool_interrupt(
             ToolInterruptResult::Restart
         }
         InterruptAction::ToolCancelled { response, exit } => {
-            cancellation_token.cancel();
             ToolInterruptResult::Cancelled { response, exit }
         }
         InterruptAction::Escalate => {
