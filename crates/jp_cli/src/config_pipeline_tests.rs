@@ -486,6 +486,51 @@ fn conversation_clears_allow_cfg_resets() {
     assert_eq!(partial.assistant.name.as_deref(), Some("Bot"));
 }
 
+/// A label rule the workspace config gained after a conversation was created
+/// reaches that conversation.
+///
+/// The conversation layer fills from the base, so a rule the conversation does
+/// not hold has to arrive from the config files.
+/// A map that keeps only its own entries drops it, and the conversation goes on
+/// labelling by the rules it was created with.
+#[test]
+fn a_workspace_label_reaches_an_existing_conversation() {
+    use jp_config::conversation::label::PartialLabelConfig;
+
+    let mut pipeline = empty_pipeline();
+    pipeline.base.conversation.labels.insert(
+        "area".to_owned(),
+        PartialLabelConfig::Static("config".to_owned()),
+    );
+    pipeline.base.conversation.labels.insert(
+        "topic".to_owned(),
+        PartialLabelConfig::Static("stale".to_owned()),
+    );
+
+    // The conversation was created knowing only `topic`, and holds its own
+    // value for it.
+    let mut conversation = PartialAppConfig::empty();
+    conversation.conversation.labels.insert(
+        "topic".to_owned(),
+        PartialLabelConfig::Static("rust".to_owned()),
+    );
+
+    let partial = pipeline
+        .partial_with_conversation(conversation, &[])
+        .unwrap();
+    let labels = &partial.conversation.labels;
+
+    assert!(
+        labels.contains_key("area"),
+        "a rule only the files declare reaches the conversation: {labels:?}"
+    );
+    assert_eq!(
+        labels.get("topic"),
+        Some(&PartialLabelConfig::Static("rust".to_owned())),
+        "and the conversation's own value wins for a rule it holds"
+    );
+}
+
 /// An MCP server entry with a command and one argument.
 fn mcp_server(argument: &str) -> PartialMcpProviderConfig {
     PartialMcpProviderConfig::Stdio(PartialStdioConfig {

@@ -22,7 +22,7 @@ use crate::{
         PartialConfigDelta, delta_mergeable_map, delta_mergeable_map_at, delta_mergeable_vec,
         delta_opt, delta_opt_at, path,
     },
-    fill::FillDefaults,
+    fill::{FillDefaults, fill_map},
     internal::merge::{map_with_strategy, vec_with_strategy},
     partial::{ToPartial, partial_opt},
     types::{
@@ -186,7 +186,13 @@ impl FillDefaults for PartialConversationConfig {
             tools: self.tools.fill_from(defaults.tools),
             compaction: self.compaction.fill_from(defaults.compaction),
             attachments: self.attachments.fill_from(defaults.attachments),
-            labels: self.labels.fill_from(defaults.labels),
+            // Key by key, so a rule only the defaults declare is added while
+            // one this layer already has keeps its own value. A map that states
+            // a strategy is left alone: its owner said how it combines.
+            labels: match self.labels {
+                merged @ MergeableMap::Merged(_) => merged,
+                MergeableMap::Map(entries) => fill_map(entries, defaults.labels.into_map()).into(),
+            },
             inquiry: self.inquiry.fill_from(defaults.inquiry),
             start_local: self.start_local.or(defaults.start_local),
             default_id: self.default_id.or(defaults.default_id),
