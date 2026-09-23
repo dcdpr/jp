@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use futures::TryStreamExt as _;
+use futures::StreamExt as _;
 use tracing::{debug, warn};
 
 use crate::{
@@ -62,6 +62,12 @@ impl RetryConfig {
 ///
 /// Non-retryable errors and errors from `chat_completion_stream` itself (before
 /// streaming starts) are propagated immediately.
+///
+/// Notices lead the returned events, and survive an attempt that failed.
+/// A provider decision the user is owed — a credential skipped, a switch onto
+/// per-token billing — happens whether or not the attempt that reported it
+/// went on to succeed, and discarding it with the rest of a failed attempt
+/// would lose the only record of it.
 pub async fn collect_with_retry(
     provider: &dyn Provider,
     model: &ModelDetails,
@@ -69,6 +75,7 @@ pub async fn collect_with_retry(
     config: &RetryConfig,
 ) -> Result<Vec<Event>> {
     let mut attempt = 0u32;
+    let mut notices: Vec<Event> = vec![];
 
     loop {
         let stream = provider
@@ -83,20 +90,35 @@ pub async fn collect_with_retry(
             None => stream,
         };
 
-        let error = match stream.try_collect::<Vec<Event>>().await {
+        let mut stream = std::pin::pin!(stream);
+        let mut collected: Vec<Event> = vec![];
+        let mut failure = None;
+
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(event @ Event::Notice(_)) => notices.push(event),
+                Ok(event) => collected.push(event),
+                Err(error) => {
+                    failure = Some(error);
+                    break;
+                }
+            }
+        }
+
+        let error = match failure {
             // Contract: a well-formed stream ends with `Event::Finished`. A
             // stream that ends without one was cut short (e.g. a dropped
             // connection); treat it as a transient failure and retry rather
             // than returning a truncated result.
-            Ok(events)
-                if events
-                    .last()
-                    .is_some_and(|e| matches!(e, Event::Finished(_))) =>
+            None if collected
+                .last()
+                .is_some_and(|e| matches!(e, Event::Finished(_))) =>
             {
-                return Ok(events);
+                notices.append(&mut collected);
+                return Ok(notices);
             }
-            Ok(_) => StreamError::transient("provider stream ended without a terminal event"),
-            Err(error) => error,
+            None => StreamError::transient("provider stream ended without a terminal event"),
+            Some(error) => error,
         };
 
         attempt += 1;

@@ -7,7 +7,7 @@ use jp_conversation::{ConversationStream, thread::Thread};
 use super::*;
 use crate::{
     error::{Error, StreamError, StreamErrorKind},
-    event::Event,
+    event::{Event, FinishReason},
     model::ModelDetails,
     provider::mock::MockProvider,
     query::Truncation,
@@ -160,6 +160,61 @@ fn stream_error_is_retryable() {
 
     // Non-retryable
     assert!(!StreamError::other("test").is_retryable());
+}
+
+/// A notice reported by an attempt that then failed survives the retry.
+///
+/// The switch onto per-token billing that a notice announces already happened;
+/// discarding it with the rest of the failed attempt would leave the only
+/// record of it in the attempt nobody sees.
+#[tokio::test]
+async fn collect_with_retry_keeps_notices_from_an_attempt_that_failed() {
+    let provider = MockProvider::with_batches(vec![
+        // Reports a credential switch, then dies in a way worth retrying.
+        vec![
+            Event::Notice("subscription limit reached (personal)".to_owned()),
+            Event::message(0, "partial"),
+        ],
+        vec![
+            Event::Notice("continuing with api_key".to_owned()),
+            Event::message(0, "done"),
+            Event::Finished(FinishReason::Completed),
+        ],
+    ]);
+
+    let config = RetryConfig {
+        max_retries: 2,
+        base_backoff_ms: 1,
+        max_backoff_secs: 1,
+        max_response_bytes: None,
+    };
+
+    let events = collect_with_retry(&provider, &model(), empty_query(), &config)
+        .await
+        .expect("the second attempt completes");
+
+    let notices: Vec<&str> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Notice(notice) => Some(notice.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(notices, [
+        "subscription limit reached (personal)",
+        "continuing with api_key",
+    ]);
+
+    // The failed attempt's content is still discarded: only its notices are
+    // worth carrying, since the response itself was never delivered.
+    assert!(
+        !events.iter().any(|event| matches!(
+            event,
+            Event::Part { part, .. } if part.as_text() == Some("partial")
+        )),
+        "a failed attempt's content must not reach the caller: {events:?}"
+    );
 }
 
 #[tokio::test]
