@@ -1807,6 +1807,8 @@ impl Default for ModelOverrides {
 /// Returns `None` for a model absent from this table, leaving its cutoff and
 /// deprecation status unknown rather than asserting defaults for a model this
 /// binary predates.
+// qual:allow(complexity, magic_numbers) reason: "model catalogue: cutoff dates
+// are data maintained by hand against Anthropic's published documentation"
 #[expect(clippy::match_same_arms)]
 fn model_overrides(id: &str) -> Option<ModelOverrides> {
     let cutoff = |year, month| NaiveDate::from_ymd_opt(year, month, 1);

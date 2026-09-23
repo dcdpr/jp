@@ -642,6 +642,8 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
 /// Unlike the Anthropic, OpenRouter, and Cerebras providers, there is nothing
 /// to derive from, so every value here is maintained by hand against OpenAI's
 /// published model documentation.
+// qual:allow(complexity, magic_numbers) reason: "model catalogue: context
+// windows, output limits and cutoff dates are data, not constants"
 fn map_model(model: ModelResponse) -> Result<ModelDetails> {
     let details = match model.id.as_str() {
         "gpt-6-astra" => ModelDetails {
