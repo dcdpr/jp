@@ -394,6 +394,61 @@ fn test_a_replaced_profile_does_not_inherit_the_old_credentials_state() {
     }
 }
 
+/// A logout followed by a login under the same name is a replacement too.
+///
+/// The removal takes the old credential's generation with it, so a counter kept
+/// per profile would start over and hand the new credential the value the
+/// in-flight request resolved at.
+#[test]
+fn test_a_removed_and_restored_profile_does_not_inherit_the_old_credentials_state() {
+    for (name, store, _dir) in stores() {
+        store
+            .mutate(|document| {
+                document.insert_profile("llm", "anthropic", "personal", token_credential("sk-old"));
+                Ok(())
+            })
+            .unwrap();
+        let resolved_at = generation_of(&store, "personal");
+
+        // The user logs out and back in while a request under `sk-old` is in
+        // flight.
+        store
+            .mutate(|document| {
+                document.remove_profile("llm", "anthropic", "personal");
+                Ok(())
+            })
+            .unwrap();
+        store
+            .mutate(|document| {
+                document.insert_profile("llm", "anthropic", "personal", token_credential("sk-new"));
+                Ok(())
+            })
+            .unwrap();
+
+        let relogin = store
+            .mark_needs_relogin("llm", "anthropic", "personal", resolved_at)
+            .unwrap();
+        let cooldown = store
+            .record_cooldown(
+                "llm",
+                "anthropic",
+                "personal",
+                resolved_at,
+                "account",
+                datetime!(2026-07-03 13:00:00 Z),
+            )
+            .unwrap();
+
+        assert_eq!(relogin, UpdateOutcome::Superseded, "store: {name}");
+        assert_eq!(cooldown, UpdateOutcome::Superseded, "store: {name}");
+
+        let document = store.load().unwrap();
+        let credential = &document.profiles("llm", "anthropic").unwrap()["personal"];
+        assert!(!credential.needs_relogin, "store: {name}");
+        assert!(credential.cooldowns.is_empty(), "store: {name}");
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn test_store_file_permissions() {

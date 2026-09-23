@@ -32,7 +32,7 @@ use jp_inquire::prompt::PromptBackend;
 use jp_llm::{
     Error as LlmError, Provider,
     error::StreamError,
-    event::{Event, EventPart, FinishReason, ToolCallPart},
+    event::{Event, EventPart, FinishReason, NoticeSink, ToolCallPart},
     model::ModelDetails,
     provider::get_provider,
     query::{ChatQuery, Truncation},
@@ -68,6 +68,7 @@ use crate::{
     },
     editor::build_editor_backend,
     error::Error,
+    output::notice_sink,
     render::metadata::set_rendered_arguments,
     signals::{InterruptNotice, SignalRouter, TurnInterrupt},
 };
@@ -234,6 +235,7 @@ pub(super) async fn run_turn_loop(
         model.clone(),
         provider.clone(),
         attachments.to_vec(),
+        notice_sink(&printer),
     )
     .await?;
 
@@ -941,6 +943,7 @@ async fn build_inquiry_backend(
     model: ModelDetails,
     provider: Arc<dyn Provider>,
     attachments: Vec<Attachment>,
+    notices: NoticeSink,
 ) -> Result<Arc<LlmInquiryBackend>, Error> {
     // Every field here is already resolved against the top-level assistant by
     // `AppConfig::from_partial_with_defaults`, so an unset inquiry key carries
@@ -1027,6 +1030,7 @@ async fn build_inquiry_backend(
         overrides,
         attachments,
         tools,
+        notices,
     )))
 }
 

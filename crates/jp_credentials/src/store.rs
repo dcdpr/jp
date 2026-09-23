@@ -459,6 +459,15 @@ fn decode(content: &str, location: &str) -> Result<StoreDocument, StoreError> {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StoreDocument {
     version: u32,
+
+    /// The generation the next stored credential receives.
+    ///
+    /// Document-wide rather than per profile, so a profile that is removed and
+    /// stored again under the same name cannot reuse the generation of the
+    /// credential it replaced.
+    #[serde(default)]
+    next_generation: u64,
+
     #[serde(default)]
     credentials: BTreeMap<String, BTreeMap<String, BTreeMap<String, StoredCredential>>>,
 }
@@ -473,6 +482,7 @@ impl StoreDocument {
     fn empty() -> Self {
         Self {
             version: STORE_VERSION,
+            next_generation: 0,
             credentials: BTreeMap::new(),
         }
     }
@@ -503,7 +513,8 @@ impl StoreDocument {
     /// Insert or replace a profile.
     ///
     /// The stored credential's [`generation`] is assigned here rather than
-    /// taken from `credential`: a replacement outranks what it replaced, so a
+    /// taken from `credential`, and is never one a previous credential under
+    /// this name held, whether that credential was replaced or removed: a
     /// request still in flight under the old credential cannot record state
     /// against the new one.
     ///
@@ -522,9 +533,15 @@ impl StoreDocument {
             .entry(provider.to_owned())
             .or_default();
 
-        credential.generation = profiles
+        // The replaced credential's own generation is a floor as well, so a
+        // document whose counter lags its profiles still moves forward.
+        let generation = profiles
             .get(profile)
-            .map_or(0, |replaced| replaced.generation.saturating_add(1));
+            .map_or(0, |replaced| replaced.generation.saturating_add(1))
+            .max(self.next_generation);
+
+        credential.generation = generation;
+        self.next_generation = generation.saturating_add(1);
 
         profiles.insert(profile.to_owned(), credential);
     }
@@ -601,9 +618,10 @@ pub struct StoredCredential {
 
     /// Which credential has held this profile name.
     ///
-    /// [`StoreDocument::insert_profile`] raises it whenever a login replaces
-    /// the profile, and nothing else changes it: a token refresh rotates the
-    /// secret of the same credential and leaves this alone.
+    /// [`StoreDocument::insert_profile`] assigns a fresh value whenever a login
+    /// stores the profile, including after a logout, and nothing else changes
+    /// it: a token refresh rotates the secret of the same credential and leaves
+    /// this alone.
     ///
     /// A request carries the generation it resolved, so state recorded against
     /// a credential that has since been replaced can be recognised and dropped

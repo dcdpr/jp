@@ -13,7 +13,7 @@ use jp_conversation::{Compaction, EventKind, SummaryPolicy, event::ChatResponse}
 
 use super::*;
 use crate::{
-    event::{Event, FinishReason},
+    event::{Event, FinishReason, NoticeSink},
     provider::mock::MockProvider,
 };
 
@@ -216,6 +216,7 @@ async fn generate_applies_the_title_model_parameters() {
         count: 1,
         rejected: vec![],
         max_response_bytes: Some(1_048_576),
+        notices: NoticeSink::new(|_| {}),
     })
     .await
     .expect("title generation succeeds");
@@ -300,9 +301,49 @@ async fn title_generate(
         count: 1,
         rejected: vec![],
         max_response_bytes: Some(1_048_576),
+        notices: NoticeSink::new(|_| {}),
     })
     .await
     .expect("title generation succeeds")
+}
+
+/// A title request that switches credentials says so.
+///
+/// A title can run on a different provider than the conversation, so the
+/// conversation's own turns may never mention the switch: the title request is
+/// the only place it can be reported.
+#[tokio::test]
+async fn generate_delivers_provider_notices() {
+    let provider = MockProvider::new(vec![
+        Event::Notice("subscription limit reached (personal)".to_owned()),
+        Event::structured(0, json!({"titles": ["A Title"]}).to_string()),
+        Event::flush(0),
+        Event::Finished(FinishReason::Completed),
+    ])
+    .with_model(ModelDetails::empty(model_id("mock")));
+    let details = details(&provider).await;
+
+    let seen = Arc::new(Mutex::new(vec![]));
+    let notices = NoticeSink::new({
+        let seen = Arc::clone(&seen);
+        move |notice| seen.lock().unwrap().push(notice.to_owned())
+    });
+
+    let titles = generate(&provider, &details, TitleRequest {
+        events: long_conversation(1),
+        model: model_config("mock"),
+        count: 1,
+        rejected: vec![],
+        max_response_bytes: None,
+        notices,
+    })
+    .await
+    .expect("title generation succeeds");
+
+    assert_eq!(titles, ["A Title"]);
+    assert_eq!(*seen.lock().unwrap(), [
+        "subscription limit reached (personal)"
+    ]);
 }
 
 #[test]

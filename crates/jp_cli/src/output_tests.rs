@@ -18,6 +18,22 @@ fn flush_stdout(printer: &Printer, out: &jp_printer::SharedBuffer) -> String {
     out.lock().clone()
 }
 
+/// A notice from a collected request reaches stderr on its own, with no logging
+/// enabled, and leaves stdout untouched.
+#[test]
+fn notice_sink_prints_to_stderr() {
+    let (printer, out, err) = Printer::memory(OutputFormat::Text);
+
+    notice_sink(&printer).emit("subscription limit reached (personal)");
+    printer.flush();
+
+    assert_eq!(
+        err.lock().as_str(),
+        "subscription limit reached (personal)\n"
+    );
+    assert_eq!(out.lock().as_str(), "");
+}
+
 #[test]
 fn table_text_pretty_renders_unicode_box() {
     let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);

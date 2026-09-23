@@ -4,7 +4,7 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse},
 };
 use jp_llm::{
-    event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction},
+    event::{Event, EventMatcher, EventPatch, FinishReason, NoticeSink, PatchAction},
     model::ModelDetails,
     provider::mock::MockProvider,
 };
@@ -75,6 +75,7 @@ async fn summarize_with_ceiling(
         "instructions",
         "summarize",
         max_response_bytes,
+        &NoticeSink::new(|_| {}),
     )
     .await
 }
@@ -129,6 +130,7 @@ async fn a_range_the_provider_rejects_for_size_reports_a_summarize_failure() {
         "instructions",
         "summarize",
         Some(1_048_576),
+        &NoticeSink::new(|_| {}),
     )
     .await
     .expect_err("an oversized request must fail");

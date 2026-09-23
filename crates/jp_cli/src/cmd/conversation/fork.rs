@@ -16,7 +16,7 @@ use crate::{
         turn_selection::TurnSelection,
     },
     ctx::Ctx,
-    output::print_json,
+    output::{notice_sink, print_json},
 };
 
 #[derive(Debug, clap::Args)]
@@ -165,6 +165,7 @@ impl Fork {
                     // Compaction during a fork is an implicit adjunct; only an
                     // explicit `jp c compact` reports compaction details.
                     None,
+                    &notice_sink(&ctx.printer),
                 )
                 .await?;
                 for compaction in compactions {

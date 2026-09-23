@@ -26,6 +26,7 @@ use serde_json::{Map, Value, json};
 use crate::{
     Provider,
     error::Result,
+    event::NoticeSink,
     event_builder,
     model::ModelDetails,
     query::{ChatQuery, Truncation},
@@ -63,6 +64,9 @@ pub struct TitleRequest {
     /// error rather than regenerated.
     /// `None` leaves the response unbounded.
     pub max_response_bytes: Option<u64>,
+
+    /// Where the provider's notices go, such as a switch to another credential.
+    pub notices: NoticeSink,
 }
 
 /// Resolve the model that conversation-title generation runs on.
@@ -135,6 +139,7 @@ pub async fn generate(
         count,
         rejected,
         max_response_bytes,
+        notices,
     } = request;
 
     let sections = title_instructions(count, &rejected);
@@ -174,7 +179,7 @@ pub async fn generate(
     };
 
     let retry = RetryConfig::default().with_max_response_bytes(max_response_bytes);
-    let events = collect_with_retry(provider, details, query, &retry).await?;
+    let events = collect_with_retry(provider, details, query, &retry, &notices).await?;
 
     Ok(event_builder::structured_data(events)
         .as_ref()

@@ -11,7 +11,7 @@ use jp_conversation::{
 };
 use jp_llm::{
     Provider, StreamErrorKind,
-    event::{Event, EventPatch, FinishReason, record_patches},
+    event::{Event, EventPatch, FinishReason, NoticeSink, record_patches},
     event_builder::EventBuilder,
     model::ModelDetails,
     provider,
@@ -41,12 +41,15 @@ Be concise but thorough. The reader should be able to continue the conversation 
 /// The summary is a plain text string suitable for storing in a
 /// `SummaryPolicy`.
 /// The summarizer reads the raw (non-compacted) events.
+/// The provider's notices, such as a switch onto another credential, go to
+/// `notices`.
 pub async fn generate_summary(
     events: &ConversationStream,
     range_from: usize,
     range_to: usize,
     summary_cfg: Option<&SummaryConfig>,
     app_cfg: &AppConfig,
+    notices: &NoticeSink,
 ) -> Result<String> {
     let model = summary_cfg
         .and_then(|c| c.model.clone())
@@ -94,6 +97,7 @@ pub async fn generate_summary(
         instructions,
         &user_message,
         app_cfg.assistant.request.max_response_bytes.bytes(),
+        notices,
     )
     .await
 }
@@ -119,6 +123,7 @@ async fn summarize_stream(
     instructions: &str,
     user_message: &str,
     max_response_bytes: Option<u64>,
+    notices: &NoticeSink,
 ) -> Result<String> {
     let retry_config = RetryConfig::default().with_max_response_bytes(max_response_bytes);
 
@@ -144,7 +149,7 @@ async fn summarize_stream(
             truncation: Truncation::Forbidden,
         };
 
-        let llm_events = collect_with_retry(provider, model_details, query, &retry_config)
+        let llm_events = collect_with_retry(provider, model_details, query, &retry_config, notices)
             .await
             .map_err(|error| summarize_error(model_id, error))?;
 
@@ -253,9 +258,9 @@ fn summarize_events(events: Vec<Event>) -> StreamOutcome {
             // Providers emit patches alongside `FinishReason::Retry`; nothing
             // else consumes them on this path, so keep them for the rebuild.
             Event::Patch(mut p) => patches.append(&mut p),
-            // `KeepAlive` is a liveness signal.
-            Event::KeepAlive => {}
-            Event::Notice(notice) => tracing::warn!("{notice}"),
+            // `KeepAlive` is a liveness signal, and `collect_with_retry` has
+            // already delivered every notice to its sink.
+            Event::KeepAlive | Event::Notice(_) => {}
         }
     }
 

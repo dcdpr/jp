@@ -1,3 +1,5 @@
+use std::{fmt, sync::Arc};
+
 use jp_conversation::{ConversationStream, OverlayAction, OverlayMatcher, OverlayPatch};
 use serde_json::{Map, Value};
 
@@ -80,6 +82,36 @@ pub enum Event {
     /// conversation: a notice is never persisted and never reaches the
     /// conversation stream.
     Notice(String),
+}
+
+/// Where [`Event::Notice`]s go when a request's events are collected rather
+/// than rendered as they stream.
+///
+/// A collecting caller has no event stream of its own to render, so it hands
+/// the request this sink instead, and each notice is delivered the moment it is
+/// consumed: an attempt that later fails, or a request that fails outright,
+/// still reports what it did.
+/// What the sink does with a notice is the caller's business; `jp_llm` does no
+/// rendering.
+#[derive(Clone)]
+pub struct NoticeSink(Arc<dyn Fn(&str) + Send + Sync>);
+
+impl NoticeSink {
+    /// A sink that hands each notice to `emit`.
+    pub fn new(emit: impl Fn(&str) + Send + Sync + 'static) -> Self {
+        Self(Arc::new(emit))
+    }
+
+    /// Deliver one notice.
+    pub fn emit(&self, notice: &str) {
+        (self.0)(notice);
+    }
+}
+
+impl fmt::Debug for NoticeSink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("NoticeSink")
+    }
 }
 
 /// A chunk of streaming data from an LLM provider.

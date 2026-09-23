@@ -228,6 +228,7 @@ fn a_background_task_persist_failure_is_recorded_after_the_command_finished() {
         title: Some("generated".into()),
         max_response_bytes: cfg.assistant.request.max_response_bytes.bytes(),
         is_tty: false,
+        notices: jp_llm::event::NoticeSink::new(|_| {}),
     });
 
     // `sync` reports success: it only logs the write failure.

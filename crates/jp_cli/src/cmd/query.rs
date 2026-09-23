@@ -99,7 +99,9 @@ use jp_conversation::{
 };
 use jp_inquire::prompt::{PromptBackend, TerminalPromptBackend};
 use jp_llm::{
-    ToolError, provider,
+    ToolError,
+    event::NoticeSink,
+    provider,
     tool::{
         InvocationContext, ToolDefinition, ToolDocs,
         builtin::{BuiltinExecutors, describe_tools::DescribeTools},
@@ -147,7 +149,7 @@ use crate::{
     ctx::{IntoPartialAppConfig, McpServerScope},
     editor,
     error::{Error, Result},
-    output::print_json,
+    output::{notice_sink, print_json},
     parser::{AttachmentUrlOrPath, split_list},
     render::{RenderFlow, TurnView, tool::output_lines},
     signals::{SignalRouter, TurnInterrupt},
@@ -486,7 +488,8 @@ impl Query {
         // `setup`, so the composed request and the editor's history preview see
         // the compacted stream while nothing is written yet.
         if self.compact.should_compact() {
-            self.apply_pre_query_compaction(&setup, &cfg).await?;
+            self.apply_pre_query_compaction(&setup, &cfg, &notice_sink(&ctx.printer))
+                .await?;
         }
 
         // `-u`/`-U` never enter the config, so the turn's choice is resolved
@@ -749,7 +752,8 @@ impl Query {
                     // assistant model. Skip the title instead of spawning a
                     // task that is doomed to fail after holding teardown
                     // open.
-                    match TitleGeneratorTask::new(cid, stream, &cfg, ctx.term.is_tty) {
+                    let notices = notice_sink(&ctx.printer);
+                    match TitleGeneratorTask::new(cid, stream, &cfg, ctx.term.is_tty, notices) {
                         Ok(task) => ctx.task_handler.spawn(task),
                         Err(error) => warn!(%error, "Skipping title generation."),
                     }
@@ -1253,6 +1257,7 @@ impl Query {
         &self,
         conv: &ConversationMut,
         cfg: &AppConfig,
+        notices: &NoticeSink,
     ) -> Result<()> {
         let events = conv.events().clone();
 
@@ -1273,6 +1278,7 @@ impl Query {
             // `--compact` on a query is a quick adjunct; apply it silently so
             // compaction details don't clutter the query output.
             None,
+            notices,
         )
         .await?;
 

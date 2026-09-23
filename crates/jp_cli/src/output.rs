@@ -17,9 +17,19 @@
 //! [`DetailItem`]: jp_term::table::DetailItem
 
 use comfy_table::Row;
+use jp_llm::event::NoticeSink;
 use jp_printer::{OutputFormat, Printer};
 use jp_term::table::{Details, details, details_json, details_markdown, list, list_markdown};
 use serde_json::{Value, to_string, to_string_pretty};
+
+/// A sink that prints provider notices to stderr as chrome.
+///
+/// For requests whose events are collected rather than rendered: the notices
+/// land on stderr exactly as a query turn prints them.
+pub fn notice_sink(printer: &Printer) -> NoticeSink {
+    let printer = printer.clone();
+    NoticeSink::new(move |notice| printer.eprintln(notice))
+}
 
 /// Print a list table (header + rows) in the format dictated by the printer.
 ///

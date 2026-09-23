@@ -12,6 +12,7 @@ use jp_conversation::{
     SummaryOverlap, SummaryPolicy, SummarySource, ToolCallPolicy, compaction::extend_summary_range,
     stream::AffectedItem,
 };
+use jp_llm::event::NoticeSink;
 use jp_workspace::{ConversationHandle, ConversationMut, Workspace};
 use tracing::warn;
 
@@ -27,6 +28,7 @@ use crate::{
     },
     ctx::{Ctx, IntoPartialAppConfig},
     format::compaction_policy_label,
+    output::notice_sink,
 };
 
 #[derive(Debug, clap::Args)]
@@ -501,6 +503,7 @@ async fn build_compaction_for_range(
     rule: &CompactionRuleConfig,
     range: CompactionRange,
     printer: Option<&jp_printer::Printer>,
+    notices: &NoticeSink,
 ) -> crate::Result<Compaction> {
     validate_summary_text(rule)?;
 
@@ -524,6 +527,7 @@ async fn build_compaction_for_range(
         range.to_turn,
         Some(summary),
         cfg,
+        notices,
     )
     .await?;
 
@@ -539,18 +543,24 @@ async fn build_compaction_for_range(
 /// Every range is resolved and every deterministic check runs before the first
 /// summarizer request, so a rule that turns out to be unsatisfiable cannot
 /// strand a paid request made for an earlier one.
+///
+/// `printer` receives progress output and may be omitted; `notices` receives
+/// the summarizer's provider notices, such as a switch onto another credential,
+/// and cannot be.
 pub(crate) async fn build_compaction_events(
     events: &ConversationStream,
     cfg: &jp_config::AppConfig,
     rules: &[CompactionRuleConfig],
     selection: &TurnSelection,
     printer: Option<&jp_printer::Printer>,
+    notices: &NoticeSink,
 ) -> crate::Result<Vec<Compaction>> {
     let plan = plan_compactions(events, rules, selection)?;
 
     let mut compactions = Vec::with_capacity(plan.len());
     for (rule, range) in plan {
-        compactions.push(build_compaction_for_range(events, cfg, rule, range, printer).await?);
+        compactions
+            .push(build_compaction_for_range(events, cfg, rule, range, printer, notices).await?);
     }
 
     Ok(compactions)
@@ -944,6 +954,7 @@ impl Compact {
             &rules,
             &self.range,
             Some(&ctx.printer),
+            &notice_sink(&ctx.printer),
         )
         .await?;
 

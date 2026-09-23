@@ -1,6 +1,6 @@
 # Provider notices from auxiliary requests never reach a chrome sink
 
-- **Status**: Todo
+- **Status**: Done
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-23
@@ -40,3 +40,18 @@ existing reporting.
 Contained for now: the cooldown that prompts a switch is persisted, so the next
 main-path turn surfaces `skipping profile:… cooling down`.
 The user learns one turn late rather than never.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-09-23T10:40:25Z
+
+Fixed in #1151.
+`collect_with_retry` takes a `NoticeSink` and hands it every notice as it is
+consumed, including notices from failed attempts and from a request that ends in
+an error.
+All callers pass `jp_cli::output::notice_sink`, which prints to stderr as
+chrome: title generation (the background task and `jp c title`), inquiries, and
+summarization (`jp c compact`, `jp q --compact`, `jp c fork --compact`).

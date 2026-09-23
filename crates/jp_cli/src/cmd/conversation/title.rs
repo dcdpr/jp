@@ -3,6 +3,7 @@
 use jp_config::{AppConfig, PartialAppConfig};
 use jp_conversation::ConversationStream;
 use jp_llm::{
+    event::NoticeSink,
     provider,
     title::{self, TitleRequest},
 };
@@ -17,6 +18,7 @@ use crate::{
     },
     ctx::{Ctx, IntoPartialAppConfig},
     error::{Error, Result},
+    output::notice_sink,
 };
 
 /// How many candidates are generated when the count isn't given.
@@ -88,8 +90,16 @@ impl Title {
         let events = conv.events().clone();
 
         if self.dry_run {
-            let candidates =
-                generate(&cfg, events, self.count, self.model.is_some(), vec![]).await?;
+            let notices = notice_sink(&ctx.printer);
+            let candidates = generate(
+                &cfg,
+                &notices,
+                events,
+                self.count,
+                self.model.is_some(),
+                vec![],
+            )
+            .await?;
             for candidate in candidates {
                 ctx.printer.println(candidate);
             }
@@ -134,10 +144,18 @@ pub(super) async fn select(
     override_model: bool,
 ) -> Result<String> {
     let mut rejected: Vec<String> = vec![];
+    let notices = notice_sink(&ctx.printer);
 
     loop {
-        let candidates =
-            generate(cfg, events.clone(), count, override_model, rejected.clone()).await?;
+        let candidates = generate(
+            cfg,
+            &notices,
+            events.clone(),
+            count,
+            override_model,
+            rejected.clone(),
+        )
+        .await?;
 
         if !ctx.term.interactive {
             return Ok(candidates
@@ -183,6 +201,7 @@ pub(super) async fn select(
 /// underlying LLM error if the request itself fails.
 async fn generate(
     cfg: &AppConfig,
+    notices: &NoticeSink,
     events: ConversationStream,
     count: usize,
     override_model: bool,
@@ -201,6 +220,7 @@ async fn generate(
         count,
         rejected,
         max_response_bytes: cfg.assistant.request.max_response_bytes.bytes(),
+        notices: notices.clone(),
     })
     .await?;
 

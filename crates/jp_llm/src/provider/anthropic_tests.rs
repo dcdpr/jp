@@ -190,6 +190,87 @@ async fn a_spent_window_stops_the_continuation() {
     );
 }
 
+/// A response that reports a spent allowance must not trigger a forced-tool
+/// retry either.
+///
+/// The retry would run on the same client, so every escalating nudge is another
+/// request billed as extra usage against a profile JP has just marked spent.
+/// The turn ends without the tool, and a notice says so.
+#[test(tokio::test)]
+async fn a_spent_window_stops_the_forced_tool_retry() {
+    // The trailing blank line dispatches `message_stop`, which is what finishes
+    // a turn that did not stop on `max_tokens`.
+    let completed_without_tool = max_tokens_sse_body().replace("max_tokens", "end_turn") + "\n";
+
+    let server = MockServer::start_async().await;
+    let endpoint = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "text/event-stream; charset=utf-8")
+                .header("anthropic-ratelimit-unified-status", "rejected")
+                .body(completed_without_tool);
+        })
+        .await;
+
+    let mut builder = Client::builder();
+    builder
+        .api_key("test-key")
+        .base_url(server.base_url())
+        .version("2023-06-01");
+    let client = builder.build().expect("a client for the mock server");
+
+    let request = types::CreateMessagesRequestBuilder::default()
+        .model("claude-test".to_owned())
+        .messages(vec![types::Message {
+            role: types::MessageRole::User,
+            content: types::MessageContentList(vec![types::MessageContent::Text(
+                "call the tool".into(),
+            )]),
+        }])
+        .max_tokens(16)
+        .stream(true)
+        .build()
+        .expect("a valid request");
+
+    let fallback = ForcedToolFallback {
+        tool_choice: types::ToolChoice::any(),
+        strategy: ForceStrategy::EscalatingNudge {
+            remaining: SOFT_FORCE_MAX_RETRIES,
+        },
+    };
+
+    let events: Vec<Event> = call(
+        client,
+        request,
+        0,
+        false,
+        Some(fallback),
+        resolve::QuotaWatch::new(None, None),
+    )
+    .collect::<Vec<_>>()
+    .await
+    .into_iter()
+    .collect::<std::result::Result<_, _>>()
+    .expect("the turn should end cleanly");
+
+    // Without the spent-window check, each of the `SOFT_FORCE_MAX_RETRIES`
+    // nudges is another request.
+    assert_eq!(
+        endpoint.calls_async().await,
+        1,
+        "a spent allowance must not be retried against"
+    );
+
+    let tail: Vec<_> = events.iter().rev().take(2).rev().collect();
+    assert_matches!(
+        tail.as_slice(),
+        [Event::Notice(notice), Event::Finished(FinishReason::Completed)]
+            if notice == "the model did not call the required tool; not retrying, since the \
+                           subscription window is spent and a retry would be billed as extra usage"
+    );
+}
+
 /// A thinking block the API refuses is a request-validation failure, so it is
 /// answered at admission rather than on the stream.
 ///

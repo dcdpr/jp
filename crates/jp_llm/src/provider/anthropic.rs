@@ -615,6 +615,9 @@ impl ForcedToolFallback {
 /// issued with thinking disabled and the original forced `tool_choice`
 /// restored.
 ///
+/// Neither follow-up is sent when the response reports a spent subscription
+/// window, since it would be billed as extra usage.
+///
 /// If the API rejects a thinking block in the request, emits [`Event::Patch`]
 /// instructions to fix the conversation stream and finishes with
 /// [`FinishReason::Retry`] so the caller can rebuild and retry.
@@ -680,16 +683,17 @@ fn call(
 
         // A spent window reported on a success means paid extra usage served
         // the request, and `observe` has just recorded the cooldown that moves
-        // the next resolution off this profile. A continuation runs on the
-        // client already built for that credential, so it would bill against a
-        // profile JP has just marked spent. The turn stops at `max_tokens`
-        // instead, and the caller asks for the rest on a fresh resolution.
+        // the next resolution off this profile. A continuation or a forced-tool
+        // retry runs on the client already built for that credential, so it
+        // would bill against a profile JP has just marked spent. Neither is
+        // sent: the turn ends with what this response produced, and whatever
+        // follows goes out on a fresh resolution.
         //
-        // Only the continuation budget is dropped. The forced-tool retry below
-        // keeps its request: a truncated answer is something the caller can
-        // continue, but a required tool that never ran has no such recovery.
-        if response.limits.is_rejected() {
-            debug!("Subscription window spent; not chaining past this response.");
+        // Re-resolving here instead would move the follow-up onto another
+        // account, which rejects the thinking signatures this one minted.
+        let window_spent = response.limits.is_rejected();
+        if window_spent {
+            debug!("Subscription window spent; not sending a follow-up request.");
             chains_remaining = 0;
         }
 
@@ -747,6 +751,24 @@ fn call(
                         .as_ref()
                         .filter(|fb| !fb.is_satisfied_by(&tool_names_called)) =>
                 {
+                    // The required tool goes uncalled, and the notice says so
+                    // rather than leaving the caller to find out from the
+                    // result.
+                    if window_spent {
+                        warn!(
+                            "Required tool not called; not retrying on a spent subscription \
+                             window."
+                        );
+                        yield Event::Notice(
+                            "the model did not call the required tool; not retrying, since the \
+                             subscription window is spent and a retry would be billed as extra \
+                             usage"
+                                .to_owned(),
+                        );
+                        yield Event::Finished(FinishReason::Completed);
+                        return;
+                    }
+
                     chain_events.extend(chain_builder.drain());
                     for await event in dispatch_force_retry(
                         client.clone(),
