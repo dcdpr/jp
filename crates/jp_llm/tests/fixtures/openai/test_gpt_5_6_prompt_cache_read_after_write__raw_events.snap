@@ -49,7 +49,7 @@ expression: v
         Flush {
             index: 0,
             metadata: {
-                "openai_item_id": String("msg_06f37a7c50fdadd9016a886d773f7887d2a99834d7b5579c83"),
+                "openai_item_id": String("msg_0b302dc2a6fb7385016ab39a9e88d487d2af79fe707a003201"),
                 "openai_phase": String("final_answer"),
             },
         },
@@ -96,7 +96,7 @@ expression: v
         Flush {
             index: 0,
             metadata: {
-                "openai_item_id": String("msg_06f37a7c50fdadd9016a886d784eb487d2a33f67f36c23524b"),
+                "openai_item_id": String("msg_0b302dc2a6fb7385016ab39aa1857087d2b63ce7d881d75921"),
                 "openai_phase": String("final_answer"),
             },
         },
