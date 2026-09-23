@@ -15,9 +15,10 @@
 //!
 //! [`get_provider`]: crate::provider::get_provider
 
-use std::fmt;
+use std::{error::Error as StdError, fmt};
 
 use async_trait::async_trait;
+use camino::Utf8Path;
 use jp_config::model::id::ProviderId;
 
 use crate::provider::{anthropic, openai};
@@ -73,6 +74,11 @@ pub struct AccountIdentity {
 /// [`Provider`]: crate::Provider
 #[async_trait]
 pub trait ProviderAuth: Send + Sync {
+    /// Runtime-owned authentication, when supported by this provider.
+    fn external_auth(&self) -> Option<&dyn ExternalAuth> {
+        None
+    }
+
     /// How a user obtains a long-lived setup token for this provider.
     ///
     /// Surfaced verbatim when JP prompts for a token and when the input it
@@ -94,6 +100,34 @@ pub trait ProviderAuth: Send + Sync {
         &self,
         token: &str,
     ) -> Result<AccountIdentity, Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Login operations delegated to a provider's external runtime.
+///
+/// Credentials never cross this interface.
+/// The directory selects the login for every operation, including status checks
+/// and logout.
+#[async_trait]
+pub trait ExternalAuth: Send + Sync {
+    /// Stable directory component used to namespace this runtime's logins.
+    fn directory_name(&self) -> &'static str;
+
+    /// Sign in interactively and return the verified subscription identity.
+    async fn login(
+        &self,
+        directory: &Utf8Path,
+    ) -> Result<AccountIdentity, Box<dyn StdError + Send + Sync>>;
+
+    /// Inspect effective subscription authentication without reading tokens.
+    ///
+    /// `None` means the runtime is not using a subscription login.
+    async fn status(
+        &self,
+        directory: &Utf8Path,
+    ) -> Result<Option<AccountIdentity>, Box<dyn StdError + Send + Sync>>;
+
+    /// Clear the runtime's login without deleting its configuration or history.
+    async fn logout(&self, directory: &Utf8Path) -> Result<(), Box<dyn StdError + Send + Sync>>;
 }
 
 /// Get the credential mechanics for a provider.

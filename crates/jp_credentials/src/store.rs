@@ -61,7 +61,7 @@ pub fn cooldown_until(reported: Option<DateTime<Utc>>, now: DateTime<Utc>) -> Da
 }
 
 /// The newest store schema this build can read and write.
-const STORE_VERSION: u32 = 1;
+const STORE_VERSION: u32 = 2;
 
 /// Errors from loading or mutating the credential store.
 #[derive(Debug, thiserror::Error)]
@@ -244,6 +244,17 @@ impl CredentialStore {
     /// A store over an explicit backend and locker.
     pub fn new(backend: Arc<dyn CredentialBackend>, locker: Arc<dyn ResourceLocker>) -> Self {
         Self { backend, locker }
+    }
+
+    /// Exclude concurrent login and logout operations without blocking.
+    ///
+    /// The returned guard may span interactive authentication.
+    /// Store reads and quota updates remain available under their separate
+    /// lock.
+    pub fn try_lock_auth(&self) -> Result<Box<dyn ResourceGuard>, StoreError> {
+        self.locker
+            .try_lock("credential-auth", None)?
+            .ok_or_else(|| StoreError::Rejected("another login or logout is in progress".into()))
     }
 
     /// Read the store into a snapshot.
@@ -526,6 +537,9 @@ impl StoreDocument {
         profile: &str,
         mut credential: StoredCredential,
     ) {
+        if matches!(credential.secret, CredentialSecret::External { .. }) {
+            self.version = STORE_VERSION;
+        }
         let profiles = self
             .credentials
             .entry(category.to_owned())
@@ -588,11 +602,11 @@ impl StoreDocument {
     }
 }
 
-/// A stored credential: the secret material plus account identity, quota
-/// cooldowns, and re-login state.
+/// A credential or external login reference with identity and availability
+/// state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StoredCredential {
-    /// The secret material, tagged by mechanism.
+    /// Authentication material or a reference to a runtime-owned login.
     #[serde(flatten)]
     pub secret: CredentialSecret,
 
@@ -672,7 +686,7 @@ fn scope_covers(scope: &str, model: &str) -> bool {
     }
 }
 
-/// The secret material of a credential, tagged by mechanism.
+/// Authentication material or a reference to credentials owned by a runtime.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CredentialSecret {
@@ -686,15 +700,22 @@ pub enum CredentialSecret {
     /// A static bearer token (`claude setup-token` output) with no refresh flow
     /// and no expiry JP can inspect.
     Token { token: String },
+
+    /// A login whose credentials and refresh lifecycle belong to a runtime.
+    External {
+        /// The absolute configuration directory used when signing in.
+        directory: Utf8PathBuf,
+    },
 }
 
 impl CredentialSecret {
-    /// A short label for `jp provider llm auth list`.
+    /// An internal label for the authentication mechanism.
     #[must_use]
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Oauth { .. } => "oauth",
             Self::Token { .. } => "token",
+            Self::External { .. } => "external",
         }
     }
 }

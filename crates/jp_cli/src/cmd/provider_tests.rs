@@ -116,19 +116,19 @@ fn test_auth_target_store_key_matches_resolver_key() {
     );
 }
 
-#[test]
-fn test_list_empty_store_renders_empty_json_array() {
+#[test(tokio::test)]
+async fn test_list_empty_store_renders_empty_json_array() {
     let dir = Utf8TempDir::new().unwrap();
     let (printer, out, _err) = Printer::memory(OutputFormat::Json);
 
-    List {}.run(&store_at(&dir), &[], &printer).unwrap();
+    List {}.run(&store_at(&dir), &[], &printer).await.unwrap();
     printer.shutdown();
 
     assert_eq!(out.lock().trim(), "[]");
 }
 
-#[test]
-fn test_list_renders_profiles_and_states_as_json() {
+#[test(tokio::test)]
+async fn test_list_renders_profiles_and_states_as_json() {
     let dir = Utf8TempDir::new().unwrap();
     let store = store_at(&dir);
 
@@ -151,7 +151,7 @@ fn test_list_renders_profiles_and_states_as_json() {
         .unwrap();
 
     let (printer, out, _err) = Printer::memory(OutputFormat::Json);
-    List {}.run(&store, &api_keys(), &printer).unwrap();
+    List {}.run(&store, &api_keys(), &printer).await.unwrap();
     printer.shutdown();
 
     // The payload is built for machine consumption rather than derived from
@@ -171,7 +171,6 @@ fn test_list_renders_profiles_and_states_as_json() {
             "provider": "anthropic",
             "name": "ci",
             "kind": "subscription",
-            "mechanism": "token",
             "state": "valid",
             "verified": false,
             "expires_in_secs": Value::Null,
@@ -181,7 +180,6 @@ fn test_list_renders_profiles_and_states_as_json() {
             "provider": "anthropic",
             "name": "personal",
             "kind": "subscription",
-            "mechanism": "token",
             "state": "valid",
             "verified": true,
             "expires_in_secs": Value::Null,
@@ -205,8 +203,8 @@ fn api_keys() -> Vec<(String, String, String)> {
     )]
 }
 
-#[test]
-fn test_list_renders_markdown_table_when_piped() {
+#[test(tokio::test)]
+async fn test_list_renders_markdown_table_when_piped() {
     let dir = Utf8TempDir::new().unwrap();
     let store = store_at(&dir);
 
@@ -223,7 +221,7 @@ fn test_list_renders_markdown_table_when_piped() {
         .unwrap();
 
     let (printer, out, _err) = Printer::memory(OutputFormat::Text);
-    List {}.run(&store, &api_keys(), &printer).unwrap();
+    List {}.run(&store, &api_keys(), &printer).await.unwrap();
     printer.shutdown();
 
     let output = out.lock().clone();
@@ -234,8 +232,8 @@ fn test_list_renders_markdown_table_when_piped() {
     assert!(output.contains("| anthropic |"), "{output}");
 }
 
-#[test]
-fn test_logout_removes_sole_profile_without_name() {
+#[test(tokio::test)]
+async fn test_logout_removes_sole_profile_without_name() {
     let dir = Utf8TempDir::new().unwrap();
     let store = store_at(&dir);
 
@@ -257,6 +255,7 @@ fn test_logout_removes_sole_profile_without_name() {
         name: None,
     }
     .run(&store, &printer)
+    .await
     .unwrap();
     printer.shutdown();
 
@@ -267,8 +266,8 @@ fn test_logout_removes_sole_profile_without_name() {
     assert_eq!(store.load().unwrap().iter().count(), 0);
 }
 
-#[test]
-fn test_logout_requires_profile_name_when_ambiguous() {
+#[test(tokio::test)]
+async fn test_logout_requires_profile_name_when_ambiguous() {
     let dir = Utf8TempDir::new().unwrap();
     let store = store_at(&dir);
 
@@ -296,6 +295,7 @@ fn test_logout_requires_profile_name_when_ambiguous() {
         name: None,
     }
     .run(&store, &printer)
+    .await
     .unwrap_err();
     printer.shutdown();
 
@@ -303,8 +303,8 @@ fn test_logout_requires_profile_name_when_ambiguous() {
     assert_eq!(store.load().unwrap().iter().count(), 2);
 }
 
-#[test]
-fn test_logout_unknown_profile_names_stored_ones() {
+#[test(tokio::test)]
+async fn test_logout_unknown_profile_names_stored_ones() {
     let dir = Utf8TempDir::new().unwrap();
     let store = store_at(&dir);
 
@@ -326,6 +326,7 @@ fn test_logout_unknown_profile_names_stored_ones() {
         name: Some("work".to_owned()),
     }
     .run(&store, &printer)
+    .await
     .unwrap_err();
     printer.shutdown();
 

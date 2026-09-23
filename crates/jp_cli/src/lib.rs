@@ -625,7 +625,9 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     // it bypasses workspace discovery entirely, the same startup exception
     // `jp init` uses.
     if let Commands::Provider(args) = &cli.command {
-        return args.run(&printer).map_err(Into::into);
+        return args
+            .run(&printer, cli.globals.no_interactive)
+            .map_err(Into::into);
     }
 
     // The per-command workspace bootstrap requirement (RFD 087): commands

@@ -6,6 +6,49 @@ use super::*;
 use crate::error::StreamErrorKind;
 
 #[test]
+fn subscription_quota_notification_preserves_scope_and_reset() {
+    let mut state = state();
+    let error = state.sdk(notification(json!({"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day_sonnet","resetsAt":1_783_080_000}}))).unwrap_err();
+    assert_eq!(error.kind, StreamErrorKind::SubscriptionExhausted);
+    assert_eq!(error.quota_scope.as_deref(), Some("seven_day_sonnet"));
+    assert_eq!(error.quota_reset.unwrap().timestamp(), 1_783_080_000);
+    assert_eq!(error.message(), "Claude Code subscription limit reached");
+    assert!(!error.is_retryable());
+}
+
+#[test]
+fn credits_required_is_subscription_exhaustion_without_a_window() {
+    let mut state = state();
+    let error = state.sdk(notification(json!({"type":"rate_limit_event","rate_limit_info":{"status":"rejected","errorCode":"credits_required"}}))).unwrap_err();
+    assert_eq!(error.kind, StreamErrorKind::SubscriptionExhausted);
+    assert_eq!(error.quota_scope, None);
+    assert_eq!(error.quota_reset, None);
+}
+
+#[test]
+fn warning_and_rejected_overage_do_not_exhaust_the_subscription() {
+    let mut state = state();
+    assert_eq!(state.sdk(notification(json!({"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","rateLimitType":"five_hour","overageStatus":"rejected"}}))).unwrap(), vec![]);
+    assert_eq!(state.sdk(notification(json!({"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour","overageStatus":"rejected"}}))).unwrap(), vec![]);
+    assert_eq!(
+        state
+            .sdk(notification(
+                json!({"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}})
+            ))
+            .unwrap(),
+        vec![]
+    );
+}
+
+#[test]
+fn rate_limit_details_can_arrive_after_the_assistant_error() {
+    let mut state = state();
+    assert_eq!(state.sdk(notification(json!({"type":"assistant","error":"rate_limit","message":{"model":"<synthetic>","content":[{"type":"text","text":"Rate limited."}]}}))).unwrap(), vec![]);
+    let error = state.sdk(notification(json!({"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"five_hour"}}))).unwrap_err();
+    assert_eq!(error.kind, StreamErrorKind::SubscriptionExhausted);
+}
+
+#[test]
 fn oversized_prompt_uses_the_context_window_error_kind() {
     let mut state = state();
     let error = state.sdk(notification(json!({"type":"assistant","error":"invalid_request","message":{"content":[{"type":"text","text":"Prompt is too long"}]}}))).unwrap_err();
@@ -279,7 +322,13 @@ fn usage_does_not_delay_content_or_enter_event_metadata() {
 #[test]
 fn synthetic_error_reports_the_reason_not_a_model_mismatch() {
     let mut state = state();
-    let error = state.sdk(notification(json!({"type":"assistant","error":"rate_limit","message":{"model":"<synthetic>","content":[{"type":"text","text":"Subscription allowance exhausted."}]}}))).unwrap_err();
+    state.sdk(notification(json!({"type":"assistant","error":"rate_limit","message":{"model":"<synthetic>","content":[{"type":"text","text":"Subscription allowance exhausted."}]}}))).unwrap();
+    let error = state
+        .sdk(notification(
+            json!({"type":"result","subtype":"error_during_execution","is_error":true,"errors":[]}),
+        ))
+        .unwrap_err();
+    assert_eq!(error.kind, StreamErrorKind::Other);
     assert_eq!(
         error.message(),
         "Claude Code rate_limit: Subscription allowance exhausted."

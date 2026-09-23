@@ -1,18 +1,19 @@
 //! Anthropic credential mechanics.
 //!
-//! Account identity recovery via the Claude CLI bootstrap endpoint: given a
-//! fresh access or setup token, the endpoint reports the account UUID and email
-//! the token belongs to.
-//! Login uses it when the token response carries no identity; a profile whose
-//! recovery fails is stored unverified.
+//! `AnthropicAuth` delegates subscription login, status, and logout to Claude
+//! Code.
+//! Explicit direct-token logins recover account identity through the bootstrap
+//! endpoint; failures leave those token profiles unverified.
 
-use std::time::Duration;
+use std::{error::Error as StdError, time::Duration};
 
 use async_anthropic::bearer;
 use async_trait::async_trait;
+use camino::Utf8Path;
 use serde::Deserialize;
 
-use crate::credential::{AccountIdentity, ProviderAuth};
+use super::acp;
+use crate::credential::{AccountIdentity, ExternalAuth, ProviderAuth};
 
 /// The Claude CLI bootstrap endpoint.
 ///
@@ -32,12 +33,16 @@ pub struct AnthropicAuth;
 
 #[async_trait]
 impl ProviderAuth for AnthropicAuth {
+    fn external_auth(&self) -> Option<&dyn ExternalAuth> {
+        Some(self)
+    }
+
     fn setup_token_hint(&self) -> &'static str {
         "Run `claude setup-token` on its own, complete the sign-in, then paste the \
          `sk-ant-oat01-…` value it prints. That command is an interactive session, so it cannot be \
          the source of a pipe: every stage of a pipeline starts at once, so JP would read the \
          stream before a token exists. A non-interactive source pipes fine, e.g. `pbpaste | jp \
-         provider llm auth login anthropic --setup-token`."
+         provider llm auth login anthropic --direct --setup-token`."
     }
 
     async fn recover_identity(
@@ -75,6 +80,31 @@ fn bootstrap_client() -> Result<reqwest::Client, reqwest::Error> {
     reqwest::Client::builder()
         .timeout(BOOTSTRAP_TIMEOUT)
         .build()
+}
+
+#[async_trait]
+impl ExternalAuth for AnthropicAuth {
+    fn directory_name(&self) -> &'static str {
+        "claude"
+    }
+
+    async fn login(
+        &self,
+        directory: &Utf8Path,
+    ) -> Result<AccountIdentity, Box<dyn StdError + Send + Sync>> {
+        Ok(acp::login(directory).await?)
+    }
+
+    async fn status(
+        &self,
+        directory: &Utf8Path,
+    ) -> Result<Option<AccountIdentity>, Box<dyn StdError + Send + Sync>> {
+        Ok(acp::login_status(directory).await?)
+    }
+
+    async fn logout(&self, directory: &Utf8Path) -> Result<(), Box<dyn StdError + Send + Sync>> {
+        Ok(acp::logout(directory).await?)
+    }
 }
 
 #[derive(Deserialize)]

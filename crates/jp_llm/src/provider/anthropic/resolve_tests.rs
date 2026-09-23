@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use assert_matches::assert_matches;
 use datetime_literal::datetime;
+use jp_config::types::api_key_env::ApiKeyEnv;
 use jp_credentials::InMemoryCredentialBackend;
 use jp_storage::resource_lock::InMemoryResourceLocker;
 use test_log::test;
@@ -19,6 +20,16 @@ const SET_ENV_VAR: &str = if cfg!(windows) { "USERNAME" } else { "USER" };
 const UNSET_ENV_VAR: &str = "JP_TEST_RESOLVE_UNSET_VAR";
 
 const MODEL: &str = "claude-opus-4-6";
+const ACP_SUB_DIR: &str = if cfg!(windows) {
+    "C:/accounts/sub"
+} else {
+    "/accounts/sub"
+};
+const ACP_SUB2_DIR: &str = if cfg!(windows) {
+    "C:/accounts/sub2"
+} else {
+    "/accounts/sub2"
+};
 
 fn anthropic_config(auth: &[&str], api_key_env: &str) -> AnthropicConfig {
     let mut config = jp_config::AppConfig::new_test().providers.llm.anthropic;
@@ -96,7 +107,7 @@ fn entry_of(attempt: &Attempt) -> Option<AuthEntry> {
 fn ready(landing: Landing) -> Credential {
     match landing {
         Landing::Ready(credential) => credential,
-        Landing::Acp => panic!("expected an explicit direct subscription flow"),
+        Landing::Acp(_) => panic!("expected an explicit direct subscription flow"),
         Landing::Stale { profile, .. } => {
             panic!("subscription:{profile} unexpectedly needs a refresh")
         }
@@ -109,7 +120,7 @@ fn acp_subscription_does_not_require_stored_tokens() {
     config.subscription_flow = SubscriptionFlow::Acp;
     let (landing, selected, notices) =
         walk_chain(&config, None, MODEL, NOW(), &HashSet::new()).unwrap();
-    assert_matches!(landing, Landing::Acp);
+    assert_matches!(landing, Landing::Acp(None));
     assert_eq!(selected, Selected {
         entry: AuthEntry::Subscription(None),
         generation: None,
@@ -140,11 +151,178 @@ async fn a_spent_acp_subscription_falls_through_to_the_api_key() {
 }
 
 #[test]
-fn acp_rejects_named_subscription_without_paid_fallback() {
+fn acp_rejects_unmapped_subscription_without_paid_fallback() {
     let mut config = anthropic_config(&["subscription:personal", "api_key"], SET_ENV_VAR);
     config.subscription_flow = SubscriptionFlow::Acp;
     let error = walk_chain(&config, None, MODEL, NOW(), &HashSet::new()).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "subscription `personal` has no Claude Code login directory; run `jp provider llm auth \
+         login anthropic --name personal` to sign in"
+    );
     assert_matches!(error, ResolveError::Acp(AcpError::NamedSubscription { name }) if name == "personal");
+}
+
+#[test]
+fn named_acp_subscription_resolves_without_stored_tokens() {
+    let mut config = anthropic_config(&["sub:sub2"], UNSET_ENV_VAR);
+    config.subscription_flow = SubscriptionFlow::Acp;
+    config.acp_config_dirs = BTreeMap::from([
+        ("sub".into(), ACP_SUB_DIR.into()),
+        ("sub2".into(), ACP_SUB2_DIR.into()),
+    ]);
+    assert!(needs_store(&config));
+    let (landing, selected, notices) =
+        walk_chain(&config, None, MODEL, NOW(), &HashSet::new()).unwrap();
+    assert_matches!(landing, Landing::Acp(Some(directory)) if directory == ACP_SUB2_DIR);
+    // A directory mapping has no stored profile, so no generation to guard.
+    assert_eq!(selected, Selected {
+        entry: profile("sub2"),
+        generation: None,
+    });
+    assert_eq!(notices, Vec::<String>::new());
+}
+
+#[test(tokio::test)]
+async fn named_acp_route_preserves_directory_and_ignores_stored_token() {
+    let mut config = anthropic_config(&["sub:sub"], UNSET_ENV_VAR);
+    config.subscription_flow = SubscriptionFlow::Acp;
+    config
+        .acp_config_dirs
+        .insert("sub".into(), ACP_SUB_DIR.into());
+    let attempt = resolve(&config, None, MODEL, NOW()).await.unwrap();
+    assert_matches!(attempt.route, Route::Acp(Some(directory)) if directory == ACP_SUB_DIR);
+    assert_eq!(
+        attempt.selected,
+        Some(Selected {
+            entry: profile("sub"),
+            generation: None,
+        })
+    );
+
+    let stored = store_with(&[("sub", token_profile("unused-token"))]);
+    let (landing, _, _) =
+        walk_chain(&config, Some(&stored), MODEL, NOW(), &HashSet::new()).unwrap();
+    assert_matches!(landing, Landing::Acp(Some(directory)) if directory == ACP_SUB_DIR);
+}
+
+#[test]
+fn bare_acp_name_uses_directory_map_without_a_store() {
+    let mut config = anthropic_config(&["sub2"], UNSET_ENV_VAR);
+    config.subscription_flow = SubscriptionFlow::Acp;
+    config
+        .acp_config_dirs
+        .insert("sub2".into(), ACP_SUB2_DIR.into());
+    assert!(needs_store(&config));
+    let (landing, selected, _) = walk_chain(&config, None, MODEL, NOW(), &HashSet::new()).unwrap();
+    assert_matches!(landing, Landing::Acp(Some(directory)) if directory == ACP_SUB2_DIR);
+    assert_eq!(selected, Selected {
+        entry: profile("sub2"),
+        generation: None,
+    });
+}
+
+#[test]
+fn acp_name_matching_an_api_key_is_ambiguous() {
+    let mut config = anthropic_config(&["work"], UNSET_ENV_VAR);
+    config.subscription_flow = SubscriptionFlow::Acp;
+    config.api_key_env = ApiKeyEnv::Many(BTreeMap::from([("work".into(), SET_ENV_VAR.into())]));
+    config
+        .acp_config_dirs
+        .insert("work".into(), ACP_SUB_DIR.into());
+    assert_matches!(walk_chain(&config, None, MODEL, NOW(), &HashSet::new()), Err(ResolveError::AmbiguousName { name }) if name == "work");
+}
+
+#[test]
+fn acp_rejects_relative_directory_without_paid_fallback() {
+    let mut config = anthropic_config(&["sub:sub2", "api_key"], SET_ENV_VAR);
+    config.subscription_flow = SubscriptionFlow::Acp;
+    config
+        .acp_config_dirs
+        .insert("sub2".into(), "relative/sub2".into());
+    let error = walk_chain(&config, None, MODEL, NOW(), &HashSet::new()).unwrap_err();
+    assert_matches!(&error, ResolveError::Acp(AcpError::InvalidConfigDirectory { name, directory }) if name == "sub2" && directory == "relative/sub2");
+    assert_eq!(
+        error.to_string(),
+        "providers.llm.anthropic.acp_config_dirs.sub2 must be an absolute path, got \
+         \"relative/sub2\""
+    );
+}
+
+#[test]
+fn unnamed_acp_subscription_does_not_pick_a_named_directory() {
+    let mut config = anthropic_config(&["subscription"], UNSET_ENV_VAR);
+    config.subscription_flow = SubscriptionFlow::Acp;
+    config
+        .acp_config_dirs
+        .insert("sub".into(), ACP_SUB_DIR.into());
+    let (landing, selected, _) = walk_chain(&config, None, MODEL, NOW(), &HashSet::new()).unwrap();
+    assert_matches!(landing, Landing::Acp(None));
+    assert_eq!(selected, Selected {
+        entry: AuthEntry::Subscription(None),
+        generation: None,
+    });
+}
+
+#[test]
+fn direct_subscription_ignores_acp_directories() {
+    let mut config = anthropic_config(&["sub:sub2"], UNSET_ENV_VAR);
+    config
+        .acp_config_dirs
+        .insert("sub2".into(), ACP_SUB2_DIR.into());
+    let store = store_with(&[("sub2", token_profile("direct-token"))]);
+    let (landing, _, _) = walk_chain(&config, Some(&store), MODEL, NOW(), &HashSet::new()).unwrap();
+    assert_eq!(ready(landing), Credential::Bearer("direct-token".into()));
+}
+
+#[test]
+fn acp_registered_login_resolves_without_manual_config() {
+    let mut config = anthropic_config(&["sub:sub2"], UNSET_ENV_VAR);
+    config.subscription_flow = SubscriptionFlow::Acp;
+    let mut credential = token_profile("unused");
+    credential.secret = CredentialSecret::External {
+        directory: ACP_SUB2_DIR.into(),
+    };
+    let store = store_with(&[("sub2", credential)]);
+    assert!(needs_store(&config));
+    let (landing, selected, _) =
+        walk_chain(&config, Some(&store), MODEL, NOW(), &HashSet::new()).unwrap();
+    assert_matches!(landing, Landing::Acp(Some(directory)) if directory == ACP_SUB2_DIR);
+    // A registered login is a stored profile, so its generation travels with
+    // the selection and guards what a failed request records against it.
+    assert_eq!(selected, selected_profile("sub2"));
+    config.auth = vec![AuthEntry::Named("sub2".into())];
+    let (landing, selected, _) =
+        walk_chain(&config, Some(&store), MODEL, NOW(), &HashSet::new()).unwrap();
+    assert_matches!(landing, Landing::Acp(Some(directory)) if directory == ACP_SUB2_DIR);
+    assert_eq!(selected, selected_profile("sub2"));
+}
+
+#[test]
+fn acp_registration_and_manual_mapping_must_agree() {
+    let mut config = anthropic_config(&["sub:sub2", "api_key"], SET_ENV_VAR);
+    config.subscription_flow = SubscriptionFlow::Acp;
+    config
+        .acp_config_dirs
+        .insert("sub2".into(), ACP_SUB_DIR.into());
+    let mut credential = token_profile("unused");
+    credential.secret = CredentialSecret::External {
+        directory: ACP_SUB2_DIR.into(),
+    };
+    let store = store_with(&[("sub2", credential)]);
+    let error = walk_chain(&config, Some(&store), MODEL, NOW(), &HashSet::new()).unwrap_err();
+    assert_matches!(error, ResolveError::Acp(AcpError::ConflictingDirectory { name }) if name == "sub2");
+}
+
+#[test]
+fn direct_flow_cannot_use_a_registered_runtime_login() {
+    let config = anthropic_config(&["sub:sub2", "api_key"], SET_ENV_VAR);
+    let mut credential = token_profile("unused");
+    credential.secret = CredentialSecret::External {
+        directory: ACP_SUB2_DIR.into(),
+    };
+    let store = store_with(&[("sub2", credential)]);
+    assert_matches!(walk_chain(&config, Some(&store), MODEL, NOW(), &HashSet::new()), Err(ResolveError::ExternalCredential { name }) if name == "sub2");
 }
 
 #[test]
@@ -545,6 +723,98 @@ fn stored(store: &CredentialStore, name: &str) -> StoredCredential {
         .and_then(|profiles| profiles.get(name))
         .cloned()
         .expect("profile is stored")
+}
+
+fn external_profile(directory: &str) -> StoredCredential {
+    StoredCredential {
+        secret: CredentialSecret::External {
+            directory: directory.into(),
+        },
+        account_id: None,
+        email: None,
+        cooldowns: BTreeMap::new(),
+        needs_relogin: false,
+        generation: 0,
+    }
+}
+
+/// A registered login as a resolution reports it, at the generation the store
+/// assigned it.
+fn registered(store: &CredentialStore, name: &str) -> Selected {
+    Selected {
+        entry: profile(name),
+        generation: Some(stored(store, name).generation),
+    }
+}
+
+#[test(tokio::test)]
+async fn acp_advance_shares_scoped_cooldowns_and_explicit_api_fallback() {
+    let mut config = anthropic_config(&["sub:sub", "sub:sub2", "api_key"], SET_ENV_VAR);
+    config.subscription_flow = SubscriptionFlow::Acp;
+    let store = memory_store(&[
+        ("sub", external_profile(ACP_SUB_DIR)),
+        ("sub2", external_profile(ACP_SUB2_DIR)),
+    ]);
+    let reset = datetime!(2026-07-03 16:00:00 Z);
+    let error =
+        StreamError::subscription_exhausted("spent", Some(reset), Some("seven_day_opus".into()));
+    let spent = attempt_on(registered(&store, "sub"));
+    let next = advance(&config, Some(&store), &spent, &error, MODEL, NOW())
+        .await
+        .unwrap();
+    assert_eq!(next.selected, Some(registered(&store, "sub2")));
+    assert_matches!(&next.route, Route::Acp(Some(directory)) if directory == ACP_SUB2_DIR);
+    assert_eq!(
+        stored(&store, "sub").cooldowns,
+        BTreeMap::from([("seven_day_opus".into(), reset)])
+    );
+    assert_eq!(
+        resolve(&config, Some(&store), "claude-haiku-4-5", NOW())
+            .await
+            .unwrap()
+            .selected,
+        Some(registered(&store, "sub"))
+    );
+    let next = advance(&config, Some(&store), &next, &error, MODEL, NOW())
+        .await
+        .unwrap();
+    assert_eq!(
+        next.selected,
+        Some(Selected {
+            entry: AuthEntry::ApiKey(None),
+            generation: None,
+        })
+    );
+    assert_matches!(next.route, Route::Http(Credential::ApiKey(_)));
+    assert_eq!(
+        resolve(&config, Some(&store), MODEL, reset)
+            .await
+            .unwrap()
+            .selected,
+        Some(registered(&store, "sub"))
+    );
+}
+
+#[test(tokio::test)]
+async fn acp_exhaustion_without_an_api_entry_is_terminal() {
+    let mut config = anthropic_config(&["sub:sub"], SET_ENV_VAR);
+    config.subscription_flow = SubscriptionFlow::Acp;
+    let store = memory_store(&[("sub", external_profile(ACP_SUB_DIR))]);
+    let error = StreamError::subscription_exhausted("spent", None, None);
+    let spent = attempt_on(registered(&store, "sub"));
+    assert!(
+        advance(&config, Some(&store), &spent, &error, MODEL, NOW())
+            .await
+            .is_none()
+    );
+    assert_eq!(
+        stored(&store, "sub").cooldowns,
+        BTreeMap::from([("account".into(), datetime!(2026-07-03 12:30:00 Z))])
+    );
+    assert_matches!(
+        resolve(&config, Some(&store), MODEL, NOW()).await,
+        Err(ResolveError::ChainExhausted { .. })
+    );
 }
 
 /// Exhausting the active profile records a cooldown scoped to what the provider

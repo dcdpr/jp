@@ -1,21 +1,24 @@
-//! Compatibility checks for the Claude Code subscription flow.
+//! Claude Code login lifecycle, compatibility checks, and ACP queries.
 //!
-//! Inspection invokes version and authentication commands only.
-//! No prompt is submitted and JP never reads Claude Code's credential files.
+//! Authentication is delegated to the bundled runtime with an explicit login
+//! directory.
+//! JP never reads Claude Code's credential files.
 
 use std::{
-    fmt, io,
+    fmt, fs, io,
     process::{ExitStatus, Stdio},
     str::{self, Utf8Error},
     time::Duration,
 };
 
+use camino::{Utf8Path, Utf8PathBuf};
 use jp_config::model::id::{ModelIdConfig, Name, ProviderId};
 use serde::Deserialize;
+use serde_json::from_slice;
 use tokio::{io::AsyncReadExt as _, process::Command, time::timeout};
 use tracing::warn;
 
-use crate::{error::StreamError, model::ModelDetails};
+use crate::{credential::AccountIdentity, error::StreamError, model::ModelDetails};
 
 mod cassette;
 mod options;
@@ -64,16 +67,30 @@ pub enum Error {
     /// The ACP peer rejected a request or the protocol connection failed.
     #[error("Claude ACP protocol error: {0}")]
     Protocol(#[source] RpcError),
-    /// JP names do not select Claude Code accounts.
+    /// A named ACP subscription has no configured login directory.
     #[error(
-        "subscription credential `{name}` is not mapped to a Claude Code login; use an unnamed \
-         `subscription` entry, or explicitly set providers.llm.anthropic.subscription_flow=direct \
-         to use JP-stored credentials (account-policy risk)"
+        "subscription `{name}` has no Claude Code login directory; run `jp provider llm auth \
+         login anthropic --name {name}` to sign in"
     )]
     NamedSubscription { name: String },
+    /// A manual mapping disagrees with the registered login directory.
+    #[error(
+        "subscription `{name}` has conflicting login directories; remove \
+         providers.llm.anthropic.acp_config_dirs.{name} to use its registered login"
+    )]
+    ConflictingDirectory { name: String },
+    /// A named login directory is not absolute.
+    #[error(
+        "providers.llm.anthropic.acp_config_dirs.{name} must be an absolute path, got \
+         {directory:?}"
+    )]
+    InvalidConfigDirectory {
+        name: String,
+        directory: Utf8PathBuf,
+    },
     /// The adapter could not be started or its output could not be read.
     #[error(
-        "Claude ACP {check} failed; install @agentclientprotocol/claude-agent-acp@0.76.0 with \
+        "Claude ACP {check} failed; install @agentclientprotocol/claude-agent-acp@0.81.0 with \
          Node.js 22+ and optional dependencies enabled"
     )]
     Io {
@@ -141,7 +158,7 @@ pub enum Error {
     FlowChanged,
 }
 
-/// A non-inference operation used to inspect the installed runtime.
+/// A non-inference operation provided by the installed runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Check {
     /// Read the ACP adapter version.
@@ -150,6 +167,10 @@ pub enum Check {
     ClaudeVersion,
     /// Read effective authentication without extracting credentials.
     Authentication,
+    /// Sign in through the runtime's interactive authentication command.
+    Login,
+    /// Clear the selected runtime login.
+    Logout,
 }
 
 impl fmt::Display for Check {
@@ -158,6 +179,8 @@ impl fmt::Display for Check {
             Self::AdapterVersion => "adapter-version check",
             Self::ClaudeVersion => "Claude Code-version check",
             Self::Authentication => "authentication check",
+            Self::Login => "login",
+            Self::Logout => "logout",
         })
     }
 }
@@ -168,6 +191,8 @@ impl Check {
             Self::AdapterVersion => &["--version"],
             Self::ClaudeVersion => &["--cli", "--version"],
             Self::Authentication => &["--cli", "auth", "status", "--json"],
+            Self::Login => &["--cli", "auth", "login", "--claudeai"],
+            Self::Logout => &["--cli", "auth", "logout"],
         }
     }
 }
@@ -180,6 +205,7 @@ struct AuthStatus {
     api_provider: Option<ApiProvider>,
     subscription_type: Option<Plan>,
     api_key_source: Option<String>,
+    email: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -209,17 +235,72 @@ enum Plan {
 }
 
 /// Verify the installed adapter/runtime pair and its active subscription login.
-pub(super) async fn inspect() -> Result<(), Error> {
-    let adapter = run(Check::AdapterVersion).await?;
-    let claude = run(Check::ClaudeVersion).await?;
-    qualify_versions(&adapter, &claude)?;
-    validate_auth(&run(Check::Authentication).await?)
+pub(super) async fn inspect(directory: Option<&Utf8Path>) -> Result<(), Error> {
+    inspect_versions(directory).await?;
+    validate_auth(&run(Check::Authentication, directory).await?)
+}
+
+async fn inspect_versions(directory: Option<&Utf8Path>) -> Result<(), Error> {
+    let adapter = run(Check::AdapterVersion, directory).await?;
+    let claude = run(Check::ClaudeVersion, directory).await?;
+    qualify_versions(&adapter, &claude)
+}
+
+pub(super) async fn login(directory: &Utf8Path) -> Result<AccountIdentity, Error> {
+    if !directory.is_absolute() {
+        return Err(Error::NativeDirectory);
+    }
+    inspect_versions(Some(directory)).await?;
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt as _;
+        builder.mode(0o700);
+    }
+    builder.create(directory).map_err(Error::NativeIo)?;
+    let mut command = process::command(Some(directory));
+    command
+        .args(Check::Login.args())
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true);
+    // Interactive login must stay in the terminal's foreground process group.
+    let status = command.status().await.map_err(|source| Error::Io {
+        check: Check::Login,
+        source,
+    })?;
+    if !status.success() {
+        return Err(Error::CommandFailed {
+            check: Check::Login,
+            status,
+        });
+    }
+    login_status(directory)
+        .await?
+        .ok_or(Error::SubscriptionRequired)
+}
+
+pub(super) async fn login_status(directory: &Utf8Path) -> Result<Option<AccountIdentity>, Error> {
+    if !directory.is_absolute() {
+        return Err(Error::NativeDirectory);
+    }
+    subscription_identity(&run(Check::Authentication, Some(directory)).await?)
+}
+
+pub(super) async fn logout(directory: &Utf8Path) -> Result<(), Error> {
+    if !directory.is_absolute() {
+        return Err(Error::NativeDirectory);
+    }
+    run(Check::Logout, Some(directory)).await?;
+    Ok(())
 }
 
 fn qualify_versions(adapter: &[u8], claude: &[u8]) -> Result<(), Error> {
     for (check, output, expected) in [
-        (Check::AdapterVersion, adapter, "0.76.0"),
-        (Check::ClaudeVersion, claude, "2.1.257"),
+        (Check::AdapterVersion, adapter, "0.81.0"),
+        (Check::ClaudeVersion, claude, "2.1.280"),
     ] {
         let actual = str::from_utf8(output)
             .map_err(|source| Error::Encoding { check, source })?
@@ -241,6 +322,12 @@ fn qualify_versions(adapter: &[u8], claude: &[u8]) -> Result<(), Error> {
 }
 
 fn validate_auth(output: &[u8]) -> Result<(), Error> {
+    subscription_identity(output)?
+        .map(drop)
+        .ok_or(Error::SubscriptionRequired)
+}
+
+fn subscription_identity(output: &[u8]) -> Result<Option<AccountIdentity>, Error> {
     let status: AuthStatus = serde_json::from_slice(output).map_err(Error::AuthStatus)?;
     if status.logged_in
         && status.api_key_source.is_none()
@@ -248,9 +335,13 @@ fn validate_auth(output: &[u8]) -> Result<(), Error> {
         && matches!(status.api_provider, Some(ApiProvider::FirstParty))
         && matches!(status.subscription_type, Some(Plan::Pro | Plan::Max))
     {
-        return Ok(());
+        return Ok(Some(AccountIdentity {
+            // The runtime reports an organization ID, not an account UUID.
+            account_id: None,
+            email: status.email.filter(|email| !email.is_empty()),
+        }));
     }
-    Err(Error::SubscriptionRequired)
+    Ok(None)
 }
 
 /// Describe the selected model without an API-key-authenticated lookup.
@@ -283,8 +374,8 @@ fn removes_variable(name: &str) -> bool {
         )
 }
 
-async fn run(check: Check) -> Result<Vec<u8>, Error> {
-    let mut command = process::command();
+async fn run(check: Check, directory: Option<&Utf8Path>) -> Result<Vec<u8>, Error> {
+    let mut command = process::command(directory);
     command.args(check.args());
     read_output(command, check).await
 }
@@ -313,7 +404,11 @@ async fn read_output(mut command: Command, check: Check) -> Result<Vec<u8>, Erro
             .wait()
             .await
             .map_err(|source| Error::Io { check, source })?;
-        if !status.success() {
+        // A signed-out runtime returns JSON status with exit code 1.
+        let signed_out = matches!(check, Check::Authentication)
+            && status.code() == Some(1)
+            && from_slice::<AuthStatus>(&bytes).is_ok_and(|status| !status.logged_in);
+        if !(status.success() || signed_out) {
             return Err(Error::CommandFailed { check, status });
         }
         Ok(bytes)

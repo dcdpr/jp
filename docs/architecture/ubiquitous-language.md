@@ -30,6 +30,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Conversation Event](#conversation-event)
     - [EditorBackend](#editorbackend)
     - [Event Overlay](#event-overlay)
+    - [External Login](#external-login)
     - [InlineReply](#inlinereply)
     - [Inquiry](#inquiry)
     - [Invocation](#invocation)
@@ -202,6 +203,16 @@ metadata value rather than by position.
 overlay.
 An Event Overlay changes the metadata of individual events; a Compaction reduces
 what a range of turns contributes.
+
+### External Login
+
+A subscription login whose credentials and refresh lifecycle are owned by an
+external runtime. JP registers its configuration directory and observed account
+identity without storing its tokens. Implemented by `CredentialSecret::External`
+in `jp_credentials`.
+
+**Not the same as** a JP-stored token or a subscription flow: the login identifies
+an account, while the flow selects how requests reach the provider.
 
 ### InlineReply
 

@@ -21,7 +21,7 @@ use super::{
 use crate::{
     error::{StreamError, StreamErrorKind, looks_like_context_window_error},
     event::{Event, EventPart, FinishReason, ToolCallPart},
-    provider::anthropic::map_event,
+    provider::anthropic::{map_event, resolve::reset_at},
 };
 
 /// The adapter's effective authentication, independent of JP's token store.
@@ -97,6 +97,9 @@ pub(super) enum SdkMessage {
         #[serde(default)]
         parent_tool_use_id: Option<String>,
     },
+    RateLimitEvent {
+        rate_limit_info: RateLimitInfo,
+    },
     Result {
         #[serde(default)]
         usage: Option<Usage>,
@@ -117,6 +120,43 @@ pub(super) enum SdkMessage {
     },
     #[serde(other)]
     Other,
+}
+
+/// Subscription quota evidence forwarded by the Claude SDK.
+/// Ordinary `rate_limit` assistant errors are insufficient to authorize a
+/// different account or paid API access.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct RateLimitInfo {
+    status: String,
+    #[serde(default)]
+    resets_at: Option<u64>,
+    #[serde(default)]
+    rate_limit_type: Option<String>,
+    #[serde(default)]
+    error_code: Option<String>,
+}
+
+impl RateLimitInfo {
+    fn rejection(self) -> Option<StreamError> {
+        if self.status != "rejected" {
+            return None;
+        }
+        let scope = self.rate_limit_type.filter(|scope| {
+            matches!(
+                scope.as_str(),
+                "five_hour" | "seven_day" | "seven_day_opus" | "seven_day_sonnet"
+            )
+        });
+        if scope.is_none() && self.error_code.as_deref() != Some("credits_required") {
+            return None;
+        }
+        Some(StreamError::subscription_exhausted(
+            "Claude Code subscription limit reached",
+            self.resets_at.and_then(reset_at),
+            scope,
+        ))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -195,6 +235,8 @@ pub(super) struct State {
     current_message: Option<MessageIdentity>,
     open_tool_blocks: HashSet<usize>,
     pending_previews: IndexSet<String>,
+    /// Held until quota metadata or the final SDK result disambiguates it.
+    rate_limit_error: Option<String>,
 }
 
 struct MessageIdentity {
@@ -224,6 +266,7 @@ impl State {
             current_message: None,
             open_tool_blocks: HashSet::new(),
             pending_previews: IndexSet::new(),
+            rate_limit_error: None,
         }
     }
 
@@ -232,6 +275,7 @@ impl State {
         request: RequestPermissionRequest,
     ) -> Result<(RequestPermissionResponse, Vec<Event>), StreamError> {
         if !self.live
+            || self.failure.is_some()
             || !self.authenticated
             || !self.inventory_checked
             || self.session.as_ref() != Some(&request.session_id)
@@ -367,6 +411,10 @@ impl State {
             return Ok(vec![]);
         }
         match notification.message {
+            SdkMessage::RateLimitEvent { rate_limit_info } => match rate_limit_info.rejection() {
+                Some(error) => Err(error),
+                None => Ok(vec![]),
+            },
             SdkMessage::System { subtype, tools } if subtype == "init" => {
                 let expected: HashSet<_> = self.tools.keys().map(String::as_str).collect();
                 let actual: HashSet<_> = tools
@@ -420,6 +468,10 @@ impl State {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
+                    if error == "rate_limit" {
+                        self.rate_limit_error = Some(format!("Claude Code rate_limit: {detail}"));
+                        return Ok(vec![]);
+                    }
                     let rejection = match error.as_str() {
                         "max_output_tokens" => {
                             return Err(StreamError::new(
@@ -455,6 +507,7 @@ impl State {
                         StreamError::new(kind, rejection.to_string()).with_source(rejection)
                     );
                 }
+                self.rate_limit_error = None;
                 self.usage.observe(&message);
                 Ok(vec![])
             }
@@ -495,6 +548,9 @@ impl State {
                 } else if stop_reason.as_deref() == Some("max_tokens") {
                     FinishReason::MaxTokens
                 } else if is_error || subtype != "success" {
+                    if let Some(detail) = self.rate_limit_error.take() {
+                        return Err(StreamError::other(detail));
+                    }
                     let detail = errors.join("\n");
                     return Err(StreamError::other(if detail.is_empty() {
                         format!("Claude Code request failed: {subtype}")

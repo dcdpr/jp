@@ -41,6 +41,7 @@ use jp_tool::ToolDefinition;
 use serde_json::{Map, Value, json};
 use tracing::{debug, info, trace, warn};
 
+use self::resolve::Route;
 use super::{Provider, trace_to_tmpfile};
 use crate::{
     credential::Credential,
@@ -286,6 +287,41 @@ impl Anthropic {
         .await
     }
 
+    /// Record ACP quota failures through the shared credential chain.
+    ///
+    /// A fresh Host request is required even before content arrives: the next
+    /// route may use caller-owned tool execution rather than the agent's loop.
+    fn with_acp_fallback(
+        &self,
+        model: &ModelDetails,
+        mut attempt: resolve::Attempt,
+        mut stream: EventStream,
+    ) -> EventStream {
+        let this = self.clone();
+        let model = model.clone();
+        Box::pin(async_stream::stream! {
+            for notice in mem::take(&mut attempt.notices) {
+                yield Ok(Event::Notice(notice));
+            }
+            while let Some(item) = stream.next().await {
+                match item {
+                    Err(error) if error.kind == StreamErrorKind::SubscriptionExhausted => {
+                        if let Some(next) = this.advance(&attempt, &error, model.name()).await {
+                            for notice in next.notices {
+                                yield Ok(Event::Notice(notice));
+                            }
+                            yield Err(error.with_credential_change());
+                        } else {
+                            yield Err(error);
+                        }
+                        return;
+                    }
+                    item => yield item,
+                }
+            }
+        })
+    }
+
     /// Advance after a non-streaming request failed, or surface the failure.
     async fn advance_or_fail(
         &self,
@@ -310,10 +346,10 @@ impl Anthropic {
     /// Bearer requests carry the Claude Code fingerprint, including the
     /// identity line leading the system content, so the flag feeds request
     /// construction, not only the auth header.
-    fn client_for(&self, route: &resolve::Route) -> Result<(Client, bool)> {
+    fn client_for(&self, route: &Route) -> Result<(Client, bool)> {
         match route {
-            resolve::Route::Http(credential) => self.client_cache.get(&self.config, credential),
-            resolve::Route::Acp => Err(acp::Error::FlowChanged.into()),
+            Route::Http(credential) => self.client_cache.get(&self.config, credential),
+            Route::Acp(_) => Err(acp::Error::FlowChanged.into()),
         }
     }
 }
@@ -344,10 +380,11 @@ impl Provider for Anthropic {
         context: QueryContext,
     ) -> Result<QueryStream> {
         let attempt = self.resolve(model.name()).await?;
-        if matches!(attempt.route, resolve::Route::Acp) {
-            acp::inspect().await?;
+        if let Route::Acp(directory) = &attempt.route {
+            acp::inspect(directory.as_deref()).await?;
+            let stream = acp::stream(model, query, context, directory.clone())?;
             return Ok(QueryStream {
-                events: acp::stream(model, query, context)?,
+                events: self.with_acp_fallback(model, attempt, stream),
                 execution: ToolExecution::Agent {
                     correlation_key: "claudecode/toolUseId",
                 },
@@ -366,9 +403,9 @@ impl Provider for Anthropic {
                 warn!("{notice}");
             }
 
-            if matches!(attempt.route, resolve::Route::Acp) {
+            if let Route::Acp(directory) = attempt.route {
                 let model = acp::model_details(name);
-                acp::inspect().await?;
+                acp::inspect(directory.as_deref()).await?;
                 return Ok(model);
             }
             let (client, _) = self.client_for(&attempt.route)?;
@@ -389,8 +426,8 @@ impl Provider for Anthropic {
                 warn!("{notice}");
             }
 
-            if matches!(attempt.route, resolve::Route::Acp) {
-                acp::inspect().await?;
+            if let Route::Acp(directory) = attempt.route {
+                acp::inspect(directory.as_deref()).await?;
                 return Ok(vec![acp::model_details(&"claude-opus-5".parse()?)]);
             }
             let (client, _) = self.client_for(&attempt.route)?;
@@ -441,15 +478,17 @@ impl Provider for Anthropic {
         // ordinary error before a stream exists; switches re-resolve inside
         // the stream.
         let attempt = self.resolve(model.name()).await?;
-        if matches!(attempt.route, resolve::Route::Acp) {
-            acp::inspect().await?;
+        if let Route::Acp(directory) = &attempt.route {
+            acp::inspect(directory.as_deref()).await?;
             let root = env::current_dir().map_err(acp::Error::NativeIo)?;
             let root = Utf8PathBuf::from_path_buf(root).map_err(|_| acp::Error::NativeDirectory)?;
-            return acp::stream(model, query, QueryContext {
+            let context = QueryContext {
                 root,
                 mcp_endpoint: None,
                 invocation: None,
-            });
+            };
+            let stream = acp::stream(model, query, context, directory.clone())?;
+            return Ok(self.with_acp_fallback(model, attempt, stream));
         }
 
         let this = self.clone();
@@ -541,7 +580,7 @@ impl Provider for Anthropic {
                                 for notice in next.take_notices(&this.seen_notices) {
                                     yield Event::Notice(notice);
                                 }
-                                Err(StreamError::transient(error.to_string()))?;
+                                Err(error.with_credential_change())?;
                                 return;
                             }
 
@@ -3289,6 +3328,10 @@ static API_ROUTE: super::ApiTestRoute = super::ApiTestRoute {
         features: vec!["interleaved-thinking", "context-editing"],
     },
 };
+
+#[cfg(test)]
+#[path = "anthropic/fallback_tests.rs"]
+mod fallback_tests;
 
 #[cfg(test)]
 #[path = "anthropic_tests.rs"]

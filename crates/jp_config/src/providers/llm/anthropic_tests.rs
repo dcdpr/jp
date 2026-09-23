@@ -1,8 +1,94 @@
 use schematic::PartialConfig as _;
+use serde_json::{json, to_value};
 use test_log::test;
 
 use super::*;
-use crate::{AppConfig, assignment::KvAssignment};
+use crate::{AppConfig, assignment::KvAssignment, util::build};
+
+#[test]
+fn acp_config_dirs_assignment_round_trip() {
+    let mut partial = PartialAnthropicConfig::default();
+    partial
+        .assign(
+            r#"acp_config_dirs:={"sub":"/accounts/sub","sub2":"/accounts/sub2"}"#
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        to_value(&partial).unwrap()["acp_config_dirs"],
+        json!({"sub": "/accounts/sub", "sub2": "/accounts/sub2"})
+    );
+    partial
+        .assign("acp_config_dirs.sub=/accounts/first".parse().unwrap())
+        .unwrap();
+    partial
+        .assign("acp_config_dirs.sub2:=null".parse().unwrap())
+        .unwrap();
+    assert_eq!(
+        to_value(&partial).unwrap()["acp_config_dirs"],
+        json!({"sub": "/accounts/first"})
+    );
+    partial
+        .assign("acp_config_dirs:=null".parse().unwrap())
+        .unwrap();
+    assert_eq!(to_value(&partial).unwrap().get("acp_config_dirs"), None);
+}
+
+#[test]
+fn acp_config_dirs_layering_and_delta() {
+    let mut before = PartialAnthropicConfig::default();
+    before
+        .assign(
+            r#"acp_config_dirs:={"sub":"/accounts/sub","sub2":"/accounts/sub2"}"#
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+    let mut after = PartialAnthropicConfig::default();
+    after
+        .assign(r#"acp_config_dirs:={"sub2":"/accounts/second"}"#.parse().unwrap())
+        .unwrap();
+    let mut layered = before.clone();
+    layered.merge(&(), after.clone()).unwrap();
+    assert_eq!(layered, after);
+    let delta = before.delta(after.clone());
+    before.merge(&(), delta).unwrap();
+    assert_eq!(before, after);
+    assert_eq!(before.delta(after.clone()).acp_config_dirs, None);
+    assert_eq!(
+        PartialAnthropicConfig::default().fill_from(after.clone()),
+        after
+    );
+    let empty = PartialAnthropicConfig {
+        acp_config_dirs: Some(BTreeMap::new()),
+        ..Default::default()
+    };
+    assert_eq!(empty.clone().fill_from(after), empty);
+}
+
+#[test]
+fn acp_config_dirs_resolved_round_trip() {
+    // Building the root also requires a model, supplied by the test config.
+    let mut partial = AppConfig::new_test().to_partial();
+    partial
+        .assign(
+            r#"providers.llm.anthropic.acp_config_dirs:={"sub":"/accounts/sub"}"#
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+    let config = build(partial).unwrap();
+    assert_eq!(
+        config.providers.llm.anthropic.acp_config_dirs,
+        BTreeMap::from([("sub".into(), "/accounts/sub".into())])
+    );
+    let rebuilt = build(config.to_partial()).unwrap();
+    assert_eq!(
+        rebuilt.providers.llm.anthropic.acp_config_dirs,
+        config.providers.llm.anthropic.acp_config_dirs
+    );
+}
 
 #[test]
 fn subscription_flow_defaults_to_acp_without_changing_auth() {

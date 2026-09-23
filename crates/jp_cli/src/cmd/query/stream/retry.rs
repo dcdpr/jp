@@ -28,7 +28,8 @@
 use std::{fmt, mem, sync::Arc, time::Duration};
 
 use jp_config::assistant::request::RequestConfig;
-use jp_llm::{StreamError, retry_delay};
+use jp_conversation::ConversationStream;
+use jp_llm::{StreamError, StreamErrorKind, retry_delay};
 use jp_printer::{Printer, RegionStyle, StatusRegion};
 use jp_workspace::ConversationMut;
 use tracing::{error, warn};
@@ -332,6 +333,20 @@ pub enum StreamErrorOutcome {
     Interrupted(InterruptNotice),
 }
 
+/// Whether an agent request can be rebuilt after a credential change.
+///
+/// Calls without recorded results may have executed side effects.
+/// They cannot be replayed automatically, even when the next credential is
+/// ready.
+pub(crate) fn can_restart_agent(error: &StreamError, events: &ConversationStream) -> bool {
+    error.kind == StreamErrorKind::CredentialChanged
+        && events.iter_turns().next_back().is_none_or(|turn| {
+            turn.iter()
+                .filter_map(|event| event.event.as_tool_call_request())
+                .all(|request| events.find_tool_call_response(&request.id).is_some())
+        })
+}
+
 /// Single source of truth for handling stream errors during LLM streaming.
 ///
 /// Decides whether to retry, flushes state, notifies the user, and waits for
@@ -347,6 +362,18 @@ pub async fn handle_stream_error(
     printer: &Arc<Printer>,
     signals: &SignalRouter,
 ) -> StreamErrorOutcome {
+    if error.kind == StreamErrorKind::CredentialChanged {
+        retry_state.retire_notice();
+        commit_partial_response(
+            turn_coordinator,
+            conv,
+            printer,
+            ResponseBoundary::Continuation,
+        );
+        turn_coordinator.prepare_retry_continuation();
+        return StreamErrorOutcome::Retry;
+    }
+
     // Always flush buffered renderer output and any unflushed partial content
     // to the stream BEFORE deciding whether to retry or abort. Streamed text
     // the user already saw must never be dropped just because the error turned

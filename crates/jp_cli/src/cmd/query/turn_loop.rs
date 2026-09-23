@@ -51,8 +51,8 @@ use super::{
         reply_edit_mode, signals::InterruptUi,
     },
     stream::{
-        ResponseBoundary, StreamErrorOutcome, StreamRetryState, commit_partial_response,
-        handle_stream_error,
+        ResponseBoundary, StreamErrorOutcome, StreamRetryState, can_restart_agent,
+        commit_partial_response, handle_stream_error,
     },
     tool::{
         PendingEntry, PendingTools, ToolCallDecision, ToolCallState, ToolCoordinator, ToolPrompter,
@@ -477,7 +477,9 @@ pub(super) async fn run_turn_loop(
                                 Ok(event) => event,
                                 Err(e) => {
                                     tool_renderer.cancel_all();
-                                    if matches!(execution, ToolExecution::Agent { .. }) {
+                                    if matches!(execution, ToolExecution::Agent { .. })
+                                        && !can_restart_agent(&e, &conv.events())
+                                    {
                                         commit_partial_response(
                                             &mut turn_coordinator,
                                             &conv,

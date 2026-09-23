@@ -461,6 +461,7 @@ Ok(
                             ],
                         ),
                         subscription_flow: None,
+                        acp_config_dirs: None,
                         api_key_env: Some(
                             One(
                                 "ANTHROPIC_API_KEY",

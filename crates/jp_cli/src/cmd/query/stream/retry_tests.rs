@@ -1,16 +1,18 @@
 use std::{sync::Arc, time::Duration};
 
+use datetime_literal::datetime;
 use jp_config::{
     AppConfig,
     assistant::request::{CachePolicy, MaxResponseBytes, RequestConfig},
 };
 use jp_conversation::{
     Conversation,
-    event::{ChatRequest, ChatResponse},
+    event::{ChatRequest, ChatResponse, ConversationEvent, ToolCallRequest, ToolCallResponse},
 };
 use jp_llm::{StreamError, event::Event};
 use jp_printer::{OutputFormat, Printer, SharedBuffer, TerminalCapability};
 use jp_workspace::{ConversationLock, Workspace};
+use serde_json::Map;
 
 use super::*;
 use crate::signals::testing::{detached_router, test_router};
@@ -62,6 +64,31 @@ fn make_test_lock() -> (Workspace, ConversationLock) {
     let handle = workspace.acquire_conversation(&id).unwrap();
     let lock = workspace.test_lock(handle);
     (workspace, lock)
+}
+
+#[test]
+fn agent_restart_requires_committed_tool_results_and_a_credential_change() {
+    let mut events = ConversationStream::new_test();
+    let error = StreamError::subscription_exhausted("spent", None, None).with_credential_change();
+    assert!(can_restart_agent(&error, &events));
+    let timestamp = datetime!(2026-07-03 12:00:00 Z);
+    events.extend([ConversationEvent::new(
+        ToolCallRequest::new("call-fixed".into(), "write".into(), Map::new()),
+        timestamp,
+    )]);
+    assert!(!can_restart_agent(&error, &events));
+    events.extend([ConversationEvent::new(
+        ToolCallResponse {
+            id: "call-fixed".into(),
+            result: Ok("written".into()),
+        },
+        timestamp,
+    )]);
+    assert!(can_restart_agent(&error, &events));
+    assert!(!can_restart_agent(
+        &StreamError::transient("connection lost"),
+        &events
+    ));
 }
 
 #[test]

@@ -45,6 +45,48 @@ fn stores() -> Vec<(&'static str, CredentialStore, Option<Utf8TempDir>)> {
 }
 
 #[test]
+fn external_login_registration_round_trips_without_tokens() {
+    let raw = r#"{"version":2,"next_generation":1,"credentials":{"llm":{"anthropic":{"sub":{"type":"external","directory":"/accounts/sub","account_id":null,"email":"first@example.com","cooldowns":{},"generation":0}}}}}"#;
+    let document = decode(raw, "test").unwrap();
+    assert_eq!(serde_json::to_string(&document).unwrap(), raw);
+}
+
+#[test]
+fn auth_lock_excludes_other_lifecycle_operations_but_not_store_updates() {
+    let store = memory_store();
+    let guard = store.try_lock_auth().unwrap();
+    assert!(
+        matches!(store.try_lock_auth(), Err(StoreError::Rejected(message)) if message == "another login or logout is in progress")
+    );
+    store
+        .mutate(|document| {
+            document.insert_profile("llm", "anthropic", "sub", token_credential("test-token"));
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(store.load().unwrap().iter().count(), 1);
+    drop(guard);
+    let _guard = store.try_lock_auth().unwrap();
+}
+
+#[test]
+fn registering_external_login_upgrades_a_version_one_store() {
+    let mut document = decode(r#"{"version":1,"credentials":{}}"#, "test").unwrap();
+    let credential = StoredCredential {
+        secret: CredentialSecret::External {
+            directory: "/accounts/sub".into(),
+        },
+        account_id: None,
+        email: None,
+        cooldowns: BTreeMap::new(),
+        needs_relogin: false,
+        generation: 0,
+    };
+    document.insert_profile("llm", "anthropic", "sub", credential);
+    assert_eq!(document.version, 2);
+}
+
+#[test]
 fn test_load_missing_store_is_empty() {
     for (name, store, _dir) in stores() {
         let document = store.load().unwrap();
@@ -121,12 +163,12 @@ fn test_rejects_newer_schema_version() {
     let dir = Utf8TempDir::new().unwrap();
     std::fs::write(
         dir.path().join(STORE_FILENAME),
-        r#"{"version": 2, "credentials": {}}"#,
+        r#"{"version": 3, "credentials": {}}"#,
     )
     .unwrap();
 
     let error = file_store(&dir).load().unwrap_err();
-    assert!(matches!(error, StoreError::NewerVersion { found: 2, .. }));
+    assert!(matches!(error, StoreError::NewerVersion { found: 3, .. }));
 }
 
 #[test]

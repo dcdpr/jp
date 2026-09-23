@@ -1,10 +1,12 @@
+use std::ffi::OsStr;
+
 use tokio::io::{AsyncBufReadExt as _, BufReader};
 
 use super::*;
 
 #[test]
 fn adapter_launcher_uses_the_platform_entry_point() {
-    let command = command();
+    let command = command(None);
     #[cfg(windows)]
     {
         assert_eq!(command.as_std().get_program(), "cmd.exe");
@@ -16,6 +18,62 @@ fn adapter_launcher_uses_the_platform_entry_point() {
     }
     #[cfg(unix)]
     assert_eq!(command.as_std().get_program(), "claude-agent-acp");
+}
+
+#[test]
+fn named_login_sets_both_configuration_and_credential_locations() {
+    let first = command(Some(Utf8Path::new("/accounts/sub")));
+    let second = command(Some(Utf8Path::new("/accounts/sub2")));
+    assert_eq!(
+        first
+            .as_std()
+            .get_envs()
+            .find(|(key, _)| *key == "CLAUDE_CONFIG_DIR"),
+        Some((
+            OsStr::new("CLAUDE_CONFIG_DIR"),
+            Some(OsStr::new("/accounts/sub"))
+        ))
+    );
+    assert_eq!(
+        second
+            .as_std()
+            .get_envs()
+            .find(|(key, _)| *key == "CLAUDE_CONFIG_DIR"),
+        Some((
+            OsStr::new("CLAUDE_CONFIG_DIR"),
+            Some(OsStr::new("/accounts/sub2"))
+        ))
+    );
+    assert_eq!(
+        second
+            .as_std()
+            .get_envs()
+            .find(|(key, _)| *key == "CLAUDE_SECURESTORAGE_CONFIG_DIR"),
+        Some((
+            OsStr::new("CLAUDE_SECURESTORAGE_CONFIG_DIR"),
+            Some(OsStr::new("/accounts/sub2"))
+        ))
+    );
+}
+
+#[test]
+fn unnamed_login_preserves_inherited_configuration_and_credential_locations() {
+    let command = command(None);
+    assert_eq!(
+        command
+            .as_std()
+            .get_envs()
+            .find(|(key, _)| *key == "CLAUDE_CONFIG_DIR"),
+        None
+    );
+    assert_eq!(
+        command
+            .as_std()
+            .get_envs()
+            .find(|(key, _)| *key == "CLAUDE_SECURESTORAGE_CONFIG_DIR"),
+        None
+    );
+    assert_eq!(login_environment(None), BTreeMap::new());
 }
 
 #[tokio::test]

@@ -201,7 +201,8 @@ fn live(
     policy: CachePolicy,
 ) -> impl FnOnce(&PreparedRequest) -> (NativeArtifact, Box<dyn Transport>) {
     move |prepared| {
-        let launch = transport::launch(prepared, &context(), policy).expect("a prepared launch");
+        let launch =
+            transport::launch(prepared, &context(), policy, None).expect("a prepared launch");
         (
             launch.artifact,
             Box::new(transport::Spawned {
@@ -316,7 +317,7 @@ async fn cache_reconstruction() {
     if recording {
         // Reaching the runtime with a stale adapter or a lapsed login produces
         // a failure that reads as a protocol problem, so check first.
-        inspect()
+        inspect(None)
             .await
             .expect("a qualified adapter and an active login");
     }
