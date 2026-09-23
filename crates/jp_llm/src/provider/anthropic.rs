@@ -168,7 +168,7 @@ pub struct Anthropic {
     /// Which beta features are enabled.
     beta: BetaFeatures,
 
-    /// The credential store backing `profile` chain entries.
+    /// The credential store backing `subscription` chain entries.
     ///
     /// `None` when the chain holds no profile entries; the default
     /// `["api_key"]` chain works without touching the store.

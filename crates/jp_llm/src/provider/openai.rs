@@ -6,7 +6,7 @@ use std::{
 use async_trait::async_trait;
 use base64::Engine as _;
 use chrono::{NaiveDate, Utc};
-use futures::{StreamExt as _, TryStreamExt as _, stream};
+use futures::{StreamExt as _, TryStreamExt as _, future, stream};
 use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
@@ -61,6 +61,10 @@ mod fold_tests;
 #[cfg(test)]
 #[path = "openai/latency_tests.rs"]
 mod latency_tests;
+
+#[cfg(test)]
+#[path = "openai/redeem_tests.rs"]
+mod redeem_tests;
 
 #[cfg(test)]
 #[path = "openai/switchable_tests.rs"]
@@ -118,7 +122,7 @@ const TOOL_CALL_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 pub struct Openai {
     config: OpenaiConfig,
 
-    /// The credential store backing `profile` chain entries.
+    /// The credential store backing `subscription` chain entries.
     ///
     /// `None` when the chain holds no profile entries; the default
     /// `["api_key"]` chain works without touching the store.
@@ -230,13 +234,10 @@ impl Openai {
     /// credential handed back is good for the request about to be sent.
     async fn resolve(&self, model: &str) -> Result<resolve::Attempt> {
         if let Some((credential, attribution)) = &self.fixed_credential {
-            return Ok(resolve::Attempt {
-                credential: credential.clone(),
-                attribution: attribution.clone(),
-                selected: None,
-                generation: None,
-                notices: vec![],
-            });
+            return Ok(resolve::Attempt::injected(
+                credential.clone(),
+                attribution.clone(),
+            ));
         }
 
         Ok(resolve::resolve(&self.config, self.store.as_ref(), model, Utc::now()).await?)
@@ -252,13 +253,10 @@ impl Openai {
         error: &StreamError,
         model: &str,
     ) -> Option<resolve::Attempt> {
-        let spent = attempt.selected.as_ref()?;
-
         resolve::advance(
             &self.config,
             self.store.as_ref(),
-            spent,
-            attempt.generation,
+            attempt,
             error,
             model,
             Utc::now(),
@@ -328,8 +326,8 @@ impl Openai {
     /// Spend a reset credit to reopen a spent usage window.
     ///
     /// Returns the notice announcing it, or `None` when the account has no
-    /// credit to spend or the redemption was refused — in which case the
-    /// caller falls through to the next credential as it would have anyway.
+    /// credit to spend or the redemption did not reopen a window, in which case
+    /// the caller falls through to the next credential as it would have anyway.
     async fn redeem_reset_credit(
         &self,
         attempt: &resolve::Attempt,
@@ -337,21 +335,20 @@ impl Openai {
     ) -> Option<String> {
         let (_, http) = self.clients(attempt, session_id).ok()?;
         let credits = usage::reset_credits(&http, &self.codex_base_url).await?;
-        let credit = credits.credits.first()?;
+        if credits.available_count == 0 {
+            return None;
+        }
 
-        // The session identifies the redemption, so a retried turn spends the
-        // same credit once rather than one per attempt.
-        let redeemed = usage::consume_reset_credit(
-            &http,
-            &self.codex_base_url,
-            session_id,
-            credit.id.as_deref(),
-        )
-        .await;
+        // One id per redemption, not per session: a later window running out
+        // in the same conversation is a new redemption, and reusing an earlier
+        // id would replay that one instead of spending a credit.
+        let redeem_request_id = oauth::random_token();
+        let redeemed =
+            usage::consume_reset_credit(&http, &self.codex_base_url, &redeem_request_id).await;
 
         redeemed.then(|| {
-            let left = credits.credits.len().saturating_sub(1);
-            format!("subscription limit reached — redeemed a usage reset ({left} left)")
+            let left = credits.available_count - 1;
+            format!("subscription limit reached, redeemed a usage reset ({left} left)")
         })
     }
 
@@ -549,7 +546,8 @@ impl Provider for Openai {
                 let started = if buffered {
                     start_buffered(&client, outgoing, is_structured, reasoning_enabled).await
                 } else {
-                    start_streaming(&client, outgoing, is_structured, reasoning_enabled).await
+                    start_streaming(&client, outgoing, is_structured, reasoning_enabled, &name)
+                        .await
                 };
 
                 match started {
@@ -639,12 +637,14 @@ async fn start_streaming(
     request: Request,
     is_structured: bool,
     reasoning_enabled: bool,
+    model: &str,
 ) -> std::result::Result<EventStream, StreamError> {
     let mut reasoning = ReasoningState::default();
+    let model = model.to_owned();
     let stream = client
         .stream(request)
         .filter_map(skip_unknown_events)
-        .or_else(map_error)
+        .or_else(move |error| future::ready(Err::<types::Event, _>(map_error(error, &model))))
         .map_ok(move |v| {
             stream::iter(map_event(
                 v,
@@ -2271,8 +2271,11 @@ async fn skip_unknown_events(
 }
 
 /// Convert an OpenAI [`OpenaiStreamError`] into a [`StreamError`].
-async fn map_error(error: OpenaiStreamError) -> std::result::Result<types::Event, StreamError> {
-    Err(match error {
+///
+/// `model` is the model the request named, which decides which usage limit a
+/// rejection is recorded against.
+fn map_error(error: OpenaiStreamError, model: &str) -> StreamError {
+    match error {
         OpenaiStreamError::Status {
             status,
             headers,
@@ -2282,7 +2285,7 @@ async fn map_error(error: OpenaiStreamError) -> std::result::Result<types::Event
             // The body says a limit was hit; the headers say which one and
             // when it reopens, which is what a cooldown needs to expire on its
             // own instead of on a guess.
-            rate_limits::apply(&mut error, &headers);
+            rate_limits::apply(&mut error, &headers, model);
             error
         }
 
@@ -2296,7 +2299,7 @@ async fn map_error(error: OpenaiStreamError) -> std::result::Result<types::Event
         OpenaiStreamError::Parsing(error) => {
             StreamError::other(error.to_string()).with_source(error)
         }
-    })
+    }
 }
 
 /// Tracks the last text-bearing reasoning item within one provider response.

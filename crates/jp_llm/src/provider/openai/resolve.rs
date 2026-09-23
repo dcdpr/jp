@@ -12,15 +12,22 @@
 //! (`jp_credentials`): a refused profile gets a re-login marker, a spent one a
 //! cooldown, and the recorded state is what routes the next resolution past it
 //! — a mid-turn switch and a fresh invocation share one code path.
+//!
+//! A request also remembers which entries it has already tried, which covers
+//! what the store cannot: an `api_key` has no stored profile to mark, and a
+//! best-effort write can fail.
+
+use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
+use futures::future::BoxFuture;
 use jp_config::{
     providers::llm::{AuthEntry, openai::OpenaiConfig},
     types::api_key_env::ApiKeyEnv,
 };
 use jp_credentials::{
     CATEGORY_LLM, CredentialSecret, CredentialStore, PROVIDER_OPENAI, SCOPE_ACCOUNT, StoreDocument,
-    StoreError, StoredCredential, UpdateOutcome, cooldown_until,
+    StoreError, StoreGuard, StoredCredential, UpdateOutcome, cooldown_until,
 };
 use tracing::{debug, warn};
 
@@ -36,27 +43,27 @@ pub enum ResolveError {
     #[error(transparent)]
     Store(#[from] StoreError),
 
-    /// A `profile:<name>` entry names a profile that is not stored.
+    /// A `subscription:<name>` entry names a profile that is not stored.
     #[error(
-        "providers.llm.openai.auth entry `profile:{name}` matches no stored profile; run `jp \
-         provider llm auth login openai --name {name}` to create it"
+        "providers.llm.openai.auth entry `subscription:{name}` matches no stored credential; run \
+         `jp provider llm auth login openai --name {name}` to create it"
     )]
     UnknownProfile {
         /// The profile name the chain entry refers to.
         name: String,
     },
 
-    /// A bare `profile` entry with zero stored profiles.
+    /// A bare `subscription` entry with zero stored profiles.
     #[error(
-        "providers.llm.openai.auth entry `profile` matches no stored profile; run `jp provider \
-         llm auth login openai` to create one"
+        "providers.llm.openai.auth entry `subscription` matches no stored credential; run `jp \
+         provider llm auth login openai` to create one"
     )]
     NoProfiles,
 
-    /// A bare `profile` entry with multiple stored profiles.
+    /// A bare `subscription` entry with multiple stored profiles.
     #[error(
-        "providers.llm.openai.auth entry `profile` is ambiguous: multiple profiles are stored \
-         ({}); name one with `profile:<name>`",
+        "providers.llm.openai.auth entry `subscription` is ambiguous: several credentials are \
+         stored ({}); name one with `subscription:<name>`",
         names.join(", ")
     )]
     AmbiguousProfile {
@@ -140,11 +147,21 @@ enum Landing {
     Stale {
         profile: String,
         refresh_token: String,
-
-        /// The generation the profile was read at, which a refused refresh
-        /// retires it under.
-        generation: u64,
     },
+}
+
+/// Trades a refresh token for fresh tokens.
+///
+/// A parameter rather than a direct call to [`oauth::refresh`], so a test can
+/// count exchanges without reaching the network.
+type Refresh =
+    dyn Fn(String) -> BoxFuture<'static, Result<oauth::Tokens, oauth::OauthError>> + Send + Sync;
+
+/// The production [`Refresh`]: the `OpenAI` token endpoint.
+fn network_refresh(
+    refresh_token: String,
+) -> BoxFuture<'static, Result<oauth::Tokens, oauth::OauthError>> {
+    Box::pin(async move { oauth::refresh(&refresh_token).await })
 }
 
 /// Account attribution a subscription request has to carry.
@@ -171,7 +188,7 @@ pub(super) struct Attempt {
     /// Account attribution the subscription endpoint requires.
     pub attribution: Attribution,
 
-    /// Which chain entry produced the credential, with a bare `profile`
+    /// Which chain entry produced the credential, with a bare `subscription`
     /// normalized to the profile it resolved to.
     ///
     /// `None` when the credential was injected directly instead of resolved
@@ -188,9 +205,33 @@ pub(super) struct Attempt {
 
     /// User-facing notices for skipped entries, surfaced as chrome.
     pub notices: Vec<String>,
+
+    /// Chain entries this request has already tried and had fail.
+    ///
+    /// Resolution skips them.
+    /// Without it, an entry whose failure leaves no trace in the store (an
+    /// `api_key`, or a profile whose cooldown could not be written) resolves
+    /// again on the next walk and strands the request on a credential already
+    /// known to be out.
+    tried: HashSet<AuthEntry>,
 }
 
 impl Attempt {
+    /// An attempt over a credential handed in rather than resolved.
+    ///
+    /// There is no chain behind it, so there is nothing to advance to and no
+    /// stored profile to record an outcome against.
+    pub(super) fn injected(credential: Credential, attribution: Attribution) -> Self {
+        Self {
+            credential,
+            attribution,
+            selected: None,
+            generation: None,
+            notices: vec![],
+            tried: HashSet::new(),
+        }
+    }
+
     /// Whether the request goes to the subscription host rather than the API.
     pub fn is_subscription(&self) -> bool {
         matches!(self.credential, Credential::Bearer(_))
@@ -214,7 +255,7 @@ pub(super) fn preflight(
     now: DateTime<Utc>,
 ) -> Result<(), ResolveError> {
     let snapshot = store.map(CredentialStore::load).transpose()?;
-    walk_chain(config, snapshot.as_ref(), model, now).map(drop)
+    walk_chain(config, snapshot.as_ref(), model, now, &HashSet::new()).map(drop)
 }
 
 /// Resolve the first usable credential in the chain.
@@ -231,14 +272,26 @@ pub(super) async fn resolve(
     model: &str,
     now: DateTime<Utc>,
 ) -> Result<Attempt, ResolveError> {
+    resolve_skipping(config, store, model, now, HashSet::new(), &network_refresh).await
+}
+
+/// Resolve the chain, ignoring the entries in `tried`.
+async fn resolve_skipping(
+    config: &OpenaiConfig,
+    store: Option<&CredentialStore>,
+    model: &str,
+    now: DateTime<Utc>,
+    tried: HashSet<AuthEntry>,
+    refresh: &Refresh,
+) -> Result<Attempt, ResolveError> {
     // Each pass either resolves or retires one chain entry, so the walk cannot
     // cycle; the bound is belt against a profile that refuses to settle.
     for _ in 0..=config.auth.len() {
         let snapshot = store.map(CredentialStore::load).transpose()?;
-        let (landing, selected, generation, mut notices) =
-            walk_chain(config, snapshot.as_ref(), model, now)?;
+        let (landing, selected, generation, notices) =
+            walk_chain(config, snapshot.as_ref(), model, now, &tried)?;
 
-        let (profile, refresh_token, generation) = match landing {
+        let (profile, refresh_token) = match landing {
             Landing::Ready(credential, attribution) => {
                 debug!(
                     entry = %selected,
@@ -254,37 +307,19 @@ pub(super) async fn resolve(
                     selected: Some(selected),
                     generation,
                     notices,
+                    tried,
                 });
             }
             Landing::Stale {
                 profile,
                 refresh_token,
-                generation,
-            } => (profile, refresh_token, generation),
+            } => (profile, refresh_token),
         };
 
-        debug!(profile, "Access token expired; refreshing.");
-
-        match oauth::refresh(&refresh_token).await {
-            Ok(tokens) => persist_rotation(store, &profile, &refresh_token, &tokens),
-
-            // The grant was refused: this profile cannot serve requests again
-            // until the user logs in. Retire it and walk on.
-            Err(error) if error.is_rejection() => {
-                warn!(%error, profile, "Refresh rejected; profile needs a fresh login.");
-                retire(store, &profile, generation);
-
-                notices.push(format!(
-                    "skipping profile:{profile}: session expired; run `jp provider llm auth login \
-                     openai --name {profile}`"
-                ));
-            }
-
-            // The endpoint could not be reached. The credential is probably
-            // fine, and so is the next attempt; falling to another chain entry
-            // would not help, since the request itself needs the same network.
-            Err(source) => return Err(ResolveError::Refresh { profile, source }),
-        }
+        // Whatever this returns, the next pass re-walks the chain and reads the
+        // state it left: a rotated token resolves, a retired profile is skipped
+        // with a notice the walk produces itself.
+        refresh_under_lock(store, &profile, &refresh_token, now, refresh).await?;
     }
 
     Err(ResolveError::ChainExhausted {
@@ -299,114 +334,186 @@ pub(super) async fn resolve(
 pub(super) async fn advance(
     config: &OpenaiConfig,
     store: Option<&CredentialStore>,
-    spent: &AuthEntry,
-    generation: Option<u64>,
+    spent: &Attempt,
     error: &StreamError,
     model: &str,
     now: DateTime<Utc>,
 ) -> Option<Attempt> {
-    record_outcome(store, spent, generation, error, now);
+    let selected = spent.selected.as_ref()?;
+
+    record_outcome(store, selected, spent.generation, error, now);
+
+    // Whether or not the store took the record, this entry is out for the rest
+    // of the request. Carrying that in memory is what lets an `api_key`, which
+    // has no stored profile to cool down, fall through to the entry behind it,
+    // and what keeps a failed store write from stranding the request on a
+    // credential already known to be spent.
+    let mut tried = spent.tried.clone();
+    tried.insert(selected.clone());
 
     // Re-resolution reads the state just recorded against the same instant, so
     // a cooldown that starts now is already in effect for this walk.
     // An exhausted chain is not a new failure to report: the caller surfaces
     // the error that prompted the switch.
-    let mut attempt = match resolve(config, store, model, now).await {
-        Ok(attempt) => attempt,
-        Err(error) => {
-            debug!(%error, "Credential chain exhausted after a failed request.");
-            return None;
-        }
-    };
-
-    // Resolution landing on the same entry means nothing was recorded that
-    // could move it: `api_key` has no store entry, so an exhausted key falls
-    // through instead of being retried forever.
-    if attempt.selected.as_ref() == Some(spent) {
-        debug!("Credential chain did not advance; treating the failure as terminal.");
-        return None;
-    }
+    let mut attempt =
+        match resolve_skipping(config, store, model, now, tried, &network_refresh).await {
+            Ok(attempt) => attempt,
+            Err(error) => {
+                debug!(%error, "Credential chain exhausted after a failed request.");
+                return None;
+            }
+        };
 
     attempt
         .notices
-        .push(switch_notice(error, spent, attempt.selected.as_ref()));
+        .push(switch_notice(error, selected, attempt.selected.as_ref()));
 
     Some(attempt)
 }
 
-/// Store the tokens a refresh produced.
+/// Bring a stale profile's access token up to date, holding the store's
+/// mutation lock across the exchange.
 ///
-/// Refresh tokens rotate, so the write rechecks its precondition under the
-/// lock: if the stored token is no longer the one this refresh consumed,
-/// another process rotated first and its tokens are the live ones.
-/// Overwriting them would invalidate a credential that works.
-fn persist_rotation(
+/// Refresh tokens rotate, so two callers that read the same stale token and
+/// both present it leave one holding a token the endpoint has already retired.
+/// Two requests from one invocation are enough to reach that: a turn and the
+/// title generation it spawns build their own providers and resolve
+/// independently.
+///
+/// The document is re-read under the lock before anything is sent, so the
+/// common case, another caller refreshing while this one waited, costs a lock
+/// acquisition and no network call.
+///
+/// A failed write of the rotated tokens is returned rather than logged: the
+/// refresh token this call presented is spent, and resolving again would
+/// present it a second time.
+async fn refresh_under_lock(
     store: Option<&CredentialStore>,
     profile: &str,
-    consumed: &str,
-    tokens: &oauth::Tokens,
-) {
+    presented: &str,
+    now: DateTime<Utc>,
+    refresh: &Refresh,
+) -> Result<(), ResolveError> {
+    // A chain with no profile entries never lands on `Stale`, so there is no
+    // store here to lock.
     let Some(store) = store else {
-        return;
+        return Ok(());
     };
 
-    let result = store.mutate(|document| {
-        let Some(stored) = document.profile_mut(CATEGORY_LLM, PROVIDER_OPENAI, profile) else {
-            return Ok(false);
-        };
+    let guard = acquire(store).await?;
+    let mut document = guard.load()?;
 
-        if !holds_refresh_token(stored, consumed) {
-            debug!(
-                profile,
-                "Another process rotated first; keeping its tokens."
-            );
-            return Ok(false);
+    let Some(refresh_token) = still_stale(&document, profile, presented, now) else {
+        debug!(
+            profile,
+            "Access token was refreshed while this request waited for the lock."
+        );
+        return Ok(());
+    };
+
+    debug!(profile, "Access token expired; refreshing.");
+
+    match refresh(refresh_token).await {
+        Ok(tokens) => rotate(&mut document, profile, &tokens),
+
+        // The grant was refused: this profile cannot serve requests again
+        // until the user logs in.
+        Err(error) if error.is_rejection() => {
+            warn!(%error, profile, "Refresh rejected; profile needs a fresh login.");
+            retire(&mut document, profile);
         }
 
-        stored.secret = CredentialSecret::Oauth {
-            access_token: tokens.access_token.clone(),
-            refresh_token: tokens.refresh_token.clone(),
-            expires_at: tokens.expires_at,
-        };
-        stored.needs_relogin = false;
-
-        // An import or an early login can leave identity unresolved; a refresh
-        // carries the claims again, so fill it in when it is still missing.
-        if stored.account_id.is_none() {
-            stored.account_id = tokens.identity.account_id.clone();
+        // The endpoint could not be reached or is throttling. The credential
+        // is probably fine, and so is the next attempt; falling to another
+        // chain entry would not help, since the request itself needs the same
+        // network.
+        Err(source) => {
+            return Err(ResolveError::Refresh {
+                profile: profile.to_owned(),
+                source,
+            });
         }
-        if stored.email.is_none() {
-            stored.email = tokens.identity.email.clone();
+    }
+
+    guard.persist(&document)?;
+
+    Ok(())
+}
+
+/// Take the store's mutation lock without parking an executor thread on it.
+///
+/// The lock is held across a network call, so a contender can wait as long as
+/// the token endpoint takes to answer.
+async fn acquire(store: &CredentialStore) -> Result<StoreGuard, ResolveError> {
+    let store = store.clone();
+
+    tokio::task::spawn_blocking(move || store.lock())
+        .await
+        .map_err(|error| {
+            StoreError::Rejected(format!("credential store lock task failed: {error}"))
+        })?
+        .map_err(Into::into)
+}
+
+/// The refresh token to present, when `profile` still needs the refresh this
+/// caller planned.
+///
+/// `None` once another caller has rotated the token or moved the expiry out.
+fn still_stale(
+    document: &StoreDocument,
+    profile: &str,
+    presented: &str,
+    now: DateTime<Utc>,
+) -> Option<String> {
+    match &document
+        .profiles(CATEGORY_LLM, PROVIDER_OPENAI)?
+        .get(profile)?
+        .secret
+    {
+        CredentialSecret::Oauth {
+            refresh_token,
+            expires_at,
+            ..
+        } if *expires_at <= now + oauth::EXPIRY_BUFFER && refresh_token == presented => {
+            Some(refresh_token.clone())
         }
-
-        Ok(true)
-    });
-
-    match result {
-        Ok(true) => {}
-        Ok(false) => debug!(profile, "Rotated tokens were not persisted."),
-        Err(error) => warn!(%error, profile, "Could not persist rotated tokens."),
+        _ => None,
     }
 }
 
-/// Mark a profile as needing a fresh login.
-fn retire(store: Option<&CredentialStore>, profile: &str, generation: u64) {
-    let Some(store) = store else {
+/// Write the tokens a refresh produced into the document.
+///
+/// The profile keeps its generation: rotating a token renews the same
+/// credential, and the outcome of a request already in flight under it is still
+/// its own.
+fn rotate(document: &mut StoreDocument, profile: &str, tokens: &oauth::Tokens) {
+    let Some(stored) = document.profile_mut(CATEGORY_LLM, PROVIDER_OPENAI, profile) else {
         return;
     };
 
-    report_write(
-        profile,
-        store.mark_needs_relogin(CATEGORY_LLM, PROVIDER_OPENAI, profile, generation),
-    );
+    stored.secret = CredentialSecret::Oauth {
+        access_token: tokens.access_token.clone(),
+        refresh_token: tokens.refresh_token.clone(),
+        expires_at: tokens.expires_at,
+    };
+    stored.needs_relogin = false;
+
+    // An import or an early login can leave identity unresolved; a refresh
+    // carries the claims again, so fill it in when it is still missing.
+    if stored.account_id.is_none() {
+        stored.account_id.clone_from(&tokens.identity.account_id);
+    }
+    if stored.email.is_none() {
+        stored.email.clone_from(&tokens.identity.email);
+    }
+
+    debug!(profile, "Rotated stored OAuth tokens.");
 }
 
-/// Whether the stored credential still holds the refresh token a refresh
-/// consumed.
-fn holds_refresh_token(credential: &StoredCredential, token: &str) -> bool {
-    match &credential.secret {
-        CredentialSecret::Oauth { refresh_token, .. } => refresh_token == token,
-        CredentialSecret::Token { .. } => false,
+/// Mark a profile as needing a fresh login after its refresh was refused.
+fn retire(document: &mut StoreDocument, profile: &str) {
+    if let Some(stored) = document.profile_mut(CATEGORY_LLM, PROVIDER_OPENAI, profile) {
+        stored.needs_relogin = true;
     }
 }
 
@@ -527,6 +634,7 @@ fn walk_chain(
     store: Option<&StoreDocument>,
     model: &str,
     now: DateTime<Utc>,
+    tried: &HashSet<AuthEntry>,
 ) -> Result<(Landing, AuthEntry, Option<u64>, Vec<String>), ResolveError> {
     let mut notices = vec![];
     let mut reasons = vec![];
@@ -544,6 +652,15 @@ fn walk_chain(
 
         match entry {
             AuthEntry::ApiKey(name) => {
+                if tried.contains(entry) {
+                    skip(
+                        &mut notices,
+                        &mut reasons,
+                        format!("{entry}: already tried for this request"),
+                    );
+                    continue;
+                }
+
                 // A name no key answers to is a config mistake, not a
                 // credential to fall past: the next entry would bill a
                 // different key.
@@ -577,13 +694,29 @@ fn walk_chain(
             AuthEntry::Subscription(name) => {
                 let (profile, stored) = lookup_profile(store, name.as_deref())?;
 
+                // A bare `subscription` entry is reported as the profile it
+                // resolved to, so callers and logs name a concrete credential.
+                let selected = AuthEntry::Subscription(Some(profile.to_owned()));
+                let generation = stored.generation;
+
+                // Both spellings are checked: the chain may hold the bare entry
+                // while the tried set holds the profile it resolved to.
+                if tried.contains(entry) || tried.contains(&selected) {
+                    skip(
+                        &mut notices,
+                        &mut reasons,
+                        format!("{selected}: already tried for this request"),
+                    );
+                    continue;
+                }
+
                 if stored.needs_relogin {
                     skip(
                         &mut notices,
                         &mut reasons,
                         format!(
-                            "profile:{profile} needs re-login; run `jp provider llm auth login \
-                             openai --name {profile}`"
+                            "{selected} needs re-login; run `jp provider llm auth login openai \
+                             --name {profile}`"
                         ),
                     );
                     continue;
@@ -593,15 +726,10 @@ fn walk_chain(
                     skip(
                         &mut notices,
                         &mut reasons,
-                        format!("profile:{profile} cooling down until {until} ({scope})"),
+                        format!("{selected} cooling down until {until} ({scope})"),
                     );
                     continue;
                 }
-
-                // A bare `profile` entry is reported as the profile it resolved
-                // to, so callers and logs name a concrete credential.
-                let selected = AuthEntry::Subscription(Some(profile.to_owned()));
-                let generation = stored.generation;
 
                 match &stored.secret {
                     CredentialSecret::Token { token } => {
@@ -627,7 +755,6 @@ fn walk_chain(
                                 Landing::Stale {
                                     profile: profile.to_owned(),
                                     refresh_token: refresh_token.clone(),
-                                    generation,
                                 },
                                 selected,
                                 Some(generation),
@@ -708,8 +835,8 @@ fn skip(notices: &mut Vec<String>, reasons: &mut Vec<String>, reason: String) {
 
 /// Look up the profile a chain entry refers to.
 ///
-/// A named entry must exist; a bare `profile` entry refers to the sole stored
-/// profile and errors on zero or multiple candidates.
+/// A named entry must exist; a bare `subscription` entry refers to the sole
+/// stored profile and errors on zero or multiple candidates.
 fn lookup_profile<'a>(
     store: Option<&'a StoreDocument>,
     name: Option<&str>,

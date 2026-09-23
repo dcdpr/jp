@@ -13,10 +13,10 @@ use std::{collections::BTreeSet, path::PathBuf};
 
 use jp_config::{ConfigEnum as _, model::id::ProviderId};
 use saphyr::{LoadableYamlNode as _, Yaml};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::{
-    provider::provider_test_support,
+    provider::{number_ids, provider_test_support},
     test::{ProviderTestMode, fixture_dir},
 };
 
@@ -154,9 +154,18 @@ fn outcome_parity() {
                 continue;
             };
 
+            // A snapshot this projection cannot read reduces to nothing on
+            // both sides, and two nothings compare equal.
+            if api.as_array().is_none_or(Vec::is_empty) {
+                differences.push(format!(
+                    "{id} `{scenario}`: the recorded conversation projected to no events"
+                ));
+                continue;
+            }
+
             if api != subscription {
                 differences.push(format!(
-                    "{id} `{scenario}`:\n  api:          {api:?}\n  subscription: {subscription:?}"
+                    "{id} `{scenario}`:\n  api:          {api}\n  subscription: {subscription}"
                 ));
             }
         }
@@ -173,60 +182,114 @@ fn outcome_parity() {
 #[path = "cross_route/projection_tests.rs"]
 mod projection;
 
-/// The shape of the conversation one route recorded: which events happened, in
-/// what order, and which tools were called with which arguments.
+#[path = "cross_route/outcome_tests.rs"]
+mod outcome;
+
+/// The shape of the conversation one route recorded, read from its snapshot.
 ///
-/// Response prose and reasoning text are dropped, since two runs word them
-/// differently.
-fn recorded_conversation(dir: &str, scenario: &str) -> Option<Vec<String>> {
+/// See [`project_conversation`] for what is kept.
+fn recorded_conversation(dir: &str, scenario: &str) -> Option<Value> {
     let path = jp_test::fixtures_dir()
         .join(dir)
         .join(format!("{scenario}__conversation_stream.snap"));
-    let raw = std::fs::read_to_string(path).ok()?;
+    let raw = std::fs::read_to_string(&path).ok()?;
 
-    let shape = raw
-        .lines()
-        // An insta snapshot opens with a `---` delimited header naming the
-        // source; only the body describes the conversation.
-        .skip_while(|line| *line != "---")
-        .skip(1)
-        .filter_map(structural_line)
-        .collect();
+    // A snapshot that exists but cannot be read is a broken comparison, not a
+    // scenario to skip.
+    let body = snapshot_body(&raw).unwrap_or_else(|| panic!("{}: no insta header", path.display()));
+    let conversation =
+        serde_json::from_str(body).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
 
-    Some(shape)
+    Some(project_conversation(&conversation))
 }
 
-/// One structural fact from a snapshot line, or `None` for prose.
+/// The body of an insta snapshot, after its `---` delimited header.
+fn snapshot_body(raw: &str) -> Option<&str> {
+    let header = raw.strip_prefix("---\n")?;
+    let (_, body) = header.split_once("\n---\n")?;
+
+    Some(body)
+}
+
+/// Reduce a recorded conversation to what two routes must agree on.
 ///
-/// Event kinds and tool names are JP's own vocabulary, so both routes owe the
-/// same sequence of them.
-fn structural_line(line: &str) -> Option<String> {
-    let trimmed = line.trim();
+/// Kept: the order and kind of events, what the user asked, which tools were
+/// called, what they returned, and which call each result answers.
+///
+/// Dropped, since two runs never share them:
+///
+/// - Timestamps and provider metadata.
+/// - The model's wording, reasoning, structured answers, and chosen tool
+///   arguments; only the kind of answer is kept.
+/// - Config deltas, which the harness writes when it points a route at its own
+///   model.
+/// - Tool call ids, which the host mints; they are numbered instead, so a
+///   result answering the wrong call still shows.
+///
+/// A run of answers of one kind is collapsed into one, since the model decides
+/// how many items to split its answer into.
+fn project_conversation(conversation: &Value) -> Value {
+    let mut events: Vec<Value> = vec![];
 
-    for marker in [
-        "TurnStart",
-        "ChatRequest",
-        "ToolCallRequest",
-        "ToolCallResponse",
-        "InquiryRequest",
-        "InquiryResponse",
-    ] {
-        if trimmed.starts_with(marker) {
-            return Some(marker.to_owned());
+    for event in conversation
+        .get("events")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(projected) = project_event(event) else {
+            continue;
+        };
+
+        if projected.get("type") == Some(&Value::from("chat_response"))
+            && events.last() == Some(&projected)
+        {
+            continue;
         }
+
+        events.push(projected);
     }
 
-    // JP derives these from the schema it sent.
-    for field in ["name:", "id:", "type:"] {
-        if let Some(value) = trimmed.strip_prefix(field) {
-            return Some(format!("{field}{}", value.trim()));
+    let mut events = Value::Array(events);
+    number_ids(&mut events, &["id"]);
+
+    events
+}
+
+/// One event as [`project_conversation`] keeps it, or `None` when dropped.
+fn project_event(event: &Value) -> Option<Value> {
+    let kind = event.get("type")?.as_str()?;
+    let mut kept = Map::new();
+    kept.insert("type".to_owned(), Value::from(kind));
+
+    let copy = |kept: &mut Map<String, Value>, keys: &[&str]| {
+        for key in keys {
+            if let Some(value) = event.get(*key) {
+                kept.insert((*key).to_owned(), value.clone());
+            }
         }
+    };
+
+    match kind {
+        "config_delta" => return None,
+
+        // Reasoning is optional output: whether the model summarizes its
+        // thinking at all varies between runs.
+        "chat_response" if event.get("reasoning").is_some() => return None,
+
+        "chat_response" => {
+            let variant = ["message", "data"]
+                .into_iter()
+                .find(|key| event.get(*key).is_some())
+                .unwrap_or("unknown");
+            kept.insert("variant".to_owned(), Value::from(variant));
+        }
+
+        "chat_request" => copy(&mut kept, &["content", "schema"]),
+        "tool_call_request" => copy(&mut kept, &["id", "name"]),
+        "tool_call_response" => copy(&mut kept, &["id", "content", "is_error"]),
+        _ => copy(&mut kept, &["id"]),
     }
 
-    // The variant is a decode decision; its content is the model's.
-    if trimmed.starts_with("Reasoning") || trimmed.starts_with("Message") {
-        return Some(trimmed.split_whitespace().next()?.to_owned());
-    }
-
-    None
+    Some(Value::Object(kept))
 }

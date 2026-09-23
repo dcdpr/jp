@@ -1,11 +1,109 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use chrono::TimeZone as _;
-use jp_credentials::{InMemoryCredentialBackend, MAX_COOLDOWN};
+use jp_credentials::{CredentialBackend, InMemoryCredentialBackend, MAX_COOLDOWN};
 use jp_storage::resource_lock::InMemoryResourceLocker;
 
 use super::*;
-use crate::StreamErrorKind;
+use crate::{StreamErrorKind, credential::AccountIdentity};
+
+/// An environment variable that is always set, so `api_key` entries resolve
+/// without mutating the test process environment.
+const SET_ENV_VAR: &str = if cfg!(windows) { "USERNAME" } else { "USER" };
+
+/// A second always-set variable, for a chain that needs two keys.
+const ALSO_SET_ENV_VAR: &str = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+
+/// An attempt that landed on `entry`, as `advance` receives it.
+fn attempt_on(entry: AuthEntry, generation: Option<u64>) -> Attempt {
+    Attempt {
+        credential: Credential::Bearer("spent".to_owned()),
+        attribution: Attribution::default(),
+        selected: Some(entry),
+        generation,
+        notices: vec![],
+        tried: HashSet::new(),
+    }
+}
+
+/// A stored OAuth profile whose access token has expired.
+fn stale_credential() -> StoredCredential {
+    StoredCredential {
+        secret: CredentialSecret::Oauth {
+            access_token: "at-old".to_owned(),
+            refresh_token: "rt-old".to_owned(),
+            expires_at: now() - MAX_COOLDOWN,
+        },
+        account_id: Some("acct-1".to_owned()),
+        email: None,
+        cooldowns: BTreeMap::new(),
+        needs_relogin: false,
+        generation: 0,
+    }
+}
+
+/// A refresh that counts its calls and answers with `outcome`.
+///
+/// It sleeps before answering, so a second caller has the chance to read the
+/// same stale token while the first exchange is in flight.
+fn counting_refresh(
+    calls: Arc<AtomicUsize>,
+    outcome: fn() -> Result<oauth::Tokens, oauth::OauthError>,
+) -> impl Fn(String) -> BoxFuture<'static, Result<oauth::Tokens, oauth::OauthError>> + Send + Sync {
+    move |_| {
+        calls.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            outcome()
+        })
+    }
+}
+
+/// A refresh that succeeds with a rotated pair.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "passed where `counting_refresh` takes a refresh outcome"
+)]
+fn fresh_tokens() -> Result<oauth::Tokens, oauth::OauthError> {
+    Ok(oauth::Tokens {
+        access_token: "at-new".to_owned(),
+        refresh_token: "rt-new".to_owned(),
+        expires_at: now() + MAX_COOLDOWN,
+        identity: AccountIdentity::default(),
+    })
+}
+
+/// A backend whose writes start failing once `fail` is set.
+#[derive(Debug, Default)]
+struct FlakyBackend {
+    inner: InMemoryCredentialBackend,
+    fail: AtomicBool,
+}
+
+impl CredentialBackend for FlakyBackend {
+    fn describe(&self) -> String {
+        "<flaky>".to_owned()
+    }
+
+    fn load(&self) -> Result<Option<String>, StoreError> {
+        self.inner.load()
+    }
+
+    fn persist(&self, document: &str) -> Result<(), StoreError> {
+        if self.fail.load(Ordering::SeqCst) {
+            return Err(StoreError::Rejected("disk full".to_owned()));
+        }
+
+        self.inner.persist(document)
+    }
+}
 
 /// A JWT whose payload nests a residency constraint of `eu`.
 const TOKEN_EU: &str = "header.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdC1uZXN0ZWQiLCJjaGF0Z3B0X2NvbXB1dGVfcmVzaWRlbmN5IjoiZXUifX0.sig";
@@ -119,8 +217,8 @@ async fn test_skips_a_profile_needing_relogin_and_reports_why() {
         Credential::Bearer("bearer-2".to_owned())
     );
     assert_eq!(attempt.notices, vec![
-        "skipping profile:spent needs re-login; run `jp provider llm auth login openai --name \
-         spent`"
+        "skipping subscription:spent needs re-login; run `jp provider llm auth login openai \
+         --name spent`"
             .to_owned()
     ]);
 }
@@ -414,8 +512,10 @@ async fn test_advance_without_a_selected_entry_is_terminal() {
     let outcome = advance(
         &config(vec![AuthEntry::ApiKey(None)]),
         None,
-        &AuthEntry::ApiKey(None),
-        None,
+        &Attempt::injected(
+            Credential::ApiKey("sk-1".to_owned()),
+            Attribution::default(),
+        ),
         &StreamError::auth_rejected("refused"),
         "gpt-5.6",
         now(),
@@ -438,8 +538,7 @@ async fn test_advance_records_relogin_and_moves_to_the_next_entry() {
     let next = advance(
         &chain,
         Some(&store),
-        &AuthEntry::Subscription(Some("first".to_owned())),
-        Some(0),
+        &attempt_on(AuthEntry::Subscription(Some("first".to_owned())), Some(0)),
         &StreamError::auth_rejected("token revoked"),
         "gpt-5.6",
         now(),
@@ -479,8 +578,7 @@ async fn test_advance_records_a_cooldown_for_an_exhausted_profile() {
     let next = advance(
         &chain,
         Some(&store),
-        &AuthEntry::Subscription(Some("first".to_owned())),
-        Some(0),
+        &attempt_on(AuthEntry::Subscription(Some("first".to_owned())), Some(0)),
         &StreamError::new(StreamErrorKind::SubscriptionExhausted, "limit reached"),
         "gpt-5.6",
         now(),
@@ -519,8 +617,7 @@ async fn test_advance_records_nothing_for_a_malformed_request() {
             AuthEntry::Subscription(Some("second".to_owned())),
         ]),
         Some(&store),
-        &AuthEntry::Subscription(Some("first".to_owned())),
-        Some(0),
+        &attempt_on(AuthEntry::Subscription(Some("first".to_owned())), Some(0)),
         &StreamError::other("System messages are not allowed (HTTP 400)"),
         "gpt-5.6",
         now(),
@@ -550,8 +647,7 @@ async fn test_advance_records_nothing_for_a_context_window_overflow() {
     advance(
         &config(vec![AuthEntry::Subscription(Some("only".to_owned()))]),
         Some(&store),
-        &AuthEntry::Subscription(Some("only".to_owned())),
-        Some(0),
+        &attempt_on(AuthEntry::Subscription(Some("only".to_owned())), Some(0)),
         &StreamError::context_window_exceeded("prompt too long"),
         "gpt-5.6",
         now(),
@@ -577,8 +673,7 @@ async fn test_advance_is_terminal_when_the_chain_has_nothing_left() {
     let outcome = advance(
         &config(vec![AuthEntry::Subscription(Some("only".to_owned()))]),
         Some(&store),
-        &AuthEntry::Subscription(Some("only".to_owned())),
-        Some(0),
+        &attempt_on(AuthEntry::Subscription(Some("only".to_owned())), Some(0)),
         &StreamError::auth_rejected("token revoked"),
         "gpt-5.6",
         now(),
@@ -586,4 +681,253 @@ async fn test_advance_is_terminal_when_the_chain_has_nothing_left() {
     .await;
 
     assert!(outcome.is_none());
+}
+
+/// Two resolutions of the same stale profile exchange its refresh token once.
+///
+/// Refresh tokens rotate, so a second exchange would present a token the first
+/// one already consumed.
+#[tokio::test]
+async fn test_concurrent_resolutions_refresh_once() {
+    let store = store();
+    insert(&store, "personal", &stale_credential());
+    let chain = config(vec![AuthEntry::Subscription(None)]);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let refresh = counting_refresh(calls.clone(), fresh_tokens);
+
+    let (first, second) = tokio::join!(
+        resolve_skipping(
+            &chain,
+            Some(&store),
+            "gpt-5.6",
+            now(),
+            HashSet::new(),
+            &refresh
+        ),
+        resolve_skipping(
+            &chain,
+            Some(&store),
+            "gpt-5.6",
+            now(),
+            HashSet::new(),
+            &refresh
+        ),
+    );
+
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        first.unwrap().credential,
+        Credential::Bearer("at-new".to_owned())
+    );
+    assert_eq!(
+        second.unwrap().credential,
+        Credential::Bearer("at-new".to_owned())
+    );
+}
+
+/// Rotated tokens that cannot be stored stop resolution.
+///
+/// The refresh token presented is spent; resolving again would present it a
+/// second time.
+#[tokio::test]
+async fn test_a_failed_rotation_write_stops_resolution() {
+    let backend = Arc::new(FlakyBackend::default());
+    let store = CredentialStore::new(backend.clone(), Arc::new(InMemoryResourceLocker::default()));
+    insert(&store, "personal", &stale_credential());
+    backend.fail.store(true, Ordering::SeqCst);
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let refresh = counting_refresh(calls.clone(), fresh_tokens);
+
+    let error = resolve_skipping(
+        &config(vec![AuthEntry::Subscription(None)]),
+        Some(&store),
+        "gpt-5.6",
+        now(),
+        HashSet::new(),
+        &refresh,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        matches!(error, ResolveError::Store(_)),
+        "unexpected error: {error}"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+/// A refused grant retires the profile, so later invocations skip it.
+#[tokio::test]
+async fn test_a_refused_refresh_retires_the_profile() {
+    let store = store();
+    insert(&store, "personal", &stale_credential());
+    let refresh = counting_refresh(Arc::default(), || {
+        Err(oauth::OauthError::Status {
+            status: 400,
+            body: "invalid_grant".to_owned(),
+        })
+    });
+
+    let error = resolve_skipping(
+        &config(vec![AuthEntry::Subscription(None)]),
+        Some(&store),
+        "gpt-5.6",
+        now(),
+        HashSet::new(),
+        &refresh,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        matches!(error, ResolveError::ChainExhausted { .. }),
+        "unexpected error: {error}"
+    );
+    assert!(stored(&store, "personal").needs_relogin);
+}
+
+/// A throttled token endpoint says nothing about the credential, so the profile
+/// stays usable for the next invocation.
+#[tokio::test]
+async fn test_a_throttled_refresh_keeps_the_profile() {
+    let store = store();
+    insert(&store, "personal", &stale_credential());
+    let refresh = counting_refresh(Arc::default(), || {
+        Err(oauth::OauthError::Status {
+            status: 429,
+            body: "slow down".to_owned(),
+        })
+    });
+
+    let error = resolve_skipping(
+        &config(vec![AuthEntry::Subscription(None)]),
+        Some(&store),
+        "gpt-5.6",
+        now(),
+        HashSet::new(),
+        &refresh,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        matches!(error, ResolveError::Refresh { .. }),
+        "unexpected error: {error}"
+    );
+    assert!(!stored(&store, "personal").needs_relogin);
+}
+
+/// A refused API key leaves nothing in the store, so only the request's own
+/// record of what it tried lets the chain reach the subscription behind it.
+#[tokio::test]
+async fn test_a_refused_api_key_falls_through_to_a_subscription() {
+    let store = store();
+    insert(&store, "personal", &token_credential("bearer-1"));
+    let mut chain = config(vec![AuthEntry::ApiKey(None), AuthEntry::Subscription(None)]);
+    chain.api_key_env = SET_ENV_VAR.into();
+
+    let first = resolve(&chain, Some(&store), "gpt-5.6", now())
+        .await
+        .unwrap();
+    assert_eq!(first.selected, Some(AuthEntry::ApiKey(None)));
+
+    let next = advance(
+        &chain,
+        Some(&store),
+        &first,
+        &StreamError::new(StreamErrorKind::InsufficientQuota, "no credit"),
+        "gpt-5.6",
+        now(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        next.selected,
+        Some(AuthEntry::Subscription(Some("personal".to_owned())))
+    );
+    assert!(
+        next.notices
+            .iter()
+            .any(|notice| notice
+                == "api key quota exhausted, continuing with subscription (personal)"),
+        "unexpected notices: {:?}",
+        next.notices
+    );
+}
+
+/// Two named keys: the first one refused moves the request onto the second, and
+/// the second refused ends it rather than retrying the first.
+#[tokio::test]
+async fn test_an_entry_is_tried_once_per_request() {
+    let mut chain = config(vec![
+        AuthEntry::ApiKey(Some("work".to_owned())),
+        AuthEntry::ApiKey(Some("personal".to_owned())),
+    ]);
+    chain.api_key_env = ApiKeyEnv::Many(BTreeMap::from([
+        ("work".to_owned(), SET_ENV_VAR.to_owned()),
+        ("personal".to_owned(), ALSO_SET_ENV_VAR.to_owned()),
+    ]));
+    let refused = StreamError::auth_rejected("invalid key");
+
+    let first = resolve(&chain, None, "gpt-5.6", now()).await.unwrap();
+    assert_eq!(
+        first.selected,
+        Some(AuthEntry::ApiKey(Some("work".to_owned())))
+    );
+
+    let second = advance(&chain, None, &first, &refused, "gpt-5.6", now())
+        .await
+        .unwrap();
+    assert_eq!(
+        second.selected,
+        Some(AuthEntry::ApiKey(Some("personal".to_owned())))
+    );
+
+    let third = advance(&chain, None, &second, &refused, "gpt-5.6", now()).await;
+    assert!(third.is_none(), "the chain offered a key it already tried");
+}
+
+/// Every chain entry an error tells the user to write has to parse, or
+/// following the advice produces another configuration error.
+#[test]
+fn test_every_suggested_entry_parses() {
+    for error in [
+        ResolveError::UnknownProfile {
+            name: "work".to_owned(),
+        },
+        ResolveError::NoProfiles,
+        ResolveError::AmbiguousProfile {
+            names: vec!["personal".to_owned(), "work".to_owned()],
+        },
+    ] {
+        let message = error.to_string();
+        let suggested: Vec<_> = message
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .filter(|quoted| quoted.starts_with("subscription"))
+            .map(|quoted| quoted.replace("<name>", "work"))
+            .collect();
+
+        assert!(!suggested.is_empty(), "{message}");
+        for entry in suggested {
+            assert!(
+                matches!(entry.parse::<AuthEntry>(), Ok(AuthEntry::Subscription(_))),
+                "{entry} in: {message}"
+            );
+        }
+    }
+}
+
+fn stored(store: &CredentialStore, profile: &str) -> StoredCredential {
+    store
+        .load()
+        .unwrap()
+        .profiles(CATEGORY_LLM, PROVIDER_OPENAI)
+        .unwrap()
+        .get(profile)
+        .unwrap()
+        .clone()
 }

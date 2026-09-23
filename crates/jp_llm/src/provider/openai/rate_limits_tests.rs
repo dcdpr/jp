@@ -50,6 +50,86 @@ fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
     map
 }
 
+/// `LIVE_HEADERS` with some values replaced.
+fn live_headers_with(overrides: &[(&str, &str)]) -> HeaderMap {
+    let mut map = headers(LIVE_HEADERS);
+
+    for (name, value) in overrides {
+        map.insert(
+            HeaderName::from_bytes(name.as_bytes()).unwrap(),
+            HeaderValue::from_str(value).unwrap(),
+        );
+    }
+
+    map
+}
+
+/// Both the account and the Spark family are spent.
+const BOTH_SPENT: &[(&str, &str)] = &[
+    ("x-codex-primary-used-percent", "100"),
+    ("x-codex-bengalfox-primary-used-percent", "100"),
+];
+
+/// A Luna request draws on the account limit, not on Spark's, even though the
+/// Spark family sorts first.
+#[test]
+fn test_apply_records_the_account_limit_for_another_model() {
+    let mut error = StreamError::rate_limit(None);
+
+    apply(&mut error, &live_headers_with(BOTH_SPENT), "gpt-5.6-luna");
+
+    assert_eq!(error.kind, StreamErrorKind::SubscriptionExhausted);
+    assert_eq!(error.quota_scope.as_deref(), Some("account"));
+}
+
+/// A Spark request records the narrower Spark limit, leaving the account free
+/// for other models.
+#[test]
+fn test_apply_prefers_the_models_own_limit() {
+    let mut error = StreamError::rate_limit(None);
+
+    apply(
+        &mut error,
+        &live_headers_with(BOTH_SPENT),
+        "gpt-5.3-codex-spark",
+    );
+
+    assert_eq!(error.kind, StreamErrorKind::SubscriptionExhausted);
+    assert_eq!(error.quota_scope.as_deref(), Some("gpt-5.3-codex-spark"));
+}
+
+/// Another model's spent limit says nothing about this request.
+#[test]
+fn test_apply_ignores_another_models_spent_limit() {
+    let mut error = StreamError::rate_limit(None);
+
+    apply(
+        &mut error,
+        &live_headers_with(&[("x-codex-bengalfox-primary-used-percent", "100")]),
+        "gpt-5.6-luna",
+    );
+
+    assert_eq!(error.kind, StreamErrorKind::RateLimit);
+    assert_eq!(error.quota_scope, None);
+}
+
+/// A request refused for a reason other than a limit keeps its own kind, even
+/// when a window it draws from happens to be spent.
+#[test]
+fn test_apply_leaves_a_non_limit_error_alone() {
+    for mut error in [
+        StreamError::other("Unsupported parameter (HTTP 400)"),
+        StreamError::transient("upstream error (HTTP 500)"),
+    ] {
+        let kind = error.kind;
+
+        apply(&mut error, &live_headers_with(BOTH_SPENT), "gpt-5.6-luna");
+
+        assert_eq!(error.kind, kind);
+        assert_eq!(error.quota_scope, None);
+    }
+}
+
 #[test]
 fn test_parse_all_reads_both_families_from_a_live_response() {
     let snapshots = parse_all(&headers(LIVE_HEADERS));

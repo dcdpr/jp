@@ -284,7 +284,7 @@ impl Login {
                 {
                     return Err(StoreError::Rejected(format!(
                         "account {account_id} is already stored as {existing:?}; run `jp provider \
-                         auth logout {target} --name {existing}` first, or use that credential"
+                         llm auth logout {target} --name {existing}` first, or use that credential"
                     )));
                 }
 

@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeMap, convert::Infallible, fmt, str::FromStr};
 
-use schematic::{Schema, SchemaBuilder, Schematic};
+use schematic::{Schema, SchemaBuilder, Schematic, schema::UnionType};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// The environment variable, or variables, holding a provider's API keys.
@@ -193,8 +193,12 @@ impl Schematic for ApiKeyEnv {
         Some("ApiKeyEnv".into())
     }
 
+    /// Either form: a variable name, or a map from key name to variable name.
     fn build_schema(mut schema: SchemaBuilder) -> Schema {
-        schema.string_default()
+        schema.union(UnionType::new_any([
+            schema.infer::<String>(),
+            schema.infer::<BTreeMap<String, String>>(),
+        ]))
     }
 }
 

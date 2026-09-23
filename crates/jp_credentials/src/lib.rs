@@ -1,8 +1,8 @@
 //! The core-owned credential store.
 //!
 //! Credentials for LLM providers live in a user-global store, managed with `jp
-//! provider auth login|list|logout` and consumed by each provider's own
-//! credential-chain resolution (`providers.llm.anthropic.auth`).
+//! provider llm auth login|list|logout` and consumed by each provider's own
+//! credential-chain resolution (`providers.llm.<provider>.auth`).
 //!
 //! This crate owns storage integrity — the document encoding, the schema
 //! version check, and the lock-mutate-persist cycle — and exposes it as an

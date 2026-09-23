@@ -1,4 +1,4 @@
-//! Reading a `ChatGPT` subscription's usage and spending its reset credits.
+//! Reading a `ChatGPT` subscription's reset credits and spending one.
 //!
 //! A plan carries a small number of reset credits; redeeming one reopens a
 //! spent usage window immediately.
@@ -9,32 +9,48 @@
 
 use reqwest::Client;
 use serde::Deserialize;
+use serde_json::{Value, json};
 use tracing::{debug, warn};
 
 /// Where the account endpoints live, relative to the `ChatGPT` backend root.
 const ACCOUNT_PATH: &str = "wham";
 
-/// A reset credit that has not been spent.
-#[derive(Debug, Clone, Deserialize)]
-pub struct ResetCredit {
-    /// The credit's own id, named when redeeming a specific one.
-    pub id: Option<String>,
-}
-
 /// What the account reports about its reset credits.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct ResetCredits {
-    /// The credits available to redeem.
+    /// How many credits can still be redeemed.
+    ///
+    /// The backend also lists credits already redeemed or mid-redemption, so
+    /// the length of that list says nothing about what is left.
     #[serde(default)]
-    pub credits: Vec<ResetCredit>,
+    pub available_count: u32,
 }
 
 /// What redeeming a credit reported back.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ConsumeCode {
+    /// A credit was spent and the spent windows reopened.
+    Reset,
+
+    /// No window was spent, so nothing was redeemed.
+    NothingToReset,
+
+    /// No credit was left to spend.
+    NoCredit,
+
+    /// This redemption id was already used, so the reset it asked for has
+    /// happened.
+    AlreadyRedeemed,
+
+    /// A code this build does not know, read as no reset.
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Deserialize)]
 struct ConsumeResponse {
-    /// Whether the window actually reopened.
-    #[serde(default)]
-    success: Option<bool>,
+    code: ConsumeCode,
 }
 
 /// The reset credits the account has left.
@@ -45,20 +61,22 @@ struct ConsumeResponse {
 pub async fn reset_credits(http: &Client, base_url: &str) -> Option<ResetCredits> {
     let url = format!("{}/{ACCOUNT_PATH}/rate-limit-reset-credits", root(base_url));
 
-    match http.get(&url).send().await {
-        Ok(response) if response.status().is_success() => match response.json().await {
-            Ok(credits) => Some(credits),
-            Err(error) => {
-                debug!(%error, "Could not read the account's reset credits.");
-                None
-            }
-        },
+    let response = match http.get(&url).send().await {
+        Ok(response) if response.status().is_success() => response,
         Ok(response) => {
             debug!(status = %response.status(), "Reset credits are unavailable.");
-            None
+            return None;
         }
         Err(error) => {
             debug!(%error, "Could not reach the reset-credit endpoint.");
+            return None;
+        }
+    };
+
+    match response.text().await {
+        Ok(body) => parse_credits(&body),
+        Err(error) => {
+            debug!(%error, "Could not read the account's reset credits.");
             None
         }
     }
@@ -67,29 +85,25 @@ pub async fn reset_credits(http: &Client, base_url: &str) -> Option<ResetCredits
 /// Spend one reset credit, reopening the spent usage window.
 ///
 /// `redeem_request_id` makes the redemption idempotent: retrying with the same
-/// id spends the same credit once, so a retried request cannot burn two.
+/// id spends the same credit once.
+/// The backend picks which credit to spend.
 ///
-/// Returns whether a window actually reopened.
+/// Returns whether a window reopened.
 /// A refusal is reported as `false` rather than an error for the same reason as
 /// [`reset_credits`]: the caller's fallback is the chain it was already about
 /// to walk.
-pub async fn consume_reset_credit(
-    http: &Client,
-    base_url: &str,
-    redeem_request_id: &str,
-    credit_id: Option<&str>,
-) -> bool {
+pub async fn consume_reset_credit(http: &Client, base_url: &str, redeem_request_id: &str) -> bool {
     let url = format!(
         "{}/{ACCOUNT_PATH}/rate-limit-reset-credits/consume",
         root(base_url)
     );
 
-    let mut body = serde_json::json!({ "redeem_request_id": redeem_request_id });
-    if let Some(credit_id) = credit_id {
-        body["credit_id"] = credit_id.into();
-    }
-
-    let response = match http.post(&url).json(&body).send().await {
+    let response = match http
+        .post(&url)
+        .json(&consume_body(redeem_request_id))
+        .send()
+        .await
+    {
         Ok(response) => response,
         Err(error) => {
             warn!(%error, "Could not reach the reset-credit endpoint.");
@@ -102,12 +116,45 @@ pub async fn consume_reset_credit(
         return false;
     }
 
-    match response.json::<ConsumeResponse>().await {
-        // A body that parses but reports nothing is taken at its word: the
-        // request succeeded, so the window is open.
-        Ok(consumed) => consumed.success.unwrap_or(true),
+    match response.text().await {
+        Ok(body) => window_reopened(&body),
         Err(error) => {
             debug!(%error, "Could not read the redemption result.");
+            false
+        }
+    }
+}
+
+/// Read the credit listing, or `None` when it cannot be parsed.
+fn parse_credits(body: &str) -> Option<ResetCredits> {
+    serde_json::from_str(body)
+        .inspect_err(|error| debug!(%error, "Could not parse the account's reset credits."))
+        .ok()
+}
+
+/// The body of a redemption request.
+///
+/// No `credit_id`: the backend spends one that is available, which spares JP
+/// from telling an available credit apart from a redeemed one.
+fn consume_body(redeem_request_id: &str) -> Value {
+    json!({ "redeem_request_id": redeem_request_id })
+}
+
+/// Whether a redemption's `200` body reports a reopened window.
+///
+/// The endpoint answers `200` for a redemption that did nothing, with a `code`
+/// saying why, so the status alone proves nothing.
+fn window_reopened(body: &str) -> bool {
+    match serde_json::from_str::<ConsumeResponse>(body) {
+        Ok(response) => {
+            debug!(code = ?response.code, "Reset credit redemption answered.");
+            matches!(
+                response.code,
+                ConsumeCode::Reset | ConsumeCode::AlreadyRedeemed
+            )
+        }
+        Err(error) => {
+            debug!(%error, "Could not parse the redemption result.");
             false
         }
     }

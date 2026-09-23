@@ -152,6 +152,39 @@ fn test_bare_profile_with_multiple_profiles_is_error() {
     );
 }
 
+/// Every chain entry an error tells the user to write has to parse, or
+/// following the advice produces another configuration error.
+#[test]
+fn test_every_suggested_entry_parses() {
+    for error in [
+        ResolveError::UnknownProfile {
+            name: "work".to_owned(),
+        },
+        ResolveError::NoProfiles,
+        ResolveError::AmbiguousProfile {
+            names: vec!["personal".to_owned(), "work".to_owned()],
+        },
+    ] {
+        let message = error.to_string();
+        let suggested: Vec<_> = message
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .filter(|quoted| quoted.starts_with("subscription"))
+            .map(|quoted| quoted.replace("<name>", "work"))
+            .collect();
+
+        assert!(!suggested.is_empty(), "{message}");
+        for entry in suggested {
+            assert_matches!(
+                entry.parse::<AuthEntry>(),
+                Ok(AuthEntry::Subscription(_)),
+                "{message}"
+            );
+        }
+    }
+}
+
 #[test]
 fn test_unknown_profile_is_error_even_with_later_entries() {
     // A chain entry naming a nonexistent profile is a config-shaped
@@ -275,7 +308,7 @@ fn test_multi_entry_chain_exhaustion_lists_reasons() {
 
 #[test]
 fn test_selected_entry_names_the_resolved_profile() {
-    // A bare `profile` entry reports the profile it resolved to, so a log
+    // A bare `subscription` entry reports the profile it resolved to, so a log
     // line or a switch notice names a concrete credential rather than the
     // ambiguous chain entry the user wrote.
     let config = anthropic_config(&["subscription"], UNSET_ENV_VAR);

@@ -1,3 +1,5 @@
+use schematic::{SchemaBuilder, SchemaType};
+
 use super::*;
 
 fn many(pairs: &[(&str, &str)]) -> ApiKeyEnv {
@@ -69,6 +71,37 @@ fn an_unknown_name_reports_the_configured_ones() {
     let message = keys.variable(Some("persnoal")).unwrap_err().to_string();
     assert!(message.contains("persnoal"), "{message}");
     assert!(message.contains("personal"), "{message}");
+}
+
+/// The schema describes both forms `Deserialize` accepts, so a validator or an
+/// editor does not reject the named-key map.
+#[test]
+fn the_schema_accepts_a_variable_or_a_map_of_variables() {
+    let schema = SchemaBuilder::build_root::<ApiKeyEnv>();
+    let SchemaType::Union(union) = schema.ty else {
+        panic!("expected a union, got {:?}", schema.ty)
+    };
+
+    let mut has_string = false;
+    let mut has_map = false;
+
+    for variant in union.variants_types {
+        match variant.ty {
+            SchemaType::String(_) => has_string = true,
+            SchemaType::Object(object) => {
+                assert!(matches!(object.key_type.ty, SchemaType::String(_)));
+                assert!(matches!(object.value_type.ty, SchemaType::String(_)));
+                has_map = true;
+            }
+            ty => panic!("unexpected variant: {ty:?}"),
+        }
+    }
+
+    assert!(has_string, "`api_key_env = \"KEY\"` must be described");
+    assert!(
+        has_map,
+        "`api_key_env = {{ work = \"KEY\" }}` must be described"
+    );
 }
 
 /// Both forms have to survive a round trip, since one of them is what every

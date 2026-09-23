@@ -183,14 +183,37 @@ fn test_device_poll_interval_survives_a_missing_interval() {
     assert_eq!(device.poll_interval(), Duration::from_secs(8));
 }
 
+/// A refusal is terminal for the credential; the caller marks a profile for
+/// re-login on it alone.
 #[test]
-fn test_rejection_is_distinguished_from_transport_failure() {
-    let rejected = OauthError::Rejected {
-        status: 400,
-        body: "bad grant".to_owned(),
-    };
-    assert!(rejected.is_rejection());
+fn test_only_a_refusal_is_a_rejection() {
+    for status in [400, 401, 403] {
+        let refused = OauthError::Status {
+            status,
+            body: "invalid_grant".to_owned(),
+        };
+        assert!(refused.is_rejection(), "HTTP {status}");
+    }
 
-    let timeout = OauthError::DeviceTimeout;
-    assert!(!timeout.is_rejection());
+    assert!(!OauthError::DeviceTimeout.is_rejection());
+}
+
+/// The token endpoint being throttled or down says nothing about the stored
+/// credential.
+///
+/// Retiring a profile over one would skip it on every later invocation and move
+/// the user onto per-token billing.
+#[test]
+fn test_a_throttle_or_outage_is_not_a_rejection() {
+    for status in [408, 429, 500, 502, 503, 504] {
+        let transient = OauthError::Status {
+            status,
+            body: "upstream unavailable".to_owned(),
+        };
+
+        assert!(
+            !transient.is_rejection(),
+            "HTTP {status} must not retire the profile"
+        );
+    }
 }

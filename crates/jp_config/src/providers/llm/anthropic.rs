@@ -32,7 +32,7 @@ pub struct AnthropicConfig {
     /// - `api_key:<name>`: Metered billing with the named key, when
     ///   `api_key_env` maps several.
     /// - `subscription`: A plan's allowance, using the sole stored credential.
-    ///   Log in with `jp provider auth login llm.anthropic`.
+    ///   Log in with `jp provider llm auth login anthropic`.
     /// - `subscription:<name>`: The named stored credential.
     ///
     /// `api` and `sub` are accepted as shorthand for the two kinds.

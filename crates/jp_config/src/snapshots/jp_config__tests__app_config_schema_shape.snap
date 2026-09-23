@@ -1334,7 +1334,10 @@ providers: ProviderConfig
               provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "vllm" | "xai"
             |: string
     anthropic: AnthropicConfig
-      api_key_env?: string
+      api_key_env?: ApiKeyEnv
+        |: string
+        |:
+          *: string
       auth?: [string]
       base_url?: string
       beta_headers?: MergeableVec
@@ -1346,15 +1349,24 @@ providers: ProviderConfig
           value?: [string]
       chain_on_max_tokens?: bool
     cerebras: CerebrasConfig
-      api_key_env?: string
+      api_key_env?: ApiKeyEnv
+        |: string
+        |:
+          *: string
       auth?: [string]
       base_url?: string
     deepseek: DeepseekConfig
-      api_key_env?: string
+      api_key_env?: ApiKeyEnv
+        |: string
+        |:
+          *: string
       auth?: [string]
       base_url?: string
     google: GoogleConfig
-      api_key_env?: string
+      api_key_env?: ApiKeyEnv
+        |: string
+        |:
+          *: string
       auth?: [string]
       base_url?: string
     llamacpp: LlamacppConfig
@@ -1362,20 +1374,29 @@ providers: ProviderConfig
     ollama: OllamaConfig
       base_url?: string
     openai: OpenaiConfig
-      api_key_env?: string
+      api_key_env?: ApiKeyEnv
+        |: string
+        |:
+          *: string
       auth?: [string]
       base_url?: string
       base_url_env?: string
       codex_base_url?: string
       codex_base_url_env?: string
     openrouter: OpenrouterConfig
-      api_key_env?: string
+      api_key_env?: ApiKeyEnv
+        |: string
+        |:
+          *: string
       app_name?: string
       app_referrer: string | null
       auth?: [string]
       base_url?: string
     vllm: VllmConfig
-      api_key_env?: string
+      api_key_env?: ApiKeyEnv
+        |: string
+        |:
+          *: string
       auth?: [string]
       base_url?: string
   mcp: MergeableMap_McpProviderConfig

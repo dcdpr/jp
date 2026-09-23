@@ -45,27 +45,27 @@ pub enum ResolveError {
     #[error(transparent)]
     Store(#[from] StoreError),
 
-    /// A `profile:<name>` entry names a profile that is not stored.
+    /// A `subscription:<name>` entry names a profile that is not stored.
     #[error(
-        "providers.llm.anthropic.auth entry `profile:{name}` matches no stored profile; run `jp \
-         provider llm auth login anthropic --name {name}` to create it"
+        "providers.llm.anthropic.auth entry `subscription:{name}` matches no stored credential; \
+         run `jp provider llm auth login anthropic --name {name}` to create it"
     )]
     UnknownProfile {
         /// The profile name the chain entry refers to.
         name: String,
     },
 
-    /// A bare `profile` entry with zero stored profiles.
+    /// A bare `subscription` entry with zero stored profiles.
     #[error(
-        "providers.llm.anthropic.auth entry `profile` matches no stored profile; run `jp provider \
-         llm auth login anthropic` to create one"
+        "providers.llm.anthropic.auth entry `subscription` matches no stored credential; run `jp \
+         provider llm auth login anthropic` to create one"
     )]
     NoProfiles,
 
-    /// A bare `profile` entry with multiple stored profiles.
+    /// A bare `subscription` entry with multiple stored profiles.
     #[error(
-        "providers.llm.anthropic.auth entry `profile` is ambiguous: multiple profiles are \
-         stored ({}); name one with `profile:<name>`",
+        "providers.llm.anthropic.auth entry `subscription` is ambiguous: several credentials are \
+         stored ({}); name one with `subscription:<name>`",
         names.join(", ")
     )]
     AmbiguousProfile {
@@ -156,8 +156,8 @@ enum Landing {
 /// it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Selected {
-    /// The entry, with a bare `profile` normalized to the profile it resolved
-    /// to.
+    /// The entry, with a bare `subscription` normalized to the profile it
+    /// resolved to.
     pub entry: AuthEntry,
 
     /// The generation the stored profile held when this resolution read it.
@@ -888,20 +888,20 @@ fn walk_profile(
     // tried set holds the profile it resolved to.
     if tried.contains(entry) || tried.contains(&selected.entry) {
         return Ok(ProfileStep::Skip(format!(
-            "profile:{profile}: already tried for this request"
+            "subscription:{profile}: already tried for this request"
         )));
     }
 
     if stored.needs_relogin {
         return Ok(ProfileStep::Skip(format!(
-            "profile:{profile} needs re-login; run `jp provider llm auth login anthropic --name \
-             {profile}`"
+            "subscription:{profile} needs re-login; run `jp provider llm auth login anthropic \
+             --name {profile}`"
         )));
     }
 
     if let Some((scope, until)) = stored.active_cooldown(model, now) {
         return Ok(ProfileStep::Skip(format!(
-            "profile:{profile} cooling down until {until} ({scope})"
+            "subscription:{profile} cooling down until {until} ({scope})"
         )));
     }
 
@@ -969,8 +969,8 @@ fn skip(notices: &mut Vec<String>, reasons: &mut Vec<String>, reason: String) {
 
 /// Look up the profile a chain entry refers to.
 ///
-/// A named entry must exist; a bare `profile` entry refers to the sole stored
-/// profile and errors on zero or multiple candidates.
+/// A named entry must exist; a bare `subscription` entry refers to the sole
+/// stored profile and errors on zero or multiple candidates.
 fn lookup_profile<'a>(
     store: Option<&'a StoreDocument>,
     name: Option<&str>,

@@ -69,12 +69,12 @@ pub enum OauthError {
     #[error("could not reach the OpenAI OAuth endpoint")]
     Transport(#[from] reqwest::Error),
 
-    /// The endpoint refused the grant.
+    /// The endpoint answered with a non-success status.
     ///
-    /// A refused refresh token cannot be recovered by retrying; the profile
-    /// needs a fresh login.
-    #[error("OAuth request rejected (HTTP {status}): {body}")]
-    Rejected { status: u16, body: String },
+    /// Only some statuses mean the grant was refused; see
+    /// [`OauthError::is_rejection`].
+    #[error("OAuth request failed (HTTP {status}): {body}")]
+    Status { status: u16, body: String },
 
     #[error("could not parse the OAuth token response: {0}")]
     Malformed(#[from] serde_json::Error),
@@ -85,14 +85,20 @@ pub enum OauthError {
 }
 
 impl OauthError {
-    /// Whether the grant itself was refused, as opposed to the request not
-    /// getting through.
+    /// Whether the grant itself was refused, rather than the request failing to
+    /// get through.
     ///
-    /// Only a refusal means the stored credential is dead; a transport failure
-    /// is worth another attempt later.
+    /// Only a refusal means the stored credential is dead and the profile needs
+    /// a fresh login.
+    /// A throttle or a server fault says nothing about the credential.
+    ///
+    /// A refused grant is `400` (RFC 6749 reports `invalid_grant` there),
+    /// `401`, or `403`.
+    /// Every other status, including `429` and the `5xx` range, is worth
+    /// another attempt later.
     #[must_use]
     pub fn is_rejection(&self) -> bool {
-        matches!(self, Self::Rejected { .. })
+        matches!(self, Self::Status { status, .. } if matches!(status, 400 | 401 | 403))
     }
 }
 
@@ -321,7 +327,7 @@ pub async fn start_device_auth() -> Result<DeviceAuth, OauthError> {
     let text = response.text().await?;
 
     if !status.is_success() {
-        return Err(OauthError::Rejected {
+        return Err(OauthError::Status {
             status: status.as_u16(),
             body: text,
         });
@@ -370,7 +376,7 @@ pub async fn poll_device_auth(device: &DeviceAuth) -> Result<DevicePoll, OauthEr
     let text = response.text().await?;
 
     if !status.is_success() {
-        return Err(OauthError::Rejected {
+        return Err(OauthError::Status {
             status: status.as_u16(),
             body: text,
         });
@@ -412,7 +418,7 @@ async fn post_token(form: Vec<(String, String)>, now: DateTime<Utc>) -> Result<T
     let text = response.text().await?;
 
     if !status.is_success() {
-        return Err(OauthError::Rejected {
+        return Err(OauthError::Status {
             status: status.as_u16(),
             body: text,
         });

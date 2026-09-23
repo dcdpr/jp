@@ -119,14 +119,25 @@ impl Snapshot {
 /// The headers say which window, and when it reopens, which is the difference
 /// between a cooldown that expires on its own and one guessed from a default.
 ///
-/// Headers that report no spent window leave the error alone: a request refused
-/// for another reason should not retire the credential that sent it.
-pub fn apply(error: &mut StreamError, headers: &HeaderMap) {
+/// Only a limit the request for `model` draws from counts: its own model's
+/// family, or the account-wide one.
+/// A spent window on another model's family says nothing about this request.
+///
+/// The error is left alone unless it already reads as a limit (a `429`, or a
+/// quota refusal), and unless a relevant window is spent: a request refused for
+/// another reason should not retire the credential that sent it.
+pub fn apply(error: &mut StreamError, headers: &HeaderMap, model: &str) {
+    if !matches!(
+        error.kind,
+        StreamErrorKind::RateLimit
+            | StreamErrorKind::InsufficientQuota
+            | StreamErrorKind::SubscriptionExhausted
+    ) {
+        return;
+    }
+
     let snapshots = parse_all(headers);
-    let Some((snapshot, window)) = snapshots
-        .iter()
-        .find_map(|snapshot| snapshot.spent().map(|window| (snapshot, window)))
-    else {
+    let Some((snapshot, window)) = spent_for(&snapshots, model) else {
         return;
     };
 
@@ -135,6 +146,28 @@ pub fn apply(error: &mut StreamError, headers: &HeaderMap) {
     error.kind = StreamErrorKind::SubscriptionExhausted;
     error.quota_scope = Some(snapshot.scope());
     error.quota_reset = window.resets_at;
+}
+
+/// The spent limit a request for `model` ran into, preferring the model's own
+/// family over the account-wide one.
+///
+/// The model's own family is narrower: recording it leaves the account free for
+/// other models.
+fn spent_for<'a>(snapshots: &'a [Snapshot], model: &str) -> Option<(&'a Snapshot, &'a Window)> {
+    let own = snapshots.iter().find(|snapshot| {
+        snapshot
+            .limit_name
+            .as_deref()
+            .is_some_and(|name| name.eq_ignore_ascii_case(model))
+    });
+    let account = snapshots
+        .iter()
+        .find(|snapshot| snapshot.limit_id == DEFAULT_LIMIT_ID);
+
+    [own, account]
+        .into_iter()
+        .flatten()
+        .find_map(|snapshot| snapshot.spent().map(|window| (snapshot, window)))
 }
 
 /// The account-wide cooldown scope.
