@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Mutex};
 
 use jp_config::model::id::{ModelIdConfig, ProviderId};
 use jp_conversation::{
@@ -26,6 +26,11 @@ fn structured_provider(data: Value) -> MockProvider {
         Event::flush(0),
         Event::Finished(FinishReason::Completed),
     ])
+}
+
+/// A sink for tests that don't look at provider notices.
+fn discard_notices() -> NoticeSink {
+    NoticeSink::new(|_| {})
 }
 
 fn test_model() -> ModelDetails {
@@ -139,7 +144,8 @@ async fn llm_backend_returns_answer() {
         ..test_inquiry_config(structured_provider(json!({ "answer": true })))
     };
 
-    let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
+    let backend =
+        LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![], discard_notices());
 
     let result = backend
         .inquire(
@@ -178,7 +184,8 @@ async fn llm_backend_applies_its_assistant_config_to_the_request() {
         ..test_inquiry_config(provider)
     };
 
-    let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
+    let backend =
+        LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![], discard_notices());
 
     backend
         .inquire(
@@ -207,11 +214,56 @@ async fn llm_backend_applies_its_assistant_config_to_the_request() {
     );
 }
 
+/// An inquiry that runs on another credential says so.
+///
+/// The inquiry model can differ from the assistant's, so the turn's own stream
+/// may never carry the notice.
+#[tokio::test]
+async fn llm_backend_delivers_provider_notices() {
+    let provider = MockProvider::new(vec![
+        Event::Notice("subscription limit reached (personal)".to_owned()),
+        Event::structured(0, json!({ "answer": true }).to_string()),
+        Event::flush(0),
+        Event::Finished(FinishReason::Completed),
+    ]);
+
+    let seen = Arc::new(Mutex::new(vec![]));
+    let notices = NoticeSink::new({
+        let seen = Arc::clone(&seen);
+        move |notice| seen.lock().unwrap().push(notice.to_owned())
+    });
+
+    let backend = LlmInquiryBackend::new(
+        test_inquiry_config(provider),
+        IndexMap::new(),
+        vec![],
+        vec![],
+        notices,
+    );
+
+    let answer = backend
+        .inquire(
+            test_events(),
+            &tool_call_inquiry_id("call_1", "confirm", 1),
+            "test_tool",
+            &Question::boolean("confirm", "Proceed?").unwrap(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("the inquiry is answered");
+
+    assert_eq!(answer, json!(true));
+    assert_eq!(*seen.lock().unwrap(), [
+        "subscription limit reached (personal)"
+    ]);
+}
+
 #[tokio::test]
 async fn llm_backend_returns_error_on_missing_structured_data() {
     let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
     let config = test_inquiry_config(MockProvider::with_message("I don't know"));
-    let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
+    let backend =
+        LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![], discard_notices());
 
     let result = backend
         .inquire(
@@ -230,7 +282,8 @@ async fn llm_backend_returns_error_on_missing_structured_data() {
 async fn llm_backend_returns_error_on_answer_extraction_failure() {
     let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
     let config = test_inquiry_config(structured_provider(json!({ "unrelated": true })));
-    let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
+    let backend =
+        LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![], discard_notices());
 
     let result = backend
         .inquire(
@@ -251,7 +304,8 @@ async fn llm_backend_returns_error_on_null_answer() {
     // than produce an `Answered { answer: Null }` record.
     let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
     let config = test_inquiry_config(structured_provider(json!({ "answer": null })));
-    let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
+    let backend =
+        LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![], discard_notices());
 
     let result = backend
         .inquire(
@@ -269,7 +323,8 @@ async fn llm_backend_returns_error_on_null_answer() {
 #[tokio::test]
 async fn llm_backend_returns_cancelled_when_token_is_already_cancelled() {
     let config = test_inquiry_config(structured_provider(json!({ "answer": true })));
-    let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
+    let backend =
+        LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![], discard_notices());
     let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
 
     let token = CancellationToken::new();
@@ -295,7 +350,8 @@ async fn llm_backend_passes_select_question() {
         .unwrap()
         .with_options(vec!["A".to_string(), "B".to_string()]);
     let config = test_inquiry_config(structured_provider(json!({ "answer": "B" })));
-    let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
+    let backend =
+        LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![], discard_notices());
 
     let result = backend
         .inquire(
@@ -315,7 +371,8 @@ async fn llm_backend_passes_text_question() {
     let inquiry_id = tool_call_inquiry_id("call_txt", "reason", 1);
     let question = Question::text("reason", "Why?").unwrap();
     let config = test_inquiry_config(structured_provider(json!({ "answer": "Because reasons" })));
-    let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
+    let backend =
+        LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![], discard_notices());
 
     let result = backend
         .inquire(
@@ -406,7 +463,8 @@ async fn llm_backend_uses_per_question_override() {
 
     let overrides = IndexMap::from([(("test_tool".into(), "confirm".into()), override_config)]);
 
-    let backend = LlmInquiryBackend::new(default_config, overrides, vec![], vec![]);
+    let backend =
+        LlmInquiryBackend::new(default_config, overrides, vec![], vec![], discard_notices());
 
     let result = backend
         .inquire(
@@ -502,7 +560,8 @@ async fn dedicated_model_backend_returns_answer() {
         max_response_bytes: Some(1_048_576),
     };
 
-    let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
+    let backend =
+        LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![], discard_notices());
 
     let result = backend
         .inquire(

@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::id::{ModelIdConfig, ProviderId},
@@ -7,7 +9,7 @@ use jp_conversation::{ConversationStream, thread::Thread};
 use super::*;
 use crate::{
     error::{Error, StreamError, StreamErrorKind},
-    event::Event,
+    event::{Event, FinishReason, NoticeSink},
     model::ModelDetails,
     provider::mock::MockProvider,
     query::Truncation,
@@ -162,6 +164,90 @@ fn stream_error_is_retryable() {
     assert!(!StreamError::other("test").is_retryable());
 }
 
+/// A sink that records every notice it is handed.
+fn recording_sink() -> (NoticeSink, Arc<Mutex<Vec<String>>>) {
+    let seen = Arc::new(Mutex::new(vec![]));
+    let sink = NoticeSink::new({
+        let seen = Arc::clone(&seen);
+        move |notice| seen.lock().unwrap().push(notice.to_owned())
+    });
+
+    (sink, seen)
+}
+
+/// A notice reported by an attempt that then failed still reaches the sink.
+///
+/// The switch onto per-token billing that a notice announces already happened;
+/// discarding it with the rest of the failed attempt would leave the only
+/// record of it in the attempt nobody sees.
+#[tokio::test]
+async fn collect_with_retry_delivers_notices_from_an_attempt_that_failed() {
+    let provider = MockProvider::with_batches(vec![
+        // Reports a credential switch, then dies in a way worth retrying.
+        vec![
+            Event::Notice("subscription limit reached (personal)".to_owned()),
+            Event::message(0, "partial"),
+        ],
+        vec![
+            Event::Notice("continuing with api_key".to_owned()),
+            Event::message(0, "done"),
+            Event::Finished(FinishReason::Completed),
+        ],
+    ]);
+
+    let config = RetryConfig {
+        max_retries: 2,
+        base_backoff_ms: 1,
+        max_backoff_secs: 1,
+        max_response_bytes: None,
+    };
+
+    let (sink, seen) = recording_sink();
+    let events = collect_with_retry(&provider, &model(), empty_query(), &config, &sink)
+        .await
+        .expect("the second attempt completes");
+
+    assert_eq!(*seen.lock().unwrap(), [
+        "subscription limit reached (personal)",
+        "continuing with api_key",
+    ]);
+
+    // The failed attempt's content is discarded, and the notices went to the
+    // sink rather than into the events.
+    assert_eq!(events, [
+        Event::message(0, "done"),
+        Event::Finished(FinishReason::Completed),
+    ]);
+}
+
+/// A request that fails outright still reports what it did on the way.
+///
+/// The notice is the only record that the request ran on a credential the user
+/// did not expect; an error in its place would say nothing about the billing.
+#[tokio::test]
+async fn collect_with_retry_delivers_notices_when_the_request_fails() {
+    let provider = MockProvider::with_batches(vec![vec![
+        Event::Notice("subscription limit reached (personal)".to_owned()),
+        Event::message(0, "partial"),
+    ]]);
+
+    let config = RetryConfig {
+        max_retries: 0,
+        base_backoff_ms: 1,
+        max_backoff_secs: 1,
+        max_response_bytes: None,
+    };
+
+    let (sink, seen) = recording_sink();
+    collect_with_retry(&provider, &model(), empty_query(), &config, &sink)
+        .await
+        .expect_err("a stream without a terminal event fails");
+
+    assert_eq!(*seen.lock().unwrap(), [
+        "subscription limit reached (personal)"
+    ]);
+}
+
 #[tokio::test]
 async fn collect_with_retry_applies_the_output_ceiling_without_retrying() {
     // One scripted request is deliberate. If OutputLimit is misclassified as
@@ -178,7 +264,8 @@ async fn collect_with_retry_applies_the_output_ceiling_without_retrying() {
         max_response_bytes: Some(25),
     };
 
-    let error = collect_with_retry(&provider, &model(), empty_query(), &config)
+    let (sink, _) = recording_sink();
+    let error = collect_with_retry(&provider, &model(), empty_query(), &config, &sink)
         .await
         .expect_err("response must stop at the configured ceiling");
 

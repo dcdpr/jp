@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use jp_config::{AppConfig, model::ModelConfig, providers::llm::LlmProviderConfig};
 use jp_conversation::{ConversationId, ConversationStream};
 use jp_llm::{
+    event::NoticeSink,
     provider,
     title::{self, TitleRequest},
 };
@@ -28,6 +29,9 @@ pub struct TitleGeneratorTask {
     /// When `false`, the OSC-2 title-update side effect on task sync is
     /// suppressed — the bytes would otherwise leak into a captured pipe.
     pub is_tty: bool,
+    /// Where the title request's provider notices go, such as a switch onto
+    /// another credential.
+    pub notices: NoticeSink,
 }
 
 impl TitleGeneratorTask {
@@ -36,13 +40,14 @@ impl TitleGeneratorTask {
         events: ConversationStream,
         config: &AppConfig,
         is_tty: bool,
+        notices: NoticeSink,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let model = title::resolve_model(config, None);
 
-        // Fail fast on a misconfigured title provider (e.g. a missing API
-        // key environment variable). Without this, the failure only surfaces
-        // inside the spawned task, after the query has already committed to
-        // waiting for it at teardown.
+        // Fail fast on a misconfigured title provider (e.g. a missing API key
+        // environment variable, or a credential chain with no usable entry).
+        // Without this, the failure only surfaces inside the spawned task,
+        // after the query has already committed to waiting for it at teardown.
         provider::preflight(model.id.resolved().provider, &config.providers.llm)?;
 
         Ok(Self {
@@ -53,6 +58,7 @@ impl TitleGeneratorTask {
             title: None,
             max_response_bytes: config.assistant.request.max_response_bytes.bytes(),
             is_tty,
+            notices,
         })
     }
 
@@ -69,6 +75,7 @@ impl TitleGeneratorTask {
             count: 1,
             rejected: vec![],
             max_response_bytes: self.max_response_bytes,
+            notices: self.notices.clone(),
         })
         .await?;
 

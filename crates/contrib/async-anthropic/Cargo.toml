@@ -1,0 +1,29 @@
+[package]
+description = "Anthropic Rust Client."
+edition = "2024"
+license = "MIT"
+name = "async-anthropic"
+publish = false
+version = "0.6.0"
+
+[dependencies]
+backon = { workspace = true, features = ["tokio", "tokio-sleep"] }
+derive_builder = { workspace = true, features = ["std"] }
+eventsource-stream = { workspace = true }
+futures = { workspace = true }
+getrandom = { workspace = true }
+reqwest = { workspace = true, features = ["json", "stream"] }
+secrecy = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true, features = ["attributes"] }
+
+[dev-dependencies]
+httpmock = { workspace = true }
+test-log = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+
+[lints]
+workspace = true

@@ -46,7 +46,7 @@ use jp_inquire::{
 use jp_llm::{
     Error as LlmError, EventStream, Provider,
     error::StreamError,
-    event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction},
+    event::{Event, EventMatcher, EventPatch, FinishReason, NoticeSink, PatchAction},
     model::ModelDetails,
     provider::mock::MockProvider,
     query::ChatQuery,
@@ -6035,9 +6035,16 @@ async fn inquiry_ceiling_honors_the_global_inquiry_override() {
     let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
     let model = inquiry_mock_model();
 
-    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
-        .await
-        .expect("the inquiry backend builds");
+    let backend = build_inquiry_backend(
+        &config,
+        vec![],
+        model,
+        provider,
+        vec![],
+        NoticeSink::new(|_| {}),
+    )
+    .await
+    .expect("the inquiry backend builds");
 
     assert_eq!(
         backend
@@ -6068,9 +6075,16 @@ async fn inquiry_ceiling_survives_a_sibling_only_request_override() {
     let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
     let model = inquiry_mock_model();
 
-    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
-        .await
-        .expect("the inquiry backend builds");
+    let backend = build_inquiry_backend(
+        &config,
+        vec![],
+        model,
+        provider,
+        vec![],
+        NoticeSink::new(|_| {}),
+    )
+    .await
+    .expect("the inquiry backend builds");
 
     assert_eq!(
         backend
@@ -6099,9 +6113,16 @@ async fn inquiry_ceiling_can_be_disabled_independently() {
     let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
     let model = inquiry_mock_model();
 
-    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
-        .await
-        .expect("the inquiry backend builds");
+    let backend = build_inquiry_backend(
+        &config,
+        vec![],
+        model,
+        provider,
+        vec![],
+        NoticeSink::new(|_| {}),
+    )
+    .await
+    .expect("the inquiry backend builds");
 
     assert_eq!(
         backend
@@ -6142,9 +6163,16 @@ async fn inquiry_ceiling_honors_the_per_question_override() {
     let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
     let model = inquiry_mock_model();
 
-    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
-        .await
-        .expect("the inquiry backend builds");
+    let backend = build_inquiry_backend(
+        &config,
+        vec![],
+        model,
+        provider,
+        vec![],
+        NoticeSink::new(|_| {}),
+    )
+    .await
+    .expect("the inquiry backend builds");
 
     assert_eq!(
         backend
@@ -7770,7 +7798,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
 fn inquiry_model_override_error_names_the_override() {
     let error = Error::InquiryModelOverride {
         model: "openrouter/foo/bar".to_owned(),
-        source: LlmError::MissingEnv("OPENROUTER_API_KEY".to_owned()),
+        source: Box::new(LlmError::MissingEnv("OPENROUTER_API_KEY".to_owned())),
     };
 
     // The variant names the override and keeps the cause chain intact.

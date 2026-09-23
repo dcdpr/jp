@@ -15,6 +15,7 @@ use jp_conversation::{
     SummarySource, ToolCallPolicy,
     event::{ChatResponse, ToolCallRequest, ToolCallResponse},
 };
+use jp_llm::event::NoticeSink;
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_workspace::Workspace;
 use serde_json::{Map, Value};
@@ -423,6 +424,7 @@ fn verbatim_summary_is_stored_as_authored_text() {
             &[summary_rule(Some("we settled on the layered loader"))],
             &parse_compact(&[]).range,
             Some(&Printer::sink()),
+            &NoticeSink::new(|_| {}),
         ))
         .unwrap();
 
@@ -451,6 +453,7 @@ fn blank_verbatim_summary_is_rejected() {
             &[summary_rule(Some("   "))],
             &parse_compact(&[]).range,
             Some(&Printer::sink()),
+            &NoticeSink::new(|_| {}),
         ))
         .unwrap_err();
 
@@ -602,6 +605,7 @@ fn verbatim_summary_refuses_to_widen_over_an_existing_summary() {
             &[rule],
             &parse_compact(&[]).range,
             Some(&Printer::sink()),
+            &NoticeSink::new(|_| {}),
         ))
         .unwrap_err();
 
@@ -636,6 +640,7 @@ fn generated_summary_refuses_to_widen_over_verbatim_text() {
             &[rule],
             &parse_compact(&[]).range,
             Some(&Printer::sink()),
+            &NoticeSink::new(|_| {}),
         ))
         .unwrap_err();
 
@@ -684,6 +689,7 @@ fn a_later_overlap_is_refused_before_any_summarizer_request() {
             &[generated, conflicting],
             &parse_compact(&[]).range,
             Some(&Printer::sink()),
+            &NoticeSink::new(|_| {}),
         ))
         .unwrap_err();
 
@@ -714,6 +720,7 @@ fn verbatim_summary_covering_an_existing_summary_is_accepted() {
             &[summary_rule(Some("covers everything"))],
             &parse_compact(&[]).range,
             Some(&Printer::sink()),
+            &NoticeSink::new(|_| {}),
         ))
         .unwrap();
 
@@ -767,6 +774,7 @@ fn tool_calls_mode_maps_to_policy() {
                 std::slice::from_ref(&rule),
                 &TurnSelection::default(),
                 Some(&Printer::sink()),
+                &NoticeSink::new(|_| {}),
             ))
             .unwrap();
         assert_eq!(compactions.len(), 1, "non-empty range, mode {mode:?}");
@@ -802,6 +810,7 @@ fn keep_last_duration_covering_whole_conversation_compacts_nothing() {
             std::slice::from_ref(&rule),
             &TurnSelection::default(),
             Some(&Printer::sink()),
+            &NoticeSink::new(|_| {}),
         ))
         .unwrap();
     assert!(
@@ -846,6 +855,7 @@ fn from_last_compaction_resolves_against_original_stream_for_every_rule() {
             &rules,
             &compact.range,
             Some(&Printer::sink()),
+            &NoticeSink::new(|_| {}),
         ))
         .unwrap();
 
@@ -904,6 +914,7 @@ fn config_rule_strip_requests_blanks_args_through_projection() {
             &rules,
             &TurnSelection::default(),
             Some(&Printer::sink()),
+            &NoticeSink::new(|_| {}),
         ))
         .unwrap();
 
@@ -967,6 +978,7 @@ fn keep_first_composes_with_first() {
             &rules,
             &compact.range,
             Some(&Printer::sink()),
+            &NoticeSink::new(|_| {}),
         ))
         .unwrap();
 
@@ -995,6 +1007,7 @@ fn keep_last_composes_with_last() {
             &rules,
             &compact.range,
             Some(&Printer::sink()),
+            &NoticeSink::new(|_| {}),
         ))
         .unwrap();
 
@@ -1037,6 +1050,7 @@ fn from_end_bounds_agree_across_flags_and_dsl() {
                 &rules,
                 &compact.range,
                 Some(&Printer::sink()),
+                &NoticeSink::new(|_| {}),
             ))
             .unwrap();
 
@@ -1069,6 +1083,7 @@ fn first_and_last_compact_two_windows_and_skip_the_middle() {
             &rules,
             &compact.range,
             Some(&Printer::sink()),
+            &NoticeSink::new(|_| {}),
         ))
         .unwrap();
 
@@ -1158,6 +1173,7 @@ fn overlapping_first_and_last_windows_compact_once() {
             &rules,
             &compact.range,
             Some(&Printer::sink()),
+            &NoticeSink::new(|_| {}),
         ))
         .unwrap();
 
@@ -1188,6 +1204,7 @@ fn abutting_first_and_last_windows_compact_once() {
             &rules,
             &compact.range,
             Some(&Printer::sink()),
+            &NoticeSink::new(|_| {}),
         ))
         .unwrap();
 
@@ -1224,6 +1241,7 @@ fn cli_keep_first_replaces_the_configured_keep_first() {
             &rules,
             &compact.range,
             Some(&Printer::sink()),
+            &NoticeSink::new(|_| {}),
         ))
         .unwrap();
 
@@ -1254,6 +1272,7 @@ fn keep_first_clamps_rather_than_shifts_an_explicit_from() {
             &rules,
             &compact.range,
             Some(&Printer::sink()),
+            &NoticeSink::new(|_| {}),
         ))
         .unwrap();
 

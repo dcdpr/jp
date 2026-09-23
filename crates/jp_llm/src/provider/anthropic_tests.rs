@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use assert_matches::assert_matches;
+use async_anthropic::errors::UnifiedRateLimit;
 use indexmap::IndexMap;
 use jp_config::model::{
     id::ModelIdConfig,
@@ -99,9 +100,16 @@ async fn chaining_is_bounded_by_the_continuation_budget() {
         .build()
         .expect("a valid request");
 
-    let events: Vec<_> = call(client, request, MAX_CHAIN_DEPTH, false, None)
-        .collect()
-        .await;
+    let events: Vec<_> = call(
+        client,
+        request,
+        MAX_CHAIN_DEPTH,
+        false,
+        None,
+        resolve::QuotaWatch::new(None, None),
+    )
+    .collect()
+    .await;
 
     assert!(
         events.iter().all(std::result::Result::is_ok),
@@ -116,6 +124,226 @@ async fn chaining_is_bounded_by_the_continuation_budget() {
         usize::from(MAX_CHAIN_DEPTH) + 1,
         "a model that always truncates must exhaust the continuation budget and stop"
     );
+}
+
+/// A response that reports a spent allowance must not chain.
+///
+/// The continuation would run on the client already built for that credential,
+/// billing paid extra usage against a profile the same response just had JP
+/// mark spent.
+/// The turn ends at `max_tokens` instead.
+#[test(tokio::test)]
+async fn a_spent_window_stops_the_continuation() {
+    let server = MockServer::start_async().await;
+    let endpoint = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "text/event-stream; charset=utf-8")
+                .header("anthropic-ratelimit-unified-status", "rejected")
+                .body(max_tokens_sse_body());
+        })
+        .await;
+
+    let mut builder = Client::builder();
+    builder
+        .api_key("test-key")
+        .base_url(server.base_url())
+        .version("2023-06-01");
+    let client = builder.build().expect("a client for the mock server");
+
+    let request = types::CreateMessagesRequestBuilder::default()
+        .model("claude-test".to_owned())
+        .messages(vec![types::Message {
+            role: types::MessageRole::User,
+            content: types::MessageContentList(vec![types::MessageContent::Text(
+                "go on then".into(),
+            )]),
+        }])
+        .max_tokens(16)
+        .stream(true)
+        .build()
+        .expect("a valid request");
+
+    let events: Vec<_> = call(
+        client,
+        request,
+        MAX_CHAIN_DEPTH,
+        false,
+        None,
+        resolve::QuotaWatch::new(None, None),
+    )
+    .collect()
+    .await;
+
+    assert!(
+        events.iter().all(std::result::Result::is_ok),
+        "the turn should end cleanly, got: {events:?}"
+    );
+
+    // The budget was `MAX_CHAIN_DEPTH`, so without the spent-window check this
+    // is `MAX_CHAIN_DEPTH + 1` requests, each billed as extra usage.
+    assert_eq!(
+        endpoint.calls_async().await,
+        1,
+        "a spent allowance must not be chained against"
+    );
+}
+
+/// A response that reports a spent allowance must not trigger a forced-tool
+/// retry either.
+///
+/// The retry would run on the same client, so every escalating nudge is another
+/// request billed as extra usage against a profile JP has just marked spent.
+/// The turn ends without the tool, and a notice says so.
+#[test(tokio::test)]
+async fn a_spent_window_stops_the_forced_tool_retry() {
+    // The trailing blank line dispatches `message_stop`, which is what finishes
+    // a turn that did not stop on `max_tokens`.
+    let completed_without_tool = max_tokens_sse_body().replace("max_tokens", "end_turn") + "\n";
+
+    let server = MockServer::start_async().await;
+    let endpoint = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "text/event-stream; charset=utf-8")
+                .header("anthropic-ratelimit-unified-status", "rejected")
+                .body(completed_without_tool);
+        })
+        .await;
+
+    let mut builder = Client::builder();
+    builder
+        .api_key("test-key")
+        .base_url(server.base_url())
+        .version("2023-06-01");
+    let client = builder.build().expect("a client for the mock server");
+
+    let request = types::CreateMessagesRequestBuilder::default()
+        .model("claude-test".to_owned())
+        .messages(vec![types::Message {
+            role: types::MessageRole::User,
+            content: types::MessageContentList(vec![types::MessageContent::Text(
+                "call the tool".into(),
+            )]),
+        }])
+        .max_tokens(16)
+        .stream(true)
+        .build()
+        .expect("a valid request");
+
+    let fallback = ForcedToolFallback {
+        tool_choice: types::ToolChoice::any(),
+        strategy: ForceStrategy::EscalatingNudge {
+            remaining: SOFT_FORCE_MAX_RETRIES,
+        },
+    };
+
+    let events: Vec<Event> = call(
+        client,
+        request,
+        0,
+        false,
+        Some(fallback),
+        resolve::QuotaWatch::new(None, None),
+    )
+    .collect::<Vec<_>>()
+    .await
+    .into_iter()
+    .collect::<std::result::Result<_, _>>()
+    .expect("the turn should end cleanly");
+
+    // Without the spent-window check, each of the `SOFT_FORCE_MAX_RETRIES`
+    // nudges is another request.
+    assert_eq!(
+        endpoint.calls_async().await,
+        1,
+        "a spent allowance must not be retried against"
+    );
+
+    let tail: Vec<_> = events.iter().rev().take(2).rev().collect();
+    assert_matches!(
+        tail.as_slice(),
+        [Event::Notice(notice), Event::Finished(FinishReason::Completed)]
+            if notice == "the model did not call the required tool; not retrying, since the \
+                           subscription window is spent and a retry would be billed as extra usage"
+    );
+}
+
+/// A thinking block the API refuses is a request-validation failure, so it is
+/// answered at admission rather than on the stream.
+///
+/// Drives a real 400 through `call`: a stale signature must produce the patch
+/// and retry that let the caller rebuild its history, not a terminal error the
+/// user cannot act on.
+#[test(tokio::test)]
+async fn a_rejected_thinking_block_is_repaired_at_admission() {
+    let server = MockServer::start_async().await;
+    let endpoint = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/v1/messages");
+            then.status(400)
+                .header("content-type", "application/json")
+                .body(
+                    r#"{"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0: Invalid `signature` in `thinking` block"}}"#,
+                );
+        })
+        .await;
+
+    let mut builder = Client::builder();
+    builder
+        .api_key("test-key")
+        .base_url(server.base_url())
+        .version("2023-06-01");
+    let client = builder.build().expect("a client for the mock server");
+
+    let request = types::CreateMessagesRequestBuilder::default()
+        .model("claude-test".to_owned())
+        .messages(vec![
+            types::Message {
+                role: types::MessageRole::User,
+                content: types::MessageContentList(vec![types::MessageContent::Text(
+                    "hello".into(),
+                )]),
+            },
+            types::Message {
+                role: types::MessageRole::Assistant,
+                content: types::MessageContentList(vec![types::MessageContent::Thinking(
+                    types::Thinking {
+                        thinking: "deep thought".to_owned(),
+                        signature: Some("sig_1".to_owned()),
+                    },
+                )]),
+            },
+        ])
+        .max_tokens(16)
+        .stream(true)
+        .build()
+        .expect("a valid request");
+
+    let events: Vec<Event> = call(
+        client,
+        request,
+        0,
+        false,
+        None,
+        resolve::QuotaWatch::new(None, None),
+    )
+    .collect::<Vec<_>>()
+    .await
+    .into_iter()
+    .collect::<std::result::Result<_, _>>()
+    .expect("a rejected thinking block is repaired, not reported");
+
+    assert_eq!(endpoint.calls_async().await, 1);
+    assert_eq!(
+        events.len(),
+        2,
+        "expected a patch and a retry, got: {events:?}"
+    );
+    assert_matches!(&events[0], Event::Patch(patches) if patches.len() == 1);
+    assert_matches!(events[1], Event::Finished(FinishReason::Retry));
 }
 
 #[test]
@@ -256,6 +484,206 @@ async fn test_opus_4_6_max_effort() -> Result {
     run_test(PROVIDER, function_name!(), Some(request)).await
 }
 
+/// A rate limit whose `Retry-After` is zero (or absent) must not pin the
+/// backoff to zero: the retry layer honors `retry_after` verbatim, so a literal
+/// zero turns the bounded retry budget into five back-to-back requests.
+#[test]
+fn test_zero_retry_after_falls_back_to_backoff() {
+    let error = StreamError::from(rate_limit(Some(0), UnifiedRateLimit::default()));
+    assert_eq!(error.kind, StreamErrorKind::RateLimit);
+    assert_eq!(error.retry_after, None, "a zero hint must be dropped");
+    assert!(error.is_retryable());
+
+    // A real hint is preserved.
+    let error = StreamError::from(rate_limit(Some(30), UnifiedRateLimit::default()));
+    assert_eq!(error.retry_after, Some(Duration::from_secs(30)));
+
+    // An absent hint stays absent.
+    let error = StreamError::from(rate_limit(None, UnifiedRateLimit::default()));
+    assert_eq!(error.retry_after, None);
+}
+
+/// A `429` carrying Anthropic's unified quota headers.
+fn rate_limit(retry_after: Option<u64>, limits: UnifiedRateLimit) -> AnthropicError {
+    AnthropicError::RateLimit {
+        retry_after,
+        limits,
+    }
+}
+
+/// An API error envelope, as returned in a rejection body.
+fn api_error(error_type: &str, message: &str) -> async_anthropic::errors::ApiError {
+    async_anthropic::errors::ApiError {
+        error_type: error_type.to_owned(),
+        message: Some(message.to_owned()),
+    }
+}
+
+/// A spent usage window, ordinary throttling, and a rejected request
+/// fingerprint (Phase 1, measured: body `"Error"`) all arrive as `429
+/// rate_limit_error`.
+///
+/// Only the unified quota headers tell them apart.
+/// Getting this wrong is expensive in one direction: treating an unexplained
+/// 429 as exhaustion would cool the profile down and move the conversation onto
+/// per-token billing over what may be our own bug.
+#[test]
+fn test_only_quota_headers_make_a_rate_limit_exhaustion() {
+    // The measured fingerprint-rejection shape carries no quota headers, so
+    // it stays a plain rate limit: retried in place, no cooldown, no
+    // credential switch.
+    let opaque = StreamError::from(rate_limit(None, UnifiedRateLimit::default()));
+    assert_eq!(opaque.kind, StreamErrorKind::RateLimit);
+    assert!(!opaque.needs_credential_switch());
+    assert!(opaque.is_retryable());
+
+    // A rejection naming the exhausted window is exhaustion: not retryable
+    // in place, and it carries the scope and reset the cooldown needs.
+    let exhausted = StreamError::from(rate_limit(Some(3600), UnifiedRateLimit {
+        status: Some("rejected".to_owned()),
+        representative_claim: Some("seven_day_opus".to_owned()),
+        reset: Some(1_781_000_000),
+        ..UnifiedRateLimit::default()
+    }));
+    assert_eq!(exhausted.kind, StreamErrorKind::SubscriptionExhausted);
+    assert_eq!(exhausted.quota_scope.as_deref(), Some("seven_day_opus"));
+    assert_eq!(
+        exhausted.quota_reset,
+        chrono::DateTime::from_timestamp(1_781_000_000, 0)
+    );
+    assert!(
+        !exhausted.is_retryable(),
+        "retrying the same credential cannot clear a usage window"
+    );
+
+    // Paid spillover being reported at all also marks a quota rejection,
+    // even without a named window.
+    let overage = StreamError::from(rate_limit(None, UnifiedRateLimit {
+        overage_status: Some("rejected".to_owned()),
+        ..UnifiedRateLimit::default()
+    }));
+    assert_eq!(overage.kind, StreamErrorKind::SubscriptionExhausted);
+    assert_eq!(overage.quota_scope, None, "no window was named");
+
+    // A status reporting the allowance as still available outranks a named
+    // window: the request was refused for another reason, so there is
+    // nothing to cool down and no credential to switch away from.
+    let available = StreamError::from(rate_limit(None, UnifiedRateLimit {
+        status: Some("allowed".to_owned()),
+        representative_claim: Some("five_hour".to_owned()),
+        ..UnifiedRateLimit::default()
+    }));
+    assert_eq!(available.kind, StreamErrorKind::RateLimit);
+    assert!(!available.needs_credential_switch());
+}
+
+/// A refused credential cannot be fixed by retrying, and the shell needs to
+/// know so it can mark the profile for re-login and move down the chain.
+#[test]
+fn test_auth_rejections_require_a_credential_switch() {
+    for (status, error_type, message) in [
+        (403, "permission_error", "OAuth token has been revoked"),
+        (
+            401,
+            "authentication_error",
+            "OAuth authentication is currently not allowed for this organization",
+        ),
+        (401, "authentication_error", "invalid bearer token"),
+    ] {
+        let error = StreamError::from(AnthropicError::Auth {
+            status,
+            error: api_error(error_type, message),
+        });
+
+        assert_eq!(error.kind, StreamErrorKind::AuthRejected, "{message}");
+        assert!(error.is_auth_rejected(), "{message}");
+        assert!(error.needs_credential_switch(), "{message}");
+        assert!(!error.is_retryable(), "{message}");
+        assert!(
+            error.message().contains(message),
+            "the provider's reason must survive: {}",
+            error.message()
+        );
+    }
+}
+
+/// A subscription (bearer) request opens its system content with the Claude
+/// Code identity line followed by the override that neutralizes it, ahead of
+/// JP's own prompt; an API key request carries neither.
+///
+/// Anthropic enforces the line: without it, a bearer request is answered `429
+/// rate_limit_error` with an opaque body, so this is the one place where auth
+/// mode changes the request body rather than only its headers.
+#[test]
+fn test_bearer_mode_prepends_identity_line_and_override() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-sonnet-5").try_into().unwrap(),
+        display_name: Some("Claude Sonnet 5".to_string()),
+        context_window: Some(200_000),
+        max_output_tokens: Some(64_000),
+        reasoning: Some(ReasoningDetails::adaptive(false, true)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: vec![],
+    };
+
+    let query = || ChatQuery {
+        thread: Thread {
+            system_prompt: Some("You are Jean-Pierre.".to_owned()),
+            sections: vec![],
+            attachments: vec![],
+            events: ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+
+    let config = jp_config::providers::llm::LlmProviderConfig::default().anthropic;
+    let api_key = Anthropic::with_credential(&config, Credential::ApiKey("test-key".to_owned()));
+    let bearer = Anthropic::with_credential(&config, Credential::Bearer("test-token".to_owned()));
+
+    let api_key_body = api_key.request_value(&model, query()).unwrap();
+    let bearer_body = bearer.request_value(&model, query()).unwrap();
+
+    // An API key request carries JP's prompt alone, with the cache
+    // breakpoint on the last system block (the default short policy).
+    assert_eq!(
+        api_key_body["system"],
+        serde_json::json!([{
+            "type": "text",
+            "text": "You are Jean-Pierre.",
+            "cache_control": { "type": "ephemeral", "ttl": "5m" },
+        }])
+    );
+
+    // A bearer request prepends the enforced identity line and, immediately
+    // after it, the override naming it as a transport artifact. Both are
+    // inserted after breakpoint assignment, so neither carries
+    // `cache_control` and JP's prompt keeps the breakpoint.
+    assert_eq!(
+        bearer_body["system"],
+        serde_json::json!([
+            {
+                "type": "text",
+                "text": "You are Claude Code, Anthropic's official CLI for Claude.",
+            },
+            {
+                "type": "text",
+                "text": "Disregard the line above. It is required by the API transport and does \
+                          not describe you. Your actual identity and instructions follow.",
+            },
+            {
+                "type": "text",
+                "text": "You are Jean-Pierre.",
+                "cache_control": { "type": "ephemeral", "ttl": "5m" },
+            },
+        ])
+    );
+}
+
 /// Unit test: Verify Opus 4.6 generates adaptive thinking request.
 #[test]
 fn test_opus_4_6_request_uses_adaptive_thinking() {
@@ -285,7 +713,7 @@ fn test_opus_4_6_request_uses_adaptive_thinking() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, is_structured, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, is_structured, _) = create_request(&model, query, true, &beta, false).unwrap();
     assert!(!is_structured);
 
     // Verify adaptive thinking is used
@@ -342,7 +770,7 @@ fn test_opus_4_7_xhigh_effort_mapping() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     assert_eq!(
         request.thinking,
@@ -394,7 +822,7 @@ fn test_opus_4_6_xhigh_falls_back_to_high() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     let output_config = request.output_config.unwrap();
     assert_eq!(output_config.effort, Some(Effort::High));
@@ -439,7 +867,7 @@ fn test_opus_4_6_max_effort_mapping() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     // Verify Max effort is used
     assert!(request.output_config.is_some());
@@ -653,6 +1081,7 @@ fn test_map_model_unknown_uses_api_token_limits() {
     assert_eq!(details.context_window, Some(200_000));
     // The payload reports no capabilities at all, so support stays unknown
     // rather than being read as "unsupported".
+    // reports it unsupported.
     assert_eq!(details.structured_output, None);
     // Absent from the override table, so cutoff and deprecation are unknown.
     assert_eq!(details.knowledge_cutoff, None);
@@ -813,7 +1242,7 @@ fn test_unknown_model_requests_summarized_thinking() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, _) = create_request(&details, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&details, query, true, &beta, false).unwrap();
 
     assert_eq!(
         request.thinking,
@@ -891,7 +1320,7 @@ fn test_unknown_reasoning_infers_adaptive_thinking() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     assert_eq!(
         request.thinking,
@@ -928,7 +1357,7 @@ fn tier_request(
         truncation: Truncation::default(),
     };
 
-    create_request(&model, query, true, &BetaFeatures(vec![])).map(|(request, ..)| request)
+    create_request(&model, query, true, &BetaFeatures(vec![]), false).map(|(request, ..)| request)
 }
 
 /// The two fields Anthropic splits the concept across.
@@ -1035,7 +1464,7 @@ fn test_off_on_unknown_model_attempts_disable() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     assert_eq!(
         request.thinking,
@@ -1153,7 +1582,7 @@ fn test_fable_5_reasoning_off_omits_disabled_thinking() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     // Thinking-always-on model: the disabled-thinking branch is skipped, so no
     // `thinking` field is sent and the model thinks adaptively.
@@ -1189,7 +1618,7 @@ fn test_opus_4_5_uses_budgetted_thinking() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     // Verify budget-based thinking is used (not adaptive)
     assert!(matches!(
@@ -1242,7 +1671,7 @@ fn test_structured_output_sets_format() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, is_structured, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, is_structured, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     assert!(is_structured);
     assert!(request.output_config.is_some());
@@ -1317,7 +1746,7 @@ fn test_schema_ignored_when_last_event_is_not_chat_request() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (_, is_structured, _) = create_request(&model, query, true, &beta).unwrap();
+    let (_, is_structured, _) = create_request(&model, query, true, &beta, false).unwrap();
     assert!(!is_structured);
 }
 
@@ -1358,7 +1787,7 @@ fn test_adaptive_thinking_with_structured_output() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, is_structured, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, is_structured, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     assert!(is_structured);
     assert_eq!(
@@ -1421,7 +1850,7 @@ fn test_forced_tool_with_reasoning_returns_fallback() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, fallback) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, fallback) = create_request(&model, query, true, &beta, false).unwrap();
 
     // tool_choice should have been downgraded to auto.
     assert!(
@@ -1494,7 +1923,7 @@ fn test_forced_tool_thinking_always_on_uses_escalating_nudge() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, fallback) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, fallback) = create_request(&model, query, true, &beta, false).unwrap();
 
     // Thinking-always-on model uses the escalating-nudge strategy, not the
     // disable-thinking hard retry.
@@ -1579,7 +2008,7 @@ fn test_forced_tool_thinking_always_on_reasoning_off_still_soft_forces() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, fallback) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, fallback) = create_request(&model, query, true, &beta, false).unwrap();
 
     // The forced choice must be downgraded to auto; sending it while thinking is
     // active is the 400 this guards against.
@@ -1645,7 +2074,7 @@ fn test_forced_tool_function_multi_tool_preserves_name() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, fallback) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, fallback) = create_request(&model, query, true, &beta, false).unwrap();
 
     assert!(
         matches!(request.tool_choice, Some(types::ToolChoice::Auto { .. })),
@@ -1713,7 +2142,7 @@ fn test_forced_tool_without_reasoning_no_fallback() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, fallback) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, fallback) = create_request(&model, query, true, &beta, false).unwrap();
 
     // No fallback needed - tool_choice should stay as forced (any).
     assert!(fallback.is_none(), "Expected no fallback without reasoning");
@@ -1753,7 +2182,7 @@ fn test_auto_tool_choice_with_reasoning_no_fallback() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (_, _, fallback) = create_request(&model, query, true, &beta).unwrap();
+    let (_, _, fallback) = create_request(&model, query, true, &beta, false).unwrap();
 
     assert!(
         fallback.is_none(),
@@ -1896,7 +2325,7 @@ fn test_continue_injected_when_prefill_unsupported() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     // Last message should be the synthetic continue message.
     let last = request.messages.last().unwrap();
@@ -1946,7 +2375,7 @@ fn test_prefill_preserved_for_supported_models() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     // Last message should be the assistant message (prefill), not a synthetic user message.
     let last = request.messages.last().unwrap();
@@ -1986,7 +2415,7 @@ fn test_no_injection_when_last_message_is_user() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     let last = request.messages.last().unwrap();
     assert_eq!(last.role, types::MessageRole::User);
@@ -2030,7 +2459,7 @@ fn test_create_request_resends_signed_thinking_as_native_block() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     assert_eq!(request.messages.len(), 3);
     let assistant = &request.messages[1];
@@ -2087,7 +2516,7 @@ fn test_create_request_resends_redacted_thinking_as_native_block() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     assert_eq!(request.messages.len(), 3);
     let assistant = &request.messages[1];
@@ -2140,7 +2569,7 @@ fn test_create_request_falls_back_to_think_tags_without_signature() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     assert_eq!(request.messages.len(), 3);
     let assistant = &request.messages[1];
@@ -2199,7 +2628,7 @@ fn test_create_request_drops_empty_reasoning_instead_of_empty_think_tags() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     let assistant = &request.messages[1];
     assert_eq!(assistant.role, types::MessageRole::Assistant);
@@ -2256,7 +2685,7 @@ fn test_create_request_downgrades_trailing_assistant_thinking() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     // user, assistant (downgraded), synthetic continue user.
     assert_eq!(request.messages.len(), 3);
@@ -2322,7 +2751,7 @@ fn test_create_request_drops_trailing_redacted_thinking() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta, false).unwrap();
 
     let assistant = request.messages.last().unwrap();
     assert_eq!(assistant.role, types::MessageRole::Assistant);

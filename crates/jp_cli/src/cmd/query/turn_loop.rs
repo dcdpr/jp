@@ -32,7 +32,7 @@ use jp_inquire::prompt::PromptBackend;
 use jp_llm::{
     Error as LlmError, Provider,
     error::StreamError,
-    event::{Event, EventPart, FinishReason, ToolCallPart},
+    event::{Event, EventPart, FinishReason, NoticeSink, ToolCallPart},
     model::ModelDetails,
     provider::get_provider,
     query::{ChatQuery, Truncation},
@@ -68,6 +68,7 @@ use crate::{
     },
     editor::build_editor_backend,
     error::Error,
+    output::notice_sink,
     render::metadata::set_rendered_arguments,
     signals::{InterruptNotice, SignalRouter, TurnInterrupt},
 };
@@ -234,6 +235,7 @@ pub(super) async fn run_turn_loop(
         model.clone(),
         provider.clone(),
         attachments.to_vec(),
+        notice_sink(&printer),
     )
     .await?;
 
@@ -470,6 +472,7 @@ pub(super) async fn run_turn_loop(
                                     .await
                                     {
                                         StreamErrorOutcome::Retry => break,
+
                                         StreamErrorOutcome::Fatal(error) => {
                                             // Persist any partial content
                                             // flushed before aborting, so a
@@ -549,7 +552,12 @@ pub(super) async fn run_turn_loop(
                             let advances_cycle = match &event {
                                 Event::Part { .. } => true,
                                 Event::Finished(reason) => *reason != FinishReason::Retry,
-                                Event::Flush { .. } | Event::Patch(_) | Event::KeepAlive => false,
+                                // A notice is chrome: it says nothing about
+                                // the provider having produced content.
+                                Event::Flush { .. }
+                                | Event::Patch(_)
+                                | Event::KeepAlive
+                                | Event::Notice(_) => false,
                             };
                             if !received_provider_event && advances_cycle {
                                 received_provider_event = true;
@@ -935,6 +943,7 @@ async fn build_inquiry_backend(
     model: ModelDetails,
     provider: Arc<dyn Provider>,
     attachments: Vec<Attachment>,
+    notices: NoticeSink,
 ) -> Result<Arc<LlmInquiryBackend>, Error> {
     // Every field here is already resolved against the top-level assistant by
     // `AppConfig::from_partial_with_defaults`, so an unset inquiry key carries
@@ -973,22 +982,21 @@ async fn build_inquiry_backend(
         // Attribute failures to the override: without this, e.g. a missing
         // API key environment variable renders identically to a main-model
         // failure and points the user at the wrong config.
+        let wrap_err =
+            |source: Box<dyn std::error::Error + Send + Sync>| Error::InquiryModelOverride {
+                model: inquiry_model_id.to_string(),
+                source,
+            };
+
         let inquiry_provider: Arc<dyn Provider> = Arc::from(
-            get_provider(inquiry_model_id.provider, &cfg.providers.llm).map_err(|source| {
-                Error::InquiryModelOverride {
-                    model: inquiry_model_id.to_string(),
-                    source,
-                }
-            })?,
+            get_provider(inquiry_model_id.provider, &cfg.providers.llm)
+                .map_err(|e| wrap_err(Box::new(e)))?,
         );
         debug!(model = %inquiry_model_id, "Fetching inquiry model details.");
         let inquiry_model = inquiry_provider
             .model_details(&inquiry_model_id.name)
             .await
-            .map_err(|source| Error::InquiryModelOverride {
-                model: inquiry_model_id.to_string(),
-                source,
-            })?;
+            .map_err(|e| wrap_err(Box::new(e)))?;
 
         if inquiry_model.structured_output == Some(false) {
             warn!(
@@ -1022,6 +1030,7 @@ async fn build_inquiry_backend(
         overrides,
         attachments,
         tools,
+        notices,
     )))
 }
 
@@ -1057,24 +1066,30 @@ async fn build_inquiry_overrides(
                 // this, e.g. a missing API key environment variable renders
                 // identically to a main-model failure and points the user at
                 // the wrong config.
-                let wrap_err = |source| Error::InquiryQuestionModelOverride {
-                    tool: tool_name.to_owned(),
-                    question: question_id.clone(),
-                    model: model_id.to_string(),
-                    source: Box::new(source),
+                let wrap_err = |source: Box<dyn std::error::Error + Send + Sync>| {
+                    Error::InquiryQuestionModelOverride {
+                        tool: tool_name.to_owned(),
+                        question: question_id.clone(),
+                        model: model_id.to_string(),
+                        source,
+                    }
                 };
 
                 let prov = if let Some(p) = providers.get(&model_id.provider) {
                     Arc::clone(p)
                 } else {
                     let p: Arc<dyn Provider> = Arc::from(
-                        get_provider(model_id.provider, &cfg.providers.llm).map_err(wrap_err)?,
+                        get_provider(model_id.provider, &cfg.providers.llm)
+                            .map_err(|e| wrap_err(Box::new(e)))?,
                     );
                     providers.insert(model_id.provider, Arc::clone(&p));
                     p
                 };
 
-                let details = prov.model_details(&model_id.name).await.map_err(wrap_err)?;
+                let details = prov
+                    .model_details(&model_id.name)
+                    .await
+                    .map_err(|e| wrap_err(Box::new(e)))?;
 
                 if details.structured_output == Some(false) {
                     warn!(

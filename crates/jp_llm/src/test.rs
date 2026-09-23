@@ -703,7 +703,7 @@ pub async fn run_chat_completion(
                                         });
                                     }
                                 }
-                                Event::Patch(_) | Event::KeepAlive => {}
+                                Event::Patch(_) | Event::KeepAlive | Event::Notice(_) => {}
                                 Event::Finished(reason) => {
                                     for mut event in builder.drain() {
                                         event.timestamp =

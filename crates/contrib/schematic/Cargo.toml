@@ -1,16 +1,16 @@
 [package]
-name = "schematic"
 description = "A layered serde configuration and schema library."
 edition = "2024"
 license = "MIT"
+name = "schematic"
 publish = false
 version = "0.19.4"
 
 [dependencies]
 schematic_macros = { path = "../schematic_macros" }
 schematic_types = { path = "../schematic_types" }
-serde-content = { workspace = true, features = ["serde", "std"] }
 serde = { workspace = true, features = ["derive", "std"] }
+serde-content = { workspace = true, features = ["serde", "std"] }
 thiserror = { workspace = true }
 tracing = { workspace = true, features = ["attributes"] }
 

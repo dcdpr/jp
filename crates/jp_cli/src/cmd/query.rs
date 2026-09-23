@@ -99,7 +99,9 @@ use jp_conversation::{
 };
 use jp_inquire::prompt::{PromptBackend, TerminalPromptBackend};
 use jp_llm::{
-    ToolError, provider,
+    ToolError,
+    event::NoticeSink,
+    provider,
     tool::{
         InvocationContext, ToolDefinition, ToolDocs,
         builtin::{BuiltinExecutors, describe_tools::DescribeTools},
@@ -147,7 +149,7 @@ use crate::{
     ctx::{IntoPartialAppConfig, McpServerScope},
     editor,
     error::{Error, Result},
-    output::print_json,
+    output::{notice_sink, print_json},
     parser::{AttachmentUrlOrPath, split_list},
     render::{RenderFlow, TurnView, tool::output_lines},
     signals::{SignalRouter, TurnInterrupt},
@@ -470,25 +472,24 @@ impl Query {
         }
 
         // Fail fast on provider misconfiguration (e.g. a missing API key
-        // environment variable) before any side-effectful work below:
-        // pre-query compaction can run a full summary LLM round-trip, MCP
-        // servers boot in background tasks, the editor may open to compose
-        // the request, and title generation and attachment loading are all
+        // environment variable, or a credential chain with no usable
+        // entry) before any side-effectful work below: pre-query
+        // compaction can run a full summary LLM round-trip, MCP servers
+        // boot in background tasks, the editor may open to compose the
+        // request, and title generation and attachment loading are all
         // wasted — and the title task alone can hold the run open for
         // seconds at teardown — when the request can never be sent.
         // `Query::run_turn` repeats this check implicitly when it constructs
         // the live provider.
-        provider::preflight(
-            cfg.assistant.model.id.resolved().provider,
-            &cfg.providers.llm,
-        )
-        .map_err(Error::from)?;
+        let model_id = cfg.assistant.model.id.resolved();
+        provider::preflight(model_id.provider, &cfg.providers.llm)?;
 
         // Compact the conversation before querying, if requested. Staged on
         // `setup`, so the composed request and the editor's history preview see
         // the compacted stream while nothing is written yet.
         if self.compact.should_compact() {
-            self.apply_pre_query_compaction(&setup, &cfg).await?;
+            self.apply_pre_query_compaction(&setup, &cfg, &notice_sink(&ctx.printer))
+                .await?;
         }
 
         // `-u`/`-U` never enter the config, so the turn's choice is resolved
@@ -751,7 +752,8 @@ impl Query {
                     // assistant model. Skip the title instead of spawning a
                     // task that is doomed to fail after holding teardown
                     // open.
-                    match TitleGeneratorTask::new(cid, stream, &cfg, ctx.term.is_tty) {
+                    let notices = notice_sink(&ctx.printer);
+                    match TitleGeneratorTask::new(cid, stream, &cfg, ctx.term.is_tty, notices) {
                         Ok(task) => ctx.task_handler.spawn(task),
                         Err(error) => warn!(%error, "Skipping title generation."),
                     }
@@ -1118,10 +1120,12 @@ impl Query {
         mut turn_interrupt: TurnInterrupt,
     ) -> Result<()> {
         let model_id = cfg.assistant.model.id.resolved();
+
         let provider: Arc<dyn jp_llm::Provider> = Arc::from(provider::get_provider(
             model_id.provider,
             &cfg.providers.llm,
         )?);
+
         debug!(model = %model_id, "Fetching model details.");
 
         // A network round trip, and the last await before the turn loop starts
@@ -1253,6 +1257,7 @@ impl Query {
         &self,
         conv: &ConversationMut,
         cfg: &AppConfig,
+        notices: &NoticeSink,
     ) -> Result<()> {
         let events = conv.events().clone();
 
@@ -1273,6 +1278,7 @@ impl Query {
             // `--compact` on a query is a quick adjunct; apply it silently so
             // compaction details don't clutter the query output.
             None,
+            notices,
         )
         .await?;
 

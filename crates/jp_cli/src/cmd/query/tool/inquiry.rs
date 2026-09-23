@@ -27,6 +27,7 @@ use jp_config::{
 use jp_conversation::{ConversationStream, event::ChatRequest, thread::Thread};
 use jp_llm::{
     Provider,
+    event::NoticeSink,
     event_builder::structured_data,
     model::ModelDetails,
     query::{ChatQuery, Truncation},
@@ -182,6 +183,10 @@ pub struct LlmInquiryBackend {
     /// Included in the inquiry request (with `ToolChoice::None`) so that the
     /// Anthropic prompt cache prefix matches the normal turn requests.
     tools: Vec<ToolDefinition>,
+
+    /// Where each inquiry's provider notices go, such as a switch onto another
+    /// credential.
+    notices: NoticeSink,
 }
 
 impl LlmInquiryBackend {
@@ -191,12 +196,14 @@ impl LlmInquiryBackend {
         overrides: IndexMap<(String, String), InquiryConfig>,
         attachments: Vec<Attachment>,
         tools: Vec<ToolDefinition>,
+        notices: NoticeSink,
     ) -> Self {
         Self {
             default_config,
             overrides,
             attachments,
             tools,
+            notices,
         }
     }
 
@@ -325,6 +332,7 @@ impl InquiryBackend for LlmInquiryBackend {
                 &config.model,
                 query,
                 &retry_config,
+                &self.notices,
             ) => {
                 result?
             }
