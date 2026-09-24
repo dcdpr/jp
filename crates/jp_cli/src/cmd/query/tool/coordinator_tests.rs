@@ -879,13 +879,13 @@ async fn remembered_denial_does_not_run_http_argument_formatter() {
         Arc::new(MockPromptBackend::new()),
         ReplyEditMode::default(),
     );
-    let renderer = ToolRenderer::new(ErrChannel::new(printer), config.style);
+    let renderer = ToolRenderer::new(ErrChannel::new(printer.clone()), config.style);
     let mut state = TurnState::default();
     state
         .remembered_permission_decisions
         .insert(PermissionCacheKey::new("example"), false);
     let decision = coordinator
-        .resolve_tool_call_decision(executor, &prompter, true, &mut state, &renderer)
+        .resolve_tool_call_decision(executor, &prompter, true, &mut state, &renderer, &printer)
         .await;
     let ToolCallDecision::Skipped(response) = decision else {
         panic!("expected remembered denial")
