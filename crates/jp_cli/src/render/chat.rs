@@ -776,8 +776,8 @@ impl ChatRenderer {
     /// caller coordinating inter-block spacing keeps its owed separator across
     /// every chunk for which this is false.
     ///
-    /// `Static` writes its `reasoning...` line at the transition whatever the
-    /// chunk holds.
+    /// `Static` writes its `reasoning...` line at the transition, even for a
+    /// whitespace-only chunk.
     /// `Full` renders the chunk as-is, so a whitespace-only one puts nothing on
     /// screen.
     /// `Truncate` answers for the text it would actually render, elision marker
@@ -787,10 +787,18 @@ impl ChatRenderer {
     /// on completion, and `Progress` writes `reasoning...` plus dots with no
     /// trailing newline.
     ///
+    /// A textless chunk (a redacted block, or one whose text was withheld)
+    /// renders nothing in any mode, so it never supplies separation.
+    ///
     /// A chunk still sitting in the markdown buffer counts as rendered: the
     /// buffer is drained ahead of the next tool header, so its content lands
     /// first and separates the header.
     pub(crate) fn reasoning_supplies_separation(&self, content: &str) -> bool {
+        // Mirrors the guard at the top of `render_reasoning`.
+        if content.is_empty() {
+            return false;
+        }
+
         match self.config.reasoning.display {
             ReasoningDisplayConfig::Static => true,
             ReasoningDisplayConfig::Full => !content.trim().is_empty(),

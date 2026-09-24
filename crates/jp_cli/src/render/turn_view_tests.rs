@@ -89,6 +89,20 @@ fn whitespace_only_reasoning_preserves_tool_separator_debt() {
 }
 
 #[test]
+fn textless_static_reasoning_preserves_tool_separator_debt() {
+    // A redacted thinking block arrives as an empty reasoning chunk. `Static`
+    // prints its `reasoning...` line only for a chunk it renders, and a
+    // textless one is not rendered, so the blank line owed before the next
+    // tool header must survive.
+    let (mut view, flag) = view_owing_separator(ReasoningDisplayConfig::Static);
+    view.render_chat_response(&ChatResponse::reasoning(""));
+    assert!(
+        flag.load(Ordering::Relaxed),
+        "a textless reasoning chunk renders nothing and must not clear the debt"
+    );
+}
+
+#[test]
 fn reasoning_past_the_truncation_budget_preserves_tool_separator_debt() {
     // Once the budget is spent, `Truncate` renders nothing for every later
     // chunk, so those chunks supply no spacing either.
