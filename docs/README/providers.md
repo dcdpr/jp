@@ -47,8 +47,8 @@ not an API-key source.
 Disable paid Usage credits in Claude's Settings > Usage if no paid overage is
 permitted.
 JP does not copy Claude Code's tokens.
-Unnamed subscription entries select its inherited active login. Named entries
-select logins registered through `jp provider llm auth login`.
+Unnamed subscription entries select its inherited active login.
+Named entries select logins registered through `jp provider llm auth login`.
 
 The initial ACP implementation supports queries through JP's tool execution
 service, including approvals, tool questions, result editing, and recording.
@@ -116,15 +116,17 @@ jp provider llm auth login anthropic --name sub2
 jp provider llm auth list
 ```
 
-JP creates a separate directory for each account at
-`<JP user data dir>/data/claude/<name>` and supplies `CLAUDE_CONFIG_DIR` to the
-bundled runtime. The user-data root honors `JP_USER_DATA_DIR`, then
-`$XDG_DATA_HOME/jp`, then the platform default. Names may contain ASCII letters,
-digits, hyphens, and underscores.
+JP creates a separate directory for each account at `<JP user data
+dir>/data/claude/<name>` and supplies `CLAUDE_CONFIG_DIR` to the bundled
+runtime.
+The user-data root honors `JP_USER_DATA_DIR`, then `$XDG_DATA_HOME/jp`, then the
+platform default.
+Names may contain ASCII letters, digits, hyphens, and underscores.
 
 JP stores the absolute directory and account identity, not Claude Code's tokens.
-Claude Code owns credential storage and refresh. Repeating login for a registered
-name reuses its original directory. No profile-manager dependency is required.
+Claude Code owns credential storage and refresh.
+Repeating login for a registered name reuses its original directory.
+No profile-manager dependency is required.
 
 Select an account with an explicit subscription name:
 
@@ -133,7 +135,8 @@ jp query --new --model anthropic/claude-sonnet-5 --auth sub:sub2 "Reply with exa
 ```
 
 `--auth sub` is shorthand for an unnamed `subscription`, not the account named
-`sub`. Use `--auth sub:sub` to select that named account.
+`sub`.
+Use `--auth sub:sub` to select that named account.
 
 To register an existing login directory without relocating it, pass its exact
 absolute path when signing in:
@@ -143,15 +146,17 @@ jp provider llm auth login anthropic --name sub2 --config-dir "$HOME/.local/shar
 ```
 
 The selected directory applies to authentication checks, the adapter and its SDK
-subprocess, and derived conversation history. JP sets
-`CLAUDE_SECURESTORAGE_CONFIG_DIR` to the same directory so an inherited override
-cannot select another account. An unnamed `subscription` preserves the inherited
-login environment, including whether `CLAUDE_CONFIG_DIR` is unset.
+subprocess, and derived conversation history.
+JP sets `CLAUDE_SECURESTORAGE_CONFIG_DIR` to the same directory so an inherited
+override cannot select another account.
+An unnamed `subscription` preserves the inherited login environment, including
+whether `CLAUDE_CONFIG_DIR` is unset.
 
-`auth list` checks each registered runtime login and reports it as a subscription.
-A failed status check reports `unavailable`, not `valid`. Logout clears that
-account's runtime login before removing its registration, and retains the
-registration if the runtime fails:
+`auth list` checks each registered runtime login and reports it as a
+subscription.
+A failed status check reports `unavailable`, not `valid`.
+Logout clears that account's runtime login before removing its registration, and
+retains the registration if the runtime fails:
 
 ```sh
 jp provider llm auth logout anthropic --name sub2
@@ -162,11 +167,13 @@ Concurrent login/logout operations are rejected; listing and queries do not wait
 for an interactive login to complete.
 
 Manual `providers.llm.anthropic.acp_config_dirs` mappings remain supported for
-unregistered directories. Their values must be absolute paths, without `~` or
-`$HOME` expansion, and each layer replaces the whole map. A mapping sharing a
-registered name must match its registered directory; remove a stale mapping
-rather than silently querying another account. Manual mappings are not themselves
-registrations for `auth list` or `auth logout`.
+unregistered directories.
+Their values must be absolute paths, without `~` or `$HOME` expansion, and each
+layer replaces the whole map.
+A mapping sharing a registered name must match its registered directory; remove
+a stale mapping rather than silently querying another account.
+Manual mappings are not themselves registrations for `auth list` or `auth
+logout`.
 
 ### Subscription quota fallback
 
@@ -179,27 +186,34 @@ subscription_flow = "acp"
 auth = ["sub:sub", "sub:sub2", "api_key"]
 ```
 
-JP shares the direct flow's scoped cooldowns and chain advancement. A spent
-account is skipped until its reported reset, or for 30 minutes when no reset is
-available. Model-specific windows do not block other model families. The cooldown
-is stored across invocations and appears in `auth list`.
+JP shares the direct flow's scoped cooldowns and chain advancement.
+A spent account is skipped until its reported reset, or for 30 minutes when no
+reset is available.
+Model-specific windows do not block other model families.
+The cooldown is stored across invocations and appears in `auth list`.
 
-Including `api_key` authorizes paid API access after the subscriptions are spent.
-Omit it to stop when the subscription chain is exhausted. ACP never switches to
-direct subscription-token access. Runtime setup failures, model errors, and
-ordinary rate limits without subscription-quota evidence do not change accounts.
+Including `api_key` authorizes paid API access after the subscriptions are
+spent.
+Omit it to stop when the subscription chain is exhausted.
+ACP never switches to direct subscription-token access.
+Runtime setup failures, model errors, and ordinary rate limits without
+subscription-quota evidence do not change accounts.
 Warnings and rejected extra-usage allowances are not themselves subscription
 exhaustion.
 
 Switching rebuilds the request from JP's committed history, preserving completed
-tool results. An agent request with unrecorded tool results stops rather than
-risking repeated side effects. Credential changes do not consume the transient
-retry budget.
+tool results.
+An agent request with unrecorded tool results stops rather than risking repeated
+side effects.
+Credential changes do not consume the transient retry budget.
 
 Automatic fallback requires registered names from `jp provider llm auth login`;
-JP does not attribute cooldowns to an unnamed inherited login or a directory-only
-manual mapping. A single-entry `--auth sub:sub2` replaces the configured chain and
-therefore disables fallback to other entries for that selection.
+JP does not attribute cooldowns to an unnamed inherited login or a
+directory-only manual mapping.
+Without a recorded cooldown, including when the credential store cannot be
+written, an exhausted subscription stops the request instead of switching.
+A single-entry `--auth sub:sub2` replaces the configured chain and therefore
+disables fallback to other entries for that selection.
 
 ### Prompt caching
 

@@ -573,6 +573,38 @@ pub(super) async fn advance(
     Some(attempt)
 }
 
+/// Whether a fresh resolution lands on the entry `next` selected.
+///
+/// A request rebuilt from scratch resolves the chain again without the entries
+/// the failed request tried, so it reaches `next` only when the store records
+/// why every entry before it is out.
+/// An unnamed ACP login, an `api_key`, or a profile whose outcome could not be
+/// written leaves no such record, and the rebuild would land on the spent
+/// credential again.
+///
+/// Reads the store only: an expired token is not refreshed.
+pub(super) fn switch_persists(
+    config: &AnthropicConfig,
+    store: Option<&CredentialStore>,
+    next: &Attempt,
+    model: &str,
+    now: DateTime<Utc>,
+) -> bool {
+    let Some(expected) = next.selected.as_ref() else {
+        return false;
+    };
+    let snapshot = match store.map(CredentialStore::load).transpose() {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            warn!(%error, "Could not read the credential store to confirm a switch.");
+            return false;
+        }
+    };
+
+    walk_chain(config, snapshot.as_ref(), model, now, &HashSet::new())
+        .is_ok_and(|(_, selected, _)| selected.entry == expected.entry)
+}
+
 /// Persist why the spent credential cannot serve the request.
 ///
 /// Failed writes are reported.

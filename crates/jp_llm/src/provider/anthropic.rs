@@ -287,6 +287,31 @@ impl Anthropic {
         .await
     }
 
+    /// Advance for a request the caller rebuilds from scratch.
+    ///
+    /// The rebuilt request resolves the chain again, so a switch counts only
+    /// when the store carries it there.
+    /// Otherwise returns `None`, which keeps the failure terminal rather than
+    /// resubmitting to the spent credential.
+    async fn advance_for_rebuild(
+        &self,
+        attempt: &resolve::Attempt,
+        error: &StreamError,
+        model: &str,
+    ) -> Option<resolve::Attempt> {
+        let next = self.advance(attempt, error, model).await?;
+        if resolve::switch_persists(&self.config, self.store.as_ref(), &next, model, Utc::now()) {
+            return Some(next);
+        }
+
+        warn!(
+            from = ?attempt.selected.as_ref().map(|selected| &selected.entry),
+            to = ?next.selected.as_ref().map(|selected| &selected.entry),
+            "Credential switch would not survive a rebuilt request; ending it instead."
+        );
+        None
+    }
+
     /// Record ACP quota failures through the shared credential chain.
     ///
     /// A fresh Host request is required even before content arrives: the next
@@ -300,14 +325,16 @@ impl Anthropic {
         let this = self.clone();
         let model = model.clone();
         Box::pin(async_stream::stream! {
-            for notice in mem::take(&mut attempt.notices) {
+            for notice in attempt.take_notices(&this.seen_notices) {
                 yield Ok(Event::Notice(notice));
             }
             while let Some(item) = stream.next().await {
                 match item {
                     Err(error) if error.kind == StreamErrorKind::SubscriptionExhausted => {
-                        if let Some(next) = this.advance(&attempt, &error, model.name()).await {
-                            for notice in next.notices {
+                        if let Some(mut next) =
+                            this.advance_for_rebuild(&attempt, &error, model.name()).await
+                        {
+                            for notice in next.take_notices(&this.seen_notices) {
                                 yield Ok(Event::Notice(notice));
                             }
                             yield Err(error.with_credential_change());
@@ -320,6 +347,29 @@ impl Anthropic {
                 }
             }
         })
+    }
+
+    /// Serve a completion through Claude Code for a caller with no query
+    /// context.
+    ///
+    /// The adapter runs in the current working directory, with no MCP endpoint.
+    async fn acp_completion_stream(
+        &self,
+        model: &ModelDetails,
+        query: ChatQuery,
+        attempt: resolve::Attempt,
+        directory: Option<Utf8PathBuf>,
+    ) -> Result<EventStream> {
+        acp::inspect(directory.as_deref()).await?;
+        let root = env::current_dir().map_err(acp::Error::NativeIo)?;
+        let root = Utf8PathBuf::from_path_buf(root).map_err(|_| acp::Error::NativeDirectory)?;
+        let context = QueryContext {
+            root,
+            mcp_endpoint: None,
+            invocation: None,
+        };
+        let stream = acp::stream(model, query, context, directory)?;
+        Ok(self.with_acp_fallback(model, attempt, stream))
     }
 
     /// Advance after a non-streaming request failed, or surface the failure.
@@ -479,16 +529,10 @@ impl Provider for Anthropic {
         // the stream.
         let attempt = self.resolve(model.name()).await?;
         if let Route::Acp(directory) = &attempt.route {
-            acp::inspect(directory.as_deref()).await?;
-            let root = env::current_dir().map_err(acp::Error::NativeIo)?;
-            let root = Utf8PathBuf::from_path_buf(root).map_err(|_| acp::Error::NativeDirectory)?;
-            let context = QueryContext {
-                root,
-                mcp_endpoint: None,
-                invocation: None,
-            };
-            let stream = acp::stream(model, query, context, directory.clone())?;
-            return Ok(self.with_acp_fallback(model, attempt, stream));
+            let directory = directory.clone();
+            return self
+                .acp_completion_stream(model, query, attempt, directory)
+                .await;
         }
 
         let this = self.clone();
@@ -560,23 +604,25 @@ impl Provider for Anthropic {
                             yield event;
                         }
                         Err(error) if error.needs_credential_switch() => {
-                            let Some(mut next) = this.advance(&attempt, &error, model.name()).await
-                            else {
-                                // Chain exhausted: the failure that prompted
-                                // the switch is terminal, reported as itself.
+                            let next = if content_seen {
+                                this.advance_for_rebuild(&attempt, &error, model.name())
+                                    .await
+                            } else {
+                                this.advance(&attempt, &error, model.name()).await
+                            };
+                            let Some(mut next) = next else {
+                                // No usable switch: the failure that prompted
+                                // it is terminal, reported as itself.
                                 Err(error)?;
                                 return;
                             };
 
                             if content_seen {
-                                // Mid-stream: partial content already reached
-                                // the caller, so an internal re-send would
-                                // duplicate it. The recorded outcome routes
-                                // the caller's retry onto the next credential;
-                                // surface the failure as retryable so the
-                                // existing retry flow (flush partial content,
-                                // rebuild the thread, fresh stream) takes it
-                                // from here.
+                                // Partial content already reached the caller,
+                                // so an internal re-send would duplicate it.
+                                // The caller commits it and rebuilds the
+                                // request, whose fresh resolution reaches
+                                // `next` through the recorded outcome.
                                 for notice in next.take_notices(&this.seen_notices) {
                                     yield Event::Notice(notice);
                                 }

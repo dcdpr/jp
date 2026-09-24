@@ -207,12 +207,13 @@ what a range of turns contributes.
 ### External Login
 
 A subscription login whose credentials and refresh lifecycle are owned by an
-external runtime. JP registers its configuration directory and observed account
-identity without storing its tokens. Implemented by `CredentialSecret::External`
-in `jp_credentials`.
+external runtime.
+JP registers its configuration directory and observed account identity without
+storing its tokens.
+Implemented by `CredentialSecret::External` in `jp_credentials`.
 
-**Not the same as** a JP-stored token or a subscription flow: the login identifies
-an account, while the flow selects how requests reach the provider.
+**Not the same as** a JP-stored token or a subscription flow: the login
+identifies an account, while the flow selects how requests reach the provider.
 
 ### InlineReply
 
