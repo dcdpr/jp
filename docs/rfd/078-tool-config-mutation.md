@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
 - **Requires**: [RFD 076], [RFD 070]
-- **Extended by**: [RFD 107]
+- **Extended by**: [RFD 108]
 - **Summary**: Scoped tool config access via `access.config` rules, with
   re-invocation on delta rejection and per-cycle commit buffering.
 
@@ -1301,4 +1301,4 @@ Depends on: Phase 2.
 [RFD 042]: 042-tool-options.md
 [RFD 070]: 070-negative-config-deltas.md
 [RFD 076]: 076-tool-access-grants.md
-[RFD 107]: 108-discoverable-tools.md
+[RFD 108]: 108-discoverable-tools.md

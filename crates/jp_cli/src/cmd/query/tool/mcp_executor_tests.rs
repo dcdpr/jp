@@ -488,6 +488,47 @@ async fn a_protocol_failure_is_reported_as_a_failure_not_as_tool_output() {
     fixture.shutdown().await;
 }
 
+/// A tool that does its work and then never reports back.
+struct VanishingTool(Arc<AtomicUsize>);
+
+#[async_trait]
+impl BuiltinTool for VanishingTool {
+    async fn execute(&self, _: &Value, _: &IndexMap<String, Value>) -> Outcome {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        panic!("the side effect happened; the result is lost");
+    }
+}
+
+#[tokio::test]
+async fn a_call_lost_after_release_is_not_reported_as_unexecuted() {
+    // The tool has already acted by the time the call fails, so telling the
+    // model it did not run would invite it to repeat the side effect.
+    let count = Arc::new(AtomicUsize::new(0));
+    let mut fixture = Fixture::start(
+        json!({"source": "builtin", "run": "unattended"}),
+        VanishingTool(count.clone()),
+    )
+    .await;
+    fixture.count = count;
+    let mut executor = fixture.executor(&json!({}));
+    assert!(executor.prepare(false).await.unwrap().is_none());
+    executor.approve().await.unwrap();
+
+    let result = timeout(
+        Duration::from_secs(5),
+        executor.execute(&IndexMap::new(), CancellationToken::new(), None),
+    )
+    .await
+    .expect("a lost call must still end");
+
+    assert!(
+        matches!(result, ExecutorResult::OutcomeUnknown(_)),
+        "a call lost after release may have run, got {result:?}"
+    );
+    assert_eq!(fixture.attempts(), 1);
+    fixture.shutdown().await;
+}
+
 #[tokio::test]
 async fn preparing_a_call_twice_is_refused() {
     let fixture = Fixture::inquiring("unattended").await;

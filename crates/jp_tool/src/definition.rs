@@ -81,6 +81,10 @@ impl ToolDefinition {
     ///
     /// Strings stay unchanged when the schema accepts strings or their contents
     /// do not parse to a declared type.
+    ///
+    /// A `null` for an optional property whose schema does not accept `null` is
+    /// treated as omitting it, so a configured default can apply.
+    /// A required property, or one that accepts `null`, keeps the value.
     pub fn coerce_arguments(&self, arguments: &mut Map<String, Value>) {
         coerce_arguments_to_schema(arguments, &self.parameters);
     }
@@ -168,6 +172,17 @@ fn coerce_arguments_to_schema(arguments: &mut Map<String, Value>, schema: &Value
 
 fn coerce_object(arguments: &mut Map<String, Value>, node: &Node<'_>) {
     for (name, property) in node.properties() {
+        // Strict-mode providers make every optional property required and
+        // nullable, so the model omits one by sending `null`. The tool's own
+        // schema does not accept that `null`; it means "not given".
+        if arguments.get(&name).is_some_and(Value::is_null)
+            && !node.is_required(&name)
+            && !property.permits(&Value::Null)
+        {
+            arguments.shift_remove(&name);
+            continue;
+        }
+
         if let Some(value) = arguments.get_mut(&name) {
             coerce_value(value, &property);
         }

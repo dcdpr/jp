@@ -15,8 +15,9 @@ accumulated input.
 Calls have independent cancellation tokens.
 Dropping a result receiver does not cancel or retry a call.
 `cancel_current` stops current work while allowing later calls; `shutdown` stops
-admission, cancels calls, waits for cleanup, and closes owned upstream
-connections.
+admission, cancels calls, and waits for cleanup.
+Upstream connections belong to the MCP Host and stay open, because concurrent
+Turns can share them.
 Stderr progress uses a separate bounded channel.
 
 `server::http::Endpoint` exposes the service through MCP Streamable HTTP on an

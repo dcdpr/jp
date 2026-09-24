@@ -33,7 +33,10 @@ use crate::{
         builtin::BuiltinExecutors,
         execute,
         http::Endpoint,
-        service::{Admission, ConfiguredTool, Interaction, ReleaseDecision, Service},
+        service::{
+            Admission, CallRequest, ConfiguredTool, HostReceiver, Interaction, ReleaseDecision,
+            Service,
+        },
         tool_definitions,
     },
 };
@@ -142,8 +145,107 @@ async fn upstream_receives_context_options_and_accumulated_answers() {
         })
     );
     assert_eq!(count.load(Ordering::SeqCst), 2);
-    client.shutdown().await;
     server.cancel().await.unwrap();
+}
+
+/// A service over `upstream` exposing its `native` tool unattended, as `alias`.
+async fn native_service(upstream: &Client) -> (Service, HostReceiver) {
+    let mut cfg = AppConfig::new_test();
+    let partial: PartialToolConfig = serde_json::from_value(json!({
+        "source": "mcp.upstream.native",
+        "run": "unattended",
+        "result": "unattended",
+    }))
+    .unwrap();
+    cfg.conversation.tools.insert(
+        "alias".into(),
+        ToolConfig::from_partial(partial, vec![]).unwrap(),
+    );
+    let configured = tool_definitions(cfg.conversation.tools.iter(), upstream, None)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|definition| ConfiguredTool {
+            config: cfg.conversation.tools.get(&definition.name).unwrap(),
+            definition,
+            access: Ok(None),
+            metadata: Map::new(),
+        })
+        .collect();
+    Service::new(
+        configured,
+        upstream.clone(),
+        BuiltinExecutors::new(),
+        "/work".into(),
+        InvocationContext::default(),
+    )
+    .unwrap()
+}
+
+/// Concurrent plugin Turns share one upstream client.
+/// The Turn that finishes first must not take the other Turn's MCP servers down
+/// with it.
+#[tokio::test]
+async fn shutting_down_one_service_leaves_shared_upstream_servers_running() {
+    timeout(Duration::from_secs(10), async {
+        let count = Arc::new(AtomicUsize::new(0));
+        let (client_transport, server_transport) = duplex(8192);
+        let handler = NativeUpstream(count.clone());
+        let server = tokio::spawn(async move { handler.serve(server_transport).await.unwrap() });
+        let running = ().serve(client_transport).await.unwrap();
+        let server = server.await.unwrap();
+        let upstream = Client::new(IndexMap::from_iter([(
+            "upstream".into(),
+            McpProviderConfig::Stdio(StdioConfig {
+                command: "unused-fixture".into(),
+                arguments: vec![],
+                variables: vec![],
+                checksum: None,
+                optional: false,
+                startup_timeout_secs: 60,
+            }),
+        )]));
+        upstream
+            .services
+            .write()
+            .await
+            .insert(McpServerId::new("upstream"), running);
+
+        let (finished, _finished_host) = native_service(&upstream).await;
+        let (surviving, mut host) = native_service(&upstream).await;
+        finished.shutdown().await;
+
+        let call = surviving
+            .start_call(CallRequest {
+                name: "alias".into(),
+                arguments: Map::new(),
+                correlation: Map::new(),
+            })
+            .unwrap();
+        let Interaction::Prepare {
+            arguments, reply, ..
+        } = host.recv().await.unwrap().interaction
+        else {
+            panic!("expected preparation")
+        };
+        reply.send(Ok(Admission::Run { arguments })).unwrap();
+        let Interaction::Release { reply, .. } = host.recv().await.unwrap().interaction else {
+            panic!("expected release")
+        };
+        reply.send(Ok(ReleaseDecision::Execute)).unwrap();
+        let Interaction::Record { reply, .. } = host.recv().await.unwrap().interaction else {
+            panic!("expected recording")
+        };
+        reply.send(Ok(())).unwrap();
+
+        assert_eq!(call.finish().await.unwrap().to_text(), "alpha\n\nresource");
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+
+        surviving.shutdown().await;
+        server.cancel().await.unwrap();
+    })
+    .await
+    .unwrap();
 }
 
 struct NativeUpstream(Arc<AtomicUsize>);

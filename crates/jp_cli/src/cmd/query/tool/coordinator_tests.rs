@@ -4,9 +4,7 @@ use camino_tempfile::Utf8TempDir;
 #[cfg(unix)]
 use jp_config::AppConfig;
 use jp_config::conversation::tool::{ToolConfig, ToolSource, style::PartialDisplayStyleConfig};
-#[cfg(unix)]
-use jp_inquire::ReplyEditMode;
-use jp_inquire::{ReplyOutcome, prompt::MockPromptBackend};
+use jp_inquire::{ReplyEditMode, ReplyOutcome, prompt::MockPromptBackend};
 #[cfg(unix)]
 use jp_mcp::{Client, server::builtin::BuiltinExecutors};
 use jp_printer::{ErrChannel, OutputFormat, Printer};
@@ -894,4 +892,47 @@ async fn remembered_denial_does_not_run_http_argument_formatter() {
         .await
         .unwrap();
     owner.shutdown().await.unwrap();
+}
+
+/// A prompter whose inline editor submits `submitted`.
+fn prompter_submitting(submitted: &str) -> ToolPrompter {
+    ToolPrompter::with_prompt_backend(
+        Arc::new(Printer::sink()),
+        None,
+        Arc::new(
+            MockPromptBackend::new()
+                .with_reply_outcomes([ReplyOutcome::Submit(submitted.to_owned())]),
+        ),
+        ReplyEditMode::default(),
+    )
+}
+
+fn offered() -> ToolCallResponse {
+    ToolCallResponse {
+        id: "call-1".into(),
+        result: Ok("alpha\n\nresource".into()),
+    }
+}
+
+/// Pressing Enter on the result as offered is not an edit: the execution
+/// service keeps delivering the tool's full result, including any content that
+/// has no text form.
+#[test]
+fn submitting_the_offered_result_unchanged_is_not_an_edit() {
+    let review =
+        ToolCoordinator::handle_edit_result(&prompter_submitting("alpha\n\nresource"), offered());
+
+    assert!(!review.edited);
+    assert_eq!(review.response, offered());
+}
+
+#[test]
+fn submitting_changed_text_replaces_the_result() {
+    let review = ToolCoordinator::handle_edit_result(&prompter_submitting("alpha only"), offered());
+
+    assert!(review.edited);
+    assert_eq!(review.response, ToolCallResponse {
+        id: "call-1".into(),
+        result: Ok("alpha only".into()),
+    });
 }

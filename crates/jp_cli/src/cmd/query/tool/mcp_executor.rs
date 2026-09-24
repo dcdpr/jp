@@ -909,6 +909,42 @@ impl ToolExecutor {
             self.service.cancel_call(id);
         }
     }
+
+    /// Report an execution attempt that ended in `error`.
+    ///
+    /// `released` is whether the service had been told to run the tool when the
+    /// attempt failed, which decides whether the tool may have run.
+    fn settle_failure(
+        &self,
+        state: &mut PendingCall,
+        error: ExecutorError,
+        released: bool,
+    ) -> ExecutorResult {
+        // A paused call is meant to come back, and a held one waits for the
+        // Host's response, so either way its invocation stays alive and the
+        // cancellation that ended this attempt is reported without tearing the
+        // service-side call down.
+        if self.slot.restarting.load(Ordering::Acquire) || self.slot.held.load(Ordering::Acquire) {
+            return ExecutorResult::Completed(ToolCallResponse {
+                id: self.slot.request.id.clone(),
+                result: Err(error.to_string()),
+            });
+        }
+        // Anything else cannot continue, so stop the service-side work rather
+        // than leaving it parked on a reply that never arrives.
+        self.cancel_invocation();
+        state.phase = Phase::Finished;
+        if error.is_call_outcome() {
+            return ExecutorResult::Completed(ToolCallResponse {
+                id: self.slot.request.id.clone(),
+                result: Err(error.to_string()),
+            });
+        }
+        if released {
+            return ExecutorResult::OutcomeUnknown(error);
+        }
+        ExecutorResult::Failed(error)
+    }
 }
 
 #[async_trait]
@@ -1107,6 +1143,9 @@ impl Executor for ToolExecutor {
     ) -> ExecutorResult {
         let mut state = self.slot.state.lock().await;
         *locked(&self.slot.stderr) = stderr;
+        // Whether the service was told to run the tool. A failure before that
+        // point means nothing ran; after it, the tool may have.
+        let mut released = false;
         let attempt = async {
             match mem::replace(&mut state.phase, Phase::Finished) {
                 Phase::Release(reply) => {
@@ -1115,6 +1154,7 @@ impl Executor for ToolExecutor {
                             operation: "release",
                         }
                     })?;
+                    released = true;
                 }
                 Phase::Input { id, reply } => {
                     let answer = answers
@@ -1126,6 +1166,7 @@ impl Executor for ToolExecutor {
                             operation: "inquiry",
                         }
                     })?;
+                    released = true;
                 }
                 phase => {
                     let name = phase.name();
@@ -1185,31 +1226,7 @@ impl Executor for ToolExecutor {
         // exited and its stderr has been drained, so the sink has nothing left
         // to receive. A question's next attempt brings its own.
         *locked(&self.slot.stderr) = None;
-        result.unwrap_or_else(|error| {
-            // A paused call is meant to come back, and a held one waits for the
-            // Host's response, so either way its invocation stays alive and the
-            // cancellation that ended this attempt is reported without tearing
-            // the service-side call down.
-            if self.slot.restarting.load(Ordering::Acquire)
-                || self.slot.held.load(Ordering::Acquire)
-            {
-                return ExecutorResult::Completed(ToolCallResponse {
-                    id: self.slot.request.id.clone(),
-                    result: Err(error.to_string()),
-                });
-            }
-            // Anything else cannot continue, so stop the service-side work
-            // rather than leaving it parked on a reply that never arrives.
-            self.cancel_invocation();
-            state.phase = Phase::Finished;
-            if error.is_call_outcome() {
-                return ExecutorResult::Completed(ToolCallResponse {
-                    id: self.slot.request.id.clone(),
-                    result: Err(error.to_string()),
-                });
-            }
-            ExecutorResult::Failed(error)
-        })
+        result.unwrap_or_else(|error| self.settle_failure(&mut state, error, released))
     }
 }
 

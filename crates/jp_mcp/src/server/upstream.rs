@@ -29,7 +29,7 @@ pub(super) fn decode_result(result: CallToolResult) -> Result<UpstreamResult, se
 
     match serde_json::from_str::<Outcome>(&text.text) {
         // The server said the call failed and its payload says it succeeded.
-        // Per RFD 108 the flag wins, so the envelope is left unrecognized and
+        // Per RFD 111 the flag wins, so the envelope is left unrecognized and
         // the failure carries through as the native result it already is.
         Ok(Outcome::Success { .. }) if result.is_error == Some(true) => {
             warn!("MCP error flag conflicts with an Outcome::Success envelope");

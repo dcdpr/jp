@@ -253,12 +253,19 @@ pub(crate) enum ExecutorResult {
     /// if the Host records this response without editing it.
     Completed(ToolCallResponse),
 
-    /// The call could not be advanced, and nothing ran.
+    /// The call failed before the tool was released to run, so nothing ran.
     ///
     /// Distinct from a tool that ran and reported failure: the reason is JP's
     /// own machinery, not the tool's, so it is not content for the model to
     /// reason about.
     Failed(ExecutorError),
+
+    /// The call failed after the tool was released to run, before its result
+    /// arrived.
+    ///
+    /// The tool may have run to completion, including its side effects, so
+    /// running it again is not known to be safe.
+    OutcomeUnknown(ExecutorError),
 
     /// Tool needs additional input before it can continue.
     ///

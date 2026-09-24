@@ -136,6 +136,73 @@ fn leaves_a_string_alone_when_the_enum_lists_it() {
     assert_eq!(Value::Object(arguments), json!({ "value": "3" }));
 }
 
+/// OpenAI's strict mode makes an optional `count` required-but-nullable, so the
+/// model omits it by sending `null`.
+/// That is an omission: the default applies and validation passes.
+#[test]
+fn a_null_optional_argument_is_an_omission_and_takes_its_default() {
+    let parameters = schema([
+        ("path", param("string"), true),
+        ("count", param_with_default("integer", &json!(10)), false),
+    ]);
+    let mut arguments = json!({ "path": "a.rs", "count": null })
+        .as_object()
+        .cloned()
+        .unwrap();
+
+    definition(parameters.clone()).coerce_arguments(&mut arguments);
+    apply_parameter_defaults(&mut arguments, &parameters);
+
+    assert_eq!(
+        Value::Object(arguments.clone()),
+        json!({ "path": "a.rs", "count": 10 })
+    );
+    validate_tool_arguments(&arguments, &parameters).expect("arguments validate");
+}
+
+#[test]
+fn a_null_nested_optional_argument_is_an_omission() {
+    let parameters = schema([(
+        "target",
+        json!({
+            "type": "object",
+            "properties": { "line": { "type": "integer" } }
+        }),
+        true,
+    )]);
+    let mut arguments = json!({ "target": { "line": null } })
+        .as_object()
+        .cloned()
+        .unwrap();
+
+    definition(parameters).coerce_arguments(&mut arguments);
+
+    assert_eq!(Value::Object(arguments), json!({ "target": {} }));
+}
+
+/// A parameter that declares `null` means something by it, so the value stays.
+#[test]
+fn a_null_is_kept_where_the_schema_accepts_it() {
+    let parameters = schema([("parent", json!({ "type": ["string", "null"] }), false)]);
+    let mut arguments = json!({ "parent": null }).as_object().cloned().unwrap();
+
+    definition(parameters).coerce_arguments(&mut arguments);
+
+    assert_eq!(Value::Object(arguments), json!({ "parent": null }));
+}
+
+/// A required argument cannot be omitted, so its `null` stays for validation to
+/// reject rather than turning into a missing-argument report.
+#[test]
+fn a_null_required_argument_is_kept() {
+    let parameters = schema([("path", param("string"), true)]);
+    let mut arguments = json!({ "path": null }).as_object().cloned().unwrap();
+
+    definition(parameters).coerce_arguments(&mut arguments);
+
+    assert_eq!(Value::Object(arguments), json!({ "path": null }));
+}
+
 #[test]
 fn test_validate_tool_arguments() {
     struct TestCase {

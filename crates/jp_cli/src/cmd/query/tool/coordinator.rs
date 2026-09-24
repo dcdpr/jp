@@ -1598,6 +1598,45 @@ impl ToolCoordinator {
         *tracked_review = Some(Review::unchanged(response));
     }
 
+    /// Record a call JP could not complete.
+    ///
+    /// The reason is JP's rather than the tool's, so the user gets the detail
+    /// and the model gets only what it needs to decide what to do next.
+    /// `may_have_run` is whether the tool was released before the call was
+    /// lost: if it was, a retry could repeat a side effect, so the model is
+    /// told to check first rather than invited to call again.
+    fn record_lost_call(
+        &mut self,
+        tool: &ExecutingTool,
+        tracked_review: &mut Option<Review>,
+        error: &ExecutorError,
+        may_have_run: bool,
+    ) {
+        warn!(
+            %error,
+            tool = %tool.tool_name,
+            may_have_run,
+            "Tool call could not be completed."
+        );
+        let message = if may_have_run {
+            format!(
+                "Tool '{}' may have run, but JP lost the call before its result arrived. Check \
+                 whether its effects took place before calling it again.",
+                tool.tool_name
+            )
+        } else {
+            format!(
+                "Tool '{}' was not executed: JP could not complete the call. You may retry it.",
+                tool.tool_name
+            )
+        };
+        self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
+        *tracked_review = Some(Review::replaced(ToolCallResponse {
+            id: tool.tool_id.clone(),
+            result: Err(message),
+        }));
+    }
+
     /// Take one finished attempt and decide what the phase does about it.
     ///
     /// `index` names a call the phase started; the caller checks that before
@@ -1667,23 +1706,10 @@ impl ToolCoordinator {
                 }
             }
             ExecutorResult::Failed(error) => {
-                // Nothing ran, and the reason is JP's rather than the tool's.
-                // The user gets the detail; the model gets only the fact that
-                // the call did not happen, so it can decide to retry.
-                warn!(
-                    %error,
-                    tool = %tool.tool_name,
-                    "Tool call could not be completed."
-                );
-                self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
-                *tracked_review = Some(Review::replaced(ToolCallResponse {
-                    id: tool.tool_id.clone(),
-                    result: Err(format!(
-                        "Tool '{}' was not executed: JP could not complete the call. You may \
-                         retry it.",
-                        tool.tool_name
-                    )),
-                }));
+                self.record_lost_call(tool, tracked_review, &error, false);
+            }
+            ExecutorResult::OutcomeUnknown(error) => {
+                self.record_lost_call(tool, tracked_review, &error, true);
             }
             ExecutorResult::NeedsInput {
                 tool_id,
@@ -1999,6 +2025,12 @@ impl ToolCoordinator {
     fn handle_edit_result(prompter: &ToolPrompter, response: ToolCallResponse) -> Review {
         let original = response.result.as_deref().unwrap_or_default();
         match prompter.edit_result(original) {
+            // Submitting the buffer as it was offered is not an edit. Treating
+            // it as one would rebuild the result from its text and drop any
+            // resources, images, or structured content the tool returned.
+            Ok(Some(edited)) if response.result.as_deref() == Ok(edited.as_str()) => {
+                Review::unchanged(response)
+            }
             Ok(Some(edited)) => Review::replaced(ToolCallResponse {
                 id: response.id,
                 result: Ok(edited),

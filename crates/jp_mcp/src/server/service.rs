@@ -380,8 +380,9 @@ impl Call {
 
 /// In-process tool service with immutable Host-bound execution context.
 ///
-/// The upstream client must be owned by this service: shutdown closes its
-/// services, including connections visible through any clones of that client.
+/// The upstream client is borrowed from the MCP Host, which may share its
+/// connections with other services running concurrent Turns, so neither
+/// dropping nor shutting down the service closes them.
 /// Dropping this owner signals cancellation; [`shutdown`] additionally waits
 /// for cleanup.
 ///
@@ -664,8 +665,10 @@ impl Service {
         }
     }
 
-    /// Stop admission, cancel outstanding calls, wait for their cleanup, and
-    /// close owned upstream services.
+    /// Stop admission, cancel outstanding calls, and wait for their cleanup.
+    ///
+    /// Upstream MCP connections stay open: they belong to the Host, and another
+    /// service may be mid-Turn on them.
     /// Safe to call more than once.
     pub async fn shutdown(&self) {
         self.stop();
@@ -680,7 +683,6 @@ impl Service {
             }
             idle.await;
         }
-        self.inner.upstream.shutdown().await;
     }
 }
 

@@ -287,7 +287,7 @@ requires its own compatibility decision.
 
 ### JP-aware upstream MCP tools
 
-Adopt the narrowly scoped interoperability from [RFD 108], within the new
+Adopt the narrowly scoped interoperability from [RFD 111], within the new
 execution path rather than as another implementation in `jp_llm`.
 
 For a result containing exactly one MCP text block, attempt to parse the entire
@@ -297,7 +297,7 @@ representation.
 No opt-in or protocol advertisement is required.
 Do not concatenate mixed content to make it parseable or recursively unwrap
 strings within a successful result.
-An MCP error flag conflicting with `Outcome::Success` wins, as specified by 108.
+An MCP error flag conflicting with `Outcome::Success` wins, as specified by 111.
 
 A literal JSON document can therefore be interpreted as an Outcome when its
 shape matches.
@@ -317,7 +317,7 @@ Any duplicated arguments derive from the same post-edit value.
 Build this metadata from Host configuration and replies; never trust incoming
 metadata as those values.
 
-This reuses 108's request plumbing and Outcome compatibility without requiring
+This reuses 111's request plumbing and Outcome compatibility without requiring
 its separate implementation or broadening the first delivery into new MCP
 features.
 
@@ -347,8 +347,9 @@ Use the existing cancellation pattern: the MCP Host sends a scoped stop command
 or cancellation token and waits for cleanup.
 Stopping current calls and shutting down the JP MCP Server are distinct
 operations.
-Shutdown stops admission, cancels pending interactions and calls, and closes
-owned upstream clients.
+Shutdown stops admission and cancels pending interactions and calls.
+Upstream MCP connections belong to the MCP Host, which can share them across
+concurrent Turns, so shutting down one JP MCP Server leaves them running.
 The JP MCP Server's HTTP listener dies with the JP process; child-process
 cleanup still follows JP's existing execution mechanisms.
 
@@ -444,7 +445,7 @@ delaying a future RFD for that work.
 3. **One HTTP path and CLI adoption.** Add the Streamable HTTP endpoint and make
    JP's ordinary query path its MCP caller.
    Keep the coordinator and event ownership in JP.
-   Add 108 metadata/Outcome handling to upstream stdio calls; do not maintain a
+   Add 111 metadata/Outcome handling to upstream stdio calls; do not maintain a
    parallel production execution pipeline.
 4. **future RFD readiness.** Exercise a third-party MCP client against the same
    service while the MCP Host handles interactions.
@@ -471,5 +472,5 @@ shared contracts and execution behavior specified here.
 [RFD 026]: 026-agent-loop-extraction.md
 [RFD 058]: 058-typed-content-blocks-for-tool-responses.md
 [RFD 065]: 065-typed-resource-model-for-attachments.md
-[RFD 108]: 108-transitional-jp-protocol-bridge-for-mcp-tools.md
+[RFD 111]: 111-transitional-jp-protocol-bridge-for-mcp-tools.md
 [Streamable HTTP]: https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#streamable-http

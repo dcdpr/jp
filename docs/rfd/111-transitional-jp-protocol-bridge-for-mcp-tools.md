@@ -1,4 +1,4 @@
-# RFD 108: Transitional JP Protocol Bridge for MCP Tools
+# RFD 111: Transitional JP Protocol Bridge for MCP Tools
 
 - **Status**: Discussion
 - **Category**: Design
