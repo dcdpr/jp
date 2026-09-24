@@ -346,20 +346,21 @@ prefix is stable.
 Do not sacrifice current instructions or correct history to preserve a cache
 entry.
 
-Honor `assistant.request.cache` through the qualified runtime controls:
+Map `assistant.request.cache` onto the runtime as follows:
 
-| JP policy       | ACP flow mapping                                                                                         |
-| --------------- | -------------------------------------------------------------------------------------------------------- |
-| `off`           | `DISABLE_PROMPT_CACHING=1`.                                                                              |
-| `short`         | `CLAUDE_CODE_PROMPT_CACHE_TTL=5m`.                                                                       |
-| `long`          | `CLAUDE_CODE_PROMPT_CACHE_TTL=1h`.                                                                       |
-| Custom duration | Existing Anthropic mapping: at least 30 minutes selects one hour; shorter durations select five minutes. |
+| JP policy                             | ACP flow mapping                                                 |
+| ------------------------------------- | ---------------------------------------------------------------- |
+| `off`                                 | `DISABLE_PROMPT_CACHING=1`.                                      |
+| `short`, `long`, or a custom duration | No override: Claude Code's own default and managed policy apply. |
 
-These published runtime controls require integration tests.
-Isolate conflicting ambient runtime overrides; report a managed-policy conflict
-rather than claim a JP setting was honored when it was not.
-JP's default remains `short`, rather than silently adopting Claude Code's
-subscription default of one hour.
+The ACP flow does not enforce a retention duration.
+Only `off` changes the runtime's caching policy, and it is the only value JP
+sends.
+The launcher removes inherited cache overrides (`DISABLE_PROMPT_CACHING*`,
+`CLAUDE_CODE_PROMPT_CACHE_TTL`, `FORCE_PROMPT_CACHING_5M`,
+`ENABLE_PROMPT_CACHING_1H`) from the child environment, so an ambient setting
+cannot stand in for a policy JP did not choose.
+The direct HTTP flows keep their existing duration mapping.
 JP-initiated auxiliary requests use their own resolved policy.
 Cache breakpoint placement need not be byte-identical between flows, but
 supported caching controls and unchanged-prefix reuse must remain useful.
