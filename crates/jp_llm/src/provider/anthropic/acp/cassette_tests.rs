@@ -226,9 +226,16 @@ async fn a_script_that_runs_out_says_so() {
 fn a_missing_recording_names_the_path_it_wanted() {
     let error = read("no-such-conversation").unwrap_err();
 
+    // Compared by path component rather than as a string, so the separator the
+    // platform joins with does not matter.
+    let wanted = fixture("no-such-conversation");
     assert!(
-        error.starts_with("Recording not found at ")
-            && error.contains("acp/no-such-conversation.jsonl"),
+        wanted.ends_with("tests/fixtures/acp/no-such-conversation.jsonl"),
+        "{}",
+        wanted.display()
+    );
+    assert!(
+        error.starts_with(&format!("Recording not found at {}: ", wanted.display())),
         "{error}"
     );
 }
