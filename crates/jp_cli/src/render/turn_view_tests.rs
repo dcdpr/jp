@@ -1,6 +1,9 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
+use std::{
+    fmt::Write as _,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use jp_config::{
@@ -10,6 +13,7 @@ use jp_config::{
 };
 use jp_conversation::event::ChatResponse;
 use jp_printer::{OutputFormat, Printer};
+use serde_json::json;
 
 use super::*;
 
@@ -144,6 +148,50 @@ fn message_clears_tool_separator_debt() {
         !flag.load(Ordering::Relaxed),
         "a message supplies spacing and clears the debt"
     );
+}
+
+/// A prompt taken over a structured answer carries no reasoning background.
+///
+/// The chat renderer draws none of the JSON, so left to itself it goes on
+/// reporting the region it last rendered and the interrupt menu comes up shaded
+/// over content that is not.
+/// A reasoning model answering `--schema` is the ordinary way to reach this:
+/// every provider emits its reasoning parts and then its structured parts.
+#[test]
+fn a_structured_response_closes_the_region_for_later_prompts() {
+    let mut style = AppConfig::new_test().style;
+    style.reasoning.display = ReasoningDisplayConfig::Full;
+    style.reasoning.background = Some(Color::Ansi256(236));
+
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mut view = TurnView::new(printer.clone(), style, None, None, RenderFlow::Live);
+
+    view.render_chat_response_chunk(&ChatResponse::reasoning("Picking a title.\n\n"));
+    printer.flush();
+    out.lock().clear();
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "Interrupted").unwrap();
+    }
+    printer.flush();
+    assert_eq!(
+        *out.lock(),
+        "\x1b[48;5;236mInterrupted\x1b[49m",
+        "a prompt inside the reasoning region is a visual row like any other"
+    );
+
+    view.render_chat_response_chunk(&ChatResponse::structured(json!({"title": "Jean-Pierre"})));
+    printer.flush();
+    out.lock().clear();
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "Interrupted").unwrap();
+    }
+    printer.flush();
+    assert_eq!(*out.lock(), "Interrupted");
 }
 
 #[test]

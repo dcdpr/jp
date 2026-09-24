@@ -2,15 +2,15 @@
 //! stream.
 //!
 //! [`ShadedWriter`] wraps another [`Write`] and keeps a region background `B`
-//! showing from column 0 to the right edge of every visual line — including
-//! lines produced by carriage-return rewrites (`\r`) and `\x1b[K` erases —
-//! while stepping out of the way for any background the content sets itself.
+//! showing from column 0 to the right edge of every visual line, including
+//! lines produced by carriage-return rewrites (`\r`) and `\x1b[K` erases, while
+//! stepping out of the way for any background the content sets itself.
 //! `B` is closed before every line break and re-asserted on the next line, so
 //! no row past the region is painted.
 //! [`shade`] is the buffer-at-a-time convenience built on the same core.
 //!
 //! The writer holds its state across `write_str` calls, so `B` survives a
-//! cursor rewrite or an escape sequence split between two writes — the cases a
+//! cursor rewrite or an escape sequence split between two writes, the cases a
 //! per-line transform over a finished string cannot express.
 
 use std::fmt::{self, Write};
@@ -46,21 +46,21 @@ pub struct ShadedWriter<W: Write> {
     ///
     /// The full policy, not a boolean: [`BackgroundFill::Terminal`] defers the
     /// fill to the terminal via `\x1b[K`, while [`BackgroundFill::Column`] pads
-    /// with real spaces — the only form a host that lays out its own
-    /// sub-window (an `fzf` preview pane) renders.
+    /// with real spaces, the only form a host that lays out its own sub-window
+    /// (an `fzf` preview pane) renders.
     fill: BackgroundFill,
 
     /// Visible column of the write cursor on the current line.
     ///
     /// Only meaningful for [`BackgroundFill::Column`], which needs to know how
     /// far to pad.
-    /// Counted in display columns over escape-free text runs — with tabs
-    /// advancing to the next tab stop, as the display does — and reset by `\n`
+    /// Counted in display columns over escape-free text runs, with tabs
+    /// advancing to the next tab stop as the display does, and reset by `\n`
     /// and `\r`.
     column: usize,
 
     /// The content's currently active attributes, fed only the content's own
-    /// escapes — never the writer's injected background.
+    /// escapes, never the writer's injected background.
     content: AnsiState,
 
     /// Whether the region background must be (re-)asserted before the next
@@ -73,8 +73,11 @@ pub struct ShadedWriter<W: Write> {
     /// nothing new can be painted and no re-assert is owed.
     needs_background: bool,
 
-    /// Holds a trailing escape sequence split across a write boundary,
-    /// completed and processed on the next write.
+    /// Holds the tail of a write that cannot be interpreted until the next one
+    /// arrives: an escape sequence cut before its terminator, or a `\r` that
+    /// may yet turn out to be the first half of a `\r\n` pair.
+    ///
+    /// Re-attached to the front of the following write and processed there.
     pending: String,
 }
 
@@ -96,7 +99,7 @@ impl<W: Write> ShadedWriter<W> {
     /// The writer being shaded.
     ///
     /// A decorator has to stay transparent to whatever the wrapped writer can
-    /// do beyond [`Write`] — flushing an `io::Write`, most often.
+    /// do beyond [`Write`], flushing an `io::Write` most often.
     /// Any escape sequence held back from a split write stays held: forwarding
     /// a half-formed sequence is the one thing this writer exists to prevent.
     pub const fn get_mut(&mut self) -> &mut W {
@@ -105,8 +108,11 @@ impl<W: Write> ShadedWriter<W> {
 
     /// End the shaded region.
     ///
-    /// Flushes any escape sequence still buffered from a split write, then
-    /// emits `\x1b[49m` so the region background does not leak past the region.
+    /// Flushes anything still buffered from a split write: a half-formed
+    /// escape, or a `\r` whose `\n` never came and so was a row rewrite after
+    /// all.
+    /// Then emits `\x1b[49m` so the region background does not leak past the
+    /// region.
     /// A region whose last write ended on a line break is already closed and
     /// emits nothing here.
     /// Call once after the last write.
@@ -160,27 +166,55 @@ impl<W: Write> ShadedWriter<W> {
     /// Forward visible text, asserting the region background under it and
     /// filling each completed line to the right edge.
     fn process_text(&mut self, text: &str) -> fmt::Result {
+        let bytes = text.as_bytes();
         let mut start = 0;
-        for (i, byte) in text.bytes().enumerate() {
-            match byte {
-                b'\n' => {
-                    self.emit_run(&text[start..i])?;
-                    self.fill_line()?;
-                    self.close_line()?;
-                    self.output.write_str("\n")?;
-                    self.column = 0;
-                    start = i + 1;
+        let mut i = 0;
+
+        while i < bytes.len() {
+            match bytes[i] {
+                // `\r\n` is one line terminator, so the line ends before the
+                // `\r` rather than after it. A fill written afterwards starts
+                // from the column the `\r` returned to, erasing or padding over
+                // the line it was meant to extend.
+                b'\r' if bytes.get(i + 1) == Some(&b'\n') => {
+                    self.end_line(&text[start..i], "\r\n")?;
+                    i += 2;
+                    start = i;
                 }
+                b'\n' => {
+                    self.end_line(&text[start..i], "\n")?;
+                    i += 1;
+                    start = i;
+                }
+                // A `\r` on its own rewrites the row in place, the way a
+                // progress line redraws itself. No line was completed, so
+                // there is nothing to fill and nothing to close.
                 b'\r' => {
                     self.emit_run(&text[start..i])?;
                     self.output.write_str("\r")?;
                     self.column = 0;
-                    start = i + 1;
+                    i += 1;
+                    start = i;
                 }
-                _ => {}
+                _ => i += 1,
             }
         }
+
         self.emit_run(&text[start..])
+    }
+
+    /// End the line `run` completes, then write `terminator`.
+    ///
+    /// The fill and the background close both land while the cursor is still at
+    /// the end of `run`, which is where the terminator would otherwise move it
+    /// from.
+    fn end_line(&mut self, run: &str, terminator: &str) -> fmt::Result {
+        self.emit_run(run)?;
+        self.fill_line()?;
+        self.close_line()?;
+        self.output.write_str(terminator)?;
+        self.column = 0;
+        Ok(())
     }
 
     /// Emit a run of visible text with the region background asserted under it.
@@ -209,7 +243,7 @@ impl<W: Write> ShadedWriter<W> {
     ///
     /// A terminal scrolling to make room for the next row fills that row with
     /// the background active at the time (the `bce` capability), so a `\n`
-    /// written under `B` paints a row that isn't part of the region — the row
+    /// written under `B` paints a row that isn't part of the region: the row
     /// the next command's output lands on.
     /// The line's own fill has already been written, so closing here costs
     /// nothing visually.
@@ -239,8 +273,9 @@ impl<W: Write> ShadedWriter<W> {
 
 impl<W: Write> Write for ShadedWriter<W> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        // Re-attach any escape sequence held back from the previous write, so a
-        // sequence split across writes is processed as a whole.
+        // Re-attach whatever the previous write could not interpret on its own,
+        // so a sequence or a `\r\n` pair split across writes is processed as a
+        // whole.
         let mut combined = std::mem::take(&mut self.pending);
         combined.push_str(s);
 
@@ -254,6 +289,15 @@ impl<W: Write> Write for ShadedWriter<W> {
                     self.pending.push_str(esc);
                 }
                 Segment::Escape(esc) => self.process_escape(esc)?,
+                // A trailing `\r` is ambiguous until the next byte arrives: it
+                // ends the line when a `\n` follows, and rewrites the row in
+                // place otherwise. Forwarding it now commits to the second
+                // reading, and the fill for a line it turns out to have ended
+                // would run from column zero.
+                Segment::Text(text) if i == last && text.ends_with('\r') => {
+                    self.process_text(&text[..text.len() - 1])?;
+                    self.pending.push('\r');
+                }
                 Segment::Text(text) => self.process_text(text)?,
             }
         }

@@ -1,3 +1,5 @@
+use jp_term::background::BackgroundFill;
+
 use super::*;
 use crate::region::OutputLines;
 
@@ -89,7 +91,7 @@ fn test_flush_instant_with_no_pending_tasks() {
     printer.print("already sent");
     printer.flush();
 
-    // Nothing pending — should be a no-op
+    // Nothing pending, so this should be a no-op
     printer.flush_instant();
 
     assert_eq!(*out.lock(), "already sent");
@@ -398,7 +400,7 @@ fn effective_delay_in_drain_mode_can_speed_up_further() {
     // pending), the controller speeds up to the new floor rather than
     // sticking with the old drain pace. This codifies that any new
     // typewriter task is also expected to clear the snapshot via
-    // `track_pending` — the max() is just a safety net.
+    // `track_pending`; the max() is just a safety net.
     let dc = DelayControl {
         skip: Mutex::new(false),
         wake: Condvar::new(),
@@ -709,8 +711,8 @@ fn releasing_a_shaded_region_leaves_no_paint_behind() {
 
     // The row is shaded while the region owns it, and the release clears it to
     // the terminal default. A background on the erase would paint the row to
-    // the right edge instead, and whatever wrote there next — including the
-    // shell prompt after `jp` exits — would sit in front of that paint.
+    // the right edge instead, and whatever wrote there next (including the
+    // shell prompt after `jp` exits) would sit in front of that paint.
     assert_eq!(
         *err.lock(),
         "\r\x1b[Kwaiting\r\x1b[48;5;236m\x1b[Kwaiting\x1b[49m\r\x1b[K"
@@ -784,7 +786,7 @@ fn acquiring_a_prompt_writer_drains_the_queue_first() {
     // No flush: acquisition is the barrier. A widget changes the terminal mode
     // and takes the cursor directly, neither of which travels through the
     // printer's queue, so anything still in it would land on a terminal the
-    // widget has already reconfigured — line feeds with no carriage return,
+    // widget has already reconfigured: line feeds with no carriage return,
     // under a cursor the widget believes it owns.
     let start = Instant::now();
     let _prompt = printer.prompt_writer();
@@ -950,6 +952,147 @@ fn output_held_by_a_prompt_is_not_lost_at_shutdown() {
         *out.lock(),
         "assistant content\n",
         "held output is deferred, not discarded"
+    );
+}
+
+/// A full-width reasoning-region background.
+fn shaded_region() -> DefaultBackground {
+    DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Terminal,
+    }
+}
+
+#[test]
+fn a_prompt_inside_a_shaded_region_carries_its_background() {
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    printer.set_prompt_background(Some(shaded_region()));
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "Run local shell tool?").unwrap();
+    }
+    printer.flush();
+
+    // The background is asserted before the text and closed once the widget is
+    // done with the terminal, so the row is shaded and nothing after it is.
+    assert_eq!(*out.lock(), "\x1b[48;5;236mRun local shell tool?\x1b[49m");
+}
+
+#[test]
+fn an_owned_prompt_writer_carries_the_background_too() {
+    // The inline reply widget owns its output stream, so it takes this writer
+    // rather than the borrowed one. Both are prompts and both are inside the
+    // region.
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    printer.set_prompt_background(Some(shaded_region()));
+
+    {
+        let mut prompt = printer.owned_prompt_writer();
+        write!(prompt, "Edit arguments").unwrap();
+    }
+    printer.flush();
+
+    assert_eq!(*out.lock(), "\x1b[48;5;236mEdit arguments\x1b[49m");
+}
+
+#[test]
+fn an_owned_prompt_writer_keeps_a_crlf_line_intact() {
+    // The inline reply widget paints in raw mode, where a bare `\n` does not
+    // return to column zero, so `reedline` coerces every buffer newline to
+    // `\r\n` before it reaches this writer. Seeded with pretty-printed tool
+    // arguments, that is most of what it writes.
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    printer.set_prompt_background(Some(shaded_region()));
+
+    {
+        let mut prompt = printer.owned_prompt_writer();
+        write!(prompt, "{{\r\n  \"path\": \"src/lib.rs\"\r\n}}").unwrap();
+    }
+    printer.flush();
+
+    // Each line is filled from where its own content ends, ahead of the `\r`
+    // that puts the cursor back at the margin.
+    assert_eq!(
+        *out.lock(),
+        "\x1b[48;5;236m{\x1b[K\x1b[49m\r\n\x1b[48;5;236m  \"path\": \
+         \"src/lib.rs\"\x1b[K\x1b[49m\r\n\x1b[48;5;236m}\x1b[49m"
+    );
+}
+
+#[test]
+fn a_prompt_outside_a_shaded_region_is_unshaded() {
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "Run local shell tool?").unwrap();
+    }
+    printer.flush();
+
+    assert_eq!(*out.lock(), "Run local shell tool?");
+}
+
+#[test]
+fn clearing_the_background_unshades_later_prompts() {
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.set_prompt_background(Some(shaded_region()));
+    drop(printer.prompt_writer());
+    printer.set_prompt_background(None);
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "after").unwrap();
+    }
+    printer.flush();
+
+    assert_eq!(*out.lock(), "after");
+}
+
+#[test]
+fn an_abandoned_prompt_still_closes_its_background() {
+    // A widget can end by `Ctrl+C` or by an error, neither of which returns
+    // through the normal path. The close lives in `Drop` so the background
+    // cannot outlive the prompt and paint whatever is printed next.
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    printer.set_prompt_background(Some(shaded_region()));
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "Deliver result?").unwrap();
+        // No further writes: the prompt is abandoned mid-session.
+    }
+    printer.set_prompt_background(None);
+    printer.println("after");
+    printer.flush();
+
+    assert_eq!(*out.lock(), "\x1b[48;5;236mDeliver result?\x1b[49mafter\n");
+}
+
+#[test]
+fn flushing_a_shaded_prompt_waits_for_the_printer() {
+    // A widget flushes its writer before it reads a key, and on this path a
+    // flush is a barrier rather than a buffer drain: the bytes have to have
+    // landed before the widget takes the cursor and the terminal's mode.
+    // Shading decorates that writer and must not swallow it.
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    printer.set_prompt_background(Some(shaded_region()));
+
+    let mut prompt = printer.prompt_writer();
+
+    // Queued after acquisition drained the printer, and slow enough that the
+    // worker is certainly still inside it.
+    printer.print("slow".typewriter(Duration::from_millis(100)));
+
+    write!(prompt, "Run local shell tool?").unwrap();
+    io::Write::flush(&mut prompt).unwrap();
+
+    // Deliberately no `printer.flush()`, which is the assertion.
+    assert!(
+        out.lock().contains("Run local shell tool?"),
+        "flushing the prompt must drain the printer, got {:?}",
+        *out.lock()
     );
 }
 

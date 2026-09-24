@@ -13,6 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use jp_term::{background::DefaultBackground, shade::ShadedWriter};
 use parking_lot::{Condvar, Mutex};
 use tracing::{debug, error};
 
@@ -110,6 +111,12 @@ pub struct Printer {
     /// even a currently-running typewriter task wakes up immediately.
     /// Cleared by the worker after processing `FlushInstant`.
     delay_control: Arc<DelayControl>,
+
+    /// The region background prompts are drawn against, when one is open.
+    ///
+    /// Shared across clones: whoever owns the region sets it once, and every
+    /// prompt taken from any handle picks it up.
+    prompt_background: Arc<Mutex<Option<DefaultBackground>>>,
 }
 
 impl Clone for Printer {
@@ -123,6 +130,7 @@ impl Clone for Printer {
             terminal: self.terminal,
             worker_handle: self.worker_handle.clone(),
             delay_control: self.delay_control.clone(),
+            prompt_background: self.prompt_background.clone(),
         }
     }
 }
@@ -174,6 +182,7 @@ impl Printer {
             terminal: TerminalCapability::default(),
             worker_handle: Arc::new(Mutex::new(Some(handle))),
             delay_control,
+            prompt_background: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -199,9 +208,9 @@ impl Printer {
 
     /// Set whether chrome reaches the error stream.
     ///
-    /// [`Chrome::Silenced`] discards everything written to that stream —
-    /// [`Self::eprint`], [`Self::eprintln`], [`Self::erase_line`], and
-    /// [`Self::err_writer`] — and leaves stdout and the prompt stream alone.
+    /// [`Chrome::Silenced`] discards everything written to that stream
+    /// ([`Self::eprint`], [`Self::eprintln`], [`Self::erase_line`], and
+    /// [`Self::err_writer`]) and leaves stdout and the prompt stream alone.
     ///
     /// Call before the printer is shared; clones inherit the value.
     #[must_use]
@@ -270,7 +279,7 @@ impl Printer {
     /// before any printer-managed write reaches the terminal.
     /// Dropping the returned handle releases the claim and erases the row.
     ///
-    /// Returns an inert handle when regions are disabled — silenced chrome, a
+    /// Returns an inert handle when regions are disabled: silenced chrome, a
     /// non-pretty format, a stderr that isn't a terminal, or live logs on
     /// stderr.
     #[must_use]
@@ -334,8 +343,8 @@ impl Printer {
     /// This allows prompts to render on the terminal even when stdout and
     /// stderr are redirected.
     ///
-    /// The chrome channel's capabilities are measured here — stderr's tty-ness
-    /// and the terminal's width — so status regions know whether they may
+    /// The chrome channel's capabilities are measured here, stderr's tty-ness
+    /// and the terminal's width, so status regions know whether they may
     /// render.
     #[must_use]
     pub fn terminal(format: OutputFormat) -> Self {
@@ -456,8 +465,8 @@ impl Printer {
 
     /// Erase the current line on the chrome channel.
     ///
-    /// For chrome that repaints in place — status lines, progress counters,
-    /// the retry notice.
+    /// For chrome that repaints in place: status lines, progress counters, the
+    /// retry notice.
     /// A no-op whenever [`Self::chrome_repaints`] is false: under a JSON format
     /// `\r\x1b[K` is neither a record nor part of one, and would break `2>&1 |
     /// jq` to redraw something a JSON consumer cannot see.
@@ -550,22 +559,39 @@ impl Printer {
     /// erased, and no region redraws until the writer drops: a prompt session
     /// is a run of small writes with the widget owning the cursor in between,
     /// and anything landing between them corrupts it.
+    ///
+    /// Writes carry whatever background [`Self::set_prompt_background`] last
+    /// named.
     #[must_use]
     pub fn prompt_writer(&self) -> PromptWriter<'_> {
+        let writer = PrinterWriter {
+            printer: self,
+            target: self.prompt_target(),
+            origin: PrintOrigin::Prompt,
+        };
+        let suspension = self.begin_prompt_session();
+
         PromptWriter {
-            writer: PrinterWriter {
-                printer: self,
-                target: self.prompt_target(),
-                origin: PrintOrigin::Prompt,
-            },
-            _suspension: self.begin_prompt_session(),
+            writer: Canvas::new(writer, self.prompt_background.lock().as_ref()),
+            _suspension: suspension,
             _trace: PromptTrace::open(),
         }
     }
 
+    /// Draw prompts against `background` until it is replaced.
+    ///
+    /// `None` while no shaded region is open, which is the common case.
+    /// A prompt drawn inside one is a visual row like any other and shows the
+    /// same background to the right edge (RFD 095).
+    /// Every prompt the printer hands out picks this up, so no prompt site
+    /// takes a background as an argument.
+    pub fn set_prompt_background(&self, background: Option<DefaultBackground>) {
+        *self.prompt_background.lock() = background;
+    }
+
     /// Print a line on the prompt stream.
     ///
-    /// For the context a question needs to be answerable — the identity of a
+    /// For the context a question needs to be answerable: the identity of a
     /// binary awaiting approval, the details of a conversation about to be
     /// removed.
     /// Such a line travels with its question rather than as chrome, so
@@ -584,17 +610,17 @@ impl Printer {
 
     /// Print a line of chrome that must not wait for a prompt session.
     ///
-    /// The same stream and the same record shape as [`Self::eprintln`] —
-    /// `--quiet` silences it, `2>` captures it — but the line belongs to the
-    /// prompt session, so it lands while a widget still owns the terminal
-    /// rather than queueing behind it.
+    /// The same stream and the same record shape as [`Self::eprintln`], so
+    /// `--quiet` silences it and `2>` captures it, but the line belongs to the
+    /// prompt session and lands while a widget still owns the terminal rather
+    /// than queueing behind it.
     /// For a notice about the question itself: held back, it arrives once the
     /// question it explains is already answered.
     ///
     /// The caller owns the timing.
     /// This bypasses the wait that keeps ordinary output off a screen someone
     /// else is drawing on, so it is safe only when the widget has left the
-    /// terminal in cooked mode — between two of its frames, not during one.
+    /// terminal in cooked mode: between two of its frames, not during one.
     pub fn prompt_eprintln<P: Printable>(&self, p: P) {
         let mut task = p.into_task();
         if self.format.is_json() {
@@ -619,10 +645,15 @@ impl Printer {
     /// ordered with the printer's other output.
     #[must_use]
     pub fn owned_prompt_writer(&self) -> Box<dyn io::Write + Send> {
-        Box::new(OwnedPrinterWriter {
+        let writer = OwnedPrinterWriter {
             tx: self.tx.clone(),
             target: self.prompt_target(),
-            _suspension: self.begin_prompt_session(),
+        };
+        let suspension = self.begin_prompt_session();
+
+        Box::new(OwnedPromptWriter {
+            writer: Canvas::new(writer, self.prompt_background.lock().as_ref()),
+            _suspension: suspension,
             _trace: PromptTrace::open(),
         })
     }
@@ -889,21 +920,85 @@ impl Drop for PromptTrace {
     }
 }
 
-/// A writer for interactive prompt output that suspends status regions.
+/// A prompt's writes, shaded with the open region background if there is one.
 ///
-/// Region rows are erased when the writer is acquired and no redraw lands until
-/// it drops, so a widget owning the cursor between writes is never interrupted.
-/// Returned by [`Printer::prompt_writer`].
-#[derive(Debug)]
-pub struct PromptWriter<'a> {
-    /// The underlying writer, targeting the TTY or `out`.
-    writer: PrinterWriter<'a>,
+/// A prompt drawn inside a shaded region shows that region's background like
+/// every other row (RFD 095).
+/// A widget owns its own cursor: it rewrites its line with `\r\x1b[K` on each
+/// keystroke, and that erase fills with whatever background is active.
+/// [`ShadedWriter`] is what keeps the fill right across the widget's own
+/// escapes, including the resets it emits mid-line.
+enum Canvas<W: fmt::Write> {
+    /// No region is open; writes pass straight through.
+    Plain(W),
 
-    /// Holds the suspension for the writer's lifetime.
+    /// Writes are shaded with the open region's background.
+    Shaded(Box<ShadedWriter<W>>),
+}
+
+impl<W: fmt::Write> Canvas<W> {
+    /// Wrap `writer`, shading it when a region is open.
+    fn new(writer: W, background: Option<&DefaultBackground>) -> Self {
+        match background {
+            Some(background) => Self::Shaded(Box::new(ShadedWriter::new(writer, background))),
+            None => Self::Plain(writer),
+        }
+    }
+
+    /// The writer underneath the shading.
+    ///
+    /// Reached for the operations [`Write`] cannot express, of which flushing
+    /// is the only one here.
+    fn get_mut(&mut self) -> &mut W {
+        match self {
+            Self::Plain(writer) => writer,
+            Self::Shaded(writer) => writer.get_mut(),
+        }
+    }
+
+    /// Close the background, if one was opened.
+    ///
+    /// Called from the prompt writer's `Drop` rather than at the end of each
+    /// prompt: a prompt can end by cancellation or by an error, and a
+    /// background left open paints everything printed after it.
+    fn finish(&mut self) {
+        if let Self::Shaded(writer) = self {
+            let _err = writer.finish();
+        }
+    }
+}
+
+impl<W: fmt::Write> fmt::Write for Canvas<W> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        match self {
+            Self::Plain(writer) => writer.write_str(s),
+            Self::Shaded(writer) => writer.write_str(s),
+        }
+    }
+}
+
+/// A writer for interactive prompt output.
+///
+/// From acquisition until it drops, status rows stay erased, ordinary output is
+/// held back, and no redraw lands between the widget's own writes.
+/// Writes carry the open region background, when there is one.
+/// Returned by [`Printer::prompt_writer`].
+pub struct PromptWriter<'a> {
+    /// The underlying writer, targeting the TTY or `out`, shaded when a region
+    /// is open.
+    writer: Canvas<PrinterWriter<'a>>,
+
+    /// Keeps status rows erased and ordinary output held back until it drops.
     _suspension: SuspendGuard,
 
     /// Records the session's lifetime for the trace log.
     _trace: PromptTrace,
+}
+
+impl Drop for PromptWriter<'_> {
+    fn drop(&mut self) {
+        self.writer.finish();
+    }
 }
 
 impl fmt::Write for PromptWriter<'_> {
@@ -914,17 +1009,21 @@ impl fmt::Write for PromptWriter<'_> {
 
 impl io::Write for PromptWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        io::Write::write(&mut self.writer, buf)
+        let s = str::from_utf8(buf).map_err(io::Error::other)?;
+        self.writer.write_str(s).map_err(io::Error::other)?;
+        Ok(s.len())
     }
 
+    /// A widget flushes before it reads a key, and on this path a flush is a
+    /// barrier rather than a buffer drain: it blocks until the printer's worker
+    /// has written everything queued ahead of it.
     fn flush(&mut self) -> io::Result<()> {
-        io::Write::flush(&mut self.writer)
+        io::Write::flush(self.writer.get_mut())
     }
 }
 
-/// An owned writer targeting one of the [`Printer`]'s streams.
+/// An owned channel into one of the [`Printer`]'s streams.
 ///
-/// Returned (boxed) by [`Printer::owned_prompt_writer`].
 /// Owns a clone of the printer's command channel, so it is `'static` and
 /// `Send`; writes flow through the printer's serialized worker just like
 /// [`PrinterWriter`].
@@ -934,26 +1033,24 @@ struct OwnedPrinterWriter {
 
     /// The target output stream.
     target: PrintTarget,
-
-    /// Holds the status-region suspension for the writer's lifetime.
-    _suspension: SuspendGuard,
-
-    /// Records the session's lifetime for the trace log.
-    _trace: PromptTrace,
 }
 
-impl io::Write for OwnedPrinterWriter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let s = str::from_utf8(buf).map_err(io::Error::other)?;
+impl fmt::Write for OwnedPrinterWriter {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
         let task = PrintTask {
             content: s.to_owned(),
             mode: PrintMode::Instant,
             target: self.target,
             origin: PrintOrigin::Prompt,
         };
-        self.tx
-            .send(Command::Print(task))
-            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "printer shutdown"))?;
+        self.tx.send(Command::Print(task)).map_err(|_| fmt::Error)
+    }
+}
+
+impl io::Write for OwnedPrinterWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let s = str::from_utf8(buf).map_err(io::Error::other)?;
+        self.write_str(s).map_err(io::Error::other)?;
         Ok(s.len())
     }
 
@@ -964,6 +1061,42 @@ impl io::Write for OwnedPrinterWriter {
             .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "printer shutdown"))?;
         rx.recv()
             .map_err(|_| io::Error::other("failed to receive flush signal"))
+    }
+}
+
+/// A writer for interactive prompt output that owns its stream.
+///
+/// From acquisition until it drops, status rows stay erased, ordinary output is
+/// held back, and no redraw lands between the widget's own writes.
+/// Writes carry the open region background, when there is one.
+/// Returned (boxed) by [`Printer::owned_prompt_writer`] for a component that
+/// needs a `'static` stream of its own.
+struct OwnedPromptWriter {
+    /// The underlying channel, shaded when a region is open.
+    writer: Canvas<OwnedPrinterWriter>,
+
+    /// Keeps status rows erased and ordinary output held back until it drops.
+    _suspension: SuspendGuard,
+
+    /// Records the session's lifetime for the trace log.
+    _trace: PromptTrace,
+}
+
+impl Drop for OwnedPromptWriter {
+    fn drop(&mut self) {
+        self.writer.finish();
+    }
+}
+
+impl io::Write for OwnedPromptWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let s = str::from_utf8(buf).map_err(io::Error::other)?;
+        self.writer.write_str(s).map_err(io::Error::other)?;
+        Ok(s.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        io::Write::flush(self.writer.get_mut())
     }
 }
 
@@ -1046,7 +1179,7 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
             }
         }
 
-        // A run can end with a widget still holding the terminal — a `Ctrl+C`
+        // A run can end with a widget still holding the terminal: a `Ctrl+C`
         // at a prompt, an error unwinding past one. Nothing is going to give it
         // back, and what is held is the answer the user asked for, so it goes
         // out anyway: a last frame the widget left untidy is a smaller loss
@@ -1225,7 +1358,7 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
                 // ~15.6ms on Windows), and a sub-tick sleep still costs
                 // a full tick of wall clock. Without batching, a burst
                 // of 200 chars at 1ms each takes ~3.1s on Windows
-                // instead of the 200ms the controller asked for —
+                // instead of the 200ms the controller asked for,
                 // silently violating the configured `max_latency`.
                 let mut credit = Duration::ZERO;
                 for (c, visible) in VisibleCharsIterator::new(content) {
@@ -1378,13 +1511,13 @@ pub enum PrintMode {
 /// The target output stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrintTarget {
-    /// Output stream (stdout) — assistant responses, structured data.
+    /// Output stream (stdout): assistant responses, structured data.
     Out,
 
-    /// Error stream (stderr) — chrome, progress, status.
+    /// Error stream (stderr): chrome, progress, status.
     Err,
 
-    /// TTY stream (`/dev/tty`) — interactive prompts.
+    /// TTY stream (`/dev/tty`): interactive prompts.
     ///
     /// Bypasses stdout/stderr redirections so prompts always render on the
     /// terminal.
@@ -1405,8 +1538,8 @@ pub enum PrintOrigin {
     #[default]
     Content,
 
-    /// Part of a prompt session — the widget's own drawing, or a line written
-    /// to give its question the context it needs to be answerable.
+    /// Part of a prompt session: the widget's own drawing, or a line written to
+    /// give its question the context it needs to be answerable.
     Prompt,
 }
 
@@ -1611,9 +1744,9 @@ impl DelayControl {
 /// On Linux/macOS that's well under 1ms, so per-character sleeps are honored as
 /// requested and the typewriter looks smooth.
 /// On Windows the default tick is ~15.6ms, so any sub-tick request still parks
-/// the worker for a full tick — without batching, a 200- character burst at
-/// 1ms each takes ~3.1s instead of the 200ms the bounded-latency controller
-/// asked for, silently violating the configured `max_latency`.
+/// the worker for a full tick. Without batching, a 200-character burst at 1ms
+/// each takes ~3.1s instead of the 200ms the bounded-latency controller asked
+/// for, silently violating the configured `max_latency`.
 ///
 /// The worker accumulates effective per-character delays and only parks once
 /// the accumulated credit reaches this threshold.
@@ -1628,7 +1761,7 @@ impl DelayControl {
 /// `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` since Rust 1.75 (Win 10 1803+), so
 /// true sub-millisecond per-character pacing is possible.
 /// Reaching it from here means dropping the `Condvar`-based wake and polling
-/// the `skip` flag between short `thread::sleep` calls — trading immediate
+/// the `skip` flag between short `thread::sleep` calls, trading immediate
 /// `flush_instant` wake-up for up-to-poll-interval wake-up latency, plus extra
 /// syscall overhead from re-creating the waitable timer on every sleep.
 /// We've taken the simpler batching fix here on the assumption that ~10ms

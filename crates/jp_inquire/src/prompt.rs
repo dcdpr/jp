@@ -287,15 +287,22 @@ impl PromptBackend for MockPromptBackend {
             .ok_or(InquireError::OperationCanceled)
     }
 
+    /// Writes `message` to `output` before answering.
+    ///
+    /// The real widget draws on the stream it is handed.
+    /// Left untouched, the stream would let a test assert on what a prompt
+    /// renders and pass with no prompt rendered at all.
     fn inline_reply(
         &self,
-        _message: &str,
+        message: &str,
         _initial_text: &str,
         _edit_mode: ReplyEditMode,
         _editor_escape: bool,
         _help: Option<&str>,
-        _output: Box<dyn Write + Send>,
+        mut output: Box<dyn Write + Send>,
     ) -> Result<ReplyOutcome, InquireError> {
+        write!(output, "{message}")?;
+
         self.reply_outcomes
             .lock()
             .pop_front()

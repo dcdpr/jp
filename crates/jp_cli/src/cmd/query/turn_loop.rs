@@ -115,8 +115,8 @@ where
 /// `style.streaming.progress.delay_secs` has passed and ticking until the
 /// region is released.
 /// Returns an inert region when `style.streaming.progress.show` is off, or when
-/// the terminal cannot carry one — a non-pretty format, JSON output, or a
-/// stderr that is not a terminal.
+/// the terminal cannot carry one: a non-pretty format, JSON output, or a stderr
+/// that is not a terminal.
 fn claim_waiting_region(printer: &Printer, config: &StreamingConfig) -> StatusRegion {
     if !config.progress.show {
         return StatusRegion::inert();
@@ -140,8 +140,8 @@ fn claim_waiting_region(printer: &Printer, config: &StreamingConfig) -> StatusRe
 /// ticks) is about to write to the terminal and releases the indicator first.
 ///
 /// A `Flush` that commits content is always preceded by a `Part` for the same
-/// index, which already released the indicator; only a part-less flush — which
-/// commits nothing — can reach a live indicator.
+/// index, which already released the indicator; only a part-less flush, which
+/// commits nothing, can reach a live indicator.
 fn event_keeps_waiting_indicator(event: &StreamingLoopEvent) -> bool {
     match event {
         StreamingLoopEvent::Llm(result) => matches!(
@@ -248,7 +248,7 @@ pub(super) async fn run_turn_loop(
     // Id-keyed scratchpad for tool work produced during the streaming
     // phase. The executing phase derives an ordered execution plan from
     // the conversation stream + this scratchpad via `build_execution_plan`.
-    // Crucially: there's no public way to enumerate this directly — the
+    // Crucially: there's no public way to enumerate this directly. The
     // stream is the source of truth for "what needs to run."
     let mut pending_tools = PendingTools::new();
     let mut continuation: Option<EventStream> = None;
@@ -378,7 +378,7 @@ pub(super) async fn run_turn_loop(
                         .map(|result| StreamingLoopEvent::Llm(Box::new(result)))
                         // Backstop: if the provider stream ends without a
                         // terminal `Finished` event (a dropped or stalled
-                        // connection), the loop would otherwise pend forever —
+                        // connection), the loop would otherwise pend forever:
                         // `SelectAll` only completes once the signal and tick
                         // sources are also exhausted, and those never end.
                         // Append a synthetic transient error so a premature end
@@ -398,8 +398,8 @@ pub(super) async fn run_turn_loop(
                 // Reset preparing display for this streaming cycle.
                 tool_renderer.reset();
 
-                // Whether we've seen at least one provider event this cycle
-                // — used to reset the retry budget on the first successful
+                // Whether we've seen at least one provider event this cycle,
+                // used to reset the retry budget on the first successful
                 // event.
                 let mut received_provider_event = false;
 
@@ -472,7 +472,7 @@ pub(super) async fn run_turn_loop(
                             let event = *event;
 
                             // Stream errors are handled by the unified retry
-                            // logic — the single source of truth for retries.
+                            // logic, the single source of truth for retries.
                             let event = match event {
                                 Ok(event) => event,
                                 Err(e) => {
@@ -743,6 +743,7 @@ pub(super) async fn run_turn_loop(
                                                 interactive,
                                                 &mut turn_state,
                                                 &tool_renderer,
+                                                &printer,
                                             )
                                             .await;
 
@@ -842,6 +843,7 @@ pub(super) async fn run_turn_loop(
                             interactive,
                             &mut turn_state,
                             &tool_renderer,
+                            &printer,
                         )
                         .await;
 
@@ -880,7 +882,7 @@ pub(super) async fn run_turn_loop(
 
                 // Orphans: a `ToolCallRequest` in the stream's current turn
                 // without a matching pending entry. Should never happen in
-                // correct operation — every flushed request goes through
+                // correct operation: every flushed request goes through
                 // the prep flow which writes to `pending_tools`. Synthesize
                 // an error response so the conversation stays valid (every
                 // request must have a response before the next provider

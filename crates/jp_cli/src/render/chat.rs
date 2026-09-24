@@ -75,7 +75,7 @@ enum SeparatorOrigin {
 
 /// Which of the two rendering flows a renderer belongs to.
 ///
-/// The flows disagree about where a turn's framing belongs — the role header
+/// The flows disagree about where a turn's framing belongs: the role header
 /// naming who speaks next, and the echo of the user's own request.
 /// A live run narrates itself, so its framing is chrome and stdout carries the
 /// assistant's answer alone.
@@ -115,8 +115,8 @@ pub struct ChatRenderer {
     /// This field keeps that memory so the tool-call boundary can decide
     /// whether a tool call continues a reasoning region (and shade its chrome
     /// to match).
-    /// Cleared at role headers and user requests — a reasoning region never
-    /// crosses a turn boundary or survives a user message.
+    /// Cleared at role headers and user requests, since a reasoning region
+    /// never crosses a turn boundary or survives a user message.
     /// Only the persistent display paths set it; ephemeral reasoning chrome
     /// (`progress`/`static`/`timer`) never reaches them, so it never marks a
     /// non-shaded region as continuable.
@@ -178,7 +178,7 @@ impl ChatRenderer {
 
     /// Render a `ChatResponse` (assistant output).
     ///
-    /// Structured responses are ignored — they are handled by the
+    /// Structured responses are ignored, being handled by the
     /// `StructuredRenderer` in the live-stream path and inline in print.
     pub fn render_response(&mut self, response: &ChatResponse) {
         match response {
@@ -192,8 +192,8 @@ impl ChatRenderer {
     ///
     /// Formats the content as a complete markdown block.
     /// Callers are responsible for emitting any preceding role header via
-    /// [`Self::render_role_header`] — the renderer no longer emits a trailing
-    /// separator on its own.
+    /// [`Self::render_role_header`]; the renderer emits no trailing separator
+    /// on its own.
     pub fn render_request(&mut self, content: &str) {
         self.flush_on_transition(ContentKind::Message);
         self.flush();
@@ -207,7 +207,7 @@ impl ChatRenderer {
         self.last_content_kind = Some(ContentKind::Message);
         // A user message ends any reasoning region; a tool call that follows
         // must not continue the previous response's reasoning.
-        self.last_response_kind = None;
+        self.set_response_kind(None);
     }
 
     /// Render a labeled role-boundary header.
@@ -216,8 +216,8 @@ impl ChatRenderer {
     /// optional dimmed suffix appended after it, with `─` characters filling
     /// the remaining width.
     /// An optional `detail` is appended dimmed at the right edge, after the
-    /// fill — e.g. `── alice ──…── turn 2, 12 minutes ago ──`.
-    /// Used by [`TurnRenderer`] to mark which participant is speaking next —
+    /// fill, e.g. `── alice ──…── turn 2, 12 minutes ago ──`.
+    /// Used by [`TurnRenderer`] to mark which participant is speaking next:
     /// e.g. `── alice ──…` before a user turn, `── jp
     /// (anthropic/claude-opus-4-8) ──…` before an assistant turn.
     ///
@@ -244,7 +244,7 @@ impl ChatRenderer {
         self.last_content_kind = None;
         // A role boundary ends any reasoning region: a region never spans a
         // turn boundary or survives a user message.
-        self.last_response_kind = None;
+        self.set_response_kind(None);
     }
 
     /// Print a line of turn framing on the channel this flow puts it on.
@@ -265,12 +265,12 @@ impl ChatRenderer {
     /// → message, or message → tool call), any partial markdown sitting in
     /// the buffer must be emitted immediately.
     /// Without this, content before the transition would only appear after the
-    /// next block boundary — which may not arrive until much later (or never,
-    /// if a tool call follows).
+    /// next block boundary, which may not arrive until much later (or never, if
+    /// a tool call follows).
     ///
     /// Always cancels any active ephemeral reasoning chrome (e.g. the `Timer`
-    /// display): persistent content arriving — even of the same `ContentKind`
-    /// as before — must stop the running timer, since the timer line and the
+    /// display): persistent content arriving, even of the same `ContentKind` as
+    /// before, must stop the running timer, since the timer line and the
     /// upcoming content share the terminal row.
     fn flush_on_transition(&mut self, next: ContentKind) {
         self.cancel_reasoning_timer();
@@ -371,7 +371,7 @@ impl ChatRenderer {
                 // Timer is ephemeral chrome on stderr: it writes a line
                 // that's erased again on cancel, leaving no persistent
                 // stdout output. Like `Hidden`, it must not go through
-                // `flush_on_transition` — that would commit a blank-line
+                // `flush_on_transition`, which would commit a blank-line
                 // separator on stdout (when leaving a `ToolCall` block)
                 // that no later content ever "earns" back. Use the timer
                 // token itself for re-entry detection instead of
@@ -401,7 +401,7 @@ impl ChatRenderer {
     /// budget is spent.
     ///
     /// The `...` elision marker is appended whenever the taken text fills the
-    /// remaining budget — whitespace included, so the cut is still marked when
+    /// remaining budget, whitespace included, so the cut is still marked when
     /// the chunk that exhausts the budget holds nothing else.
     ///
     /// Reads `reasoning_chars_count` without advancing it, so callers deciding
@@ -431,7 +431,7 @@ impl ChatRenderer {
         // tell whether a following tool call continues a reasoning region.
         // Ephemeral reasoning chrome never reaches this path, so it can't mark
         // the region as reasoning.
-        self.last_response_kind = self.last_content_kind;
+        self.set_response_kind(self.last_content_kind);
         self.buffer.push(content);
         self.flush_buffer_blocks();
     }
@@ -591,7 +591,7 @@ impl ChatRenderer {
     ///
     /// Accumulates the paragraph's source, re-renders the whole paragraph with
     /// the same options [`print_block`] uses, and prints only the newly
-    /// committed prefix delta — holding the in-progress visual line until a
+    /// committed prefix delta, holding the in-progress visual line until a
     /// later chunk (or `last`) commits it.
     /// The concatenation of all deltas equals the one-shot block render, so
     /// streamed output is byte-identical to non-streaming.
@@ -664,8 +664,8 @@ impl ChatRenderer {
     /// edge, so a window resized part-way through a response still shades whole
     /// lines, and it leaves no trailing spaces in a copied selection.
     /// A width declared by the caller pads with real spaces instead, because a
-    /// host that lays out its own sub-window — an `fzf` preview pane — drops
-    /// the erase, leaving the shading to stop at the last character.
+    /// host that lays out its own sub-window (an `fzf` preview pane) drops the
+    /// erase, leaving the shading to stop at the last character.
     fn reasoning_background(&self) -> Option<DefaultBackground> {
         self.config
             .reasoning
@@ -736,7 +736,7 @@ impl ChatRenderer {
     /// A code block left open by the stream is closed here with a matched,
     /// escalated fence (recognized or synthesized by `flush_events`) instead of
     /// leaking its body as re-parsed markdown.
-    /// The deferred separator is left untouched — callers resolve it via
+    /// The deferred separator is left untouched; callers resolve it via
     /// [`emit_pending_separator`] or leave it pending.
     ///
     /// [`emit_pending_separator`]: Self::emit_pending_separator
@@ -781,7 +781,7 @@ impl ChatRenderer {
     /// `Full` renders the chunk as-is, so a whitespace-only one puts nothing on
     /// screen.
     /// `Truncate` answers for the text it would actually render, elision marker
-    /// included — whitespace that fills the remaining budget still shows a
+    /// included, so whitespace that fills the remaining budget still shows a
     /// `...`, while everything past the budget shows nothing.
     /// `Hidden` renders nothing, `Timer` writes a stderr line it erases again
     /// on completion, and `Progress` writes `reasoning...` plus dots with no
@@ -805,7 +805,7 @@ impl ChatRenderer {
             ReasoningDisplayConfig::Truncate(TruncateChars { characters }) => self
                 .truncated_reasoning(content, characters)
                 .is_some_and(|data| !data.trim().is_empty()),
-            // `Summary` is unimplemented — `render_reasoning` panics on it.
+            // `Summary` is unimplemented; `render_reasoning` panics on it.
             ReasoningDisplayConfig::Hidden
             | ReasoningDisplayConfig::Timer
             | ReasoningDisplayConfig::Progress
@@ -816,6 +816,54 @@ impl ChatRenderer {
     /// Transition renderer state to tool call mode.
     pub fn transition_to_tool_call(&mut self) {
         self.last_content_kind = Some(ContentKind::ToolCall);
+    }
+
+    /// End the chat-response region without rendering into it.
+    ///
+    /// Call this when content this renderer did not draw has reached the
+    /// screen.
+    /// It cannot see that content, so it would otherwise go on reporting the
+    /// region it last rendered: a prompt taken afterwards would carry a
+    /// background that is no longer on screen, and a tool call would continue a
+    /// region that has ended.
+    pub(crate) fn leave_response_region(&mut self) {
+        self.set_response_kind(None);
+    }
+
+    /// Record which kind of chat response last rendered, and publish the region
+    /// a prompt taken now would sit inside.
+    ///
+    /// A reasoning region is open exactly while the last response was
+    /// reasoning, so the two move together, and a prompt drawn inside one
+    /// carries its background like every other row (RFD 095).
+    /// Every change is published, so a prompt taken once the region has ended
+    /// is drawn without it.
+    fn set_response_kind(&mut self, kind: Option<ContentKind>) {
+        self.last_response_kind = kind;
+
+        // A replay builds a document out of stored events and is never
+        // prompted against; only the live renderer's region governs what a
+        // prompt shows.
+        if self.flow == RenderFlow::Live {
+            self.printer.set_prompt_background(self.open_region());
+        }
+    }
+
+    /// The shaded region a prompt taken right now would sit inside.
+    ///
+    /// `None` outside a reasoning region, and `None` when no background is
+    /// configured for one.
+    /// A tool call resolves its own region, which can be narrower: its chrome
+    /// may leave the reasoning region
+    /// (`style.reasoning.extend_across_tool_calls`) or opt out per tool
+    /// (`conversation.tools.<name>.style.joins_reasoning`).
+    /// That answer is published over this one.
+    fn open_region(&self) -> Option<DefaultBackground> {
+        if self.last_response_kind != Some(ContentKind::Reasoning) {
+            return None;
+        }
+
+        self.reasoning_background()
     }
 
     /// Whether a tool call at the current point continues a reasoning region.
@@ -834,8 +882,8 @@ impl ChatRenderer {
     /// header, resolves the deferred separator, and transitions into tool-call
     /// mode.
     ///
-    /// A separator owed by rendered content is emitted — shaded when the tool
-    /// call continues the reasoning region, unstyled otherwise.
+    /// A separator owed by rendered content is emitted, shaded when the tool
+    /// call continues the reasoning region and unstyled otherwise.
     /// One owed by an earlier tool-call boundary is dropped instead: the
     /// reasoning between the two tool calls rendered nothing, so their headers
     /// belong on consecutive lines, exactly as back-to-back tool calls with no
@@ -872,7 +920,7 @@ impl ChatRenderer {
     /// Drains buffered content so blocks before the tool commit (a complete
     /// message keeps its trailing separator, so messages stay separated), but
     /// leaves any deferred reasoning separator pending so the next visible
-    /// content decides its shading — a reasoning region stays continuous
+    /// content decides its shading, so a reasoning region stays continuous
     /// across the invisible tool.
     /// Does not transition into tool-call mode: with no chrome there is no
     /// boundary for the next content to react to.
@@ -894,7 +942,7 @@ impl ChatRenderer {
         self.formatter =
             formatter_from_config(&self.config, pretty, self.printer.output_width().columns());
         self.last_content_kind = None;
-        self.last_response_kind = None;
+        self.set_response_kind(None);
         self.pending_separator = None;
         self.reasoning_chars_count = 0;
         self.code_block = None;
@@ -919,7 +967,7 @@ impl ChatRenderer {
         self.reset();
 
         self.last_content_kind = last_content_kind;
-        self.last_response_kind = last_response_kind;
+        self.set_response_kind(last_response_kind);
         self.pending_separator = pending_separator;
     }
 }
@@ -1013,7 +1061,7 @@ fn indent_lines(content: &str, indent: usize) -> String {
 ///
 /// `style.markdown.wrap_width` is a reading-comfort preference, so a wider
 /// output area doesn't widen it.
-/// A *narrower* one has to win, though — wrapping past the available width
+/// A *narrower* one has to win, though: wrapping past the available width
 /// leaves the host to wrap again on top, which double-wraps in a terminal and
 /// silently truncates in a pane that clips.
 fn wrap_width(config: &StyleConfig, terminal_width: Option<u16>) -> usize {

@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use jp_config::{AppConfig, style::typewriter::DelayDuration, types::color::Color};
 use jp_printer::{OutputFormat, OutputWidth, SharedBuffer, TerminalCapability};
 
@@ -455,7 +457,7 @@ async fn test_timer_reasoning_suppresses_output() {
 }
 
 /// The timer row and the tool chrome share the terminal row, so entering a tool
-/// call must release the timer region — which is what erases the row.
+/// call must release the timer region, which is what erases the row.
 /// Nothing else pins this: the region is drawn on stderr, so a leaked row is
 /// invisible to assertions on rendered stdout.
 #[tokio::test]
@@ -521,13 +523,13 @@ async fn test_no_separator_for_tool_call_timer_reasoning_tool_call() {
     // stdout from this side.)
     renderer.transition_to_tool_call();
 
-    // Reasoning chunk under Timer style — no persistent stdout output.
+    // Reasoning chunk under Timer style, so no persistent stdout output.
     renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "Thinking hard\n\n".into(),
     });
 
     // Tool call 2: the real flow flushes (cancelling the timer) before
-    // re-entering ToolCall mode — mirror that here.
+    // re-entering ToolCall mode, so mirror that here.
     renderer.flush();
     renderer.transition_to_tool_call();
 
@@ -572,7 +574,7 @@ fn test_no_separator_between_reasoning_and_message() {
     });
 
     renderer.printer.flush();
-    // No separator — background color distinguishes reasoning from message.
+    // No separator: background color distinguishes reasoning from message.
     assert_eq!(*out.lock(), "Thinking\n\nAnswer\n\n");
 }
 
@@ -591,7 +593,7 @@ fn test_reasoning_buffer_flushed_on_message_transition() {
     renderer.printer.flush();
     assert_eq!(*out.lock(), "", "Should not flush incomplete block yet");
 
-    // Message arrives — should force-flush the buffered reasoning first
+    // Message arrives, which should force-flush the buffered reasoning first
     renderer.render_response(&ChatResponse::Message {
         message: "Answer\n\n".into(),
     });
@@ -609,9 +611,9 @@ fn test_reasoning_buffer_flushed_on_message_transition() {
 /// mid-word in one event and resumes in the next joins into a single word.
 ///
 /// This is what a provider relies on when it splits one region of reasoning
-/// across several events — Anthropic interrupts a thinking block with an
-/// opaque `redacted_thinking` block, which reaches the renderer as a reasoning
-/// event holding no text.
+/// across several events: Anthropic interrupts a thinking block with an opaque
+/// `redacted_thinking` block, which reaches the renderer as a reasoning event
+/// holding no text.
 #[test]
 fn test_consecutive_reasoning_events_form_one_region() {
     let mut config = AppConfig::new_test();
@@ -833,9 +835,8 @@ fn test_reasoning_gap_across_a_continuation_is_shaded() {
 
 /// The provider is free to resume an interrupted reasoning block with the
 /// answer instead of more reasoning.
-/// The gap then leaves the reasoning region, so it is unshaded — the same
-/// output the reasoning-to-answer transition produces without a retry in
-/// between.
+/// The gap then leaves the reasoning region, so it is unshaded, the same output
+/// the reasoning-to-answer transition produces without a retry in between.
 #[test]
 fn test_reasoning_gap_across_a_continuation_into_a_message_is_unshaded() {
     let mut config = AppConfig::new_test();
@@ -1002,6 +1003,99 @@ fn test_reasoning_background_not_applied_to_messages() {
         !output.contains("\x1b[48;5;236m"),
         "Message should not have reasoning background, got: {output:?}"
     );
+}
+
+/// A prompt taken while a reasoning region is open carries its background, and
+/// one taken after the region has ended does not.
+///
+/// The interrupt menu is what bites: it takes its writer from the same printer
+/// a tool decision last named a region on, at a point where the assistant has
+/// moved on to an ordinary message.
+/// Nothing about that menu knows a region ever existed, so the region has to
+/// stop claiming it.
+#[test]
+fn a_message_after_reasoning_closes_the_region_for_later_prompts() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mut renderer = ChatRenderer::new(printer.clone(), config.style, RenderFlow::Live);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Checking the README.\n\n".into(),
+    });
+    printer.flush();
+    out.lock().clear();
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "Interrupted").unwrap();
+    }
+    printer.flush();
+    assert_eq!(
+        *out.lock(),
+        "\x1b[48;5;236mInterrupted\x1b[49m",
+        "a prompt inside the region is a visual row like any other"
+    );
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "The title is `# Jean-Pierre`.\n\n".into(),
+    });
+    printer.flush();
+    out.lock().clear();
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "Interrupted").unwrap();
+    }
+    printer.flush();
+    assert_eq!(*out.lock(), "Interrupted");
+}
+
+/// The clear covers a background the tool-call path named, not just one this
+/// renderer opened.
+///
+/// A tool decision resolves the per-tool region itself, which can leave the
+/// reasoning region or opt out of it per tool, and sets it on the printer
+/// directly.
+/// The message that ends the reasoning has to take that back, or the last tool
+/// of the turn keeps colouring every prompt after it.
+#[test]
+fn a_tool_calls_region_does_not_outlive_the_reasoning_it_came_from() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mut renderer = ChatRenderer::new(printer.clone(), config.style, RenderFlow::Live);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Checking the README.\n\n".into(),
+    });
+    renderer.enter_tool_call();
+
+    // Stands in for `ToolCoordinator::resolve_tool_call_decision`, which names
+    // the region once the per-tool answer is known.
+    printer.set_prompt_background(Some(DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Terminal,
+    }));
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "The title is `# Jean-Pierre`.\n\n".into(),
+    });
+    printer.flush();
+    out.lock().clear();
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "Interrupted").unwrap();
+    }
+    printer.flush();
+    assert_eq!(*out.lock(), "Interrupted");
 }
 
 #[test]
@@ -1318,7 +1412,7 @@ fn test_no_separator_for_consecutive_messages() {
 
     // Flush prints the paragraph "block".
     // The double space between "First" and "Second" is preserved from
-    // the source ("First " + " Second") — CommonMark doesn't collapse
+    // the source ("First " + " Second"); CommonMark doesn't collapse
     // interior spaces.
     renderer.printer.flush();
     assert_eq!(*out.lock(), "First  Second\n\n");
@@ -1640,7 +1734,7 @@ fn test_streaming_ambiguous_lead_streams_after_first_newline() {
     // An ambiguous block-start lead (`[`) is not classified as a paragraph
     // until its first source newline: nothing streams before that newline, but
     // the paragraph streams normally afterward. This pins the precise boundary
-    // of the documented limitation — it is the first newline, not a wholesale
+    // of the documented limitation: it is the first newline, not a wholesale
     // failure to stream.
     let mut config = AppConfig::new_test();
     config.style.reasoning.background = None;
@@ -1886,7 +1980,7 @@ fn test_gap_between_tool_call_and_next_reasoning_is_shaded() {
 #[test]
 fn test_truncate_marks_the_cut_when_whitespace_fills_the_budget() {
     // The chunk carries no text of its own, but it consumes the last of the
-    // budget, so the elision marker still lands — this is the render the
+    // budget, so the elision marker still lands. This is the render the
     // separation predicate has to agree with.
     let mut config = AppConfig::new_test();
     config.style.reasoning.display =
@@ -2068,7 +2162,7 @@ fn test_extend_across_tool_calls_disabled_ends_the_region_at_the_tool_call() {
     // With the flag off, a tool call after reasoning does not continue the
     // region: the separator before it is unshaded and no chrome background is
     // returned, restoring the per-block behaviour. The reasoning content itself
-    // stays shaded — only the *extension* is gated.
+    // stays shaded; only the *extension* is gated.
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
     config.style.reasoning.background = Some(Color::Ansi256(236));
