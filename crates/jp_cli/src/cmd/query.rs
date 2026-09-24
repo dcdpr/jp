@@ -2705,25 +2705,11 @@ fn active_provider(
     [Some(partial), merged_config]
         .into_iter()
         .flatten()
-        .find_map(|config| provider_of(&config.assistant.model.id, aliases, 8))
-}
-
-/// Follow a model id, or an alias to the id it stands for, to its provider.
-///
-/// `depth` bounds an alias chain that points at itself; the config pipeline
-/// reports the cycle properly later.
-fn provider_of(
-    id: &PartialModelIdOrAliasConfig,
-    aliases: &IndexMap<String, PartialModelIdOrAliasConfig>,
-    depth: u8,
-) -> Option<ProviderId> {
-    match id {
-        PartialModelIdOrAliasConfig::Id(id) => id.provider,
-        PartialModelIdOrAliasConfig::Alias(alias) if depth > 0 => {
-            provider_of(aliases.get(alias.as_str())?, aliases, depth - 1)
-        }
-        PartialModelIdOrAliasConfig::Alias(_) => None,
-    }
+        .find_map(|config| {
+            PartialModelIdOrAliasConfig::finalize(&config.assistant.model.id, aliases)
+                .ok()?
+                .provider
+        })
 }
 
 /// Apply the CLI model configuration to the partial configuration.
