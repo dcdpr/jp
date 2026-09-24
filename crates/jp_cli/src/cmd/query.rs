@@ -86,9 +86,13 @@ use jp_config::{
         },
     },
     fs::{expand_tilde, load_partial},
-    model::parameters::{
-        PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningConfig, ServiceTier,
+    model::{
+        id::{PartialModelIdOrAliasConfig, ProviderId},
+        parameters::{
+            PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningConfig, ServiceTier,
+        },
     },
+    providers::llm::AuthEntry,
     style::{mcp_startup::McpStartupConfig, reasoning::ReasoningDisplayConfig},
 };
 use jp_conversation::{
@@ -250,6 +254,19 @@ pub(crate) struct Query {
     /// The model to use.
     #[arg(short = 'm', long = "model")]
     model: Option<String>,
+
+    /// Which credential to bill this turn to.
+    ///
+    /// Takes the same entries as the `auth` chain in configuration, comma
+    /// separated: a credential name, `api_key`, `subscription`, or
+    /// `<kind>:<name>`.
+    /// `api` and `sub` are accepted for the kinds.
+    ///
+    /// Applies to the provider the chosen model belongs to, and is recorded on
+    /// the turn, so the rest of the conversation keeps billing the same way
+    /// until another `--auth` changes it.
+    #[arg(long = "auth", value_name = "CHAIN", value_delimiter = ',')]
+    auth: Vec<AuthEntry>,
 
     /// The model parameters to use.
     #[arg(short = 'p', long = "param", value_name = "KEY=VALUE", action = ArgAction::Append)]
@@ -2483,6 +2500,7 @@ impl IntoPartialAppConfig for Query {
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         let Self {
             model,
+            auth,
             template: _,
             schema: _,
             replay: _,
@@ -2513,6 +2531,7 @@ impl IntoPartialAppConfig for Query {
         } = &self;
 
         apply_model(&mut partial, model.as_deref(), merged_config);
+        apply_auth(&mut partial, auth, merged_config)?;
 
         // Must run before tool-enable processing, which reads the injected
         // `enable` blocks.
@@ -2619,6 +2638,78 @@ fn build_thread(
     }
 
     Ok(thread_builder.build()?)
+}
+
+/// Write `--auth` to the `auth` chain of the provider serving this turn.
+///
+/// Runs after [`apply_model`], since the provider comes from the turn's model.
+/// A provider that cannot be determined is an error: writing the chain to the
+/// wrong one would silently do nothing.
+fn apply_auth(
+    partial: &mut PartialAppConfig,
+    auth: &[AuthEntry],
+    merged_config: Option<&PartialAppConfig>,
+) -> BoxedResult<()> {
+    if auth.is_empty() {
+        return Ok(());
+    }
+
+    let provider = active_provider(partial, merged_config).ok_or_else(|| {
+        format!(
+            "--auth needs to know which provider to bill, and the model for this turn does not \
+             name one; pass `--model <provider>/<name>`, or set the chain directly with `--cfg \
+             providers.llm.<provider>.auth={}`",
+            auth.iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    })?;
+
+    let auth = auth.to_vec();
+    let llm = &mut partial.providers.llm;
+    match provider {
+        ProviderId::Anthropic => llm.anthropic.auth = Some(auth),
+        ProviderId::Cerebras => llm.cerebras.auth = Some(auth),
+        ProviderId::Deepseek => llm.deepseek.auth = Some(auth),
+        ProviderId::Google => llm.google.auth = Some(auth),
+        ProviderId::Openai => llm.openai.auth = Some(auth),
+        ProviderId::Openrouter => llm.openrouter.auth = Some(auth),
+        ProviderId::Vllm => llm.vllm.auth = Some(auth),
+
+        provider @ (ProviderId::Llamacpp
+        | ProviderId::Ollama
+        | ProviderId::Test
+        | ProviderId::Xai) => {
+            return Err(format!(
+                "--auth is not supported for `{provider}`: it needs no credential"
+            )
+            .into());
+        }
+    }
+
+    Ok(())
+}
+
+/// The provider serving this turn, if the config says which.
+///
+/// Reads the CLI's `--model` first, then the config layers.
+fn active_provider(
+    partial: &PartialAppConfig,
+    merged_config: Option<&PartialAppConfig>,
+) -> Option<ProviderId> {
+    let aliases = merged_config.map_or(&partial.providers.llm.aliases, |merged| {
+        &merged.providers.llm.aliases
+    });
+
+    [Some(partial), merged_config]
+        .into_iter()
+        .flatten()
+        .find_map(|config| {
+            PartialModelIdOrAliasConfig::finalize(&config.assistant.model.id, aliases)
+                .ok()?
+                .provider
+        })
 }
 
 /// Apply the CLI model configuration to the partial configuration.
