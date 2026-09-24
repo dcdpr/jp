@@ -16,23 +16,23 @@ use crate::{
 
 #[test]
 fn qualified_runtime_pair() {
-    qualify_versions(b"0.76.0\n", b"2.1.257 (Claude Code)\n").unwrap();
+    qualify_versions(b"0.81.0\n", b"2.1.280 (Claude Code)\n").unwrap();
     assert_matches!(
-        qualify_versions(b"0.77.0", b"2.1.257"),
+        qualify_versions(b"0.82.0", b"2.1.280"),
         Err(Error::UnsupportedVersion {
             check: Check::AdapterVersion,
             ..
         })
     );
     assert_matches!(
-        qualify_versions(b"0.76.0", b"2.1.258"),
+        qualify_versions(b"0.81.0", b"2.1.281"),
         Err(Error::UnsupportedVersion {
             check: Check::ClaudeVersion,
             ..
         })
     );
     assert_matches!(
-        qualify_versions(b"0.76.0", b"2.1.257-extra"),
+        qualify_versions(b"0.81.0", b"2.1.280-extra"),
         Err(Error::UnsupportedVersion { .. })
     );
 }
@@ -54,6 +54,56 @@ fn subscription_status_is_fail_closed() {
     assert_matches!(validate_auth(br#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"unknown"}"#), Err(Error::SubscriptionRequired));
     assert_matches!(validate_auth(br#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max","apiKeySource":"apiKeyHelper"}"#), Err(Error::SubscriptionRequired));
     assert_matches!(validate_auth(b"not json"), Err(Error::AuthStatus(_)));
+}
+
+#[test]
+fn runtime_identity_does_not_mistake_an_organization_for_an_account() {
+    let identity = subscription_identity(br#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max","email":"first@example.com","orgId":"11111111-1111-1111-1111-111111111111"}"#).unwrap().unwrap();
+    assert_eq!(identity, AccountIdentity {
+        account_id: None,
+        email: Some("first@example.com".into())
+    });
+    assert_eq!(
+        subscription_identity(br#"{"loggedIn":false}"#).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn lifecycle_commands_select_subscription_login_and_logout() {
+    assert_eq!(Check::Login.args(), &[
+        "--cli",
+        "auth",
+        "login",
+        "--claudeai"
+    ]);
+    assert_eq!(Check::Logout.args(), &["--cli", "auth", "logout"]);
+}
+
+#[cfg(unix)]
+#[test(tokio::test)]
+async fn signed_out_status_json_survives_exit_one() {
+    let mut command = Command::new("sh");
+    command.args(["-c", r#"printf '{"loggedIn":false}'; exit 1"#]);
+    let output = read_output(command, Check::Authentication).await.unwrap();
+    assert_eq!(output, br#"{"loggedIn":false}"#);
+    assert_eq!(subscription_identity(&output).unwrap(), None);
+}
+
+#[cfg(unix)]
+#[test(tokio::test)]
+async fn failed_logout_does_not_accept_exit_one() {
+    let mut command = Command::new("sh");
+    command.args(["-c", "exit 1"]);
+    assert_matches!(read_output(command, Check::Logout).await, Err(Error::CommandFailed { check: Check::Logout, status }) if status.code() == Some(1));
+}
+
+#[cfg(unix)]
+#[test(tokio::test)]
+async fn failed_status_command_cannot_report_a_usable_login() {
+    let mut command = Command::new("sh");
+    command.args(["-c", r#"printf '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}'; exit 1"#]);
+    assert_matches!(read_output(command, Check::Authentication).await, Err(Error::CommandFailed { check: Check::Authentication, status }) if status.code() == Some(1));
 }
 
 #[test]
@@ -83,7 +133,7 @@ async fn subscription_construction_uses_no_store_or_external_runtime() {
     assert!(!resolve::needs_store(&config));
     assert_matches!(
         provider.resolve("claude-opus-5").await.unwrap().route,
-        Route::Acp
+        Route::Acp(None)
     );
 }
 
@@ -138,7 +188,7 @@ async fn missing_runtime_has_setup_guidance() {
     assert_eq!(
         error.to_string(),
         "Claude ACP adapter-version check failed; install \
-         @agentclientprotocol/claude-agent-acp@0.76.0 with Node.js 22+ and optional dependencies \
+         @agentclientprotocol/claude-agent-acp@0.81.0 with Node.js 22+ and optional dependencies \
          enabled"
     );
 }

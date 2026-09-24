@@ -40,6 +40,9 @@ use crate::{
 /// Errors from walking the credential chain.
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveError {
+    /// A runtime-owned login cannot authenticate direct HTTP requests.
+    #[error("subscription `{name}` requires runtime authentication, not a direct token flow")]
+    ExternalCredential { name: String },
     #[error(transparent)]
     Store(#[from] StoreError),
 
@@ -654,7 +657,10 @@ fn label(entry: &AuthEntry) -> String {
 
 /// Walk the chain and return the first usable credential, the entry that
 /// produced it, and the notices for entries skipped along the way.
-#[expect(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep credential dispatch and skip notices in chain order"
+)]
 fn walk_chain(
     config: &OpenaiConfig,
     store: Option<&StoreDocument>,
@@ -771,6 +777,11 @@ fn walk_chain(
                 }
 
                 match &stored.secret {
+                    CredentialSecret::External { .. } => {
+                        return Err(ResolveError::ExternalCredential {
+                            name: profile.to_owned(),
+                        });
+                    }
                     CredentialSecret::Token { token } => {
                         return Ok((
                             Landing::Ready(

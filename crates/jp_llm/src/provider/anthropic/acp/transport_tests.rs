@@ -1,4 +1,4 @@
-use std::{error::Error as _, iter};
+use std::{error::Error as _, future, iter};
 
 use async_anthropic::types::JsonOutputFormat;
 use datetime_literal::datetime;
@@ -23,7 +23,10 @@ use tracing::instrument::WithSubscriber as _;
 use tracing_subscriber::{layer::SubscriberExt as _, registry};
 
 use super::{super::recorded_tests::UsageCapture, *};
-use crate::event::{EventPart, FinishReason};
+use crate::{
+    error::StreamErrorKind,
+    event::{EventPart, FinishReason},
+};
 
 fn prepared() -> PreparedRequest {
     prepared_with(None, None)
@@ -249,9 +252,14 @@ fn project_directory_is_scoped_by_host_identity_not_worktree_path() {
 #[test]
 fn storage_options_do_not_select_a_different_login_directory() {
     let mut environment = BTreeMap::new();
-    configure_storage_environment(&mut environment, None, "jp-c123-otvo8");
+    configure_storage_environment(&mut environment, None, "jp-c123-otvo8", None);
     assert!(environment.is_empty());
-    configure_storage_environment(&mut environment, Some("/custom/claude"), "jp-c123-otvo8");
+    configure_storage_environment(
+        &mut environment,
+        Some("/custom/claude"),
+        "jp-c123-otvo8",
+        None,
+    );
     assert_eq!(
         environment,
         BTreeMap::from([(
@@ -260,6 +268,64 @@ fn storage_options_do_not_select_a_different_login_directory() {
         )])
     );
     assert!(!environment.contains_key("CLAUDE_CONFIG_DIR"));
+}
+
+#[test]
+fn named_login_controls_sdk_environment_and_history_directory() {
+    let directory = Utf8Path::new(if cfg!(windows) {
+        "C:/accounts/sub2"
+    } else {
+        "/accounts/sub2"
+    });
+    assert_eq!(native_directory(Some(directory)).unwrap(), directory);
+    let mut environment = BTreeMap::new();
+    configure_storage_environment(
+        &mut environment,
+        Some("/accounts/other"),
+        "jp-c123-otvo8",
+        Some(directory),
+    );
+    assert_eq!(
+        environment,
+        BTreeMap::from([
+            ("CLAUDE_CONFIG_DIR".into(), directory.as_str().into()),
+            (
+                "CLAUDE_SECURESTORAGE_CONFIG_DIR".into(),
+                directory.as_str().into()
+            ),
+            (
+                "CLAUDE_CODE_PROJECT_DIR_NAME".into(),
+                "jp-c123-otvo8".into()
+            ),
+        ])
+    );
+    let metadata = options::metadata(&prepared(), &environment).unwrap();
+    assert_eq!(metadata["claudeCode"]["options"]["env"], json!(environment));
+}
+
+#[test]
+fn named_login_sets_project_directory_without_an_inherited_directory() {
+    let mut environment = BTreeMap::new();
+    configure_storage_environment(
+        &mut environment,
+        None,
+        "jp-c123-otvo8",
+        Some(Utf8Path::new("/accounts/sub")),
+    );
+    assert_eq!(
+        environment,
+        BTreeMap::from([
+            ("CLAUDE_CONFIG_DIR".into(), "/accounts/sub".into()),
+            (
+                "CLAUDE_SECURESTORAGE_CONFIG_DIR".into(),
+                "/accounts/sub".into()
+            ),
+            (
+                "CLAUDE_CODE_PROJECT_DIR_NAME".into(),
+                "jp-c123-otvo8".into()
+            ),
+        ])
+    );
 }
 
 #[test]
@@ -363,6 +429,75 @@ fn a_followup_error_does_not_replace_the_original_failure() {
         state.into_inner().unwrap().failure.unwrap().message(),
         "Model unavailable."
     );
+}
+
+#[tokio::test]
+async fn quota_notification_survives_the_protocol_error_boundary() {
+    // The adapter reports the spent window, then never answers the prompt:
+    // only the failure JP recorded can end the attempt.
+    let agent = scripted(|method, params, notifier| async move {
+        match method.as_str() {
+            m if m == agent_method::INITIALIZE => Ok(json!({"protocolVersion": 1})),
+            m if m == agent_method::SESSION_NEW => {
+                notifier.auth("Claude Max");
+                Ok(json!({"sessionId": "11111111-1111-4111-8111-111111111111"}))
+            }
+            m if m == agent_method::SESSION_SET_CONFIG_OPTION => Ok(json!({
+                "configOptions": [{
+                    "id": params["configId"],
+                    "name": "Setting",
+                    "type": "select",
+                    "currentValue": params["value"],
+                    "options": [],
+                }],
+            })),
+            m if m == agent_method::SESSION_PROMPT => {
+                notifier.sdk(json!({
+                    "type": "rate_limit_event",
+                    "rate_limit_info": {
+                        "status": "rejected",
+                        "rateLimitType": "five_hour",
+                        "resetsAt": 1_783_080_000,
+                    },
+                }));
+                future::pending::<()>().await;
+                unreachable!("the prompt never answers")
+            }
+            other => panic!("unexpected request: {other}"),
+        }
+    });
+    let prepared = prepared();
+    let environment = options::environment(&prepared, CachePolicy::Short);
+    let (sender, mut receiver) = mpsc::channel(16);
+    let error = timeout(
+        Duration::from_secs(5),
+        drive(
+            prepared,
+            QueryContext {
+                root: "/work/project".into(),
+                mcp_endpoint: None,
+                invocation: None,
+            },
+            vec![],
+            environment,
+            NativeArtifact {
+                session: None,
+                path: None,
+            },
+            agent,
+            sender,
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    let Error::Stream(error) = error else {
+        panic!("expected the quota failure")
+    };
+    assert_eq!(error.kind, StreamErrorKind::SubscriptionExhausted);
+    assert_eq!(error.quota_scope.as_deref(), Some("five_hour"));
+    assert_eq!(error.quota_reset.unwrap().timestamp(), 1_783_080_000);
+    assert!(receiver.recv().await.is_none());
 }
 
 #[tokio::test]

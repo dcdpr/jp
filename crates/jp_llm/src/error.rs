@@ -113,6 +113,18 @@ impl StreamError {
         }
     }
 
+    /// Request a fresh query after the provider has advanced its credential
+    /// chain.
+    ///
+    /// The provider must have recorded the change before emitting this error.
+    /// Callers rebuild from committed history without consuming a transient
+    /// retry attempt.
+    /// The original failure remains available as the source.
+    #[must_use]
+    pub fn with_credential_change(self) -> Self {
+        Self::new(StreamErrorKind::CredentialChanged, self.to_string()).with_source(self)
+    }
+
     /// Create a transient error.
     #[must_use]
     pub fn transient(message: impl Into<String>) -> Self {
@@ -196,6 +208,7 @@ impl StreamError {
                 | StreamErrorKind::Connect
                 | StreamErrorKind::RateLimit
                 | StreamErrorKind::Transient
+                | StreamErrorKind::CredentialChanged
         ) || self.retry_after.is_some()
             || (self.kind == StreamErrorKind::Other
                 && looks_like_transient_network_error(&self.message))
@@ -441,6 +454,9 @@ fn extract_api_error_body(body: &str) -> Option<String> {
 /// knowing the specific provider implementation details.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamErrorKind {
+    /// The provider advanced to a different credential; rebuild the request.
+    CredentialChanged,
+
     /// Request timed out.
     Timeout,
 
@@ -497,6 +513,7 @@ impl StreamErrorKind {
             Self::Connect => "Connection error",
             Self::RateLimit => "Rate limited",
             Self::Transient => "Server error",
+            Self::CredentialChanged => "Credential changed",
             Self::InsufficientQuota => "Insufficient API quota",
             Self::SubscriptionExhausted => "Subscription limit reached",
             Self::AuthRejected => "Authentication rejected",

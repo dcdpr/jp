@@ -1334,6 +1334,8 @@ providers: ProviderConfig
               provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "vllm" | "xai"
             |: string
     anthropic: AnthropicConfig
+      acp_config_dirs?:
+        *: string
       api_key_env?: ApiKeyEnv
         |: string
         |:

@@ -6,7 +6,7 @@
 pub(crate) mod retry;
 
 pub(crate) use retry::{
-    RebuildRefusal, ResponseBoundary, StreamErrorOutcome, StreamRetryState,
+    RebuildRefusal, ResponseBoundary, StreamErrorOutcome, StreamRetryState, can_restart_agent,
     commit_partial_response, handle_stream_error,
 };
 

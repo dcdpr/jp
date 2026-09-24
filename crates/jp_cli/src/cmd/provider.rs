@@ -10,28 +10,30 @@
 //! stdin, never from process arguments.
 
 use std::{
-    collections::HashMap,
-    env, fmt,
+    collections::{BTreeMap, HashMap},
+    env,
+    error::Error as StdError,
+    fmt,
     io::{self, BufRead as _, IsTerminal as _},
     net::Ipv4Addr,
     str::FromStr,
     time::{Duration, Instant},
 };
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use comfy_table::{Cell, Row};
 use crossterm::style::{Color, Stylize as _};
 use jp_config::{
-    FillDefaults as _, PartialAppConfig, PartialConfig as _, model::id::ProviderId,
-    types::api_key_env::ApiKeyEnv,
+    FillDefaults as _, PartialAppConfig, PartialConfig as _, fs::user_data_dir,
+    model::id::ProviderId, types::api_key_env::ApiKeyEnv,
 };
 use jp_credentials::{
     CATEGORY_LLM, CredentialSecret, CredentialStore, StoreError, StoredCredential,
 };
 use jp_inquire::prompt::{PromptBackend as _, TerminalPromptBackend};
 use jp_llm::{
-    credential::{AccountIdentity, ProviderAuth},
+    credential::{AccountIdentity, ProviderAuth, provider_auth},
     provider::openai::{auth as openai_auth, oauth as openai_oauth},
 };
 use jp_printer::Printer;
@@ -84,14 +86,18 @@ struct Auth {
 
 #[derive(Debug, clap::Subcommand)]
 enum AuthCmd {
-    /// Log in to a provider and store the credential as a profile.
+    /// Log in to a provider and register a named subscription.
+    ///
+    /// Anthropic uses Claude Code's sign-in with an isolated configuration
+    /// directory.
+    /// JP registers the login without copying its tokens.
     Login(Login),
 
-    /// List stored credential profiles and their state.
+    /// List named subscriptions, API keys, and their state.
     #[command(visible_alias = "ls")]
     List(List),
 
-    /// Remove a stored credential profile.
+    /// Log out of a named subscription and remove its registration.
     Logout(Logout),
 }
 
@@ -131,6 +137,20 @@ struct Login {
     /// non-interactive source (a clipboard tool, a file) works.
     #[arg(long)]
     setup_token: bool,
+
+    /// Opt in to direct Anthropic subscription tokens and their account-policy
+    /// risk.
+    /// Requires `--setup-token`.
+    /// Queries also require `subscription_flow=direct`.
+    #[arg(long, requires = "setup_token", conflicts_with = "config_dir")]
+    direct: bool,
+
+    /// Use an existing runtime login directory instead of allocating one.
+    /// Must be absolute.
+    /// Existing registrations retain their original directory.
+    /// For Anthropic, the default is `<JP user data dir>/data/claude/<name>`.
+    #[arg(long, conflicts_with_all = ["setup_token", "device_auth", "import_codex"])]
+    config_dir: Option<Utf8PathBuf>,
 }
 
 #[derive(Debug, clap::Args)]
@@ -192,24 +212,30 @@ impl FromStr for AuthTarget {
 impl Provider {
     /// Run the command against the user-global credential store.
     ///
-    /// Runs before workspace discovery; only `login` needs an async runtime
-    /// (for identity recovery), built here on demand.
-    pub(crate) fn run(&self, printer: &Printer) -> Output {
+    /// Runs before workspace discovery.
+    /// Runtime-owned logins are inspected without exposing their credentials.
+    pub(crate) fn run(&self, printer: &Printer, no_interactive: bool) -> Output {
         let ProviderCmd::Llm(llm) = &self.command;
         let LlmCmd::Auth(auth) = &llm.command;
-        let store = CredentialStore::file_default().map_err(|e| store_error(&e))?;
-
-        match &auth.command {
-            AuthCmd::Login(args) => {
-                let runtime = crate::build_runtime(None, "jp-provider-auth")
-                    .map_err(crate::cmd::Error::from)?;
-                runtime.block_on(args.run(&store, printer))
-            }
-            // Read here rather than in `run`, so a test supplies its own keys
-            // instead of reading the machine's config.
-            AuthCmd::List(args) => args.run(&store, &configured_api_keys(printer), printer),
-            AuthCmd::Logout(args) => args.run(&store, printer),
+        if no_interactive
+            && matches!(&auth.command, AuthCmd::Login(args) if !args.setup_token && !args.import_codex)
+        {
+            return Err(Error::from(
+                "login requires user interaction; remove --no-interactive to sign in",
+            ));
         }
+        let store = CredentialStore::file_default().map_err(|error| store_error(&error))?;
+        let runtime = crate::build_runtime(None, "jp-provider-auth").map_err(Error::from)?;
+        runtime.block_on(async {
+            match &auth.command {
+                AuthCmd::Login(args) => args.run(&store, printer).await,
+                AuthCmd::List(args) => {
+                    args.run(&store, &configured_api_keys(printer), printer)
+                        .await
+                }
+                AuthCmd::Logout(args) => args.run(&store, printer).await,
+            }
+        })
     }
 }
 
@@ -217,6 +243,12 @@ impl Provider {
 enum Acquired {
     /// A static bearer token with no refresh flow.
     Token(String),
+
+    /// A verified login owned by the provider's runtime.
+    External {
+        directory: Utf8PathBuf,
+        identity: AccountIdentity,
+    },
 
     /// A refreshable token pair.
     Oauth {
@@ -229,9 +261,20 @@ enum Acquired {
 
 impl Login {
     async fn run(&self, store: &CredentialStore, printer: &Printer) -> Output {
-        let auth = jp_llm::provider_auth(self.target.provider)
+        let auth = provider_auth(self.target.provider)
             .expect("AuthTarget parsing guarantees stored-credential support");
+        self.run_with_auth(store, printer, auth.as_ref(), user_data_dir().as_deref())
+            .await
+    }
 
+    async fn run_with_auth(
+        &self,
+        store: &CredentialStore,
+        printer: &Printer,
+        auth: &dyn ProviderAuth,
+        data_root: Option<&Utf8Path>,
+    ) -> Output {
+        let _guard = store.try_lock_auth().map_err(|error| store_error(&error))?;
         if self.name.is_empty() || self.name.chars().any(char::is_whitespace) {
             return Err(Error::from(format!(
                 "invalid credential name {:?}: must be non-empty and contain no whitespace",
@@ -239,11 +282,93 @@ impl Login {
             )));
         }
 
-        let acquired = self.acquire(auth.as_ref(), printer).await?;
+        let acquired = self
+            .acquire_registration(store, printer, auth, data_root)
+            .await?;
 
-        // Best-effort identity recovery: a failure stores the profile
-        // unverified instead of blocking the login.
-        let (secret, identity) = match acquired {
+        // Best-effort identity recovery: a failure stores a token unverified.
+        let (secret, identity) = Self::resolve_identity(auth, acquired).await;
+        self.register(store, printer, &secret, identity)
+    }
+
+    async fn acquire_registration(
+        &self,
+        store: &CredentialStore,
+        printer: &Printer,
+        auth: &dyn ProviderAuth,
+        data_root: Option<&Utf8Path>,
+    ) -> Result<Acquired, Error> {
+        if let Some(external) = auth.external_auth().filter(|_| !self.direct) {
+            if self.setup_token {
+                return Err(Error::from(
+                    "Anthropic login uses Claude Code; direct token login requires --direct \
+                     --setup-token",
+                ));
+            }
+            if self.import_codex || self.device_auth {
+                return Err(Error::from(
+                    "--device-auth and --import-codex are only supported for OpenAI",
+                ));
+            }
+            let snapshot = store.load().map_err(|error| store_error(&error))?;
+            let profiles = snapshot.profiles(CATEGORY_LLM, &self.target.store_key());
+            let existing = profiles.and_then(|profiles| profiles.get(&self.name));
+            let directory = external_directory(
+                &self.name,
+                data_root,
+                external.directory_name(),
+                self.config_dir.as_deref(),
+                existing,
+            )?;
+            if let Some((other, _)) = profiles.into_iter().flatten().find(|(name, credential)| {
+                **name != self.name
+                    && matches!(&credential.secret, CredentialSecret::External { directory: existing } if existing == &directory)
+            }) {
+                return Err(Error::from(format!("login directory is already registered as {other:?}")));
+            }
+            let identity = external
+                .login(&directory)
+                .await
+                .map_err(|error| Error::from(error.to_string()))?;
+            return Ok(Acquired::External {
+                directory,
+                identity,
+            });
+        }
+        if self.config_dir.is_some()
+            || (self.direct && self.target.provider != ProviderId::Anthropic)
+        {
+            return Err(Error::from(
+                "--config-dir and --direct are only supported for Anthropic",
+            ));
+        }
+        let snapshot = store.load().map_err(|error| store_error(&error))?;
+        if snapshot
+            .profiles(CATEGORY_LLM, &self.target.store_key())
+            .and_then(|profiles| profiles.get(&self.name))
+            .is_some_and(|credential| {
+                matches!(credential.secret, CredentialSecret::External { .. })
+            })
+        {
+            return Err(Error::from(
+                "log out of the existing subscription before replacing its authentication method",
+            ));
+        }
+        self.acquire(auth, printer).await
+    }
+
+    async fn resolve_identity(
+        auth: &dyn ProviderAuth,
+        acquired: Acquired,
+    ) -> (
+        CredentialSecret,
+        Result<AccountIdentity, Box<dyn StdError + Send + Sync>>,
+    ) {
+        match acquired {
+            Acquired::External {
+                directory,
+                identity,
+            } => (CredentialSecret::External { directory }, Ok(identity)),
             Acquired::Token(token) => {
                 let identity = auth.recover_identity(&token).await;
                 (CredentialSecret::Token { token }, identity)
@@ -261,8 +386,16 @@ impl Login {
                 },
                 Ok(identity),
             ),
-        };
+        }
+    }
 
+    fn register(
+        &self,
+        store: &CredentialStore,
+        printer: &Printer,
+        secret: &CredentialSecret,
+        identity: Result<AccountIdentity, Box<dyn StdError + Send + Sync>>,
+    ) -> Output {
         let profile = self.name.clone();
         let target = self.target;
         let (account_id, email, recovery_error) = match identity {
@@ -296,7 +429,7 @@ impl Login {
                         secret: secret.clone(),
                         account_id: account_id.clone(),
                         email: email.clone(),
-                        cooldowns: std::collections::BTreeMap::new(),
+                        cooldowns: BTreeMap::new(),
                         needs_relogin: false,
                         // Assigned by `insert_profile`, which raises it past
                         // whatever this login replaces.
@@ -308,6 +441,14 @@ impl Login {
             })
             .map_err(|e| store_error(&e))?;
 
+        if matches!(secret, CredentialSecret::External { .. }) {
+            printer.println(format!(
+                "Logged in to {target} as {:?} ({}).",
+                self.name,
+                email.as_deref().unwrap_or("identity unavailable")
+            ));
+            return Ok(());
+        }
         match (&account_id, recovery_error) {
             (Some(account_id), _) => printer.println(format!(
                 "Linked {target} credential {:?} to {} (account {account_id}).",
@@ -333,6 +474,11 @@ impl Login {
 impl Login {
     /// Obtain a credential by whichever flow the flags selected.
     async fn acquire(&self, auth: &dyn ProviderAuth, printer: &Printer) -> Result<Acquired, Error> {
+        if self.setup_token && self.target.provider == ProviderId::Anthropic && !self.direct {
+            return Err(Error::from(
+                "direct token login requires --direct --setup-token",
+            ));
+        }
         if self.setup_token {
             return Ok(Acquired::Token(read_setup_token(
                 printer,
@@ -570,12 +716,22 @@ async fn respond(socket: &mut TcpStream, message: &str) {
 }
 
 impl List {
-    #[expect(clippy::unused_self)]
-    fn run(
+    async fn run(
         &self,
         store: &CredentialStore,
         api_keys: &[(String, String, String)],
         printer: &Printer,
+    ) -> Output {
+        self.run_with_auth(store, api_keys, printer, provider_auth)
+            .await
+    }
+
+    async fn run_with_auth(
+        &self,
+        store: &CredentialStore,
+        api_keys: &[(String, String, String)],
+        printer: &Printer,
+        auth: impl Fn(ProviderId) -> Option<Box<dyn ProviderAuth>>,
     ) -> Output {
         let document = store.load().map_err(|e| store_error(&e))?;
         let now = Utc::now();
@@ -617,14 +773,33 @@ impl List {
         // the command path.
         for (_, provider, profile, credential) in document.iter() {
             let target = provider;
-            let state = CredentialState::read(credential, now);
+            let mut state = CredentialState::read(credential, now);
+            if let CredentialSecret::External { directory } = &credential.secret {
+                let provider_auth = provider.parse().ok().and_then(&auth);
+                let external = provider_auth.as_ref().and_then(|auth| auth.external_auth());
+                match external {
+                    Some(external) => match external.status(directory).await {
+                        Ok(Some(identity)) => {
+                            state.lifecycle = Lifecycle::Valid;
+                            state.verified =
+                                identity.account_id.is_some() || identity.email.is_some();
+                        }
+                        Ok(None) => state.lifecycle = Lifecycle::NeedsRelogin,
+                        Err(error) => {
+                            state.lifecycle = Lifecycle::Unavailable;
+                            printer.eprintln(format!(
+                                "could not check {provider} subscription {profile:?}: {error}"
+                            ));
+                        }
+                    },
+                    None => state.lifecycle = Lifecycle::Unavailable,
+                }
+            }
             let prose = state.to_prose();
 
             let mut row = Row::new();
             row.add_cell(Cell::new(target));
             row.add_cell(Cell::new(profile));
-            // A stored credential is always a subscription; `secret.kind()` is
-            // the mechanism it arrived by, which no `auth` entry selects on.
             row.add_cell(Cell::new("subscription"));
             row.add_cell(Cell::new(highlight_faults(&prose)));
             rows.push(row);
@@ -633,7 +808,6 @@ impl List {
                 "provider": target,
                 "name": profile,
                 "kind": "subscription",
-                "mechanism": credential.secret.kind(),
             });
 
             if let (Some(entry), Some(state)) = (entry.as_object_mut(), state.to_json().as_object())
@@ -727,54 +901,115 @@ fn read_api_keys() -> Result<Vec<(String, String, String)>, crate::Error> {
 }
 
 impl Logout {
-    fn run(&self, store: &CredentialStore, printer: &Printer) -> Output {
+    async fn run(&self, store: &CredentialStore, printer: &Printer) -> Output {
+        self.run_with_auth(store, printer, provider_auth).await
+    }
+
+    async fn run_with_auth(
+        &self,
+        store: &CredentialStore,
+        printer: &Printer,
+        auth: impl Fn(ProviderId) -> Option<Box<dyn ProviderAuth>>,
+    ) -> Output {
+        let _guard = store.try_lock_auth().map_err(|error| store_error(&error))?;
         let target = self.target;
-        let profile = self.name.clone();
-
-        let removed = store
+        let document = store.load().map_err(|error| store_error(&error))?;
+        let profiles = document.profiles(CATEGORY_LLM, &target.store_key());
+        let names = profiles
+            .map(|profiles| profiles.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        let name = match &self.name {
+            Some(name) => name.clone(),
+            None if names.len() == 1 => names[0].clone(),
+            None if names.is_empty() => {
+                return Err(Error::from(format!("no stored profiles for {target}")));
+            }
+            None => {
+                return Err(Error::from(format!(
+                    "multiple credentials stored for {target} ({}); name one with --name <name>",
+                    names.join(", ")
+                )));
+            }
+        };
+        let credential = profiles
+            .and_then(|profiles| profiles.get(&name))
+            .ok_or_else(|| {
+                Error::from(format!(
+                    "no stored credential {name:?} for {target}{}",
+                    if names.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" (stored: {})", names.join(", "))
+                    }
+                ))
+            })?;
+        if let CredentialSecret::External { directory } = &credential.secret {
+            let auth =
+                auth(target.provider).ok_or("provider does not support subscription logout")?;
+            let external = auth
+                .external_auth()
+                .ok_or("provider does not support runtime-owned subscription logout")?;
+            external
+                .logout(directory)
+                .await
+                .map_err(|error| Error::from(error.to_string()))?;
+        }
+        store
             .mutate(|document| {
-                let profiles = document
-                    .profiles(CATEGORY_LLM, &target.store_key())
-                    .map(|profiles| profiles.keys().cloned().collect::<Vec<_>>())
-                    .unwrap_or_default();
-
-                let profile = match &profile {
-                    Some(profile) => profile.clone(),
-                    None if profiles.len() == 1 => profiles[0].clone(),
-                    None if profiles.is_empty() => {
-                        return Err(StoreError::Rejected(format!(
-                            "no stored profiles for {target}"
-                        )));
-                    }
-                    None => {
-                        return Err(StoreError::Rejected(format!(
-                            "multiple credentials stored for {target} ({}); name one with --name \
-                             <name>",
-                            profiles.join(", ")
-                        )));
-                    }
-                };
-
-                document
-                    .remove_profile(CATEGORY_LLM, &target.store_key(), &profile)
-                    .ok_or_else(|| {
-                        StoreError::Rejected(format!(
-                            "no stored credential {profile:?} for {target}{}",
-                            if profiles.is_empty() {
-                                String::new()
-                            } else {
-                                format!(" (stored: {})", profiles.join(", "))
-                            }
-                        ))
-                    })?;
-
-                Ok(profile)
+                document.remove_profile(CATEGORY_LLM, &target.store_key(), &name);
+                Ok(())
             })
-            .map_err(|e| store_error(&e))?;
-
-        printer.println(format!("Removed {target} profile {removed:?}."));
+            .map_err(|error| store_error(&error))?;
+        printer.println(format!("Removed {target} profile {name:?}."));
         Ok(())
     }
+}
+
+fn external_directory(
+    name: &str,
+    data_root: Option<&Utf8Path>,
+    runtime: &str,
+    requested: Option<&Utf8Path>,
+    existing: Option<&StoredCredential>,
+) -> Result<Utf8PathBuf, Error> {
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(Error::from(
+            "subscription names must contain only ASCII letters, digits, '-' or '_'",
+        ));
+    }
+    let directory = match existing.map(|credential| &credential.secret) {
+        Some(CredentialSecret::External { directory }) => {
+            if requested.is_some_and(|requested| requested != directory) {
+                return Err(Error::from(
+                    "log out before changing a subscription's login directory",
+                ));
+            }
+            directory.clone()
+        }
+        Some(_) => {
+            return Err(Error::from(
+                "log out of the existing subscription before replacing its authentication method",
+            ));
+        }
+        None => match requested {
+            Some(directory) => directory.to_owned(),
+            None => data_root
+                .ok_or("cannot locate JP's user data directory")?
+                .join("data")
+                .join(runtime)
+                .join(name),
+        },
+    };
+    if !directory.is_absolute() {
+        return Err(Error::from(
+            "subscription login directory must be an absolute path",
+        ));
+    }
+    Ok(directory)
 }
 
 /// Read the setup token from the first line of stdin.
@@ -974,6 +1209,9 @@ enum Lifecycle {
 
     /// The provider refused the credential, or a refresh was rejected.
     NeedsRelogin,
+
+    /// The runtime's current authentication could not be inspected.
+    Unavailable,
 }
 
 impl Lifecycle {
@@ -982,6 +1220,7 @@ impl Lifecycle {
             Self::Valid => "valid",
             Self::Expired => "expired",
             Self::NeedsRelogin => "needs_relogin",
+            Self::Unavailable => "unavailable",
         }
     }
 }
@@ -994,7 +1233,7 @@ impl CredentialState {
     fn read(credential: &StoredCredential, now: DateTime<Utc>) -> Self {
         let expiry = match &credential.secret {
             CredentialSecret::Oauth { expires_at, .. } => Some(*expires_at),
-            CredentialSecret::Token { .. } => None,
+            CredentialSecret::Token { .. } | CredentialSecret::External { .. } => None,
         };
 
         let lifecycle = if credential.needs_relogin {
@@ -1007,7 +1246,9 @@ impl CredentialState {
 
         Self {
             lifecycle,
-            verified: credential.account_id.is_some(),
+            verified: credential.account_id.is_some()
+                || (matches!(credential.secret, CredentialSecret::External { .. })
+                    && credential.email.is_some()),
             expires_in_secs: expiry.map(|expires_at| (expires_at - now).num_seconds()),
             cooldowns: credential
                 .cooldowns
@@ -1022,6 +1263,7 @@ impl CredentialState {
         let mut parts = vec![];
 
         match self.lifecycle {
+            Lifecycle::Unavailable => return "status unavailable".into(),
             Lifecycle::NeedsRelogin => parts.push("needs re-login".to_owned()),
             Lifecycle::Expired => parts.push("expired".to_owned()),
             Lifecycle::Valid => {
@@ -1069,6 +1311,10 @@ impl CredentialState {
 fn store_error(error: &StoreError) -> Error {
     Error::from(error.to_string())
 }
+
+#[cfg(test)]
+#[path = "provider_auth_tests.rs"]
+mod auth_tests;
 
 #[cfg(test)]
 #[path = "provider_tests.rs"]

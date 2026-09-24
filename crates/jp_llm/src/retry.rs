@@ -6,7 +6,7 @@ use futures::StreamExt as _;
 use tracing::{debug, warn};
 
 use crate::{
-    Provider, StreamError,
+    Provider, StreamError, StreamErrorKind,
     error::Result,
     event::{Event, NoticeSink},
     model::ModelDetails,
@@ -17,7 +17,8 @@ use crate::{
 /// Configuration for resilient stream retries.
 #[derive(Debug, Clone)]
 pub struct RetryConfig {
-    /// Maximum number of retry attempts.
+    /// Maximum number of transient retry attempts.
+    /// Provider-confirmed credential changes do not consume this budget.
     pub max_retries: u32,
 
     /// Base backoff delay in milliseconds.
@@ -63,6 +64,8 @@ impl RetryConfig {
 /// Collects the full event stream into a `Vec<Event>`.
 /// On retryable stream errors, backs off and retries the entire request up to
 /// `config.max_retries` times.
+/// Provider-confirmed credential changes resubmit immediately without using
+/// that budget.
 ///
 /// Non-retryable errors and errors from `chat_completion_stream` itself (before
 /// streaming starts) are propagated immediately.
@@ -125,6 +128,9 @@ pub async fn collect_with_retry(
             Some(error) => error,
         };
 
+        if error.kind == StreamErrorKind::CredentialChanged {
+            continue;
+        }
         attempt += 1;
 
         if !error.is_retryable() || attempt > config.max_retries {

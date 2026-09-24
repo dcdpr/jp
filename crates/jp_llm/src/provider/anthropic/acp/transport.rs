@@ -15,7 +15,7 @@ use jp_config::assistant::{request::CachePolicy, tool_choice::ToolChoice};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 use tracing::{debug, instrument::WithSubscriber as _, warn};
 use uuid::Uuid;
 
@@ -47,6 +47,7 @@ pub(crate) fn stream(
     model: &ModelDetails,
     query: ChatQuery,
     context: QueryContext,
+    directory: Option<Utf8PathBuf>,
 ) -> crate::error::Result<EventStream> {
     let cache = query.thread.events.config()?.assistant.request.cache;
     let tools = if query.tool_choice == ToolChoice::None {
@@ -68,7 +69,7 @@ pub(crate) fn stream(
         let result = tokio::select! {
             biased;
             () = sender.closed() => return,
-            result = run(prepared, context, tools, cache, sender.clone()) => result,
+            result = run(prepared, context, tools, cache, directory, sender.clone()) => result,
         };
         if let Err(error) = result {
             let error = match error {
@@ -211,15 +212,18 @@ pub(super) struct Launch {
 /// Prepare one connection: write its transcript, build its environment, and
 /// construct the command that would spawn the adapter.
 ///
-/// Reads `HOME` and `CLAUDE_CONFIG_DIR`, and writes into the directory they
-/// name, so a caller that has no adapter to run should build its own pieces
-/// rather than call this.
+/// `login_directory` is the Claude Code login a named subscription selects;
+/// `None` uses the active login.
+/// Otherwise reads `HOME` and `CLAUDE_CONFIG_DIR`, and writes into the
+/// directory they name, so a caller that has no adapter to run should build its
+/// own pieces rather than call this.
 pub(super) fn launch(
     prepared: &PreparedRequest,
     context: &QueryContext,
     cache: CachePolicy,
+    login_directory: Option<&Utf8Path>,
 ) -> Result<Launch, Error> {
-    let directory = native_directory()?;
+    let directory = native_directory(login_directory)?;
     let project = project_name(context);
     let artifact = NativeArtifact::write(prepared, &context.root, &directory, &project)?;
     let mut environment = options::environment(prepared, cache);
@@ -227,8 +231,9 @@ pub(super) fn launch(
         &mut environment,
         env::var("CLAUDE_CONFIG_DIR").ok().as_deref(),
         &project,
+        login_directory,
     );
-    let mut command = process::command();
+    let mut command = process::command(login_directory);
     command.envs(&environment);
 
     Ok(Launch {
@@ -243,13 +248,14 @@ async fn run(
     context: QueryContext,
     tools: Vec<String>,
     cache: CachePolicy,
+    login_directory: Option<Utf8PathBuf>,
     sender: mpsc::Sender<Result<Event, StreamError>>,
 ) -> Result<(), Error> {
     let Launch {
         artifact,
         environment,
         command,
-    } = launch(&prepared, &context, cache)?;
+    } = launch(&prepared, &context, cache, login_directory.as_deref())?;
 
     drive(
         prepared,
@@ -270,10 +276,18 @@ async fn run(
 ///
 /// An error here ends the connection, which is how a revoked subscription stops
 /// a prompt that is already streaming.
-fn inbound(state: Arc<Mutex<State>>, sender: mpsc::Sender<Result<Event, StreamError>>) -> Handler {
+/// A failure reported inside an SDK message also wakes `failure`: the adapter
+/// can keep the prompt request open after one, so the caller has to stop the
+/// attempt itself rather than wait for the prompt to answer.
+fn inbound(
+    state: Arc<Mutex<State>>,
+    sender: mpsc::Sender<Result<Event, StreamError>>,
+    failure: Arc<Notify>,
+) -> Handler {
     Box::new(move |message| {
         let state = state.clone();
         let sender = sender.clone();
+        let failure = failure.clone();
         Box::pin(async move {
             let (Inbound::Notification { method, params } | Inbound::Request { method, params }) =
                 message;
@@ -296,7 +310,11 @@ fn inbound(state: Arc<Mutex<State>>, sender: mpsc::Sender<Result<Event, StreamEr
                         locked.live && locked.session.as_ref() == Some(&notification.session_id);
                     (active, locked.sdk(notification))
                 };
-                let mut events = result.map_err(|error| record_failure(&state, error))?;
+                let mut events = result.map_err(|error| {
+                    let response = record_failure(&state, error);
+                    failure.notify_one();
+                    response
+                })?;
                 // Non-rendered SDK updates still prove the connection is active.
                 if active && events.is_empty() {
                     events.push(Event::KeepAlive);
@@ -357,7 +375,8 @@ pub(super) async fn drive(
         tools.iter().cloned(),
         prepared.schema.is_some(),
     )));
-    let handler = inbound(state.clone(), sender.clone());
+    let failure = Arc::new(Notify::new());
+    let handler = inbound(state.clone(), sender.clone(), failure.clone());
     let foreground_state = state.clone();
     let heartbeat = sender.clone();
     let foreground: Foreground = Box::new(move |peer| {
@@ -463,6 +482,15 @@ pub(super) async fn drive(
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     loop {
         tokio::select! {
+            () = failure.notified() => {
+                // Notification handler errors do not terminate the peer's prompt.
+                // Dropping the connection here also stops its process group.
+                let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+                debug!(usage = %state.usage_snapshot(), "Claude ACP usage snapshot");
+                state.live = false;
+                let error = state.failure.take().expect("failure is recorded before notifying");
+                return Err(Error::Stream(Box::new(error)));
+            }
             result = &mut result => {
                 debug!(usage = %state.lock().unwrap_or_else(PoisonError::into_inner).usage_snapshot(), "Claude ACP usage snapshot");
                 if let Some(error) = state.lock().unwrap_or_else(PoisonError::into_inner).failure.take() {
@@ -486,11 +514,13 @@ fn configure_storage_environment(
     environment: &mut BTreeMap<String, String>,
     configured: Option<&str>,
     project: &str,
+    login_directory: Option<&Utf8Path>,
 ) {
+    environment.extend(process::login_environment(login_directory));
     // Setting CLAUDE_CONFIG_DIR can select a different Keychain entry even
     // when it names the default directory. Preserve the login environment.
     // Without an explicit config directory, resume finds our file by ID.
-    if configured.is_some() {
+    if configured.is_some() || login_directory.is_some() {
         environment.insert("CLAUDE_CODE_PROJECT_DIR_NAME".into(), project.into());
     }
 }
@@ -521,8 +551,10 @@ fn project_name(context: &QueryContext) -> String {
     )
 }
 
-fn native_directory() -> Result<Utf8PathBuf, Error> {
-    let directory = env::var("CLAUDE_CONFIG_DIR")
+fn native_directory(configured: Option<&Utf8Path>) -> Result<Utf8PathBuf, Error> {
+    let directory = configured
+        .map(|path| path.as_str().to_owned())
+        .map_or_else(|| env::var("CLAUDE_CONFIG_DIR"), Ok)
         .or_else(|_| {
             #[cfg(windows)]
             let home = env::var("USERPROFILE").or_else(|_| env::var("HOME"));

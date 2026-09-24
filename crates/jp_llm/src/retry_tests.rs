@@ -1,8 +1,13 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
 
+use async_trait::async_trait;
+use futures::stream;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
-    model::id::{ModelIdConfig, ProviderId},
+    model::id::{ModelIdConfig, Name, ProviderId},
 };
 use jp_conversation::{ConversationStream, thread::Thread};
 
@@ -13,6 +18,7 @@ use crate::{
     model::ModelDetails,
     provider::mock::MockProvider,
     query::Truncation,
+    stream::EventStream,
 };
 
 fn empty_query() -> ChatQuery {
@@ -41,6 +47,48 @@ const TEST_BASE_BACKOFF_MS: u64 = 1000;
 
 /// Default max backoff for tests.
 const TEST_MAX_BACKOFF_SECS: u64 = 60;
+
+struct ChangingCredential(AtomicUsize);
+
+#[async_trait]
+impl Provider for ChangingCredential {
+    async fn model_details(&self, _: &Name) -> Result<ModelDetails> {
+        Ok(model())
+    }
+    async fn models(&self) -> Result<Vec<ModelDetails>> {
+        Ok(vec![model()])
+    }
+    async fn chat_completion_stream(&self, _: &ModelDetails, _: ChatQuery) -> Result<EventStream> {
+        match self.0.fetch_add(1, Ordering::SeqCst) {
+            0 => Ok(Box::pin(stream::iter(vec![Err(
+                StreamError::subscription_exhausted("spent", None, None).with_credential_change(),
+            )]))),
+            1 => Ok(Box::pin(stream::iter(vec![
+                Ok(Event::message(0, "second account")),
+                Ok(Event::Finished(FinishReason::Completed)),
+            ]))),
+            _ => panic!("unexpected extra request"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn collected_requests_follow_credential_changes_without_transient_retries() {
+    let provider = ChangingCredential(AtomicUsize::new(0));
+    let config = RetryConfig {
+        max_retries: 0,
+        ..RetryConfig::default()
+    };
+    let sink = NoticeSink::new(|_| {});
+    let events = collect_with_retry(&provider, &model(), empty_query(), &config, &sink)
+        .await
+        .unwrap();
+    assert_eq!(provider.0.load(Ordering::SeqCst), 2);
+    assert_eq!(events, vec![
+        Event::message(0, "second account"),
+        Event::Finished(FinishReason::Completed)
+    ]);
+}
 
 #[test]
 fn backoff_increases() {

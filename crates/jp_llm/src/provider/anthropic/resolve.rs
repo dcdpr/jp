@@ -26,11 +26,9 @@ use std::{
 };
 
 use async_anthropic::errors::{UnifiedRateLimit, WindowUtilization};
+use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
-use jp_config::{
-    providers::llm::anthropic::{AnthropicConfig, AuthEntry, SubscriptionFlow},
-    types::api_key_env::ApiKeyEnv,
-};
+use jp_config::providers::llm::anthropic::{AnthropicConfig, AuthEntry, SubscriptionFlow};
 use jp_credentials::{
     CATEGORY_LLM, CredentialSecret, CredentialStore, PROVIDER_ANTHROPIC, SCOPE_ACCOUNT,
     StoreDocument, StoreError, StoreGuard, StoredCredential, UpdateOutcome, cooldown_until,
@@ -43,6 +41,9 @@ use crate::{credential::Credential, error::StreamError};
 /// Errors from walking the credential chain.
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveError {
+    /// A runtime-owned login cannot authenticate direct HTTP requests.
+    #[error("subscription `{name}` requires runtime authentication, not a direct token flow")]
+    ExternalCredential { name: String },
     /// ACP selection failed before a request could be sent.
     #[error(transparent)]
     Acp(#[from] AcpError),
@@ -144,7 +145,7 @@ pub enum ResolveError {
 #[derive(Debug)]
 enum Landing {
     /// Use Claude Code's own authentication without reading stored tokens.
-    Acp,
+    Acp(Option<Utf8PathBuf>),
     /// A credential that can be sent as-is.
     Ready(Credential),
 
@@ -257,15 +258,15 @@ pub(super) enum Route {
     /// An API key or an explicitly selected direct subscription token.
     Http(Credential),
     /// Authentication is owned by Claude Code, not by JP's token store.
-    Acp,
+    Acp(Option<Utf8PathBuf>),
 }
 
 /// Whether resolving this chain requires consulting JP's credential store.
 pub(super) fn needs_store(config: &AnthropicConfig) -> bool {
     config.auth.iter().any(|entry| match entry {
         AuthEntry::ApiKey(_) => false,
-        AuthEntry::Subscription(_) => config.subscription_flow == SubscriptionFlow::Direct,
-        AuthEntry::Named(_) => true,
+        AuthEntry::Subscription(None) => config.subscription_flow == SubscriptionFlow::Direct,
+        AuthEntry::Subscription(Some(_)) | AuthEntry::Named(_) => true,
     })
 }
 
@@ -323,11 +324,11 @@ async fn resolve_skipping(
             walk_chain(config, snapshot.as_ref(), model, now, &tried)?;
 
         let (profile, refresh_token) = match landing {
-            Landing::Acp => {
+            Landing::Acp(directory) => {
                 debug!(entry = %selected.entry, model, "Resolved ACP subscription route.");
 
                 return Ok(Attempt {
-                    route: Route::Acp,
+                    route: Route::Acp(directory),
                     selected: Some(selected),
                     notices,
                     switch: None,
@@ -530,6 +531,17 @@ pub(super) async fn advance(
 ) -> Option<Attempt> {
     let selected = spent.selected.as_ref()?;
 
+    // A named ACP login without a registered profile is a directory mapping:
+    // JP keeps no state for it, so there is no cooldown to record and nothing
+    // to route the next resolution past it. Advancing would just land on it
+    // again in the next invocation.
+    if config.subscription_flow == SubscriptionFlow::Acp
+        && matches!(selected.entry, AuthEntry::Subscription(Some(_)))
+        && selected.generation.is_none()
+    {
+        return None;
+    }
+
     record_outcome(store, selected, error, now);
 
     // Whether or not the store took the record, this entry is out for the rest
@@ -561,10 +573,43 @@ pub(super) async fn advance(
     Some(attempt)
 }
 
+/// Whether a fresh resolution lands on the entry `next` selected.
+///
+/// A request rebuilt from scratch resolves the chain again without the entries
+/// the failed request tried, so it reaches `next` only when the store records
+/// why every entry before it is out.
+/// An unnamed ACP login, an `api_key`, or a profile whose outcome could not be
+/// written leaves no such record, and the rebuild would land on the spent
+/// credential again.
+///
+/// Reads the store only: an expired token is not refreshed.
+pub(super) fn switch_persists(
+    config: &AnthropicConfig,
+    store: Option<&CredentialStore>,
+    next: &Attempt,
+    model: &str,
+    now: DateTime<Utc>,
+) -> bool {
+    let Some(expected) = next.selected.as_ref() else {
+        return false;
+    };
+    let snapshot = match store.map(CredentialStore::load).transpose() {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            warn!(%error, "Could not read the credential store to confirm a switch.");
+            return false;
+        }
+    };
+
+    walk_chain(config, snapshot.as_ref(), model, now, &HashSet::new())
+        .is_ok_and(|(_, selected, _)| selected.entry == expected.entry)
+}
+
 /// Persist why the spent credential cannot serve the request.
 ///
-/// Best-effort: a store that cannot be written costs this switch its
-/// cross-invocation memory, not the request itself.
+/// Failed writes are reported.
+/// Re-resolution leaves the failure terminal if the persisted state cannot move
+/// the chain to a different credential.
 fn record_outcome(
     store: Option<&CredentialStore>,
     spent: &Selected,
@@ -739,7 +784,7 @@ impl QuotaWatch {
 }
 
 /// Convert a reset reported as Unix seconds into a timestamp.
-fn reset_at(seconds: u64) -> Option<DateTime<Utc>> {
+pub(super) fn reset_at(seconds: u64) -> Option<DateTime<Utc>> {
     i64::try_from(seconds)
         .ok()
         .and_then(|secs| DateTime::from_timestamp(secs, 0))
@@ -826,7 +871,7 @@ fn walk_chain(
         let owned;
         let entry = match entry {
             AuthEntry::Named(name) => {
-                owned = classify(&config.api_key_env, store, PROVIDER_ANTHROPIC, name)?;
+                owned = classify(config, store, name)?;
                 &owned
             }
             entry => entry,
@@ -876,12 +921,12 @@ fn walk_chain(
             }
 
             AuthEntry::Subscription(name) => {
-                // Claude Code owns this login, so there is no stored profile
-                // to look up, cool down, or refresh.
+                // Claude Code owns this login's tokens, so there is nothing
+                // to refresh. A registered login is still a stored profile:
+                // its cooldowns and re-login marker gate it, and its
+                // generation guards what a failed request records against it.
                 if config.subscription_flow == SubscriptionFlow::Acp {
-                    if let Some(name) = name {
-                        return Err(AcpError::NamedSubscription { name: name.clone() }.into());
-                    }
+                    let directory = acp_directory(config, store, name.as_deref())?;
 
                     if tried.contains(entry) {
                         skip(
@@ -892,11 +937,29 @@ fn walk_chain(
                         continue;
                     }
 
+                    let registered = name
+                        .as_deref()
+                        .and_then(|profile| {
+                            store
+                                .and_then(|store| store.profiles(CATEGORY_LLM, PROVIDER_ANTHROPIC))
+                                .and_then(|profiles| profiles.get_key_value(profile))
+                        })
+                        .filter(|(_, stored)| {
+                            matches!(stored.secret, CredentialSecret::External { .. })
+                        });
+
+                    if let Some((profile, stored)) = registered
+                        && let Some(reason) = unavailable_reason(profile, stored, model, now)
+                    {
+                        skip(&mut notices, &mut reasons, reason);
+                        continue;
+                    }
+
                     return Ok((
-                        Landing::Acp,
+                        Landing::Acp(directory),
                         Selected {
                             entry: entry.clone(),
-                            generation: None,
+                            generation: registered.map(|(_, stored)| stored.generation),
                         },
                         notices,
                     ));
@@ -926,7 +989,7 @@ enum ProfileStep {
     Skip(String),
 }
 
-/// Evaluate one `subscription` chain entry.
+/// Evaluate one `subscription` chain entry under the direct flow.
 fn walk_profile(
     store: Option<&StoreDocument>,
     name: Option<&str>,
@@ -952,20 +1015,17 @@ fn walk_profile(
         )));
     }
 
-    if stored.needs_relogin {
-        return Ok(ProfileStep::Skip(format!(
-            "subscription:{profile} needs re-login; run `jp provider llm auth login anthropic \
-             --name {profile}`"
-        )));
-    }
-
-    if let Some((scope, until)) = stored.active_cooldown(model, now) {
-        return Ok(ProfileStep::Skip(format!(
-            "subscription:{profile} cooling down until {until} ({scope})"
-        )));
+    if let Some(reason) = unavailable_reason(profile, stored, model, now) {
+        return Ok(ProfileStep::Skip(reason));
     }
 
     let landing = match &stored.secret {
+        CredentialSecret::External { .. } => {
+            return Err(ResolveError::ExternalCredential {
+                name: profile.to_owned(),
+            });
+        }
+
         CredentialSecret::Token { token } => Landing::Ready(Credential::Bearer(token.clone())),
 
         // Refreshed slightly before the deadline, so a token cannot expire
@@ -987,22 +1047,101 @@ fn walk_profile(
     Ok(ProfileStep::Landed(landing, selected))
 }
 
+/// Why a stored profile cannot serve a request right now, if it cannot.
+fn unavailable_reason(
+    profile: &str,
+    stored: &StoredCredential,
+    model: &str,
+    now: DateTime<Utc>,
+) -> Option<String> {
+    if stored.needs_relogin {
+        return Some(format!(
+            "subscription:{profile} needs re-login; run `jp provider llm auth login anthropic \
+             --name {profile}`"
+        ));
+    }
+    stored.active_cooldown(model, now).map(|(scope, until)| {
+        format!("subscription:{profile} cooling down until {until} ({scope})")
+    })
+}
+
+/// The Claude Code configuration directory a named ACP subscription uses.
+///
+/// `None` for the bare entry, which uses Claude Code's active login.
+/// A registered login and an `acp_config_dirs` mapping may both name the
+/// directory, but must agree.
+fn acp_directory(
+    config: &AnthropicConfig,
+    store: Option<&StoreDocument>,
+    name: Option<&str>,
+) -> Result<Option<Utf8PathBuf>, AcpError> {
+    let Some(name) = name else {
+        return Ok(None);
+    };
+    let registered = store
+        .and_then(|store| store.profiles(CATEGORY_LLM, PROVIDER_ANTHROPIC))
+        .and_then(|profiles| profiles.get(name))
+        .and_then(|credential| match &credential.secret {
+            CredentialSecret::External { directory } => Some(directory.clone()),
+            _ => None,
+        });
+    let configured = config.acp_config_dirs.get(name).map(Utf8PathBuf::from);
+    if let (Some(registered), Some(configured)) = (&registered, &configured)
+        && registered != configured
+    {
+        return Err(AcpError::ConflictingDirectory {
+            name: name.to_owned(),
+        });
+    }
+    let directory = registered
+        .or(configured)
+        .ok_or_else(|| AcpError::NamedSubscription {
+            name: name.to_owned(),
+        })?;
+    if !directory.is_absolute() {
+        return Err(AcpError::InvalidConfigDirectory {
+            name: name.to_owned(),
+            directory,
+        });
+    }
+    Ok(Some(directory))
+}
+
 /// Decide which kind of credential a bare name refers to.
 ///
 /// A name both an API key and a subscription answer to is an error, not a
 /// guess.
 fn classify(
-    api_key_env: &ApiKeyEnv,
+    config: &AnthropicConfig,
     store: Option<&StoreDocument>,
-    provider: &str,
     name: &str,
 ) -> Result<AuthEntry, ResolveError> {
-    let keys = api_key_env.names();
-    let subscriptions: Vec<&str> = store
-        .and_then(|document| document.profiles(CATEGORY_LLM, provider))
-        .map(|profiles| profiles.keys().map(String::as_str).collect())
-        .unwrap_or_default();
+    let keys = config.api_key_env.names();
+    let mut subscriptions: Vec<&str> = if config.subscription_flow == SubscriptionFlow::Acp {
+        config
+            .acp_config_dirs
+            .keys()
+            .map(String::as_str)
+            .chain(
+                store
+                    .and_then(|store| store.profiles(CATEGORY_LLM, PROVIDER_ANTHROPIC))
+                    .into_iter()
+                    .flat_map(|profiles| profiles.iter())
+                    .filter(|(_, credential)| {
+                        matches!(credential.secret, CredentialSecret::External { .. })
+                    })
+                    .map(|(name, _)| name.as_str()),
+            )
+            .collect()
+    } else {
+        store
+            .and_then(|document| document.profiles(CATEGORY_LLM, PROVIDER_ANTHROPIC))
+            .map(|profiles| profiles.keys().map(String::as_str).collect())
+            .unwrap_or_default()
+    };
 
+    subscriptions.sort_unstable();
+    subscriptions.dedup();
     match (keys.contains(&name), subscriptions.contains(&name)) {
         (true, false) => Ok(AuthEntry::ApiKey(Some(name.to_owned()))),
         (false, true) => Ok(AuthEntry::Subscription(Some(name.to_owned()))),

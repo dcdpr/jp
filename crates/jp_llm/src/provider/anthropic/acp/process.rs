@@ -1,13 +1,14 @@
 //! ACP process lifecycle using Unix process groups or Windows job objects.
 
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     env, io,
     ops::{Deref, DerefMut},
     process::Stdio,
     time::Duration,
 };
 
+use camino::Utf8Path;
 #[cfg(windows)]
 use process_wrap::tokio::JobObject;
 #[cfg(unix)]
@@ -25,7 +26,24 @@ use super::{
     rpc::{self, Handler, Peer, RpcError, Tap},
 };
 
-pub(super) fn command() -> Command {
+/// Environment overrides selecting a named Claude Code login.
+///
+/// An unnamed login produces no overrides, preserving the inherited location.
+pub(super) fn login_environment(directory: Option<&Utf8Path>) -> BTreeMap<String, String> {
+    let Some(directory) = directory else {
+        return BTreeMap::new();
+    };
+    // A secure-storage override inherited from another account must not win.
+    BTreeMap::from([
+        ("CLAUDE_CONFIG_DIR".into(), directory.as_str().into()),
+        (
+            "CLAUDE_SECURESTORAGE_CONFIG_DIR".into(),
+            directory.as_str().into(),
+        ),
+    ])
+}
+
+pub(super) fn command(directory: Option<&Utf8Path>) -> Command {
     #[cfg(windows)]
     let mut command = {
         // npm installs a .cmd shim on Windows. No prompt or model data is
@@ -41,6 +59,7 @@ pub(super) fn command() -> Command {
             command.env_remove(name);
         }
     }
+    command.envs(login_environment(directory));
     command
 }
 

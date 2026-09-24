@@ -1,5 +1,7 @@
 //! Anthropic provider configuration.
 
+use std::collections::BTreeMap;
+
 use schematic::{Config, ConfigEnum, ConfigError};
 use serde::{Deserialize, Serialize};
 
@@ -35,9 +37,10 @@ pub struct AnthropicConfig {
     /// - `subscription`: A plan's allowance, using Claude Code's active login
     ///   with `subscription_flow = "acp"`, or the sole JP-stored credential
     ///   with `subscription_flow = "direct"`.
-    /// - `subscription:<name>`: The named JP-stored credential, available with
+    /// - `subscription:<name>`: A registered Claude Code login with
+    ///   `subscription_flow = "acp"`, or a named JP-stored credential with
     ///   `subscription_flow = "direct"`.
-    ///   ACP does not map credential names.
+    ///   Manual ACP directories may also be configured in `acp_config_dirs`.
     ///
     /// `api` and `sub` are accepted as shorthand for the two kinds.
     /// Names are case-sensitive.
@@ -60,9 +63,9 @@ pub struct AnthropicConfig {
     ///
     /// Defaults to `acp`: use `claude-agent-acp` and Claude Code's active
     /// subscription login.
-    /// Install `@agentclientprotocol/claude-agent-acp@0.76.0` and sign in with
-    /// `claude-agent-acp --cli auth login --claudeai`.
-    /// Named JP subscription credentials are not mapped to this login.
+    /// Install `@agentclientprotocol/claude-agent-acp@0.81.0` and sign in with
+    /// `jp provider llm auth login anthropic --name personal`.
+    /// Named subscriptions select their registered login directory.
     ///
     /// Set to `direct` to use JP-stored subscription credentials through direct
     /// HTTP requests.
@@ -71,6 +74,35 @@ pub struct AnthropicConfig {
     /// API-key entries are unaffected and require no external runtime.
     #[setting(default)]
     pub subscription_flow: SubscriptionFlow,
+
+    /// Manual Claude Code login directories for named subscriptions.
+    ///
+    /// Defaults to an empty map.
+    /// Logins registered by `jp provider llm auth login` do not need an entry
+    /// here.
+    /// A manual entry sharing a registered name must point to the same
+    /// directory.
+    /// Each value must be an absolute path, with no `~` or environment-variable
+    /// expansion.
+    /// Sign in using the same path as `CLAUDE_CONFIG_DIR` with
+    /// `claude-agent-acp --cli auth login --claudeai`.
+    /// Claude Code stores and refreshes the credentials; JP does not read them.
+    ///
+    /// With `subscription_flow = "acp"`, `sub:personal` selects the `personal`
+    /// entry.
+    /// An unnamed `subscription` retains the inherited Claude Code login.
+    /// This map is ignored by the `direct` flow.
+    /// Automatic quota fallback requires registered logins.
+    /// JP does not record cooldowns for directory-only mappings.
+    ///
+    /// Replaces the map from earlier configuration layers.
+    ///
+    /// ```toml
+    /// [providers.llm.anthropic.acp_config_dirs]
+    /// personal = "/absolute/path/to/claude/personal"
+    /// ```
+    #[setting(default)]
+    pub acp_config_dirs: BTreeMap<String, String>,
 
     /// Environment variable that contains the API key.
     ///
@@ -128,6 +160,23 @@ impl AssignKeyValue for PartialAnthropicConfig {
             "api_key_env" => self.api_key_env = kv.try_some_object_or_from_str()?,
             "base_url" => self.base_url = kv.try_some_string()?,
             "subscription_flow" => self.subscription_flow = kv.try_some_object_or_from_str()?,
+            "acp_config_dirs" => {
+                self.acp_config_dirs = if kv.is_json_null() {
+                    None
+                } else {
+                    Some(kv.try_object()?)
+                };
+            }
+            _ if kv.p("acp_config_dirs") => {
+                let name = kv.key_string();
+                let directory = kv.try_some_string()?;
+                let directories = self.acp_config_dirs.get_or_insert_default();
+                if let Some(directory) = directory {
+                    directories.insert(name, directory);
+                } else {
+                    directories.remove(&name);
+                }
+            }
             "chain_on_max_tokens" => self.chain_on_max_tokens = kv.try_some_bool()?,
             _ if kv.p("auth") => {
                 kv.try_some_vec(&mut self.auth, |kv| match kv.value.into_value() {
@@ -150,6 +199,7 @@ impl PartialConfigDelta for PartialAnthropicConfig {
         Self {
             auth: delta_opt(self.auth.as_ref(), next.auth),
             subscription_flow: delta_opt(self.subscription_flow.as_ref(), next.subscription_flow),
+            acp_config_dirs: delta_opt(self.acp_config_dirs.as_ref(), next.acp_config_dirs),
             api_key_env: delta_opt(self.api_key_env.as_ref(), next.api_key_env),
             base_url: delta_opt(self.base_url.as_ref(), next.base_url),
             chain_on_max_tokens: delta_opt(
@@ -160,10 +210,10 @@ impl PartialConfigDelta for PartialAnthropicConfig {
         }
     }
 
-    // No `delta_with_unsets`: `auth` merges by replacement and `beta_headers`
-    // carries its own strategy, so every field here is reachable by merging and
-    // none needs a path reported. The default implementation, which is the plain
-    // diff, is correct.
+    // No `delta_with_unsets`: `auth` and `acp_config_dirs` merge by replacement
+    // and `beta_headers` carries its own strategy, so every field here is
+    // reachable by merging and none needs a path reported. The default
+    // implementation, which is the plain diff, is correct.
 }
 
 impl FillDefaults for PartialAnthropicConfig {
@@ -171,6 +221,7 @@ impl FillDefaults for PartialAnthropicConfig {
         Self {
             auth: self.auth.or(defaults.auth),
             subscription_flow: self.subscription_flow.or(defaults.subscription_flow),
+            acp_config_dirs: self.acp_config_dirs.or(defaults.acp_config_dirs),
             api_key_env: self.api_key_env.or(defaults.api_key_env),
             base_url: self.base_url.or(defaults.base_url),
             chain_on_max_tokens: self.chain_on_max_tokens.or(defaults.chain_on_max_tokens),
@@ -186,6 +237,7 @@ impl ToPartial for AnthropicConfig {
         Self::Partial {
             auth: partial_opt(&self.auth, defaults.auth),
             subscription_flow: partial_opt(&self.subscription_flow, defaults.subscription_flow),
+            acp_config_dirs: partial_opt(&self.acp_config_dirs, defaults.acp_config_dirs),
             api_key_env: partial_opt(&self.api_key_env, defaults.api_key_env),
             base_url: partial_opt(&self.base_url, defaults.base_url),
             chain_on_max_tokens: partial_opt(
