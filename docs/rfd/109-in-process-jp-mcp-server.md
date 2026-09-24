@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-12
+- **Summary**: Tool execution moves into an in-process JP MCP Server that JP and
+  third-party MCP clients both call over loopback Streamable HTTP.
 
 ## Summary
 

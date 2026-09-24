@@ -60,6 +60,7 @@ impl Fixture {
         self
     }
 
+    #[cfg(unix)]
     fn with_invocation(mut self, invocation: InvocationContext) -> Self {
         self.invocation = invocation;
         self

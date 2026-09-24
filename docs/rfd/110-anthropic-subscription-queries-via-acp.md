@@ -5,6 +5,9 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-11
 - **Extends**: [RFD 090]
+- **Summary**: The `anthropic` provider runs subscription queries through
+  `claude-agent-acp` and the official Claude Code runtime by default, keeping
+  the direct flow as an explicit option.
 
 ## Summary
 
