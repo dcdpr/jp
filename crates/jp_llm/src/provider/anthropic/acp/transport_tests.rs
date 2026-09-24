@@ -1,7 +1,11 @@
 use std::{error::Error as _, iter};
 
+use async_anthropic::types::JsonOutputFormat;
 use datetime_literal::datetime;
-use jp_config::AppConfig;
+use jp_config::{
+    AppConfig,
+    model::parameters::{CustomReasoningConfig, ReasoningConfig, ReasoningEffort},
+};
 use jp_conversation::{
     ConversationStream,
     event::{ChatRequest, ChatResponse, ConversationEvent},
@@ -22,12 +26,27 @@ use super::{super::recorded_tests::UsageCapture, *};
 use crate::event::{EventPart, FinishReason};
 
 fn prepared() -> PreparedRequest {
-    prepared_with_limit(None)
+    prepared_with(None, None)
 }
 
 fn prepared_with_limit(max_tokens: Option<u32>) -> PreparedRequest {
+    prepared_with(max_tokens, None)
+}
+
+fn prepared_with_reasoning(effort: ReasoningEffort) -> PreparedRequest {
+    prepared_with(
+        None,
+        Some(ReasoningConfig::Custom(CustomReasoningConfig {
+            effort,
+            exclude: false,
+        })),
+    )
+}
+
+fn prepared_with(max_tokens: Option<u32>, reasoning: Option<ReasoningConfig>) -> PreparedRequest {
     let mut config = AppConfig::new_test();
     config.assistant.model.parameters.max_tokens = max_tokens;
+    config.assistant.model.parameters.reasoning = reasoning;
     let timestamp = datetime!(2026-09-11 12:00:00 Z);
     let mut events = ConversationStream::new(config.into()).with_created_at(timestamp);
     events.extend([
@@ -263,6 +282,66 @@ fn cache_policy_reaches_the_native_sdk_environment() {
         }
         assert!(native.get("CLAUDE_CODE_PROMPT_CACHE_TTL").is_none());
     }
+}
+
+/// Opus 4.7 and later default `thinking.display` to `omitted`: the model still
+/// reasons and still bills for it, but every thinking block comes back empty.
+/// JP asks for summarized thinking on the HTTP route, and the subscription
+/// route has to ask for the same thing or reasoning silently disappears.
+#[test]
+fn reasoning_asks_claude_code_for_visible_thinking() {
+    let prepared = prepared_with_reasoning(ReasoningEffort::Max);
+    let metadata = options::metadata(&prepared, &BTreeMap::new()).unwrap();
+    assert_eq!(
+        metadata["claudeCode"]["options"]["thinking"],
+        json!({"type": "adaptive", "display": "summarized"})
+    );
+}
+
+/// `effort` and `thinking` are independent options: the effort ladder picks how
+/// hard the model works, `thinking.display` picks whether the result is
+/// readable.
+#[test]
+fn reasoning_effort_reaches_the_sdk_options() {
+    let prepared = prepared_with_reasoning(ReasoningEffort::Max);
+    let metadata = options::metadata(&prepared, &BTreeMap::new()).unwrap();
+    assert_eq!(metadata["claudeCode"]["options"]["effort"], json!("max"));
+}
+
+/// A structured request reaches Claude Code as its `outputFormat` option.
+/// The schema travels as the Anthropic request type rather than a bare map, so
+/// this pins the envelope that type serializes into.
+#[test]
+fn a_structured_request_carries_its_schema_as_the_sdk_output_format() {
+    let schema = json!({"type": "object", "properties": {"answer": {"type": "string"}}})
+        .as_object()
+        .unwrap()
+        .clone();
+    let mut prepared = prepared();
+    prepared.schema = Some(JsonOutputFormat::JsonSchema { schema });
+
+    let metadata = options::metadata(&prepared, &BTreeMap::new()).unwrap();
+
+    assert_eq!(
+        metadata["claudeCode"]["options"]["outputFormat"],
+        json!({
+            "type": "json_schema",
+            "schema": {"type": "object", "properties": {"answer": {"type": "string"}}}
+        })
+    );
+}
+
+/// An unstructured request leaves the key out entirely rather than sending
+/// `null`, which Claude Code would reject as a malformed output format.
+#[test]
+fn an_unstructured_request_sends_no_output_format() {
+    let metadata = options::metadata(&prepared(), &BTreeMap::new()).unwrap();
+
+    assert!(
+        metadata["claudeCode"]["options"]
+            .get("outputFormat")
+            .is_none()
+    );
 }
 
 #[test]

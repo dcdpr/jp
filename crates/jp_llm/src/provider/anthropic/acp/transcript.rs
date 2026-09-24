@@ -16,7 +16,6 @@ use jp_config::{
     model::{id::Name, parameters::ServiceTier},
 };
 use serde::Serialize;
-use serde_json::{Map, Value};
 use tracing::warn;
 use uuid::Uuid;
 
@@ -38,7 +37,7 @@ pub(super) struct PreparedRequest {
     pub max_tokens: Option<u32>,
     pub thinking: Option<ExtendedThinking>,
     pub effort: Option<Effort>,
-    pub schema: Option<Map<String, Value>>,
+    pub schema: Option<JsonOutputFormat>,
 }
 
 impl PreparedRequest {
@@ -120,15 +119,9 @@ impl PreparedRequest {
                 }
             }
         }
-        let (effort, schema) = request.output_config.map_or((None, None), |output| {
-            (
-                output.effort,
-                output.format.map(|format| {
-                    let JsonOutputFormat::JsonSchema { schema } = format;
-                    schema
-                }),
-            )
-        });
+        let (effort, schema) = request
+            .output_config
+            .map_or((None, None), |output| (output.effort, output.format));
         Ok(Self {
             system_prompt,
             history: request.messages,

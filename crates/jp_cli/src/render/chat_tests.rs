@@ -937,6 +937,54 @@ fn test_reasoning_background_color_applied() {
     );
 }
 
+/// A provider can return a thinking block with no text in it: a redacted block,
+/// or one whose text was withheld and only its signature streamed.
+/// Such a block renders nothing, so it must not open a reasoning region --
+/// otherwise every tool call that follows is shaded by reasoning the reader
+/// never saw.
+#[test]
+fn a_textless_reasoning_chunk_does_not_open_a_reasoning_region() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: String::new(),
+    });
+    let background = renderer.enter_tool_call();
+
+    assert!(
+        background.is_none(),
+        "a textless thinking block must leave the tool chrome unshaded"
+    );
+    renderer.printer.flush();
+    assert_eq!(out.lock().clone(), "");
+}
+
+/// The region a textless block sits inside stays open: a redacted block between
+/// two thinking blocks splits the text, not the region.
+#[test]
+fn a_textless_reasoning_chunk_does_not_close_an_open_region() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, _out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking about it.\n\n".into(),
+    });
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: String::new(),
+    });
+    let background = renderer.enter_tool_call();
+
+    assert!(
+        background.is_some(),
+        "reasoning already on screen must keep shading the tool chrome"
+    );
+}
+
 #[test]
 fn test_reasoning_background_not_applied_to_messages() {
     let mut config = AppConfig::new_test();

@@ -183,6 +183,15 @@ pub(super) struct State {
     tools: HashMap<String, String>,
     structured: bool,
     inventory_checked: bool,
+    /// Whether Claude Code has streamed a partial message this request.
+    ///
+    /// JP reads its response entirely from these events; the complete assistant
+    /// messages are read for usage only.
+    /// Claude Code emits them only when the adapter enables
+    /// `includePartialMessages`, which is the adapter's decision rather than
+    /// JP's, so a request that never sees one has no response to read and must
+    /// say so instead of reporting an empty success.
+    partial_messages_seen: bool,
     seen_calls: HashSet<String>,
     observed_names: HashMap<String, String>,
     ignored: HashSet<usize>,
@@ -213,6 +222,7 @@ impl State {
             tools: tools.map(|name| (tool_name(&name), name)).collect(),
             structured,
             inventory_checked: false,
+            partial_messages_seen: false,
             seen_calls: HashSet::new(),
             observed_names: HashMap::new(),
             ignored: HashSet::new(),
@@ -363,6 +373,18 @@ impl State {
         reason = "Keep SDK message variants and their state updates in one dispatch point"
     )]
     pub(super) fn sdk(&mut self, notification: SdkNotification) -> Result<Vec<Event>, StreamError> {
+        // The only record JP keeps of this boundary. Every SDK message passes
+        // through here, including the ones that decide how a turn ends and
+        // never reach the stream-event translator that traces content.
+        //
+        // This is the message as JP understood it, not the bytes that arrived:
+        // anything the typed form does not model is already gone by this point,
+        // and an unrecognised message reads as `{"type":"other"}`.
+        trace!(
+            sdk = serde_json::to_string(&notification.message).unwrap_or_default(),
+            live = self.live,
+            "Received Claude Code SDK message."
+        );
         if !self.live || self.session.as_ref() != Some(&notification.session_id) {
             return Ok(vec![]);
         }
@@ -461,7 +483,10 @@ impl State {
             SdkMessage::StreamEvent {
                 event,
                 parent_tool_use_id: None,
-            } => self.stream_event(event),
+            } => {
+                self.partial_messages_seen = true;
+                self.stream_event(event)
+            }
             SdkMessage::Result {
                 usage,
                 model_usage,
@@ -505,6 +530,12 @@ impl State {
                     if !self.inventory_checked {
                         return Err(StreamError::other(
                             "Claude Code did not report its tool inventory",
+                        ));
+                    }
+                    if !self.partial_messages_seen {
+                        return Err(StreamError::other(
+                            "Claude Code streamed no partial messages; JP cannot read a response \
+                             without them",
                         ));
                     }
                     if self.structured {

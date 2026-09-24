@@ -1,9 +1,57 @@
-use std::error::Error as _;
+use std::{
+    error::Error as _,
+    fmt,
+    sync::{Arc, Mutex},
+};
 
 use serde_json::json;
+use tracing::{
+    Event as TracingEvent, Subscriber,
+    field::{Field, Visit},
+};
+use tracing_subscriber::{
+    Layer,
+    layer::{Context, SubscriberExt as _},
+    registry,
+};
 
 use super::*;
 use crate::error::StreamErrorKind;
+
+/// Test-only observer of the SDK-message diagnostic this module emits.
+#[derive(Clone, Default)]
+struct FrameCapture(Arc<Mutex<Vec<String>>>);
+
+impl FrameCapture {
+    fn frames(&self) -> Vec<String> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+struct FrameVisitor(Option<String>);
+
+impl Visit for FrameVisitor {
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if field.name() == "sdk" {
+            self.0 = Some(value.to_owned());
+        }
+    }
+
+    fn record_debug(&mut self, _: &Field, _: &dyn fmt::Debug) {}
+}
+
+impl<S: Subscriber> Layer<S> for FrameCapture {
+    fn on_event(&self, event: &TracingEvent<'_>, _: Context<'_, S>) {
+        if event.metadata().target() != "jp_llm::provider::anthropic::acp::protocol" {
+            return;
+        }
+        let mut visitor = FrameVisitor(None);
+        event.record(&mut visitor);
+        if let Some(frame) = visitor.0 {
+            self.0.lock().unwrap().push(frame);
+        }
+    }
+}
 
 #[test]
 fn oversized_prompt_uses_the_context_window_error_kind() {
@@ -333,6 +381,88 @@ fn token_limit_is_not_reported_as_completion() {
     assert_eq!(state.final_events.take().unwrap(), vec![Event::Finished(
         FinishReason::MaxTokens
     )]);
+}
+
+/// Every message, reasoning token and word of text JP renders on this route
+/// arrives as a partial-message stream event; the complete assistant messages
+/// are read for usage only.
+/// Claude Code emits those events only when the adapter asks it to, and JP is
+/// not the one asking.
+///
+/// A run that reaches its result without a single stream event has therefore
+/// produced nothing to show, and reporting it as a completed turn would hand
+/// the user an empty answer with no indication anything went wrong.
+#[test]
+fn a_turn_that_streamed_nothing_is_not_reported_as_completed() {
+    let mut state = state();
+
+    let error = state
+        .sdk(notification(
+            json!({"type":"result","subtype":"success","is_error":false}),
+        ))
+        .unwrap_err();
+
+    assert_eq!(
+        error.message(),
+        "Claude Code streamed no partial messages; JP cannot read a response without them"
+    );
+}
+
+#[test]
+fn a_turn_that_streamed_is_reported_as_completed() {
+    let mut state = state();
+    state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"Answer."}}}))).unwrap();
+
+    state
+        .sdk(notification(
+            json!({"type":"result","subtype":"success","is_error":false}),
+        ))
+        .unwrap();
+
+    assert_eq!(state.final_events.take().unwrap(), vec![Event::Finished(
+        FinishReason::Completed
+    )]);
+}
+
+/// The messages that decide how a turn ends -- the tool inventory, the result
+/// and its stop reason, a rejected request -- never reach the stream-event
+/// translator that traces content.
+/// Tracing them at this dispatch point is what gives JP its own record of the
+/// boundary, rather than depending on the JSON-RPC crate underneath to keep
+/// logging frames.
+#[test]
+fn every_sdk_message_is_traced_at_the_boundary() {
+    let capture = FrameCapture::default();
+    let subscriber = registry().with(capture.clone());
+
+    tracing::subscriber::with_default(subscriber, || {
+        // `state()` opens with the `system`/`init` inventory message.
+        let mut state = state();
+        state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"Answer."}}}))).unwrap();
+        state
+            .sdk(notification(
+                json!({"type":"result","subtype":"success","is_error":false}),
+            ))
+            .unwrap();
+    });
+
+    let frames = capture.frames();
+    assert_eq!(frames.len(), 3, "every message is traced once: {frames:?}");
+    assert!(
+        frames[0].contains(r#""subtype":"init""#),
+        "got: {}",
+        frames[0]
+    );
+    assert!(
+        frames[1].contains(r#""type":"stream_event""#),
+        "got: {}",
+        frames[1]
+    );
+    assert!(
+        frames[2].contains(r#""type":"result""#),
+        "got: {}",
+        frames[2]
+    );
 }
 
 #[test]

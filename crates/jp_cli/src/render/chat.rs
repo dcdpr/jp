@@ -312,6 +312,23 @@ impl ChatRenderer {
     }
 
     fn render_reasoning(&mut self, content: &str) {
+        // A thinking block can carry no text at all: a redacted one, or one whose
+        // text the provider withheld and streamed only a signature for. There is
+        // nothing to show and nothing to time, and opening a reasoning region on
+        // it would shade every tool call that followed without a word of
+        // reasoning on screen to account for the shading.
+        //
+        // Doing nothing also leaves an already-open region open, so a redacted
+        // block between two thinking blocks splits the text without splitting
+        // the region.
+        //
+        // Only the display is skipped. The event still reaches the event
+        // builder, so the signature it carries is recorded and replayed to the
+        // provider on the next request.
+        if content.is_empty() {
+            return;
+        }
+
         match self.config.reasoning.display {
             // Even though reasoning is hidden, a reasoning block is a
             // semantic boundary: flush any buffered message content so that
@@ -759,8 +776,8 @@ impl ChatRenderer {
     /// caller coordinating inter-block spacing keeps its owed separator across
     /// every chunk for which this is false.
     ///
-    /// `Static` writes its `reasoning...` line at the transition whatever the
-    /// chunk holds.
+    /// `Static` writes its `reasoning...` line at the transition, even for a
+    /// whitespace-only chunk.
     /// `Full` renders the chunk as-is, so a whitespace-only one puts nothing on
     /// screen.
     /// `Truncate` answers for the text it would actually render, elision marker
@@ -770,10 +787,18 @@ impl ChatRenderer {
     /// on completion, and `Progress` writes `reasoning...` plus dots with no
     /// trailing newline.
     ///
+    /// A textless chunk (a redacted block, or one whose text was withheld)
+    /// renders nothing in any mode, so it never supplies separation.
+    ///
     /// A chunk still sitting in the markdown buffer counts as rendered: the
     /// buffer is drained ahead of the next tool header, so its content lands
     /// first and separates the header.
     pub(crate) fn reasoning_supplies_separation(&self, content: &str) -> bool {
+        // Mirrors the guard at the top of `render_reasoning`.
+        if content.is_empty() {
+            return false;
+        }
+
         match self.config.reasoning.display {
             ReasoningDisplayConfig::Static => true,
             ReasoningDisplayConfig::Full => !content.trim().is_empty(),
