@@ -1,21 +1,35 @@
 use async_trait::async_trait;
+#[cfg(unix)]
 use camino_tempfile::Utf8TempDir;
+#[cfg(unix)]
+use jp_config::AppConfig;
 use jp_config::conversation::tool::{ToolConfig, ToolSource, style::PartialDisplayStyleConfig};
-use jp_inquire::{ReplyOutcome, prompt::MockPromptBackend};
-use jp_llm::tool::executor::MockExecutor;
+use jp_inquire::{ReplyEditMode, ReplyOutcome, prompt::MockPromptBackend};
+#[cfg(unix)]
+use jp_mcp::{Client, server::builtin::BuiltinExecutors};
 use jp_printer::{ErrChannel, OutputFormat, Printer};
+#[cfg(unix)]
+use jp_tool::{InvocationContext, ToolDefinition, ToolDocs};
 use schematic::Config as _;
+#[cfg(unix)]
+use serde_json::json;
 
-use super::{super::executor::TerminalExecutorSource, *};
-use crate::render::tool::ToolRenderer;
+use super::*;
+#[cfg(unix)]
+use crate::{
+    access::approvals::ApprovalStore, cmd::query::tool::mcp_executor::TerminalExecutorSource,
+};
+use crate::{
+    cmd::query::tool::executor::mock::{MockExecutor, TestExecutorSource},
+    render::tool::ToolRenderer,
+};
 
-fn empty_executor_source() -> Box<dyn jp_llm::tool::executor::ExecutorSource> {
-    Box::new(TerminalExecutorSource::new(
-        jp_llm::tool::builtin::BuiltinExecutors::new(),
-        &[],
-        std::sync::Arc::new(crate::access::approvals::ApprovalStore::default()),
-        jp_llm::tool::InvocationContext::default(),
-    ))
+fn empty_executor_source() -> Box<dyn ExecutorSource> {
+    Box::new(TestExecutorSource::new())
+}
+
+fn strip_ansi(text: &str) -> String {
+    String::from_utf8(strip_ansi_escapes::strip(text)).expect("valid utf-8 after stripping ANSI")
 }
 
 #[test]
@@ -278,18 +292,13 @@ fn test_static_answer_with_configured_answer() {
     );
 }
 
-#[tokio::test]
-async fn test_pre_render_for_prompt_function_call_fires_before_approval() {
-    // Regression test for the bug where `fs_delete_file`-style tools
-    // (built-in parameter style + `run = "ask"`) showed the permission
-    // prompt without first rendering the arguments. `FormatMode::Ask`
-    // exists to defer side-effecting custom formatters; it should not
-    // suppress rendering for the pure built-in styles.
+/// Build a coordinator around a single tool with the given parameter style.
+fn coordinator_with_style(name: &str, parameters: ParametersStyle) -> ToolCoordinator {
     let tool_config = ToolConfig::from_partial(
         jp_config::conversation::tool::PartialToolConfig {
             source: Some(ToolSource::Builtin { tool: None }),
             style: Some(PartialDisplayStyleConfig {
-                parameters: Some(ParametersStyle::FunctionCall),
+                parameters: Some(parameters),
                 ..Default::default()
             }),
             ..Default::default()
@@ -299,106 +308,87 @@ async fn test_pre_render_for_prompt_function_call_fires_before_approval() {
     .expect("valid tool config");
 
     let mut tools_config = jp_config::AppConfig::new_test().conversation.tools;
-    tools_config.insert("fs_delete_file".to_string(), tool_config);
+    tools_config.insert(name.to_owned(), tool_config);
+    ToolCoordinator::new(tools_config, empty_executor_source())
+}
 
-    let coordinator = ToolCoordinator::new(tools_config, empty_executor_source());
-
-    // Sanity-check the precondition: with no explicit `format` and the
-    // default `run = "ask"`, the format mode derives to `Ask`. The bug
-    // was that this gated rendering even for non-Custom styles.
-    assert_eq!(coordinator.format_mode("fs_delete_file"), FormatMode::Ask);
+#[test]
+fn test_pre_render_for_prompt_function_call_fires_before_approval() {
+    // Regression test for the bug where `fs_delete_file`-style tools
+    // (built-in parameter style + `run = "ask"`) showed the permission prompt
+    // without first rendering the arguments. Deferral exists to hold back a
+    // side-effecting custom formatter, and must not suppress rendering for the
+    // pure built-in styles.
+    let coordinator = coordinator_with_style("fs_delete_file", ParametersStyle::FunctionCall);
 
     let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let style_config = jp_config::AppConfig::new_test().style;
-    let root = Utf8TempDir::new().expect("temp dir");
     let tool_renderer = ToolRenderer::new(
         ErrChannel::new(printer.clone()),
-        style_config,
-        root.path().to_owned(),
-        jp_llm::tool::InvocationContext::default(),
+        jp_config::AppConfig::new_test().style,
     );
 
     let mut args = Map::new();
     args.insert("path".into(), Value::String("src/foo.rs".into()));
+    let executor = MockExecutor::completed("call-1", "fs_delete_file", "done")
+        .with_arguments(args)
+        .with_permission_info(PermissionInfo {
+            tool_id: "call-1".into(),
+            tool_name: "fs_delete_file".into(),
+            tool_source: ToolSource::Builtin { tool: None },
+            run_mode: RunMode::Ask,
+            arguments: Value::Object(Map::new()),
+        });
 
-    let result = coordinator
-        .pre_render_for_prompt("fs_delete_file", &args, &tool_renderer)
-        .await;
+    let result = coordinator.pre_render_for_prompt(&executor, &tool_renderer);
 
-    // Non-Custom styles should always pre-render. `content` is `None`
-    // because only Custom formatters produce persistable rendered content.
+    // Built-in styles print their arguments inline, so they render before the
+    // prompt and produce no content for the caller to persist.
     assert!(
-        matches!(result, Ok(Some(None))),
+        matches!(result, Ok(PreRender::Ready(None))),
         "pre-render should fire for FunctionCall style, got: {result:?}"
     );
 
     printer.flush();
-    let output = stderr.lock();
-    assert!(
-        output.contains("fs_delete_file"),
-        "stderr should contain tool name; got: {output:?}"
-    );
-    assert!(
-        output.contains("src/foo.rs"),
-        "stderr should contain the rendered argument; got: {output:?}"
+    assert_eq!(
+        strip_ansi(&stderr.lock()),
+        "Calling tool fs_delete_file(path: \"src/foo.rs\")\n"
     );
 }
 
-#[tokio::test]
-async fn test_pre_render_for_prompt_custom_ask_defers_rendering() {
-    // Counterpart to the test above: Custom formatters with the default
-    // `FormatMode::Ask` should still defer rendering until after approval,
-    // because the formatter is a user-controlled shell command.
+#[test]
+fn test_pre_render_for_prompt_custom_defers_until_the_service_formats() {
+    // Counterpart to the test above: a Custom formatter is a user-controlled
+    // command run by the execution service, so until the service reports its
+    // output there is nothing to show and rendering defers.
     use jp_config::conversation::tool::CommandConfigOrString;
 
-    let tool_config = ToolConfig::from_partial(
-        jp_config::conversation::tool::PartialToolConfig {
-            source: Some(ToolSource::Builtin { tool: None }),
-            style: Some(PartialDisplayStyleConfig {
-                parameters: Some(ParametersStyle::Custom(CommandConfigOrString::String(
-                    "echo SHOULD-NOT-RUN".into(),
-                ))),
-                ..Default::default()
-            }),
-            ..Default::default()
-        },
-        vec![],
-    )
-    .expect("valid tool config");
-
-    let mut tools_config = jp_config::AppConfig::new_test().conversation.tools;
-    tools_config.insert("custom_tool".to_string(), tool_config);
-
-    let coordinator = ToolCoordinator::new(tools_config, empty_executor_source());
-    assert_eq!(coordinator.format_mode("custom_tool"), FormatMode::Ask);
+    let coordinator = coordinator_with_style(
+        "custom_tool",
+        ParametersStyle::Custom(CommandConfigOrString::String("echo SHOULD-NOT-RUN".into())),
+    );
 
     let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let style_config = jp_config::AppConfig::new_test().style;
-    let root = Utf8TempDir::new().expect("temp dir");
     let tool_renderer = ToolRenderer::new(
         ErrChannel::new(printer.clone()),
-        style_config,
-        root.path().to_owned(),
-        jp_llm::tool::InvocationContext::default(),
+        jp_config::AppConfig::new_test().style,
     );
 
-    let result = coordinator
-        .pre_render_for_prompt("custom_tool", &Map::new(), &tool_renderer)
-        .await;
+    // A mock executor never formats arguments, standing in for a service that
+    // has not run the formatter yet.
+    let executor = MockExecutor::completed("call-1", "custom_tool", "done");
+    let result = coordinator.pre_render_for_prompt(&executor, &tool_renderer);
 
     assert!(
-        matches!(result, Ok(None)),
-        "Custom + format=ask should defer rendering, got: {result:?}"
+        matches!(result, Ok(PreRender::Deferred)),
+        "an unformatted Custom style should defer rendering, got: {result:?}"
     );
 
     printer.flush();
-    let output = stderr.lock();
-    assert!(
-        !output.contains("SHOULD-NOT-RUN"),
-        "custom formatter must not have run; got: {output:?}"
-    );
+    // Nothing at all is printed: not the formatter's output, and not a header
+    // with nothing under it.
+    assert_eq!(strip_ansi(&stderr.lock()), "");
 }
 
 /// Minimal `Executor` whose `set_arguments` actually mutates state.
@@ -435,10 +425,8 @@ impl Executor for EditableExecutor {
     async fn execute(
         &self,
         _answers: &IndexMap<String, Value>,
-        _mcp_client: &jp_mcp::Client,
-        _root: &camino::Utf8Path,
         _cancellation_token: tokio_util::sync::CancellationToken,
-        _stderr: Option<jp_llm::tool::StderrSink>,
+        _stderr: Option<jp_mcp::server::StderrSink>,
     ) -> ExecutorResult {
         unreachable!("resolve_tool_call_decision does not invoke execute()")
     }
@@ -475,13 +463,7 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
     let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let style_config = jp_config::AppConfig::new_test().style;
-    let root = Utf8TempDir::new().expect("temp dir");
-    let tool_renderer = ToolRenderer::new(
-        ErrChannel::new(printer.clone()),
-        style_config,
-        root.path().to_owned(),
-        jp_llm::tool::InvocationContext::default(),
-    );
+    let tool_renderer = ToolRenderer::new(ErrChannel::new(printer.clone()), style_config);
 
     let mut pre_edit_args = Map::new();
     pre_edit_args.insert("path".into(), Value::String("src/foo.rs".into()));
@@ -794,12 +776,11 @@ fn test_pending_prompt_mixed_types_interleaved() {
     assert!(matches!(queue[2], PendingPrompt::Question { .. }));
 }
 
-#[tokio::test]
-async fn custom_formatter_receives_the_invoked_tool_name() {
+#[test]
+fn a_custom_style_shows_the_key_the_assistant_called() {
     // A `source` that names an implementation (`local.fs_list_files` under the
-    // key `ls`) is the name the tool is executed with, so the custom parameter
-    // formatter has to be handed that name too. Handing it the key asks the
-    // formatter about a tool that does not exist.
+    // key `ls`) changes the name the tool runs under, but the header the user
+    // reads stays the name the assistant called.
     use jp_config::conversation::tool::CommandConfigOrString;
 
     let tool_config = ToolConfig::from_partial(
@@ -822,23 +803,16 @@ async fn custom_formatter_receives_the_invoked_tool_name() {
     let mut tools_config = jp_config::AppConfig::new_test().conversation.tools;
     tools_config.insert("ls".to_owned(), tool_config);
 
-    let coordinator = ToolCoordinator::new(tools_config, empty_executor_source());
-
     let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    // The formatter is spawned with this path as its working directory, so it
-    // has to exist on every platform the tests run on.
-    let root = Utf8TempDir::new().expect("temp dir");
     let tool_renderer = ToolRenderer::new(
         ErrChannel::new(printer.clone()),
         jp_config::AppConfig::new_test().style,
-        root.path().to_owned(),
-        jp_llm::tool::InvocationContext::default(),
     );
 
-    let outcome = coordinator
-        .render_approved_tool("ls", &Map::new(), &tool_renderer)
-        .await;
+    // The execution service ran the formatter and reported what it printed;
+    // nothing here shells out to produce this.
+    let outcome = tool_renderer.render_custom_result("ls", Ok("fs_list_files".into()));
 
     match outcome {
         RenderOutcome::Rendered { content } => {
@@ -847,9 +821,118 @@ async fn custom_formatter_receives_the_invoked_tool_name() {
         RenderOutcome::Suppressed { error } => panic!("custom formatter failed: {error}"),
     }
 
-    // The header the user reads stays the name the assistant called.
     printer.flush();
-    let output = String::from_utf8(strip_ansi_escapes::strip(stderr.lock().as_str()))
-        .expect("valid utf-8 after stripping ANSI");
-    assert_eq!(output, "Calling tool ls\n\nfs_list_files\n");
+    assert_eq!(
+        strip_ansi(&stderr.lock()),
+        "Calling tool ls\n\nfs_list_files\n"
+    );
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn remembered_denial_does_not_run_http_argument_formatter() {
+    let root = Utf8TempDir::new().unwrap();
+    let mut config = AppConfig::new_test();
+    let partial = serde_json::from_value(json!({
+        "source":"builtin", "run":"ask", "format":"unattended",
+        "style":{"parameters":{"program":"sh", "args":["-c","printf formatted > formatted"], "shell":false}}
+    })).unwrap();
+    config.conversation.tools.insert(
+        "example".into(),
+        ToolConfig::from_partial(partial, vec![]).unwrap(),
+    );
+    let definitions = vec![ToolDefinition {
+        name: "example".into(),
+        docs: ToolDocs::default(),
+        parameters: json!({"type":"object","properties":{}}),
+    }];
+    let (source, owner) = TerminalExecutorSource::start(
+        BuiltinExecutors::new(),
+        &definitions,
+        &config.conversation.tools,
+        Arc::new(ApprovalStore::default()),
+        InvocationContext::default(),
+        &Client::default(),
+        root.path().to_owned(),
+    )
+    .await
+    .unwrap();
+    let mut coordinator = ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source));
+    let executor = coordinator
+        .prepare_one(ToolCallRequest {
+            id: "call-1".into(),
+            name: "example".into(),
+            arguments: Map::new(),
+        })
+        .unwrap();
+    let printer = Arc::new(Printer::sink());
+    let prompter = ToolPrompter::with_prompt_backend(
+        printer.clone(),
+        None,
+        Arc::new(MockPromptBackend::new()),
+        ReplyEditMode::default(),
+    );
+    let renderer = ToolRenderer::new(ErrChannel::new(printer), config.style);
+    let mut state = TurnState::default();
+    state
+        .remembered_permission_decisions
+        .insert(PermissionCacheKey::new("example"), false);
+    let decision = coordinator
+        .resolve_tool_call_decision(executor, &prompter, true, &mut state, &renderer)
+        .await;
+    let ToolCallDecision::Skipped(response) = decision else {
+        panic!("expected remembered denial")
+    };
+    assert!(
+        !root.path().join("formatted").exists(),
+        "a call the user already denied must not run its formatter"
+    );
+    coordinator
+        .acknowledge_reviews(vec![Review::unchanged(response)])
+        .await
+        .unwrap();
+    owner.shutdown().await.unwrap();
+}
+
+/// A prompter whose inline editor submits `submitted`.
+fn prompter_submitting(submitted: &str) -> ToolPrompter {
+    ToolPrompter::with_prompt_backend(
+        Arc::new(Printer::sink()),
+        None,
+        Arc::new(
+            MockPromptBackend::new()
+                .with_reply_outcomes([ReplyOutcome::Submit(submitted.to_owned())]),
+        ),
+        ReplyEditMode::default(),
+    )
+}
+
+fn offered() -> ToolCallResponse {
+    ToolCallResponse {
+        id: "call-1".into(),
+        result: Ok("alpha\n\nresource".into()),
+    }
+}
+
+/// Pressing Enter on the result as offered is not an edit: the execution
+/// service keeps delivering the tool's full result, including any content that
+/// has no text form.
+#[test]
+fn submitting_the_offered_result_unchanged_is_not_an_edit() {
+    let review =
+        ToolCoordinator::handle_edit_result(&prompter_submitting("alpha\n\nresource"), offered());
+
+    assert!(!review.edited);
+    assert_eq!(review.response, offered());
+}
+
+#[test]
+fn submitting_changed_text_replaces_the_result() {
+    let review = ToolCoordinator::handle_edit_result(&prompter_submitting("alpha only"), offered());
+
+    assert!(review.edited);
+    assert_eq!(review.response, ToolCallResponse {
+        id: "call-1".into(),
+        result: Ok("alpha only".into()),
+    });
 }

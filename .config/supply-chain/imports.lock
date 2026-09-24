@@ -130,6 +130,11 @@ version = "1.2.56"
 when = "2026-02-13"
 trusted-publisher = "github:rust-lang/cc-rs"
 
+[[publisher.chacha20]]
+version = "0.10.2"
+when = "2026-08-27"
+trusted-publisher = "github:RustCrypto/stream-ciphers"
+
 [[publisher.clap]]
 version = "4.5.48"
 when = "2025-09-19"
@@ -178,6 +183,20 @@ when = "2019-11-15"
 user-id = 696
 user-login = "fitzgen"
 user-name = "Nick Fitzgerald"
+
+[[publisher.cpufeatures]]
+version = "0.2.17"
+when = "2025-01-25"
+user-id = 267
+user-login = "tarcieri"
+user-name = "Tony Arcieri"
+
+[[publisher.cpufeatures]]
+version = "0.3.1"
+when = "2026-08-26"
+user-id = 267
+user-login = "tarcieri"
+user-name = "Tony Arcieri"
 
 [[publisher.dtoa]]
 version = "1.0.11"
@@ -552,6 +571,16 @@ user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
 
+[[publisher.rand]]
+version = "0.10.2"
+when = "2026-07-02"
+trusted-publisher = "github:rust-random/rand"
+
+[[publisher.rand_core]]
+version = "0.10.1"
+when = "2026-04-13"
+trusted-publisher = "github:rust-random/rand_core"
+
 [[publisher.ref-cast]]
 version = "1.0.24"
 when = "2025-03-03"
@@ -651,8 +680,8 @@ user-login = "dtolnay"
 user-name = "David Tolnay"
 
 [[publisher.serde_json]]
-version = "1.0.149"
-when = "2026-01-06"
+version = "1.0.151"
+when = "2026-07-20"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
@@ -1425,6 +1454,12 @@ who = "Pat Hickey <pat@moreproductive.org>"
 criteria = "safe-to-deploy"
 delta = "0.3.28 -> 0.3.31"
 
+[[audits.bytecode-alliance.audits.getrandom]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.1 -> 0.4.2"
+notes = "Nothing awry in this update, standard updates for some platforms and other misc things."
+
 [[audits.bytecode-alliance.audits.gimli]]
 who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
@@ -1599,27 +1634,11 @@ who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
 delta = "0.1.21 -> 0.1.24"
 
-[[audits.bytecode-alliance.audits.rustls]]
-who = "Alex Crichton <alex@alexcrichton.com>"
-criteria = "safe-to-deploy"
-delta = "0.23.37 -> 0.23.45"
-notes = """
-A relatively large update, but no new `unsafe` and nothing awry here. Lots of
-protocol/etc updates which I'm not personally an expert within but the rustls
-maintainers are relatively well trusted as well.
-"""
-
 [[audits.bytecode-alliance.audits.rustls-webpki]]
 who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
 delta = "0.103.12 -> 0.103.13"
 notes = "Minor fixes for the bug being fixed in this release, nothing awry."
-
-[[audits.bytecode-alliance.audits.rustls-webpki]]
-who = "Alex Crichton <alex@alexcrichton.com>"
-criteria = "safe-to-deploy"
-delta = "0.103.13 -> 0.103.15"
-notes = "Minor updates and feature shufflings."
 
 [[audits.bytecode-alliance.audits.sha1]]
 who = "Andrew Brown <andrew.brown@intel.com>"
@@ -2731,6 +2750,16 @@ delta = "1.0.0 -> 1.0.1"
 who = "J.C. Jones <jc@divviup.org>"
 criteria = "safe-to-deploy"
 delta = "1.0.1 -> 1.0.3"
+
+[[audits.isrg.audits.getrandom]]
+who = "David Cook <dcook@divviup.org>"
+criteria = "safe-to-deploy"
+delta = "0.3.4 -> 0.4.0"
+
+[[audits.isrg.audits.getrandom]]
+who = "David Cook <dcook@divviup.org>"
+criteria = "safe-to-deploy"
+delta = "0.4.0 -> 0.4.1"
 
 [[audits.isrg.audits.libbz2-rs-sys]]
 who = "Ameer Ghani <inahga@divviup.org>"

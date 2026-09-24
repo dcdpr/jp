@@ -6,7 +6,6 @@ use htmd::HtmlToMarkdown;
 use jp_attachment::{
     Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, typetag,
 };
-use jp_mcp::Client;
 use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
@@ -67,11 +66,7 @@ impl Handler for HttpContent<Http> {
         Ok(self.urls.iter().cloned().collect())
     }
 
-    async fn get(
-        &self,
-        _: &Utf8Path,
-        _: Client,
-    ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
+    async fn get(&self, _: &Utf8Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         debug!(id = "http", "Getting http attachment contents.");
         fetch_all(&self.urls).await
     }
@@ -104,11 +99,7 @@ impl Handler for HttpContent<Https> {
         Ok(self.urls.iter().cloned().collect())
     }
 
-    async fn get(
-        &self,
-        _: &Utf8Path,
-        _: Client,
-    ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
+    async fn get(&self, _: &Utf8Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         debug!(id = "https", "Getting https attachment contents.");
         fetch_all(&self.urls).await
     }

@@ -7,13 +7,11 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse, ToolCallRequest, ToolCallResponse},
     thread::Thread,
 };
+use jp_tool::{ToolDefinition, ToolDocs};
 use serde_json::{Map, json};
 
 use super::*;
-use crate::{
-    query::Truncation,
-    tool::{ToolDefinition, ToolDocs},
-};
+use crate::query::Truncation;
 
 fn qwen_model() -> VllmModel {
     serde_json::from_value(json!({

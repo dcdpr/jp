@@ -12,8 +12,30 @@ use crate::messages;
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct Usage {
+    /// Uncached input tokens; cache reads and writes are reported separately.
     pub input_tokens: Option<u32>,
+    /// Generated output tokens.
     pub output_tokens: Option<u32>,
+    /// Input tokens written to the prompt cache.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<u64>,
+    /// Input tokens read from the prompt cache.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u64>,
+    /// Cache writes classified by retention period, when reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation: Option<CacheCreationUsage>,
+}
+
+/// Prompt-cache writes classified by retention period.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+pub struct CacheCreationUsage {
+    /// Tokens written with a five-minute retention period.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ephemeral_5m_input_tokens: Option<u64>,
+    /// Tokens written with a one-hour retention period.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ephemeral_1h_input_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

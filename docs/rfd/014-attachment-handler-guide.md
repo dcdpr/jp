@@ -126,7 +126,7 @@ pub trait Handler: Debug + DynClone + DynHash + Send + Sync {
 - **`list()`** — returns all stored attachment URLs.
   Used by `jp attachment ls`.
   Should produce canonical (hierarchical) URLs for consistency.
-- **`get(cwd, mcp)`** — fetches and returns the actual attachment content.
+- **`get(cwd)`** — fetches and returns the actual attachment content.
   This is where the handler does its real work: reading files, running commands,
   making HTTP requests, etc.
 

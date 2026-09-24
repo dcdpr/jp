@@ -469,19 +469,21 @@ fn tool_interrupt_restart_returns_restart() {
 
     let result = handle_tool_interrupt(
         &token,
-        &mut turn_coordinator,
         false, // not prompting
-        &printer,
-        &backend,
-        None,
-        ReplyEditMode::Emacs,
+        &mut InterruptUi {
+            turn_coordinator: &mut turn_coordinator,
+            printer: &printer,
+            backend: &backend,
+            editor: None,
+            edit_mode: ReplyEditMode::Emacs,
+        },
         &tool_prompt(),
     );
 
     assert_eq!(result, ToolInterruptResult::Restart);
     assert!(
-        token.is_cancelled(),
-        "Restart should cancel current execution"
+        !token.is_cancelled(),
+        "The coordinator must preserve MCP calls before cancelling workers"
     );
 }
 
@@ -502,12 +504,14 @@ fn tool_interrupt_cancelled_empty_reply_has_no_custom_message() {
 
     let result = handle_tool_interrupt(
         &token,
-        &mut turn_coordinator,
         false, // not prompting
-        &printer,
-        &backend,
-        None,
-        ReplyEditMode::Emacs,
+        &mut InterruptUi {
+            turn_coordinator: &mut turn_coordinator,
+            printer: &printer,
+            backend: &backend,
+            editor: None,
+            edit_mode: ReplyEditMode::Emacs,
+        },
         &tool_prompt(),
     );
 
@@ -519,7 +523,10 @@ fn tool_interrupt_cancelled_empty_reply_has_no_custom_message() {
         },
         "Expected Cancelled without a custom message, got {result:?}",
     );
-    assert!(token.is_cancelled(), "Cancel should stop current execution");
+    assert!(
+        !token.is_cancelled(),
+        "The coordinator must hold MCP calls before cancelling workers"
+    );
 }
 
 #[test]
@@ -537,12 +544,14 @@ fn tool_interrupt_cancelled_with_custom_response() {
 
     let result = handle_tool_interrupt(
         &token,
-        &mut turn_coordinator,
         false, // not prompting
-        &printer,
-        &backend,
-        None,
-        ReplyEditMode::Emacs,
+        &mut InterruptUi {
+            turn_coordinator: &mut turn_coordinator,
+            printer: &printer,
+            backend: &backend,
+            editor: None,
+            edit_mode: ReplyEditMode::Emacs,
+        },
         &tool_prompt(),
     );
 
@@ -550,7 +559,10 @@ fn tool_interrupt_cancelled_with_custom_response() {
         response: Some("wrong tool, use grep instead".into()),
         exit: false
     });
-    assert!(token.is_cancelled(), "Cancel should stop current execution");
+    assert!(
+        !token.is_cancelled(),
+        "The coordinator must hold MCP calls before cancelling workers"
+    );
 }
 
 #[test]
@@ -566,12 +578,14 @@ fn tool_interrupt_resume_continues_without_cancel() {
 
     let result = handle_tool_interrupt(
         &token,
-        &mut turn_coordinator,
         false, // not prompting
-        &printer,
-        &backend,
-        None,
-        ReplyEditMode::Emacs,
+        &mut InterruptUi {
+            turn_coordinator: &mut turn_coordinator,
+            printer: &printer,
+            backend: &backend,
+            editor: None,
+            edit_mode: ReplyEditMode::Emacs,
+        },
         &tool_prompt(),
     );
 
@@ -596,12 +610,14 @@ fn tool_interrupt_declined_when_prompting() {
 
     let result = handle_tool_interrupt(
         &token,
-        &mut turn_coordinator,
         true, // prompting
-        &printer,
-        &backend,
-        None,
-        ReplyEditMode::Emacs,
+        &mut InterruptUi {
+            turn_coordinator: &mut turn_coordinator,
+            printer: &printer,
+            backend: &backend,
+            editor: None,
+            edit_mode: ReplyEditMode::Emacs,
+        },
         &tool_prompt(),
     );
 
@@ -627,23 +643,22 @@ fn tool_interrupt_handled_when_not_prompting() {
 
     let result = handle_tool_interrupt(
         &token,
-        &mut turn_coordinator,
         false, // not prompting
-        &printer,
-        &backend,
-        None,
-        ReplyEditMode::Emacs,
+        &mut InterruptUi {
+            turn_coordinator: &mut turn_coordinator,
+            printer: &printer,
+            backend: &backend,
+            editor: None,
+            edit_mode: ReplyEditMode::Emacs,
+        },
         &tool_prompt(),
     );
 
-    // Should process the interrupt and cancel
+    // The menu runs when no prompt is active; the coordinator, not this
+    // handler, cancels the running tools.
     assert!(
         matches!(result, ToolInterruptResult::Cancelled { .. }),
         "Expected Cancelled variant when not prompting, got {result:?}"
-    );
-    assert!(
-        token.is_cancelled(),
-        "Should cancel when no prompt is active"
     );
 }
 
@@ -661,12 +676,14 @@ fn tool_interrupt_menu_cancel_escalates() {
 
     let result = handle_tool_interrupt(
         &token,
-        &mut turn_coordinator,
         false, // not prompting
-        &printer,
-        &backend,
-        None,
-        ReplyEditMode::Emacs,
+        &mut InterruptUi {
+            turn_coordinator: &mut turn_coordinator,
+            printer: &printer,
+            backend: &backend,
+            editor: None,
+            edit_mode: ReplyEditMode::Emacs,
+        },
         &tool_prompt(),
     );
 

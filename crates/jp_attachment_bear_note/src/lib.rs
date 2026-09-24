@@ -7,7 +7,6 @@ use jp_attachment::{
     Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, percent_decode_str,
     percent_encode_str, typetag,
 };
-use jp_mcp::Client;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 use url::Url;
@@ -152,11 +151,7 @@ impl Handler for BearNotes {
         Ok(uris)
     }
 
-    async fn get(
-        &self,
-        _: &Utf8Path,
-        _: Client,
-    ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
+    async fn get(&self, _: &Utf8Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         let db = BearDb::open().map_err(|e| e.to_string())?;
 
         let mut attachments = vec![];

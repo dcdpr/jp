@@ -114,6 +114,7 @@ percent-encoding = { version = "2", default-features = false }
 portable-pty = { version = "0.9", default-features = false }
 pretty_assertions = { version = "1", default-features = false }
 proc-macro2 = { version = "1", default-features = false }
+process-wrap = { version = "9", default-features = false }
 proptest = { version = "1", default-features = false }
 quick-xml = { version = "0.41", default-features = false }
 quote = { version = "1", default-features = false }
@@ -131,7 +132,7 @@ rowan = { version = "0.16", default-features = false }
 rusqlite = { version = "0.38", default-features = false }
 rustc-demangle = { version = "0.1", default-features = false }
 saphyr = { git = "https://github.com/JeanMertz/saphyr", branch = "jean/fix-multinewline-endings", default-features = false } # <https://github.com/saphyr-rs/saphyr/pull/90>
-schemars = { version = "1.0.0-alpha.17", default-features = false }
+schemars = { version = "1", default-features = false }
 scraper = { version = "0.25", default-features = false }
 secrecy = { version = "0.10", default-features = false }
 semver = { version = "1", default-features = false }
@@ -147,6 +148,7 @@ sha1 = { version = "0.10", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 shlex = { version = "1", default-features = false }
 similar = { version = "2", default-features = false }
+sse-stream = { version = "0.2", default-features = false }
 strip-ansi-escapes = { version = "0.2", default-features = false }
 syn = { version = "2", default-features = false }
 syntect = { version = "5.3", default-features = false }

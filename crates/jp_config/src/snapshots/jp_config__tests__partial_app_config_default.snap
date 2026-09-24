@@ -224,6 +224,7 @@ PartialAppConfig {
             ),
             anthropic: PartialAnthropicConfig {
                 auth: None,
+                subscription_flow: None,
                 api_key_env: None,
                 base_url: None,
                 chain_on_max_tokens: None,

@@ -1,278 +1,321 @@
-//! Single tool execution for the query stream pipeline.
+//! The seam a turn loop runs one tool call through.
 //!
-//! The `ToolExecutor` handles execution of a single tool call, including:
+//! [`Executor`] is the MCP Host's view of one logical tool call: preparation
+//! and approval precede execution release, and an input request returns control
+//! to the Host so it can route the inquiry, review the result, and record both.
+//! [`ExecutorSource`] builds one per tool call, so a test can supply a scripted
+//! executor where production supplies [`super::mcp_executor`].
 //!
-//! - Permission prompts (run mode configuration)
-//! - Input prompts (tool-specific questions)
-//! - Result formatting
-//!
-//! # Lifecycle State Machine
-//!
-//! ```text
-//!                     ┌─────────────────────────────────────────────────────┐
-//!                     │                  ToolExecutor                       │
-//!                     │                                                     │
-//!   ┌─────────┐       │  ┌─────────┐    ┌──────────────────┐    ┌─────────┐ │
-//!   │ new()   │──────▶│  │ Pending │───▶│AwaitingPermission│───▶│ Running │ │
-//!   └─────────┘       │  └─────────┘    └──────────────────┘    └────┬────┘ │
-//!                     │                         │                    │      │
-//!                     │                         │ (skip)             │      │
-//!                     │                         ▼                    ▼      │
-//!                     │                   ┌───────────┐      ┌─────────────┐│
-//!                     │                   │ Completed │◀─────│AwaitingInput││
-//!                     │                   └───────────┘      └─────────────┘│
-//!                     │                         ▲                    │      │
-//!                     │                         │                    │      │
-//!                     │                   ┌───────────────────┐      │      │
-//!                     │                   │AwaitingResultEdit │◀─────┘      │
-//!                     │                   └───────────────────┘             │
-//!                     └─────────────────────────────────────────────────────┘
-//! ```
-//!
-//! # Thread Safety
-//!
-//! The executor works with `SharedTurnState` (`Arc<RwLock<TurnState>>`) to
-//! support parallel execution.
-//! Lock durations are minimized to avoid blocking other executors.
-//!
-//! # Testing
-//!
-//! The [`Executor`] trait allows for mock implementations in tests.
-//! See [`MockExecutor`] for testing parallel execution behavior.
-//!
-//! [`MockExecutor`]: jp_llm::tool::executor::MockExecutor
-
-use std::sync::Arc;
+//! Execution itself lives in `jp_mcp::server`; nothing here runs a tool.
 
 use async_trait::async_trait;
-use camino::Utf8Path;
+use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults, ToolSource};
 use jp_conversation::event::{InquirySource, ToolCallRequest, ToolCallResponse};
-use jp_llm::{
-    ExecutionOutcome,
-    tool::{
-        InvocationContext, StderrSink, ToolDefinition,
-        builtin::BuiltinExecutors,
-        executor::{Executor, ExecutorResult, ExecutorSource, PermissionInfo},
-    },
-};
-use jp_mcp::Client;
-use serde_json::Value;
+use jp_llm::query::ToolExecution;
+use jp_mcp::server::{StderrSink, service::Formatted};
+use jp_tool::{Question, ToolResult};
+use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
+use url::Url;
 
-use crate::access::{approvals::ApprovalStore, compile::compile_tool_policy};
+#[path = "executor_error.rs"]
+mod error;
+pub(crate) use error::ExecutorError;
 
-/// Terminal executor source that creates real [`ToolExecutor`] instances.
+/// The MCP Host's view of a logical tool call.
 ///
-/// Holds pre-resolved tool definitions so executors don't need to re-resolve
-/// (avoiding redundant MCP server fetches).
-pub struct TerminalExecutorSource {
-    builtin_executors: BuiltinExecutors,
-    definitions: IndexMap<String, ToolDefinition>,
-    approvals: Arc<ApprovalStore>,
-    invocation: InvocationContext,
-}
-
-impl TerminalExecutorSource {
-    #[must_use]
-    pub fn new(
-        builtin_executors: BuiltinExecutors,
-        definitions: &[ToolDefinition],
-        approvals: Arc<ApprovalStore>,
-        invocation: InvocationContext,
-    ) -> Self {
-        let definitions = definitions
-            .iter()
-            .map(|d| (d.name.clone(), d.clone()))
-            .collect();
-        Self {
-            builtin_executors,
-            definitions,
-            approvals,
-            invocation,
-        }
-    }
-}
-
-impl ExecutorSource for TerminalExecutorSource {
-    fn create(
-        &self,
-        mut request: ToolCallRequest,
-        config: ToolConfigWithDefaults,
-    ) -> Option<Box<dyn Executor>> {
-        let definition = self.definitions.get(&request.name)?.clone();
-        definition.coerce_arguments(&mut request.arguments);
-
-        Some(Box::new(ToolExecutor::new(
-            request,
-            config,
-            definition,
-            Arc::new(self.builtin_executors.clone()),
-            self.approvals.clone(),
-            self.invocation.clone(),
-        )))
-    }
-}
-
-/// Executes a single tool call.
-///
-/// The executor handles the execution lifecycle including permission prompts,
-/// input questions, and result formatting.
-///
-/// # Note
-///
-/// Interactive prompts currently happen inside `ToolDefinition::call()`.
-/// In the future, prompts will be driven by the `ToolCoordinator`, and the
-/// executor will only handle pure execution.
-pub struct ToolExecutor {
-    request: ToolCallRequest,
-    config: ToolConfigWithDefaults,
-    definition: ToolDefinition,
-    builtin_executors: Arc<BuiltinExecutors>,
-    approvals: Arc<ApprovalStore>,
-    invocation: InvocationContext,
-}
-
-impl ToolExecutor {
-    fn new(
-        request: ToolCallRequest,
-        config: ToolConfigWithDefaults,
-        definition: ToolDefinition,
-        builtin_executors: Arc<BuiltinExecutors>,
-        approvals: Arc<ApprovalStore>,
-        invocation: InvocationContext,
-    ) -> Self {
-        Self {
-            request,
-            config,
-            definition,
-            builtin_executors,
-            approvals,
-            invocation,
-        }
-    }
-
-    /// Resolve the persisted `InquirySource` recorded for a question this tool
-    /// emits.
-    ///
-    /// Built-in tools may override their source via
-    /// `BuiltinTool::inquiry_source`; local and MCP tools always attribute the
-    /// question to the tool by name.
-    fn inquiry_source(&self) -> InquirySource {
-        match self.config.source() {
-            ToolSource::Builtin { .. } => {
-                self.builtin_executors.get(&self.request.name).map_or_else(
-                    || InquirySource::tool(self.request.name.as_str()),
-                    |tool| tool.inquiry_source(&self.request.name),
-                )
-            }
-            ToolSource::Local { .. } | ToolSource::Mcp { .. } => {
-                InquirySource::tool(self.request.name.as_str())
-            }
-        }
-    }
-}
-
+/// Preparation and approval precede release.
+/// Input and completed results return control to the Host for inquiry routing,
+/// result review, and recording.
 #[async_trait]
-impl Executor for ToolExecutor {
-    fn tool_id(&self) -> &str {
-        &self.request.id
+pub(crate) trait Executor: Send + Sync {
+    /// Prepare an invocation, or return a response resolved without execution.
+    async fn prepare(
+        &mut self,
+        _render_arguments: bool,
+    ) -> Result<Option<ToolCallResponse>, ExecutorError> {
+        Ok(None)
     }
 
-    fn tool_name(&self) -> &str {
-        &self.request.name
+    /// Apply Host approval and wait until the invocation is ready for release.
+    async fn approve(&mut self) -> Result<(), ExecutorError> {
+        Ok(())
     }
 
-    fn arguments(&self) -> &serde_json::Map<String, Value> {
-        &self.request.arguments
+    /// Custom argument rendering provided by the execution service.
+    ///
+    /// `None` when the execution service has not formatted this call's
+    /// arguments, either because nothing asked it to or because its formatter
+    /// waits for admission.
+    fn formatted_arguments(&self) -> Option<&Formatted> {
+        None
     }
 
-    fn permission_info(&self) -> Option<PermissionInfo> {
-        let run_mode = self.config.run();
+    /// Returns the tool call ID.
+    fn tool_id(&self) -> &str;
 
-        // No prompt needed for these modes
-        if matches!(run_mode, RunMode::Unattended | RunMode::Skip) {
-            return None;
-        }
+    /// Returns the tool name.
+    fn tool_name(&self) -> &str;
 
-        Some(PermissionInfo {
-            tool_id: self.request.id.clone(),
-            tool_name: self.request.name.clone(),
-            tool_source: self.config.source().clone(),
-            run_mode,
-            arguments: self.request.arguments.clone().into(),
-        })
+    /// Returns the tool call arguments.
+    ///
+    /// This is separate from [`permission_info()`] because arguments are always
+    /// available, while permission info is only present for tools that require
+    /// a permission prompt.
+    ///
+    /// [`permission_info()`]: Self::permission_info
+    fn arguments(&self) -> &Map<String, Value>;
+
+    /// Returns information needed for permission prompting.
+    ///
+    /// Returns `None` if the tool doesn't need a permission prompt (e.g.,
+    /// `RunMode::Unattended` or `RunMode::Skip`).
+    fn permission_info(&self) -> Option<PermissionInfo>;
+
+    /// Whether this call needs a permission prompt before it runs.
+    ///
+    /// Agrees with [`permission_info()`] being `Some`, without copying the
+    /// arguments to find out.
+    ///
+    /// [`permission_info()`]: Self::permission_info
+    fn needs_permission(&self) -> bool {
+        self.permission_info().is_some()
     }
 
-    fn set_arguments(&mut self, args: Value) {
-        if let Value::Object(map) = args {
-            self.request.arguments = map;
-        }
-        // If not an object, ignore (preserve original arguments)
+    /// Updates the arguments to use for execution.
+    ///
+    /// This is called after permission prompting if the user edited the
+    /// arguments (via `RunMode::Edit`).
+    /// The new arguments replace the original arguments from the tool call
+    /// request.
+    fn set_arguments(&mut self, args: Value);
+
+    /// Hold this call's service-side invocation open while its current attempt
+    /// is abandoned, so a replacement attempt continues the same logical call.
+    ///
+    /// Returns `false` when there is nothing to hold — the service has not
+    /// named the call yet, or this executor has no service behind it — in
+    /// which case a restart submits a fresh call instead.
+    fn pause_for_restart(&self) -> bool {
+        false
     }
 
+    /// Stop this call's current attempt but keep its service-side invocation
+    /// open, so the response the Host records for it is what the MCP caller
+    /// receives once that response is acknowledged.
+    ///
+    /// Returns `false` when there is nothing to hold, the service has not named
+    /// the call yet, or this executor has no service behind it.
+    /// The call is then torn down when its attempt is cancelled.
+    fn hold_for_response(&self) -> bool {
+        false
+    }
+
+    /// Advance the call to its next input request or result.
+    ///
+    /// An MCP-backed executor releases prepared work or answers the pending
+    /// inquiry on its existing MCP call.
+    /// The server re-executes a tool that returned `NeedsInput`; the executor
+    /// does not submit another MCP call.
+    /// The result remains subject to Host review and recording.
+    ///
+    /// The executor doesn't know how questions should be answered - it just
+    /// reports that input is needed.
+    /// The coordinator looks up the tool configuration to determine whether to
+    /// prompt the user or ask the LLM.
+    ///
+    /// # Arguments
+    ///
+    /// - `answers` - Accumulated answers from previous `NeedsInput` responses
+    /// - `cancellation_token` - Token to cancel execution
+    /// - `stderr` - Receives the tool's stderr lines as they arrive, for a
+    ///   caller showing progress while it runs.
+    ///   `None` when nothing is watching; the lines still reach tracing and the
+    ///   accumulated buffer either way.
     async fn execute(
         &self,
         answers: &IndexMap<String, Value>,
-        mcp_client: &Client,
-        root: &Utf8Path,
         cancellation_token: CancellationToken,
         stderr: Option<StderrSink>,
-    ) -> ExecutorResult {
-        // Compile this tool's access grants into a runtime policy, baking
-        // approved external targets in. The policy travels to the tool in its
-        // context so the tool can self-enforce. A policy that fails to compile
-        // (invalid config) fails the tool rather than running it unenforced.
-        let access = match compile_tool_policy(self.config.access(), root, &self.approvals) {
-            Ok(access) => access,
-            Err(error) => {
-                return ExecutorResult::Completed(ToolCallResponse {
-                    id: self.request.id.clone(),
-                    result: Err(format!(
-                        "invalid access policy for tool '{}': {error}",
-                        self.request.name
-                    )),
-                });
-            }
-        };
+    ) -> ExecutorResult;
+}
 
-        let result = self
-            .definition
-            .execute(
-                self.request.id.clone(),
-                Value::Object(self.request.arguments.clone()),
-                answers,
-                &self.config,
-                mcp_client,
-                root,
-                cancellation_token,
-                &self.builtin_executors,
-                access.as_ref(),
-                &self.invocation,
-                stderr,
-            )
-            .await;
+/// Creates Host-facing tool calls and acknowledges their recorded responses.
+pub(crate) trait ExecutorSource: Send + Sync {
+    /// The endpoint an external agent submits its own tool calls to.
+    ///
+    /// `None` when this source has no reachable endpoint, which is every source
+    /// that only serves calls JP submits itself.
+    fn endpoint(&self) -> Option<Url> {
+        None
+    }
 
-        match result {
-            Ok(ExecutionOutcome::Completed { id, result }) => {
-                ExecutorResult::Completed(ToolCallResponse { id, result })
-            }
-            Ok(ExecutionOutcome::Cancelled { id }) => ExecutorResult::Completed(ToolCallResponse {
-                id,
-                result: Ok("Tool execution cancelled.".to_string()),
-            }),
-            Ok(ExecutionOutcome::NeedsInput { id: _, question }) => ExecutorResult::NeedsInput {
-                tool_id: self.request.id.clone(),
-                tool_name: self.request.name.clone(),
-                question,
-                source: self.inquiry_source(),
-                accumulated_answers: answers.clone(),
-            },
-            Err(e) => ExecutorResult::Completed(ToolCallResponse {
-                id: self.request.id.clone(),
-                result: Err(e.to_string()),
-            }),
+    /// Choose who submits the MCP request for the calls created after this.
+    ///
+    /// A source that can only serve calls JP submits refuses anything else,
+    /// rather than silently accepting work it will never route.
+    fn set_execution(&self, execution: ToolExecution) -> Result<(), ExecutorError> {
+        if execution == ToolExecution::Caller {
+            return Ok(());
+        }
+        Err(ExecutorError::ExternalCallsUnsupported)
+    }
+
+    /// Release a final delivery barrier after the response has been recorded.
+    ///
+    /// `review` carries the content the Host settled on, which the executor
+    /// compares against what it offered to decide whether the Host edited it.
+    fn acknowledge(&self, _review: Review) -> BoxFuture<'_, Result<(), ExecutorError>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Creates an executor for the given tool call request.
+    ///
+    /// Returns `None` if the tool cannot be resolved (e.g. missing from the
+    /// definitions).
+    fn create(
+        &self,
+        request: ToolCallRequest,
+        config: ToolConfigWithDefaults,
+    ) -> Option<Box<dyn Executor>>;
+}
+
+/// What the Host settled on for one call, once the conversation has it.
+///
+/// [`edited`] is what distinguishes a Host that rewrote the text from one that
+/// passed it through: only the executor that offered the original knows which
+/// happened, so the comparison is made where the original still exists rather
+/// than by projecting both to text and comparing strings.
+///
+/// [`edited`]: Self::edited
+#[derive(Debug, Clone)]
+pub(crate) struct Review {
+    /// The response the conversation recorded.
+    pub response: ToolCallResponse,
+
+    /// Whether the Host changed the content it was offered.
+    pub edited: bool,
+}
+
+impl Review {
+    /// The Host recorded the content it was offered.
+    pub fn unchanged(response: ToolCallResponse) -> Self {
+        Self {
+            response,
+            edited: false,
+        }
+    }
+
+    /// The Host recorded content of its own in place of what it was offered.
+    pub fn replaced(response: ToolCallResponse) -> Self {
+        Self {
+            response,
+            edited: true,
         }
     }
 }
+
+/// Project a tool result into the conversation's text/error format.
+///
+/// This is the compatibility projection: the conversation stores one string per
+/// call plus a failure flag, so ordered content, resources, and structured data
+/// are flattened by [`ToolResult::to_text`] and the failure flag becomes `Err`.
+pub(crate) fn response(id: impl Into<String>, result: &ToolResult) -> ToolCallResponse {
+    let text = result.to_text();
+    ToolCallResponse {
+        id: id.into(),
+        result: if result.is_error() {
+            Err(text)
+        } else {
+            Ok(text)
+        },
+    }
+}
+
+/// Result of a tool execution attempt.
+///
+/// Tools may need multiple rounds of execution if they require additional
+/// input.
+/// This enum allows the executor to return control to the coordinator, which
+/// decides how to handle the `NeedsInput` case by looking up the question
+/// configuration.
+#[derive(Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "A turn holds one of these per in-flight call, not a collection of them"
+)]
+pub(crate) enum ExecutorResult {
+    /// Tool completed (success or error).
+    ///
+    /// The full result stays with the executor, which hands it back unchanged
+    /// if the Host records this response without editing it.
+    Completed(ToolCallResponse),
+
+    /// The call failed before the tool was released to run, so nothing ran.
+    ///
+    /// Distinct from a tool that ran and reported failure: the reason is JP's
+    /// own machinery, not the tool's, so it is not content for the model to
+    /// reason about.
+    Failed(ExecutorError),
+
+    /// The call failed after the tool was released to run, before its result
+    /// arrived.
+    ///
+    /// The tool may have run to completion, including its side effects, so
+    /// running it again is not known to be safe.
+    OutcomeUnknown(ExecutorError),
+
+    /// Tool needs additional input before it can continue.
+    ///
+    /// The executor doesn't know who should answer - it just reports that input
+    /// is needed.
+    /// The coordinator looks up the question configuration to determine the
+    /// target:
+    ///
+    /// - `User`: Prompt the user interactively, then restart the tool
+    /// - `Assistant`: Format a response asking the LLM to re-run with answers
+    NeedsInput {
+        /// Tool call ID.
+        tool_id: String,
+
+        /// Tool name (for persisting answers).
+        tool_name: String,
+
+        /// The question that needs to be answered.
+        question: Question,
+
+        /// Resolved provenance for the persisted `InquiryRequest`.
+        source: InquirySource,
+
+        /// Accumulated answers so far (for retry).
+        accumulated_answers: IndexMap<String, Value>,
+    },
+}
+
+/// Information needed to prompt for tool execution permission.
+///
+/// This struct contains all the data the `ToolPrompter` needs to show a
+/// permission prompt to the user.
+#[derive(Debug, Clone)]
+pub(crate) struct PermissionInfo {
+    /// The tool call ID.
+    pub tool_id: String,
+
+    /// The tool name.
+    pub tool_name: String,
+
+    /// The tool source (builtin, local, MCP).
+    pub tool_source: ToolSource,
+
+    /// The configured run mode.
+    pub run_mode: RunMode,
+
+    /// The arguments to pass to the tool.
+    pub arguments: Value,
+}
+
+#[cfg(test)]
+#[path = "executor_mock.rs"]
+pub(crate) mod mock;

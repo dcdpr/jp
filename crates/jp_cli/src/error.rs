@@ -2,9 +2,10 @@ use std::io;
 
 use camino::Utf8PathBuf;
 use jp_conversation::ConversationId;
+use jp_mcp::server::http::EndpointError;
 use url::Url;
 
-use crate::cmd;
+use crate::{cmd, cmd::query::tool::executor::ExecutorError};
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
@@ -65,6 +66,13 @@ pub(crate) enum Error {
     #[error("MCP error")]
     Mcp(#[from] jp_mcp::Error),
 
+    #[error(transparent)]
+    McpEndpoint(#[from] EndpointError),
+
+    /// The Host could not establish the provider's tool-dispatch contract.
+    #[error("MCP Host control failed: {0}")]
+    McpHost(#[source] ExecutorError),
+
     #[error("LLM error")]
     Llm(#[from] jp_llm::Error),
 
@@ -118,7 +126,7 @@ pub(crate) enum Error {
     Url(#[from] url::ParseError),
 
     #[error("Tool error")]
-    Tool(#[from] jp_llm::ToolError),
+    Tool(#[from] jp_tool::Error),
 
     #[error("Syntax highlighting error")]
     SyntaxHighlight(#[from] syntect::Error),

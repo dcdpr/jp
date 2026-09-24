@@ -1348,6 +1348,7 @@ providers: ProviderConfig
           strategy?: "append" | "prepend" | "replace" | null
           value?: [string]
       chain_on_max_tokens?: bool
+      subscription_flow?: "acp" | "direct"
     cerebras: CerebrasConfig
       api_key_env?: ApiKeyEnv
         |: string

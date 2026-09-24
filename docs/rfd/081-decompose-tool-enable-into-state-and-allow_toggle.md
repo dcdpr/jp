@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-11
 - **Extends**: [RFD 008]
-- **Extended by**: [RFD 107]
+- **Extended by**: [RFD 108]
 - **Summary**: Split tool enable into state and allow_toggle to fix directive
   bugs and eliminate variant proliferation.
 
@@ -886,4 +886,4 @@ Phase 4 (tests and RFD updates) lands in the same PR.
 [RFD 078]: 078-tool-config-mutation.md
 [RFD 079]: 079-config-sources-and-load-order.md
 [RFD 083]: 083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md
-[RFD 107]: 108-discoverable-tools.md
+[RFD 108]: 108-discoverable-tools.md

@@ -75,6 +75,25 @@ pub enum Event {
     /// It signals only that the connection is still alive.
     KeepAlive,
 
+    /// A tool's identity is known, but its arguments or delegation are pending.
+    /// This is display-only progress: it is not buffered, persisted, or
+    /// executed.
+    /// A complete tool call is delivered separately through `Part` and `Flush`.
+    ToolCallPending {
+        /// Provider-issued tool call ID used to associate progress with the
+        /// final call.
+        id: String,
+        /// JP tool name, not its provider-specific alias.
+        name: String,
+    },
+
+    /// Remove pending-arguments progress that the provider has abandoned.
+    /// This neither cancels execution nor records a tool response.
+    ToolCallPendingEnd {
+        /// The identity used by the earlier pending notification.
+        id: String,
+    },
+
     /// A user-facing notice from the provider, rendered as chrome on stderr.
     ///
     /// Announces provider-level decisions the user must see — a skipped

@@ -1,0 +1,126 @@
+---
+source: crates/jp_llm/src/provider/anthropic/acp/recorded_tests.rs
+expression: "json!({\n    \"initial\": anonymous(&first), \"reconstructed\": anonymous(&repeat), \"off\":\n    anonymous(&off),\n})"
+---
+{
+  "initial": {
+    "native_session_id": "[session]",
+    "requests": {
+      "msg_011Cf5x1M2ZGPXyc7cnVVGoH": {
+        "model": "claude-opus-5",
+        "input_tokens": 2,
+        "output_tokens": 7,
+        "cache_creation_input_tokens": 8918,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 8918
+        }
+      }
+    },
+    "runtime": {
+      "usage": {
+        "input_tokens": 2,
+        "output_tokens": 7,
+        "cache_creation_input_tokens": 8918,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 8918
+        }
+      },
+      "model_usage": {
+        "claude-opus-5[1m]": {
+          "inputTokens": 2,
+          "outputTokens": 7,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 8918,
+          "costUSD": 0.08936500000000001,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000
+        }
+      },
+      "estimated_cost_usd": 0.08936500000000001
+    }
+  },
+  "reconstructed": {
+    "native_session_id": "[session]",
+    "requests": {
+      "msg_011Cf5x1c2htZ4Mi7o5MCbcu": {
+        "model": "claude-opus-5",
+        "input_tokens": 2,
+        "output_tokens": 7,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 8918,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        }
+      }
+    },
+    "runtime": {
+      "usage": {
+        "input_tokens": 2,
+        "output_tokens": 7,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 8918,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        }
+      },
+      "model_usage": {
+        "claude-opus-5[1m]": {
+          "inputTokens": 2,
+          "outputTokens": 7,
+          "cacheReadInputTokens": 8918,
+          "cacheCreationInputTokens": 0,
+          "costUSD": 0.0046440000000000006,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000
+        }
+      },
+      "estimated_cost_usd": 0.0046440000000000006
+    }
+  },
+  "off": {
+    "native_session_id": "[session]",
+    "requests": {
+      "msg_011Cf5x1mkMHS8F25qRpcfam": {
+        "model": "claude-opus-5",
+        "input_tokens": 8920,
+        "output_tokens": 7,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        }
+      }
+    },
+    "runtime": {
+      "usage": {
+        "input_tokens": 8920,
+        "output_tokens": 7,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        }
+      },
+      "model_usage": {
+        "claude-opus-5[1m]": {
+          "inputTokens": 8920,
+          "outputTokens": 7,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "costUSD": 0.044775,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000
+        }
+      },
+      "estimated_cost_usd": 0.044775
+    }
+  }
+}

@@ -32,7 +32,10 @@ In disagreements between code and docs, the code is authoritative.
     - [Event Overlay](#event-overlay)
     - [InlineReply](#inlinereply)
     - [Inquiry](#inquiry)
+    - [Invocation](#invocation)
+    - [JP MCP Server](#jp-mcp-server)
     - [Match](#match)
+    - [MCP Host](#mcp-host)
     - [Persona](#persona)
     - [Pinned Conversation](#pinned-conversation)
     - [Provider](#provider)
@@ -40,6 +43,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Search Hit](#search-hit)
     - [Service Tier](#service-tier)
     - [Signal Router](#signal-router)
+    - [Subscription Flow](#subscription-flow)
     - [Summary](#summary)
     - [Thread](#thread)
     - [Tool Call](#tool-call)
@@ -55,8 +59,8 @@ In disagreements between code and docs, the code is authoritative.
 ### Attachment
 
 External content attached to a conversation to provide context: a file, URL
-contents, command output, Bear note, MCP resource, etc. Implemented as
-`Attachment` in `jp_attachment`.
+contents, command output, Bear note, etc. Implemented as `Attachment` in
+`jp_attachment`.
 Each attachment kind is a separate crate (`jp_attachment_file_content`,
 `jp_attachment_cmd_output`, and so on).
 
@@ -219,6 +223,33 @@ Carried as `InquiryRequest` and `InquiryResponse` events within a conversation.
 Used for mid-turn clarification that should not appear in the main chat stream
 or be sent to the LLM provider as context.
 
+### Invocation
+
+One execution of one tool call inside the [JP MCP Server](#jp-mcp-server), from
+the moment the call is admitted to the moment its result is recorded.
+It carries an identity the server assigns itself, so two callers asking for the
+same tool with the same arguments at the same time remain distinguishable.
+Implemented as `InvocationId` in `jp_mcp::server::service`.
+
+**Not the same as** a [Tool Call](#tool-call), which is the pair of conversation
+events an invocation produces, nor a transport request ID, which belongs to
+whichever protocol carried the call.
+
+A tool that asks for input ends its execution attempt and runs again with the
+answer; both attempts belong to the same invocation.
+
+### JP MCP Server
+
+The in-process service that executes tool calls: it resolves the tool, validates
+arguments, runs the local command, built-in, or upstream MCP tool, and produces
+the result.
+It owns no conversation and makes no policy decision about who answers a
+question; it asks the [MCP Host](#mcp-host) for each decision it needs.
+Implemented as `Service` in `jp_mcp::server::service`.
+
+**Not the same as** a third-party MCP server, which is an external process
+configured under `providers.mcp` and reached *through* this one.
+
 ### Match
 
 A [Search Hit](#search-hit) whose line actually contains the pattern, as opposed
@@ -230,6 +261,20 @@ Matches are the unit every count in `jp conversation grep` uses: the figure in a
 heading, the `--output count` value, and the `--max-matches` cap.
 
 **Not the same as.** A Search Hit, which also covers context lines.
+
+### MCP Host
+
+The side of a tool call that owns everything the [JP MCP Server](#jp-mcp-server)
+deliberately does not: admission, argument and result editing, inquiry routing,
+and writing the conversation.
+The server asks; the Host decides and records.
+In JP the Host is the CLI process, reached through the private channel a
+`HostReceiver` carries.
+
+**Not the same as** an MCP client, which is any caller that invokes tools over
+the protocol.
+The Host is one such caller, and a third-party client is another; only the Host
+answers the server's decisions.
 
 ### Pinned Conversation
 
@@ -312,6 +357,16 @@ Only the topmost handler is notified; a handler may `decline` to pass the
 interrupt down the stack.
 The registered scopes are the streaming loop, the tool execution loop, and the
 turn-level handler covering gaps between turn phases.
+
+### Subscription Flow
+
+The request implementation selected for subscription authentication within a
+provider.
+Represented by `SubscriptionFlow` in `jp_config::providers::llm::anthropic`.
+
+**Not the same as** a credential, model, or service tier: selecting a flow does
+not select an account, change the model ID, or authorize another billing kind.
+API-key requests do not use this selection.
 
 ### Summary
 

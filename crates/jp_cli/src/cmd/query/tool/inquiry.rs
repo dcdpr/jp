@@ -32,10 +32,9 @@ use jp_llm::{
     model::ModelDetails,
     query::{ChatQuery, Truncation},
     retry::{RetryConfig, collect_with_retry},
-    tool::ToolDefinition,
     window,
 };
-use jp_tool::{AnswerType, Question};
+use jp_tool::{AnswerType, Question, ToolDefinition};
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -219,7 +218,6 @@ impl LlmInquiryBackend {
 }
 
 #[async_trait]
-#[allow(clippy::too_many_lines)]
 impl InquiryBackend for LlmInquiryBackend {
     async fn inquire(
         &self,

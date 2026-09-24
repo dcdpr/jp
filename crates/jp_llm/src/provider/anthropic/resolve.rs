@@ -28,7 +28,7 @@ use std::{
 use async_anthropic::errors::{UnifiedRateLimit, WindowUtilization};
 use chrono::{DateTime, Utc};
 use jp_config::{
-    providers::llm::anthropic::{AnthropicConfig, AuthEntry},
+    providers::llm::anthropic::{AnthropicConfig, AuthEntry, SubscriptionFlow},
     types::api_key_env::ApiKeyEnv,
 };
 use jp_credentials::{
@@ -37,11 +37,15 @@ use jp_credentials::{
 };
 use tracing::{debug, warn};
 
-use crate::{credential::Credential, error::StreamError, provider::anthropic::oauth};
+use super::{acp::Error as AcpError, oauth};
+use crate::{credential::Credential, error::StreamError};
 
 /// Errors from walking the credential chain.
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveError {
+    /// ACP selection failed before a request could be sent.
+    #[error(transparent)]
+    Acp(#[from] AcpError),
     #[error(transparent)]
     Store(#[from] StoreError),
 
@@ -139,6 +143,8 @@ pub enum ResolveError {
 /// What a walk of the chain landed on.
 #[derive(Debug)]
 enum Landing {
+    /// Use Claude Code's own authentication without reading stored tokens.
+    Acp,
     /// A credential that can be sent as-is.
     Ready(Credential),
 
@@ -168,12 +174,11 @@ pub(super) struct Selected {
     pub generation: Option<u64>,
 }
 
-/// A resolved chain attempt: the credential to send with, the entry that
-/// produced it, and notices for entries skipped on the way there.
+/// A resolved request route and the chain entry that selected it.
 #[derive(Debug)]
 pub(super) struct Attempt {
-    /// The credential the request authenticates with.
-    pub credential: Credential,
+    /// The request implementation, carrying a credential only for HTTP.
+    pub route: Route,
 
     /// Which chain entry produced the credential.
     ///
@@ -207,7 +212,7 @@ impl Attempt {
     /// stored profile to record an outcome against.
     pub(super) fn injected(credential: Credential) -> Self {
         Self {
-            credential,
+            route: Route::Http(credential),
             selected: None,
             notices: vec![],
             switch: None,
@@ -244,6 +249,24 @@ impl SeenNotices {
     pub(super) fn first(&self, key: &str) -> bool {
         self.0.lock().expect("poisoned").insert(key.to_owned())
     }
+}
+
+/// The selected request implementation and its authentication material.
+#[derive(Debug)]
+pub(super) enum Route {
+    /// An API key or an explicitly selected direct subscription token.
+    Http(Credential),
+    /// Authentication is owned by Claude Code, not by JP's token store.
+    Acp,
+}
+
+/// Whether resolving this chain requires consulting JP's credential store.
+pub(super) fn needs_store(config: &AnthropicConfig) -> bool {
+    config.auth.iter().any(|entry| match entry {
+        AuthEntry::ApiKey(_) => false,
+        AuthEntry::Subscription(_) => config.subscription_flow == SubscriptionFlow::Direct,
+        AuthEntry::Named(_) => true,
+    })
 }
 
 /// Check that some entry of the chain could resolve, without any network use.
@@ -300,6 +323,17 @@ async fn resolve_skipping(
             walk_chain(config, snapshot.as_ref(), model, now, &tried)?;
 
         let (profile, refresh_token) = match landing {
+            Landing::Acp => {
+                debug!(entry = %selected.entry, model, "Resolved ACP subscription route.");
+
+                return Ok(Attempt {
+                    route: Route::Acp,
+                    selected: Some(selected),
+                    notices,
+                    switch: None,
+                    tried,
+                });
+            }
             Landing::Ready(credential) => {
                 debug!(
                     entry = %selected.entry,
@@ -310,7 +344,7 @@ async fn resolve_skipping(
                 );
 
                 return Ok(Attempt {
-                    credential,
+                    route: Route::Http(credential),
                     selected: Some(selected),
                     notices,
                     switch: None,
@@ -842,6 +876,32 @@ fn walk_chain(
             }
 
             AuthEntry::Subscription(name) => {
+                // Claude Code owns this login, so there is no stored profile
+                // to look up, cool down, or refresh.
+                if config.subscription_flow == SubscriptionFlow::Acp {
+                    if let Some(name) = name {
+                        return Err(AcpError::NamedSubscription { name: name.clone() }.into());
+                    }
+
+                    if tried.contains(entry) {
+                        skip(
+                            &mut notices,
+                            &mut reasons,
+                            format!("{entry}: already tried for this request"),
+                        );
+                        continue;
+                    }
+
+                    return Ok((
+                        Landing::Acp,
+                        Selected {
+                            entry: entry.clone(),
+                            generation: None,
+                        },
+                        notices,
+                    ));
+                }
+
                 match walk_profile(store, name.as_deref(), entry, model, now, tried)? {
                     ProfileStep::Landed(landing, selected) => {
                         return Ok((landing, selected, notices));

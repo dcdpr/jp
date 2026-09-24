@@ -30,16 +30,16 @@ use jp_conversation::{
 };
 use jp_inquire::prompt::PromptBackend;
 use jp_llm::{
-    Error as LlmError, Provider,
+    Error as LlmError, EventStream, Provider,
     error::StreamError,
     event::{Event, EventPart, FinishReason, NoticeSink, ToolCallPart},
     model::ModelDetails,
     provider::get_provider,
-    query::{ChatQuery, Truncation},
-    tool::{InvocationContext, ToolDefinition, executor::Executor},
+    query::{ChatQuery, QueryContext, ToolExecution, Truncation},
     with_idle_timeout, with_output_limit,
 };
 use jp_printer::{ErrChannel, Printer, RegionStyle, StatusRegion};
+use jp_tool::{InvocationContext, ToolDefinition};
 use jp_workspace::{ConversationLock, ConversationMut};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, info, warn};
@@ -48,7 +48,7 @@ use super::{
     PendingStreamTrim, build_sections, build_thread,
     interrupt::{
         LoopAction, StreamingInterruptResult, handle_llm_event, handle_streaming_interrupt,
-        reply_edit_mode,
+        reply_edit_mode, signals::InterruptUi,
     },
     stream::{
         ResponseBoundary, StreamErrorOutcome, StreamRetryState, commit_partial_response,
@@ -57,6 +57,7 @@ use super::{
     tool::{
         PendingEntry, PendingTools, ToolCallDecision, ToolCallState, ToolCoordinator, ToolPrompter,
         ToolRenderer, build_execution_plan,
+        executor::{Executor, Review},
         inquiry::{InquiryBackend, InquiryConfig, LlmInquiryBackend},
     },
     turn::{Action, CommittedEvent, TurnCoordinator, TurnPhase, TurnState},
@@ -175,8 +176,8 @@ pub(super) async fn run_turn_loop(
     model: &ModelDetails,
     cfg: &AppConfig,
     signals: &SignalRouter,
-    mcp_client: &jp_mcp::Client,
     root: &Utf8Path,
+    invocation: InvocationContext,
     interactive: bool,
     attachments: &[Attachment],
     lock: &ConversationLock,
@@ -186,7 +187,6 @@ pub(super) async fn run_turn_loop(
     prompt_backend: Arc<dyn PromptBackend>,
     mut tool_coordinator: ToolCoordinator,
     chat_request: ChatRequest,
-    invocation: InvocationContext,
     pending_trim: PendingStreamTrim,
     mut turn_interrupt: TurnInterrupt,
 ) -> Result<(), Error> {
@@ -215,6 +215,7 @@ pub(super) async fn run_turn_loop(
         cfg.assistant.name.clone(),
         Some(cfg.assistant.model.id.resolved().to_string()),
     );
+    let query_invocation = invocation;
     let mut tool_renderer = ToolRenderer::new(
         ErrChannel::new(if cfg.style.tool_call.show && !printer.format().is_json() {
             printer.clone()
@@ -222,8 +223,6 @@ pub(super) async fn run_turn_loop(
             Printer::sink().into()
         }),
         cfg.style.clone(),
-        root.to_path_buf(),
-        invocation,
     );
     // Share the owed-separator flag so visible assistant content rendered by
     // the coordinator can cancel a blank line owed by a preceding tool result.
@@ -252,6 +251,8 @@ pub(super) async fn run_turn_loop(
     // Crucially: there's no public way to enumerate this directly — the
     // stream is the source of truth for "what needs to run."
     let mut pending_tools = PendingTools::new();
+    let mut continuation: Option<EventStream> = None;
+    let mut execution = ToolExecution::Caller;
 
     // Prompter shared between streaming (permission prompts) and
     // executing (tool question prompts) phases.
@@ -340,25 +341,39 @@ pub(super) async fn run_turn_loop(
                     ReceiverStream::new(interrupt_rx).map(StreamingLoopEvent::Interrupt),
                 );
 
-                let raw_stream = provider
-                    .chat_completion_stream(model, query)
-                    .await
-                    .map_err(|e| map_llm_error(e, vec![]))?;
+                let fresh_request = continuation.is_none();
+                let mut raw_stream = if let Some(stream) = continuation.take() {
+                    stream
+                } else {
+                    let started = provider
+                        .start_query(model, query, QueryContext {
+                            root: root.to_path_buf(),
+                            mcp_endpoint: tool_coordinator.endpoint(),
+                            invocation: Some(query_invocation.clone()),
+                        })
+                        .await
+                        .map_err(|e| map_llm_error(e, vec![]))?;
+                    execution = started.execution;
+                    tool_coordinator
+                        .set_execution(execution)
+                        .map_err(Error::McpHost)?;
+                    let raw_stream = started.events;
+                    let raw_stream = match idle_timeout {
+                        Some(idle) => with_idle_timeout(raw_stream, idle),
+                        None => raw_stream,
+                    };
+                    // Wrapped outside the provider stream, so the bytes of every
+                    // chained continuation accumulate against a single ceiling
+                    // rather than resetting per link. Bytes the provider discards
+                    // while merging those links are billed but never seen here.
+                    match output_limit {
+                        Some(max) => with_output_limit(raw_stream, max),
+                        None => raw_stream,
+                    }
+                };
                 waiting.set_detail("waiting for first tokens");
-                let raw_stream = match idle_timeout {
-                    Some(idle) => with_idle_timeout(raw_stream, idle),
-                    None => raw_stream,
-                };
-                // Wrapped outside the provider stream, so the bytes of every
-                // chained continuation accumulate against a single ceiling
-                // rather than resetting per link. Bytes the provider discards
-                // while merging those links are billed but never seen here.
-                let raw_stream = match output_limit {
-                    Some(max) => with_output_limit(raw_stream, max),
-                    None => raw_stream,
-                };
                 let llm_stream = StreamSource::Llm(
-                    raw_stream
+                    (&mut raw_stream)
                         .fuse()
                         .map(|result| StreamingLoopEvent::Llm(Box::new(result)))
                         // Backstop: if the provider stream ends without a
@@ -376,7 +391,9 @@ pub(super) async fn run_turn_loop(
                             ))),
                         )))),
                 );
-                turn_state.request_count += 1;
+                if fresh_request {
+                    turn_state.request_count += 1;
+                }
 
                 // Reset preparing display for this streaming cycle.
                 tool_renderer.reset();
@@ -460,6 +477,16 @@ pub(super) async fn run_turn_loop(
                                 Ok(event) => event,
                                 Err(e) => {
                                     tool_renderer.cancel_all();
+                                    if matches!(execution, ToolExecution::Agent { .. }) {
+                                        commit_partial_response(
+                                            &mut turn_coordinator,
+                                            &conv,
+                                            &printer,
+                                            ResponseBoundary::Final,
+                                        );
+                                        conv.flush()?;
+                                        return Err(LlmError::Stream(e).into());
+                                    }
 
                                     match handle_stream_error(
                                         e,
@@ -557,6 +584,8 @@ pub(super) async fn run_turn_loop(
                                 Event::Flush { .. }
                                 | Event::Patch(_)
                                 | Event::KeepAlive
+                                | Event::ToolCallPending { .. }
+                                | Event::ToolCallPendingEnd { .. }
                                 | Event::Notice(_) => false,
                             };
                             if !received_provider_event && advances_cycle {
@@ -570,7 +599,8 @@ pub(super) async fn run_turn_loop(
                             if let Event::Part {
                                 part: EventPart::ToolCall(ToolCallPart::Start { id, name }),
                                 ..
-                            } = &event
+                            }
+                            | Event::ToolCallPending { id, name } = &event
                             {
                                 // The tool-call boundary is owned here: only the
                                 // turn loop holds the per-tool config and
@@ -590,6 +620,11 @@ pub(super) async fn run_turn_loop(
                                     .set_tool_state(id, ToolCallState::ReceivingArguments {
                                         name: name.clone(),
                                     });
+                            }
+
+                            if let Event::ToolCallPendingEnd { id } = &event {
+                                tool_renderer.complete(id);
+                                tool_coordinator.discard_pending_tool(id);
                             }
 
                             let is_finished = matches!(event, Event::Finished(_));
@@ -743,6 +778,13 @@ pub(super) async fn run_turn_loop(
                     }
                 }
 
+                drop(streams);
+                if matches!(execution, ToolExecution::Agent { .. })
+                    && turn_coordinator.current_phase() == TurnPhase::Executing
+                {
+                    continuation = Some(raw_stream);
+                }
+
                 // Deregister the streaming interrupt handler; from here the
                 // router treats Ctrl-C as unhandled again.
                 drop(interrupt_guard);
@@ -858,21 +900,22 @@ pub(super) async fn run_turn_loop(
 
                 tool_coordinator.reset_for_execution();
 
+                let mut interrupt_ui = InterruptUi {
+                    turn_coordinator: &mut turn_coordinator,
+                    printer: &printer,
+                    backend: prompt_backend.as_ref(),
+                    editor: build_editor_backend(&cfg.editor, &printer),
+                    edit_mode: reply_edit_mode(cfg.editor.inline.edit_mode),
+                };
                 let execution_result = tool_coordinator
                     .execute_with_prompting(
                         approved,
                         Arc::clone(&prompter),
                         signals,
-                        &mut turn_coordinator,
                         &mut turn_state,
-                        &printer,
-                        prompt_backend.as_ref(),
-                        build_editor_backend(&cfg.editor, &printer),
-                        reply_edit_mode(cfg.editor.inline.edit_mode),
+                        &mut interrupt_ui,
                         Arc::clone(&inquiry_backend),
                         &conv,
-                        mcp_client,
-                        root,
                         &mut tool_renderer,
                         interactive,
                     )
@@ -891,7 +934,8 @@ pub(super) async fn run_turn_loop(
                             &mut tool_coordinator,
                             &mut turn_coordinator,
                             &mut conv,
-                        )?;
+                        )
+                        .await?;
                         return Err(cmd::Error::interrupted().into());
                     }
 
@@ -908,7 +952,8 @@ pub(super) async fn run_turn_loop(
                             &mut tool_coordinator,
                             &mut turn_coordinator,
                             &mut conv,
-                        )?;
+                        )
+                        .await?;
                         break;
                     }
 
@@ -925,7 +970,9 @@ pub(super) async fn run_turn_loop(
                             &mut tool_coordinator,
                             &mut turn_coordinator,
                             &mut conv,
-                        )? {
+                        )
+                        .await?
+                        {
                             tool_choice = ToolChoice::Auto;
                         }
                     }
@@ -1152,7 +1199,7 @@ async fn build_inquiry_overrides(
 ///
 /// Returns `true` if a follow-up LLM cycle is needed (i.e. tool responses were
 /// added and the coordinator wants to continue).
-fn commit_tool_responses(
+async fn commit_tool_responses(
     result: ExecutionResult,
     pre_resolved: Vec<(usize, ToolCallResponse)>,
     tool: &mut ToolCoordinator,
@@ -1163,16 +1210,37 @@ fn commit_tool_responses(
     // permission phase into the corresponding ToolCallRequest events.
     flush_rendered_arguments(tool, conv);
 
-    // Both `result.responses` and `pre_resolved` are already keyed by the
+    // Both `result.reviews` and `pre_resolved` are already keyed by the
     // plan index assigned in `build_execution_plan`. Sorting by that
     // index restores stream order for the persisted responses.
-    let mut indexed: Vec<(usize, ToolCallResponse)> = result.responses;
-    indexed.extend(pre_resolved);
-    indexed.sort_by_key(|(idx, _)| *idx);
-    let responses: Vec<_> = indexed.into_iter().map(|(_, r)| r).collect();
+    //
+    // A pre-resolved tool never reached an executor, so nothing offered it a
+    // result to edit.
+    let mut indexed: Vec<(usize, Review)> = result.reviews;
+    indexed.extend(
+        pre_resolved
+            .into_iter()
+            .map(|(index, response)| (index, Review::unchanged(response))),
+    );
+    indexed.sort_by_key(|(index, _)| *index);
+    let reviews: Vec<_> = indexed.into_iter().map(|(_, review)| review).collect();
 
+    let responses = reviews
+        .iter()
+        .map(|review| review.response.clone())
+        .collect();
     let action = conv.update_events(|stream| turn.handle_tool_responses(stream, responses));
     conv.flush()?;
+    // Only now does each call's MCP response reach its caller: the service
+    // holds every result until the conversation has it on disk.
+    //
+    // The conversation is already written at this point, so a failure here is
+    // the Host and the execution service disagreeing about a call that, from
+    // the user's side, succeeded. Ending the turn over it would discard work
+    // that is on disk and about to be answered.
+    if let Err(error) = tool.acknowledge_reviews(reviews).await {
+        warn!(%error, "Could not acknowledge a recorded tool response.");
+    }
 
     Ok(matches!(action, Action::SendFollowUp))
 }
@@ -1218,3 +1286,7 @@ fn map_llm_error(error: jp_llm::Error, models: Vec<ModelDetails>) -> Error {
 #[cfg(test)]
 #[path = "turn_loop_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "agent_turn_tests.rs"]
+mod agent_turn_tests;

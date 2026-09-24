@@ -28,6 +28,7 @@ use jp_conversation::{
     ConversationStream,
     event::{ChatResponse, EventKind, ToolCallResponse},
 };
+use jp_tool::ToolDefinition;
 use reqwest_eventsource::Event as SseEvent;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -38,7 +39,6 @@ use crate::{
     error::StreamError,
     event::{Event, FinishReason},
     stream::aggregator::reasoning::ReasoningExtractor,
-    tool::ToolDefinition,
 };
 
 #[derive(Debug, Deserialize)]

@@ -20,6 +20,7 @@ use jp_conversation::{
     thread::{Thread, ThreadBuilder},
 };
 use jp_test::mock::{Snap, Vcr};
+use jp_tool::{ToolDefinition, ToolDocs};
 
 use crate::{
     event::{Event, FinishReason},
@@ -27,7 +28,6 @@ use crate::{
     model::ModelDetails,
     provider::{ProviderTestRoute, provider_test_support},
     query::{ChatQuery, Truncation},
-    tool::{ToolDefinition, ToolDocs},
 };
 
 /// Fail when a model calls a tool with arguments its schema does not declare.
@@ -747,7 +747,11 @@ pub async fn run_chat_completion_mode(
                                         });
                                     }
                                 }
-                                Event::Patch(_) | Event::KeepAlive | Event::Notice(_) => {}
+                                Event::Patch(_)
+                                | Event::KeepAlive
+                                | Event::ToolCallPending { .. }
+                                | Event::ToolCallPendingEnd { .. }
+                                | Event::Notice(_) => {}
                                 Event::Finished(reason) => {
                                     for mut event in builder.drain() {
                                         event.timestamp =

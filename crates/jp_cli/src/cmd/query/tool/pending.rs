@@ -24,7 +24,8 @@ use jp_conversation::{
     ConversationStream,
     event::{ToolCallRequest, ToolCallResponse},
 };
-use jp_llm::tool::executor::Executor;
+
+use super::executor::Executor;
 
 /// The work product for a single tool call, as decided during the streaming
 /// phase.

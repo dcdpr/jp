@@ -21,7 +21,6 @@ use camino::Utf8Path;
 use jp_attachment::{
     Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, typetag,
 };
-use jp_mcp::Client;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 use url::Url;
@@ -79,11 +78,7 @@ impl Handler for AgenticShepherd {
         self.references.iter().map(Reference::to_url).collect()
     }
 
-    async fn get(
-        &self,
-        root: &Utf8Path,
-        _: Client,
-    ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
+    async fn get(&self, root: &Utf8Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         debug!(
             count = self.references.len(),
             "Fetching agentic-shepherd attachments."
