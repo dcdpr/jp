@@ -1,0 +1,46 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "call_yHDWZ3ju9GaGhZkaZxeyY20Z",
+                        name: "run_me",
+                        arguments: {
+                            "bar": String("foo"),
+                            "foo": Null,
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The tool ran successfully.",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_0918ab3a10b6968b016ab3b832a10487d29d8d5ea9c4e8f593"),
+                    "openai_phase": String("final_answer"),
+                },
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

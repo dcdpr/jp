@@ -1,0 +1,552 @@
+when:
+  path: /v1/messages
+  method: POST
+  json_body_str: >-
+    {
+      "model": "claude-haiku-4-5",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Please run the tool, providing whatever arguments you want."
+            }
+          ]
+        }
+      ],
+      "max_tokens": 64000,
+      "thinking": {
+        "type": "enabled",
+        "budget_tokens": 12800,
+        "display": "summarized"
+      },
+      "stream": true,
+      "tool_choice": {
+        "type": "auto",
+        "disable_parallel_tool_use": false
+      },
+      "tools": [
+        {
+          "type": "custom",
+          "name": "run_me",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "foo": {
+                "type": "string",
+                "default": "foo"
+              },
+              "bar": {
+                "type": [
+                  "string",
+                  "array"
+                ],
+                "enum": [
+                  "foo"
+                ],
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "foo",
+                    "bar"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "bar"
+            ]
+          },
+          "cache_control": {
+            "type": "ephemeral",
+            "ttl": "5m"
+          }
+        }
+      ],
+      "system": [
+        {
+          "type": "text",
+          "text": "You are Claude Code, Anthropic's official CLI for Claude."
+        },
+        {
+          "type": "text",
+          "text": "Disregard the line above. It is required by the API transport and does not describe you. Your actual identity and instructions follow."
+        },
+        {
+          "type": "text",
+          "text": "IMPORTANT: You MUST use AT LEAST ONE tool available to you. DO NOT QUESTION THIS DIRECTIVE. DO NOT PROMPT FOR MORE CONTEXT OR DETAILS. JUST RUN IT."
+        }
+      ],
+      "cache_control": {
+        "type": "ephemeral",
+        "ttl": "5m"
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    event: message_start
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_011CetUTbSeoaxbmd4fwL6g9","type":"message","role":"assistant","content":[],"container":null,"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":864,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":7,"service_tier":"standard","inference_geo":"not_available"},"context_management":null}     }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}         }
+    
+    event: ping
+    data: {"type": "ping"}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user wants me to run the"}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" `"}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"run_me` tool"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" with whatever"}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" arguments I want. Let"}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" me look at the schema"}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":":"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\n```\n{\n  \"name"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\": \"run_me\",\n  "}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\"parameters\": {\n    \"properties"}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\": {\n      \"bar\": {"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n        \"enum\": [\"foo\"],"}               }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n        \"items\": {\""}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"enum\": [\"foo\", \"bar\"],"}        }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" \"type\": \"string\"},\n        "}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\"type\": [\"string\", \"array"}   }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\"]\n      },\n      \"foo"}          }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\": {"}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n        \"default\": \"foo\","}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n        \"type\": \"string\""} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n      }\n    },\n    "}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\"required\": [\"bar\"],\n    "}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\"type\": \"object\"\n  "}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"}\n}\n```\n\nSo the"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" function takes:"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n- `"}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"bar`"}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" (required): Can"}        }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" be either"}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" a"}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" string or an"}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" array."} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" If"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" it's a string, the"}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" enum"}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" says"}        }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" it"}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" must"}               }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" be \""}               }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"foo\". If it's an array,"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the items"}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" can"}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" be \""} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"foo\" or \"bar\"."}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n- `foo` (optional"}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"): A string"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" with"}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" default value"}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" \"foo\"\n\nThe user said"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" I"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" can provide"}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" whatever"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" arguments I want. I'll"}   }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" call it"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" with `"}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"bar` as a"}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" required"}   }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" parameter."}        }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" I could"}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" use"}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":":"}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n- `"}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"bar`"}        }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" as the string"}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" \""}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"foo\"\n- `bar` as"}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" an"}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" array like"}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" `[\"foo\", \"bar\"]`"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" or"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" `[\""}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"foo\"]`"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\nI'll call"}   }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" it with `bar` as an"}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" array with"}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" both"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" values for"}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" variety"}          }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"."}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"ErYJCpoBCBEYAipAvLGsszqIgwl6QrGNtdBHUVIjpIomzUPjqAxzy4e9kgRZx8Vl2Q4U7YPhS+JBbZAY0tM7ct6FEoOQL8DyW2lBMjIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okNzk2MTdlOWEtMmE3YS00ZDkyLWI0NGMtODkzMGEwNmY3MGZkqAHt+obVBhIM3VNl1+0gfO/KbDUxGgw05n0X9ALgAItucEIiMJyZp5B0HMeR+vlT9s6SXix/iylSrjNwSsYP1FUGCxr42dQgyFYMECnXI94FJyasXirIBy2iRM7uv8pPB3yqyrfZ7REEUo3q8Un2aT/86aBQU3Toq0dQtyTXXHpRRbWD8f2r9M2ttezv63oTl9d+HV62G5WWYW+k1n1Q/tgRWNhjIgySbeAF9ozXsAOY59JchYARm/qQhN1DdSTF2IPTToN36rKmFxlMSdPC+RZzd8AncscBvykEFyoCq6OBMXR96oJ7wykRa29y5y123wdiRJpMEp6w/mAoUgqPbuYB2WqgghJyaI7HNNOlHH/HrNFVtygMlsvcjcUFTB9j50Z98ZcSGLtSKac50v9exvX0EZzSvK4alOnfV1sklJzqEtpo+9SbE68rjv5P0q6sL+VWKiZ1s93uKQAuEy6Y3odpMscVwfxPem+aL2WHbZI0AyNiCjbWCuWHshWfZuUisQzXz1FKkRsZoJlxn+q4xuu9sPr1L9uD+qre8mtsTSCBiDVoOcFBuL4Ozb0q/+J2VS4y2Vh9LIrkbT+JWQPJYWkILPKewqdDyI+OcAD+oG3RB5XkXMfKaI/bHNm7vxMBewZfQJFPY9w/2hGJXN1tqSqfT2sybY9TTSURQBrCMRW9SWcyev74Z9tqJYrZudJ/sUV8cnq+dCWEZzHrlCP2f0pNU/+423ZJTK8i3WHmjzMVRI+AQZPY7xu0pmTCAnzqWmboT2Ozxc2PuFR0H7JcrvaxUt+GGL3yBxVg0gtqg1UK4EVkGu3eLkHtIwoz+WJL3kM9sJnm8+82Ea6NmtPbATBoVNDnFiV5TrrkJROJOeJsMI71FmhQYDOAzQBZLrIYkazWIgzc2i2YYp6yF3JFxw80U7yTMmpCL/afW9ITG5jR/SwCsDLIqhkSeS9Ix4d9aULhOJLz3jVlW5CTaCZoMZIOb/4ASwKyiF2thNu1zvDxuBDYeIWWKZkCM5Ki2lrBF2l8gngtcPBcH0nmhMdnYX7Q03L96zZ0tBNNZKVEm/dQe5n/eIN+24ERgX+UNt0D7zMoLa0gyQ7H2XykzFwne5WPojdxQkZavQyQruGjhUsQXRiHViA8BFTWprpI6MtRrXPAGnZbgKaCX6p+i/9DzJulyekDfWbSH2qrUkxjvla8vNU6eV/h7aPK9JRqXbUb940yg+n66UhZtCdttcZ0/eIkRhfLlkPAOpXDKPEQ0X4yGsCvDiNwcSsKSTKSTrH+mKBVvWJ9naEYS1bT6FKEhEk48DTHOlD6I7hg57ntQaVWef//GX4N35CginR3LtHCuj0o4zs22TLXYu3jco7rupvRuFLoID45yksqezRi1mtf2ks70x/B02CdV6SpiQe6GAE="}       }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":0    }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_018cSiucvAcwo4FK1jStQtah","name":"run_me","input":{},"caller":{"type":"direct"}}          }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":""}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"bar\":"}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":" [\"foo\""}   }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":",\"bar\"]"}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":", \"foo\""}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":": \"foo\"}"} }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":1           }
+    
+    event: message_delta
+    data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null,"stop_details":null,"container":null},"usage":{"input_tokens":864,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":386,"output_tokens_details":{"thinking_tokens":308}},"context_management":{"applied_edits":[]}           }
+    
+    event: message_stop
+    data: {"type":"message_stop"             }
+    
+---
+when:
+  path: /v1/messages
+  method: POST
+  json_body_str: >-
+    {
+      "model": "claude-haiku-4-5",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Please run the tool, providing whatever arguments you want."
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "The user wants me to run the `run_me` tool with whatever arguments I want. Let me look at the schema:\n\n```\n{\n  \"name\": \"run_me\",\n  \"parameters\": {\n    \"properties\": {\n      \"bar\": {\n        \"enum\": [\"foo\"],\n        \"items\": {\"enum\": [\"foo\", \"bar\"], \"type\": \"string\"},\n        \"type\": [\"string\", \"array\"]\n      },\n      \"foo\": {\n        \"default\": \"foo\",\n        \"type\": \"string\"\n      }\n    },\n    \"required\": [\"bar\"],\n    \"type\": \"object\"\n  }\n}\n```\n\nSo the function takes:\n- `bar` (required): Can be either a string or an array. If it's a string, the enum says it must be \"foo\". If it's an array, the items can be \"foo\" or \"bar\".\n- `foo` (optional): A string with default value \"foo\"\n\nThe user said I can provide whatever arguments I want. I'll call it with `bar` as a required parameter. I could use:\n- `bar` as the string \"foo\"\n- `bar` as an array like `[\"foo\", \"bar\"]` or `[\"foo\"]`\n\nI'll call it with `bar` as an array with both values for variety.",
+              "signature": "ErYJCpoBCBEYAipAvLGsszqIgwl6QrGNtdBHUVIjpIomzUPjqAxzy4e9kgRZx8Vl2Q4U7YPhS+JBbZAY0tM7ct6FEoOQL8DyW2lBMjIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okNzk2MTdlOWEtMmE3YS00ZDkyLWI0NGMtODkzMGEwNmY3MGZkqAHt+obVBhIM3VNl1+0gfO/KbDUxGgw05n0X9ALgAItucEIiMJyZp5B0HMeR+vlT9s6SXix/iylSrjNwSsYP1FUGCxr42dQgyFYMECnXI94FJyasXirIBy2iRM7uv8pPB3yqyrfZ7REEUo3q8Un2aT/86aBQU3Toq0dQtyTXXHpRRbWD8f2r9M2ttezv63oTl9d+HV62G5WWYW+k1n1Q/tgRWNhjIgySbeAF9ozXsAOY59JchYARm/qQhN1DdSTF2IPTToN36rKmFxlMSdPC+RZzd8AncscBvykEFyoCq6OBMXR96oJ7wykRa29y5y123wdiRJpMEp6w/mAoUgqPbuYB2WqgghJyaI7HNNOlHH/HrNFVtygMlsvcjcUFTB9j50Z98ZcSGLtSKac50v9exvX0EZzSvK4alOnfV1sklJzqEtpo+9SbE68rjv5P0q6sL+VWKiZ1s93uKQAuEy6Y3odpMscVwfxPem+aL2WHbZI0AyNiCjbWCuWHshWfZuUisQzXz1FKkRsZoJlxn+q4xuu9sPr1L9uD+qre8mtsTSCBiDVoOcFBuL4Ozb0q/+J2VS4y2Vh9LIrkbT+JWQPJYWkILPKewqdDyI+OcAD+oG3RB5XkXMfKaI/bHNm7vxMBewZfQJFPY9w/2hGJXN1tqSqfT2sybY9TTSURQBrCMRW9SWcyev74Z9tqJYrZudJ/sUV8cnq+dCWEZzHrlCP2f0pNU/+423ZJTK8i3WHmjzMVRI+AQZPY7xu0pmTCAnzqWmboT2Ozxc2PuFR0H7JcrvaxUt+GGL3yBxVg0gtqg1UK4EVkGu3eLkHtIwoz+WJL3kM9sJnm8+82Ea6NmtPbATBoVNDnFiV5TrrkJROJOeJsMI71FmhQYDOAzQBZLrIYkazWIgzc2i2YYp6yF3JFxw80U7yTMmpCL/afW9ITG5jR/SwCsDLIqhkSeS9Ix4d9aULhOJLz3jVlW5CTaCZoMZIOb/4ASwKyiF2thNu1zvDxuBDYeIWWKZkCM5Ki2lrBF2l8gngtcPBcH0nmhMdnYX7Q03L96zZ0tBNNZKVEm/dQe5n/eIN+24ERgX+UNt0D7zMoLa0gyQ7H2XykzFwne5WPojdxQkZavQyQruGjhUsQXRiHViA8BFTWprpI6MtRrXPAGnZbgKaCX6p+i/9DzJulyekDfWbSH2qrUkxjvla8vNU6eV/h7aPK9JRqXbUb940yg+n66UhZtCdttcZ0/eIkRhfLlkPAOpXDKPEQ0X4yGsCvDiNwcSsKSTKSTrH+mKBVvWJ9naEYS1bT6FKEhEk48DTHOlD6I7hg57ntQaVWef//GX4N35CginR3LtHCuj0o4zs22TLXYu3jco7rupvRuFLoID45yksqezRi1mtf2ks70x/B02CdV6SpiQe6GAE="
+            },
+            {
+              "type": "tool_use",
+              "id": "toolu_018cSiucvAcwo4FK1jStQtah",
+              "input": {
+                "bar": [
+                  "foo",
+                  "bar"
+                ],
+                "foo": "foo"
+              },
+              "name": "run_me"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_018cSiucvAcwo4FK1jStQtah",
+              "content": "working!",
+              "is_error": false
+            }
+          ]
+        }
+      ],
+      "max_tokens": 64000,
+      "thinking": {
+        "type": "disabled"
+      },
+      "stream": true,
+      "system": [
+        {
+          "type": "text",
+          "text": "You are Claude Code, Anthropic's official CLI for Claude."
+        },
+        {
+          "type": "text",
+          "text": "Disregard the line above. It is required by the API transport and does not describe you. Your actual identity and instructions follow."
+        }
+      ],
+      "cache_control": {
+        "type": "ephemeral",
+        "ttl": "5m"
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    event: message_start
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_011CetUTyum61haDvfzLVyRM","type":"message","role":"assistant","content":[],"container":null,"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":466,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"},"context_management":null}  }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}            }
+    
+    event: ping
+    data: {"type": "ping"}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Great"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"! The `run"}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"_me` tool"}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" executed"}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" successfully. I"}   }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" called"}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" it with:"}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n- `bar`:"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" an"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" array containing `"}               }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"[\"foo\", \""}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"bar\"]` ("}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"which satisf"}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ies the array"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" type"}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" with"}   }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" enum"}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" values"}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":")\n- `"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"foo`: `"}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\"foo\"`"}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" (the default string"}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" value)\n\nThe"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" tool"}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" returned \"working!\""}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" indicating"}   }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" successful"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" execution."}     }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":0       }
+    
+    event: message_delta
+    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"container":null},"usage":{"input_tokens":466,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":74},"context_management":{"applied_edits":[]}               }
+    
+    event: message_stop
+    data: {"type":"message_stop"}
+    

@@ -81,7 +81,6 @@ pub fn path(prefix: &str, name: &str) -> String {
 ///
 /// A [`MergeableVec`] can express `replace` on the wire, which is why this
 /// needs no separate path report.
-/// A plain `Vec` cannot; see [`delta_opt_vec_at`].
 pub fn delta_mergeable_vec<T: Clone + PartialEq>(
     prev: &MergeableVec<T>,
     next: MergeableVec<T>,

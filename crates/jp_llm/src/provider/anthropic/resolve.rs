@@ -21,13 +21,16 @@
 
 use std::{
     collections::HashSet,
-    env, mem,
+    mem,
     sync::{Arc, Mutex},
 };
 
 use async_anthropic::errors::{UnifiedRateLimit, WindowUtilization};
 use chrono::{DateTime, Utc};
-use jp_config::providers::llm::anthropic::{AnthropicConfig, AuthEntry};
+use jp_config::{
+    providers::llm::anthropic::{AnthropicConfig, AuthEntry},
+    types::api_key_env::ApiKeyEnv,
+};
 use jp_credentials::{
     CATEGORY_LLM, CredentialSecret, CredentialStore, PROVIDER_ANTHROPIC, SCOPE_ACCOUNT,
     StoreDocument, StoreError, StoreGuard, StoredCredential, UpdateOutcome, cooldown_until,
@@ -42,27 +45,27 @@ pub enum ResolveError {
     #[error(transparent)]
     Store(#[from] StoreError),
 
-    /// A `profile:<name>` entry names a profile that is not stored.
+    /// A `subscription:<name>` entry names a profile that is not stored.
     #[error(
-        "providers.llm.anthropic.auth entry `profile:{name}` matches no stored profile; run `jp \
-         provider auth login llm.anthropic --profile {name}` to create it"
+        "providers.llm.anthropic.auth entry `subscription:{name}` matches no stored credential; \
+         run `jp provider llm auth login anthropic --name {name}` to create it"
     )]
     UnknownProfile {
         /// The profile name the chain entry refers to.
         name: String,
     },
 
-    /// A bare `profile` entry with zero stored profiles.
+    /// A bare `subscription` entry with zero stored profiles.
     #[error(
-        "providers.llm.anthropic.auth entry `profile` matches no stored profile; run `jp provider \
-         auth login llm.anthropic` to create one"
+        "providers.llm.anthropic.auth entry `subscription` matches no stored credential; run `jp \
+         provider llm auth login anthropic` to create one"
     )]
     NoProfiles,
 
-    /// A bare `profile` entry with multiple stored profiles.
+    /// A bare `subscription` entry with multiple stored profiles.
     #[error(
-        "providers.llm.anthropic.auth entry `profile` is ambiguous: multiple profiles are \
-         stored ({}); name one with `profile:<name>`",
+        "providers.llm.anthropic.auth entry `subscription` is ambiguous: several credentials are \
+         stored ({}); name one with `subscription:<name>`",
         names.join(", ")
     )]
     AmbiguousProfile {
@@ -74,6 +77,41 @@ pub enum ResolveError {
     /// unset.
     #[error("Missing environment variable: {0}")]
     MissingEnv(String),
+
+    /// An `api_key` entry naming a key that `api_key_env` does not configure.
+    #[error(transparent)]
+    ApiKeyEnv(#[from] jp_config::types::api_key_env::ApiKeyEnvError),
+
+    /// A bare name that both an API key and a subscription answer to.
+    #[error(
+        "`{name}` names both an API key and a subscription; write `api_key:{name}` or \
+         `subscription:{name}`"
+    )]
+    AmbiguousName {
+        /// The name written in the chain.
+        name: String,
+    },
+
+    /// A bare name that nothing answers to.
+    #[error(
+        "no credential named `{name}`{}{}",
+        if .keys.is_empty() { String::new() } else { format!(" (API keys: {})", .keys.join(", ")) },
+        if .subscriptions.is_empty() {
+            String::new()
+        } else {
+            format!(" (subscriptions: {})", .subscriptions.join(", "))
+        }
+    )]
+    UnknownName {
+        /// The name written in the chain.
+        name: String,
+
+        /// Every configured API key name.
+        keys: Vec<String>,
+
+        /// Every stored subscription name.
+        subscriptions: Vec<String>,
+    },
 
     /// Every chain entry was skipped.
     #[error(
@@ -118,8 +156,8 @@ enum Landing {
 /// it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Selected {
-    /// The entry, with a bare `profile` normalized to the profile it resolved
-    /// to.
+    /// The entry, with a bare `subscription` normalized to the profile it
+    /// resolved to.
     pub entry: AuthEntry,
 
     /// The generation the stored profile held when this resolution read it.
@@ -500,7 +538,8 @@ fn record_outcome(
     now: DateTime<Utc>,
 ) {
     // Only a stored profile has state to record against.
-    let (AuthEntry::Profile(Some(profile)), Some(generation)) = (&spent.entry, spent.generation)
+    let (AuthEntry::Subscription(Some(profile)), Some(generation)) =
+        (&spent.entry, spent.generation)
     else {
         return;
     };
@@ -575,7 +614,9 @@ impl QuotaWatch {
     /// A watch over the profile `selected` names, if it names one.
     pub(super) fn new(store: Option<&CredentialStore>, selected: Option<&Selected>) -> Self {
         let profile = selected.and_then(|selected| match (&selected.entry, selected.generation) {
-            (AuthEntry::Profile(Some(name)), Some(generation)) => Some((name.clone(), generation)),
+            (AuthEntry::Subscription(Some(name)), Some(generation)) => {
+                Some((name.clone(), generation))
+            }
             _ => None,
         });
 
@@ -706,25 +747,31 @@ fn warning_notice(window: &WindowUtilization) -> String {
 /// The one-line notice announcing a credential switch.
 fn switch_notice(error: &StreamError, from: &AuthEntry, to: Option<&AuthEntry>) -> String {
     let reason = if error.is_auth_rejected() {
-        "credential rejected"
+        "rejected"
     } else if error.kind == crate::StreamErrorKind::SubscriptionExhausted {
-        "subscription limit reached"
+        "limit reached"
     } else {
         "quota exhausted"
     };
 
     match to {
-        Some(to) => format!("{reason} ({}) — continuing with {}", label(from), label(to)),
-        None => format!("{reason} ({})", label(from)),
+        Some(to) => format!("{} {reason}, continuing with {}", label(from), label(to)),
+        None => format!("{} {reason}, no more alternatives, aborting", label(from)),
     }
 }
 
-/// How a chain entry is named in user-facing output.
+/// How a chain entry reads in a notice: its kind in words, plus the credential
+/// it names.
 fn label(entry: &AuthEntry) -> String {
-    match entry {
-        AuthEntry::ApiKey => "api_key".to_owned(),
-        AuthEntry::Profile(Some(name)) => name.clone(),
-        AuthEntry::Profile(None) => "profile".to_owned(),
+    let kind = match entry {
+        AuthEntry::ApiKey(_) => "api key",
+        AuthEntry::Subscription(_) => "subscription",
+        AuthEntry::Named(_) => "credential",
+    };
+
+    match entry.name() {
+        Some(name) => format!("{kind} ({name})"),
+        None => kind.to_owned(),
     }
 }
 
@@ -741,22 +788,40 @@ fn walk_chain(
     let mut reasons = vec![];
 
     for entry in &config.auth {
+        // Settled here rather than in config, which sees neither source.
+        let owned;
+        let entry = match entry {
+            AuthEntry::Named(name) => {
+                owned = classify(&config.api_key_env, store, PROVIDER_ANTHROPIC, name)?;
+                &owned
+            }
+            entry => entry,
+        };
+
         match entry {
-            AuthEntry::ApiKey => {
+            AuthEntry::ApiKey(name) => {
                 if tried.contains(entry) {
                     skip(
                         &mut notices,
                         &mut reasons,
-                        "api_key: already tried for this request".to_owned(),
+                        format!("{entry}: already tried for this request"),
                     );
                     continue;
                 }
 
-                if let Ok(key) = env::var(&config.api_key_env) {
+                // A name no key answers to is a config mistake, not a
+                // credential to fall past: the next entry would bill a
+                // different key.
+                let variable = config
+                    .api_key_env
+                    .variable(name.as_deref())
+                    .map_err(ResolveError::ApiKeyEnv)?;
+
+                if let Some(key) = super::super::api_key_chain::read_key(variable) {
                     return Ok((
                         Landing::Ready(Credential::ApiKey(key)),
                         Selected {
-                            entry: AuthEntry::ApiKey,
+                            entry: entry.clone(),
                             generation: None,
                         },
                         notices,
@@ -766,20 +831,17 @@ fn walk_chain(
                 // Under the single-entry default chain, a missing key is
                 // the same failure it was before chains existed.
                 if config.auth.len() == 1 {
-                    return Err(ResolveError::MissingEnv(config.api_key_env.clone()));
+                    return Err(ResolveError::MissingEnv(variable.to_owned()));
                 }
 
                 skip(
                     &mut notices,
                     &mut reasons,
-                    format!(
-                        "api_key: environment variable {} is not set",
-                        config.api_key_env
-                    ),
+                    format!("{entry}: environment variable {variable} is not set"),
                 );
             }
 
-            AuthEntry::Profile(name) => {
+            AuthEntry::Subscription(name) => {
                 match walk_profile(store, name.as_deref(), entry, model, now, tried)? {
                     ProfileStep::Landed(landing, selected) => {
                         return Ok((landing, selected, notices));
@@ -787,13 +849,15 @@ fn walk_chain(
                     ProfileStep::Skip(reason) => skip(&mut notices, &mut reasons, reason),
                 }
             }
+
+            AuthEntry::Named(_) => unreachable!("classified above"),
         }
     }
 
     Err(ResolveError::ChainExhausted { reasons })
 }
 
-/// What one `profile` entry of the chain offered.
+/// What one `subscription` entry of the chain offered.
 enum ProfileStep {
     /// The entry produced a credential, or one a refresh can make usable.
     Landed(Landing, Selected),
@@ -802,7 +866,7 @@ enum ProfileStep {
     Skip(String),
 }
 
-/// Evaluate one `profile` chain entry.
+/// Evaluate one `subscription` chain entry.
 fn walk_profile(
     store: Option<&StoreDocument>,
     name: Option<&str>,
@@ -813,10 +877,10 @@ fn walk_profile(
 ) -> Result<ProfileStep, ResolveError> {
     let (profile, stored) = lookup_profile(store, name)?;
 
-    // A bare `profile` entry is reported as the profile it resolved to, so
-    // callers and logs name a concrete credential.
+    // A bare `subscription` entry is reported as the profile it resolved to,
+    // so callers and logs name a concrete credential.
     let selected = Selected {
-        entry: AuthEntry::Profile(Some(profile.to_owned())),
+        entry: AuthEntry::Subscription(Some(profile.to_owned())),
         generation: Some(stored.generation),
     };
 
@@ -824,20 +888,20 @@ fn walk_profile(
     // tried set holds the profile it resolved to.
     if tried.contains(entry) || tried.contains(&selected.entry) {
         return Ok(ProfileStep::Skip(format!(
-            "profile:{profile}: already tried for this request"
+            "subscription:{profile}: already tried for this request"
         )));
     }
 
     if stored.needs_relogin {
         return Ok(ProfileStep::Skip(format!(
-            "profile:{profile} needs re-login; run `jp provider auth login llm.anthropic \
-             --profile {profile}`"
+            "subscription:{profile} needs re-login; run `jp provider llm auth login anthropic \
+             --name {profile}`"
         )));
     }
 
     if let Some((scope, until)) = stored.active_cooldown(model, now) {
         return Ok(ProfileStep::Skip(format!(
-            "profile:{profile} cooling down until {until} ({scope})"
+            "subscription:{profile} cooling down until {until} ({scope})"
         )));
     }
 
@@ -863,6 +927,39 @@ fn walk_profile(
     Ok(ProfileStep::Landed(landing, selected))
 }
 
+/// Decide which kind of credential a bare name refers to.
+///
+/// A name both an API key and a subscription answer to is an error, not a
+/// guess.
+fn classify(
+    api_key_env: &ApiKeyEnv,
+    store: Option<&StoreDocument>,
+    provider: &str,
+    name: &str,
+) -> Result<AuthEntry, ResolveError> {
+    let keys = api_key_env.names();
+    let subscriptions: Vec<&str> = store
+        .and_then(|document| document.profiles(CATEGORY_LLM, provider))
+        .map(|profiles| profiles.keys().map(String::as_str).collect())
+        .unwrap_or_default();
+
+    match (keys.contains(&name), subscriptions.contains(&name)) {
+        (true, false) => Ok(AuthEntry::ApiKey(Some(name.to_owned()))),
+        (false, true) => Ok(AuthEntry::Subscription(Some(name.to_owned()))),
+        (true, true) => Err(ResolveError::AmbiguousName {
+            name: name.to_owned(),
+        }),
+        (false, false) => Err(ResolveError::UnknownName {
+            name: name.to_owned(),
+            keys: keys.iter().map(|name| (*name).to_owned()).collect(),
+            subscriptions: subscriptions
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect(),
+        }),
+    }
+}
+
 /// Record a skipped entry as both a chrome notice and an exhaustion reason.
 fn skip(notices: &mut Vec<String>, reasons: &mut Vec<String>, reason: String) {
     debug!("Skipping credential chain entry: {reason}");
@@ -872,8 +969,8 @@ fn skip(notices: &mut Vec<String>, reasons: &mut Vec<String>, reason: String) {
 
 /// Look up the profile a chain entry refers to.
 ///
-/// A named entry must exist; a bare `profile` entry refers to the sole stored
-/// profile and errors on zero or multiple candidates.
+/// A named entry must exist; a bare `subscription` entry refers to the sole
+/// stored profile and errors on zero or multiple candidates.
 fn lookup_profile<'a>(
     store: Option<&'a StoreDocument>,
     name: Option<&str>,

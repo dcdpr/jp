@@ -626,6 +626,7 @@ fn test_bearer_mode_prepends_identity_line_and_override() {
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: vec![],
     };
 
@@ -697,6 +698,7 @@ fn test_opus_4_6_request_uses_adaptive_thinking() {
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -744,6 +746,7 @@ fn test_opus_4_7_xhigh_effort_mapping() {
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -796,6 +799,7 @@ fn test_opus_4_6_xhigh_falls_back_to_high() {
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -841,6 +845,7 @@ fn test_opus_4_6_max_effort_mapping() {
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -1561,6 +1566,7 @@ fn test_fable_5_reasoning_off_omits_disabled_thinking() {
         deprecated: None,
         structured_output: Some(true),
         prefill: None,
+        subscription: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -1602,6 +1608,7 @@ fn test_opus_4_5_uses_budgetted_thinking() {
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: vec!["interleaved-thinking"],
     };
 
@@ -1644,6 +1651,7 @@ fn test_structured_output_sets_format() {
         deprecated: None,
         structured_output: Some(true),
         prefill: None,
+        subscription: None,
         features: vec![],
     };
 
@@ -1707,6 +1715,7 @@ fn test_schema_ignored_when_last_event_is_not_chat_request() {
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: vec![],
     };
 
@@ -1763,6 +1772,7 @@ fn test_adaptive_thinking_with_structured_output() {
         deprecated: None,
         structured_output: Some(true),
         prefill: None,
+        subscription: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -1830,6 +1840,7 @@ fn test_forced_tool_with_reasoning_returns_fallback() {
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: vec![],
     };
 
@@ -1903,6 +1914,7 @@ fn test_forced_tool_thinking_always_on_uses_escalating_nudge() {
         deprecated: None,
         structured_output: Some(true),
         prefill: None,
+        subscription: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -1983,6 +1995,7 @@ fn test_forced_tool_thinking_always_on_reasoning_off_still_soft_forces() {
         deprecated: None,
         structured_output: Some(true),
         prefill: None,
+        subscription: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -2047,6 +2060,7 @@ fn test_forced_tool_function_multi_tool_preserves_name() {
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: vec![],
     };
 
@@ -2122,6 +2136,7 @@ fn test_forced_tool_without_reasoning_no_fallback() {
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: vec![],
     };
 
@@ -2166,6 +2181,7 @@ fn test_auto_tool_choice_with_reasoning_no_fallback() {
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: vec![],
     };
 
@@ -2297,6 +2313,7 @@ fn test_continue_injected_when_prefill_unsupported() {
         structured_output: None,
         // Prefill unsupported.
         prefill: None,
+        subscription: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -2347,6 +2364,7 @@ fn test_prefill_preserved_for_supported_models() {
         deprecated: None,
         structured_output: None,
         prefill: Some(true),
+        subscription: None,
         features: vec!["interleaved-thinking"],
     };
 
@@ -2397,6 +2415,7 @@ fn test_no_injection_when_last_message_is_user() {
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -2434,6 +2453,7 @@ fn test_create_request_resends_signed_thinking_as_native_block() {
         deprecated: None,
         structured_output: None,
         prefill: Some(true),
+        subscription: None,
         features: vec![],
     };
 
@@ -2491,6 +2511,7 @@ fn test_create_request_resends_redacted_thinking_as_native_block() {
         deprecated: None,
         structured_output: None,
         prefill: Some(true),
+        subscription: None,
         features: vec![],
     };
 
@@ -2545,6 +2566,7 @@ fn test_create_request_falls_back_to_think_tags_without_signature() {
         deprecated: None,
         structured_output: None,
         prefill: Some(true),
+        subscription: None,
         features: vec![],
     };
 
@@ -2603,6 +2625,7 @@ fn test_create_request_drops_empty_reasoning_instead_of_empty_think_tags() {
         deprecated: None,
         structured_output: None,
         prefill: Some(true),
+        subscription: None,
         features: vec![],
     };
 
@@ -2661,6 +2684,7 @@ fn test_create_request_downgrades_trailing_assistant_thinking() {
         // Prefill unsupported, so a synthetic continue is appended after the
         // (downgraded) assistant turn.
         prefill: None,
+        subscription: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -2727,6 +2751,7 @@ fn test_create_request_drops_trailing_redacted_thinking() {
         // Prefill keeps the assistant message as the trailing continuation
         // target (no synthetic continue).
         prefill: Some(true),
+        subscription: None,
         features: vec![],
     };
 

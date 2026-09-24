@@ -184,14 +184,23 @@ expression: v
           "beta_headers": []
         },
         "cerebras": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "CEREBRAS_API_KEY",
           "base_url": "https://api.cerebras.ai"
         },
         "deepseek": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "DEEPSEEK_API_KEY",
           "base_url": "https://api.deepseek.com"
         },
         "google": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "GEMINI_API_KEY",
           "base_url": "https://generativelanguage.googleapis.com/v1beta"
         },
@@ -202,16 +211,27 @@ expression: v
           "base_url": "http://localhost:11434"
         },
         "openai": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "OPENAI_API_KEY",
           "base_url": "https://api.openai.com",
-          "base_url_env": "OPENAI_BASE_URL"
+          "base_url_env": "OPENAI_BASE_URL",
+          "codex_base_url": "https://chatgpt.com/backend-api/codex",
+          "codex_base_url_env": "JP_OPENAI_CODEX_BASE_URL"
         },
         "openrouter": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "OPENROUTER_API_KEY",
           "app_name": "JP",
           "base_url": "https://openrouter.ai"
         },
         "vllm": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "VLLM_API_KEY",
           "base_url": "http://127.0.0.1:8000"
         }
@@ -247,10 +267,10 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "**Calculating multiplication**\n\nI'm working through the multiplication: 191 times 7. I can break it down like this: 200 minus 9, then multiply that by 7, which gives me 1400 minus 63 — and that equals 1337. I could also look at it as 7 times 190, giving 1330, and then adding 7 to get to 1337. So, the answer is definitely 1337. Let’s keep it concise and clear!",
+      "reasoning": "**Calculating a multiplication**\n\nI need to provide a simple answer for the multiplication of 191 and 7. It looks like the result is 1337. Keeping it straightforward is important, so I'll make sure to present that clearly. There's something satisfying about getting the right answer for a basic calculation like this! Not much more to add—just presenting the number and ensuring it's accurate for the user's needs.",
       "metadata": {
-        "openai_item_id": "cnNfMDE1MTA4OTUxMDJhZTIzMzAxNmE4ODZkNzcwYmM4ODdkMmEwMTA4NDBmZDE1MGE1YTk=",
-        "openai_encrypted_content": "Z0FBQUFBQnFpRzE0OEVCVU5LVFlPZGc4VmRJdWVNbGhQUWdyRWVIbExfY0xrNW5DZG0xa0lOeE54RjBNZUJQQXYyQkRBTlpCOVVoMGxESEFmVmd0OE85cVR1aS1PWkJlbXhEaUJvX0FNU2VVMUQ4UnpHMHBxdjR5Z2dYX01QYVdmakJhWnV3OUtpLWxEanRfdnVwWWx3R2RmRzhNdF9QX0JhSGt0cVU3V1lPcnZlMlFPYXRlUnJwY2V4dVp3a0xOUDNKMlQzSUVxYVRLem1aYmdocXVQNjRwbDl6eUhzTWtsVmdqTkh4SFdtNUt5Nm9MOThmNkRvMjVpRmRwQUg3YkF2OVFMT0diYXAwb2RqMVFHazA1ZnNQVWRpRDJkX01iakxieGM2VmlGRVRyN0ktSkwyTjAzMDZUdExTNVlVekxIaWpYV0o4aFp4YVBpWktXSHRyU3ExczRKdlh2SVZxUzgwZHVSMDZNbTlka1FEREtXR2ljb2dwLUE3QkJxcV9YMjJwalpxdF8wb2N5ZEZfenBJOF9wUzdJUngzNUlJanhiYW5EU3hlN1A5ZVQ5R0hMYnE0SU9UMWVsVzN3WnJlWE5kb1kxT2d4VEJzQ0l1bVJ5QVpGMmtlbmNUTjI0eUlGb3JpcHRXMk04S1Z3bzFRXzNwNUlKblpEdVh1emhMZHZOWXptSnJYVnpkQlZWd1BKdnRZZmhJT3lGTHlUa2Nmb3A3TVFGczFvNnl3RnNMNnNtSXl5MU5fRzgzWWNGY2owTFdiZW5IWFNnU0t3U2U0X2I2SmlZM2xXYVB6TkxtWXR5OHY1ekVKOHd3ZlYtMVpoeEl6TC1ZbkU0eXRhTXM5Nmx2Sm1VYnk4b0FhZUM3MG5aWC1KTTBhTFRTQnowd0U0UjdHYzRpTjJ1em5CUl9UUjZmdWxCMnBXVVFBdUlxZGxoUEFqY2JveTVTMUdkMVFOMXJVbkowdzYtWDQzUm1aTjlTc2xVMzRabktVZjZtbld3SXh1Zk1qdjkxSGFSZS1vRHNvY01HY2RoRl95d3ZWSjJkdGZQX0NzOW1jNE5UYzljcmVQSFU2am1DbVB1R2hyX0JYNHFfNFdnLTV2d1V2SmUyb3ZVbVl1Z3JnOUJybjNZWms5ZHRmeGRfanE1Z0JnZmdyRlRpVWxyTTB3RjNURkM5Ymp5d2w1R2pMal9UMFdER2RhZjhIX21hT1J0Y2hxcllwSC1NRnZIYTllY2xEelF0WjlmUjRuazlDM1ZqNDJjNHdtN3EyVUlyQTQ1Z3RVSGJGdVJVZ3BubVhyeEoxY25wLXNFWHlWTGY3RmdENmtxdXhnRFc2QU1SNk1fV281LS1pN2hBeHdsc2prMXVUM3ZSLTJUeHdSZnRNLS15ajlDUzg0X2pUaXRFdURBbUVBc1BMV3BmclhiRnVuY1N1S3JnVDM1UFBNNVhONlNKNUgyaHZWRjY0LWl6Nzh5NkhVV1hrTG1reVp3M2VJWHFJMzYzazJwOU4yZVdwU1Z1dnREcklCWWQxaFVzSWdpd1gtQVhOZ1pMU0Y5TlRkUTQteHE5MGN0YUkta3RKVC1XSGowNTVzcFFWX0pnTUhYZ084ODhDMGJwckdXa0NiZmdvZVJfb091REh1NG1fRjdrWkR1UWw5NDczcENFbkxiX19RNjZDZmNQS3dIX2ZVckhtNmdQN0IyajFWMTFTWG9xSmF6OU5YcUpMSGxqcHM3UWdILWFDeGc0Yll2a01SY2paMk1JSTg4d2V0RjhwQXpoSERtX3hzNlNnUHg1NW1NeGY0ajdMRXowZ2ZleXFyOUFJX0NfM3YtclhYdmtCUTAycXU0T2wydFl0S2NSVW9CeEs2RE1fM2M4cz0="
+        "openai_item_id": "cnNfMGI5NjE3NmEzYTc1MThkYzAxNmFiM2I4MmIxNmEwODdkMjkyMDg5ZTRjODdiMWYyNTY=",
+        "openai_encrypted_content": "Z0FBQUFBQnFzN2dydzFMN2xrM2Z5a0pxVUg0UmNFN21VcjFZMENvNGROZEM2TndKQ1h4WW5BZUJPR3ZKMDZqaUZ4dE5PcjZ4ZmpSbW82SDMwSUFYOHVaMHBuRVN1SlBrRXVBQWcyaDJZSXJTeHZnN2tuU19IREtuNmFsQlNoX2NMYmFTNFBrZE1Lb2s3bjBfTVVDMmRZU01nUEI3aEJ5LXV5a3FEc1dVcS16T2RLTXhtZmR6SlRBT3Rpd3liNTI0Zl9OQllVTzBtUTJHYXZ1MG50U05vQVY4QlFYQkNibFlDSDVxVjVlSXJqY3hJOWRxY01LdTBwcThza3RuQmU4WGVidkRUY1ZaVGFtNFpnZ25UVGVFSGhuWDRnNXFKY0xROHpCZmdWUEJfZmlBSWxFM3FpSW5ZbWFHOGIzbnNKMGRwZEx5YjJqOVN2dGg3bDk4dmczcjYycEoyeTg0RzBLSTlSVmhLVWdmbFdqUFYyUXpObFBFbXNNTTFxMFVlSTMzand4dVdsRlFwLVl6di1wMldZZUNWRUgwTHFSNGswRGoxMjIxQjc1WjBJZEJ6ems3REtqTFBzZEdNX08tRTJGbnc0S1FJemFiZlhfVjA1WG9xREJtYW9YWDZ0c0RxbWczT1J6Q3dyXzdMelo4TkV3MjZ6WUlQekZyck1OS3I3SUdCbC1hYmdtcVNqLWVYMHQwakJMQUlrcjlyU3lqZ3R1OFBRS0VLWE1Yb1BTSHowSlVnb1M0cWhnQUdHd0NKbS1rdzd2NDlZOWs1ZjBONWdUa292T0dPNGozLXEwWGNjMWhvX29yVmJyVktpYUc5S1pJbzU2LUpRblBqYjVDUEI3WmE2U0wzNEszbkhUMGpJRk9mQlF1VDZVUjZXZnpTeWVsYy15MXE5SUM5cEZXNms2d1JQUE1QX3hSX2ZHSHh3X3l1RXowZHBabmNnNFdjY2huTlZJbnA0QmxzT19CWXRTSW9aYXBFczZNbGtWM2ZDWFVtZ1FPLWRnZGlfX2dvQzFjdXdVeWMzaTVTQXNNeXVJVWx1Mk5oZ3ZfN1pXakQyX1RkZjhfY0loVFZtakQ0cnNON2dRc0FGUndWWUdRYnA5MXdwdFc3TEs4eTF5TFFXM0d3anZrMzNMZlFFSG5ndmtpQVAzT2dlWURlUzZpM3N2a19EQVVvNU9GSTVLbG5WdlJjajJpN1pFQWU2MzJsV0dYYWNvQnlYejhkUHdqdEt3VndTZ2ZIMTdOVTdTMlpVdHVXSzdRcXI5ZVgyNTJPM2V1WWRjcnRFV1libVI4dXR4dl9SQWNOZnB2Xy1RUHpqTTVvZXlYT1UzdG9NS3ZxNGxVOWRIZG1LY29IT1dndVlWS0RtYlFaQmxVaUhHOExSUUtWOWpyZlNWMUNLQlpvS2dsRWZWUHF1ZG80T2JJR0ZUeDE3N3dCYURLNVFVc3pnSUJrdXd1NlR1aFZUOUxzTG00QVZxMmZPSGt5bFBXekdpSHM3UFBVS0JiOTMwdTMxeFEzQ1J1SldFMkpCZEJWR0RRRHppbWVQLVQ1WG1FRE9MUWt5eDZmeFVzQVMwQURYMmszekpyLVlfOERvbkwyNHZDZHJmaVNpMlRQR0hmSHFfMFZ5c2lxOHZvRHExdldWNEtXcGdxVVNwUFRBMUdRWGE5aFE9PQ=="
       }
     },
     {
@@ -258,7 +278,8 @@ expression: v
       "type": "chat_response",
       "message": "1337",
       "metadata": {
-        "openai_item_id": "bXNnXzAxNTEwODk1MTAyYWUyMzMwMTZhODg2ZDc4YjY4MDg3ZDJiYTFhNmI2MDRhNzA2NjVj"
+        "openai_item_id": "bXNnXzBiOTYxNzZhM2E3NTE4ZGMwMTZhYjNiODJiZWJkNDg3ZDI4ZDNmOWJhYjMzYWQ1N2Qw",
+        "openai_phase": "ZmluYWxfYW5zd2Vy"
       }
     },
     {
@@ -282,9 +303,9 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "1337",
+      "message": "7 * 191 equals 1337.",
       "metadata": {
-        "openai_item_id": "bXNnXzAxNTEwODk1MTAyYWUyMzMwMTZhODg2ZDdhMmQ5ODg3ZDJiNzNmMGEzY2M5MmI4ZDFh"
+        "openai_item_id": "bXNnXzBiOTYxNzZhM2E3NTE4ZGMwMTZhYjNiODJkZmY2NDg3ZDI4MTMyZTJlOGNjODZkODM3"
       }
     }
   ]

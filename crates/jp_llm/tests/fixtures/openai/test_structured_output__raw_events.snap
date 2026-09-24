@@ -5,93 +5,73 @@ expression: v
 [
     [
         Part {
-            index: 1,
+            index: 0,
             part: Structured(
                 "",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: Structured(
                 "{\"",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: Structured(
                 "titles",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: Structured(
                 "\":[\"",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: Structured(
-                "Generate",
+                "Conversation",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: Structured(
-                " a",
+                " Title",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: Structured(
-                " title",
+                " Generation",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
-            part: Structured(
-                " for",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " this",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " conversation",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
+            index: 0,
             part: Structured(
                 "\"]",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: Structured(
                 "}",
             ),
             metadata: {},
         },
         Flush {
-            index: 1,
+            index: 0,
             metadata: {
-                "openai_item_id": String("msg_088c41056f971fe1016a886da6f56887d2980995f33da10a61"),
+                "openai_item_id": String("msg_0c428b720e2c6cac016ab3b82abd4487d2a5ddf2e116432419"),
+                "openai_phase": String("final_answer"),
             },
         },
         Finished(

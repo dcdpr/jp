@@ -14,6 +14,10 @@ pub mod window;
 #[cfg(test)]
 pub(crate) mod test;
 
+#[cfg(test)]
+#[path = "cross_route_tests.rs"]
+mod cross_route_tests;
+
 pub use credential::{AccountIdentity, Credential, ProviderAuth, provider_auth};
 pub use error::{Error, StreamError, StreamErrorKind, ToolError};
 pub use provider::Provider;

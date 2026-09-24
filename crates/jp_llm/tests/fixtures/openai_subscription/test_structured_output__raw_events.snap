@@ -1,0 +1,81 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: Structured(
+                "",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                "{\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                "titles",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                "\":[\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                "Conversation",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                " Title",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                " Generation",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                "\"]",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                "}",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {
+                "openai_item_id": String("msg_00c88e510131a15a016ab3b82ee42087d2a696b040c1987800"),
+                "openai_phase": String("final_answer"),
+            },
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

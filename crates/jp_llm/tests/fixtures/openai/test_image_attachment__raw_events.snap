@@ -5,23 +5,24 @@ expression: v
 [
     [
         Part {
-            index: 1,
+            index: 0,
             part: Message(
                 "",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: Message(
-                "apple",
+                "Apple",
             ),
             metadata: {},
         },
         Flush {
-            index: 1,
+            index: 0,
             metadata: {
-                "openai_item_id": String("msg_0d7a4512dbd87835016a886da0cb4887d28e349f6f703b7f8d"),
+                "openai_item_id": String("msg_0059cf825a0a025d016ab3b82aa99087d2a93290a393e40f18"),
+                "openai_phase": String("final_answer"),
             },
         },
         Finished(

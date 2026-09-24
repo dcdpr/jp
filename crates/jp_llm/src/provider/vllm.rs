@@ -1,7 +1,7 @@
 //! The vLLM provider: a self-hosted server that speaks the OpenAI-compatible
 //! `/v1/chat/completions` dialect and checks a Bearer token.
 
-use std::{env, time::Duration};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use base64::Engine as _;
@@ -297,6 +297,7 @@ fn map_model(model: &VllmModel) -> Result<ModelDetails, Error> {
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: vec![],
     })
 }
@@ -305,8 +306,8 @@ impl TryFrom<&VllmConfig> for Vllm {
     type Error = Error;
 
     fn try_from(config: &VllmConfig) -> Result<Self, Self::Error> {
-        let api_key = env::var(&config.api_key_env)
-            .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
+        let (api_key, _) =
+            super::api_key_chain::resolve("vllm", &config.auth, &config.api_key_env)?;
 
         let client = reqwest::Client::builder()
             .default_headers(HeaderMap::from_iter([(
@@ -322,6 +323,33 @@ impl TryFrom<&VllmConfig> for Vllm {
         })
     }
 }
+
+/// vLLM's recorded-test route.
+#[cfg(test)]
+pub(crate) static TEST_SUPPORT: super::ApiOnlyTestSupport = super::ApiOnlyTestSupport(&API_ROUTE);
+
+#[cfg(test)]
+static API_ROUTE: super::ApiTestRoute = super::ApiTestRoute {
+    id: ProviderId::Vllm,
+    base_url: |config| config.vllm.base_url.clone(),
+    set_base_url: |config, url| config.vllm.base_url = url,
+    use_replay_credentials: |config| {
+        config.vllm.api_key_env = super::replay_credential_env().into();
+    },
+    model: || ModelDetails {
+        id: "vllm/Qwen/Qwen3.8-Flash-Next-NVFP4".parse().unwrap(),
+        display_name: None,
+        context_window: Some(131_072),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        subscription: None,
+        features: vec![],
+    },
+};
 
 #[cfg(test)]
 #[path = "vllm_tests.rs"]

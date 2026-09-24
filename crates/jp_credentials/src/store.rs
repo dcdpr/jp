@@ -612,7 +612,7 @@ pub struct StoredCredential {
     pub cooldowns: BTreeMap<String, DateTime<Utc>>,
 
     /// Whether the credential was rejected by the provider and needs a fresh
-    /// `jp provider auth login`.
+    /// `jp provider llm auth login`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub needs_relogin: bool,
 
@@ -689,7 +689,7 @@ pub enum CredentialSecret {
 }
 
 impl CredentialSecret {
-    /// A short label for `jp provider auth list`.
+    /// A short label for `jp provider llm auth list`.
     #[must_use]
     pub fn kind(&self) -> &'static str {
         match self {

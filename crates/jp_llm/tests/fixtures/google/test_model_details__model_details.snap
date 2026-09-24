@@ -43,6 +43,7 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
 ]
