@@ -33,12 +33,10 @@ use jp_config::{
     model::id::{self, ProviderId},
     style::stderr_rows::{RowCount, StderrRows},
 };
-#[cfg(unix)]
-use jp_conversation::event::InquiryId;
 use jp_conversation::{
     Conversation, ConversationEvent,
     event::{
-        CancellationReason, ChatRequest, ChatResponse, InquiryResponse, InquirySource,
+        CancellationReason, ChatRequest, ChatResponse, InquiryId, InquiryResponse, InquirySource,
         ToolCallRequest, TurnStart,
     },
 };
@@ -67,8 +65,6 @@ use tokio::{sync::Notify, time::timeout};
 use tokio_util::sync::CancellationToken;
 
 use super::*;
-#[cfg(unix)]
-use crate::render::metadata::get_rendered_arguments;
 use crate::{
     access::approvals::ApprovalStore,
     cmd::query::{
@@ -77,13 +73,20 @@ use crate::{
             ToolCoordinator,
             executor::{
                 Executor, ExecutorResult, ExecutorSource, PermissionInfo,
-                mock::{MockExecutor, TestExecutorSource},
+                mock::{
+                    MockExecutor, TestExecutorSource, asking_formatter, asking_formatter_runner,
+                    no_commands,
+                },
             },
             mcp_executor::TerminalExecutorSource,
         },
     },
+    render::metadata::get_rendered_arguments,
     signals::testing::{detached_router, test_router},
 };
+
+#[path = "turn_loop_tool_order_tests.rs"]
+mod tool_order;
 
 fn empty_executor_source() -> Box<dyn ExecutorSource> {
     Box::new(TestExecutorSource::new())
@@ -1737,15 +1740,15 @@ impl Executor for SleepingExecutor {
         &self.tool_name
     }
 
-    fn arguments(&self) -> &Map<String, Value> {
-        &self.arguments
+    fn arguments(&self) -> Map<String, Value> {
+        self.arguments.clone()
     }
 
     fn permission_info(&self) -> Option<PermissionInfo> {
         None
     }
 
-    fn set_arguments(&mut self, _args: Value) {}
+    fn set_arguments(&self, _args: Value) {}
 
     async fn execute(
         &self,
@@ -5349,15 +5352,15 @@ impl Executor for TalkingExecutor {
         &self.tool_name
     }
 
-    fn arguments(&self) -> &Map<String, Value> {
-        &self.arguments
+    fn arguments(&self) -> Map<String, Value> {
+        self.arguments.clone()
     }
 
     fn permission_info(&self) -> Option<PermissionInfo> {
         None
     }
 
-    fn set_arguments(&mut self, _args: Value) {}
+    fn set_arguments(&self, _args: Value) {}
 
     async fn execute(
         &self,
@@ -6287,15 +6290,15 @@ impl Executor for AskingTalkingExecutor {
         &self.tool_name
     }
 
-    fn arguments(&self) -> &Map<String, Value> {
-        &self.arguments
+    fn arguments(&self) -> Map<String, Value> {
+        self.arguments.clone()
     }
 
     fn permission_info(&self) -> Option<PermissionInfo> {
         None
     }
 
-    fn set_arguments(&mut self, _args: Value) {}
+    fn set_arguments(&self, _args: Value) {}
 
     async fn execute(
         &self,
@@ -6319,8 +6322,6 @@ impl Executor for AskingTalkingExecutor {
         }
 
         ExecutorResult::NeedsInput {
-            tool_id: self.tool_id.clone(),
-            tool_name: self.tool_name.clone(),
             question: Question::boolean("which", "Which one?").expect("valid question id"),
             source: InquirySource::tool(self.tool_name.clone()),
             accumulated_answers: answers.clone(),
@@ -6361,13 +6362,13 @@ impl Executor for InquiryMockExecutor {
     fn tool_name(&self) -> &str {
         &self.tool_name
     }
-    fn arguments(&self) -> &Map<String, Value> {
-        &self.arguments
+    fn arguments(&self) -> Map<String, Value> {
+        self.arguments.clone()
     }
     fn permission_info(&self) -> Option<PermissionInfo> {
         None
     }
-    fn set_arguments(&mut self, _args: Value) {}
+    fn set_arguments(&self, _args: Value) {}
 
     async fn execute(
         &self,
@@ -6378,8 +6379,6 @@ impl Executor for InquiryMockExecutor {
         for q in &self.questions {
             if !answers.contains_key(q.id.as_str()) {
                 return ExecutorResult::NeedsInput {
-                    tool_id: self.tool_id.clone(),
-                    tool_name: self.tool_name.clone(),
                     question: q.clone(),
                     source: InquirySource::tool(self.tool_name.clone()),
                     accumulated_answers: answers.clone(),
@@ -7982,21 +7981,11 @@ async fn test_retry_counter_resets_on_successful_event() {
     assert!(test_result.is_ok(), "Test timed out");
 }
 
-/// Regression: when the LLM emits a tool call for an unconfigured tool (which
-/// becomes a `Resolved` pending entry) followed by a configured one (which
-/// becomes `Approved`), `build_execution_plan` assigns plan indices 0 and 1 in
-/// stream order.
-/// The approved entry then has plan index 1, but `execute_with_prompting` was
-/// sizing its internal `results` vector to `executors.len()` (= 1) and indexing
-/// into it with the plan index — which panicked with `index out of bounds: the
-/// len is 1 but the index is 1`.
+/// A call to an unconfigured tool, settled on arrival, followed by a configured
+/// one that runs: both get their responses, in the order the calls were made.
 ///
-/// The fix re-bases plan indices to contiguous local positions inside
-/// `execute_with_prompting`, then pairs each response back with its
-/// caller-provided plan index on output.
-/// The downstream `commit_tool_responses` uses those plan indices when merging
-/// approved + pre-resolved responses, so they appear in the original stream
-/// order.
+/// Mixing calls settled without running with calls that run once indexed the
+/// running ones out of bounds.
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn test_unavailable_tool_before_approved_does_not_panic() {
@@ -9011,6 +9000,7 @@ async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
         let client = Client::default();
         let (source, owner) = TerminalExecutorSource::start(
             BuiltinExecutors::new().register("http_tool", HttpInquiryTool(count.clone())),
+            no_commands(),
             &definitions,
             &config.conversation.tools,
             Arc::new(ApprovalStore::default()),
@@ -9097,7 +9087,6 @@ async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
 /// runs: the call is shown with the answer, and the tool runs once, with the
 /// same answer, without asking again.
 #[tokio::test]
-#[cfg(unix)]
 #[expect(
     clippy::too_many_lines,
     reason = "Keep the end-to-end setup and persisted assertions in one scenario"
@@ -9106,25 +9095,12 @@ async fn a_formatters_question_is_answered_before_the_call_runs() {
     timeout(Duration::from_secs(10), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
-        // Serialized rather than hand-written, so the formatter speaks the
-        // wire format a real tool emits.
-        let question = serde_json::to_string(&Outcome::NeedsInput {
-            question: Question::boolean("confirm", "Continue?").unwrap(),
-        })
-        .unwrap();
-        let script = [
-            "{% if tool.answers.confirm is defined %}printf 'confirm = \
-             {{tool.answers.confirm}}'{% else %}printf '%s' '",
-            &question,
-            "'{% endif %}",
-        ]
-        .concat();
         let mut config = AppConfig::new_test();
         let partial: PartialToolConfig = serde_json::from_value(json!({
             "source": "builtin", "run": "unattended", "format": "unattended",
             "questions": {"confirm": {"answer": true}},
             "style": {
-                "parameters": {"program": "sh", "args": ["-c", script], "shell": false},
+                "parameters": asking_formatter(),
                 "results_file_link": "off",
             },
         }))
@@ -9147,6 +9123,7 @@ async fn a_formatters_question_is_answered_before_the_call_runs() {
         let client = Client::default();
         let (source, owner) = TerminalExecutorSource::start(
             BuiltinExecutors::new().register("http_tool", HttpInquiryTool(count.clone())),
+            asking_formatter_runner("Continue?"),
             &definitions,
             &config.conversation.tools,
             Arc::new(ApprovalStore::default()),
@@ -9185,7 +9162,8 @@ async fn a_formatters_question_is_answered_before_the_call_runs() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)),
             ChatRequest::from("Run the tool."),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();
@@ -9239,7 +9217,6 @@ async fn a_formatters_question_is_answered_before_the_call_runs() {
 /// formatter describes it with the answer, and runs with that same answer: what
 /// the user approves is what executes.
 #[tokio::test]
-#[cfg(unix)]
 #[expect(
     clippy::too_many_lines,
     reason = "Keep the end-to-end setup and the prompt-time snapshot in one scenario"
@@ -9248,23 +9225,12 @@ async fn an_approval_prompt_shows_the_call_its_formatter_describes_with_the_answ
     timeout(Duration::from_secs(10), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
-        let question = serde_json::to_string(&Outcome::NeedsInput {
-            question: Question::boolean("confirm", "Continue?").unwrap(),
-        })
-        .unwrap();
-        let script = [
-            "{% if tool.answers.confirm is defined %}printf 'confirm = \
-             {{tool.answers.confirm}}'{% else %}printf '%s' '",
-            &question,
-            "'{% endif %}",
-        ]
-        .concat();
         let mut config = AppConfig::new_test();
         let partial: PartialToolConfig = serde_json::from_value(json!({
             "source": "builtin", "run": "ask", "format": "unattended",
             "questions": {"confirm": {"answer": true}},
             "style": {
-                "parameters": {"program": "sh", "args": ["-c", script], "shell": false},
+                "parameters": asking_formatter(),
                 "results_file_link": "off",
             },
         }))
@@ -9287,6 +9253,7 @@ async fn an_approval_prompt_shows_the_call_its_formatter_describes_with_the_answ
         let client = Client::default();
         let (source, owner) = TerminalExecutorSource::start(
             BuiltinExecutors::new().register("http_tool", HttpInquiryTool(count.clone())),
+            asking_formatter_runner("Continue?"),
             &definitions,
             &config.conversation.tools,
             Arc::new(ApprovalStore::default()),
@@ -9330,7 +9297,8 @@ async fn an_approval_prompt_shows_the_call_its_formatter_describes_with_the_answ
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)),
             ChatRequest::from("Run the tool."),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();

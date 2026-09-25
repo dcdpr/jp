@@ -27,6 +27,7 @@ server = [
     "dep:base64",
     "dep:camino",
     "dep:futures",
+    "dep:jp_process",
     "dep:jp_tool",
     "dep:minijinja",
     "dep:reqwest",
@@ -40,6 +41,7 @@ server = [
 
 [dependencies]
 jp_config = { workspace = true }
+jp_process = { workspace = true, optional = true }
 jp_tool = { workspace = true, optional = true }
 
 async-trait = { workspace = true, optional = true }
@@ -70,6 +72,8 @@ url = { workspace = true, optional = true }
 which = { workspace = true }
 
 [dev-dependencies]
+jp_process = { workspace = true, features = ["mock"] }
+
 assert_matches = { workspace = true }
 camino-tempfile = { workspace = true }
 # The conformance client speaks JSON-RPC and SSE over plain HTTP by hand, on

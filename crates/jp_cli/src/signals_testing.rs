@@ -6,7 +6,7 @@
 //! inverted through [`SignalRouter::with_signal_source`].
 
 use std::{
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic::Ordering},
     time::Duration,
 };
 
@@ -49,6 +49,18 @@ impl TestSignals {
             .lock()
             .expect("exit codes lock poisoned")
             .clone()
+    }
+}
+
+impl SignalRouter {
+    /// How many interrupt handlers have been registered on this router, over
+    /// its whole life.
+    ///
+    /// Only ever grows, so a test can wait for a phase that registers its own
+    /// handler to have started, and press Ctrl-C into that phase rather than
+    /// the one before it.
+    pub(crate) fn handlers_registered(&self) -> u64 {
+        self.inner.next_handler_id.load(Ordering::Relaxed)
     }
 }
 

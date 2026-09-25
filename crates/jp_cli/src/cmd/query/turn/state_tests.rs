@@ -21,3 +21,28 @@ fn next_inquiry_attempt_increments_per_key_and_resets_per_turn() {
     let mut next_turn = TurnState::default();
     assert_eq!(next_turn.next_inquiry_attempt("call_1", "confirm"), 1);
 }
+
+/// A remembered decision covers the tool, not the call it was given for.
+#[test]
+fn a_remembered_permission_applies_to_every_call_to_the_tool() {
+    let mut state = TurnState::default();
+    assert_eq!(state.remembered_permission("fs_delete_file"), None);
+
+    state.remember_permission("fs_delete_file", false);
+
+    assert_eq!(state.remembered_permission("fs_delete_file"), Some(false));
+    assert_eq!(state.remembered_permission("fs_modify_file"), None);
+}
+
+#[test]
+fn a_remembered_answer_is_kept_per_tool_and_question() {
+    let mut state = TurnState::default();
+    state.remember_answer("git_commit", "confirm", Value::Bool(true));
+
+    assert_eq!(
+        state.remembered_answer("git_commit", "confirm"),
+        Some(&Value::Bool(true))
+    );
+    assert_eq!(state.remembered_answer("git_commit", "message"), None);
+    assert_eq!(state.remembered_answer("git_stage", "confirm"), None);
+}

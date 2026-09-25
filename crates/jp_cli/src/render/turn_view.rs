@@ -72,6 +72,14 @@ pub(crate) struct TurnView {
     ///
     /// [`ToolRenderer`]: super::ToolRenderer
     tool_separator: Arc<AtomicBool>,
+
+    /// Shared with the [`ToolRenderer`] (wired via [`Self::set_tool_drawn`]):
+    /// the flag it raises when it draws, which decides whether the content
+    /// after a tool-call region is spaced from it.
+    /// Kept here so a reconfigured chat renderer is wired to it too.
+    ///
+    /// [`ToolRenderer`]: super::ToolRenderer
+    tool_drawn: Option<Arc<AtomicBool>>,
 }
 
 impl TurnView {
@@ -91,6 +99,7 @@ impl TurnView {
             assistant_header_rendered: false,
             pending_turn_detail: None,
             tool_separator: Arc::new(AtomicBool::new(false)),
+            tool_drawn: None,
         }
     }
 
@@ -99,6 +108,14 @@ impl TurnView {
     /// [`ToolRenderer`]: super::ToolRenderer
     pub(crate) fn set_tool_separator(&mut self, flag: Arc<AtomicBool>) {
         self.tool_separator = flag;
+    }
+
+    /// Wire this view's drawn-chrome flag to a [`ToolRenderer`].
+    ///
+    /// [`ToolRenderer`]: super::ToolRenderer
+    pub(crate) fn set_tool_drawn(&mut self, flag: Arc<AtomicBool>) {
+        self.chat.set_tool_drawn(Arc::clone(&flag));
+        self.tool_drawn = Some(flag);
     }
 
     /// Set the dimmed detail attached to the first role header of the upcoming
@@ -321,6 +338,9 @@ impl TurnView {
     ) {
         self.flush();
         self.chat = ChatRenderer::new(printer.clone(), style, self.flow);
+        if let Some(flag) = &self.tool_drawn {
+            self.chat.set_tool_drawn(Arc::clone(flag));
+        }
         self.structured = StructuredRenderer::new(printer);
         self.assistant_name = assistant_name;
         self.model_id = model_id;

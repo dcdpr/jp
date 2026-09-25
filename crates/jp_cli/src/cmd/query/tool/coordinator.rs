@@ -1,88 +1,55 @@
-//! Tool execution coordination for the query stream pipeline.
+//! Tool call coordination for the query stream pipeline.
 //!
-//! The [`ToolCoordinator`] manages parallel execution of multiple tool calls.
+//! The [`ToolCoordinator`] takes each tool call from the moment the assistant
+//! finishes requesting it to the response the conversation records.
+//! [`submit`] hands it a call, [`handle`] advances its calls on each event
+//! [`next_event`] yields while the response is still streaming, and [`finish`]
+//! drives them to their responses once it has ended.
 //!
-//! # Execution Model
+//! # Calls in flight
 //!
-//! The coordinator uses an **event-driven streaming model** where:
+//! A call runs as far as it can on its own as soon as it arrives: its argument
+//! formatter describes it, and a question the formatter or the tool asks is
+//! routed straight away.
+//! The assistant answers the questions routed to it for several calls at once.
 //!
-//! 1. All tools are spawned as independent async tasks
-//! 2. Results stream in as tools complete (not all at once)
-//! 3. When a tool needs user input, a prompt is shown while other tools
-//!    continue running in the background
-//! 4. After the user answers, the tool is restarted with the accumulated
-//!    answers
-//! 5. This continues until all tools have completed
-//! 6. Results are returned in the original request order
+//! # The terminal
 //!
-//! <!-- end list -->
+//! One prompt is on screen at a time, and calls are announced in the order the
+//! assistant sent them.
+//! A call's header, description, approval prompt, and questions to the user
+//! wait until every earlier call has been announced or settled, so a call is
+//! never shown ahead of one that came before it.
+//! A call skipped by a "no" remembered for the turn is settled when its turn
+//! comes, and nothing of it is shown.
 //!
-//! ```text
-//! ┌───────────────────────────────────────────────────────────────┐
-//! │                        Event Channel                          │
-//! │                                                               │
-//! │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
-//! │  │ Tool 1   │  │ Tool 2   │  │ Tool 3   │  │ Signal   │       │
-//! │  │ (spawn)  │  │ (spawn)  │  │ (spawn)  │  │ Stream   │       │
-//! │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘       │
-//! │       │             │             │             │             │
-//! │       └─────────────┴─────────────┴─────────────┘             │
-//! │                           │                                   │
-//! │                           ▼                                   │
-//! │                    ┌─────────────┐                            │
-//! │                    │ Event Loop  │◄──────┐                    │
-//! │                    └──────┬──────┘       │                    │
-//! │                           │              │                    │
-//! │         ┌─────────────────┼──────────────┼───────────┐        │
-//! │         ▼                 ▼              │           ▼        │
-//! │  ┌────────────┐   ┌────────────┐   ┌─────┴─────┐  ┌────────┐  │
-//! │  │ Completed  │   │ NeedsInput │   │ Prompt    │  │ Signal │  │
-//! │  │ → collect  │   │ (User)     │   │ Answer    │  │ Handle │  │
-//! │  └────────────┘   └─────┬──────┘   │ → restart │  └────────┘  │
-//! │                         │          └───────────┘              │
-//! │                         ▼                                     │
-//! │                  ┌─────────────────┐                          │
-//! │                  │ spawn_blocking  │                          │
-//! │                  │ prompt_question │───► sends PromptAnswer   │
-//! │                  └─────────────────┘                          │
-//! └───────────────────────────────────────────────────────────────┘
-//! ```
+//! # Questions
 //!
-//! # Question Handling
+//! Every question takes one route, whichever step asked it: the tool's or its
+//! argument formatter's, before approval or while the tool runs.
+//! An answer remembered for the turn or configured for the tool comes first,
+//! then the user or the assistant, as the question's `target` says, and each
+//! round-trip is recorded as an inquiry.
+//! A question still open when its call is settled is withdrawn.
 //!
-//! When a tool returns `NeedsInput`, the coordinator checks the configuration:
+//! # Release
 //!
-//! - **User target**: Prompt is shown via `spawn_blocking` (other tools keep
-//!   running).
-//!   When answered, the tool is restarted with the answer.
-//! - **LLM target**: The question is formatted as a response asking the LLM to
-//!   re-run the tool with the answer.
-//!   The tool is marked as completed.
-//! - **Static answer**: When the tool asks a question with a configured
-//!   `QuestionConfig.answer`, the value is supplied without a prompt and the
-//!   round-trip is recorded as an inquiry request/response pair.
+//! Nothing runs until the response has finished streaming and every call has
+//! been approved or settled.
+//! The approved calls then run in parallel, and their results are reviewed and
+//! recorded.
 //!
-//! # Non-Blocking Prompts
-//!
-//! Interactive prompts run on a blocking thread (`spawn_blocking`) so the async
-//! event loop continues processing other tool results.
-//! If multiple tools need input, prompts are queued and shown sequentially.
-//!
-//! # Thread Safety
-//!
-//! [`TurnState`] is wrapped in [`Arc<RwLock<>>`] to allow concurrent access.
-//! Each executor reads needed state, executes, then writes back results.
-//!
-//! # Testing
-//!
-//! The coordinator uses the [`Executor`] trait for tool execution.
+//! [`finish`]: ToolCoordinator::finish
+//! [`handle`]: ToolCoordinator::handle
+//! [`next_event`]: ToolCoordinator::next_event
+//! [`submit`]: ToolCoordinator::submit
 
 use std::{
     collections::{HashMap, VecDeque},
+    future::pending,
     sync::Arc,
 };
 
-use async_trait::async_trait;
 use indexmap::IndexMap;
 use inquire::error::InquireError;
 use jp_config::{
@@ -106,15 +73,12 @@ use jp_workspace::ConversationMut;
 use serde_json::{Map, Value};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use url::Url;
 
 use super::{
     ToolRenderer,
-    executor::{
-        Executor, ExecutorError, ExecutorResult, ExecutorSource, FormatterQuestions,
-        PermissionInfo, Review,
-    },
+    executor::{Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo, Review},
     inquiry::{self, InquiryBackend, InquiryError},
     prompter::{PermissionResult, ToolPrompter},
 };
@@ -122,143 +86,93 @@ use crate::{
     Error,
     cmd::query::{
         interrupt::{
-            InterruptAction, TurnInterrupts,
+            TurnInterrupts,
             signals::{
                 InterruptUi, ToolInterruptResult, apply_tool_interrupt, as_tool_interrupt,
                 handle_tool_interrupt,
             },
         },
-        turn::state::{PermissionCacheKey, ToolAnswerCacheKey, TurnState},
+        turn::state::TurnState,
     },
-    render::tool::RenderOutcome,
-    signals::{InterruptNotice, SignalRouter},
+    signals::SignalRouter,
 };
 
-/// Fold a resolved tool interrupt into the execution loop's state.
-///
-/// The tools with no result yet are the ones a cancellation answers for, so
-/// they are collected as the interrupt lands rather than after the loop, where
-/// a result that arrived in between would have filled one in.
-fn record_tool_interrupt(
-    result: &ToolInterruptResult,
-    state: &PhaseState,
-    cancellation_token: &CancellationToken,
-    outcome: &mut ExecutionOutcome,
-    tools_cancelled: &mut bool,
-    cancellation_message: &mut Option<String>,
-    cancelled_indices: &mut Vec<usize>,
-) {
-    match result {
-        // Either the user chose to keep waiting, or the menu could not be shown
-        // and nothing happened. A declined press was already handed down the
-        // stack.
-        ToolInterruptResult::Continue
-        | ToolInterruptResult::PromptFailed
-        | ToolInterruptResult::Declined => {}
+/// What the rest of the turn lends the coordinator while it handles an event.
+pub(crate) struct Host<'a> {
+    /// Runs the prompts a call needs: approval, questions, result review.
+    pub prompter: &'a Arc<ToolPrompter>,
 
-        ToolInterruptResult::Restart => {
-            // Hold each call's service-side invocation open before cancelling
-            // the Host workers, so the re-preparation that follows continues
-            // the same logical calls instead of submitting new ones.
-            for tool in state.tools.values() {
-                tool.executor.pause_for_restart();
-            }
+    /// Answers a question routed to an assistant instead of the user.
+    pub inquiry_backend: &'a Arc<dyn InquiryBackend>,
 
-            cancellation_token.cancel();
-            outcome.upgrade(ExecutionOutcome::Restart);
-        }
+    /// The conversation each inquiry is recorded on.
+    pub conv: &'a ConversationMut,
 
-        ToolInterruptResult::Cancelled { response, exit } => {
-            let unfinished: Vec<usize> = state
-                .reviews
-                .iter()
-                .enumerate()
-                .filter(|(_, review)| review.is_none())
-                .map(|(index, _)| index)
-                .collect();
+    /// What the user asked to remember for the turn, and the inquiry counter.
+    pub turn_state: &'a mut TurnState,
 
-            // Hold each unfinished call open before cancelling the Host
-            // workers, so the cancellation response this phase records is what
-            // its MCP caller receives. An agent that owns the call builds its
-            // transcript from that, not from the conversation.
-            for index in &unfinished {
-                if let Some(tool) = state.tools.get(index) {
-                    tool.executor.hold_for_response();
-                }
-            }
+    /// Draws each call's header, description, and result.
+    pub renderer: &'a mut ToolRenderer,
 
-            cancellation_token.cancel();
-            *cancelled_indices = unfinished;
-            *tools_cancelled = true;
-            *cancellation_message = response.clone();
-            if *exit {
-                outcome.upgrade(ExecutionOutcome::Stopped);
-            }
-        }
+    /// Shades the prompts a call opens with the call's reasoning region.
+    pub printer: &'a Printer,
 
-        // The menu itself was cancelled with Ctrl-C: the tools are already
-        // cancelled; surface the escalation so the turn loop begins a graceful
-        // shutdown.
-        ToolInterruptResult::Escalate => outcome.upgrade(ExecutionOutcome::Escalated),
-    }
+    /// Whether a user is there to answer a prompt at all.
+    pub interactive: bool,
 }
 
+/// Something a call's work in flight reported back.
 #[derive(Debug)]
-enum ExecutionEvent {
-    /// A Ctrl-C press delivered to this execution phase's interrupt handler.
-    Interrupt(InterruptNotice),
+pub(crate) enum ToolEvent {
+    /// An executor step finished.
+    Step { call: usize, result: ExecutorResult },
 
-    /// An interrupt from a client driving this turn from outside the process,
-    /// which arrives already decided because there was no menu to show.
-    ClientInterrupt(InterruptAction),
-
-    ToolResult {
-        index: usize,
-        result: ExecutorResult,
+    /// The call's approval prompt closed.
+    Permission {
+        call: usize,
+        result: Result<PermissionResult, String>,
     },
 
-    PromptAnswer {
-        index: usize,
-        question_id: String,
+    /// The user answered a question.
+    Answered {
+        call: usize,
         inquiry_id: InquiryId,
+        question_id: String,
         answer: Value,
-        persist_level: jp_tool::PersistLevel,
+        persist_level: PersistLevel,
         /// Whether the persisted response must be recorded as `Redacted` (the
         /// question's answer type is `Secret`).
         redact: bool,
     },
 
-    PromptCancelled {
-        index: usize,
+    /// A question prompt closed without an answer.
+    Unanswered {
+        call: usize,
         inquiry_id: InquiryId,
         /// Why the prompt closed without an answer, mapped from the prompter
         /// error at the prompt site.
         reason: CancellationReason,
     },
 
-    /// Result of a structured inquiry (LLM answering a tool question).
-    InquiryResult {
-        index: usize,
+    /// The assistant answered a question, or could not.
+    Inquired {
+        call: usize,
         inquiry_id: InquiryId,
         question_id: String,
         question_text: String,
         result: Result<Value, InquiryError>,
     },
 
-    ResultModeProcessed {
-        index: usize,
-        review: Review,
-    },
+    /// The call's result review closed.
+    Reviewed { call: usize, review: Review },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ExecutionResult {
-    /// What the Host settled on per tool, paired with the plan index supplied
-    /// by the caller in `executors`.
-    /// Indices may be sparse when the caller's plan also contains pre-resolved
-    /// tools that bypass execution; merging those back into the original stream
-    /// order is the caller's job.
-    pub reviews: Vec<(usize, Review)>,
+    /// What the Host settled on per tool call, keyed by the call's id.
+    ///
+    /// Merging these back into the stream's order is the caller's job.
+    pub reviews: IndexMap<String, Review>,
 
     /// How the execution phase ended, and what the caller should do next.
     pub outcome: ExecutionOutcome,
@@ -335,224 +249,191 @@ fn stderr_sink(
     Some(Arc::new(move |line: &str| sink.push(line)))
 }
 
-struct ExecutingTool {
-    executor: Arc<dyn Executor>,
+/// The tool calls of one response, from arrival to their recorded responses.
+struct Batch {
+    /// Every call the batch took, in the order the assistant sent them.
+    calls: Vec<Call>,
+
+    /// Calls settled on arrival, because their tool is not available.
+    unavailable: Vec<ToolCallResponse>,
+
+    /// Where each call's work in flight reports back.
+    events: mpsc::UnboundedSender<ToolEvent>,
+    receiver: mpsc::UnboundedReceiver<ToolEvent>,
+
+    /// Parent of every token handed to this batch's work in flight.
+    cancellation: CancellationToken,
+
+    /// Prompts waiting for the terminal.
+    prompts: VecDeque<Prompt>,
+
+    /// Whether a prompt owns the terminal.
+    prompting: bool,
+
+    /// Whether the response has finished streaming, so no more calls arrive.
+    stream_ended: bool,
+
+    /// Whether the approved calls were released to run.
+    released: bool,
+
+    /// Whether the progress row was claimed for the released calls.
+    progress: bool,
+}
+
+impl Batch {
+    fn new() -> Self {
+        let (events, receiver) = mpsc::unbounded_channel();
+        Self {
+            calls: Vec::new(),
+            unavailable: Vec::new(),
+            events,
+            receiver,
+            cancellation: CancellationToken::new(),
+            prompts: VecDeque::new(),
+            prompting: false,
+            stream_ended: false,
+            released: false,
+            progress: false,
+        }
+    }
+
+    /// The first call not yet announced: the only one whose approval-stage
+    /// prompts may use the terminal.
+    fn cursor(&self) -> usize {
+        self.calls
+            .iter()
+            .position(|call| !call.announced)
+            .unwrap_or(self.calls.len())
+    }
+
+    /// Whether every call has a response.
+    fn settled(&self) -> bool {
+        self.calls.iter().all(|call| call.review.is_some())
+    }
+}
+
+/// One tool call in a batch.
+struct Call {
     tool_id: String,
     tool_name: String,
-    accumulated_answers: IndexMap<String, Value>,
+    executor: Arc<dyn Executor>,
 
-    /// Where this tool's stderr goes while it runs.
-    ///
-    /// Built once when the tool is first spawned and reused across the
-    /// re-spawns an answered question triggers, so a tool that asks a question
-    /// keeps feeding the same window row afterwards.
+    /// Answers to the call's questions, which its tool and formatter both see.
+    answers: IndexMap<String, Value>,
+
+    /// Where the tool's stderr goes while it runs, set when it is released.
     stderr: Option<StderrSink>,
+
+    /// What the call is waiting for.
+    wait: Wait,
+
+    /// Whether the call has been approved, or settled without running.
+    decided: bool,
+
+    /// Whether the call has been shown, or settled with nothing to show.
+    announced: bool,
+
+    /// Whether the call was released to run.
+    released: bool,
+
+    /// What was drawn for the call ahead of its approval prompt, and the
+    /// arguments it was drawn from.
+    pre_render: Option<PreRendered>,
+
+    /// The question the call is waiting on an answer to.
+    question: Option<OpenQuestion>,
+
+    /// What the Host settled on.
+    review: Option<Review>,
 }
 
-/// What an execution phase talks to, fixed from the moment it starts.
-///
-/// Every handler in the phase needs some of these and none of them changes, so
-/// they travel as one borrow rather than as eight repeated parameters.
-struct PhaseServices<'a> {
-    /// Runs the inline prompts a question or a result review needs.
-    prompter: Arc<ToolPrompter>,
-
-    /// Answers a question routed to an assistant instead of the user.
-    inquiry_backend: Arc<dyn InquiryBackend>,
-
-    /// Where a spawned prompt, inquiry, or execution reports back to.
-    event_tx: mpsc::Sender<ExecutionEvent>,
-
-    /// Parent of every token this phase hands to a spawned task.
-    cancellation_token: CancellationToken,
-
-    /// The conversation each inquiry pair is recorded on.
-    conv: &'a ConversationMut,
-
-    /// Whether a user is there to answer a prompt at all.
-    interactive: bool,
-}
-
-/// What an execution phase is keeping track of while its tools run.
-///
-/// Indexed by the phase's own contiguous index, not the caller's plan index:
-/// see [`ToolCoordinator::execute_with_prompting`] for why the two differ.
-struct PhaseState {
-    /// Every call the phase started, kept for the life of the phase so an
-    /// answered question can re-spawn the tool it belongs to.
-    tools: HashMap<usize, ExecutingTool>,
-
-    /// What the Host settled on per call, filled in as calls finish.
-    reviews: Vec<Option<Review>>,
-
-    /// Prompts waiting for the terminal, which one call holds at a time.
-    pending_prompts: VecDeque<PendingPrompt>,
-
-    /// Whether a prompt currently owns the terminal.
-    prompt_active: bool,
-}
-
+/// What a call is waiting for.
 #[derive(Debug)]
-enum PendingPrompt {
+enum Wait {
+    /// An executor step is running.
+    Step,
+
+    /// A question is out, with the user or the assistant.
+    Answer,
+
+    /// Parked at admission, for its turn at the terminal.
+    Admission,
+
+    /// Its approval prompt is open.
+    Approval(PermissionInfo),
+
+    /// Parked at release, for the batch to be released.
+    Release,
+
+    /// Its result is waiting to be reviewed.
+    Review,
+
+    /// Settled.
+    Done,
+}
+
+/// What a call showed ahead of its approval prompt.
+struct PreRendered {
+    /// Content to persist for replay, when the style produced any.
+    content: Option<String>,
+
+    /// The arguments it was drawn from; an edit at the prompt makes it stale.
+    arguments: Map<String, Value>,
+}
+
+/// A question a call is waiting on.
+struct OpenQuestion {
+    inquiry_id: InquiryId,
+
+    /// Cancels the assistant's answer; `None` for a question the user answers.
+    inquiry: Option<CancellationToken>,
+}
+
+/// Something waiting for the terminal.
+enum Prompt {
+    /// A question for the user.
     Question {
-        index: usize,
+        call: usize,
         question: Question,
         inquiry_id: InquiryId,
     },
-    ResultMode {
-        index: usize,
-        tool_id: String,
-        tool_name: String,
+
+    /// A result waiting to be reviewed.
+    Review {
+        call: usize,
         response: ToolCallResponse,
-        result_mode: ResultMode,
+        mode: ResultMode,
     },
 }
 
-/// A question one tool asked, and what routing it needs to know.
-///
-/// The four travel together because answering needs all of them: the call to
-/// resume, the name its configuration is keyed on, the question itself, and the
-/// provenance the recorded `InquiryRequest` carries.
-struct ToolQuestion {
-    tool_id: String,
-    tool_name: String,
-    question: Question,
-    source: InquirySource,
-}
-
-/// Answers the questions one call's argument formatter asks while the call is
-/// prepared or approved.
-///
-/// A question is routed the way one asked while the tool runs is: an answer
-/// remembered for the turn or configured for the tool first, then the user or
-/// the assistant, as the question's target says.
-/// Each round-trip is recorded on the conversation as an inquiry.
-struct FormatterAnswers<'a> {
-    /// Holds the tool configuration questions are routed by.
-    coordinator: &'a ToolCoordinator,
-
-    /// Answers remembered for the turn, and the per-question attempt counter.
-    turn_state: &'a mut TurnState,
-
-    /// Asks the user.
-    prompter: &'a ToolPrompter,
-
-    /// The conversation each inquiry is recorded on.
-    conv: &'a ConversationMut,
-
-    /// Asks the assistant.
-    inquiry_backend: &'a dyn InquiryBackend,
-
-    /// Whether a user is there to answer a prompt.
-    interactive: bool,
-
-    /// The call the formatter describes.
-    tool_id: &'a str,
-
-    /// The name the call's tool configuration is keyed on.
-    tool_name: &'a str,
-}
-
-#[async_trait]
-impl FormatterQuestions for FormatterAnswers<'_> {
-    async fn answer(&mut self, question: Question) -> Result<Value, ToolCallResponse> {
-        let conv = self.conv;
-        let inquiry_id = ToolCoordinator::open_inquiry(
-            conv,
-            self.turn_state,
-            self.tool_id,
-            InquirySource::tool(self.tool_name),
-            &question,
-        );
-        if let Some(answer) = self.coordinator.preset_answer(
-            conv,
-            self.turn_state,
-            self.tool_name,
-            &inquiry_id,
-            &question,
-        ) {
-            return Ok(answer);
-        }
-
-        let target = self
-            .coordinator
-            .question_target(self.tool_name, question.id.as_str())
-            .unwrap_or(QuestionTarget::User);
-        let is_secret = question.answer_type == AnswerType::Secret;
-        let tool_id = self.tool_id;
-        let settled = |result| ToolCallResponse {
-            id: tool_id.to_owned(),
-            result,
-        };
-
-        if self.interactive && target.is_user() {
-            return match self.prompter.prompt_question(&question) {
-                Ok(prompted) => {
-                    // A secret answer is persisted as `Redacted`, and never
-                    // enters the turn-answer cache.
-                    if is_secret {
-                        ToolCoordinator::record_inquiry_redacted(conv, &inquiry_id);
-                    } else {
-                        ToolCoordinator::record_inquiry_answer(conv, &inquiry_id, &prompted.answer);
-                        if prompted.persist_level == PersistLevel::Turn {
-                            self.turn_state.remembered_tool_answers.insert(
-                                ToolAnswerCacheKey::new(self.tool_name, question.id.as_str()),
-                                prompted.answer.clone(),
-                            );
-                        }
-                    }
-                    Ok(prompted.answer)
-                }
-                Err(error) => {
-                    let reason = ToolCoordinator::prompt_cancellation_reason(&error);
-                    if reason == CancellationReason::BackendError {
-                        warn!(%error, "Formatter question prompt failed.");
-                    }
-                    let result = ToolCoordinator::cancelled_input_result(&reason);
-                    ToolCoordinator::record_inquiry_cancelled(conv, &inquiry_id, reason);
-                    Err(settled(result))
-                }
-            };
-        }
-
-        if is_secret {
-            let (reason, message) =
-                ToolCoordinator::secret_refusal(self.tool_name, target.is_user());
-            ToolCoordinator::record_inquiry_cancelled(conv, &inquiry_id, reason);
-            return Err(settled(Err(message)));
-        }
-
-        let events = ToolCoordinator::paused_events(conv, self.tool_id, &question);
-        let cancellation = self.coordinator.cancellation_token.child_token();
-        match self
-            .inquiry_backend
-            .inquire(
-                events,
-                inquiry_id.as_str(),
-                self.tool_name,
-                &question,
-                cancellation,
-            )
-            .await
-        {
-            Ok(answer) => {
-                ToolCoordinator::record_inquiry_answer(conv, &inquiry_id, &answer);
-                Ok(answer)
-            }
-            Err(error) => {
-                ToolCoordinator::record_inquiry_cancelled(
-                    conv,
-                    &inquiry_id,
-                    ToolCoordinator::cancellation_reason(&error),
-                );
-                Err(settled(Err(ToolCoordinator::inquiry_failure(
-                    self.tool_name,
-                    &question.text,
-                    &error,
-                ))))
-            }
+impl Prompt {
+    fn call(&self) -> usize {
+        match self {
+            Self::Question { call, .. } | Self::Review { call, .. } => *call,
         }
     }
+}
+
+/// The calls a "stop" from the interrupt menu cancelled, and what they answer
+/// with.
+#[derive(Default)]
+struct Stop {
+    /// The calls that had no response when the user stopped them.
+    cancelled: Vec<usize>,
+
+    /// The user's message, which every cancelled call answers with; `None`
+    /// answers each with its tool's configured cancellation response.
+    message: Option<String>,
+}
+
+/// An executor step to run.
+enum Step {
+    /// Submit the call.
+    Prepare { render_arguments: bool },
+    /// Admit the call.
+    Approve,
+    /// Release the call, or answer the question it is waiting on.
+    Execute,
 }
 
 /// What rendering a tool call before its approval prompt produced.
@@ -567,44 +448,14 @@ enum PreRender {
 }
 
 /// Result of [`ToolCoordinator::decide_permission`] for a single tool.
+#[derive(Debug)]
 pub enum PermissionDecision {
     /// Tool can run immediately (unattended, persisted approval, non-TTY).
-    Approved(Box<dyn Executor>),
+    Approved,
     /// Tool should not run (persisted skip).
     Skipped(ToolCallResponse),
     /// Requires an interactive user prompt before deciding.
-    NeedsPrompt {
-        executor: Box<dyn Executor>,
-        info: PermissionInfo,
-    },
-}
-
-/// Final outcome of [`ToolCoordinator::resolve_tool_call_decision`], the
-/// per-tool permission pipeline.
-///
-/// This wraps the full decide → pre-render → prompt → apply → post-render
-/// flow into one of three terminal states.
-/// Callers map this into their own storage shape (see the streaming path in
-/// `turn_loop.rs` and the batch path in
-/// [`ToolCoordinator::run_permission_phase`]).
-pub enum ToolCallDecision {
-    /// Tool is approved and ready to be queued for execution.
-    /// Includes any rendered argument content from the formatter, which the
-    /// caller is responsible for persisting (typically into a `ToolCallRequest`
-    /// event's metadata).
-    Approved {
-        executor: Box<dyn Executor>,
-        rendered_arguments: Option<String>,
-    },
-    /// Tool was skipped: persisted "n", `RunMode::Skip`, or user declined at
-    /// the prompt.
-    /// The response is the synthesized skip message ready to be appended to the
-    /// conversation stream.
-    Skipped(ToolCallResponse),
-    /// Tool failed before it could run, typically because a custom-format
-    /// formatter command errored.
-    /// The response tells the LLM the tool was not executed and may be retried.
-    Failed(ToolCallResponse),
+    NeedsPrompt(PermissionInfo),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -652,13 +503,13 @@ fn tool_question_to_inquiry_question(q: &Question) -> InquiryQuestion {
 }
 
 pub struct ToolCoordinator {
-    executors: Vec<(usize, Box<dyn Executor>)>,
+    /// The calls of the response being handled, once one has arrived.
+    batch: Option<Batch>,
     tool_states: HashMap<String, ToolCallState>,
     tools_config: ToolsConfig,
     interrupt_config: ToolInterruptConfig,
     executor_source: Box<dyn ExecutorSource>,
-    cancellation_token: CancellationToken,
-    /// Rendered custom argument output accumulated during the permission phase.
+    /// Rendered custom argument output for approved calls.
     /// Keyed by tool call ID.
     /// Drained by the turn loop to write into event metadata.
     rendered_arguments: HashMap<String, String>,
@@ -677,12 +528,11 @@ impl ToolCoordinator {
 
     pub fn new(tools_config: ToolsConfig, executor_source: Box<dyn ExecutorSource>) -> Self {
         Self {
-            executors: Vec::new(),
+            batch: None,
             tool_states: HashMap::new(),
             tools_config,
             interrupt_config: ToolInterruptConfig::default(),
             executor_source,
-            cancellation_token: CancellationToken::new(),
             rendered_arguments: HashMap::new(),
         }
     }
@@ -698,8 +548,8 @@ impl ToolCoordinator {
 
     /// Drain accumulated rendered argument content.
     ///
-    /// Returns `(tool_call_id, rendered_content)` pairs collected during the
-    /// permission phase.
+    /// Returns `(tool_call_id, rendered_content)` pairs for the calls that were
+    /// approved.
     /// The caller writes these into event metadata.
     pub fn drain_rendered_arguments(&mut self) -> HashMap<String, String> {
         std::mem::take(&mut self.rendered_arguments)
@@ -707,6 +557,11 @@ impl ToolCoordinator {
 
     pub fn is_prompting(&self) -> bool {
         self.tool_states.values().any(ToolCallState::is_prompting)
+    }
+
+    /// Whether a call's prompt owns the terminal.
+    pub(crate) fn prompt_active(&self) -> bool {
+        self.batch.as_ref().is_some_and(|batch| batch.prompting)
     }
 
     pub(crate) fn set_tool_state(&mut self, tool_id: impl Into<String>, state: ToolCallState) {
@@ -721,10 +576,6 @@ impl ToolCoordinator {
         ) {
             self.tool_states.remove(tool_id);
         }
-    }
-
-    fn clear_tool_states(&mut self) {
-        self.tool_states.clear();
     }
 
     pub fn parameter_style(&self, tool_name: &str) -> ParametersStyle {
@@ -746,14 +597,7 @@ impl ToolCoordinator {
     /// produced.
     /// A formatter configured with `format = "ask"` has not run yet at this
     /// point, which is [`PreRender::Deferred`].
-    ///
-    /// Returns `Err` if a formatter failed.
-    /// The caller should treat that as a tool failure and skip prompting.
-    fn pre_render_for_prompt(
-        &self,
-        executor: &dyn Executor,
-        tool_renderer: &ToolRenderer,
-    ) -> Result<PreRender, String> {
+    fn pre_render_for_prompt(&self, executor: &dyn Executor, renderer: &ToolRenderer) -> PreRender {
         let name = executor.tool_name();
         if matches!(self.parameter_style(name), ParametersStyle::Custom(_))
             && executor.formatted_arguments().is_none()
@@ -762,232 +606,35 @@ impl ToolCoordinator {
             // the tool would be surprising, so `format = "ask"` holds the
             // formatter back until admission. Built-in styles are pure and
             // have no side effects, so they always render before the prompt.
-            return Ok(PreRender::Deferred);
+            return PreRender::Deferred;
         }
 
-        match self.render_executor(executor, tool_renderer) {
-            RenderOutcome::Rendered { content } => Ok(PreRender::Ready(content)),
-            RenderOutcome::Suppressed { error } => Err(error),
-        }
+        PreRender::Ready(self.render_executor(executor, renderer))
     }
 
-    /// Single-tool permission pipeline.
-    ///
-    /// Encapsulates the full decide → pre-render → prompt → apply →
-    /// post-render flow.
-    /// Returns a [`ToolCallDecision`] that the caller maps to its storage
-    /// shape.
-    ///
-    /// This is the seam where new permission-related features should land:
-    /// telemetry, sandboxing decisions, alternate prompting modes, anything
-    /// that needs to apply uniformly to both the streaming path (in
-    /// `turn_loop.rs`) and the batch/restart path
-    /// ([`Self::run_permission_phase`]).
-    /// Both paths funnel through here, so changes don't drift between sites.
-    ///
-    /// # Pipeline steps
-    ///
-    /// 0. Prepare the call.
-    ///    A custom formatter's questions are answered here, through
-    ///    [`FormatterAnswers`], so the call is approved as the formatter
-    ///    describes it with those answers; the tool runs with the same answers.
-    /// 1. [`Self::decide_permission`] resolves the executor's run mode against
-    ///    persisted answers and whether a user is available to answer.
-    /// 2. If the decision is `NeedsPrompt`, pre-render the call via
-    ///    [`Self::pre_render_for_prompt`] (always for built-in parameter
-    ///    styles; only when `format = "unattended"` for `Custom` formatters),
-    ///    then prompt the user via [`ToolPrompter::prompt_permission`], then
-    ///    apply the result via [`Self::apply_permission_result`].
-    ///    If the user edited the arguments at the prompt, the pre-render is
-    ///    discarded so step 3 re-renders with the args that will actually
-    ///    execute.
-    /// 3. For approved tools, render the call (skipping if pre-rendered).
-    ///    A formatter held back until approval asks its questions before this.
-    /// 4. Return [`ToolCallDecision::Approved`], `Skipped`, or `Failed`.
-    #[expect(clippy::too_many_lines)]
-    pub(crate) async fn resolve_tool_call_decision(
-        &mut self,
-        mut executor: Box<dyn Executor>,
-        prompter: &ToolPrompter,
-        interactive: bool,
-        turn_state: &mut TurnState,
-        tool_renderer: &ToolRenderer,
-        printer: &Printer,
-        conv: &ConversationMut,
-        inquiry_backend: &dyn InquiryBackend,
-    ) -> ToolCallDecision {
-        // A tool call reached from a reasoning block sits inside that block's
-        // shading, and a prompt is a visual row like any other (RFD 095). The
-        // region is resolved per tool call, so it is read once this tool is
-        // known, from the one place holding both the renderer that owns it and
-        // the printer that draws the prompts.
-        printer.set_prompt_background(tool_renderer.current_region());
-
-        // Asking the service to format arguments for a call the user already
-        // said no to would run a formatter command for output nobody sees.
-        let remembered_denial = interactive
-            && executor.needs_permission()
-            && turn_state
-                .remembered_permission_decisions
-                .get(&PermissionCacheKey::new(executor.tool_name()))
-                == Some(&false);
-        let render_arguments = !self.is_hidden(executor.tool_name()) && !remembered_denial;
-        let tool_id = executor.tool_id().to_owned();
-        let tool_name = executor.tool_name().to_owned();
-        let prepared = executor
-            .prepare(render_arguments, &mut FormatterAnswers {
-                coordinator: self,
-                turn_state,
-                prompter,
-                conv,
-                inquiry_backend,
-                interactive,
-                tool_id: &tool_id,
-                tool_name: &tool_name,
-            })
-            .await;
-        match prepared {
-            Ok(Some(response)) => {
-                self.set_tool_state(&response.id, ToolCallState::Completed);
-                return ToolCallDecision::Skipped(response);
-            }
-            Ok(None) => {}
-            Err(error) => {
-                self.set_tool_state(executor.tool_id(), ToolCallState::Completed);
-                return ToolCallDecision::Failed(ToolCallResponse {
-                    id: executor.tool_id().into(),
-                    result: Err(error.to_string()),
-                });
-            }
-        }
-
-        // Step 1: decide.
-        let decision = self.decide_permission(executor, interactive, turn_state);
-
-        // Step 2: handle prompt path. After this match, `executor` is
-        // approved and `pre_rendered` is `Some(content)` if pre-rendering
-        // already happened, `None` if a post-render is still needed.
-        let (mut executor, pre_rendered) = match decision {
-            PermissionDecision::Approved(executor) => (executor, None),
-            PermissionDecision::Skipped(response) => {
-                return ToolCallDecision::Skipped(response);
-            }
-            PermissionDecision::NeedsPrompt { executor, info } => {
-                self.set_tool_state(&info.tool_id, ToolCallState::AwaitingPermission);
-
-                // Pre-render before the prompt so the user sees the
-                // rendered call (not raw arguments) when deciding.
-                // Built-in parameter styles always pre-render; Custom
-                // formatters are gated on `format = "unattended"`
-                // because they shell out to a user-controlled command.
-                let pre = match self.pre_render_for_prompt(executor.as_ref(), tool_renderer) {
-                    Ok(PreRender::Ready(content)) => Some(content),
-                    Ok(PreRender::Deferred) => None,
-                    Err(error) => {
-                        return ToolCallDecision::Failed(Self::render_failed_response(
-                            info.tool_id.clone(),
-                            &info.tool_name,
-                            &error,
-                        ));
-                    }
-                };
-
-                // Snapshot the args we just rendered so we can detect a
-                // user edit. If `e` changes the arguments, the pre-render
-                // reflects pre-edit values and would diverge from what
-                // actually executes, so drop it and let step 3 re-render with
-                // the post-edit args.
-                let pre_edit_args = executor.arguments().clone();
-
-                let result = prompter.prompt_permission(&info);
-                match self.apply_permission_result(result, &info, turn_state, executor) {
-                    Ok(executor) => {
-                        let pre = if executor.arguments() == &pre_edit_args {
-                            pre
-                        } else {
-                            None
-                        };
-                        (executor, pre)
-                    }
-                    Err(response) => return ToolCallDecision::Skipped(response),
-                }
-            }
-        };
-
-        let approved = executor
-            .approve(&mut FormatterAnswers {
-                coordinator: self,
-                turn_state,
-                prompter,
-                conv,
-                inquiry_backend,
-                interactive,
-                tool_id: &tool_id,
-                tool_name: &tool_name,
-            })
-            .await;
-        match approved {
-            Ok(None) => {}
-            Ok(Some(response)) => {
-                self.set_tool_state(&response.id, ToolCallState::Completed);
-                return ToolCallDecision::Skipped(response);
-            }
-            Err(error) => {
-                self.set_tool_state(executor.tool_id(), ToolCallState::Completed);
-                return ToolCallDecision::Failed(ToolCallResponse {
-                    id: executor.tool_id().into(),
-                    result: Err(error.to_string()),
-                });
-            }
-        }
-
-        // Step 3: render. If pre-rendered, use that; otherwise render now.
-        let rendered_arguments = if let Some(pre) = pre_rendered {
-            pre
-        } else {
-            let tool_name = executor.tool_name().to_owned();
-            match self.render_executor(executor.as_ref(), tool_renderer) {
-                RenderOutcome::Rendered { content } => content,
-                RenderOutcome::Suppressed { error } => {
-                    let id = executor.tool_id().to_owned();
-                    return ToolCallDecision::Failed(Self::render_failed_response(
-                        id, &tool_name, &error,
-                    ));
-                }
-            }
-        };
-
-        debug!(tool = executor.tool_name(), "Tool call decision resolved.");
-
-        ToolCallDecision::Approved {
-            executor,
-            rendered_arguments,
-        }
-    }
-
-    /// Render one tool call's arguments for display.
+    /// Render one tool call's arguments for display, returning the content to
+    /// persist for replay.
     ///
     /// A `Custom` parameter style shows what the execution service's formatter
     /// produced.
     /// The formatter is a user-configured command, so it runs once, there,
     /// under the call's access policy and cancellation token, and never a
     /// second time here.
-    fn render_executor(&self, executor: &dyn Executor, renderer: &ToolRenderer) -> RenderOutcome {
+    fn render_executor(&self, executor: &dyn Executor, renderer: &ToolRenderer) -> Option<String> {
         let name = executor.tool_name();
         if self.is_hidden(name) {
-            return RenderOutcome::Rendered { content: None };
+            return None;
         }
         let ParametersStyle::Custom(_) = self.parameter_style(name) else {
-            return self.render_approved_tool(name, executor.arguments(), renderer);
+            self.render_approved_tool(name, &executor.arguments(), renderer);
+            return None;
         };
-        let Some(formatted) = executor.formatted_arguments() else {
-            // The service formats a call's arguments before releasing it,
-            // unless the call is hidden or configured not to run. Both of
-            // those are already handled, so no output here means there is no
-            // call to announce: a bare header would say otherwise.
-            return RenderOutcome::Rendered { content: None };
-        };
-        renderer.render_custom_result(name, formatted.clone().map_err(|error| error.to_string()))
+        // The service formats a call's arguments before releasing it, unless
+        // the call is hidden or configured not to run. Both of those are
+        // already handled, so no output here means there is no call to
+        // announce: a bare header would say otherwise.
+        let formatted = executor.formatted_arguments()?;
+        renderer.render_custom_result(name, formatted)
     }
 
     /// Acknowledge the execution service after the conversation owner flushes.
@@ -1057,39 +704,22 @@ impl ToolCoordinator {
             .unwrap_or_default()
     }
 
+    /// Cancel the work in flight for the calls being handled.
     #[allow(dead_code)]
     pub fn cancel(&self) {
-        self.cancellation_token.cancel();
-    }
-
-    /// Resets internal state for a new execution cycle.
-    ///
-    /// Call this when the streaming phase has already prepared executors and
-    /// decided permissions, so the executing phase starts with a fresh
-    /// cancellation token.
-    pub fn reset_for_execution(&mut self) {
-        self.cancellation_token = CancellationToken::new();
-    }
-
-    /// Prepares executors for the given tool call requests.
-    ///
-    /// Tools that cannot be resolved (e.g. missing from config or definitions)
-    /// are returned as pre-built error responses rather than failing the entire
-    /// batch.
-    pub fn prepare(&mut self, requests: Vec<ToolCallRequest>) -> Vec<(usize, ToolCallResponse)> {
-        self.executors.clear();
-        self.clear_tool_states();
-        self.cancellation_token = CancellationToken::new();
-
-        let mut unavailable = Vec::new();
-        for (index, request) in requests.into_iter().enumerate() {
-            match self.prepare_one(request) {
-                Ok(executor) => self.executors.push((index, executor)),
-                Err(response) => unavailable.push((index, response)),
-            }
+        if let Some(batch) = &self.batch {
+            batch.cancellation.cancel();
         }
+    }
 
-        unavailable
+    /// Drop the calls being handled, stopping their work in flight.
+    ///
+    /// Their requests get their responses elsewhere, as when a response that
+    /// failed mid-stream is requested again.
+    pub(crate) fn abandon(&mut self) {
+        if let Some(batch) = self.batch.take() {
+            batch.cancellation.cancel();
+        }
     }
 
     /// Prepares a single executor for a tool call request.
@@ -1124,11 +754,10 @@ impl ToolCoordinator {
         })
     }
 
-    /// Renders the tool call header and arguments after permission approval.
+    /// Renders the tool call header and arguments.
     ///
     /// Prints the header with inline-formatted arguments.
-    /// A hidden tool renders nothing and still returns `Rendered`, because it
-    /// also still executes.
+    /// A hidden tool renders nothing.
     ///
     /// A `Custom` parameter style is rendered by [`render_executor`] from the
     /// execution service's formatter output, not here.
@@ -1139,20 +768,18 @@ impl ToolCoordinator {
         tool_name: &str,
         arguments: &Map<String, Value>,
         tool_renderer: &ToolRenderer,
-    ) -> RenderOutcome {
+    ) {
         if self.is_hidden(tool_name) {
-            return RenderOutcome::Rendered { content: None };
+            return;
         }
 
         let style = self.parameter_style(tool_name);
-        tool_renderer.render_approved(tool_name, arguments, &style)
+        tool_renderer.render_approved(tool_name, arguments, &style);
     }
 
     /// Determines permission for a single tool without blocking on user input.
     ///
     /// Does NOT render any output.
-    /// Rendering happens after the permission decision via
-    /// [`render_approved_tool`].
     ///
     /// Returns one of:
     ///
@@ -1160,75 +787,69 @@ impl ToolCoordinator {
     ///   non-interactive)
     /// - `Skipped`: tool should not run (persisted "n")
     /// - `NeedsPrompt`: requires an interactive user prompt
-    ///
-    /// [`render_approved_tool`]: Self::render_approved_tool
     pub fn decide_permission(
         &mut self,
-        executor: Box<dyn Executor>,
+        executor: &dyn Executor,
         interactive: bool,
         turn_state: &TurnState,
     ) -> PermissionDecision {
         let Some(info) = executor.permission_info() else {
-            return PermissionDecision::Approved(executor);
+            return PermissionDecision::Approved;
         };
 
         if !interactive && matches!(info.run_mode, RunMode::Ask | RunMode::Edit) {
             self.set_tool_state(&info.tool_id, ToolCallState::Running);
-            return PermissionDecision::Approved(executor);
+            return PermissionDecision::Approved;
         }
 
         // Check for a persisted permission decision from earlier in this turn.
-        let permission_key = PermissionCacheKey::new(&info.tool_name);
-        let persisted = turn_state
-            .remembered_permission_decisions
-            .get(&permission_key)
-            .copied();
-
-        match persisted {
+        match turn_state.remembered_permission(&info.tool_name) {
             Some(true) => {
                 self.set_tool_state(&info.tool_id, ToolCallState::Running);
-                PermissionDecision::Approved(executor)
+                PermissionDecision::Approved
             }
             Some(false) => {
                 self.set_tool_state(&info.tool_id, ToolCallState::Completed);
-                PermissionDecision::Skipped(ToolCallResponse {
-                    id: info.tool_id.clone(),
-                    result: Ok("Tool skipped by user (remembered).".to_string()),
-                })
+                PermissionDecision::Skipped(Self::remembered_skip(&info.tool_id))
             }
-            None => PermissionDecision::NeedsPrompt { executor, info },
+            None => PermissionDecision::NeedsPrompt(info),
+        }
+    }
+
+    /// The response a call ends with when the user said "no" to its tool for
+    /// the rest of the turn.
+    fn remembered_skip(tool_id: &str) -> ToolCallResponse {
+        ToolCallResponse {
+            id: tool_id.to_owned(),
+            result: Ok("Tool skipped by user (remembered).".to_string()),
         }
     }
 
     /// Applies the result of an interactive permission prompt.
     ///
-    /// Call this after the user answers a prompt for a tool returned as
+    /// Call this after the user answers a prompt for a tool whose decision was
     /// [`PermissionDecision::NeedsPrompt`].
+    /// An approval hands the arguments the user approved to `executor`; any
+    /// other answer returns the response the call ends with instead.
     pub fn apply_permission_result(
         &mut self,
-        result: Result<PermissionResult, crate::error::Error>,
+        result: Result<PermissionResult, String>,
         info: &PermissionInfo,
         turn_state: &mut TurnState,
-        mut executor: Box<dyn Executor>,
-    ) -> Result<Box<dyn Executor>, ToolCallResponse> {
-        let permission_key = PermissionCacheKey::new(&info.tool_name);
-
+        executor: &dyn Executor,
+    ) -> Result<(), ToolCallResponse> {
         match result {
             Ok(PermissionResult::Run { arguments, persist }) => {
                 if persist {
-                    turn_state
-                        .remembered_permission_decisions
-                        .insert(permission_key, true);
+                    turn_state.remember_permission(&info.tool_name, true);
                 }
                 executor.set_arguments(arguments);
                 self.set_tool_state(&info.tool_id, ToolCallState::Running);
-                Ok(executor)
+                Ok(())
             }
             Ok(PermissionResult::Skip { reason, persist }) => {
                 if persist {
-                    turn_state
-                        .remembered_permission_decisions
-                        .insert(permission_key, false);
+                    turn_state.remember_permission(&info.tool_name, false);
                 }
                 self.set_tool_state(&info.tool_id, ToolCallState::Completed);
                 let msg = if let Some(r) = reason {
@@ -1241,131 +862,627 @@ impl ToolCoordinator {
                     result: Ok(msg),
                 })
             }
-            Err(e) => {
+            Err(error) => {
                 self.set_tool_state(&info.tool_id, ToolCallState::Completed);
                 Err(ToolCallResponse {
                     id: info.tool_id.clone(),
-                    result: Err(format!("Permission prompt failed: {e}")),
+                    result: Err(format!("Permission prompt failed: {error}")),
                 })
             }
         }
     }
 
-    pub async fn run_permission_phase(
-        &mut self,
-        prompter: &ToolPrompter,
-        interactive: bool,
-        turn_state: &mut TurnState,
-        tool_renderer: &ToolRenderer,
-        printer: &Printer,
-        conv: &ConversationMut,
-        inquiry_backend: &dyn InquiryBackend,
-    ) -> (
-        Vec<(usize, Box<dyn Executor>)>,
-        Vec<(usize, ToolCallResponse)>,
-    ) {
-        let mut approved_executors = Vec::new();
-        let mut skipped_responses = Vec::new();
-
-        for (index, executor) in std::mem::take(&mut self.executors) {
-            // Funnel through the unified per-tool permission pipeline. The
-            // streaming path in `turn_loop.rs` uses the same call so the
-            // decide → pre-render → prompt → render policy stays in one
-            // place.
-            let decision = self
-                .resolve_tool_call_decision(
+    /// Take a tool call the assistant finished requesting, and start it.
+    ///
+    /// Its formatter describes it and it asks what it needs to right away; what
+    /// needs the terminal waits for the calls before it.
+    pub(crate) fn submit(&mut self, request: ToolCallRequest, host: &mut Host<'_>) {
+        if self.batch.is_none() {
+            // A new response: the states left by the last one describe calls
+            // that are gone.
+            self.tool_states.clear();
+            self.batch = Some(Batch::new());
+        }
+        let executor = self.prepare_one(request);
+        let Some(mut batch) = self.batch.take() else {
+            return;
+        };
+        match executor {
+            Err(response) => batch.unavailable.push(response),
+            Ok(executor) => {
+                let executor: Arc<dyn Executor> = Arc::from(executor);
+                // Formatting a call the user already said no to would run a
+                // formatter command for output nobody sees.
+                let remembered_denial = host.interactive
+                    && executor.needs_permission()
+                    && host.turn_state.remembered_permission(executor.tool_name()) == Some(false);
+                let render_arguments = !self.is_hidden(executor.tool_name()) && !remembered_denial;
+                let index = batch.calls.len();
+                batch.calls.push(Call {
+                    tool_id: executor.tool_id().to_owned(),
+                    tool_name: executor.tool_name().to_owned(),
                     executor,
-                    prompter,
-                    interactive,
-                    turn_state,
-                    tool_renderer,
-                    printer,
-                    conv,
-                    inquiry_backend,
-                )
-                .await;
-
-            match decision {
-                ToolCallDecision::Approved {
-                    executor,
-                    rendered_arguments,
-                } => {
-                    if let Some(content) = rendered_arguments {
-                        self.rendered_arguments
-                            .insert(executor.tool_id().to_owned(), content);
-                    }
-                    approved_executors.push((index, executor));
-                }
-                ToolCallDecision::Skipped(response) | ToolCallDecision::Failed(response) => {
-                    skipped_responses.push((index, response));
-                }
+                    answers: IndexMap::new(),
+                    stderr: None,
+                    wait: Wait::Step,
+                    decided: false,
+                    announced: false,
+                    released: false,
+                    pre_render: None,
+                    question: None,
+                    review: None,
+                });
+                Self::spawn_step(&mut batch, index, Step::Prepare { render_arguments });
             }
         }
-
-        (approved_executors, skipped_responses)
+        self.pump(&mut batch, host);
+        self.batch = Some(batch);
     }
 
-    /// Run the approved tools, answering their questions and result prompts as
-    /// they arrive.
+    /// Wait for the next thing a call's work in flight reports.
+    ///
+    /// Never resolves while there are no calls.
+    pub(crate) async fn next_event(&mut self) -> ToolEvent {
+        match &mut self.batch {
+            // The batch holds a sender itself, so the channel never closes.
+            Some(batch) => match batch.receiver.recv().await {
+                Some(event) => event,
+                None => pending().await,
+            },
+            None => pending().await,
+        }
+    }
+
+    /// Advance the calls with `event`, and hand the terminal on.
+    pub(crate) fn handle(&mut self, event: ToolEvent, host: &mut Host<'_>) {
+        let Some(mut batch) = self.batch.take() else {
+            return;
+        };
+        self.dispatch(&mut batch, event, host);
+        self.pump(&mut batch, host);
+        self.batch = Some(batch);
+    }
+
+    /// Drive the calls to their responses, now that the response has finished
+    /// streaming.
+    ///
+    /// Nothing runs until every call has been approved or settled; the approved
+    /// calls then run in parallel.
+    /// Returns what the Host settled on for each call, including calls handed
+    /// over by [`submit`] while the response streamed.
     ///
     /// `interactive` gates every question and result prompt.
     /// The elapsed-time progress row takes no parameter: it is a status region,
     /// so the printer's own terminal capability decides whether it renders.
-    #[expect(clippy::too_many_lines, clippy::too_many_arguments)]
-    pub async fn execute_with_prompting(
+    ///
+    /// `interrupts` carries interrupts from a client driving the turn from
+    /// outside the process; one is taken per call, and the rest stay queued.
+    ///
+    /// [`submit`]: Self::submit
+    pub(crate) async fn finish(
         &mut self,
-        executors: Vec<(usize, Box<dyn Executor>)>,
-        prompter: Arc<ToolPrompter>,
+        host: &mut Host<'_>,
         signals: &SignalRouter,
-        turn_state: &mut TurnState,
         interrupt_ui: &mut InterruptUi<'_>,
-        inquiry_backend: Arc<dyn InquiryBackend>,
-        conv: &ConversationMut,
-        tool_renderer: &mut ToolRenderer,
-        interactive: bool,
         interrupts: &mut TurnInterrupts,
     ) -> ExecutionResult {
-        if executors.is_empty() {
-            return ExecutionResult {
-                reviews: Vec::new(),
-                outcome: ExecutionOutcome::Completed,
-            };
-        }
+        let Some(mut batch) = self.batch.take() else {
+            return ExecutionResult::default();
+        };
+        batch.stream_ended = true;
+        self.pump(&mut batch, host);
 
-        debug!(tools = executors.len(), "Starting tool execution.");
+        debug!(
+            tools = batch.calls.len(),
+            "Driving tool calls to completion."
+        );
 
-        // Register the tool interrupt handler for this execution phase. While
-        // registered, the first Ctrl-C press is delivered to this event loop;
-        // the guard deregisters the handler when execution completes.
+        // Register the tool interrupt handler for this phase. While
+        // registered, the first Ctrl-C press is delivered to this loop; the
+        // guard deregisters the handler when the calls are done.
         let (interrupt_guard, mut interrupt_rx) = signals.push_handler();
 
-        // The caller's `index` values come from the execution plan and may
-        // be sparse (e.g. when some tools in the same plan are
-        // pre-resolved and don't reach this function). We can't use them
-        // as offsets into a `Vec` sized to `executors.len()`, so we
-        // re-base to contiguous local indices for internal bookkeeping
-        // and pair each response back with its plan index on output.
-        let plan_indices: Vec<usize> = executors.iter().map(|(idx, _)| *idx).collect();
-        let executors: Vec<Box<dyn Executor>> =
-            executors.into_iter().map(|(_, exec)| exec).collect();
+        let mut outcome = ExecutionOutcome::Completed;
+        let mut stop = Stop::default();
 
-        let total_tools = executors.len();
-        let cancellation_token = self.cancellation_token.clone();
-        let (event_tx, mut event_rx) = mpsc::channel::<ExecutionEvent>(32);
-        let services = PhaseServices {
-            prompter,
-            inquiry_backend,
-            event_tx: event_tx.clone(),
-            cancellation_token: cancellation_token.clone(),
-            conv,
-            interactive,
+        while !batch.settled() {
+            // One client interrupt per phase. Once the calls are being
+            // cancelled, the answer they give back is settled, and a second
+            // reply taken here would replace the first after both were reported
+            // delivered. Anything later stays queued for the phase that
+            // follows: a reply becomes the next request, and a stop ends the
+            // turn after this one's answer is recorded.
+            let taking = !batch.cancellation.is_cancelled();
+
+            tokio::select! {
+                Some(event) = batch.receiver.recv() => {
+                    self.dispatch(&mut batch, event, host);
+                    self.pump(&mut batch, host);
+                }
+                Some(action) = interrupts.next(), if taking => {
+                    // Applied even while a call's prompt is active, unlike a
+                    // Ctrl-C: the press competes with the prompt for the
+                    // terminal, and this does not.
+                    info!(?action, "Client interrupt received during tool execution.");
+                    let result = apply_tool_interrupt(
+                        as_tool_interrupt(action),
+                        &batch.cancellation,
+                        interrupt_ui.turn_coordinator,
+                    );
+                    self.interrupt(&mut batch, result, &mut outcome, &mut stop, host);
+                }
+                Some(notice) = interrupt_rx.recv() => {
+                    if batch.prompting {
+                        // An active inline prompt owns the terminal; pass the
+                        // interrupt down the handler stack instead of stacking
+                        // the menu on top of the prompt.
+                        notice.decline();
+                        continue;
+                    }
+                    let result = handle_tool_interrupt(
+                        &batch.cancellation,
+                        self.is_prompting(),
+                        interrupt_ui,
+                        &self.interrupt_config,
+                    );
+
+                    match result {
+                        // Answered by the menu: clear the ladder so the next
+                        // press opens it again instead of bypassing it.
+                        ToolInterruptResult::Continue
+                        | ToolInterruptResult::Restart
+                        | ToolInterruptResult::Cancelled { .. } => notice.handled(),
+
+                        // A pending tool prompt owns this press; hand it to
+                        // the next handler down with the ladder intact.
+                        ToolInterruptResult::Declined => notice.decline(),
+
+                        // An escalation is the user asking to get past the
+                        // menu, and a menu that could not run answered
+                        // nothing. Both leave the press on the ladder so it
+                        // still gets the user out.
+                        ToolInterruptResult::Escalate | ToolInterruptResult::PromptFailed => {}
+                    }
+
+                    self.interrupt(&mut batch, result, &mut outcome, &mut stop, host);
+                }
+            }
+        }
+
+        // Deregister the tool interrupt handler.
+        drop(interrupt_guard);
+
+        if batch.progress {
+            host.renderer.clear_progress();
+        }
+
+        let reviews = self.collect(batch, &stop);
+        ExecutionResult { reviews, outcome }
+    }
+
+    /// Act on what the tool interrupt menu decided.
+    fn interrupt(
+        &mut self,
+        batch: &mut Batch,
+        result: ToolInterruptResult,
+        outcome: &mut ExecutionOutcome,
+        stop: &mut Stop,
+        host: &mut Host<'_>,
+    ) {
+        match result {
+            // Either the user chose to keep waiting, or the menu could not be
+            // shown and nothing happened. A declined press was already handed
+            // down the stack.
+            ToolInterruptResult::Continue
+            | ToolInterruptResult::PromptFailed
+            | ToolInterruptResult::Declined => {}
+            ToolInterruptResult::Restart => {
+                // Hold each call's service-side invocation open before
+                // cancelling the Host workers, so the re-preparation that
+                // follows continues the same logical calls instead of
+                // submitting new ones.
+                for call in &batch.calls {
+                    call.executor.pause_for_restart();
+                }
+                batch.cancellation.cancel();
+                self.abandon_parked(batch, host);
+                outcome.upgrade(ExecutionOutcome::Restart);
+            }
+            ToolInterruptResult::Cancelled { response, exit } => {
+                stop.cancelled = batch
+                    .calls
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, call)| call.review.is_none())
+                    .map(|(index, _)| index)
+                    .collect();
+                // Hold each unfinished call open before cancelling the Host
+                // workers, so the cancellation response recorded below is
+                // what its MCP caller receives. An agent that owns the call
+                // builds its transcript from that, not from the conversation.
+                for index in &stop.cancelled {
+                    batch.calls[*index].executor.hold_for_response();
+                }
+                batch.cancellation.cancel();
+                self.abandon_parked(batch, host);
+                stop.message = response;
+                if exit {
+                    outcome.upgrade(ExecutionOutcome::Stopped);
+                }
+            }
+            // The menu itself was cancelled with Ctrl-C: the tools are already
+            // cancelled; surface the escalation so the turn loop begins a
+            // graceful shutdown.
+            ToolInterruptResult::Escalate => {
+                self.abandon_parked(batch, host);
+                outcome.upgrade(ExecutionOutcome::Escalated);
+            }
+        }
+    }
+
+    /// What the Host settled on for each call, with the cancelled ones answered
+    /// by their cancellation response.
+    fn collect(&self, batch: Batch, stop: &Stop) -> IndexMap<String, Review> {
+        let mut reviews: IndexMap<String, Review> = batch
+            .unavailable
+            .into_iter()
+            .map(|response| (response.id.clone(), Review::unchanged(response)))
+            .collect();
+
+        for (index, call) in batch.calls.into_iter().enumerate() {
+            let Some(mut review) = call.review else {
+                continue;
+            };
+            if stop.cancelled.contains(&index) {
+                review.response.result = Ok(if let Some(msg) = &stop.message {
+                    format!("Tool run cancelled by user with a custom message:\n\n{msg}")
+                } else {
+                    // No custom message: each cancelled tool answers with its
+                    // configured cancellation response.
+                    self.cancellation_response(&call.tool_name)
+                });
+                // The cancellation message stands in for whatever the tool
+                // would have produced.
+                review.edited = true;
+            }
+            reviews.insert(call.tool_id, review);
+        }
+
+        reviews
+    }
+
+    /// Advance the call `event` is about.
+    fn dispatch(&mut self, batch: &mut Batch, event: ToolEvent, host: &mut Host<'_>) {
+        match event {
+            ToolEvent::Step { call, result } => {
+                // A call settled while its step was in flight has its response;
+                // whatever the step reached, acknowledging the call releases it.
+                if matches!(batch.calls[call].wait, Wait::Done) {
+                    return;
+                }
+                self.on_step(batch, call, result, host);
+            }
+            ToolEvent::Permission { call, result } => {
+                batch.prompting = false;
+                self.on_permission(batch, call, result, host);
+            }
+            ToolEvent::Answered {
+                call,
+                inquiry_id,
+                question_id,
+                answer,
+                persist_level,
+                redact,
+            } => {
+                batch.prompting = false;
+                if batch.calls[call].question.take().is_none() {
+                    return;
+                }
+                // A secret answer is persisted as `Redacted`, and never enters
+                // the turn-answer cache.
+                if redact {
+                    Self::record_inquiry_redacted(host.conv, &inquiry_id);
+                } else {
+                    Self::record_inquiry_answer(host.conv, &inquiry_id, &answer);
+                    if persist_level == PersistLevel::Turn {
+                        let tool_name = &batch.calls[call].tool_name;
+                        host.turn_state
+                            .remember_answer(tool_name, &question_id, answer.clone());
+                    }
+                }
+                self.answer(batch, call, question_id, answer);
+            }
+            ToolEvent::Unanswered {
+                call,
+                inquiry_id,
+                reason,
+            } => {
+                batch.prompting = false;
+                if batch.calls[call].question.take().is_none() {
+                    return;
+                }
+                // A user cancellation (Esc / Ctrl-C / EOF at the prompt)
+                // completes the tool benignly; a prompt failure is a tool-level
+                // error.
+                let result = Self::cancelled_input_result(&reason);
+                Self::record_inquiry_cancelled(host.conv, &inquiry_id, reason);
+                let id = batch.calls[call].tool_id.clone();
+                let response = ToolCallResponse { id, result };
+                self.settle(batch, call, Review::replaced(response), host);
+            }
+            ToolEvent::Inquired {
+                call,
+                inquiry_id,
+                question_id,
+                question_text,
+                result,
+            } => {
+                // A withdrawn question was already closed.
+                let open = batch.calls[call]
+                    .question
+                    .take_if(|open| open.inquiry_id == inquiry_id);
+                if open.is_none() {
+                    return;
+                }
+                match result {
+                    Ok(answer) => {
+                        Self::record_inquiry_answer(host.conv, &inquiry_id, &answer);
+                        self.answer(batch, call, question_id, answer);
+                    }
+                    Err(error) => {
+                        Self::record_inquiry_cancelled(
+                            host.conv,
+                            &inquiry_id,
+                            Self::cancellation_reason(&error),
+                        );
+                        let Call {
+                            tool_id, tool_name, ..
+                        } = &batch.calls[call];
+                        let response = ToolCallResponse {
+                            id: tool_id.clone(),
+                            result: Err(Self::inquiry_failure(tool_name, &question_text, &error)),
+                        };
+                        self.settle(batch, call, Review::replaced(response), host);
+                    }
+                }
+            }
+            ToolEvent::Reviewed { call, review } => {
+                batch.prompting = false;
+                let tool_name = batch.calls[call].tool_name.clone();
+                host.renderer.focus(&batch.calls[call].tool_id);
+                self.render_result(&tool_name, &review.response, host.renderer);
+                self.settle(batch, call, review, host);
+            }
+        }
+    }
+
+    /// Take what one executor step reached.
+    fn on_step(
+        &mut self,
+        batch: &mut Batch,
+        index: usize,
+        result: ExecutorResult,
+        host: &mut Host<'_>,
+    ) {
+        let call = &mut batch.calls[index];
+        let released = call.released;
+        let tool_id = call.tool_id.clone();
+        match result {
+            ExecutorResult::AwaitingAdmission => call.wait = Wait::Admission,
+            ExecutorResult::AwaitingRelease => {
+                self.announce(batch, index, host);
+                batch.calls[index].wait = Wait::Release;
+            }
+            ExecutorResult::NeedsInput {
+                question,
+                source,
+                accumulated_answers,
+                ..
+            } => {
+                call.answers = accumulated_answers;
+                self.route(batch, index, question, source, host);
+            }
+            ExecutorResult::Completed(response) if released => {
+                self.deliver(batch, index, response, host);
+            }
+            // Settled before it ran: skipped by configuration, refused by the
+            // service, or a formatter that failed.
+            ExecutorResult::Completed(response) => {
+                self.settle(batch, index, Review::unchanged(response), host);
+            }
+            ExecutorResult::Failed(error) if released => {
+                self.record_lost_call(batch, index, &error, false, host);
+            }
+            ExecutorResult::OutcomeUnknown(error) if released => {
+                self.record_lost_call(batch, index, &error, true, host);
+            }
+            ExecutorResult::Failed(error) | ExecutorResult::OutcomeUnknown(error) => {
+                let response = ToolCallResponse {
+                    id: tool_id,
+                    result: Err(error.to_string()),
+                };
+                self.settle(batch, index, Review::unchanged(response), host);
+            }
+        }
+    }
+
+    /// Take the user's answer to the call's approval prompt.
+    fn on_permission(
+        &mut self,
+        batch: &mut Batch,
+        index: usize,
+        result: Result<PermissionResult, String>,
+        host: &mut Host<'_>,
+    ) {
+        let call = &mut batch.calls[index];
+        let Wait::Approval(info) = std::mem::replace(&mut call.wait, Wait::Step) else {
+            return;
         };
-        let mut state = PhaseState {
-            tools: HashMap::new(),
-            reviews: vec![None; total_tools],
-            pending_prompts: VecDeque::new(),
-            prompt_active: false,
+        let executor = call.executor.clone();
+        match self.apply_permission_result(result, &info, host.turn_state, executor.as_ref()) {
+            Ok(()) => {
+                let call = &mut batch.calls[index];
+                call.decided = true;
+                // If `e` changed the arguments, what was drawn before the
+                // prompt describes a call that no longer exists, so the call
+                // is drawn again once admitted.
+                if call
+                    .pre_render
+                    .as_ref()
+                    .is_some_and(|pre| pre.arguments != executor.arguments())
+                {
+                    call.pre_render = None;
+                }
+                Self::spawn_step(batch, index, Step::Approve);
+            }
+            Err(response) => self.settle(batch, index, Review::unchanged(response), host),
+        }
+    }
+
+    /// Hand the terminal to whatever may use it next, and release the calls
+    /// once they are all decided.
+    fn pump(&mut self, batch: &mut Batch, host: &mut Host<'_>) {
+        loop {
+            if batch.stream_ended
+                && !batch.released
+                && batch
+                    .calls
+                    .iter()
+                    .all(|call| matches!(call.wait, Wait::Release | Wait::Done))
+            {
+                self.release(batch, host);
+            }
+
+            if batch.prompting {
+                return;
+            }
+
+            let cursor = batch.cursor();
+
+            // A "no" remembered for this tool settles the call before any of
+            // it reaches the screen: it would be shown, never asked about, and
+            // never run.
+            if let Some(call) = batch.calls.get(cursor)
+                && !call.decided
+                && host.interactive
+                && call.executor.needs_permission()
+                && host.turn_state.remembered_permission(&call.tool_name) == Some(false)
+            {
+                let response = Self::remembered_skip(&call.tool_id);
+                self.settle(batch, cursor, Review::unchanged(response), host);
+                continue;
+            }
+
+            let servable = batch.prompts.iter().position(|prompt| {
+                let call = prompt.call();
+                call == cursor || batch.calls[call].decided
+            });
+            if let Some(position) = servable
+                && let Some(prompt) = batch.prompts.remove(position)
+            {
+                self.serve(batch, prompt, host);
+                continue;
+            }
+
+            if batch
+                .calls
+                .get(cursor)
+                .is_some_and(|call| matches!(call.wait, Wait::Admission))
+            {
+                self.decide(batch, cursor, host);
+                continue;
+            }
+
+            return;
+        }
+    }
+
+    /// Decide whether the call at the front runs: approve it, settle it, or put
+    /// it up for approval.
+    fn decide(&mut self, batch: &mut Batch, index: usize, host: &mut Host<'_>) {
+        let executor = batch.calls[index].executor.clone();
+        match self.decide_permission(executor.as_ref(), host.interactive, host.turn_state) {
+            PermissionDecision::Approved => {
+                batch.calls[index].decided = true;
+                Self::spawn_step(batch, index, Step::Approve);
+            }
+            PermissionDecision::Skipped(response) => {
+                self.settle(batch, index, Review::unchanged(response), host);
+            }
+            PermissionDecision::NeedsPrompt(info) => {
+                self.set_tool_state(&info.tool_id, ToolCallState::AwaitingPermission);
+                // A tool call reached from a reasoning block sits inside that
+                // block's shading, and a prompt is a visual row like any other
+                // (RFD 095).
+                host.renderer.focus(&info.tool_id);
+                host.printer
+                    .set_prompt_background(host.renderer.current_region());
+                // The prompt is on screen even when nothing is drawn above it.
+                host.renderer.mark_drawn();
+
+                // Drawn before the prompt so the user sees the call (not raw
+                // arguments) when deciding. Built-in parameter styles always
+                // draw; Custom formatters only once the service ran them.
+                let call = &mut batch.calls[index];
+                call.pre_render = match self.pre_render_for_prompt(executor.as_ref(), host.renderer)
+                {
+                    PreRender::Ready(content) => Some(PreRendered {
+                        content,
+                        arguments: executor.arguments(),
+                    }),
+                    PreRender::Deferred => None,
+                };
+                call.wait = Wait::Approval(info.clone());
+                batch.prompting = true;
+
+                let prompter = Arc::clone(host.prompter);
+                let events = batch.events.clone();
+                tokio::task::spawn_blocking(move || {
+                    let result = prompter
+                        .prompt_permission(&info)
+                        .map_err(|error| error.to_string());
+                    drop(events.send(ToolEvent::Permission {
+                        call: index,
+                        result,
+                    }));
+                });
+            }
+        }
+    }
+
+    /// Show the call: draw its header and description, unless they were already
+    /// drawn ahead of its approval prompt.
+    fn announce(&mut self, batch: &mut Batch, index: usize, host: &mut Host<'_>) {
+        let call = &mut batch.calls[index];
+        call.decided = true;
+        call.announced = true;
+        let content = if let Some(pre) = call.pre_render.take() {
+            pre.content
+        } else {
+            host.renderer.focus(&call.tool_id);
+            self.render_executor(call.executor.as_ref(), host.renderer)
         };
+        if let Some(content) = content {
+            self.rendered_arguments
+                .insert(call.tool_id.clone(), content);
+        }
+    }
+
+    /// Release every admitted call to run.
+    fn release(&mut self, batch: &mut Batch, host: &mut Host<'_>) {
+        batch.released = true;
+        let admitted: Vec<usize> = batch
+            .calls
+            .iter()
+            .enumerate()
+            .filter(|(_, call)| matches!(call.wait, Wait::Release))
+            .map(|(index, _)| index)
+            .collect();
+        if admitted.is_empty() {
+            return;
+        }
+
+        debug!(tools = admitted.len(), "Starting tool execution.");
 
         // Claimed before the sinks below, not after: `StatusRegion::source`
         // copies the region it is asked of, so a sink taken from the inert
@@ -1379,326 +1496,357 @@ impl ToolCoordinator {
         // Progress is a terminal affordance, not a prompt, so nothing here
         // consults `interactive`: a `--no-interactive` run on a terminal still
         // shows how long a tool has been going.
-        tool_renderer.start_progress();
+        host.renderer.start_progress();
+        batch.progress = true;
 
-        for (index, executor) in executors.into_iter().enumerate() {
-            let tool_id = executor.tool_id().to_string();
-            let tool_name = executor.tool_name().to_string();
-            // No pre-seeding: static answers flow through the late
-            // `static_answer` path so every question round-trip is recorded as
-            // an inquiry pair (RFD 082).
-            let accumulated_answers = IndexMap::new();
-
-            let executor: Arc<dyn Executor> = Arc::from(executor);
-
-            let stderr = stderr_sink(tool_renderer, &self.tools_config, &tool_name);
-
-            let tool = ExecutingTool {
-                executor,
-                tool_id: tool_id.clone(),
-                tool_name,
-                accumulated_answers,
-                stderr,
-            };
-
+        for index in admitted {
+            let call = &mut batch.calls[index];
+            call.stderr = stderr_sink(host.renderer, &self.tools_config, &call.tool_name);
+            call.released = true;
+            let tool_id = call.tool_id.clone();
             self.set_tool_state(&tool_id, ToolCallState::Running);
-            Self::spawn_tool_execution(index, &tool, &services);
-            state.tools.insert(index, tool);
-        }
-
-        // Forward interrupt notifications into the execution event channel.
-        // The task ends when the guard drops (closing the notification
-        // channel) or when the event channel closes.
-        let interrupt_tx = event_tx.clone();
-        tokio::spawn(async move {
-            while let Some(notice) = interrupt_rx.recv().await {
-                if interrupt_tx
-                    .send(ExecutionEvent::Interrupt(notice))
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
-
-        let mut outcome = ExecutionOutcome::Completed;
-        let mut tools_cancelled = false;
-        let mut cancellation_message: Option<String> = None;
-        let mut cancelled_indices: Vec<usize> = Vec::new();
-
-        loop {
-            // A client's interrupt arrives on its own channel rather than
-            // through the router, so it is polled alongside the tools rather
-            // than forwarded by a task: the receiver belongs to the turn, and
-            // the turn outlives this phase.
-            //
-            // One per phase. Once the tools are being cancelled, the answer
-            // they give back is settled, and a second reply taken here would
-            // replace the first after both were reported delivered. Anything
-            // later stays queued for the phase that follows: a reply becomes
-            // the next request, and a stop ends the turn after this one's
-            // answer is recorded.
-            let taking = !cancellation_token.is_cancelled();
-            let event = tokio::select! {
-                event = event_rx.recv() => event,
-                Some(action) = interrupts.next(), if taking => {
-                    Some(ExecutionEvent::ClientInterrupt(action))
-                }
-            };
-
-            let Some(event) = event else { break };
-
-            match event {
-                ExecutionEvent::ToolResult { index, result } => {
-                    if !state.tools.contains_key(&index) {
-                        warn!(index, "Received ToolResult for unknown tool.");
-                        continue;
-                    }
-                    self.handle_tool_result(
-                        result,
-                        index,
-                        &mut state,
-                        &services,
-                        turn_state,
-                        tool_renderer,
-                    );
-                }
-                ExecutionEvent::PromptAnswer {
-                    index,
-                    question_id,
-                    inquiry_id,
-                    answer,
-                    persist_level,
-                    redact,
-                } => {
-                    self.handle_prompt_answer(
-                        index,
-                        question_id,
-                        &inquiry_id,
-                        answer,
-                        persist_level,
-                        redact,
-                        &mut state,
-                        &services,
-                        turn_state,
-                    );
-                }
-                ExecutionEvent::InquiryResult {
-                    index,
-                    inquiry_id,
-                    question_id,
-                    question_text,
-                    result,
-                } => match result {
-                    Ok(answer) => {
-                        // Close the recorded pair before the tool lookup, so an
-                        // unknown index cannot leave the request unpaired on
-                        // disk (sanitize() would drop it on the next load).
-                        Self::record_inquiry_answer(services.conv, &inquiry_id, &answer);
-                        if let Some(tool) = state.tools.get_mut(&index) {
-                            tool.accumulated_answers.insert(question_id, answer);
-                            self.set_tool_state(&tool.tool_id, ToolCallState::Running);
-                            Self::spawn_tool_execution(index, tool, &services);
-                        } else {
-                            warn!(index, "Received InquiryResult for unknown tool.");
-                        }
-                    }
-                    Err(error) => {
-                        Self::record_inquiry_cancelled(
-                            services.conv,
-                            &inquiry_id,
-                            Self::cancellation_reason(&error),
-                        );
-                        match state.tools.get(&index) {
-                            None => {
-                                warn!(index, %error, "Received InquiryResult for unknown tool.");
-                            }
-                            Some(tool) => {
-                                self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
-
-                                state.reviews[index] = Some(Review::replaced(ToolCallResponse {
-                                    id: tool.tool_id.clone(),
-                                    result: Err(Self::inquiry_failure(
-                                        &tool.tool_name,
-                                        &question_text,
-                                        &error,
-                                    )),
-                                }));
-                            }
-                        }
-                    }
-                },
-                ExecutionEvent::PromptCancelled {
-                    index,
-                    inquiry_id,
-                    reason,
-                } => {
-                    self.handle_prompt_cancelled(index, &inquiry_id, reason, &mut state, &services);
-                }
-                ExecutionEvent::ResultModeProcessed { index, review } => {
-                    state.prompt_active = false;
-                    // The tool is still registered: nothing removes an entry
-                    // for the life of the phase, and this index came from one.
-                    if let Some(tool) = state.tools.get(&index) {
-                        let tool_name = tool.tool_name.clone();
-                        let tool_id = tool.tool_id.clone();
-                        self.render_result(&tool_name, &review.response, tool_renderer);
-                        self.set_tool_state(&tool_id, ToolCallState::Completed);
-                    } else {
-                        warn!(index, "Received ResultModeProcessed for unknown tool.");
-                    }
-                    state.reviews[index] = Some(review);
-                    self.process_next_prompt(&mut state, &services);
-                }
-                ExecutionEvent::Interrupt(notice) => {
-                    if state.prompt_active {
-                        // An active inline prompt owns the terminal; pass the
-                        // interrupt down the handler stack instead of stacking
-                        // the menu on top of the prompt.
-                        notice.decline();
-                    } else {
-                        let result = handle_tool_interrupt(
-                            &cancellation_token,
-                            self.is_prompting(),
-                            interrupt_ui,
-                            &self.interrupt_config,
-                        );
-
-                        match result {
-                            // Answered by the menu: clear the ladder so the next
-                            // press opens it again instead of bypassing it.
-                            ToolInterruptResult::Continue
-                            | ToolInterruptResult::Restart
-                            | ToolInterruptResult::Cancelled { .. } => notice.handled(),
-
-                            // A pending tool prompt owns this press; hand it to
-                            // the next handler down with the ladder intact.
-                            ToolInterruptResult::Declined => notice.decline(),
-
-                            // An escalation is the user asking to get past the
-                            // menu, and a menu that could not run answered
-                            // nothing. Both leave the press on the ladder so it
-                            // still gets the user out.
-                            ToolInterruptResult::Escalate | ToolInterruptResult::PromptFailed => {}
-                        }
-
-                        record_tool_interrupt(
-                            &result,
-                            &state,
-                            &cancellation_token,
-                            &mut outcome,
-                            &mut tools_cancelled,
-                            &mut cancellation_message,
-                            &mut cancelled_indices,
-                        );
-                    }
-                }
-
-                ExecutionEvent::ClientInterrupt(action) => {
-                    // Applied even while a tool prompt is active, unlike a
-                    // Ctrl-C: the press competes with the prompt for the
-                    // terminal, and this does not. The prompt is cancelled
-                    // along with the tool that asked.
-                    let result = apply_tool_interrupt(
-                        as_tool_interrupt(action),
-                        &cancellation_token,
-                        interrupt_ui.turn_coordinator,
-                    );
-
-                    record_tool_interrupt(
-                        &result,
-                        &state,
-                        &cancellation_token,
-                        &mut outcome,
-                        &mut tools_cancelled,
-                        &mut cancellation_message,
-                        &mut cancelled_indices,
-                    );
-                }
-            }
-
-            if state.reviews.iter().all(Option::is_some) {
-                break;
-            }
-        }
-
-        // Deregister the tool interrupt handler; its forwarding task exits
-        // when the notification channel closes.
-        drop(interrupt_guard);
-
-        tool_renderer.clear_progress();
-
-        let mut reviews: Vec<(usize, Review)> = plan_indices
-            .into_iter()
-            .zip(state.reviews.into_iter().map(|review| {
-                review.unwrap_or_else(|| {
-                    Review::replaced(ToolCallResponse {
-                        id: "unknown".to_owned(),
-                        result: Err("Tool did not complete".to_owned()),
-                    })
-                })
-            }))
-            .collect();
-
-        if tools_cancelled {
-            for &i in &cancelled_indices {
-                let Some((_, review)) = reviews.get_mut(i) else {
-                    continue;
-                };
-
-                review.response.result = Ok(if let Some(msg) = &cancellation_message {
-                    format!("Tool run cancelled by user with a custom message:\n\n{msg}")
-                } else {
-                    // No custom message: each cancelled tool answers with its
-                    // configured cancellation response.
-                    let tool_name = state
-                        .tools
-                        .get(&i)
-                        .map(|tool| tool.tool_name.as_str())
-                        .unwrap_or_default();
-                    self.cancellation_response(tool_name)
-                });
-                // The cancellation message stands in for whatever the tool
-                // would have produced.
-                review.edited = true;
-            }
-        }
-
-        ExecutionResult { reviews, outcome }
-    }
-
-    /// Builds an error response for a tool whose argument rendering failed.
-    ///
-    /// The response tells the LLM the tool was not executed and it may retry.
-    pub(crate) fn render_failed_response(
-        tool_id: String,
-        tool_name: &str,
-        error: &str,
-    ) -> ToolCallResponse {
-        ToolCallResponse {
-            id: tool_id,
-            result: Err(format!(
-                "Tool '{tool_name}' was not executed because the argument formatter failed: \
-                 {error}",
-            )),
+            Self::spawn_step(batch, index, Step::Execute);
         }
     }
 
-    /// Run one attempt of a tool, reporting back through the phase's channel.
+    /// Run one executor step, reporting back through the batch's channel.
     ///
     /// The answers are snapshotted here rather than borrowed, so the spawned
     /// task is unaffected by a later question adding to them.
-    fn spawn_tool_execution(index: usize, tool: &ExecutingTool, services: &PhaseServices<'_>) {
-        let executor = tool.executor.clone();
-        let answers = tool.accumulated_answers.clone();
-        let stderr = tool.stderr.clone();
-        let token = services.cancellation_token.child_token();
-        let tx = services.event_tx.clone();
+    fn spawn_step(batch: &mut Batch, index: usize, step: Step) {
+        let call = &mut batch.calls[index];
+        call.wait = Wait::Step;
+        let executor = Arc::clone(&call.executor);
+        let answers = call.answers.clone();
+        let stderr = call.stderr.clone();
+        let token = batch.cancellation.child_token();
+        let events = batch.events.clone();
         tokio::spawn(async move {
-            let result = executor.execute(&answers, token, stderr).await;
-            let _err = tx.send(ExecutionEvent::ToolResult { index, result }).await;
+            let result = match step {
+                Step::Prepare { render_arguments } => {
+                    executor.prepare(render_arguments, token).await
+                }
+                Step::Approve => executor.approve(token).await,
+                Step::Execute => executor.execute(&answers, token, stderr).await,
+            };
+            drop(events.send(ToolEvent::Step {
+                call: index,
+                result,
+            }));
         });
+    }
+
+    /// Decide who answers a call's question, and set that in motion.
+    ///
+    /// The `InquiryRequest` is recorded before any routing decision, so every
+    /// question round-trip lands on the stream however it is answered.
+    /// A question answered from the turn cache or from configuration continues
+    /// the call here; anything else waits for the user or the assistant.
+    fn route(
+        &mut self,
+        batch: &mut Batch,
+        index: usize,
+        question: Question,
+        source: InquirySource,
+        host: &mut Host<'_>,
+    ) {
+        let call = &batch.calls[index];
+        let tool_id = call.tool_id.clone();
+        let tool_name = call.tool_name.clone();
+        let inquiry_id =
+            Self::open_inquiry(host.conv, host.turn_state, &tool_id, source, &question);
+        if let Some(answer) = self.preset_answer(
+            host.conv,
+            host.turn_state,
+            &tool_name,
+            &inquiry_id,
+            &question,
+        ) {
+            self.answer(batch, index, question.id.to_string(), answer);
+            return;
+        }
+
+        let is_secret = question.answer_type == AnswerType::Secret;
+        let target = self
+            .question_target(&tool_name, question.id.as_str())
+            .unwrap_or(QuestionTarget::User);
+
+        info!(
+            tool_name = %tool_name,
+            tool_id = %tool_id,
+            question_id = %question.id,
+            question_text = %question.text,
+            question_type = ?question.answer_type,
+            target = ?target,
+            interactive = host.interactive,
+            "Tool question received, routing to target",
+        );
+
+        if host.interactive && target.is_user() {
+            let call = &mut batch.calls[index];
+            call.wait = Wait::Answer;
+            call.question = Some(OpenQuestion {
+                inquiry_id: inquiry_id.clone(),
+                inquiry: None,
+            });
+            batch.prompts.push_back(Prompt::Question {
+                call: index,
+                question,
+                inquiry_id,
+            });
+        } else if is_secret {
+            let (reason, message) = Self::secret_refusal(&tool_name, target.is_user());
+            Self::record_inquiry_cancelled(host.conv, &inquiry_id, reason);
+            let response = ToolCallResponse {
+                id: tool_id,
+                result: Err(message),
+            };
+            self.settle(batch, index, Review::replaced(response), host);
+        } else {
+            let token = batch.cancellation.child_token();
+            let call = &mut batch.calls[index];
+            call.wait = Wait::Answer;
+            call.question = Some(OpenQuestion {
+                inquiry_id: inquiry_id.clone(),
+                inquiry: Some(token.clone()),
+            });
+            // Nothing is on the terminal while the assistant answers, so a
+            // Ctrl-C opens the interrupt menu rather than waiting for it.
+            self.set_tool_state(&tool_id, ToolCallState::Running);
+
+            let backend = Arc::clone(host.inquiry_backend);
+            let events_stream = Self::paused_events(host.conv, &tool_id, &question);
+            let events = batch.events.clone();
+            tokio::spawn(async move {
+                let result = backend
+                    .inquire(
+                        events_stream,
+                        inquiry_id.as_str(),
+                        &tool_name,
+                        &question,
+                        token,
+                    )
+                    .await;
+                drop(events.send(ToolEvent::Inquired {
+                    call: index,
+                    inquiry_id,
+                    question_id: question.id.to_string(),
+                    question_text: question.text,
+                    result,
+                }));
+            });
+        }
+    }
+
+    /// Continue a call with the answer to its question.
+    fn answer(&mut self, batch: &mut Batch, index: usize, question_id: String, answer: Value) {
+        let call = &mut batch.calls[index];
+        call.answers.insert(question_id, answer);
+        let tool_id = call.tool_id.clone();
+        let state = if call.released {
+            ToolCallState::Running
+        } else {
+            ToolCallState::Queued
+        };
+        self.set_tool_state(&tool_id, state);
+        Self::spawn_step(batch, index, Step::Execute);
+    }
+
+    /// Put a prompt on the terminal.
+    fn serve(&mut self, batch: &mut Batch, prompt: Prompt, host: &mut Host<'_>) {
+        match prompt {
+            Prompt::Question {
+                call,
+                question,
+                inquiry_id,
+            } => {
+                let tool_name = batch.calls[call].tool_name.clone();
+                // An answer remembered while this waited for the terminal is
+                // used rather than asking again. Secrets are never remembered.
+                if question.answer_type != AnswerType::Secret
+                    && let Some(answer) = host
+                        .turn_state
+                        .remembered_answer(&tool_name, question.id.as_str())
+                        .cloned()
+                {
+                    Self::record_inquiry_answer(host.conv, &inquiry_id, &answer);
+                    batch.calls[call].question = None;
+                    self.answer(batch, call, question.id.to_string(), answer);
+                    return;
+                }
+
+                let tool_id = batch.calls[call].tool_id.clone();
+                self.set_tool_state(&tool_id, ToolCallState::AwaitingInput);
+                host.renderer.focus(&tool_id);
+                host.printer
+                    .set_prompt_background(host.renderer.current_region());
+                // The prompt is on screen even when nothing is drawn above it.
+                host.renderer.mark_drawn();
+                batch.prompting = true;
+
+                let prompter = Arc::clone(host.prompter);
+                let events = batch.events.clone();
+                let question_id = question.id.to_string();
+                let redact = question.answer_type == AnswerType::Secret;
+                tokio::task::spawn_blocking(move || {
+                    let event = match prompter.prompt_question(&question) {
+                        Ok(result) => ToolEvent::Answered {
+                            call,
+                            inquiry_id,
+                            question_id,
+                            answer: result.answer,
+                            persist_level: result.persist_level,
+                            redact,
+                        },
+                        Err(error) => {
+                            let reason = Self::prompt_cancellation_reason(&error);
+                            // Esc/Ctrl-C is routine; only genuine prompt
+                            // failures are warning-worthy. The persisted record
+                            // stays coarse, so this trace is the only place the
+                            // underlying error survives.
+                            if reason == CancellationReason::BackendError {
+                                warn!(%error, "Tool question prompt failed.");
+                            }
+                            ToolEvent::Unanswered {
+                                call,
+                                inquiry_id,
+                                reason,
+                            }
+                        }
+                    };
+                    drop(events.send(event));
+                });
+            }
+            Prompt::Review {
+                call,
+                response,
+                mode,
+            } => {
+                let tool_id = batch.calls[call].tool_id.clone();
+                let tool_name = batch.calls[call].tool_name.clone();
+                self.set_tool_state(&tool_id, ToolCallState::AwaitingResultEdit);
+                host.renderer.mark_drawn();
+                batch.prompting = true;
+                Self::spawn_result_mode_prompt(
+                    call,
+                    tool_name,
+                    response,
+                    mode,
+                    Arc::clone(host.prompter),
+                    batch.events.clone(),
+                );
+            }
+        }
+    }
+
+    /// Hand a released call's result to its reviewer, or record it.
+    fn deliver(
+        &mut self,
+        batch: &mut Batch,
+        index: usize,
+        response: ToolCallResponse,
+        host: &mut Host<'_>,
+    ) {
+        let tool_name = batch.calls[index].tool_name.clone();
+        match self.result_mode(&tool_name) {
+            ResultMode::Unattended => {
+                host.renderer.focus(&batch.calls[index].tool_id);
+                self.render_result(&tool_name, &response, host.renderer);
+                self.settle(batch, index, Review::unchanged(response), host);
+            }
+            // The execution service applies `result = "skip"` itself, so this
+            // response is already its skip message rather than the tool's
+            // output. Rendering it would announce a result the configuration
+            // asked not to deliver.
+            ResultMode::Skip => {
+                self.settle(batch, index, Review::unchanged(response), host);
+            }
+            // Nobody is there to answer, so the configured prompt is skipped
+            // and the result stands as the tool produced it.
+            ResultMode::Ask | ResultMode::Edit if !host.interactive => {
+                host.renderer.focus(&batch.calls[index].tool_id);
+                self.render_result(&tool_name, &response, host.renderer);
+                self.settle(batch, index, Review::unchanged(response), host);
+            }
+            // Both Ask and Edit prompt whenever a user is there to answer: the
+            // Edit flow uses the inline widget, which does not need a
+            // configured editor.
+            mode => {
+                batch.calls[index].wait = Wait::Review;
+                batch.prompts.push_back(Prompt::Review {
+                    call: index,
+                    response,
+                    mode,
+                });
+            }
+        }
+    }
+
+    /// Record what the Host settled on for a call.
+    ///
+    /// A question still open is withdrawn: nobody needs its answer anymore.
+    fn settle(&mut self, batch: &mut Batch, index: usize, review: Review, host: &mut Host<'_>) {
+        self.close(batch, index, review, CancellationReason::Withdrawn, host);
+    }
+
+    /// Record what the Host settled on for a call, closing any question still
+    /// open with `reason`.
+    fn close(
+        &mut self,
+        batch: &mut Batch,
+        index: usize,
+        review: Review,
+        reason: CancellationReason,
+        host: &mut Host<'_>,
+    ) {
+        batch.prompts.retain(|prompt| prompt.call() != index);
+        let call = &mut batch.calls[index];
+        if let Some(open) = call.question.take() {
+            if let Some(inquiry) = &open.inquiry {
+                inquiry.cancel();
+            }
+            Self::record_inquiry_cancelled(host.conv, &open.inquiry_id, reason);
+        }
+        call.review = Some(review);
+        call.wait = Wait::Done;
+        call.decided = true;
+        call.announced = true;
+        let tool_id = call.tool_id.clone();
+        self.set_tool_state(&tool_id, ToolCallState::Completed);
+    }
+
+    /// Settle every call nothing is running for, after the batch was cancelled.
+    ///
+    /// Work in flight reports back through its cancelled token; a call parked
+    /// on a barrier or waiting for the terminal would otherwise wait forever.
+    /// A question still waiting for the user was cancelled by them.
+    fn abandon_parked(&mut self, batch: &mut Batch, host: &mut Host<'_>) {
+        for index in 0..batch.calls.len() {
+            let call = &batch.calls[index];
+            let in_flight = match call.wait {
+                Wait::Step => true,
+                Wait::Answer => call
+                    .question
+                    .as_ref()
+                    .is_some_and(|open| open.inquiry.is_some()),
+                Wait::Done => continue,
+                Wait::Admission | Wait::Approval(_) | Wait::Release | Wait::Review => false,
+            };
+            if in_flight {
+                continue;
+            }
+            let response = ToolCallResponse {
+                id: call.tool_id.clone(),
+                result: Ok(self.cancellation_response(&call.tool_name)),
+            };
+            self.close(
+                batch,
+                index,
+                Review::replaced(response),
+                CancellationReason::User,
+                host,
+            );
+        }
     }
 
     /// Record an `InquiryResponse::Answered` for a request recorded earlier in
@@ -1778,42 +1926,6 @@ impl ToolCoordinator {
         }
     }
 
-    fn spawn_inquiry(
-        index: usize,
-        inquiry_id: InquiryId,
-        id: &str,
-        tool_name: String,
-        question: Question,
-        services: &PhaseServices<'_>,
-    ) {
-        let backend = Arc::clone(&services.inquiry_backend);
-        let cancellation_token = services.cancellation_token.child_token();
-        let event_tx = services.event_tx.clone();
-        let events = Self::paused_events(services.conv, id, &question);
-
-        tokio::spawn(async move {
-            let result = backend
-                .inquire(
-                    events,
-                    inquiry_id.as_str(),
-                    &tool_name,
-                    &question,
-                    cancellation_token,
-                )
-                .await;
-
-            let _err = event_tx
-                .send(ExecutionEvent::InquiryResult {
-                    index,
-                    inquiry_id,
-                    question_id: question.id.to_string(),
-                    question_text: question.text,
-                    result,
-                })
-                .await;
-        });
-    }
-
     /// A copy of the conversation in which call `tool_id` is paused on
     /// `question`, for the assistant to answer the question from.
     fn paused_events(
@@ -1867,22 +1979,6 @@ impl ToolCoordinator {
         renderer.render_result(response, &inline_results, &results_file_link);
     }
 
-    /// Show a call's result and record it as the content the Host settled on.
-    ///
-    /// This is the path for a result nobody was asked about: either the tool is
-    /// configured to deliver unattended, or there is no user to ask.
-    fn finish_tool_call(
-        &mut self,
-        tool: &ExecutingTool,
-        response: ToolCallResponse,
-        tracked_review: &mut Option<Review>,
-        tool_renderer: &ToolRenderer,
-    ) {
-        self.render_result(&tool.tool_name, &response, tool_renderer);
-        self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
-        *tracked_review = Some(Review::unchanged(response));
-    }
-
     /// Record a call JP could not complete.
     ///
     /// The reason is JP's rather than the tool's, so the user gets the detail
@@ -1892,214 +1988,35 @@ impl ToolCoordinator {
     /// told to check first rather than invited to call again.
     fn record_lost_call(
         &mut self,
-        tool: &ExecutingTool,
-        tracked_review: &mut Option<Review>,
+        batch: &mut Batch,
+        index: usize,
         error: &ExecutorError,
         may_have_run: bool,
+        host: &mut Host<'_>,
     ) {
+        let tool_name = batch.calls[index].tool_name.clone();
         warn!(
             %error,
-            tool = %tool.tool_name,
+            tool = %tool_name,
             may_have_run,
             "Tool call could not be completed."
         );
         let message = if may_have_run {
             format!(
-                "Tool '{}' may have run, but JP lost the call before its result arrived. Check \
-                 whether its effects took place before calling it again.",
-                tool.tool_name
+                "Tool '{tool_name}' may have run, but JP lost the call before its result arrived. \
+                 Check whether its effects took place before calling it again."
             )
         } else {
             format!(
-                "Tool '{}' was not executed: JP could not complete the call. You may retry it.",
-                tool.tool_name
+                "Tool '{tool_name}' was not executed: JP could not complete the call. You may \
+                 retry it."
             )
         };
-        self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
-        *tracked_review = Some(Review::replaced(ToolCallResponse {
-            id: tool.tool_id.clone(),
+        let response = ToolCallResponse {
+            id: batch.calls[index].tool_id.clone(),
             result: Err(message),
-        }));
-    }
-
-    /// Take one finished attempt and decide what the phase does about it.
-    ///
-    /// `index` names a call the phase started; the caller checks that before
-    /// dispatching here.
-    fn handle_tool_result(
-        &mut self,
-        result: ExecutorResult,
-        index: usize,
-        state: &mut PhaseState,
-        services: &PhaseServices<'_>,
-        turn_state: &mut TurnState,
-        tool_renderer: &ToolRenderer,
-    ) {
-        let PhaseState {
-            tools,
-            reviews,
-            pending_prompts,
-            prompt_active,
-        } = state;
-        let Some(tool) = tools.get_mut(&index) else {
-            return;
         };
-        let tracked_review = &mut reviews[index];
-        match result {
-            ExecutorResult::Completed(response) => {
-                match self.result_mode(&tool.tool_name) {
-                    ResultMode::Unattended => {
-                        self.finish_tool_call(tool, response, tracked_review, tool_renderer);
-                    }
-                    // The execution service applies `result = "skip"` itself,
-                    // so this response is already its skip message rather than
-                    // the tool's output. Rendering it would announce a result
-                    // the configuration asked not to deliver.
-                    ResultMode::Skip => {
-                        self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
-                        *tracked_review = Some(Review::unchanged(response));
-                    }
-                    // Nobody is there to answer, so the configured prompt is
-                    // skipped and the result stands as the tool produced it.
-                    ResultMode::Ask | ResultMode::Edit if !services.interactive => {
-                        self.finish_tool_call(tool, response, tracked_review, tool_renderer);
-                    }
-                    // Both Ask and Edit prompt whenever a user is there to
-                    // answer: the Edit flow uses the inline widget, which does
-                    // not need a configured editor.
-                    result_mode => {
-                        if *prompt_active {
-                            pending_prompts.push_back(PendingPrompt::ResultMode {
-                                index,
-                                tool_id: tool.tool_id.clone(),
-                                tool_name: tool.tool_name.clone(),
-                                response,
-                                result_mode,
-                            });
-                        } else {
-                            *prompt_active = true;
-                            self.set_tool_state(&tool.tool_id, ToolCallState::AwaitingResultEdit);
-                            Self::spawn_result_mode_prompt(
-                                index,
-                                tool.tool_name.clone(),
-                                response,
-                                result_mode,
-                                services,
-                            );
-                        }
-                    }
-                }
-            }
-            ExecutorResult::Failed(error) => {
-                self.record_lost_call(tool, tracked_review, &error, false);
-            }
-            ExecutorResult::OutcomeUnknown(error) => {
-                self.record_lost_call(tool, tracked_review, &error, true);
-            }
-            ExecutorResult::NeedsInput {
-                tool_id,
-                tool_name,
-                question,
-                source,
-                accumulated_answers,
-            } => {
-                tool.accumulated_answers = accumulated_answers;
-                self.route_tool_question(
-                    ToolQuestion {
-                        tool_id,
-                        tool_name,
-                        question,
-                        source,
-                    },
-                    index,
-                    tool,
-                    tracked_review,
-                    pending_prompts,
-                    prompt_active,
-                    services,
-                    turn_state,
-                );
-            }
-        }
-    }
-
-    /// Decide who answers a tool's question, and set that in motion.
-    ///
-    /// The `InquiryRequest` is recorded before any routing decision, so every
-    /// question round-trip lands on the stream however it is answered.
-    /// A question answered from the turn cache or from configuration resumes
-    /// the tool here; anything else hands off to a prompt or to the assistant
-    /// and resumes on a later event.
-    fn route_tool_question(
-        &mut self,
-        question: ToolQuestion,
-        index: usize,
-        tool: &mut ExecutingTool,
-        tracked_review: &mut Option<Review>,
-        pending_prompts: &mut VecDeque<PendingPrompt>,
-        prompt_active: &mut bool,
-        services: &PhaseServices<'_>,
-        turn_state: &mut TurnState,
-    ) {
-        let conv = services.conv;
-        let ToolQuestion {
-            tool_id,
-            tool_name,
-            question,
-            source,
-        } = question;
-        let inquiry_id = Self::open_inquiry(conv, turn_state, &tool_id, source, &question);
-        if let Some(answer) =
-            self.preset_answer(conv, turn_state, &tool_name, &inquiry_id, &question)
-        {
-            tool.accumulated_answers
-                .insert(question.id.to_string(), answer);
-            Self::spawn_tool_execution(index, tool, services);
-            return;
-        }
-
-        let is_secret = question.answer_type == AnswerType::Secret;
-        let target = self
-            .question_target(&tool_name, question.id.as_str())
-            .unwrap_or(QuestionTarget::User);
-
-        tracing::info!(
-            tool_name = %tool_name,
-            tool_id = %tool_id,
-            question_id = %question.id,
-            question_text = %question.text,
-            question_type = ?question.answer_type,
-            target = ?target,
-            interactive = services.interactive,
-            "Tool question received, routing to target",
-        );
-
-        if services.interactive && target.is_user() {
-            if *prompt_active {
-                pending_prompts.push_back(PendingPrompt::Question {
-                    index,
-                    question,
-                    inquiry_id,
-                });
-            } else {
-                *prompt_active = true;
-                self.set_tool_state(&tool_id, ToolCallState::AwaitingInput);
-                Self::spawn_user_prompt(index, question, inquiry_id, services);
-            }
-        } else if is_secret {
-            let (reason, message) = Self::secret_refusal(&tool_name, target.is_user());
-            Self::record_inquiry_cancelled(conv, &inquiry_id, reason);
-            self.set_tool_state(&tool_id, ToolCallState::Completed);
-            *tracked_review = Some(Review::replaced(ToolCallResponse {
-                id: tool_id.clone(),
-                result: Err(message),
-            }));
-        } else {
-            // The `InquiryRequest` is already recorded above; spawn the
-            // async inquiry on a cloned snapshot.
-            Self::spawn_inquiry(index, inquiry_id, &tool_id, tool_name, question, services);
-            self.set_tool_state(&tool_id, ToolCallState::AwaitingInput);
-        }
+        self.settle(batch, index, Review::replaced(response), host);
     }
 
     /// Record a tool's question on the current turn, and return the inquiry id
@@ -2150,12 +2067,11 @@ impl ToolCoordinator {
         let is_secret = question.answer_type == AnswerType::Secret;
 
         // Secrets never enter or read the turn-answer cache.
-        if !is_secret {
-            let answer_key = ToolAnswerCacheKey::new(tool_name, question.id.as_str());
-            if let Some(answer) = turn_state.remembered_tool_answers.get(&answer_key) {
-                Self::record_inquiry_answer(conv, inquiry_id, answer);
-                return Some(answer.clone());
-            }
+        if !is_secret
+            && let Some(answer) = turn_state.remembered_answer(tool_name, question.id.as_str())
+        {
+            Self::record_inquiry_answer(conv, inquiry_id, answer);
+            return Some(answer.clone());
         }
 
         let answer = self.static_answer(tool_name, question.id.as_str())?;
@@ -2206,113 +2122,14 @@ impl ToolCoordinator {
         }
     }
 
-    fn handle_prompt_answer(
-        &mut self,
-        index: usize,
-        question_id: String,
-        inquiry_id: &InquiryId,
-        answer: Value,
-        persist_level: jp_tool::PersistLevel,
-        redact: bool,
-        state: &mut PhaseState,
-        services: &PhaseServices<'_>,
-        turn_state: &mut TurnState,
-    ) {
-        state.prompt_active = false;
-
-        // Close the recorded inquiry with the user's answer; a secret answer
-        // is persisted as `Redacted` and never carries the value.
-        if redact {
-            Self::record_inquiry_redacted(services.conv, inquiry_id);
-        } else {
-            Self::record_inquiry_answer(services.conv, inquiry_id, &answer);
-        }
-
-        if let Some(tool) = state.tools.get_mut(&index) {
-            // Secrets never enter the turn-answer cache.
-            if persist_level == jp_tool::PersistLevel::Turn && !redact {
-                let answer_key = ToolAnswerCacheKey::new(&tool.tool_name, &question_id);
-                turn_state
-                    .remembered_tool_answers
-                    .insert(answer_key, answer.clone());
-            }
-            tool.accumulated_answers.insert(question_id, answer);
-            self.set_tool_state(&tool.tool_id, ToolCallState::Running);
-            Self::spawn_tool_execution(index, tool, services);
-        }
-        self.process_next_prompt(state, services);
-    }
-
-    fn handle_prompt_cancelled(
-        &mut self,
-        index: usize,
-        inquiry_id: &InquiryId,
-        reason: CancellationReason,
-        state: &mut PhaseState,
-        services: &PhaseServices<'_>,
-    ) {
-        state.prompt_active = false;
-
-        let result = Self::cancelled_input_result(&reason);
-        Self::record_inquiry_cancelled(services.conv, inquiry_id, reason);
-
-        if let Some(tool) = state.tools.get(&index) {
-            self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
-            state.reviews[index] = Some(Review::replaced(ToolCallResponse {
-                id: tool.tool_id.clone(),
-                result,
-            }));
-        }
-        self.process_next_prompt(state, services);
-    }
-
-    fn spawn_user_prompt(
-        index: usize,
-        question: Question,
-        inquiry_id: InquiryId,
-        services: &PhaseServices<'_>,
-    ) {
-        let prompter = services.prompter.clone();
-        let event_tx = services.event_tx.clone();
-        let question_id = question.id.to_string();
-        let redact = question.answer_type == AnswerType::Secret;
-        tokio::task::spawn_blocking(move || match prompter.prompt_question(&question) {
-            Ok(result) => {
-                drop(event_tx.blocking_send(ExecutionEvent::PromptAnswer {
-                    index,
-                    question_id,
-                    inquiry_id,
-                    answer: result.answer,
-                    persist_level: result.persist_level,
-                    redact,
-                }));
-            }
-            Err(error) => {
-                let reason = Self::prompt_cancellation_reason(&error);
-                // Esc/Ctrl-C is routine; only genuine prompt failures are
-                // warning-worthy. The persisted record stays coarse, so this
-                // trace is the only place the underlying error survives.
-                if reason == CancellationReason::BackendError {
-                    warn!(%error, "Tool question prompt failed.");
-                }
-                drop(event_tx.blocking_send(ExecutionEvent::PromptCancelled {
-                    index,
-                    inquiry_id,
-                    reason,
-                }));
-            }
-        });
-    }
-
     fn spawn_result_mode_prompt(
-        index: usize,
+        call: usize,
         tool_name: String,
         response: ToolCallResponse,
         result_mode: ResultMode,
-        services: &PhaseServices<'_>,
+        prompter: Arc<ToolPrompter>,
+        events: mpsc::UnboundedSender<ToolEvent>,
     ) {
-        let prompter = services.prompter.clone();
-        let event_tx = services.event_tx.clone();
         tokio::task::spawn_blocking(move || {
             // Whether the content changed is decided here, where both the
             // offered response and the user's answer are in hand. Downstream
@@ -2337,7 +2154,7 @@ impl ToolCoordinator {
                 ResultMode::Edit => Self::handle_edit_result(&prompter, response),
                 _ => Review::unchanged(response),
             };
-            drop(event_tx.blocking_send(ExecutionEvent::ResultModeProcessed { index, review }));
+            drop(events.send(ToolEvent::Reviewed { call, review }));
         });
     }
 
@@ -2363,35 +2180,13 @@ impl ToolCoordinator {
             }),
         }
     }
+}
 
-    /// Hand the terminal to the next waiting prompt, if there is one.
-    fn process_next_prompt(&mut self, state: &mut PhaseState, services: &PhaseServices<'_>) {
-        let Some(next) = state.pending_prompts.pop_front() else {
-            return;
-        };
-        state.prompt_active = true;
-        match next {
-            PendingPrompt::Question {
-                index,
-                question,
-                inquiry_id,
-            } => {
-                if let Some(tool) = state.tools.get(&index) {
-                    self.set_tool_state(&tool.tool_id, ToolCallState::AwaitingInput);
-                }
-                Self::spawn_user_prompt(index, question, inquiry_id, services);
-            }
-            PendingPrompt::ResultMode {
-                index,
-                tool_id,
-                tool_name,
-                response,
-                result_mode,
-            } => {
-                self.set_tool_state(&tool_id, ToolCallState::AwaitingResultEdit);
-                Self::spawn_result_mode_prompt(index, tool_name, response, result_mode, services);
-            }
-        }
+impl Drop for ToolCoordinator {
+    /// Stop the calls of a turn that ended before they did, such as one the
+    /// user aborted while a response was streaming.
+    fn drop(&mut self) {
+        self.abandon();
     }
 }
 

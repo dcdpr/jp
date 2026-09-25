@@ -15,10 +15,7 @@
 //! the turn ends without doing so, so a sender learns whether its interrupt
 //! reached the conversation rather than only whether it was queued.
 
-use std::{
-    collections::VecDeque,
-    task::{Context, Poll},
-};
+use std::collections::VecDeque;
 
 use tokio::sync::{
     mpsc::{self, error::TrySendError},
@@ -151,20 +148,6 @@ impl TurnInterrupts {
         }
 
         self.rx.recv().await.map(ClientInterrupt::take)
-    }
-
-    /// Poll for the next interrupt.
-    ///
-    /// Yields `Ready(None)` once every sender is gone, which for
-    /// [`TurnInterrupts::none`] is immediately.
-    pub(crate) fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<Option<InterruptAction>> {
-        if let Some(interrupt) = self.held.pop_front() {
-            return Poll::Ready(Some(interrupt.take()));
-        }
-
-        self.rx
-            .poll_recv(cx)
-            .map(|next| next.map(ClientInterrupt::take))
     }
 
     /// Wait for an interrupt that ends the turn before it has started.

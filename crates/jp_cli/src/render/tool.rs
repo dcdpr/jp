@@ -21,7 +21,6 @@ use jp_md::format::Formatter;
 use jp_printer::{ErrChannel, LineSink, OutputLines, RegionStyle, StatusRegion};
 use jp_term::{background::DefaultBackground, osc::hyperlink, shade::ShadedWriter};
 use serde_json::{Map, Value};
-use tracing::warn;
 
 /// Map the `stderr_rows` config key onto the printer's window budget.
 ///
@@ -42,19 +41,6 @@ struct PendingTool {
     id: String,
     /// Tool name.
     name: String,
-}
-
-/// Outcome of [`ToolRenderer::render_approved`].
-#[derive(Debug, Clone)]
-pub enum RenderOutcome {
-    /// Header and arguments (if any) were printed.
-    /// If a custom formatter produced output, it's returned for persistence.
-    Rendered { content: Option<String> },
-    /// Custom formatter failed — nothing was printed.
-    Suppressed {
-        /// Error message from the custom formatter.
-        error: String,
-    },
 }
 
 /// Renders tool-related output to the terminal and manages the streaming-phase
@@ -110,6 +96,16 @@ pub struct ToolRenderer {
     /// [`TurnView`]: super::TurnView
     separator: Arc<AtomicBool>,
 
+    /// Whether any tool chrome reached the screen since the chat renderer last
+    /// entered a tool-call region from other content.
+    ///
+    /// Shared with the [`TurnView`]: a tool call settled before it drew
+    /// anything, such as one whose formatter failed, leaves nothing on screen
+    /// for the content after it to be spaced from.
+    ///
+    /// [`TurnView`]: super::TurnView
+    drawn: Arc<AtomicBool>,
+
     /// Reasoning-region background captured per tool-call ID.
     ///
     /// Populated at the tool-call boundary (via [`set_region`]) when a tool
@@ -146,6 +142,7 @@ impl ToolRenderer {
             preparing: StatusRegion::inert(),
             progress: StatusRegion::inert(),
             separator: Arc::new(AtomicBool::new(false)),
+            drawn: Arc::new(AtomicBool::new(false)),
             regions: HashMap::new(),
             current_region: None,
         }
@@ -157,6 +154,19 @@ impl ToolRenderer {
     /// [`TurnView`]: super::TurnView
     pub(crate) fn separator_flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.separator)
+    }
+
+    /// Handle to the shared drawn-chrome flag, for wiring to the [`TurnView`].
+    ///
+    /// [`TurnView`]: super::TurnView
+    pub(crate) fn drawn_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.drawn)
+    }
+
+    /// Record that a tool call put something on screen this renderer did not
+    /// write itself, such as a prompt asking one of its questions.
+    pub(crate) fn mark_drawn(&self) {
+        self.drawn.store(true, Ordering::Relaxed);
     }
 
     /// Record the reasoning-region background captured for a tool call at the
@@ -208,6 +218,9 @@ impl ToolRenderer {
             let _ = write(&mut buffer);
         }
 
+        if !buffer.is_empty() {
+            self.drawn.store(true, Ordering::Relaxed);
+        }
         let _ = self.channel.writer().write_str(&buffer);
     }
 
@@ -253,9 +266,9 @@ impl ToolRenderer {
 
     /// Renders an approved tool call, printing header and arguments atomically.
     ///
-    /// Prints the header with inline-formatted arguments in a single write, and
-    /// returns `Rendered { content: None }`: the built-in styles print their
-    /// arguments inline rather than producing content a caller persists.
+    /// Prints the header with inline-formatted arguments in a single write.
+    /// The built-in styles print their arguments inline rather than producing
+    /// content a caller persists.
     ///
     /// A `Custom` style is rendered by [`render_custom_result`] instead, from
     /// output the execution service produced.
@@ -266,50 +279,26 @@ impl ToolRenderer {
         name: &str,
         arguments: &Map<String, Value>,
         style: &ParametersStyle,
-    ) -> RenderOutcome {
+    ) {
         self.render_tool_call(name, arguments, style);
-        RenderOutcome::Rendered { content: None }
     }
 
     /// Render custom arguments already formatted by the execution service.
     ///
-    /// Prints the "Calling tool X" header followed by the formatted output.
-    /// A formatter that failed prints nothing and returns
-    /// [`RenderOutcome::Suppressed`], so a broken formatter does not show a
-    /// half-rendered call.
-    ///
-    /// The returned content is what the caller persists for replay.
-    pub(crate) fn render_custom_result(
-        &self,
-        name: &str,
-        result: Result<String, String>,
-    ) -> RenderOutcome {
-        match result {
-            Ok(content) if !content.is_empty() => {
-                let styled_name = name.yellow().bold();
-                self.write_chrome(self.current_region.as_ref(), |w| {
-                    self.emit_separator_to(w)?;
-                    writeln!(w, "Calling tool {styled_name}")
-                });
-                self.render_formatted_arguments(&content);
-                RenderOutcome::Rendered {
-                    content: Some(content),
-                }
-            }
-            Ok(_) => {
-                // Custom formatter returned empty — just show the header.
-                let styled_name = name.yellow().bold();
-                self.write_chrome(self.current_region.as_ref(), |w| {
-                    self.emit_separator_to(w)?;
-                    writeln!(w, "Calling tool {styled_name}")
-                });
-                RenderOutcome::Rendered { content: None }
-            }
-            Err(error) => {
-                warn!(%error, tool = %name, "Custom formatter failed, suppressing tool call display");
-                RenderOutcome::Suppressed { error }
-            }
+    /// Prints the "Calling tool X" header followed by the formatted output, and
+    /// returns that output for the caller to persist for replay.
+    /// An empty description prints only the header, and returns `None`.
+    pub(crate) fn render_custom_result(&self, name: &str, content: String) -> Option<String> {
+        let styled_name = name.yellow().bold();
+        self.write_chrome(self.current_region.as_ref(), |w| {
+            self.emit_separator_to(w)?;
+            writeln!(w, "Calling tool {styled_name}")
+        });
+        if content.is_empty() {
+            return None;
         }
+        self.render_formatted_arguments(&content);
+        Some(content)
     }
 
     /// Render already-formatted custom argument content.
@@ -592,6 +581,15 @@ impl ToolRenderer {
         } else {
             self.refresh_preparing();
         }
+    }
+
+    /// Shade what is written next with the region captured for call `id`.
+    ///
+    /// A call's header, description, and prompts can be written long after
+    /// other calls started streaming, so the region is set from the call's own
+    /// capture each time rather than left at whichever call came last.
+    pub(crate) fn focus(&mut self, id: &str) {
+        self.current_region = self.regions.get(id).cloned();
     }
 
     /// Returns `true` if there are tools waiting for arguments.

@@ -28,7 +28,13 @@
 //! | `Static`      | Show "reasoning..." once                 |
 //! | `Timer`       | Show a running timer, erase when done    |
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use crossterm::style::Stylize as _;
 use jp_config::style::{
@@ -147,6 +153,14 @@ pub struct ChatRenderer {
     para_source: String,
     /// Bytes of `para_source`'s render already printed (the stable prefix).
     para_emitted: usize,
+    /// Whether tool chrome reached the screen since the last tool-call region
+    /// was entered from other content, shared with the tool renderer.
+    ///
+    /// Content after a tool-call region is spaced from it only when the region
+    /// drew something: a call settled before it drew, such as one whose
+    /// formatter failed, leaves nothing to be spaced from.
+    /// `None` until wired, in which case every region counts as drawn.
+    tool_drawn: Option<Arc<AtomicBool>>,
 }
 
 impl ChatRenderer {
@@ -173,7 +187,13 @@ impl ChatRenderer {
             fixups: Fixups::llm_quirks(),
             para_source: String::new(),
             para_emitted: 0,
+            tool_drawn: None,
         }
+    }
+
+    /// Wire the flag the tool renderer raises when it draws.
+    pub(crate) fn set_tool_drawn(&mut self, flag: Arc<AtomicBool>) {
+        self.tool_drawn = Some(flag);
     }
 
     /// Render a `ChatResponse` (assistant output).
@@ -303,7 +323,13 @@ impl ChatRenderer {
     /// two blocks rather than two with nothing between them.
     /// A deferred gap goes out with the content instead: the reasoning it ends
     /// up in front of is on stdout, and so is the reasoning above it.
+    /// No gap at all when the region drew nothing.
     fn blank_line_after_tool_call(&mut self, next: ContentKind) {
+        if let Some(drawn) = &self.tool_drawn
+            && !drawn.swap(false, Ordering::Relaxed)
+        {
+            return;
+        }
         if next == ContentKind::Reasoning && self.reasoning_region_continues() {
             self.pending_separator = Some(SeparatorOrigin::ToolCall);
         } else {
@@ -906,6 +932,13 @@ impl ChatRenderer {
             self.pending_separator = None;
         } else {
             self.emit_pending_separator(continues);
+        }
+        // A region entered from other content starts with nothing drawn; one
+        // entered from another tool call keeps what that call drew.
+        if self.last_content_kind != Some(ContentKind::ToolCall)
+            && let Some(drawn) = &self.tool_drawn
+        {
+            drawn.store(false, Ordering::Relaxed);
         }
         self.transition_to_tool_call();
         if continues {
