@@ -2,6 +2,7 @@
 //! every case runs the same program on every platform.
 
 use std::{
+    env,
     io::ErrorKind,
     sync::{Arc, Mutex},
     thread,
@@ -26,8 +27,11 @@ fn probe(steps: &[&str], dir: &Utf8Path) -> ProcessSpec {
     ProcessSpec::new(PROBE, steps.iter().copied(), dir)
 }
 
+/// The package directory, as a working directory that always exists.
 fn here() -> Utf8PathBuf {
-    Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    env::var("CARGO_MANIFEST_DIR")
+        .expect("CARGO_MANIFEST_DIR: run tests via `cargo test` or `cargo nextest`")
+        .into()
 }
 
 #[test]
