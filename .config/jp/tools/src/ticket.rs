@@ -248,7 +248,8 @@ fn fitting_title(
     let count = retitled.chars().count();
     if count > limit {
         return Err(error(format!(
-            "The shorter title is {count} characters, and a ticket takes at most {limit}."
+            "The shorter title is {count} characters, and a ticket takes at most {limit}: \
+             {retitled}"
         )));
     }
 

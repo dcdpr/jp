@@ -621,7 +621,8 @@ fn a_shorter_title_answer_that_still_does_not_fit_ends_the_call() {
 
     assert_eq!(
         out,
-        "The shorter title is 71 characters, and a ticket takes at most 60."
+        "The shorter title is 71 characters, and a ticket takes at most 60: Make provider \
+         fixtures deterministic and sanitize recorded model output"
     );
     assert!(ids(&dir).is_empty(), "a refused title filed a ticket");
 }
