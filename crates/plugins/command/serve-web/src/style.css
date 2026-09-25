@@ -12,6 +12,10 @@
     --reasoning-bg: #fffbeb;
     --tool-bg: #f0fdf4;
     --code-bg: #f4f4f5;
+    /* The background a scrollable block sits on, so it can mask its own edge
+       shadows. Overridden by each surface that holds rendered markdown. */
+    --surface: #ffffff;
+    --edge-shadow: rgba(0, 0, 0, 0.3);
     --radius: 8px;
     --max-width: 800px;
 }
@@ -29,6 +33,10 @@
         --reasoning-bg: #2d2305;
         --tool-bg: #0d2818;
         --code-bg: #1e2228;
+        --surface: #0d1117;
+        /* Deeper than the light-mode value: the surfaces it falls on are already
+           dark, so it takes more black to read as a shadow. */
+        --edge-shadow: rgba(0, 0, 0, 0.55);
     }
 }
 
@@ -125,9 +133,13 @@ html:has(> body.scrolls) {
     overscroll-behavior: auto;
 }
 
+/* Above the list that passes under it. A sticky element with `z-index: auto`
+   does not create a stacking context, so the rows would otherwise paint over
+   the header's background and read as if it had none. */
 body.scrolls .page-header {
     position: sticky;
     top: 0;
+    z-index: 10;
 }
 
 body.scrolls .conversation-list {
@@ -313,29 +325,6 @@ a:hover {
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 8px;
-}
-
-/* One block per load-path directory: the directory is the namespace, and its
-   files are the choices within it. */
-.new-conversation fieldset {
-    margin: 0;
-    padding: 12px 14px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-}
-
-.new-conversation legend {
-    padding: 0 6px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: var(--fg-muted);
-}
-
-.new-conversation .config-option {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 0;
 }
 
 .new-conversation button {
@@ -630,18 +619,26 @@ html.ready .loading-veil {
     border-radius: var(--radius);
 }
 
+/* The dialog holds focus on open so the keyboard stays down, and a container
+   that can only be focused that way has no ring to draw. */
+.config-modal:focus {
+    outline: none;
+}
+
 .config-modal::backdrop {
     background: rgb(0 0 0 / 0.4);
 }
 
-.config-form {
+.config-form,
+.config-picker-body {
     display: flex;
     flex-direction: column;
     gap: 16px;
     padding: 20px;
 }
 
-.config-form h2 {
+.config-form h2,
+.config-picker-body h2 {
     margin: 0;
     font-size: 1rem;
 }
@@ -656,29 +653,6 @@ html.ready .loading-veil {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    max-height: 50vh;
-    overflow-y: auto;
-}
-
-.config-groups fieldset {
-    margin: 0;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-}
-
-.config-groups legend {
-    padding: 0 6px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--fg-muted);
-}
-
-.config-option {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 3px 0;
 }
 
 .config-actions {
@@ -702,6 +676,190 @@ html.ready .loading-veil {
     color: #ffffff;
     background: var(--accent);
     border-color: var(--accent);
+}
+
+/* The arguments a message runs under, in the order they are applied. */
+.config-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* The rows scroll, the note and the buttons below them do not: a list long
+   enough to need the room is also one the next row is added to. */
+.config-items {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 40vh;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    list-style: none;
+}
+
+.config-item {
+    display: flex;
+    gap: 6px;
+}
+
+/* Three classes deep on purpose. The new-conversation form styles every text
+   field it contains as its Title field, which would leave the picker and the
+   argument beside it padded differently. */
+.config-list .config-item .config-pick,
+.config-list .config-item .config-raw {
+    /* Without this a long option or placeholder sets the minimum width and the
+       row overflows the dialog rather than sharing what it has. */
+    min-width: 0;
+    flex: 1;
+    padding: 8px 10px;
+    /* Inherits the body's 16px, which is also the size below which iOS zooms
+       the page on focus. Denser would suit a dialog, and costs a zoom. */
+    font: inherit;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.config-new {
+    display: flex;
+    gap: 6px;
+}
+
+/* Two classes deep on purpose. The new-conversation form styles every button it
+   contains as its Start button, and these are not that. */
+.config-item .config-grip,
+.config-item .config-remove,
+.config-new .config-add {
+    flex: none;
+    font: inherit;
+    font-weight: 400;
+    color: var(--fg-muted);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+
+/* Square and as tall as the field between them, so a row reads as one control
+   rather than three. */
+.config-item .config-grip,
+.config-item .config-remove {
+    width: 36px;
+    padding: 0;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+/* The grip is the only part of a row that starts a drag, so it is also the only
+   part that gives up the browser's own touch gestures: without this, dragging
+   it on a phone scrolls the page instead. */
+.config-item .config-grip {
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+
+/* Lifted off the list while it is dragged, and above the rows it passes over. */
+.config-item.is-dragging {
+    position: relative;
+    z-index: 1;
+    background: var(--bg-alt);
+    border-radius: var(--radius);
+    box-shadow: 0 6px 16px rgb(0 0 0 / 0.3);
+}
+
+.config-item.is-dragging .config-grip {
+    cursor: grabbing;
+}
+
+.config-new .config-add {
+    padding: 8px 14px;
+}
+
+.config-item .config-grip:hover,
+.config-item .config-remove:hover,
+.config-new .config-add:hover {
+    color: var(--fg);
+    background: var(--bg-alt);
+}
+
+.config-new .config-add:disabled {
+    cursor: default;
+    opacity: 0.5;
+}
+
+.config-new .config-add:disabled:hover {
+    color: var(--fg-muted);
+    background: transparent;
+}
+
+/* Ticking a set of configurations to add, rather than picking them one row at a
+   time. Opened from `+ Configuration`, and on the conversation page that means
+   a dialog over a dialog. */
+
+/* One class and one element deep on purpose: the new-conversation form styles
+   every text field it contains as its Title field, and this one is not that. */
+.config-picker input.config-filter {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 8px 10px;
+    /* Inherits the body's 16px, which is also the size below which iOS zooms
+       the page on focus. Denser would suit a dialog, and costs a zoom. */
+    font: inherit;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.config-picker-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+/* One block per load-path directory: the directory is the namespace, and its
+   files are the choices within it. */
+.config-picker fieldset {
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.config-picker legend {
+    padding: 0 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--fg-muted);
+}
+
+.config-picker .config-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+}
+
+/* What the filter has hidden. Spelled out because the rules above set a
+   `display`, which is what the `hidden` attribute would otherwise have
+   removed. */
+.config-picker .config-option[hidden],
+.config-picker fieldset[hidden] {
+    display: none;
+}
+
+/* The place a ticked configuration will take in the list, which is the order it
+   was ticked in. */
+.config-picker .config-order {
+    margin-left: auto;
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-muted);
 }
 
 /* Nothing here skips rendering.
@@ -907,6 +1065,47 @@ html.ready .loading-veil {
   color: var(--fg);
   opacity: 1;
   background: var(--bg-alt);
+}
+
+/* Sized for a thumb where there is one.
+
+   Keyed on the pointer rather than the window width: a narrow desktop window is
+   still driven by a mouse, and 44px of chrome there is 44px of conversation
+   nobody asked to give up. */
+@media (pointer: coarse) {
+  .composer-tools {
+    gap: 4px;
+  }
+
+  .composer-tools button {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+  }
+
+  .composer-tools button svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* The label is shown on hover, which a touch screen reports as the state a
+     tap leaves behind. It would sit over the row until something else was
+     tapped. */
+  .composer-tools button::after {
+    content: none;
+  }
+
+  .config-list .config-item .config-pick,
+  .config-list .config-item .config-raw,
+  .config-new .config-add {
+    min-height: 44px;
+  }
+
+  .config-item .config-grip,
+  .config-item .config-remove {
+    width: 44px;
+    min-height: 44px;
+  }
 }
 
 /* Marks a configuration choice waiting to be applied. */
@@ -1159,10 +1358,12 @@ html.ready .loading-veil {
 
 .message.user {
     background: var(--user-bg);
+    --surface: var(--user-bg);
 }
 
 .message.assistant {
     background: var(--assistant-bg);
+    --surface: var(--assistant-bg);
 }
 
 /* Submitted, not yet in the transcript. Dimmed so it reads as provisional
@@ -1187,6 +1388,7 @@ html.ready .loading-veil {
 .reasoning {
     margin-bottom: 16px;
     background: var(--reasoning-bg);
+    --surface: var(--reasoning-bg);
     border-radius: var(--radius);
     padding: 0;
 }
@@ -1259,11 +1461,37 @@ code {
     border-radius: 3px;
 }
 
-/* Tables */
+/* Tables
+
+   The wrapper is the scroll container, so a table wider than the column scrolls
+   on its own. Left to overflow, it reaches `.conversation-detail`, whose
+   `overflow-y: auto` also makes the horizontal axis scrollable, and the whole
+   transcript slides sideways. */
+.table-scroll {
+    overflow-x: auto;
+    /* Swiping past either end of the table stops there, rather than chaining to
+       the transcript behind it or to the browser's back gesture. */
+    overscroll-behavior-x: contain;
+    margin: 16px 0;
+
+    /* A shadow on whichever side still has table beyond it, because iOS shows no
+       resting scrollbar and a cut that lands on a column border looks like the
+       end of the table.
+
+       Four layers: two covers painted in the surface colour that scroll with the
+       table, and two shadows that stay with the box. Reaching an end parks that
+       end's cover over its shadow and hides it, which is what makes the pair
+       mean "there is more this way" rather than "this box scrolls". */
+    background:
+        linear-gradient(to right, var(--surface) 30%, transparent) left / 24px 100% no-repeat local,
+        linear-gradient(to left, var(--surface) 30%, transparent) right / 24px 100% no-repeat local,
+        radial-gradient(farthest-side at left, var(--edge-shadow), transparent) left / 12px 100% no-repeat scroll,
+        radial-gradient(farthest-side at right, var(--edge-shadow), transparent) right / 12px 100% no-repeat scroll;
+}
+
 table {
     border-collapse: collapse;
     width: 100%;
-    margin: 16px 0;
     font-size: 0.875rem;
 }
 

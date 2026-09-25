@@ -98,13 +98,14 @@ pub enum InterruptAction {
         /// The reply text.
         content: String,
 
-        /// Whether the reply was composed in the external editor.
+        /// Whether the caller has to render the reply to the terminal.
         ///
-        /// An editor-composed reply never appeared on the terminal, so the
-        /// caller should echo it back.
-        /// An inline-composed reply is already visible in scrollback on the
-        /// widget's own line.
-        from_editor: bool,
+        /// `false` when the text is already on the terminal because that is
+        /// where it was typed — an inline-composed reply sits in scrollback on
+        /// the widget's own line, and rendering it again would double it.
+        /// `true` for a reply the terminal never saw: composed in the external
+        /// editor, or sent by a client somewhere else entirely.
+        echo: bool,
     },
 
     /// Resume generation (if stream is alive) or wait (if tool is running).
@@ -283,7 +284,10 @@ impl<P: PromptBackend> InterruptHandler<P> {
                     ReplyResult::Reply { text, from_editor } => {
                         return InterruptAction::Reply {
                             content: text,
-                            from_editor,
+                            // The editor took over the screen and gave it back:
+                            // whatever was composed there was never rendered
+                            // here.
+                            echo: from_editor,
                         };
                     }
                     // Empty submit or `Ctrl+C` in a menu-driven reply re-shows

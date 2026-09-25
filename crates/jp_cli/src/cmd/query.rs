@@ -68,6 +68,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use clap::{ArgAction, builder::TypedValueParser as _};
 use indexmap::IndexMap;
+use interrupt::TurnInterrupts;
 use jp_attachment::Attachment;
 use jp_config::{
     AppConfig, PartialAppConfig, PartialConfig as _, PartialConfigDelta as _,
@@ -789,11 +790,14 @@ impl Query {
             mcp_servers_handle,
             ctx.printer.clone(),
             ctx.term.interactive,
+            // Ctrl-C is how this turn is interrupted, and that arrives through
+            // the signal router.
+            TurnInterrupts::none(),
         )
         .await?;
 
         let mut turn_result = inputs
-            .run(lock, stream, ctx.signals.turn_interrupt(lock.id()))
+            .run(lock, stream, ctx.signals.turn_interrupt())
             .await
             .map_err(|error| cmd::Error::from(error).with_persistence(true));
 
@@ -1131,6 +1135,7 @@ impl Query {
         invocation: InvocationContext,
         pending_trim: PendingStreamTrim,
         mut turn_interrupt: TurnInterrupt,
+        mut interrupts: TurnInterrupts,
     ) -> Result<()> {
         let model_id = cfg.assistant.model.id.resolved();
 
@@ -1153,6 +1158,11 @@ impl Query {
                     notice.handled();
                 }
                 info!("Interrupted during model lookup; the turn did not start.");
+                return Ok(());
+            }
+
+            Some(action) = interrupts.next_stop() => {
+                info!(?action, "Stopped by a client during model lookup; the turn did not start.");
                 return Ok(());
             }
         };
@@ -1200,6 +1210,7 @@ impl Query {
             chat_request,
             pending_trim,
             turn_interrupt,
+            interrupts,
         )
         .await;
         if let Err(error) = execution_owner.shutdown().await {
@@ -1465,6 +1476,13 @@ pub(crate) struct TurnInputs {
 
     /// MCP servers starting in the background, awaited by [`TurnInputs::run`].
     mcp_servers: StartupSet,
+
+    /// Interrupts aimed at this turn by whoever asked for it.
+    ///
+    /// A turn typed at a terminal is interrupted through the signal router and
+    /// takes [`TurnInterrupts::none`]; a turn asked for from elsewhere is
+    /// reached through here.
+    interrupts: TurnInterrupts,
 }
 
 impl TurnInputs {
@@ -1493,6 +1511,7 @@ impl TurnInputs {
         mcp_servers: StartupSet,
         printer: Arc<Printer>,
         interactive: bool,
+        interrupts: TurnInterrupts,
     ) -> Result<Self> {
         let urls: Vec<Url> = config
             .conversation
@@ -1524,6 +1543,7 @@ impl TurnInputs {
             chat_request,
             pending_trim,
             config,
+            interrupts,
         })
     }
 
@@ -1539,6 +1559,7 @@ impl TurnInputs {
         mut turn_interrupt: TurnInterrupt,
     ) -> Result<()> {
         let cfg = &self.config;
+        let mut interrupts = self.interrupts;
 
         let tools = tokio::select! {
             result = async {
@@ -1580,6 +1601,14 @@ impl TurnInputs {
                 info!("Interrupted while preparing; the turn did not start.");
                 return Ok(());
             }
+
+            // A client's stop, for the same span: nothing has been appended, so
+            // ending here leaves the conversation as it was. A reply is held for
+            // the turn to take once its own request is in place.
+            Some(action) = interrupts.next_stop() => {
+                info!(?action, "Stopped by a client while preparing; the turn did not start.");
+                return Ok(());
+            }
         };
 
         let thread = build_thread(stream, self.attachments, &cfg.assistant, !tools.is_empty())?;
@@ -1614,6 +1643,7 @@ impl TurnInputs {
             },
             self.pending_trim,
             turn_interrupt,
+            interrupts,
         )
         .await
     }
@@ -1757,7 +1787,7 @@ enum QuerySource {
 /// How a new conversation's title is set from its first prompt, before the turn
 /// runs.
 #[derive(Debug, PartialEq)]
-enum NewTitle {
+pub(crate) enum NewTitle {
     /// Use this text, taken verbatim from a leading markdown heading.
     FromHeading(String),
 
@@ -1774,7 +1804,11 @@ enum NewTitle {
 /// background generation is chosen when `generate_auto` is enabled.
 /// The two flags are independent: disabling generation does not disable
 /// heading-derived titles.
-fn resolve_new_title(from_heading: bool, generate_auto: bool, content: &str) -> NewTitle {
+pub(crate) fn resolve_new_title(
+    from_heading: bool,
+    generate_auto: bool,
+    content: &str,
+) -> NewTitle {
     if from_heading && let Some(title) = jp_md::heading::leading_heading(content) {
         return NewTitle::FromHeading(title);
     }

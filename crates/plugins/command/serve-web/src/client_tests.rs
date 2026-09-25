@@ -29,6 +29,36 @@ fn channel_client() -> (PluginClient, std::sync::mpsc::Sender<u8>) {
     (client, tx)
 }
 
+/// A writer whose bytes stay readable, for asserting what reached the host.
+#[derive(Clone)]
+struct Recorder(Arc<Mutex<Vec<u8>>>);
+
+impl Recorder {
+    fn written(&self) -> String {
+        String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+    }
+}
+
+impl std::io::Write for Recorder {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// [`channel_client`], keeping what the client sends.
+fn recording_client() -> (PluginClient, std::sync::mpsc::Sender<u8>, Recorder) {
+    let (tx, rx) = std::sync::mpsc::channel::<u8>();
+    let stdin = BufReader::new(BlockingReader { rx });
+    let recorder = Recorder(Arc::new(Mutex::new(Vec::new())));
+    let writer: SharedWriter = Arc::new(Mutex::new(Box::new(recorder.clone())));
+    let (client, _shutdown) = PluginClient::start(stdin, writer);
+    (client, tx, recorder)
+}
+
 /// Deliver `line` to the reader once `client` has a pending request, so the
 /// response is dispatched to a waiting receiver rather than dropped.
 fn feed_after_register(client: &PluginClient, tx: std::sync::mpsc::Sender<u8>, line: String) {
@@ -189,6 +219,66 @@ async fn host_error_propagated() {
     let err = client.list_conversations().await.unwrap_err();
 
     assert!(matches!(err, ClientError::Host(msg) if msg.contains("something went wrong")));
+}
+
+/// Sending to a busy conversation asks the host to interrupt the turn and
+/// answer it, rather than to start a second one.
+///
+/// Asserted as the exact line on the wire, because this is the contract with
+/// the host: an `action` an older host does not read leaves the turn stopped
+/// and the message discarded.
+#[tokio::test]
+async fn a_reply_is_sent_as_an_interrupt_carrying_the_message() {
+    let (client, tx, sent) = recording_client();
+    feed_after_register(
+        &client,
+        tx,
+        format!(
+            "{}\n",
+            host_line(&HostToPlugin::Done(DoneResponse {
+                id: Some("1".to_owned()),
+            }))
+        ),
+    );
+
+    client
+        .reply("jp-c17000000000", "use Rust instead")
+        .await
+        .unwrap();
+
+    let expected = r#"{"type":"interrupt","id":"1","conversation":"jp-c17000000000","action":"reply","content":"use Rust instead"}"#;
+
+    assert_eq!(sent.written(), format!("{expected}\n"));
+}
+
+/// A host with no turn left to interrupt says so, and the caller still owns the
+/// message.
+#[tokio::test]
+async fn a_reply_to_a_finished_turn_reports_the_hosts_reason() {
+    let (client, tx, _sent) = recording_client();
+    feed_after_register(
+        &client,
+        tx,
+        format!(
+            "{}\n",
+            host_line(&HostToPlugin::Error(ErrorResponse {
+                id: Some("1".to_owned()),
+                request: Some("interrupt".to_owned()),
+                message: "no turn is running on conversation jp-c17000000000".to_owned(),
+            }))
+        ),
+    );
+
+    let error = client
+        .reply("jp-c17000000000", "use Rust instead")
+        .await
+        .expect_err("there is nothing to interrupt");
+
+    assert!(matches!(
+        error,
+        ClientError::Host(message)
+            if message == "no turn is running on conversation jp-c17000000000"
+    ));
 }
 
 #[tokio::test]

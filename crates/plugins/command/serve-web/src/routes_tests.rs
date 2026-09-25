@@ -1,4 +1,5 @@
 use axum::http::{HeaderMap, HeaderName};
+use pretty_assertions::assert_eq;
 use serde_json::json;
 
 use super::*;
@@ -74,27 +75,146 @@ fn a_caller_that_sends_neither_header_is_allowed() {
     assert!(same_origin(&headers(&[("host", "127.0.0.1:3000")])));
 }
 
+/// A caller that says nothing about what it holds gets the tail.
 #[test]
-fn a_caller_holding_the_whole_transcript_is_sent_nothing() {
-    // `from == total` is what the handler reads as "nothing to say".
-    assert_eq!(answer_from(Some(4), 4, 4, false), 4);
+fn resend_from_gives_the_tail_to_a_caller_that_holds_nothing() {
+    assert_eq!(resend_from(500, None, None, 500), 300);
 }
 
-/// The regression this guards: an entry that changes in place.
+/// A short conversation fits in one window, so the tail is the whole thing.
+#[test]
+fn resend_from_gives_the_whole_transcript_when_it_fits() {
+    assert_eq!(resend_from(12, None, None, 12), 0);
+}
+
+/// Nothing to send when the caller is up to date and nothing is in flight.
 ///
-/// A tool call is rendered when it is requested and gains its result later, and
-/// consecutive assistant text renders as one block that grows.
-/// Either way the count stays where it was, so a caller that trusts the count
-/// holds the first version forever — no later poll corrects it, because by
-/// then the count has moved past the entry that changed.
+/// `from == total` is what the handler reads as "nothing to say".
 #[test]
-fn an_unsettled_tail_is_resent_to_a_caller_that_already_has_it() {
-    assert_eq!(answer_from(Some(4), 4, 4, true), 3);
+fn resend_from_sends_nothing_to_an_up_to_date_caller() {
+    assert_eq!(resend_from(13, Some(13), Some(13), 13), 13);
+}
+
+/// A count past the end means the transcript was rewritten under the caller, so
+/// the tail is the only safe answer.
+#[test]
+fn resend_from_ignores_a_count_past_the_end() {
+    assert_eq!(resend_from(400, Some(900), None, 400), 200);
+}
+
+/// The tool call the caller is waiting on is sent again, so its result reaches
+/// the page.
+#[test]
+fn resend_from_reaches_back_to_the_call_the_caller_is_waiting_on() {
+    // Thirteen events, the caller holds all of them, and the call at 11 has no
+    // result yet.
+    assert_eq!(resend_from(13, Some(13), Some(11), 11), 11);
+}
+
+/// A tool call that gained its result between two polls is sent again.
+///
+/// By then the server's own boundary has moved past it — the next call in the
+/// batch is the one waiting — so the caller's floor is what reaches back for
+/// the entry that changed.
+#[test]
+fn resend_from_reaches_back_to_a_call_that_has_since_resolved() {
+    // The caller was last told that everything from 10 was provisional. Since
+    // then the call at 10 resolved and the one at 11 is the first still waiting.
+    assert_eq!(resend_from(13, Some(13), Some(10), 11), 10);
+}
+
+/// A floor above what the caller holds cannot reach past the end of its copy.
+#[test]
+fn resend_from_never_sends_past_what_the_caller_holds() {
+    assert_eq!(resend_from(20, Some(11), Some(30), 20), 11);
+}
+
+/// A boundary that moved backwards is honoured over a stale floor.
+///
+/// Compaction rewrites the transcript, which can leave an entry the caller
+/// believes final provisional again.
+#[test]
+fn resend_from_honours_a_boundary_below_the_callers_floor() {
+    assert_eq!(resend_from(30, Some(30), Some(20), 8), 8);
+}
+
+/// While a turn runs, a newest entry that can grow is provisional.
+///
+/// Consecutive assistant text renders as one block that grows, and it is the
+/// last entry, so nothing after it marks it as unfinished.
+/// The count stays where it was too, so a caller that trusts it holds the first
+/// version forever.
+#[test]
+fn a_growing_tail_is_provisional_while_the_turn_runs() {
+    let answering = render::render_events(&[
+        json!({"type": "chat_request", "content": "go"}),
+        json!({"type": "chat_response", "message": "here is"}),
+    ]);
+
+    assert_eq!(provisional_from(&answering, true), 1);
+    assert_eq!(provisional_from(&answering, false), 2);
+}
+
+/// A tool call still waiting on its result is where the provisional part
+/// starts, however much came after it.
+#[test]
+fn an_unanswered_call_is_provisional_before_a_growing_tail() {
+    let rendered = render::render_events(&[
+        json!({"type": "chat_request", "content": "go"}),
+        json!({"type": "tool_call_request", "id": "t1", "name": "ls", "arguments": {}}),
+        json!({"type": "chat_response", "message": "meanwhile"}),
+    ]);
+
+    assert_eq!(provisional_from(&rendered, true), 1);
 }
 
 #[test]
-fn a_settled_tail_leaves_an_up_to_date_caller_alone() {
-    assert_eq!(answer_from(Some(4), 4, 4, false), 4);
+fn an_empty_transcript_has_nothing_provisional() {
+    assert_eq!(provisional_from(&[], true), 0);
+    assert_eq!(resend_from(0, Some(0), Some(0), 0), 0);
+}
+
+/// A block that grows once more and then the turn ends, between two polls.
+///
+/// The poll after the turn has ended no longer counts the newest entry as
+/// provisional, so the only thing that can reach back for it is the floor the
+/// caller was given while the turn ran — which is why that floor has to
+/// include the growing tail rather than stop at the tool calls.
+#[test]
+fn a_block_that_grows_as_the_turn_ends_reaches_the_caller() {
+    let streaming = render::render_events(&[
+        json!({"type": "chat_request", "content": "go"}),
+        json!({"type": "chat_response", "message": "first part"}),
+    ]);
+
+    // What the poll during streaming hands the caller.
+    let held = streaming.len();
+    let floor = provisional_from(&streaming, true);
+
+    let finished = render::render_events(&[
+        json!({"type": "chat_request", "content": "go"}),
+        json!({"type": "chat_response", "message": "first part"}),
+        json!({"type": "chat_response", "message": "second part"}),
+    ]);
+    assert_eq!(
+        finished.len(),
+        held,
+        "the second flush grows the block rather than adding one"
+    );
+
+    let from = resend_from(
+        finished.len(),
+        Some(held),
+        Some(floor),
+        provisional_from(&finished, false),
+    );
+    assert_eq!(from, 1, "the grown block is sent again");
+
+    let html = views::detail::messages(&finished[from..]).into_string();
+    assert!(
+        html.contains("second part"),
+        "what is sent carries the rest of the answer: {html}"
+    );
 }
 
 /// Waiting for the first token is the longest stretch of a turn, and the
@@ -125,31 +245,6 @@ fn a_tool_call_and_a_block_of_text_are_both_unsettled() {
     assert!(render::tail_can_change(&render::render_events(&answering)));
 }
 
-/// An unsettled entry wins over the newest one: a tool call still waiting on
-/// its result is where the answer has to start, however much came after it.
-#[test]
-fn an_unsettled_entry_is_resent_from_where_it_starts() {
-    assert_eq!(answer_from(Some(9), 9, 4, true), 4);
-}
-
-/// A count past the end means the transcript was rewritten underneath the
-/// caller — compacted, or edited on disk — so the only safe answer is the
-/// tail.
-#[test]
-fn a_count_beyond_the_end_falls_back_to_the_tail() {
-    assert_eq!(answer_from(Some(500), 300, 300, false), 100);
-}
-
-#[test]
-fn a_caller_that_says_nothing_is_sent_the_tail() {
-    assert_eq!(answer_from(None, 300, 300, false), 100);
-}
-
-#[test]
-fn an_empty_transcript_has_nothing_to_resend() {
-    assert_eq!(answer_from(Some(0), 0, 0, true), 0);
-}
-
 /// The same thing end to end, against what the renderer actually produces.
 ///
 /// The count is identical before and after the result arrives, because
@@ -163,8 +258,13 @@ fn a_tool_result_reaches_a_caller_that_already_counted_the_call() {
         json!({"type": "tool_call_request", "id": "t1", "name": "ls", "arguments": {}}),
     ];
 
-    let held = render::render_events(&asked).len();
+    let asked = render::render_events(&asked);
+    let held = asked.len();
     assert_eq!(held, 2);
+
+    // What the caller was told on the poll that delivered the unanswered call.
+    let floor = provisional_from(&asked, true);
+    assert_eq!(floor, 1);
 
     let answered = [
         json!({"type": "chat_request", "content": "run it"}),
@@ -179,11 +279,11 @@ fn a_tool_result_reaches_a_caller_that_already_counted_the_call() {
         "the result renders into the call, so the count cannot report it"
     );
 
-    let from = answer_from(
-        Some(held),
+    let from = resend_from(
         rendered.len(),
-        render::settled_upto(&rendered),
-        render::tail_can_change(&rendered),
+        Some(held),
+        Some(floor),
+        provisional_from(&rendered, true),
     );
 
     assert_eq!(
@@ -196,4 +296,138 @@ fn a_tool_result_reaches_a_caller_that_already_counted_the_call() {
         html.contains("a.txt"),
         "what is sent carries the result: {html}"
     );
+}
+
+/// Both shapes of choice reach the host in the order the chooser held them.
+///
+/// The host applies them in that order, so an assignment written above a
+/// configuration is overridden by it, and one written below wins.
+#[test]
+fn a_turn_form_keeps_the_order_the_rows_were_arranged_in() {
+    let form = TurnForm::parse(
+        "content=go&cfg=assistant.model.id%3Dopus&cfg=personas%2Fdev&cfg=skill%2Frfd",
+    );
+
+    assert_eq!(form.content, "go");
+    assert_eq!(form.cfg.args(), [
+        "assistant.model.id=opus",
+        "personas/dev",
+        "skill/rfd"
+    ]);
+}
+
+/// A picker left on its empty option is not an argument.
+#[test]
+fn a_turn_form_drops_a_row_that_chose_nothing() {
+    let form = TurnForm::parse("content=go&cfg=&cfg=+&cfg=personas%2Fdev");
+
+    assert_eq!(form.cfg.args(), ["personas/dev"]);
+}
+
+/// Space around an argument is the keyboard's, not the reader's.
+#[test]
+fn a_turn_form_trims_an_argument() {
+    let form = TurnForm::parse("content=go&cfg=+assistant.name%3DJP+");
+
+    assert_eq!(form.cfg.args(), ["assistant.name=JP"]);
+}
+
+/// Whether `id` is recorded as running, and if so, for which turn.
+fn running_as(turns: &Turns, id: &str, turn: &watch::Sender<bool>) -> bool {
+    running_turn(turns, id).is_some_and(|done| done.same_channel(&turn.subscribe()))
+}
+
+/// A reply the turn refused falls back to a turn of its own only once the
+/// original query has returned, and the original's completion cannot then clear
+/// the fallback's entry.
+///
+/// The turn stops reading interrupts before it lets go of the conversation, so
+/// the refusal can arrive while the original query is still in flight.
+#[tokio::test]
+async fn a_fallback_turn_waits_for_the_one_it_replaced() {
+    let turns = Turns::default();
+    let original = begin_turn(&turns, "c1", None, None, None);
+
+    // What the busy check took before the reply was sent.
+    let mut ended = running_turn(&turns, "c1").expect("the original is running");
+
+    let (started, mut fallback_started) = tokio::sync::oneshot::channel();
+    let fallback = tokio::spawn(async move {
+        ended.wait_for(|ended| *ended).await.ok();
+        started.send(()).unwrap();
+    });
+
+    tokio::task::yield_now().await;
+    assert!(
+        fallback_started.try_recv().is_err(),
+        "the fallback waits while the original query is still in flight"
+    );
+
+    end_turn(
+        &turns,
+        "c1".to_owned(),
+        &original,
+        Some("interrupted".to_owned()),
+    );
+    fallback.await.unwrap();
+
+    let replacement = begin_turn(&turns, "c1", Some("use Rust".to_owned()), None, None);
+
+    // The original's outcome landing after the replacement took the entry, as
+    // it would without the wait above: it must not clear the replacement.
+    end_turn(&turns, "c1".to_owned(), &original, None);
+    assert!(running_as(&turns, "c1", &replacement));
+
+    end_turn(&turns, "c1".to_owned(), &original, Some("late".to_owned()));
+    assert!(running_as(&turns, "c1", &replacement));
+}
+
+/// A turn's own completion still settles its entry.
+#[test]
+fn a_turn_ending_clears_its_own_entry() {
+    let turns = Turns::default();
+    let done = begin_turn(&turns, "c1", None, None, None);
+    let ended = running_turn(&turns, "c1").unwrap();
+
+    end_turn(&turns, "c1".to_owned(), &done, None);
+
+    assert!(running_turn(&turns, "c1").is_none());
+    assert!(*ended.borrow(), "whoever waited on it is told it ended");
+}
+
+/// A reply to a running turn cannot carry configuration: the turn keeps the one
+/// it started with, so the choice would be accepted and never applied.
+#[test]
+fn a_busy_reply_carrying_configuration_is_refused() {
+    let form = TurnForm::parse("content=go&cfg=assistant.model.id%3Dopus");
+
+    assert_eq!(
+        busy_refusal(&form),
+        Some(
+            "A turn is running, and configuration applies to a new turn. Stop it first, or clear \
+             the configuration to reply."
+        )
+    );
+}
+
+/// Without configuration a reply goes through, including one whose chooser
+/// holds only rows nothing was picked in.
+#[test]
+fn a_busy_reply_without_configuration_is_delivered() {
+    assert_eq!(busy_refusal(&TurnForm::parse("content=go")), None);
+    assert_eq!(
+        busy_refusal(&TurnForm::parse("content=go&cfg=&cfg=+")),
+        None
+    );
+}
+
+/// The new-conversation form reads the same field as the composer.
+#[test]
+fn the_new_conversation_form_reads_the_same_configuration_field() {
+    let form = NewConversationForm::parse(
+        "title=Spike&content=go&cfg=personas%2Fdev&cfg=assistant.name%3DJP",
+    );
+
+    assert_eq!(form.title, "Spike");
+    assert_eq!(form.cfg.args(), ["personas/dev", "assistant.name=JP"]);
 }

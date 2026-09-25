@@ -37,7 +37,7 @@ use rmcp::model::{CallToolRequestParams, Meta};
 use serde_json::{Map, Value, json};
 use tokio::time::{Duration, timeout};
 
-use super::{PendingStreamTrim, ToolCoordinator, run_turn_loop};
+use super::{PendingStreamTrim, ToolCoordinator, TurnInterrupts, run_turn_loop};
 use crate::{
     access::approvals::ApprovalStore, cmd::query::tool::mcp_executor::TerminalExecutorSource,
     signals::testing::detached_router,
@@ -264,7 +264,7 @@ async fn assert_agent_fallback(next_execution: ToolExecution) {
         let router = detached_router();
         let (printer, output, _) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        run_turn_loop(provider.clone(), &model, &config, &router, root, InvocationContext::default(), false, &[], &lock, ToolChoice::Auto, &definitions, printer.clone(), Arc::new(MockPromptBackend::new()), ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)), ChatRequest::from("Run the tool."), PendingStreamTrim::default(), router.turn_interrupt(lock.id())).await.unwrap();
+        run_turn_loop(provider.clone(), &model, &config, &router, root, InvocationContext::default(), false, &[], &lock, ToolChoice::Auto, &definitions, printer.clone(), Arc::new(MockPromptBackend::new()), ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)), ChatRequest::from("Run the tool."), PendingStreamTrim::default(), router.turn_interrupt(), TurnInterrupts::none()).await.unwrap();
         assert_eq!(count.load(Ordering::SeqCst), 4);
         assert_eq!(provider.starts.load(Ordering::SeqCst), 2);
         printer.flush();
@@ -296,7 +296,7 @@ async fn agent_continuation_waits_for_host_recording_without_resubmission() {
         let router = detached_router();
         let (printer, output, chrome) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        run_turn_loop(provider.clone(), &model, &config, &router, root, InvocationContext::default(), false, &[], &lock, ToolChoice::Auto, &definitions, printer.clone(), Arc::new(MockPromptBackend::new()), ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)), ChatRequest::from("Run the tool."), PendingStreamTrim::default(), router.turn_interrupt(lock.id())).await.unwrap();
+        run_turn_loop(provider.clone(), &model, &config, &router, root, InvocationContext::default(), false, &[], &lock, ToolChoice::Auto, &definitions, printer.clone(), Arc::new(MockPromptBackend::new()), ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)), ChatRequest::from("Run the tool."), PendingStreamTrim::default(), router.turn_interrupt(), TurnInterrupts::none()).await.unwrap();
         let answers = lock.events().iter().filter_map(|event| event.event.as_inquiry_response()).filter_map(|answer| match answer { InquiryResponse::Answered { answer, .. } => Some(answer.clone()), _ => None }).collect::<Vec<_>>();
         assert_eq!(answers, vec![json!(true), json!(true)]);
         assert_eq!(count.load(Ordering::SeqCst), 4);

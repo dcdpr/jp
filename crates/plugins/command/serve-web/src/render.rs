@@ -278,7 +278,21 @@ pub(crate) fn markdown_to_html(md: &str) -> String {
     options.extension.autolink = true;
     options.extension.tasklist = true;
 
-    comrak::markdown_to_html(md, &options)
+    wrap_tables(comrak::markdown_to_html(md, &options))
+}
+
+/// Put every table in a scroll container.
+///
+/// Raw HTML is escaped, so a literal `<table>` tag can only have come from
+/// comrak's own table rendering, and GFM has no nested tables, so a plain
+/// string replacement is enough.
+fn wrap_tables(html: String) -> String {
+    if !html.contains("<table>") {
+        return html;
+    }
+
+    html.replace("<table>", "<div class=\"table-scroll\"><table>")
+        .replace("</table>", "</table></div>")
 }
 
 #[cfg(test)]

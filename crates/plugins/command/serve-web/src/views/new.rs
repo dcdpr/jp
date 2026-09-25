@@ -3,21 +3,18 @@
 use jp_plugin::message::ConfigEntry;
 use maud::{Markup, PreEscaped, html};
 
-use super::layout;
+use super::{configs, layout};
 
 /// Render the new-conversation form.
 ///
-/// `configs` are grouped by namespace in the order the host listed them, which
-/// is sorted by segment — so a namespace's entries arrive together and the
-/// groups come out alphabetically.
-///
-/// `error` is shown above the form when a previous attempt was refused; the
-/// fields keep what was typed so nothing has to be entered twice.
+/// `chosen` are the configuration arguments to restore, in the order they
+/// apply, and `error` is shown above the form when a previous attempt was
+/// refused; the fields keep what was typed so nothing has to be entered twice.
 pub(crate) fn render(
-    configs: &[ConfigEntry],
+    entries: &[ConfigEntry],
     content: &str,
     title: &str,
-    selected: &[String],
+    chosen: &[String],
     error: Option<&str>,
 ) -> Markup {
     layout::page("New conversation", html! {
@@ -46,21 +43,7 @@ pub(crate) fn render(
                         placeholder="Optional; named from the first turn if left blank";
                 }
 
-                @for group in group_by_namespace(configs) {
-                    fieldset {
-                        legend { (group.label()) }
-                        @for entry in group.entries {
-                            label class="config-option" {
-                                input
-                                    type="checkbox"
-                                    name="cfg"
-                                    value=(entry.segment)
-                                    checked[selected.contains(&entry.segment)];
-                                span { (entry.name) }
-                            }
-                        }
-                    }
-                }
+                (configs::chooser(entries, chosen))
 
                 label {
                     span class="field-label" { "Message" }
@@ -78,6 +61,9 @@ pub(crate) fn render(
 
             script { (PreEscaped(CLIENT_SCRIPT)) }
         }
+
+        script { (PreEscaped(configs::SCRIPT)) }
+        script { (PreEscaped(SCRIPT)) }
     })
 }
 
@@ -108,42 +94,7 @@ try {
 }
 ";
 
-/// Configurations sharing a namespace, in the order the host listed them.
-struct Group<'a> {
-    namespace: &'a str,
-    entries: Vec<&'a ConfigEntry>,
-}
-
-impl Group<'_> {
-    /// The heading for the group, naming the load-path directory it came from.
-    ///
-    /// Entries at the load path's root have no namespace to show, so they are
-    /// labelled generically rather than with an empty heading.
-    fn label(&self) -> &str {
-        if self.namespace.is_empty() {
-            "General"
-        } else {
-            self.namespace
-        }
-    }
-}
-
-/// Split a sorted list into runs sharing a namespace.
+/// The keyboard shortcut for starting the conversation.
 ///
-/// Relies on the host's sort by segment: entries in one namespace share a
-/// prefix, so they are already adjacent and no grouping map is needed.
-fn group_by_namespace(configs: &[ConfigEntry]) -> Vec<Group<'_>> {
-    let mut groups: Vec<Group<'_>> = Vec::new();
-
-    for entry in configs {
-        match groups.last_mut() {
-            Some(group) if group.namespace == entry.namespace => group.entries.push(entry),
-            _ => groups.push(Group {
-                namespace: &entry.namespace,
-                entries: vec![entry],
-            }),
-        }
-    }
-
-    groups
-}
+/// The form works without it; this only saves the trip to the button.
+const SCRIPT: &str = include_str!("new.js");

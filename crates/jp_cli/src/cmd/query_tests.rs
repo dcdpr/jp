@@ -33,9 +33,13 @@ use jp_workspace::{
 };
 use relative_path::RelativePathBuf;
 use serde_json::Value;
-use tokio::{runtime::Runtime, sync::broadcast};
+use tokio::{
+    runtime::Runtime,
+    sync::{broadcast, oneshot::error::TryRecvError},
+};
 
 use super::{
+    interrupt::InterruptAction,
     tool::executor::{ExecutorSource, mock::TestExecutorSource},
     *,
 };
@@ -44,7 +48,7 @@ use crate::{
     cmd::target::{ConversationTarget, PickerFilter},
     config_pipeline::ConfigPipeline,
     resolve_config,
-    signals::testing::detached_router,
+    signals::testing::{detached_router, test_router},
 };
 
 fn make_partial_with_tools() -> PartialAppConfig {
@@ -332,7 +336,7 @@ async fn an_interrupt_during_mcp_startup_stops_the_turn_before_it_runs() {
         stderr,
     };
 
-    let router = detached_router();
+    let (router, signals) = test_router();
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
 
     let inputs = TurnInputs {
@@ -348,16 +352,17 @@ async fn an_interrupt_during_mcp_startup_stops_the_turn_before_it_runs() {
         workspace_id: workspace.id().clone(),
         pending_trim: PendingStreamTrim::default(),
         mcp_servers,
+        // Ctrl-C is how this turn is interrupted, and this test drives that
+        // through the router rather than over a channel.
+        interrupts: TurnInterrupts::none(),
     };
 
-    // Registered where the lock is taken, so the request reaches it even though
-    // the turn has not started. The notice waits on the channel until `run`
-    // polls it.
-    let interrupt = router.turn_interrupt(conversation_id);
-    assert!(
-        router.interrupt_scope(conversation_id),
-        "the handler exists as soon as the conversation is locked"
-    );
+    // Registered where the lock is taken, so the press reaches it even though
+    // the turn has not started. It is the only handler on the stack at this
+    // point, so it is the one a Ctrl-C finds, and the notice waits on the
+    // channel until `run` polls it.
+    let interrupt = router.turn_interrupt();
+    signals.interrupt().await;
 
     let stream = lock.events().clone();
     tokio::time::timeout(
@@ -371,6 +376,99 @@ async fn an_interrupt_during_mcp_startup_stops_the_turn_before_it_runs() {
     assert!(
         lock.events().is_empty(),
         "the turn was interrupted before its request was appended"
+    );
+}
+
+/// A client's stop reaches the turn while MCP servers are starting, the same as
+/// a Ctrl-C does.
+///
+/// A client with no terminal has only this channel: the web UI's Cancel is sent
+/// in exactly this window, while the message it pulls back has not been
+/// recorded yet.
+/// A reply sent in the same window is held for the turn rather than refused or
+/// acted on early, so it is still unacknowledged when the stop ends the turn,
+/// and refused then.
+///
+/// The startup never completes, so the only way out of `run` is the stop.
+#[tokio::test]
+async fn a_client_stop_during_mcp_startup_stops_the_turn_before_it_runs() {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::in_memory(tmp.path());
+    let conversation_id = ConversationId::try_from(
+        chrono::DateTime::<chrono::Utc>::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000),
+    )
+    .unwrap();
+    let base_config = Arc::new(AppConfig::new_test());
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base_config),
+    );
+    let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+    let lock = workspace.test_lock(handle);
+
+    let (_release, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async move {
+        release_rx.await.ok();
+        Ok(Startup::Ready(McpServerId::new("bookworm")))
+    });
+    let (_lines, stderr) = broadcast::channel(1);
+    let mcp_servers = StartupSet {
+        joins,
+        pending: vec![McpServerId::new("bookworm")],
+        stderr,
+    };
+
+    // Nothing presses Ctrl-C in this test; the router is only there because a
+    // turn always has one.
+    let router = detached_router();
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let (client, interrupts) = TurnInterrupts::channel();
+
+    let inputs = TurnInputs {
+        config: Arc::clone(&base_config),
+        signals: router.clone(),
+        mcp_client: jp_mcp::Client::default(),
+        workspace_root: tmp.path().to_path_buf(),
+        interactive: false,
+        attachments: vec![],
+        printer: Arc::new(printer),
+        approvals: Arc::new(crate::access::approvals::ApprovalStore::default()),
+        chat_request: ChatRequest::from("hello"),
+        workspace_id: workspace.id().clone(),
+        pending_trim: PendingStreamTrim::default(),
+        mcp_servers,
+        interrupts,
+    };
+
+    let mut reply = client
+        .try_send(InterruptAction::Reply {
+            content: "and in Rust".to_owned(),
+            echo: true,
+        })
+        .unwrap();
+    let stop = client.try_send(InterruptAction::Stop).unwrap();
+
+    let interrupt = router.turn_interrupt();
+    let stream = lock.events().clone();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        inputs.run(&lock, stream, interrupt),
+    )
+    .await
+    .expect("the stop ends the wait; a hang here means it was never seen")
+    .expect("stopping before the turn starts is not an error");
+
+    assert!(
+        lock.events().is_empty(),
+        "the turn was stopped before its request was appended"
+    );
+    assert_eq!(stop.await, Ok(()), "the stop was acted on");
+    assert_eq!(
+        reply.try_recv(),
+        Err(TryRecvError::Closed),
+        "the reply was never acted on, so it is refused rather than reported delivered"
     );
 }
 
@@ -406,7 +504,8 @@ async fn run_mock_turn(
         tool::ToolCoordinator::new(cfg.conversation.tools.clone(), empty_executor_source()),
         ChatRequest::from(prompt),
         PendingStreamTrim::default(),
-        router.turn_interrupt(lock.id()),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
     )
     .await
     .unwrap();

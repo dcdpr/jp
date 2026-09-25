@@ -16,7 +16,7 @@ use axum::{
 use jp_plugin::message::LockState;
 use maud::Markup;
 use serde::{Deserialize, Serialize};
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::watch};
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -33,7 +33,7 @@ struct AppState {
     ///
     /// A turn outlives the request that started it, so its outcome has to live
     /// somewhere the polling endpoint can find it.
-    turns: Arc<Mutex<HashMap<String, TurnStatus>>>,
+    turns: Arc<Turns>,
 
     /// Identifies this run of the server.
     ///
@@ -43,6 +43,9 @@ struct AppState {
     /// Data recovers on its own; the page itself does not.
     boot: String,
 }
+
+/// The turns this server has started, by conversation.
+type Turns = Mutex<HashMap<String, TurnStatus>>;
 
 /// The state of a turn started from the browser.
 #[derive(Debug, Clone)]
@@ -74,6 +77,14 @@ enum TurnStatus {
         /// the transcript is longer than this, whether or not the assistant has
         /// already begun answering it.
         sent_at: Option<usize>,
+
+        /// Turns `true` once the query behind this entry has ended and its
+        /// outcome is recorded here.
+        ///
+        /// Also what tells one turn's entry from the next on the same
+        /// conversation: two entries are the same turn only if their receivers
+        /// share a channel.
+        done: watch::Receiver<bool>,
     },
 
     /// It failed, and nobody has been told yet.
@@ -297,15 +308,53 @@ async fn status(State(state): State<AppState>) -> Json<StatusBody> {
     })
 }
 
+/// The configuration choices a form carries.
+///
+/// One `cfg` field per row of the chooser, each holding a whole `--cfg`
+/// argument: a configuration to load by name, or a value to assign.
+/// Both are what `--cfg` takes, and posting them under one name is what
+/// preserves the order they were arranged in.
+#[derive(Debug, Default)]
+struct CfgFields {
+    args: Vec<String>,
+}
+
+impl CfgFields {
+    /// Take one decoded form pair, reporting whether it belonged here.
+    ///
+    /// An empty argument is a row nothing was chosen in, and is dropped.
+    ///
+    /// What is kept is trimmed: a soft keyboard puts a space after a word it
+    /// thinks is finished, and an argument carrying one reaches the config
+    /// parser as a different key or value than the one that was typed.
+    fn accept(&mut self, key: &str, value: &str) -> bool {
+        if key != "cfg" {
+            return false;
+        }
+
+        let argument = value.trim();
+        if !argument.is_empty() {
+            self.args.push(argument.to_owned());
+        }
+
+        true
+    }
+
+    /// The `--cfg` arguments this form asks for, in the order they apply.
+    fn args(&self) -> &[String] {
+        &self.args
+    }
+}
+
 /// A new turn, as posted by the composer form.
 ///
 /// Read from decoded pairs rather than through `Form`, for the same reason the
-/// new-conversation form is: a set of checkboxes sharing a name posts that name
-/// once per ticked box, and the urlencoded deserialiser cannot collect repeats.
+/// new-conversation form is: the chooser posts `cfg` once per row, and the
+/// urlencoded deserialiser cannot collect repeats.
 #[derive(Debug, Default)]
 struct TurnForm {
     content: String,
-    cfg: Vec<String>,
+    cfg: CfgFields,
     client: Option<String>,
 
     /// How much of the transcript the submitting page held, which is what the
@@ -318,9 +367,12 @@ impl TurnForm {
         let mut form = Self::default();
 
         for (key, value) in form_urlencoded::parse(body.as_bytes()) {
+            if form.cfg.accept(&key, &value) {
+                continue;
+            }
+
             match key.as_ref() {
                 "content" => form.content = value.into_owned(),
-                "cfg" => form.cfg.push(value.into_owned()),
                 // Without this the turn is recorded unattributed, and the page
                 // that started it is told the turn is somebody else's.
                 "client" => form.client = Some(value.into_owned()),
@@ -385,41 +437,85 @@ async fn start_turn(
         return response;
     }
 
-    // Sending while a turn runs is refused rather than made to interrupt it.
+    // Sending while a turn runs interrupts it and answers it, inside that turn.
     //
-    // Interrupting and immediately starting a second turn was tried and withdrawn:
-    // it relied on a fixed delay to guess when the first turn had released the
-    // conversation, and the turn that followed came back empty. Stopping and
-    // sending are separate acts until the host can say when a turn has finished
-    // unwinding.
-    let busy = matches!(
-        state.turns.lock().expect("turns lock poisoned").get(&id),
-        Some(TurnStatus::Running { .. })
-    );
+    // Not a stop followed by a second turn: the conversation is never unlocked in
+    // between, so there is no window for the send to be refused as already-locked
+    // and no need to guess when the first turn has finished unwinding.
+    // This is what Ctrl-C then `[r] Reply` does at a terminal.
+    let running = running_turn(&state.turns, &id);
+    let busy = running.is_some();
 
-    if busy {
+    if busy && let Some(error) = busy_refusal(&form) {
         return (
             StatusCode::CONFLICT,
             Json(TurnRefused {
-                error: "A turn is still running. Stop it first, then send.".to_owned(),
+                error: error.to_owned(),
             }),
         )
             .into_response();
     }
 
-    state
-        .turns
-        .lock()
-        .expect("turns lock poisoned")
-        .insert(id.clone(), TurnStatus::Running {
-            pending: Some(content.clone()),
-            client: form.client.clone(),
-            sent_at: form.count,
-        });
+    if busy {
+        match state.client.reply(&id, &content).await {
+            Ok(()) => {
+                // The same turn, told something new. Whoever started it still
+                // owns it, so only the provisional copy of the message changes.
+                if let Some(TurnStatus::Running { pending, .. }) = state
+                    .turns
+                    .lock()
+                    .expect("turns lock poisoned")
+                    .get_mut(&id)
+                {
+                    *pending = Some(content);
+                }
+
+                return response;
+            }
+
+            // The turn ended without acting on the reply. There is nothing left
+            // to interrupt, which makes this an ordinary message: falling
+            // through starts a turn with it.
+            //
+            // Not until the query behind that turn has returned, though. The
+            // turn stops reading interrupts before it lets go of the
+            // conversation, so a query sent now can be refused as
+            // already-locked, and the original's completion would then clear the
+            // entry this one is about to take.
+            Err(ClientError::Host(error)) => {
+                debug!(%id, %error, "No turn left to reply to; starting one instead.");
+
+                if let Some(mut done) = running {
+                    done.wait_for(|ended| *ended).await.ok();
+                }
+            }
+
+            // The host gave no answer, so whether the turn has the message is
+            // unknown. Starting a second turn with it could send it twice.
+            Err(error) => {
+                error!(%id, %error, "Reply failed");
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(TurnRefused {
+                        error: format!("The message could not be delivered: {error}"),
+                    }),
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    let done = begin_turn(
+        &state.turns,
+        &id,
+        Some(content.clone()),
+        form.client.clone(),
+        form.count,
+    );
 
     let client = state.client.clone();
     let turns = Arc::clone(&state.turns);
-    let cfg = form.cfg;
+    let cfg = form.cfg.args().to_vec();
     tokio::spawn(async move {
         let failure = match client.query(&id, &content, cfg).await {
             Ok(()) => {
@@ -428,18 +524,88 @@ async fn start_turn(
             }
             Err(error) => {
                 error!(%id, %error, "Turn failed");
-                Some(TurnStatus::Failed(error.to_string()))
+                Some(error.to_string())
             }
         };
 
-        let mut turns = turns.lock().expect("turns lock poisoned");
-        match failure {
-            Some(failed) => turns.insert(id, failed),
-            None => turns.remove(&id),
-        };
+        end_turn(&turns, id, &done, failure);
     });
 
     response
+}
+
+/// The end of the turn this server is running on `id`, if it is running one.
+fn running_turn(turns: &Turns, id: &str) -> Option<watch::Receiver<bool>> {
+    match turns.lock().expect("turns lock poisoned").get(id) {
+        Some(TurnStatus::Running { done, .. }) => Some(done.clone()),
+        _ => None,
+    }
+}
+
+/// Record a delegated query as running on `id`.
+///
+/// Returns what the query's task hands to [`end_turn`] once the query returns.
+fn begin_turn(
+    turns: &Turns,
+    id: &str,
+    pending: Option<String>,
+    client: Option<String>,
+    sent_at: Option<usize>,
+) -> watch::Sender<bool> {
+    let (done, ended) = watch::channel(false);
+
+    turns
+        .lock()
+        .expect("turns lock poisoned")
+        .insert(id.to_owned(), TurnStatus::Running {
+            pending,
+            client,
+            sent_at,
+            done: ended,
+        });
+
+    done
+}
+
+/// Record how the query [`begin_turn`] registered ended, then say it has.
+///
+/// Leaves the entry alone when a later turn on the same conversation has taken
+/// it: the outcome belongs to this query, and writing it there would mark the
+/// turn that is running as finished or failed.
+fn end_turn(turns: &Turns, id: String, done: &watch::Sender<bool>, failure: Option<String>) {
+    {
+        let mut turns = turns.lock().expect("turns lock poisoned");
+        let superseded = matches!(
+            turns.get(&id),
+            Some(TurnStatus::Running { done: current, .. })
+                if !current.same_channel(&done.subscribe())
+        );
+
+        if superseded {
+            debug!(%id, "A later turn owns this conversation; leaving its entry alone.");
+        } else {
+            match failure {
+                Some(message) => turns.insert(id, TurnStatus::Failed(message)),
+                None => turns.remove(&id),
+            };
+        }
+    }
+
+    done.send_replace(true);
+}
+
+/// Why a message for a running turn cannot be delivered as it was sent.
+///
+/// A reply joins the turn already running, and that turn keeps the
+/// configuration it started with, so configuration chosen alongside the reply
+/// has nowhere to go.
+/// Refusing keeps both the message and the choices on the page, rather than
+/// delivering one and quietly dropping the other.
+fn busy_refusal(form: &TurnForm) -> Option<&'static str> {
+    (!form.cfg.args().is_empty()).then_some(
+        "A turn is running, and configuration applies to a new turn. Stop it first, or clear the \
+         configuration to reply.",
+    )
 }
 
 /// Stop the turn the host is running, then send the browser back.
@@ -474,16 +640,15 @@ async fn interrupt(
 
 /// What the new-conversation form submits.
 ///
-/// Read from decoded pairs rather than through `Form`, because a set of
-/// checkboxes sharing a name posts the name once per ticked box, and the
-/// urlencoded deserialiser behind `Form` has no way to express "collect the
-/// repeats" — it sees the second `cfg` and reports a string where a sequence
-/// was expected.
+/// Read from decoded pairs rather than through `Form`, because the chooser
+/// posts `cfg` once per row, and the urlencoded deserialiser behind `Form` has
+/// no way to express "collect the repeats" — it sees the second `cfg` and
+/// reports a string where a sequence was expected.
 #[derive(Debug, Default)]
 struct NewConversationForm {
     content: String,
     title: String,
-    cfg: Vec<String>,
+    cfg: CfgFields,
 
     /// Which page is asking, so the turn it starts is attributed to it.
     client: Option<String>,
@@ -498,10 +663,13 @@ impl NewConversationForm {
         let mut form = Self::default();
 
         for (key, value) in form_urlencoded::parse(body.as_bytes()) {
+            if form.cfg.accept(&key, &value) {
+                continue;
+            }
+
             match key.as_ref() {
                 "content" => form.content = value.into_owned(),
                 "title" => form.title = value.into_owned(),
-                "cfg" => form.cfg.push(value.into_owned()),
                 "client" => form.client = Some(value.into_owned()),
                 _ => {}
             }
@@ -544,7 +712,7 @@ async fn start_conversation(
     } else {
         match state
             .client
-            .start_conversation(&content, title, form.cfg.clone())
+            .start_conversation(&content, title, form.cfg.args().to_vec())
             .await
         {
             Ok((id, outcome)) => {
@@ -556,14 +724,7 @@ async fn start_conversation(
                 // needed.
                 // Attributed to whoever filled the form, so the page they land on
                 // can stop the first turn without being asked whose it is.
-                state.turns.lock().expect("turns lock poisoned").insert(
-                    id.clone(),
-                    TurnStatus::Running {
-                        pending: None,
-                        client: form.client.clone(),
-                        sent_at: None,
-                    },
-                );
+                let done = begin_turn(&state.turns, &id, None, form.client.clone(), None);
 
                 // Cleared when the turn ends, which is the half that has to exist:
                 // an entry nothing ever removes leaves the conversation busy for the
@@ -578,15 +739,11 @@ async fn start_conversation(
                         }
                         Err(error) => {
                             error!(id = %finished_id, %error, "First turn failed.");
-                            Some(TurnStatus::Failed(error.to_string()))
+                            Some(error.to_string())
                         }
                     };
 
-                    let mut turns = turns.lock().expect("turns lock poisoned");
-                    match failure {
-                        Some(failed) => turns.insert(finished_id, failed),
-                        None => turns.remove(&finished_id),
-                    };
+                    end_turn(&turns, finished_id, &done, failure);
                 });
 
                 return Ok(Redirect::to(&format!("/conversations/{id}")).into_response());
@@ -602,10 +759,14 @@ async fn start_conversation(
     // again, and drawing it without its choices would lose them.
     let configs = state.client.list_configs().await.unwrap_or_default();
 
-    Ok(
-        views::new::render(&configs, &content, &form.title, &form.cfg, error.as_deref())
-            .into_response(),
+    Ok(views::new::render(
+        &configs,
+        &content,
+        &form.title,
+        form.cfg.args(),
+        error.as_deref(),
     )
+    .into_response())
 }
 
 /// Move a conversation to the archive.
@@ -703,18 +864,20 @@ async fn conversation_digest(
         .map_err(|e| AppError::Internal(e.to_string()))
 }
 
-/// The configurations a message can be run under.
+/// The chooser for the configurations a message can be run under.
 ///
 /// Fetched by the page when its configuration dialog is first opened, rather
 /// than rendered into every conversation, since most visits never open it.
-async fn list_configs(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<jp_plugin::message::ConfigEntry>>, AppError> {
+///
+/// Markup rather than data: the new-conversation form offers the same choices,
+/// and building the same chooser twice is how the two come to group, label and
+/// post them differently.
+async fn list_configs(State(state): State<AppState>) -> Result<Markup, AppError> {
     state
         .client
         .list_configs()
         .await
-        .map(Json)
+        .map(|entries| views::configs::chooser(&entries, &[]))
         .map_err(|e| AppError::Internal(e.to_string()))
 }
 
@@ -725,7 +888,7 @@ struct TurnStarted {
     pending: String,
 }
 
-/// Why a turn was not started, for the page to show and to keep the text.
+/// Why a message was not sent, for the page to show while it keeps the text.
 #[derive(Debug, Serialize)]
 struct TurnRefused {
     error: String,
@@ -826,6 +989,13 @@ struct MessagesBody {
 
     running: bool,
 
+    /// The first index that can still change.
+    ///
+    /// The caller holds every rendered entry below this one in its final form,
+    /// and sends it back on the next poll so an entry that changes after it was
+    /// delivered is sent again.
+    settled: usize,
+
     /// What stopping the running turn would take, from the asker's side.
     stop: StopMode,
 
@@ -847,6 +1017,60 @@ struct MessagesBody {
 /// paint is cheap however long the conversation is.
 /// The cost of getting this wrong is a fetch, not a broken view.
 const WINDOW: usize = 200;
+
+/// Where a caller's copy of the transcript stops being usable.
+///
+/// Everything from here on is sent again: either the caller does not hold it,
+/// or it holds a rendering that has since changed.
+///
+/// `total` is how many rendered events there are, `held` how many the caller
+/// says it has, `floor` the index from which its copy was provisional when it
+/// was rendered, and `provisional` the index from which the transcript can
+/// still change now, as [`provisional_from`] reports it.
+///
+/// The caller's own floor is what carries a tool call's result to it.
+/// A call is rendered when it is requested and gains its result later, and by
+/// the time that lands `settled` has moved past it — the next call in the
+/// batch is the one waiting.
+/// Only the caller knows how far back its copy went provisional.
+///
+/// A caller that cannot say either is given the tail, and a boundary that moved
+/// backwards — the transcript was compacted or edited — wins over a floor
+/// that predates it.
+fn resend_from(
+    total: usize,
+    held: Option<usize>,
+    floor: Option<usize>,
+    provisional: usize,
+) -> usize {
+    held.filter(|&count| count <= total)
+        .unwrap_or_else(|| total.saturating_sub(WINDOW))
+        .min(floor.unwrap_or(usize::MAX))
+        .min(provisional)
+}
+
+/// The first rendered entry that can still change while `running`.
+///
+/// A tool call waiting on its result is provisional wherever it sits.
+/// While a turn runs, the newest entry is too: a block of assistant text or
+/// reasoning grows with the next flush, and neither that nor a tool call
+/// gaining its result moves the count.
+///
+/// This is also what the caller is told to send back as its floor, so the
+/// newest entry has to be counted here rather than only when deciding what to
+/// resend.
+/// A block that grows once more before the turn ends is otherwise delivered in
+/// its earlier form, and the poll after the turn ends has nothing left marking
+/// it provisional.
+fn provisional_from(rendered: &[render::RenderedEvent], running: bool) -> usize {
+    let settled = render::settled_upto(rendered);
+
+    if running && render::tail_can_change(rendered) {
+        settled.min(rendered.len().saturating_sub(1))
+    } else {
+        settled
+    }
+}
 
 /// What the poller already has, so the answer can leave it out.
 #[derive(Debug, Deserialize)]
@@ -870,6 +1094,13 @@ struct MessagesQuery {
     #[serde(default)]
     count: Option<usize>,
 
+    /// The index from which the caller's copy is provisional.
+    ///
+    /// What it was last told was still in flight, so an entry that has changed
+    /// since is sent again rather than left as the caller first drew it.
+    #[serde(default)]
+    settled: Option<usize>,
+
     /// Which client is asking, so a turn it started can be told from one it
     /// merely shares a server with.
     #[serde(default)]
@@ -891,6 +1122,7 @@ async fn messages(
     // taking either here would deliver it to nobody.
     if let Some(before) = query.before {
         let view = peek_turn_status(&state, &id);
+        let running = view.running || resp.lock.is_held();
         let before = before.min(rendered.len());
         let from = if query.all.is_some_and(|all| all != 0) {
             0
@@ -904,9 +1136,10 @@ async fn messages(
             html: (from < before)
                 .then(|| views::detail::messages(&rendered[from..before]).into_string()),
             pending: None,
+            settled: provisional_from(&rendered, running),
             stop: stop_mode(&view, resp.lock, query.client.as_deref()),
             boot: state.boot.clone(),
-            running: view.running || resp.lock.is_held(),
+            running,
             error: None,
         }));
     }
@@ -921,13 +1154,8 @@ async fn messages(
     let view = take_turn_status(&state, &id, &rendered);
     let running = view.running || resp.lock.is_held();
 
-    let from = answer_from(
-        query.count,
-        rendered.len(),
-        render::settled_upto(&rendered),
-        running && render::tail_can_change(&rendered),
-    );
-
+    let settled = provisional_from(&rendered, running);
+    let from = resend_from(rendered.len(), query.count, query.settled, settled);
     let stale = from != rendered.len();
 
     Ok(Json(MessagesBody {
@@ -941,37 +1169,9 @@ async fn messages(
         stop: stop_mode(&view, resp.lock, query.client.as_deref()),
         boot: state.boot.clone(),
         running,
+        settled,
         error: view.error,
     }))
-}
-
-/// Where the answer to a poll has to start.
-///
-/// `held` is how much the caller says it has rendered and `settled` where the
-/// first entry that can still change begins, so ordinarily the answer starts at
-/// whichever is lower and carries only what the caller is missing.
-/// A `held` beyond the end means the transcript was rewritten under the caller
-/// — compacted, or edited on disk — and the only safe answer is the tail,
-/// from scratch.
-///
-/// `tail_unsettled` takes one more off the top, for a newest entry that can
-/// change without the count moving — a tool call that gains its result, a
-/// block of assistant text that the next flush adds to.
-/// Counting alone leaves the caller holding the first version of either, and no
-/// later poll corrects it, because by then the count has moved past the entry
-/// that changed.
-fn answer_from(held: Option<usize>, total: usize, settled: usize, tail_unsettled: bool) -> usize {
-    let held = held
-        .filter(|&held| held <= total)
-        .unwrap_or_else(|| total.saturating_sub(WINDOW));
-
-    let final_upto = if tail_unsettled {
-        settled.min(total.saturating_sub(1))
-    } else {
-        settled
-    };
-
-    held.min(final_upto)
 }
 
 /// What stopping the running turn would take, for the client that is asking.
@@ -1009,6 +1209,7 @@ fn take_turn_status(state: &AppState, id: &str, rendered: &[render::RenderedEven
             pending,
             client,
             sent_at,
+            ..
         }) => {
             // Counted rather than read off the end of the transcript. A fast
             // first flush can persist the request and an answer to it between
@@ -1138,6 +1339,7 @@ async fn conversation_detail(
         &rendered[first..],
         first,
         rendered.len(),
+        provisional_from(&rendered, running),
         running,
         stoppable,
     )))

@@ -585,10 +585,7 @@ impl TurnCoordinator {
                 self.prepare_continuation();
             }
 
-            InterruptAction::Reply {
-                content,
-                from_editor,
-            } => {
+            InterruptAction::Reply { content, echo } => {
                 // Inject partial reasoning + message as assistant events first,
                 // before the user's reply, so the resumed model sees its own
                 // interrupted reasoning as context.
@@ -602,14 +599,12 @@ impl TurnCoordinator {
                     author: self.author.clone(),
                 };
 
-                // An editor-composed reply never appeared on the terminal, so
-                // echo it through the view (labeled user header + body), same
-                // as replay would emit for this `ChatRequest`. An
-                // inline-composed reply is already visible in scrollback on
-                // the widget's own line, so skip the echo — but still reset
-                // the assistant-header gate so the next assistant chunk
-                // prints a fresh `── jp …` header.
-                if from_editor {
+                // A reply the terminal never saw goes through the view
+                // (labeled user header + body), the same way replay would emit
+                // this `ChatRequest`. One that is already in scrollback is
+                // skipped — but the assistant-header gate still resets, so the
+                // next assistant chunk prints a fresh `── jp …` header.
+                if echo {
                     self.view.render_user_request(&request);
                 } else {
                     self.view.begin_turn();

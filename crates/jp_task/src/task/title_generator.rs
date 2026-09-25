@@ -62,6 +62,16 @@ impl TitleGeneratorTask {
         })
     }
 
+    /// Ask the model for a title and return it.
+    ///
+    /// For a caller that already holds the conversation lock and can write the
+    /// title itself.
+    /// Returns `None` when the model answered without a usable title.
+    pub async fn generate(mut self) -> Result<Option<String>, Box<dyn Error + Send + Sync>> {
+        self.update_title().await?;
+        Ok(self.title)
+    }
+
     async fn update_title(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         trace!(conversation_id = %self.conversation_id, "Updating conversation title.");
 

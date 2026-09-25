@@ -137,7 +137,7 @@ pub enum PluginToHost {
     /// Ask the host to run a turn on a conversation.
     Query(QueryRequest),
 
-    /// Ask the host to interrupt the turn running on a conversation.
+    /// Ask the host to change what a running turn is doing.
     Interrupt(InterruptRequest),
 
     /// Print user-facing output through JP's printer.
@@ -175,14 +175,12 @@ impl PluginToHost {
             Self::ArchiveConversation(m) | Self::ReadDraft(m) => m.id.as_deref(),
             Self::SetTitle(m) => m.id.as_deref(),
             Self::WriteDraft(m) => m.id.as_deref(),
+            Self::Interrupt(m) => m.id.as_deref(),
 
             // Not requests: nothing is waiting on an answer to any of these.
-            Self::Ready(_)
-            | Self::Interrupt(_)
-            | Self::Print(_)
-            | Self::Log(_)
-            | Self::Describe(_)
-            | Self::Exit(_) => None,
+            Self::Ready(_) | Self::Print(_) | Self::Log(_) | Self::Describe(_) | Self::Exit(_) => {
+                None
+            }
         }
     }
 }
@@ -537,27 +535,106 @@ pub struct QueryRequest {
     pub cfg: Vec<String>,
 }
 
-/// Ask the host to interrupt the turn running on a conversation.
+/// Ask the host to change what a running turn is doing.
 ///
-/// Reaches the turn the way a Ctrl-C does, so it asks the turn to wrap up:
-/// partial output is kept and the conversation is left in a state a later turn
-/// can continue from.
+/// Reaches the turn the way the terminal's Ctrl-C menu does, with the choice
+/// already made: `stop` keeps what the assistant has produced and ends the
+/// turn, `abort` discards it, and `reply` interrupts the assistant and answers
+/// it without leaving the turn.
 ///
 /// A repeat re-asks the same turn.
 /// It does not escalate the way a terminal's second and third Ctrl-C do, since
 /// cancelling the host's shutdown token or exiting the process is not something
 /// a request naming one conversation should reach.
 ///
-/// Fire-and-forget: the host sends no acknowledgement, because what the
-/// interrupt did shows up in the conversation itself.
-/// The outcome of the turn still arrives as the reply to the original `query`.
+/// With `id` set, answered once the turn has acted on it, with
+/// [`HostToPlugin::Done`], or with [`HostToPlugin::Error`] when it could not:
+/// there was no turn left to reach, or the turn ended before acting on it.
+/// That is how a client tells "interrupted" from "it had already finished"
+/// without guessing from a timeout.
+/// Without an `id` it stays fire-and-forget.
+/// The outcome of the turn itself still arrives as the reply to the original
+/// `query`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct InterruptRequest {
-    /// The conversation whose turn should stop.
+    /// Optional request correlation ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    /// The conversation whose turn to reach.
     ///
     /// Required, and not a convenience: a host can be running several turns at
     /// once, so there is no "the" turn to infer.
     pub conversation: String,
+
+    /// What the turn should do.
+    ///
+    /// Defaults to `stop`.
+    #[serde(default)]
+    pub action: InterruptAction,
+
+    /// What to say to the assistant, for `reply`.
+    ///
+    /// Required by `reply` and ignored by every other action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+}
+
+impl InterruptRequest {
+    /// Stop the turn running on `conversation`.
+    #[must_use]
+    pub fn stop(conversation: String) -> Self {
+        Self {
+            id: None,
+            conversation,
+            action: InterruptAction::Stop,
+            content: None,
+        }
+    }
+
+    /// Interrupt the turn running on `conversation` and answer it with
+    /// `content`.
+    #[must_use]
+    pub fn reply(conversation: String, content: String) -> Self {
+        Self {
+            id: None,
+            conversation,
+            action: InterruptAction::Reply,
+            content: Some(content),
+        }
+    }
+
+    /// Correlate the answer to this request with `id`.
+    #[must_use]
+    pub fn with_id(mut self, id: String) -> Self {
+        self.id = Some(id);
+        self
+    }
+}
+
+/// What an interrupt asks a running turn to do.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InterruptAction {
+    /// Keep what the assistant has produced so far and end the turn.
+    ///
+    /// What a terminal user gets from `[s] Stop`.
+    #[default]
+    Stop,
+
+    /// End the turn, discarding what the assistant produced since the last
+    /// persisted boundary.
+    ///
+    /// What a terminal user gets from `[a] Abort`.
+    Abort,
+
+    /// Interrupt the assistant and answer it, staying in the same turn.
+    ///
+    /// What the assistant had produced so far is kept as context, `content`
+    /// follows it as the user's next message, and the turn continues from
+    /// there.
+    /// What a terminal user gets from `[r] Reply`.
+    Reply,
 }
 
 /// Response to `query`, sent once the turn has finished.
