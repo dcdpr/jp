@@ -36,6 +36,7 @@ jp_md = { workspace = true }
 jp_openrouter = { workspace = true }
 jp_plugin = { workspace = true }
 jp_printer = { workspace = true }
+jp_process = { workspace = true }
 jp_storage = { workspace = true }
 jp_task = { workspace = true }
 jp_term = { workspace = true }
@@ -119,6 +120,8 @@ windows-sys = { workspace = true, features = [
 chrono = { workspace = true }
 
 [dev-dependencies]
+jp_process = { workspace = true, features = ["mock"] }
+
 assert_matches = { workspace = true }
 camino-tempfile = { workspace = true }
 datetime_literal = { workspace = true }

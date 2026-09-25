@@ -1,10 +1,39 @@
+use std::io;
+
 use camino_tempfile::{Utf8TempDir, tempdir};
 use indexmap::IndexMap;
 use jp_config::conversation::label::LabelConfig;
 use jp_inquire::prompt::MockPromptBackend;
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
+use jp_process::{ExitCode, MockProcessRunner, ProcessOutput};
 
 use super::*;
+
+/// Plays the commands these rules name, printing what they would print.
+///
+/// A command it does not know fails to start, so a rule reaching an unexpected
+/// command shows up as a dropped label.
+fn commands() -> Arc<dyn ProcessRunner> {
+    Arc::new(MockProcessRunner::responding(|spec| {
+        let (stdout, code) = match spec.to_string().as_str() {
+            "echo hello" => ("hello\n", 0),
+            "echo hi" => ("hi\n", 0),
+            "echo x" => ("x\n", 0),
+            "true" => ("", 0),
+            "false" => ("", 1),
+            "sh -c printf 'jp_config\\nwith spaces, and a comma\\n\\n'" => {
+                ("jp_config\nwith spaces, and a comma\n\n", 0)
+            }
+            "sh -c echo a b c | tr ' ' -" => ("a-b-c\n", 0),
+            other => return Err(io::Error::other(format!("unexpected command: {other}"))),
+        };
+        Ok(ProcessOutput {
+            stdout: stdout.to_owned(),
+            stderr: String::new(),
+            status: ExitCode::from_code(code),
+        })
+    }))
+}
 
 /// A resolver over `rules`, with no terminal available.
 ///
@@ -51,7 +80,8 @@ async fn static_rules_resolve_without_running_anything() {
             "later": { "value": "x", "apply_on": { "new": false, "fork": true } }
         }"#,
     );
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
@@ -69,7 +99,8 @@ async fn list_rules_resolve_to_every_value() {
             "stage": { "value": ["draft", "review"] }
         }"#,
     );
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
@@ -82,7 +113,8 @@ async fn list_rules_resolve_to_every_value() {
 #[tokio::test]
 async fn an_empty_list_rule_keeps_its_key_with_no_values() {
     let (rules, tmp, printer, _err, prompts) = setup(r#"{ "crate": { "value": [] } }"#);
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
@@ -101,7 +133,8 @@ async fn apply_on_selects_rules_per_trigger() {
             "onboth": { "value": "c", "apply_on": { "new": true, "fork": true } }
         }"#,
     );
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     let new = resolver.automatic(Trigger::New).await.unwrap();
     assert_eq!(keys(&new), ["onnew", "onboth"]);
@@ -117,7 +150,8 @@ async fn unattended_commands_run_without_prompting() {
             "greeting": { "value": { "cmd": "echo hello" }, "run": "unattended" }
         }"#,
     );
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
@@ -144,7 +178,8 @@ async fn command_output_is_one_value_per_line() {
             }
         }"#,
     );
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
@@ -160,7 +195,8 @@ async fn command_output_is_one_value_per_line() {
 async fn a_silent_command_produces_no_values() {
     let (rules, tmp, printer, _err, prompts) =
         setup(r#"{ "quiet": { "value": { "cmd": "true" }, "run": "unattended" } }"#);
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
@@ -174,7 +210,8 @@ async fn a_silent_command_produces_no_values() {
 async fn a_failing_command_drops_its_key() {
     let (rules, tmp, printer, _err, prompts) =
         setup(r#"{ "broken": { "value": { "cmd": "false" }, "run": "unattended" } }"#);
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
@@ -193,11 +230,61 @@ async fn shell_commands_get_a_shell() {
             }
         }"#,
     );
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
     assert_eq!(values(&resolved, "piped"), ["a-b-c"]);
+}
+
+/// A label command runs in the workspace root and shares JP's process group, so
+/// a Ctrl-C at the terminal stops it too: nothing else would.
+#[tokio::test]
+async fn a_label_command_is_reached_by_a_terminal_ctrl_c() {
+    let (rules, tmp, printer, _err, prompts) =
+        setup(r#"{ "greeting": { "value": { "cmd": "echo hello" }, "run": "unattended" } }"#);
+    let runner = Arc::new(MockProcessRunner::responding(|_| {
+        Ok(ProcessOutput {
+            stdout: "hello\n".to_owned(),
+            stderr: String::new(),
+            status: ExitCode::success(),
+        })
+    }));
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(runner.clone());
+
+    resolver.automatic(Trigger::New).await.unwrap();
+
+    let calls = runner.calls();
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert_eq!(calls[0].dir, tmp.path());
+    assert!(!calls[0].own_process_group);
+}
+
+/// A failing command's stderr is part of the error, so the reason is visible
+/// without running the command again by hand.
+#[tokio::test]
+async fn a_failing_commands_stderr_is_in_the_error() {
+    let (rules, tmp, printer, _err, prompts) =
+        setup(r#"{ "broken": { "value": { "cmd": "false" }, "run": "unattended" } }"#);
+    let runner = Arc::new(
+        MockProcessRunner::builder()
+            .expect("false")
+            .returns(ProcessOutput {
+                stdout: String::new(),
+                stderr: "no such branch\n".to_owned(),
+                status: ExitCode::from_code(2),
+            }),
+    );
+    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(runner);
+
+    let error = resolver.alias("broken").await.unwrap_err().to_string();
+
+    assert_eq!(
+        error,
+        "Label error: label ':broken' failed: `false` exited with status 2: no such branch"
+    );
 }
 
 /// A rule the user asked for by name resolves regardless of `apply_on`.
@@ -205,7 +292,8 @@ async fn shell_commands_get_a_shell() {
 async fn alias_ignores_apply_on() {
     let (rules, tmp, printer, _err, prompts) =
         setup(r#"{ "manual": { "value": "yes", "apply_on": { "new": false, "fork": false } } }"#);
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     assert!(resolver.automatic(Trigger::New).await.unwrap().is_empty());
     assert_eq!(
@@ -224,7 +312,8 @@ async fn automatic_application_drops_a_failing_command() {
             "broken": { "value": { "cmd": "false" }, "run": "unattended" }
         }"#,
     );
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
@@ -243,7 +332,8 @@ async fn automatic_application_drops_a_failing_command() {
 async fn alias_errors_on_a_failing_command() {
     let (rules, tmp, printer, _err, prompts) =
         setup(r#"{ "broken": { "value": { "cmd": "false" }, "run": "unattended" } }"#);
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     let error = resolver.alias("broken").await.unwrap_err().to_string();
     assert!(error.contains("broken"), "got: {error}");
@@ -252,7 +342,8 @@ async fn alias_errors_on_a_failing_command() {
 #[tokio::test]
 async fn alias_errors_on_an_unknown_name() {
     let (rules, tmp, printer, _err, prompts) = setup(r#"{ "known": "x" }"#);
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     let error = resolver.alias("missing").await.unwrap_err().to_string();
     assert!(error.contains("unknown label alias"), "got: {error}");
@@ -264,7 +355,8 @@ async fn alias_errors_on_an_unknown_name() {
 async fn deny_is_skipped_automatically_but_errors_as_an_alias() {
     let (rules, tmp, printer, _err, prompts) =
         setup(r#"{ "denied": { "value": { "cmd": "echo x" }, "run": "deny" } }"#);
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     assert!(resolver.automatic(Trigger::New).await.unwrap().is_empty());
 
@@ -280,7 +372,8 @@ async fn deny_is_skipped_automatically_but_errors_as_an_alias() {
 async fn ask_without_a_terminal_aborts() {
     let (rules, tmp, printer, _err, prompts) =
         setup(r#"{ "asks": { "value": { "cmd": "echo x" } } }"#);
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     let error = resolver.automatic(Trigger::New).await.unwrap_err();
     let error = error.to_string();
@@ -301,7 +394,8 @@ async fn declining_the_prompt_drops_only_that_label() {
         }"#,
     );
     let prompts = MockPromptBackend::new().with_inline_responses(['n']);
-    let resolver = Resolver::new(&rules, tmp.path(), true, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), true, &printer, &prompts).with_runner(commands());
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
@@ -318,7 +412,8 @@ async fn declining_the_prompt_drops_only_that_label() {
 async fn cancelling_the_prompt_aborts_the_command() {
     let (rules, tmp, printer, _err, prompts) =
         setup(r#"{ "asks": { "value": { "cmd": "echo x" } } }"#);
-    let resolver = Resolver::new(&rules, tmp.path(), true, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), true, &printer, &prompts).with_runner(commands());
 
     assert!(
         resolver.automatic(Trigger::New).await.is_err(),
@@ -331,7 +426,8 @@ async fn cancelling_the_prompt_aborts_the_command() {
 async fn approving_the_prompt_runs_the_command() {
     let (rules, tmp, printer, _err, _) = setup(r#"{ "asks": { "value": { "cmd": "echo hi" } } }"#);
     let prompts = MockPromptBackend::new().with_inline_responses(['y']);
-    let resolver = Resolver::new(&rules, tmp.path(), true, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), true, &printer, &prompts).with_runner(commands());
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
@@ -350,7 +446,8 @@ async fn an_optional_failing_command_is_skipped_silently() {
             "broken": { "value": { "cmd": "false" }, "run": "unattended", "optional": true }
         }"#,
     );
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
@@ -367,7 +464,8 @@ async fn an_optional_alias_failure_resolves_to_nothing() {
     let (rules, tmp, printer, err, prompts) = setup(
         r#"{ "broken": { "value": { "cmd": "false" }, "run": "unattended", "optional": true } }"#,
     );
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     assert_eq!(resolver.alias("broken").await.unwrap(), None);
 
@@ -381,7 +479,8 @@ async fn an_optional_alias_failure_resolves_to_nothing() {
 async fn an_optional_rule_without_a_terminal_is_skipped() {
     let (rules, tmp, printer, err, prompts) =
         setup(r#"{ "asks": { "value": { "cmd": "echo x" }, "optional": true } }"#);
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     assert!(resolver.automatic(Trigger::New).await.unwrap().is_empty());
     assert_eq!(resolver.alias("asks").await.unwrap(), None);
@@ -396,7 +495,8 @@ async fn an_optional_rule_without_a_terminal_is_skipped() {
 async fn an_optional_deny_rule_still_errors_as_an_alias() {
     let (rules, tmp, printer, _err, prompts) =
         setup(r#"{ "denied": { "value": { "cmd": "echo x" }, "run": "deny", "optional": true } }"#);
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     let error = resolver.alias("denied").await.unwrap_err().to_string();
     assert!(error.contains("deny"), "got: {error}");
@@ -408,7 +508,8 @@ async fn an_optional_deny_rule_still_errors_as_an_alias() {
 async fn static_rules_are_unaffected_by_run_policy() {
     let (rules, tmp, printer, _err, prompts) =
         setup(r#"{ "plain": { "value": "v", "run": "ask" } }"#);
-    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+    let resolver =
+        Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
     assert_eq!(values(&resolved, "plain"), ["v"]);
