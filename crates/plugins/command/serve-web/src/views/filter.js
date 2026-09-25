@@ -1,5 +1,7 @@
-const field = document.getElementById('filter');
-const entries = [...document.querySelectorAll('.conversation-list li')];
+const field = /** @type {HTMLInputElement} */ (document.getElementById('filter'));
+const entries = /** @type {HTMLElement[]} */ (
+  [...document.querySelectorAll('.conversation-list li')]
+);
 const noMatches = document.getElementById('no-matches');
 
 const apply = () => {

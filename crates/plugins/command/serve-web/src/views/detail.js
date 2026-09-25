@@ -32,9 +32,11 @@ let loadingOlder = false;
 // Zero when the page cannot say, which asks for everything it holds.
 let settledFloor = Number(box.dataset.settled) || 0;
 const pending = document.getElementById('pending');
-const status = document.getElementById('status');
-const composer = document.getElementById('composer');
-const send = document.getElementById('send');
+// Not named `status`: that is the deprecated `window.status`, a string, and
+// `tsc` types the name as that global rather than as this element.
+const statusRow = document.getElementById('status');
+const composer = /** @type {HTMLFormElement} */ (document.getElementById('composer'));
+const send = /** @type {HTMLButtonElement} */ (document.getElementById('send'));
 const reload = document.getElementById('reload');
 const draftNote = document.getElementById('draft-note');
 let boot = null;
@@ -290,7 +292,7 @@ fitApp();
 // nothing here: the composer is a row of a box sized to the visible area, so it
 // is never behind the keyboard to begin with.
 document.addEventListener('touchstart', (event) => {
-  const target = event.target;
+  const target = /** @type {HTMLElement} */ (event.target);
   if (target?.matches?.('textarea, input') && document.activeElement !== target) {
     target.focus({ preventScroll: true });
   }
@@ -301,7 +303,7 @@ document.addEventListener('touchstart', (event) => {
 // view. Dropping focus is what releases that, and only then does resetting the
 // scroll stick.
 function blurField() {
-  const active = document.activeElement;
+  const active = /** @type {HTMLElement | null} */ (document.activeElement);
   if (active?.matches?.('textarea, input')) active.blur();
 }
 
@@ -400,7 +402,9 @@ input.addEventListener('keydown', (event) => {
 //
 // Kept here rather than on the server: nothing is applied until a message is
 // sent, so this is a choice in progress, not state the conversation has.
-const configModal = document.getElementById('config-modal');
+const configModal = /** @type {HTMLDialogElement} */ (
+  document.getElementById('config-modal')
+);
 const configGroups = document.getElementById('config-groups');
 let chosenCfg = [];
 let configsLoaded = false;
@@ -423,7 +427,7 @@ async function loadConfigs() {
 
   try {
     const r = await fetch('/configs');
-    if (!r.ok) throw new Error(r.status);
+    if (!r.ok) throw new Error(String(r.status));
 
     configGroups.innerHTML = await r.text();
     configsLoaded = true;
@@ -454,8 +458,12 @@ configModal.addEventListener('close', () => {
 //
 // The same value, not a second draft: the small field is the one that gets sent,
 // so this copies in on open and back out on close.
-const expanded = document.getElementById('expanded');
-const expandModal = document.getElementById('expand-modal');
+const expanded = /** @type {HTMLTextAreaElement} */ (
+  document.getElementById('expanded')
+);
+const expandModal = /** @type {HTMLDialogElement} */ (
+  document.getElementById('expand-modal')
+);
 
 document.getElementById('expand').addEventListener('click', () => {
   expanded.value = input.value;
@@ -561,8 +569,12 @@ document.getElementById('quote').addEventListener('click', () => {
 // form gets Enter-to-submit and a real input for free, and the title is short
 // enough that losing the heading's styling for a moment costs nothing.
 const heading = document.getElementById('title');
-const renameForm = document.getElementById('rename-form');
-const titleField = document.getElementById('title-field');
+const renameForm = /** @type {HTMLFormElement} */ (
+  document.getElementById('rename-form')
+);
+const titleField = /** @type {HTMLInputElement} */ (
+  document.getElementById('title-field')
+);
 const renameButton = document.getElementById('rename');
 
 function showRename(editing) {
@@ -611,7 +623,7 @@ renameForm.addEventListener('submit', async (event) => {
       },
       body: new URLSearchParams({ title }),
     });
-    if (!r.ok) throw new Error(r.status);
+    if (!r.ok) throw new Error(String(r.status));
 
     // Applied here rather than reloading, so the transcript and the scroll stay
     // where they are.
@@ -636,8 +648,9 @@ renameForm.addEventListener('submit', async (event) => {
 // builds. A handler on the form itself may already have asked for confirmation
 // and been declined; that shows up as the event being cancelled, and is left
 // alone.
-status.addEventListener('submit', async (event) => {
-  const form = event.target.closest('.composer-stop');
+statusRow.addEventListener('submit', async (event) => {
+  const target = /** @type {Element} */ (event.target);
+  const form = /** @type {HTMLFormElement | null} */ (target.closest('.composer-stop'));
   if (!form || event.defaultPrevented) return;
 
   event.preventDefault();
@@ -661,7 +674,7 @@ status.addEventListener('submit', async (event) => {
 // Ignores clicks on the links inside it, which have somewhere else to go.
 document.querySelector('.page-header').addEventListener('click', (event) => {
   // The links and the rename controls inside it have their own jobs.
-  if (event.target.closest('a, button, form')) return;
+  if (/** @type {Element} */ (event.target).closest('a, button, form')) return;
 
   transcript.scrollTop = 0;
 });
@@ -727,10 +740,12 @@ if (!matchMedia('(hover: hover) and (pointer: fine)').matches) {
 // A turn starts at its separator, so those are the anchors. `prev` and `next` are
 // relative to what is at the top of the view rather than to a remembered position,
 // which keeps the buttons honest after scrolling by hand.
-const nav = document.getElementById('nav');
+const nav = /** @type {HTMLDetailsElement} */ (document.getElementById('nav'));
 
 function turnStarts() {
-  return Array.from(transcript.querySelectorAll('.turn-separator'));
+  return /** @type {HTMLElement[]} */ (
+    Array.from(transcript.querySelectorAll('.turn-separator'))
+  );
 }
 
 function jump(where) {
@@ -765,7 +780,8 @@ function jump(where) {
 }
 
 nav.addEventListener('click', (event) => {
-  const button = event.target.closest('[data-nav]');
+  const target = /** @type {Element} */ (event.target);
+  const button = /** @type {HTMLElement | null} */ (target.closest('[data-nav]'));
   if (!button) return;
 
   jump(button.dataset.nav);
@@ -1233,26 +1249,26 @@ function restoreBlocks(open) {
 function showStatus(running, error, stopMode) {
   const stoppable = stopMode === 'own' || stopMode === 'shared';
   if (error) {
-    status.dataset.running = 'false';
-    status.textContent = '';
+    statusRow.dataset.running = 'false';
+    statusRow.textContent = '';
     const p = document.createElement('p');
     p.className = 'composer-error';
     p.textContent = error;
-    status.append(p);
+    statusRow.append(p);
     return;
   }
 
   const state = String(running) + ':' + String(stopMode);
-  if (state === status.dataset.running) return;
-  status.dataset.running = state;
-  status.textContent = '';
+  if (state === statusRow.dataset.running) return;
+  statusRow.dataset.running = state;
+  statusRow.textContent = '';
   if (running) {
     const s = document.createElement('span');
     s.className = 'composer-working';
     s.role = 'status';
     s.ariaLabel = 'Working';
     s.append(...[0, 1, 2].map(() => document.createElement('i')));
-    status.append(s);
+    statusRow.append(s);
 
     // Offered only for a turn this server is running: an interrupt reaches its
     // own host, and a turn started elsewhere is another process's to stop.
@@ -1261,7 +1277,7 @@ function showStatus(running, error, stopMode) {
       why.className = 'composer-hint';
       why.textContent =
         'Another process is running this turn; it can only be stopped there.';
-      status.append(why);
+      statusRow.append(why);
     }
 
     if (stoppable) {
@@ -1294,7 +1310,7 @@ function showStatus(running, error, stopMode) {
         + `<path d='M8 12h8'></path></svg>`;
 
       stop.append(button);
-      status.append(stop);
+      statusRow.append(stop);
     }
   }
 
@@ -1437,11 +1453,11 @@ async function poll() {
 }
 
 // Attentive while a turn is live, lazy when idle.
-status.dataset.running = String(!!status.querySelector('.composer-working'))
-  + ':' + String(!!status.querySelector('.composer-stop'));
+statusRow.dataset.running = String(!!statusRow.querySelector('.composer-working'))
+  + ':' + String(!!statusRow.querySelector('.composer-stop'));
 // The flag is `running:stoppable`, so match the prefix rather than the whole.
 (function tick() {
-  const live = () => status.dataset.running.startsWith('true');
+  const live = () => statusRow.dataset.running.startsWith('true');
   poll().finally(() => setTimeout(tick, live() ? 1000 : 3000));
 })();
 addEventListener('focus', poll);

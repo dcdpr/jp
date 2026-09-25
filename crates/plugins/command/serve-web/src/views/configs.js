@@ -39,7 +39,8 @@ function appendRow(list, kind, argument) {
 // of them, so they are ticked as a set rather than chosen one dropdown at a
 // time.
 document.addEventListener('click', (event) => {
-  const add = event.target.closest('.config-add');
+  const target = /** @type {Element} */ (event.target);
+  const add = /** @type {HTMLButtonElement | null} */ (target.closest('.config-add'));
   if (!add) return;
 
   const list = add.closest('.config-list');
@@ -101,7 +102,8 @@ function firstMatch(picker) {
 }
 
 document.addEventListener('input', (event) => {
-  const filter = event.target.closest?.('.config-filter');
+  const target = /** @type {Element} */ (event.target);
+  const filter = /** @type {HTMLInputElement | null} */ (target.closest?.('.config-filter'));
   if (!filter) return;
 
   filterPicker(filter.closest('.config-picker'), filter.value);
@@ -110,7 +112,8 @@ document.addEventListener('input', (event) => {
 // Enter ticks the first match and clears the filter, so a set is gathered by
 // typing a word per configuration rather than by aiming at boxes.
 document.addEventListener('keydown', (event) => {
-  const filter = event.target.closest?.('.config-filter');
+  const target = /** @type {Element} */ (event.target);
+  const filter = /** @type {HTMLInputElement | null} */ (target.closest?.('.config-filter'));
   if (!filter || event.key !== 'Enter') return;
 
   // Held down, Enter means the set is finished rather than one more of it.
@@ -140,7 +143,7 @@ document.addEventListener('keydown', (event) => {
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return;
 
-  const picker = event.target.closest?.('.config-picker');
+  const picker = /** @type {Element} */ (event.target).closest?.('.config-picker');
   if (!picker) return;
 
   event.preventDefault();
@@ -160,7 +163,10 @@ function markPickerOrder(picker) {
 }
 
 document.addEventListener('change', (event) => {
-  const box = event.target.closest?.('.config-picker input[type="checkbox"]');
+  const target = /** @type {Element} */ (event.target);
+  const box = /** @type {HTMLInputElement | null} */ (
+    target.closest?.('.config-picker input[type="checkbox"]')
+  );
   if (!box) return;
 
   const picker = box.closest('.config-picker');
@@ -188,10 +194,11 @@ function applyPicker(picker) {
 }
 
 document.addEventListener('click', (event) => {
-  const button = event.target.closest('.config-picker-add, .config-picker-cancel');
+  const target = /** @type {Element} */ (event.target);
+  const button = target.closest('.config-picker-add, .config-picker-cancel');
   if (!button) return;
 
-  const picker = button.closest('.config-picker');
+  const picker = /** @type {HTMLDialogElement | null} */ (button.closest('.config-picker'));
   if (!picker) return;
 
   if (button.classList.contains('config-picker-cancel')) {
@@ -203,7 +210,7 @@ document.addEventListener('click', (event) => {
 });
 
 document.addEventListener('click', (event) => {
-  const remove = event.target.closest('.config-remove');
+  const remove = /** @type {Element} */ (event.target).closest('.config-remove');
   if (remove) remove.closest('.config-item')?.remove();
 });
 
@@ -267,7 +274,7 @@ function settle(drag, clientY) {
 // all. The grip declares `touch-action: none`, so a drag that starts on it
 // drags rather than scrolling the page.
 document.addEventListener('pointerdown', (event) => {
-  const grip = event.target.closest?.('.config-grip');
+  const grip = /** @type {Element} */ (event.target).closest?.('.config-grip');
   if (!grip || configDrag || event.button !== 0) return;
 
   const row = grip.closest('.config-item');
@@ -308,7 +315,8 @@ document.addEventListener('pointercancel', endConfigDrag);
 
 // The arrow keys move the row the focused grip belongs to.
 document.addEventListener('keydown', (event) => {
-  const grip = event.target.closest?.('.config-grip');
+  const target = /** @type {Element} */ (event.target);
+  const grip = /** @type {HTMLButtonElement | null} */ (target.closest?.('.config-grip'));
   if (!grip) return;
 
   const up = event.key === 'ArrowUp';
@@ -343,8 +351,10 @@ document.addEventListener('keydown', (event) => {
 // is confirmed and how a row is dropped without a pointer.
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter') return;
-  if (!event.target.closest?.('.config-item, .config-picker')) return;
-  if (event.target.closest('button')) return;
+
+  const target = /** @type {Element} */ (event.target);
+  if (!target.closest?.('.config-item, .config-picker')) return;
+  if (target.closest('button')) return;
 
   event.preventDefault();
 });
@@ -357,7 +367,12 @@ window.jpConfigList = {
   // A row left on the picker's empty option contributes nothing, the same way
   // the server drops it.
   read(root) {
-    return Array.from(root.querySelectorAll('.config-item [name="cfg"]'))
+    // A named row's field is a `<select>`, a written one's an `<input>`.
+    const fields = /** @type {NodeListOf<HTMLInputElement | HTMLSelectElement>} */ (
+      root.querySelectorAll('.config-item [name="cfg"]')
+    );
+
+    return Array.from(fields)
       .map((field) => field.value.trim())
       .filter((argument) => argument !== '');
   },

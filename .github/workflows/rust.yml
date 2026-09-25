@@ -77,7 +77,7 @@ jobs:
           cargo='(^|/)Cargo\.toml$|^Cargo\.lock$|^rust-toolchain\.toml$'
           rust='\.rs$'
           markdown='\.md$|\.markdown$'
-          javascript='\.js$|(^|/)tsconfig\.json$'
+          javascript='\.js$|\.d\.ts$|(^|/)tsconfig\.json$'
           snapshots='\.snap$|^\.config/insta\.yaml$'
           source="$rust|$cargo|$workflow|$justfile"
 

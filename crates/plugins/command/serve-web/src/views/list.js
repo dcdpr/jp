@@ -1,4 +1,4 @@
-const header = document.querySelector('.page-header');
+const header = /** @type {HTMLElement} */ (document.querySelector('.page-header'));
 
 // What the server says the list amounts to.
 //
@@ -7,7 +7,7 @@ const header = document.querySelector('.page-header');
 // between the same two visits.
 async function listDigest() {
   const r = await fetch('/conversations/digest');
-  if (!r.ok) throw new Error(r.status);
+  if (!r.ok) throw new Error(String(r.status));
 
   const { digest } = await r.json();
   return digest;
@@ -28,7 +28,7 @@ document.addEventListener('visibilitychange', () => {
 // The header is a way back to the top on platforms that do not do it themselves.
 // Ignores the links inside it, which have somewhere else to go.
 header.addEventListener('click', (event) => {
-  if (!event.target.closest('a')) scrollTo(0, 0);
+  if (!/** @type {Element} */ (event.target).closest('a')) scrollTo(0, 0);
 });
 
 // Archiving asks first: a swipe is easy to make by accident, and a conversation
@@ -37,7 +37,8 @@ header.addEventListener('click', (event) => {
 // Handled here rather than on the form so the confirmation is one dialog for the
 // whole list rather than one per row.
 document.addEventListener('submit', async (event) => {
-  const form = event.target.closest('.row-actions');
+  const target = /** @type {Element} */ (event.target);
+  const form = /** @type {HTMLFormElement | null} */ (target.closest('.row-actions'));
   if (!form) return;
 
   event.preventDefault();
@@ -51,7 +52,7 @@ document.addEventListener('submit', async (event) => {
       method: 'POST',
       headers: { accept: 'application/json' },
     });
-    if (!r.ok) throw new Error(r.status);
+    if (!r.ok) throw new Error(String(r.status));
 
     // Removed rather than reloaded: the rest of the list is unchanged, and a
     // reload would lose the filter and the scroll position.
@@ -74,7 +75,7 @@ document.addEventListener('submit', async (event) => {
 // A tap on a row that is swiped open should close it rather than follow the
 // link, which is what every list with this gesture does.
 document.addEventListener('click', (event) => {
-  const entry = event.target.closest('.row-entry');
+  const entry = /** @type {Element} */ (event.target).closest('.row-entry');
   if (!entry) return;
 
   const track = entry.closest('.row-track');

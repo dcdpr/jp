@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "types": []
   },
-  "include": ["src/views/*.js"]
+  "include": ["src/views/*.js", "src/views/*.d.ts"]
 }

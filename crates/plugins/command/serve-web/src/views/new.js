@@ -9,9 +9,11 @@ document.addEventListener('keydown', (event) => {
   // A dialog takes the same chord for finishing its own work. Read off the
   // keystroke rather than off which dialogs are open, which by now may include
   // the one that just closed itself on this very key.
-  if (event.target.closest?.('dialog')) return;
+  if (/** @type {Element} */ (event.target).closest?.('dialog')) return;
 
-  const form = document.querySelector('.new-conversation');
+  const form = /** @type {HTMLFormElement | null} */ (
+    document.querySelector('.new-conversation')
+  );
   if (!form) return;
 
   event.preventDefault();
