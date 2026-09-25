@@ -8,9 +8,10 @@
 //! the snapshot tool and the drive harness report through it.
 
 use camino::Utf8Path;
+use jp_process::ProcessRunner;
 use serde::Deserialize;
 
-use crate::{Error, debug_app::driver, util::runner::ProcessRunner};
+use crate::{Error, debug_app::driver};
 
 /// Sibling cap when the caller names none.
 ///

@@ -1,4 +1,6 @@
+use jp_process::ProcessOutput;
 use jp_tool::Capability;
+use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::{
@@ -40,6 +42,31 @@ use stage_patch::git_stage_patch;
 use stage_patch_lines::git_stage_patch_lines;
 use status::git_status;
 use unstage::git_unstage;
+
+/// A git command's output as a tool reports it: each stream under the name the
+/// assistant sees, and the exit code only when the command failed.
+#[derive(Debug, Serialize)]
+struct Reported<'a> {
+    #[serde(rename = "output", skip_serializing_if = "str::is_empty")]
+    stdout: &'a str,
+
+    #[serde(rename = "error", skip_serializing_if = "str::is_empty")]
+    stderr: &'a str,
+
+    /// `Some(None)` for a command ended by a signal, which has no code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<Option<i32>>,
+}
+
+impl<'a> From<&'a ProcessOutput> for Reported<'a> {
+    fn from(output: &'a ProcessOutput) -> Self {
+        Self {
+            stdout: &output.stdout,
+            stderr: &output.stderr,
+            status: (!output.success()).then(|| output.status.code()),
+        }
+    }
+}
 
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     let opts = &t.options;

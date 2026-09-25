@@ -8,12 +8,10 @@
 //! asked.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use jp_process::{ProcessOutput, ProcessRunner};
 use serde::Deserialize;
 
-use crate::{
-    Error,
-    util::runner::{ProcessOutput, ProcessRunner},
-};
+use crate::Error;
 
 /// The `jpdrive` package, relative to the repository root.
 const PACKAGE: &str = "apps/macos/Tools/jpdrive";

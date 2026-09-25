@@ -1,13 +1,11 @@
+use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 use jp_tool::Context;
 
 use super::{SOURCE_PATHS, strip};
-use crate::util::{
-    ToolResult, error,
-    runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
-};
+use crate::util::{ToolResult, error};
 
 pub(crate) async fn swift_format(ctx: &Context, check: bool) -> ToolResult {
-    swift_format_impl(ctx, check, &DuctProcessRunner)
+    swift_format_impl(ctx, check, &SystemProcessRunner)
 }
 
 fn swift_format_impl<R: ProcessRunner>(ctx: &Context, check: bool, runner: &R) -> ToolResult {

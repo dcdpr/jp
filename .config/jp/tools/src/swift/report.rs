@@ -9,11 +9,11 @@
 use std::fs;
 
 use camino::{Utf8Path, Utf8PathBuf};
+use jp_process::{ProcessOutput, ProcessRunner};
 use jp_tool::Context;
 use serde_json::Value;
 
 use super::strip;
-use crate::util::runner::{ProcessOutput, ProcessRunner};
 
 /// How much of the raw log to show when there is no summary to show instead.
 const LOG_TAIL_LINES: usize = 40;

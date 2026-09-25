@@ -10,6 +10,7 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use jp_process::SystemProcessRunner;
 use jp_tool::Outcome;
 
 use crate::{
@@ -21,7 +22,7 @@ use crate::{
         sandbox::{Sandbox, SandboxOpts},
         shorten_paths, with_termination_note,
     },
-    util::{ToolResult, error, runner::DuctProcessRunner},
+    util::{ToolResult, error},
 };
 
 /// Tool entrypoint.
@@ -92,10 +93,10 @@ fn run(workspace_root: &Utf8Path, args: &[String], clone_user_data: bool) -> Too
     let sandbox = Sandbox::create(
         workspace_root,
         SandboxOpts { clone_user_data },
-        &DuctProcessRunner,
+        &SystemProcessRunner,
     )?;
 
-    let binary = build::build(&DuctProcessRunner, &BuildSpec {
+    let binary = build::build(&SystemProcessRunner, &BuildSpec {
         working_dir: sandbox.working_dir(),
         package: "jp_cli",
         bin: "jp",

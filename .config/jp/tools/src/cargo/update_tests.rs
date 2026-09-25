@@ -1,14 +1,14 @@
 use std::io;
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use camino_tempfile::{Utf8TempDir, tempdir};
 use indoc::indoc;
+use jp_process::{Ended, ExitCode, Finished, MockProcessRunner, ProcessOutput, ProcessSpec, Watch};
 use jp_tool::{Action, Context, Outcome};
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
 use super::*;
-use crate::util::runner::{ExitCode, MockProcessRunner, ProcessOutput, RunnerOpts};
 
 fn ctx() -> (Utf8TempDir, Context) {
     let dir = tempdir().unwrap();
@@ -58,15 +58,12 @@ struct MutatingRunner {
 }
 
 impl ProcessRunner for MutatingRunner {
-    fn run_with_opts(
-        &self,
-        _program: &str,
-        _args: &[&str],
-        _working_dir: &Utf8Path,
-        _opts: &RunnerOpts<'_>,
-    ) -> Result<ProcessOutput, io::Error> {
+    fn execute(&self, _spec: &ProcessSpec, _watch: &Watch) -> Result<Finished, io::Error> {
         fs::write(&self.lockfile, &self.after)?;
-        Ok(success(&self.stderr))
+        Ok(Finished {
+            output: success(&self.stderr),
+            ended: Ended::Exited,
+        })
     }
 }
 

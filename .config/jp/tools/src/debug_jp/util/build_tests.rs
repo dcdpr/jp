@@ -1,7 +1,8 @@
 use std::fs;
 
+use jp_process::MockProcessRunner;
+
 use super::*;
-use crate::util::runner::MockProcessRunner;
 
 #[test]
 fn resolves_binary_path_from_metadata() {

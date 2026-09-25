@@ -1,8 +1,8 @@
+use jp_process::{ExitCode, MockProcessRunner, ProcessOutput};
 use jp_tool::{Action, Context};
 use pretty_assertions::assert_eq;
 
 use super::{super::error_message, *};
-use crate::util::runner::{ExitCode, MockProcessRunner, ProcessOutput};
 
 fn ctx() -> Context {
     Context {

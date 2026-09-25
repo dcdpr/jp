@@ -1,11 +1,8 @@
-use std::{io, sync::Mutex};
-
-use camino::Utf8Path;
 use camino_tempfile::tempdir;
+use jp_process::MockProcessRunner;
 use jp_tool::{Action, Context};
 
 use super::*;
-use crate::util::runner::{MockProcessRunner, RunnerOpts};
 
 #[test]
 fn test_cargo_test_success() {
@@ -290,44 +287,13 @@ fn cargo_profile_is_passed_through_to_nextest() {
     assert_eq!(content, "Ran 1/1 tests, of which 0 failed.\n");
 }
 
-/// A runner that captures the environment variables passed to it, so we can
-/// assert on the exact values.
-struct EnvCapturingRunner {
-    inner: MockProcessRunner,
-    captured_env: Mutex<Vec<(String, String)>>,
-}
-
-impl From<MockProcessRunner> for EnvCapturingRunner {
-    fn from(inner: MockProcessRunner) -> Self {
-        Self {
-            inner,
-            captured_env: Mutex::new(Vec::new()),
-        }
-    }
-}
-
-impl EnvCapturingRunner {
-    fn captured_env(&self) -> Vec<(String, String)> {
-        self.captured_env.lock().unwrap().clone()
-    }
-}
-
-impl ProcessRunner for EnvCapturingRunner {
-    fn run_with_opts(
-        &self,
-        program: &str,
-        args: &[&str],
-        working_dir: &Utf8Path,
-        opts: &RunnerOpts<'_>,
-    ) -> Result<ProcessOutput, io::Error> {
-        *self.captured_env.lock().unwrap() = opts
-            .env
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-
-        self.inner.run_with_opts(program, args, working_dir, opts)
-    }
+/// The variables the last command `runner` ran was given.
+fn captured_env(runner: &MockProcessRunner) -> Vec<(String, String)> {
+    runner
+        .calls()
+        .pop()
+        .map(|call| call.env)
+        .unwrap_or_default()
 }
 
 /// `cargo test` was the one compiling tool that never set `RUSTFLAGS`, so it
@@ -347,7 +313,7 @@ fn test_rustflags_reaches_cargo() {
     };
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
-    let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
+    let runner = MockProcessRunner::success(stdout);
     let _result = cargo_test_impl(
         &ctx.root,
         "-W warnings -Zthreads=0",
@@ -361,8 +327,7 @@ fn test_rustflags_reaches_cargo() {
     .unwrap();
 
     assert_eq!(
-        runner
-            .captured_env()
+        captured_env(&runner)
             .iter()
             .find(|(k, _)| k == "RUSTFLAGS")
             .map(|(_, v)| v.as_str()),
@@ -414,7 +379,7 @@ fn test_backtrace_disabled_by_default() {
     };
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
-    let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
+    let runner = MockProcessRunner::success(stdout);
     let _result = cargo_test_impl(
         &ctx.root,
         "-W warnings",
@@ -428,8 +393,7 @@ fn test_backtrace_disabled_by_default() {
     .unwrap();
 
     assert_eq!(
-        runner
-            .captured_env()
+        captured_env(&runner)
             .iter()
             .find(|(k, _)| k == "RUST_BACKTRACE")
             .map(|(_, v)| v.as_str()),
@@ -449,7 +413,7 @@ fn test_checksum_freshness_disabled_by_default() {
     };
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
-    let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
+    let runner = MockProcessRunner::success(stdout);
     let _result = cargo_test_impl(
         &ctx.root,
         "-W warnings",
@@ -463,8 +427,7 @@ fn test_checksum_freshness_disabled_by_default() {
     .unwrap();
 
     assert!(
-        !runner
-            .captured_env()
+        !captured_env(&runner)
             .iter()
             .any(|(k, _)| k == "CARGO_UNSTABLE_CHECKSUM_FRESHNESS"),
         "checksum freshness must be off unless opted into, so the tools work on stable cargo",
@@ -483,7 +446,7 @@ fn test_checksum_freshness_enabled() {
     };
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
-    let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
+    let runner = MockProcessRunner::success(stdout);
     let _result = cargo_test_impl(
         &ctx.root,
         "-W warnings",
@@ -497,8 +460,7 @@ fn test_checksum_freshness_enabled() {
     .unwrap();
 
     assert_eq!(
-        runner
-            .captured_env()
+        captured_env(&runner)
             .iter()
             .find(|(k, _)| k == "CARGO_UNSTABLE_CHECKSUM_FRESHNESS")
             .map(|(_, v)| v.as_str()),
@@ -518,7 +480,7 @@ fn test_backtrace_enabled() {
     };
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
-    let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
+    let runner = MockProcessRunner::success(stdout);
     let _result = cargo_test_impl(
         &ctx.root,
         "-W warnings",
@@ -532,8 +494,7 @@ fn test_backtrace_enabled() {
     .unwrap();
 
     assert_eq!(
-        runner
-            .captured_env()
+        captured_env(&runner)
             .iter()
             .find(|(k, _)| k == "RUST_BACKTRACE")
             .map(|(_, v)| v.as_str()),

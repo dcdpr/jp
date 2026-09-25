@@ -1,8 +1,8 @@
+use jp_process::{ExitCode, MockProcessRunner, ProcessOutput};
 use jp_tool::{Action, Context};
 use pretty_assertions::assert_eq;
 
 use super::{super::error_message, *};
-use crate::util::runner::{ExitCode, MockProcessRunner, ProcessOutput};
 
 fn ctx() -> Context {
     Context {
@@ -201,13 +201,16 @@ fn nothing_is_unmatched_when_nothing_is_known() {
     assert!(unmatched(&requested, &[]).is_empty());
 }
 
-/// A failing run names the screenshots the tests left behind, so what was on
-/// screen can be looked at rather than guessed.
+/// A run that fails to the end reports the failure it printed.
+///
+/// An `XCTest` failure rather than a swift-testing issue: the issue line is
+/// what stops a run outside CI, and a stopped run is reported from what the
+/// tests left on disk instead of from what was printed.
 #[test]
 fn reports_a_failure_with_its_summary() {
     let runner = prepared().expect("xcodebuild").returns(ProcessOutput {
-        stdout: "\u{1005db} Test \"selects a row\" recorded an issue at Foo.swift:12:5: Issue \
-                 recorded\n"
+        stdout: "Foo.swift:12: error: -[JPUITests.ConversationListTests testClickSelects] : \
+                 XCTAssertTrue failed\n"
             .to_owned(),
         stderr: String::new(),
         status: ExitCode::from_code(1),
@@ -216,5 +219,8 @@ fn reports_a_failure_with_its_summary() {
     let tests = ["UISuite/ConversationListTests/clickSelects()".to_owned()];
     let message = error_message(swift_test_ui_impl(&ctx(), Some(&tests), &runner).unwrap());
 
-    assert!(message.contains("recorded an issue"), "got: {message}");
+    assert!(
+        message.contains("XCTAssertTrue failed") && !message.starts_with("Stopped the run"),
+        "got: {message}"
+    );
 }

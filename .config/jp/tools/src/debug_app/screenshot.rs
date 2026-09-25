@@ -26,6 +26,7 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use jp_tool::Outcome;
 use serde::Deserialize;
 
@@ -35,10 +36,7 @@ use crate::{
         driver,
         session::{Session, Slot},
     },
-    util::{
-        ToolResult, error,
-        runner::{DuctProcessRunner, ProcessRunner},
-    },
+    util::{ToolResult, error},
 };
 
 /// What the Screen Recording grant being absent means for a capture.
@@ -101,7 +99,7 @@ pub(crate) async fn debug_app_screenshot(ctx: &Context, _t: &Tool) -> ToolResult
         .map_or(0, |since| since.as_millis());
 
     let dir = Session::dir(&ctx.root, &Slot::for_context(ctx)?);
-    run(&ctx.root, &dir, millis, &DuctProcessRunner)
+    run(&ctx.root, &dir, millis, &SystemProcessRunner)
 }
 
 fn format_preview() -> String {

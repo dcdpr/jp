@@ -1,9 +1,9 @@
 use camino_tempfile::tempdir;
+use jp_process::{ExitCode, MockProcessRunner, ProcessOutput};
 use jp_tool::{AccessPolicy, FsRule, Outcome};
 use serde_json::{Map, Value, json};
 
 use super::*;
-use crate::util::runner::{ExitCode, MockProcessRunner, ProcessOutput};
 
 fn no_answers() -> Map<String, Value> {
     Map::new()

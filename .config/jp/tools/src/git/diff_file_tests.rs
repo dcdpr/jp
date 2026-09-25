@@ -1,7 +1,7 @@
 use camino_tempfile::tempdir;
+use jp_process::MockProcessRunner;
 
 use super::*;
-use crate::util::runner::MockProcessRunner;
 
 fn small_diff() -> &'static str {
     "\
