@@ -593,7 +593,9 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
 
     // The per-command workspace bootstrap requirement (RFD 087) drives the
     // startup dispatch: each arm performs exactly the pre-workspace work its
-    // commands declared, so no command can reach a path another arm owns.
+    // commands declared. The compiler does not tie a declaration to its arm;
+    // a command declaring a requirement its arm does not handle panics at
+    // that arm's `unreachable!`.
     let requirement = cli.command.workspace_requirement();
     match requirement {
         // Nothing to resolve: `jp init` creates the workspace another command

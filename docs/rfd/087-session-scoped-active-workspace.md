@@ -316,6 +316,8 @@ Examples below use `jp w` for brevity.
   targeting grammar below.
   `jp w use ?` opens the picker (list known workspaces, expand each through the
   roots registry to its live checkouts, pick one).
+  Bare `jp w use` returns to `s`, falling back to `?` when the session has no
+  live previous workspace, mirroring bare `jp c use`.
   `jp w use` is interactive-only in all forms — including `cwd` — because it
   mutates session state; scripts target with `jp -w` instead (see
   [Non-interactive mode](#precedence-and-the-cwd-vs-active-conflict)).
@@ -511,13 +513,13 @@ Having no session identity is distinct from having no active workspace:
   session identity available.
   Set `$JP_SESSION` or run in a terminal with automatic session detection.").
   There is nothing to persist the selection against.
-- `jp q` launched from outside a workspace without a session identity errors
-  with guidance to pass `-w`.
-  It does not fall back to a non-persisted one-shot picker: a choice that cannot
-  be recorded would have to be re-made on every invocation, and [RFD 020]
-  already establishes that mappings are not persisted without a session
-  identity.
-  Scripts stay deterministic.
+- `jp q` launched interactively from outside a workspace without a session
+  identity skips the steps that read a session record (2, 3, and 5) and reaches
+  the step-6 picker, which resolves the run only.
+  That is the same picker a session with no selection gets: it records nothing,
+  so it needs no identity to record against.
+  Non-interactively it errors with guidance to pass `-w`, so scripts stay
+  deterministic.
 
 ### Reprompt on a missing active workspace
 

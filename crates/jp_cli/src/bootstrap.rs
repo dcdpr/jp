@@ -201,6 +201,8 @@ impl ExecutionContext {
 ///
 /// Non-interactive runs ignore the session layer entirely (steps 2–3 and
 /// 5–6), so scripts never depend on hidden per-session state.
+/// Interactive runs without a session identity have no record for steps 2–3
+/// and 5 to read, and take steps 4 and 6 only.
 ///
 /// Resolution may *repair* the session's recorded selection when its checkout
 /// is gone, but never creates one: attaching a workspace to a session is `jp w
@@ -228,12 +230,18 @@ fn resolve_from(env: &TargetEnv<'_>, target: Option<&WorkspaceTarget>) -> Result
             ResolvedTarget::Root(selected) => (selected.root, source_for(target)),
         },
 
-        // No explicit target: the session layer applies only to interactive
-        // runs with a session identity — scripts and identity-less sessions
-        // resolve from the cwd or error with guidance.
+        // No explicit target: the session record applies only to interactive
+        // runs with a session identity. Without one, an interactive run can
+        // still be asked, since the picker records nothing; scripts resolve
+        // from the cwd or error with guidance.
         None => match (env.session, env.interactive) {
             (Some(session), true) => ladder(env, session)?,
-            _ => (cwd_root(env)?, RootSource::Cwd),
+            (None, true) => match Workspace::find_root(env.launch_cwd.clone(), DEFAULT_STORAGE_DIR)
+            {
+                Some(cwd) => (cwd, RootSource::Cwd),
+                None => picker(env)?,
+            },
+            (_, false) => (cwd_root(env)?, RootSource::Cwd),
         },
     };
 
@@ -288,8 +296,8 @@ fn cwd_root(env: &TargetEnv<'_>) -> Result<Utf8PathBuf> {
 /// The no-target precedence ladder (RFD 087 steps 2–6): sticky pin, conflict
 /// prompt, cwd, session-active workspace, picker.
 ///
-/// Only reached interactively with a session identity: a choice that cannot be
-/// prompted for or recorded is not made at all.
+/// Only reached interactively with a session identity, because steps 2–3 and 5
+/// read the session's record.
 fn ladder(env: &TargetEnv<'_>, session: &Session) -> Result<(Utf8PathBuf, RootSource)> {
     let cwd = Workspace::find_root(env.launch_cwd.clone(), DEFAULT_STORAGE_DIR);
 
@@ -554,24 +562,19 @@ fn picker(env: &TargetEnv<'_>) -> Result<(Utf8PathBuf, RootSource)> {
 }
 
 /// The no-workspace error, with guidance matching how the run fell through:
-/// non-interactive runs and identity-less sessions each get their way out.
+/// non-interactive runs are pointed at `--workspace`, interactive runs reached
+/// an empty picker and can only create one.
 fn no_workspace_error(env: &TargetEnv<'_>) -> crate::error::Error {
     let jp_init = "jp init".bold().yellow();
     let workspace_flag = "--workspace <id|path>".bold().yellow();
 
-    let message = if !env.interactive {
+    let message = if env.interactive {
+        format!("Could not locate workspace. Use `{jp_init}` to create a new workspace.")
+    } else {
         format!(
             "Could not locate workspace. Run from inside a workspace, pass `{workspace_flag}`, or \
              create one with `{jp_init}`."
         )
-    } else if env.session.is_none() {
-        format!(
-            "Could not locate workspace, and no session identity is available to select one. Pass \
-             `{workspace_flag}`, set $JP_SESSION (or run in a terminal with automatic session \
-             detection), or create a workspace with `{jp_init}`."
-        )
-    } else {
-        format!("Could not locate workspace. Use `{jp_init}` to create a new workspace.")
     };
 
     cmd::Error::from(message).into()

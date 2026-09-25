@@ -413,6 +413,34 @@ fn bare_use_returns_to_the_previous_workspace() {
     );
 }
 
+// With nothing to return to, bare `use` falls back to the picker. An empty
+// registry makes the picker fail without prompting, so the error it reports is
+// proof the fallback ran: the `s` error must have been swallowed, not returned.
+#[test]
+fn bare_use_without_a_previous_workspace_falls_back_to_the_picker() {
+    let tmp = tempdir().unwrap();
+    let session = env_session();
+    let env = env_at(tmp.path().to_owned(), tmp.path(), Some(&session), true);
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+
+    let error = Use {
+        target: None,
+        always: false,
+    }
+    .run(&printer, &env)
+    .unwrap_err();
+
+    let message = message_of(&error);
+    assert!(
+        message.contains("No known workspaces"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        !message.contains("No previously active workspace"),
+        "unexpected error: {message}"
+    );
+}
+
 #[test]
 fn a_path_without_a_workspace_id_is_rejected() {
     let tmp = tempdir().unwrap();

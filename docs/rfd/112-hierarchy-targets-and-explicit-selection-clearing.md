@@ -276,8 +276,11 @@ Leaves `jp w use cwd` clearing as well, so nothing breaks yet.
 
 ### Phase 2: `cwd` deprecation window
 
-`jp w use cwd` errors, naming `--clear` to clear and `jp w use .` to select.
-`jp -w cwd` is untouched.
+Split the `.` alias off `cwd` into its own target.
+On `jp w use`, `.` selects and records the current workspace, the behavior Phase
+4 later gives `cwd`; `jp w use cwd` errors, naming `--clear` to clear and `jp w
+use .` to select.
+`jp -w cwd` and `jp -w .` are untouched.
 
 Depends on Phase 1, so the replacement exists before the error points at it.
 
@@ -288,7 +291,8 @@ Implement the parent walk (ID inequality) and add `.`, `..`, `../..`, and `/` to
 error messages.
 Add them to the non-interactive target set.
 
-Depends on Phase 2 for `.` on the `use` axis to be unambiguous.
+Depends on Phase 2, which gives `.` its own target on the `use` axis; this phase
+adds the remaining segments alongside it.
 `jp -w` hierarchy targets do not depend on it and could land earlier if the
 phases are split further.
 
