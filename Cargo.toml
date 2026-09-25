@@ -33,6 +33,7 @@ jp_md = { path = "crates/jp_md" }
 jp_openrouter = { path = "crates/jp_openrouter" }
 jp_plugin = { path = "crates/jp_plugin" }
 jp_printer = { path = "crates/jp_printer" }
+jp_process = { path = "crates/jp_process" }
 jp_pty = { path = "crates/jp_pty" }
 jp_storage = { path = "crates/jp_storage" }
 jp_task = { path = "crates/jp_task" }
