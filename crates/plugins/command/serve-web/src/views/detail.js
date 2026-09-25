@@ -1151,6 +1151,11 @@ composer.addEventListener('submit', async (event) => {
     return;
   }
 
+  // Already on its way. A reply to a running turn is answered only once the
+  // turn takes it, which can be minutes, and a second send would deliver it
+  // twice.
+  if (submitted) return;
+
   const content = input.value.trim();
   if (!content) return;
 
@@ -1437,10 +1442,15 @@ async function poll() {
     // returns to Send and the indicator takes over the stopping.
     setCancelMode(awaitingSend && stoppable);
 
-    // The field is held while the message is in flight, but the button is not: it
-    // is the way out of that state.
-    input.readOnly = clearWhenLanded !== null;
-    send.disabled = cancelling ? false : d.running && !stoppable;
+    // The field is held while the message is in flight, from the post until the
+    // transcript carries it. The post can outlast several polls, since a reply
+    // is answered only once the turn takes it, so this cannot be read off the
+    // poll alone.
+    // Send is held for the post as well, and comes back as Cancel once the
+    // message is waiting to land; until then, the Stop beside the indicator is
+    // the way out.
+    input.readOnly = holdingSent();
+    send.disabled = cancelling ? false : submitted || (d.running && !stoppable);
 
     // Anything newly arrived needs the chase, appended or not: a message that has
     // not been measured reports a placeholder height, and for a tall one that is a

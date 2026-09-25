@@ -332,6 +332,69 @@ fn a_turn_form_trims_an_argument() {
     assert_eq!(form.cfg.args(), ["assistant.name=JP"]);
 }
 
+/// Whether `id` is recorded as running, and if so, for which turn.
+fn running_as(turns: &Turns, id: &str, turn: &watch::Sender<bool>) -> bool {
+    running_turn(turns, id).is_some_and(|done| done.same_channel(&turn.subscribe()))
+}
+
+/// A reply the turn refused falls back to a turn of its own only once the
+/// original query has returned, and the original's completion cannot then clear
+/// the fallback's entry.
+///
+/// The turn stops reading interrupts before it lets go of the conversation, so
+/// the refusal can arrive while the original query is still in flight.
+#[tokio::test]
+async fn a_fallback_turn_waits_for_the_one_it_replaced() {
+    let turns = Turns::default();
+    let original = begin_turn(&turns, "c1", None, None, None);
+
+    // What the busy check took before the reply was sent.
+    let mut ended = running_turn(&turns, "c1").expect("the original is running");
+
+    let (started, mut fallback_started) = tokio::sync::oneshot::channel();
+    let fallback = tokio::spawn(async move {
+        ended.wait_for(|ended| *ended).await.ok();
+        started.send(()).unwrap();
+    });
+
+    tokio::task::yield_now().await;
+    assert!(
+        fallback_started.try_recv().is_err(),
+        "the fallback waits while the original query is still in flight"
+    );
+
+    end_turn(
+        &turns,
+        "c1".to_owned(),
+        &original,
+        Some("interrupted".to_owned()),
+    );
+    fallback.await.unwrap();
+
+    let replacement = begin_turn(&turns, "c1", Some("use Rust".to_owned()), None, None);
+
+    // The original's outcome landing after the replacement took the entry, as
+    // it would without the wait above: it must not clear the replacement.
+    end_turn(&turns, "c1".to_owned(), &original, None);
+    assert!(running_as(&turns, "c1", &replacement));
+
+    end_turn(&turns, "c1".to_owned(), &original, Some("late".to_owned()));
+    assert!(running_as(&turns, "c1", &replacement));
+}
+
+/// A turn's own completion still settles its entry.
+#[test]
+fn a_turn_ending_clears_its_own_entry() {
+    let turns = Turns::default();
+    let done = begin_turn(&turns, "c1", None, None, None);
+    let ended = running_turn(&turns, "c1").unwrap();
+
+    end_turn(&turns, "c1".to_owned(), &done, None);
+
+    assert!(running_turn(&turns, "c1").is_none());
+    assert!(*ended.borrow(), "whoever waited on it is told it ended");
+}
+
 /// A reply to a running turn cannot carry configuration: the turn keeps the one
 /// it started with, so the choice would be accepted and never applied.
 #[test]

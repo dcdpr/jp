@@ -16,7 +16,7 @@ use axum::{
 use jp_plugin::message::LockState;
 use maud::Markup;
 use serde::{Deserialize, Serialize};
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::watch};
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -33,7 +33,7 @@ struct AppState {
     ///
     /// A turn outlives the request that started it, so its outcome has to live
     /// somewhere the polling endpoint can find it.
-    turns: Arc<Mutex<HashMap<String, TurnStatus>>>,
+    turns: Arc<Turns>,
 
     /// Identifies this run of the server.
     ///
@@ -43,6 +43,9 @@ struct AppState {
     /// Data recovers on its own; the page itself does not.
     boot: String,
 }
+
+/// The turns this server has started, by conversation.
+type Turns = Mutex<HashMap<String, TurnStatus>>;
 
 /// The state of a turn started from the browser.
 #[derive(Debug, Clone)]
@@ -74,6 +77,14 @@ enum TurnStatus {
         /// the transcript is longer than this, whether or not the assistant has
         /// already begun answering it.
         sent_at: Option<usize>,
+
+        /// Turns `true` once the query behind this entry has ended and its
+        /// outcome is recorded here.
+        ///
+        /// Also what tells one turn's entry from the next on the same
+        /// conversation: two entries are the same turn only if their receivers
+        /// share a channel.
+        done: watch::Receiver<bool>,
     },
 
     /// It failed, and nobody has been told yet.
@@ -432,10 +443,8 @@ async fn start_turn(
     // between, so there is no window for the send to be refused as already-locked
     // and no need to guess when the first turn has finished unwinding.
     // This is what Ctrl-C then `[r] Reply` does at a terminal.
-    let busy = matches!(
-        state.turns.lock().expect("turns lock poisoned").get(&id),
-        Some(TurnStatus::Running { .. })
-    );
+    let running = running_turn(&state.turns, &id);
+    let busy = running.is_some();
 
     if busy && let Some(error) = busy_refusal(&form) {
         return (
@@ -467,8 +476,18 @@ async fn start_turn(
             // The turn ended without acting on the reply. There is nothing left
             // to interrupt, which makes this an ordinary message: falling
             // through starts a turn with it.
+            //
+            // Not until the query behind that turn has returned, though. The
+            // turn stops reading interrupts before it lets go of the
+            // conversation, so a query sent now can be refused as
+            // already-locked, and the original's completion would then clear the
+            // entry this one is about to take.
             Err(ClientError::Host(error)) => {
                 debug!(%id, %error, "No turn left to reply to; starting one instead.");
+
+                if let Some(mut done) = running {
+                    done.wait_for(|ended| *ended).await.ok();
+                }
             }
 
             // The host gave no answer, so whether the turn has the message is
@@ -486,15 +505,13 @@ async fn start_turn(
         }
     }
 
-    state
-        .turns
-        .lock()
-        .expect("turns lock poisoned")
-        .insert(id.clone(), TurnStatus::Running {
-            pending: Some(content.clone()),
-            client: form.client.clone(),
-            sent_at: form.count,
-        });
+    let done = begin_turn(
+        &state.turns,
+        &id,
+        Some(content.clone()),
+        form.client.clone(),
+        form.count,
+    );
 
     let client = state.client.clone();
     let turns = Arc::clone(&state.turns);
@@ -507,18 +524,74 @@ async fn start_turn(
             }
             Err(error) => {
                 error!(%id, %error, "Turn failed");
-                Some(TurnStatus::Failed(error.to_string()))
+                Some(error.to_string())
             }
         };
 
-        let mut turns = turns.lock().expect("turns lock poisoned");
-        match failure {
-            Some(failed) => turns.insert(id, failed),
-            None => turns.remove(&id),
-        };
+        end_turn(&turns, id, &done, failure);
     });
 
     response
+}
+
+/// The end of the turn this server is running on `id`, if it is running one.
+fn running_turn(turns: &Turns, id: &str) -> Option<watch::Receiver<bool>> {
+    match turns.lock().expect("turns lock poisoned").get(id) {
+        Some(TurnStatus::Running { done, .. }) => Some(done.clone()),
+        _ => None,
+    }
+}
+
+/// Record a delegated query as running on `id`.
+///
+/// Returns what the query's task hands to [`end_turn`] once the query returns.
+fn begin_turn(
+    turns: &Turns,
+    id: &str,
+    pending: Option<String>,
+    client: Option<String>,
+    sent_at: Option<usize>,
+) -> watch::Sender<bool> {
+    let (done, ended) = watch::channel(false);
+
+    turns
+        .lock()
+        .expect("turns lock poisoned")
+        .insert(id.to_owned(), TurnStatus::Running {
+            pending,
+            client,
+            sent_at,
+            done: ended,
+        });
+
+    done
+}
+
+/// Record how the query [`begin_turn`] registered ended, then say it has.
+///
+/// Leaves the entry alone when a later turn on the same conversation has taken
+/// it: the outcome belongs to this query, and writing it there would mark the
+/// turn that is running as finished or failed.
+fn end_turn(turns: &Turns, id: String, done: &watch::Sender<bool>, failure: Option<String>) {
+    {
+        let mut turns = turns.lock().expect("turns lock poisoned");
+        let superseded = matches!(
+            turns.get(&id),
+            Some(TurnStatus::Running { done: current, .. })
+                if !current.same_channel(&done.subscribe())
+        );
+
+        if superseded {
+            debug!(%id, "A later turn owns this conversation; leaving its entry alone.");
+        } else {
+            match failure {
+                Some(message) => turns.insert(id, TurnStatus::Failed(message)),
+                None => turns.remove(&id),
+            };
+        }
+    }
+
+    done.send_replace(true);
 }
 
 /// Why a message for a running turn cannot be delivered as it was sent.
@@ -651,14 +724,7 @@ async fn start_conversation(
                 // needed.
                 // Attributed to whoever filled the form, so the page they land on
                 // can stop the first turn without being asked whose it is.
-                state.turns.lock().expect("turns lock poisoned").insert(
-                    id.clone(),
-                    TurnStatus::Running {
-                        pending: None,
-                        client: form.client.clone(),
-                        sent_at: None,
-                    },
-                );
+                let done = begin_turn(&state.turns, &id, None, form.client.clone(), None);
 
                 // Cleared when the turn ends, which is the half that has to exist:
                 // an entry nothing ever removes leaves the conversation busy for the
@@ -673,15 +739,11 @@ async fn start_conversation(
                         }
                         Err(error) => {
                             error!(id = %finished_id, %error, "First turn failed.");
-                            Some(TurnStatus::Failed(error.to_string()))
+                            Some(error.to_string())
                         }
                     };
 
-                    let mut turns = turns.lock().expect("turns lock poisoned");
-                    match failure {
-                        Some(failed) => turns.insert(finished_id, failed),
-                        None => turns.remove(&finished_id),
-                    };
+                    end_turn(&turns, finished_id, &done, failure);
                 });
 
                 return Ok(Redirect::to(&format!("/conversations/{id}")).into_response());
@@ -1147,6 +1209,7 @@ fn take_turn_status(state: &AppState, id: &str, rendered: &[render::RenderedEven
             pending,
             client,
             sent_at,
+            ..
         }) => {
             // Counted rather than read off the end of the transcript. A fast
             // first flush can persist the request and an answer to it between
