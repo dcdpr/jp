@@ -1,4 +1,4 @@
-# RFD D66: Provider-Native Token Counting
+# RFD D70: Provider-Native Token Counting
 
 - **Status**: Draft
 - **Category**: Design
