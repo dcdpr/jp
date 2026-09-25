@@ -1,6 +1,6 @@
 # Tool-execution tests that spawn a process only run on Unix
 
-- **Status**: Todo
+- **Status**: Done
 - **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-14
@@ -61,3 +61,41 @@ state their intent directly instead of encoding it in shell.
 
 Land it with CI actually running the suite on `windows-latest`, or the gap just
 moves.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-09-25T12:21:00Z
+
+Resolved in PR #1175, by dependency injection rather than the helper binary
+suggested above.
+
+Running a program to completion is now the `ProcessRunner` trait in a new
+`jp_process` crate.
+`SystemProcessRunner` spawns the real process, and `MockProcessRunner` (behind
+the `mock` feature) answers from a script and records every run.
+The JP MCP Server takes the runner as a constructor argument (`Service::new`,
+`TerminalExecutorSource::start`), so local tools and argument formatters run
+through it.
+Label resolution and the maintenance tools crate use the same trait, and
+`.config/jp/tools/src/util/runner.rs` is gone.
+
+All seven tests listed here run on the mock and are no longer gated
+`#[cfg(unix)]`.
+They assert what they previously inferred from marker files, directly from the
+runner's call log: whether the formatter ran, how many attempts ran, which
+arguments and answers each attempt got, and which directory it ran in.
+
+The real runner is covered once, in `crates/jp_process/tests/system.rs`, through
+a `process_probe` fixture binary that behaves the same on every platform.
+It covers capture, exit codes, stdin, environment and clean environment, working
+directory, spawn failure, lossy decoding, stderr line streaming, stop-on-match,
+cancellation, and a stopped process whose own child keeps its pipes open.
+The interrupt-then-kill grace period and process-group isolation are Unix-only,
+and their tests are gated accordingly.
+
+Not covered here: the two `jp_mcp::client_tests` that start `sh` as an MCP stdio
+server.
+Those are long-lived protocol processes, outside what `ProcessRunner` models.
