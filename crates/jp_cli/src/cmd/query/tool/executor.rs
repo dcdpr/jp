@@ -32,16 +32,27 @@ pub(crate) use error::ExecutorError;
 #[async_trait]
 pub(crate) trait Executor: Send + Sync {
     /// Prepare an invocation, or return a response resolved without execution.
+    ///
+    /// A question the call's argument formatter asks before the call is put up
+    /// for approval goes to `questions`.
     async fn prepare(
         &mut self,
         _render_arguments: bool,
+        _questions: &mut dyn FormatterQuestions,
     ) -> Result<Option<ToolCallResponse>, ExecutorError> {
         Ok(None)
     }
 
-    /// Apply Host approval and wait until the invocation is ready for release.
-    async fn approve(&mut self) -> Result<(), ExecutorError> {
-        Ok(())
+    /// Apply Host approval and wait until the invocation is ready for release,
+    /// or return the response it was resolved with instead.
+    ///
+    /// A formatter held back until approval asks its questions here, through
+    /// `questions`.
+    async fn approve(
+        &mut self,
+        _questions: &mut dyn FormatterQuestions,
+    ) -> Result<Option<ToolCallResponse>, ExecutorError> {
+        Ok(None)
     }
 
     /// Custom argument rendering provided by the execution service.
@@ -50,14 +61,6 @@ pub(crate) trait Executor: Send + Sync {
     /// arguments, either because nothing asked it to or because its formatter
     /// waits for admission.
     fn formatted_arguments(&self) -> Option<&Formatted> {
-        None
-    }
-
-    /// Custom argument rendering the execution service produced once the call
-    /// had run, for a formatter that needed the call's answers first.
-    ///
-    /// Returned once; later calls return `None`.
-    fn take_deferred_arguments(&self) -> Option<Formatted> {
         None
     }
 
@@ -148,6 +151,18 @@ pub(crate) trait Executor: Send + Sync {
         cancellation_token: CancellationToken,
         stderr: Option<StderrSink>,
     ) -> ExecutorResult;
+}
+
+/// Answers the questions a call's argument formatter asks before the call is
+/// released.
+///
+/// The tool runs with the same answers, so the call the formatter describes is
+/// the call that executes.
+#[async_trait]
+pub(crate) trait FormatterQuestions: Send {
+    /// Answer `question`, or settle the call with the response to record in
+    /// place of running it.
+    async fn answer(&mut self, question: Question) -> Result<Value, ToolCallResponse>;
 }
 
 /// Creates Host-facing tool calls and acknowledges their recorded responses.

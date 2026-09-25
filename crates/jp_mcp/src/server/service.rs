@@ -19,7 +19,7 @@ use jp_config::conversation::tool::{
     style::ParametersStyle,
 };
 use jp_tool::{
-    AccessPolicy, Action, ContentBlock, Error as ToolError, InputRequest, QuestionId,
+    AccessPolicy, Action, ContentBlock, Error as ToolError, InputRequest, Question, QuestionId,
     ToolDefinition, ToolResult,
     definition::{apply_parameter_defaults, validate_tool_arguments},
     schema::Node,
@@ -126,13 +126,6 @@ pub enum FormatterError {
     /// The command could not execute.
     #[error("{0}")]
     Execution(#[source] Arc<ToolError>),
-    /// The formatter needs answers the call has not collected yet.
-    ///
-    /// The call still runs, and the formatter runs again once it has, with the
-    /// answers the call collected; that output arrives as
-    /// [`Interaction::DeferredArguments`].
-    #[error("Custom arguments formatter requested input.")]
-    InputRequired,
     /// The formatter ran and reported a tool error.
     #[error("{message}")]
     Reported {
@@ -210,18 +203,16 @@ pub enum Interaction {
         /// Permission to execute, or a final response without execution.
         reply: oneshot::Sender<HostReply<ReleaseDecision>>,
     },
-    /// Custom representation of the arguments, for a call whose formatter
-    /// needed the call's answers before it could describe it.
+    /// Obtain and record input before the tool or its argument formatter runs
+    /// again.
     ///
-    /// Sent once the call has run successfully, before its result is reviewed
-    /// or recorded.
-    DeferredArguments {
-        /// The formatter's output, given the answers the call collected.
-        formatted_arguments: Formatted,
-        /// Acknowledges that the Host has the representation.
-        reply: oneshot::Sender<HostReply<()>>,
-    },
-    /// Obtain and record input before the next execution attempt.
+    /// A formatter's question arrives before the call's [`Prepare`], or, for a
+    /// formatter held back until admission, before its [`Release`].
+    /// Every answer given is also given to the tool when it runs, so the call
+    /// that executes is the one the formatter described.
+    ///
+    /// [`Prepare`]: Self::Prepare
+    /// [`Release`]: Self::Release
     Input {
         /// The expected answer shape and secrecy constraints.
         request: InputRequest,
@@ -280,7 +271,7 @@ impl Interaction {
             Self::Release { reply, .. } => reply.is_closed(),
             Self::Input { reply, .. } => reply.is_closed(),
             Self::Review { reply, .. } => reply.is_closed(),
-            Self::DeferredArguments { reply, .. } | Self::Record { reply, .. } => reply.is_closed(),
+            Self::Record { reply, .. } => reply.is_closed(),
         }
     }
 }
@@ -761,6 +752,10 @@ fn validate_value(path: &str, value: &Value, node: &Node<'_>) -> Result<(), Serv
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "The call's barriers read top to bottom in the order the Host meets them"
+)]
 async fn run_call(
     inner: &Inner,
     call: &CallInfo,
@@ -787,20 +782,30 @@ async fn run_call(
         }
         _ => None,
     };
+    // What the formatter's questions were answered with. The tool runs with the
+    // same answers, so the call that executes is the one that was described.
+    let mut answers = Answers::new();
     // `format = "ask"` holds a user-configured command back until the Host has
     // admitted the call.
     let mut formatted_arguments = match &formatter {
-        Some(command) if tool.config.format() == FormatMode::Unattended => Some(
-            format_arguments(
+        Some(command) if tool.config.format() == FormatMode::Unattended => {
+            match format_with_answers(
                 inner,
+                call,
                 &tool,
                 command,
                 &arguments,
-                &Answers::new(),
+                &mut answers,
                 cancellation,
             )
-            .await?,
-        ),
+            .await?
+            {
+                Formatting::Described(formatted) => Some(formatted),
+                Formatting::Settled(result) => {
+                    return record_without_executing(inner, call, arguments, result).await;
+                }
+            }
+        }
         _ => None,
     };
     let original_arguments = arguments.clone();
@@ -835,24 +840,26 @@ async fn run_call(
     if let Some(command) = &formatter
         && (formatted_arguments.is_none() || arguments != original_arguments)
     {
-        formatted_arguments = Some(
-            format_arguments(
-                inner,
-                &tool,
-                command,
-                &arguments,
-                &Answers::new(),
-                cancellation,
-            )
-            .await?,
-        );
-    }
-    let deferred = formatter.as_ref().filter(|_| {
-        matches!(
-            formatted_arguments,
-            Some(Err(FormatterError::InputRequired))
+        // Answers given about the original arguments may not hold for the
+        // edited ones, so the formatter asks again.
+        answers.clear();
+        formatted_arguments = match format_with_answers(
+            inner,
+            call,
+            &tool,
+            command,
+            &arguments,
+            &mut answers,
+            cancellation,
         )
-    });
+        .await?
+        {
+            Formatting::Described(formatted) => Some(formatted),
+            Formatting::Settled(result) => {
+                return record_without_executing(inner, call, arguments, result).await;
+            }
+        };
+    }
     let release = ask(inner, call, |reply| Interaction::Release {
         arguments: arguments.clone(),
         formatted_arguments,
@@ -861,7 +868,7 @@ async fn run_call(
     .await?;
     let (output, executed) = match release {
         ReleaseDecision::Execute => (
-            execute_released(inner, call, &tool, &arguments, deferred, cancellation).await?,
+            execute_with_answers(inner, call, &tool, &arguments, answers, cancellation).await?,
             true,
         ),
         ReleaseDecision::Complete { result } => (
@@ -873,43 +880,6 @@ async fn run_call(
         ),
     };
     deliver_result(inner, call, &tool, arguments, output, executed).await
-}
-
-/// Run a released call to completion.
-///
-/// `deferred` is the formatter that declined to describe the call before it
-/// ran, because it needed the call's answers.
-/// Once the call has run, it formats the call with those answers, and the Host
-/// receives that before the result.
-/// Nothing is sent for a call the Host settled or that ended in an error, which
-/// is not the call the formatter was waiting to describe, nor for a call that
-/// collected no answers, where the formatter would see exactly what it declined
-/// to describe the first time.
-async fn execute_released(
-    inner: &Inner,
-    call: &CallInfo,
-    tool: &ConfiguredTool,
-    arguments: &Map<String, Value>,
-    deferred: Option<&CommandConfig>,
-    cancellation: &CancellationToken,
-) -> Result<CallOutput, ServiceError> {
-    let mut answers = Answers::new();
-    let output =
-        execute_with_answers(inner, call, tool, arguments, &mut answers, cancellation).await?;
-    let Some(command) = deferred else {
-        return Ok(output);
-    };
-    if output.delivery_decided || output.result.is_error() || answers.is_empty() {
-        return Ok(output);
-    }
-    let formatted_arguments =
-        format_arguments(inner, tool, command, arguments, &answers, cancellation).await?;
-    ask(inner, call, |reply| Interaction::DeferredArguments {
-        formatted_arguments,
-        reply,
-    })
-    .await?;
-    Ok(output)
 }
 
 /// Record a call the Host resolved before it could execute.
@@ -983,14 +953,14 @@ async fn deliver_result(
 
 /// Run the tool until it completes, asking the Host for each answer it needs.
 ///
-/// `answers` collects every answer given, and is left holding them when the
-/// call ends.
+/// `answers` are the ones already given, which the tool sees from its first
+/// attempt.
 async fn execute_with_answers(
     inner: &Inner,
     call: &CallInfo,
     tool: &ConfiguredTool,
     arguments: &Map<String, Value>,
-    answers: &mut Answers,
+    mut answers: Answers,
     cancellation: &CancellationToken,
 ) -> Result<CallOutput, ServiceError> {
     let access = match &tool.access {
@@ -1026,7 +996,7 @@ async fn execute_with_answers(
         stderr: Some(stderr),
     };
     loop {
-        match execute(&execution, answers).await? {
+        match execute(&execution, &answers).await? {
             ExecutionOutcome::Cancelled { .. } => return Err(ServiceError::Cancelled),
             ExecutionOutcome::Completed { result, .. } => {
                 return Ok(CallOutput {
@@ -1034,40 +1004,107 @@ async fn execute_with_answers(
                     delivery_decided: false,
                 });
             }
-            ExecutionOutcome::NeedsInput { mut question, .. } => {
-                let supporting = question
-                    .pre_amble
-                    .take()
-                    .into_iter()
-                    .map(ContentBlock::text)
-                    .collect();
-                let request = InputRequest::from(question);
-                let answer = ask(inner, call, |reply| Interaction::Input {
-                    request: request.clone(),
-                    supporting,
-                    answers: answers.clone(),
-                    reply,
-                })
-                .await?;
-                let answer = match answer {
-                    InputAnswer::Answer(answer) => answer,
-                    InputAnswer::Complete { result } => {
-                        return Ok(CallOutput {
-                            result,
-                            delivery_decided: true,
-                        });
-                    }
-                };
-                if !Node::root(&Value::Object(request.schema())).permits(&answer) {
-                    return Err(ServiceError::InvalidAnswer(request.id.clone()));
+            ExecutionOutcome::NeedsInput { question, .. } => {
+                if let Asked::Settled(result) =
+                    ask_for_input(inner, call, question, &mut answers).await?
+                {
+                    return Ok(CallOutput {
+                        result,
+                        delivery_decided: true,
+                    });
                 }
-                answers.insert(request.id.to_string(), answer);
             }
         }
     }
 }
 
-/// Run a tool's configured argument formatter and return what it printed.
+/// How asking the Host for one answer ended.
+enum Asked {
+    /// The answer was validated and added to the call's answers.
+    Answered,
+    /// The Host resolved the call with this result instead of answering.
+    Settled(ToolResult),
+}
+
+/// Ask the Host to answer `question`, and add the answer to `answers`.
+///
+/// An answer outside the question's answer shape fails the call.
+async fn ask_for_input(
+    inner: &Inner,
+    call: &CallInfo,
+    mut question: Question,
+    answers: &mut Answers,
+) -> Result<Asked, ServiceError> {
+    let supporting = question
+        .pre_amble
+        .take()
+        .into_iter()
+        .map(ContentBlock::text)
+        .collect();
+    let request = InputRequest::from(question);
+    let answer = ask(inner, call, |reply| Interaction::Input {
+        request: request.clone(),
+        supporting,
+        answers: answers.clone(),
+        reply,
+    })
+    .await?;
+    let answer = match answer {
+        InputAnswer::Answer(answer) => answer,
+        InputAnswer::Complete { result } => return Ok(Asked::Settled(result)),
+    };
+    if !Node::root(&Value::Object(request.schema())).permits(&answer) {
+        return Err(ServiceError::InvalidAnswer(request.id.clone()));
+    }
+    answers.insert(request.id.to_string(), answer);
+    Ok(Asked::Answered)
+}
+
+/// What a call's argument formatter settled on once its questions were asked.
+enum Formatting {
+    /// The formatter's description of the call, or why it gave none.
+    Described(Formatted),
+    /// The Host resolved the call with this result instead of answering one of
+    /// the formatter's questions.
+    Settled(ToolResult),
+}
+
+/// Run a tool's argument formatter until it describes the call, asking the Host
+/// for each answer it needs first.
+///
+/// `answers` collects every answer given; the formatter sees them on each run.
+async fn format_with_answers(
+    inner: &Inner,
+    call: &CallInfo,
+    tool: &ConfiguredTool,
+    command: &CommandConfig,
+    arguments: &Map<String, Value>,
+    answers: &mut Answers,
+    cancellation: &CancellationToken,
+) -> Result<Formatting, ServiceError> {
+    loop {
+        match format_arguments(inner, tool, command, arguments, answers, cancellation).await? {
+            FormatterRun::Described(formatted) => return Ok(Formatting::Described(formatted)),
+            FormatterRun::NeedsInput(question) => {
+                if let Asked::Settled(result) =
+                    ask_for_input(inner, call, question, answers).await?
+                {
+                    return Ok(Formatting::Settled(result));
+                }
+            }
+        }
+    }
+}
+
+/// What one run of an argument formatter produced.
+enum FormatterRun {
+    /// The formatter's output, or why it produced none.
+    Described(Formatted),
+    /// The formatter needs this answered before it can describe the call.
+    NeedsInput(Question),
+}
+
+/// Run a tool's configured argument formatter once and return what it printed.
 ///
 /// The formatter sees `answers` as the answers to the tool's questions so far.
 /// A formatter that fails is presentation that failed, not a failed call, so it
@@ -1080,7 +1117,7 @@ async fn format_arguments(
     arguments: &Map<String, Value>,
     answers: &Answers,
     cancellation: &CancellationToken,
-) -> Result<Formatted, ServiceError> {
+) -> Result<FormatterRun, ServiceError> {
     let name = match tool.config.source() {
         ToolSource::Local { tool: name }
         | ToolSource::Builtin { tool: name }
@@ -1106,25 +1143,30 @@ async fn format_arguments(
     .await
     {
         Ok(result) => result,
-        Err(error) => return Ok(Err(FormatterError::Execution(Arc::new(error)))),
+        Err(error) => {
+            return Ok(FormatterRun::Described(Err(FormatterError::Execution(
+                Arc::new(error),
+            ))));
+        }
     };
-    match result {
-        CommandResult::NeedsInput(_) => Ok(Err(FormatterError::InputRequired)),
-        CommandResult::Cancelled => Err(ServiceError::Cancelled),
-        CommandResult::Success(text) => Ok(Ok(text.trim().into())),
-        CommandResult::TransientError { message, trace } => Ok(Err(FormatterError::Reported {
+    let formatted = match result {
+        CommandResult::NeedsInput(question) => return Ok(FormatterRun::NeedsInput(question)),
+        CommandResult::Cancelled => return Err(ServiceError::Cancelled),
+        CommandResult::Success(text) => Ok(text.trim().into()),
+        CommandResult::TransientError { message, trace } => Err(FormatterError::Reported {
             message: CommandResult::format_error(&message, &trace),
-        })),
+        }),
         other => {
             let result = other.into_tool_result(name);
             let message = result.to_text();
             if result.is_error() {
-                Ok(Err(FormatterError::Reported { message }))
+                Err(FormatterError::Reported { message })
             } else {
-                Ok(Ok(message.trim().into()))
+                Ok(message.trim().into())
             }
         }
-    }
+    };
+    Ok(FormatterRun::Described(formatted))
 }
 
 #[cfg(test)]

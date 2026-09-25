@@ -82,6 +82,7 @@ use std::{
     sync::Arc,
 };
 
+use async_trait::async_trait;
 use indexmap::IndexMap;
 use inquire::error::InquireError;
 use jp_config::{
@@ -90,14 +91,17 @@ use jp_config::{
     },
     interrupt::ToolInterruptConfig,
 };
-use jp_conversation::event::{
-    CancellationReason, InquiryAnswerType, InquiryId, InquiryQuestion, InquiryRequest,
-    InquiryResponse, InquirySource, SelectOption, ToolCallRequest, ToolCallResponse,
+use jp_conversation::{
+    ConversationStream,
+    event::{
+        CancellationReason, InquiryAnswerType, InquiryId, InquiryQuestion, InquiryRequest,
+        InquiryResponse, InquirySource, SelectOption, ToolCallRequest, ToolCallResponse,
+    },
 };
 use jp_llm::query::ToolExecution;
-use jp_mcp::server::{StderrSink, service::FormatterError};
+use jp_mcp::server::StderrSink;
 use jp_printer::Printer;
-use jp_tool::{AnswerType, Question};
+use jp_tool::{AnswerType, PersistLevel, Question};
 use jp_workspace::ConversationMut;
 use serde_json::{Map, Value};
 use tokio::sync::mpsc;
@@ -107,7 +111,10 @@ use url::Url;
 
 use super::{
     ToolRenderer,
-    executor::{Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo, Review},
+    executor::{
+        Executor, ExecutorError, ExecutorResult, ExecutorSource, FormatterQuestions,
+        PermissionInfo, Review,
+    },
     inquiry::{self, InquiryBackend, InquiryError},
     prompter::{PermissionResult, ToolPrompter},
 };
@@ -413,6 +420,141 @@ struct ToolQuestion {
     source: InquirySource,
 }
 
+/// Answers the questions one call's argument formatter asks while the call is
+/// prepared or approved.
+///
+/// A question is routed the way one asked while the tool runs is: an answer
+/// remembered for the turn or configured for the tool first, then the user or
+/// the assistant, as the question's target says.
+/// Each round-trip is recorded on the conversation as an inquiry.
+struct FormatterAnswers<'a> {
+    /// Holds the tool configuration questions are routed by.
+    coordinator: &'a ToolCoordinator,
+
+    /// Answers remembered for the turn, and the per-question attempt counter.
+    turn_state: &'a mut TurnState,
+
+    /// Asks the user.
+    prompter: &'a ToolPrompter,
+
+    /// The conversation each inquiry is recorded on.
+    conv: &'a ConversationMut,
+
+    /// Asks the assistant.
+    inquiry_backend: &'a dyn InquiryBackend,
+
+    /// Whether a user is there to answer a prompt.
+    interactive: bool,
+
+    /// The call the formatter describes.
+    tool_id: &'a str,
+
+    /// The name the call's tool configuration is keyed on.
+    tool_name: &'a str,
+}
+
+#[async_trait]
+impl FormatterQuestions for FormatterAnswers<'_> {
+    async fn answer(&mut self, question: Question) -> Result<Value, ToolCallResponse> {
+        let conv = self.conv;
+        let inquiry_id = ToolCoordinator::open_inquiry(
+            conv,
+            self.turn_state,
+            self.tool_id,
+            InquirySource::tool(self.tool_name),
+            &question,
+        );
+        if let Some(answer) = self.coordinator.preset_answer(
+            conv,
+            self.turn_state,
+            self.tool_name,
+            &inquiry_id,
+            &question,
+        ) {
+            return Ok(answer);
+        }
+
+        let target = self
+            .coordinator
+            .question_target(self.tool_name, question.id.as_str())
+            .unwrap_or(QuestionTarget::User);
+        let is_secret = question.answer_type == AnswerType::Secret;
+        let tool_id = self.tool_id;
+        let settled = |result| ToolCallResponse {
+            id: tool_id.to_owned(),
+            result,
+        };
+
+        if self.interactive && target.is_user() {
+            return match self.prompter.prompt_question(&question) {
+                Ok(prompted) => {
+                    // A secret answer is persisted as `Redacted`, and never
+                    // enters the turn-answer cache.
+                    if is_secret {
+                        ToolCoordinator::record_inquiry_redacted(conv, &inquiry_id);
+                    } else {
+                        ToolCoordinator::record_inquiry_answer(conv, &inquiry_id, &prompted.answer);
+                        if prompted.persist_level == PersistLevel::Turn {
+                            self.turn_state.remembered_tool_answers.insert(
+                                ToolAnswerCacheKey::new(self.tool_name, question.id.as_str()),
+                                prompted.answer.clone(),
+                            );
+                        }
+                    }
+                    Ok(prompted.answer)
+                }
+                Err(error) => {
+                    let reason = ToolCoordinator::prompt_cancellation_reason(&error);
+                    if reason == CancellationReason::BackendError {
+                        warn!(%error, "Formatter question prompt failed.");
+                    }
+                    let result = ToolCoordinator::cancelled_input_result(&reason);
+                    ToolCoordinator::record_inquiry_cancelled(conv, &inquiry_id, reason);
+                    Err(settled(result))
+                }
+            };
+        }
+
+        if is_secret {
+            let (reason, message) =
+                ToolCoordinator::secret_refusal(self.tool_name, target.is_user());
+            ToolCoordinator::record_inquiry_cancelled(conv, &inquiry_id, reason);
+            return Err(settled(Err(message)));
+        }
+
+        let events = ToolCoordinator::paused_events(conv, self.tool_id, &question);
+        let cancellation = self.coordinator.cancellation_token.child_token();
+        match self
+            .inquiry_backend
+            .inquire(
+                events,
+                inquiry_id.as_str(),
+                self.tool_name,
+                &question,
+                cancellation,
+            )
+            .await
+        {
+            Ok(answer) => {
+                ToolCoordinator::record_inquiry_answer(conv, &inquiry_id, &answer);
+                Ok(answer)
+            }
+            Err(error) => {
+                ToolCoordinator::record_inquiry_cancelled(
+                    conv,
+                    &inquiry_id,
+                    ToolCoordinator::cancellation_reason(&error),
+                );
+                Err(settled(Err(ToolCoordinator::inquiry_failure(
+                    self.tool_name,
+                    &question.text,
+                    &error,
+                ))))
+            }
+        }
+    }
+}
+
 /// What rendering a tool call before its approval prompt produced.
 #[derive(Debug)]
 enum PreRender {
@@ -516,8 +658,7 @@ pub struct ToolCoordinator {
     interrupt_config: ToolInterruptConfig,
     executor_source: Box<dyn ExecutorSource>,
     cancellation_token: CancellationToken,
-    /// Rendered custom argument output accumulated during the permission phase,
-    /// and for a call whose formatter waited for its answers, once it has run.
+    /// Rendered custom argument output accumulated during the permission phase.
     /// Keyed by tool call ID.
     /// Drained by the turn loop to write into event metadata.
     rendered_arguments: HashMap<String, String>,
@@ -605,8 +746,6 @@ impl ToolCoordinator {
     /// produced.
     /// A formatter configured with `format = "ask"` has not run yet at this
     /// point, which is [`PreRender::Deferred`].
-    /// A formatter that needs the call's answers prints nothing here; its
-    /// output is shown once the call has run.
     ///
     /// Returns `Err` if a formatter failed.
     /// The caller should treat that as a tool failure and skip prompting.
@@ -648,6 +787,10 @@ impl ToolCoordinator {
     ///
     /// # Pipeline steps
     ///
+    /// 0. Prepare the call.
+    ///    A custom formatter's questions are answered here, through
+    ///    [`FormatterAnswers`], so the call is approved as the formatter
+    ///    describes it with those answers; the tool runs with the same answers.
     /// 1. [`Self::decide_permission`] resolves the executor's run mode against
     ///    persisted answers and whether a user is available to answer.
     /// 2. If the decision is `NeedsPrompt`, pre-render the call via
@@ -659,7 +802,9 @@ impl ToolCoordinator {
     ///    discarded so step 3 re-renders with the args that will actually
     ///    execute.
     /// 3. For approved tools, render the call (skipping if pre-rendered).
+    ///    A formatter held back until approval asks its questions before this.
     /// 4. Return [`ToolCallDecision::Approved`], `Skipped`, or `Failed`.
+    #[expect(clippy::too_many_lines)]
     pub(crate) async fn resolve_tool_call_decision(
         &mut self,
         mut executor: Box<dyn Executor>,
@@ -668,6 +813,8 @@ impl ToolCoordinator {
         turn_state: &mut TurnState,
         tool_renderer: &ToolRenderer,
         printer: &Printer,
+        conv: &ConversationMut,
+        inquiry_backend: &dyn InquiryBackend,
     ) -> ToolCallDecision {
         // A tool call reached from a reasoning block sits inside that block's
         // shading, and a prompt is a visual row like any other (RFD 095). The
@@ -685,7 +832,21 @@ impl ToolCoordinator {
                 .get(&PermissionCacheKey::new(executor.tool_name()))
                 == Some(&false);
         let render_arguments = !self.is_hidden(executor.tool_name()) && !remembered_denial;
-        match executor.prepare(render_arguments).await {
+        let tool_id = executor.tool_id().to_owned();
+        let tool_name = executor.tool_name().to_owned();
+        let prepared = executor
+            .prepare(render_arguments, &mut FormatterAnswers {
+                coordinator: self,
+                turn_state,
+                prompter,
+                conv,
+                inquiry_backend,
+                interactive,
+                tool_id: &tool_id,
+                tool_name: &tool_name,
+            })
+            .await;
+        match prepared {
             Ok(Some(response)) => {
                 self.set_tool_state(&response.id, ToolCallState::Completed);
                 return ToolCallDecision::Skipped(response);
@@ -753,12 +914,31 @@ impl ToolCoordinator {
             }
         };
 
-        if let Err(error) = executor.approve().await {
-            self.set_tool_state(executor.tool_id(), ToolCallState::Completed);
-            return ToolCallDecision::Failed(ToolCallResponse {
-                id: executor.tool_id().into(),
-                result: Err(error.to_string()),
-            });
+        let approved = executor
+            .approve(&mut FormatterAnswers {
+                coordinator: self,
+                turn_state,
+                prompter,
+                conv,
+                inquiry_backend,
+                interactive,
+                tool_id: &tool_id,
+                tool_name: &tool_name,
+            })
+            .await;
+        match approved {
+            Ok(None) => {}
+            Ok(Some(response)) => {
+                self.set_tool_state(&response.id, ToolCallState::Completed);
+                return ToolCallDecision::Skipped(response);
+            }
+            Err(error) => {
+                self.set_tool_state(executor.tool_id(), ToolCallState::Completed);
+                return ToolCallDecision::Failed(ToolCallResponse {
+                    id: executor.tool_id().into(),
+                    result: Err(error.to_string()),
+                });
+            }
         }
 
         // Step 3: render. If pre-rendered, use that; otherwise render now.
@@ -807,38 +987,7 @@ impl ToolCoordinator {
             // call to announce: a bare header would say otherwise.
             return RenderOutcome::Rendered { content: None };
         };
-        // The formatter needs answers the call has not collected. The call
-        // still runs, and the service formats it again once it has; see
-        // `render_deferred_arguments`.
-        if matches!(formatted, Err(FormatterError::InputRequired)) {
-            return RenderOutcome::Rendered { content: None };
-        }
         renderer.render_custom_result(name, formatted.clone().map_err(|error| error.to_string()))
-    }
-
-    /// Show the arguments of a call whose formatter waited for its answers.
-    ///
-    /// Runs when the call's result arrives, so the call is shown ahead of it.
-    /// The call has already run, so a formatter that fails here only leaves the
-    /// call undescribed.
-    fn render_deferred_arguments(&mut self, tool: &ExecutingTool, renderer: &ToolRenderer) {
-        let Some(formatted) = tool.executor.take_deferred_arguments() else {
-            return;
-        };
-        if self.is_hidden(&tool.tool_name) {
-            return;
-        }
-        let outcome = renderer.render_custom_result(
-            &tool.tool_name,
-            formatted.map_err(|error| error.to_string()),
-        );
-        if let RenderOutcome::Rendered {
-            content: Some(content),
-        } = outcome
-        {
-            self.rendered_arguments
-                .insert(tool.tool_id.clone(), content);
-        }
     }
 
     /// Acknowledge the execution service after the conversation owner flushes.
@@ -1109,6 +1258,8 @@ impl ToolCoordinator {
         turn_state: &mut TurnState,
         tool_renderer: &ToolRenderer,
         printer: &Printer,
+        conv: &ConversationMut,
+        inquiry_backend: &dyn InquiryBackend,
     ) -> (
         Vec<(usize, Box<dyn Executor>)>,
         Vec<(usize, ToolCallResponse)>,
@@ -1129,6 +1280,8 @@ impl ToolCoordinator {
                     turn_state,
                     tool_renderer,
                     printer,
+                    conv,
+                    inquiry_backend,
                 )
                 .await;
 
@@ -1366,13 +1519,10 @@ impl ToolCoordinator {
 
                                 state.reviews[index] = Some(Review::replaced(ToolCallResponse {
                                     id: tool.tool_id.clone(),
-                                    result: Err(format!(
-                                        "The tool '{}' asked a follow-up question (\"{}\") that \
-                                         was routed to a secondary assistant for resolution, but \
-                                         the secondary assistant failed to provide a valid \
-                                         answer. Error: {}. You may retry the tool call or end \
-                                         the turn.",
-                                        tool.tool_name, question_text, error,
+                                    result: Err(Self::inquiry_failure(
+                                        &tool.tool_name,
+                                        &question_text,
+                                        &error,
                                     )),
                                 }));
                             }
@@ -1631,7 +1781,7 @@ impl ToolCoordinator {
     fn spawn_inquiry(
         index: usize,
         inquiry_id: InquiryId,
-        id: String,
+        id: &str,
         tool_name: String,
         question: Question,
         services: &PhaseServices<'_>,
@@ -1639,20 +1789,7 @@ impl ToolCoordinator {
         let backend = Arc::clone(&services.inquiry_backend);
         let cancellation_token = services.cancellation_token.child_token();
         let event_tx = services.event_tx.clone();
-        let mut events = services.conv.events().clone();
-
-        // Insert a ToolCallResponse into the cloned stream so the LLM sees the
-        // tool as "paused". The ID must match the original ToolCallRequest.id
-        // so providers can resolve the tool name when converting events to
-        // their wire format.
-        events
-            .current_turn_mut()
-            .add_tool_call_response(ToolCallResponse {
-                id,
-                result: Ok(format!("Tool paused: {}", question.text)),
-            })
-            .build()
-            .expect("Invalid ConversationStream state");
+        let events = Self::paused_events(services.conv, id, &question);
 
         tokio::spawn(async move {
             let result = backend
@@ -1675,6 +1812,41 @@ impl ToolCoordinator {
                 })
                 .await;
         });
+    }
+
+    /// A copy of the conversation in which call `tool_id` is paused on
+    /// `question`, for the assistant to answer the question from.
+    fn paused_events(
+        conv: &ConversationMut,
+        tool_id: &str,
+        question: &Question,
+    ) -> ConversationStream {
+        let mut events = conv.events().clone();
+
+        // Insert a ToolCallResponse into the cloned stream so the LLM sees the
+        // tool as "paused". The ID must match the original ToolCallRequest.id
+        // so providers can resolve the tool name when converting events to
+        // their wire format.
+        events
+            .current_turn_mut()
+            .add_tool_call_response(ToolCallResponse {
+                id: tool_id.to_owned(),
+                result: Ok(format!("Tool paused: {}", question.text)),
+            })
+            .build()
+            .expect("Invalid ConversationStream state");
+        events
+    }
+
+    /// The response a call ends with when the assistant could not answer its
+    /// tool's question.
+    fn inquiry_failure(tool_name: &str, question_text: &str, error: &InquiryError) -> String {
+        format!(
+            "The tool '{tool_name}' asked a follow-up question (\"{question_text}\") that was \
+             routed to a secondary assistant for resolution, but the secondary assistant failed \
+             to provide a valid answer. Error: {error}. You may retry the tool call or end the \
+             turn.",
+        )
     }
 
     /// Show a finished call's result, unless the tool renders no chrome.
@@ -1775,7 +1947,6 @@ impl ToolCoordinator {
         let tracked_review = &mut reviews[index];
         match result {
             ExecutorResult::Completed(response) => {
-                self.render_deferred_arguments(tool, tool_renderer);
                 match self.result_mode(&tool.tool_name) {
                     ResultMode::Unattended => {
                         self.finish_tool_call(tool, response, tracked_review, tool_renderer);
@@ -1859,7 +2030,6 @@ impl ToolCoordinator {
     /// A question answered from the turn cache or from configuration resumes
     /// the tool here; anything else hands off to a prompt or to the assistant
     /// and resumes on a later event.
-    #[expect(clippy::too_many_lines)]
     fn route_tool_question(
         &mut self,
         question: ToolQuestion,
@@ -1878,55 +2048,17 @@ impl ToolCoordinator {
             question,
             source,
         } = question;
-        // Allocate the inquiry ID, incrementing the per-turn attempt counter.
-        let attempt = turn_state.next_inquiry_attempt(&tool_id, question.id.as_str());
-        let inquiry_id = InquiryId::new(inquiry::tool_call_inquiry_id(
-            &tool_id,
-            question.id.as_str(),
-            attempt,
-        ));
-        let inquiry_question = tool_question_to_inquiry_question(&question);
-        conv.update_events(|events| {
-            events
-                .current_turn_mut()
-                .add_inquiry_request(InquiryRequest::new(
-                    inquiry_id.clone(),
-                    source,
-                    inquiry_question,
-                ))
-                .build()
-                .expect("Invalid ConversationStream state");
-        });
-
-        let is_secret = question.answer_type == AnswerType::Secret;
-
-        // Secrets never enter or read the turn-answer cache.
-        if !is_secret {
-            let answer_key = ToolAnswerCacheKey::new(&tool_name, question.id.as_str());
-            let persisted_answer = turn_state.remembered_tool_answers.get(&answer_key).cloned();
-            if let Some(answer) = persisted_answer {
-                Self::record_inquiry_answer(conv, &inquiry_id, &answer);
-                tool.accumulated_answers
-                    .insert(question.id.to_string(), answer);
-                Self::spawn_tool_execution(index, tool, services);
-                return;
-            }
-        }
-
-        if let Some(answer) = self.static_answer(&tool_name, question.id.as_str()) {
-            // The tool still receives the configured value in-memory;
-            // only the persisted record is redacted for secrets.
-            if is_secret {
-                Self::record_inquiry_redacted(conv, &inquiry_id);
-            } else {
-                Self::record_inquiry_answer(conv, &inquiry_id, &answer);
-            }
+        let inquiry_id = Self::open_inquiry(conv, turn_state, &tool_id, source, &question);
+        if let Some(answer) =
+            self.preset_answer(conv, turn_state, &tool_name, &inquiry_id, &question)
+        {
             tool.accumulated_answers
                 .insert(question.id.to_string(), answer);
             Self::spawn_tool_execution(index, tool, services);
             return;
         }
 
+        let is_secret = question.answer_type == AnswerType::Secret;
         let target = self
             .question_target(&tool_name, question.id.as_str())
             .unwrap_or(QuestionTarget::User);
@@ -1955,26 +2087,7 @@ impl ToolCoordinator {
                 Self::spawn_user_prompt(index, question, inquiry_id, services);
             }
         } else if is_secret {
-            // A secret requires a human at an interactive prompt; it must never
-            // route to the inquiry backend. Fail the tool and close the
-            // recorded inquiry with the guard's reason.
-            let (reason, message) = if target.is_user() {
-                (
-                    CancellationReason::NoPromptBackend,
-                    format!(
-                        "The tool '{tool_name}' asked for a secret value, which requires an \
-                         interactive prompt, but no interactive terminal is available."
-                    ),
-                )
-            } else {
-                (
-                    CancellationReason::AssistantRoutingDenied,
-                    format!(
-                        "The tool '{tool_name}' asked for a secret value, which must be entered \
-                         by a human and cannot be routed to the assistant."
-                    ),
-                )
-            };
+            let (reason, message) = Self::secret_refusal(&tool_name, target.is_user());
             Self::record_inquiry_cancelled(conv, &inquiry_id, reason);
             self.set_tool_state(&tool_id, ToolCallState::Completed);
             *tracked_review = Some(Review::replaced(ToolCallResponse {
@@ -1984,15 +2097,112 @@ impl ToolCoordinator {
         } else {
             // The `InquiryRequest` is already recorded above; spawn the
             // async inquiry on a cloned snapshot.
-            Self::spawn_inquiry(
-                index,
-                inquiry_id,
-                tool_id.clone(),
-                tool_name,
-                question,
-                services,
-            );
+            Self::spawn_inquiry(index, inquiry_id, &tool_id, tool_name, question, services);
             self.set_tool_state(&tool_id, ToolCallState::AwaitingInput);
+        }
+    }
+
+    /// Record a tool's question on the current turn, and return the inquiry id
+    /// its answer is recorded under.
+    ///
+    /// Recorded before any routing decision, so every question round-trip lands
+    /// on the stream however it is answered.
+    fn open_inquiry(
+        conv: &ConversationMut,
+        turn_state: &mut TurnState,
+        tool_id: &str,
+        source: InquirySource,
+        question: &Question,
+    ) -> InquiryId {
+        let attempt = turn_state.next_inquiry_attempt(tool_id, question.id.as_str());
+        let inquiry_id = InquiryId::new(inquiry::tool_call_inquiry_id(
+            tool_id,
+            question.id.as_str(),
+            attempt,
+        ));
+        let inquiry_question = tool_question_to_inquiry_question(question);
+        conv.update_events(|events| {
+            events
+                .current_turn_mut()
+                .add_inquiry_request(InquiryRequest::new(
+                    inquiry_id.clone(),
+                    source,
+                    inquiry_question,
+                ))
+                .build()
+                .expect("Invalid ConversationStream state");
+        });
+        inquiry_id
+    }
+
+    /// The answer to a tool's question that needs nobody to give it: one
+    /// remembered for the turn, or one configured for the tool.
+    ///
+    /// A found answer closes the inquiry `inquiry_id`.
+    fn preset_answer(
+        &self,
+        conv: &ConversationMut,
+        turn_state: &TurnState,
+        tool_name: &str,
+        inquiry_id: &InquiryId,
+        question: &Question,
+    ) -> Option<Value> {
+        let is_secret = question.answer_type == AnswerType::Secret;
+
+        // Secrets never enter or read the turn-answer cache.
+        if !is_secret {
+            let answer_key = ToolAnswerCacheKey::new(tool_name, question.id.as_str());
+            if let Some(answer) = turn_state.remembered_tool_answers.get(&answer_key) {
+                Self::record_inquiry_answer(conv, inquiry_id, answer);
+                return Some(answer.clone());
+            }
+        }
+
+        let answer = self.static_answer(tool_name, question.id.as_str())?;
+        // The tool still receives the configured value in-memory; only the
+        // persisted record is redacted for secrets.
+        if is_secret {
+            Self::record_inquiry_redacted(conv, inquiry_id);
+        } else {
+            Self::record_inquiry_answer(conv, inquiry_id, &answer);
+        }
+        Some(answer)
+    }
+
+    /// Why a secret question nobody can answer at a prompt fails its call, as
+    /// the recorded cancellation reason and the message the call ends with.
+    ///
+    /// A secret requires a human at an interactive prompt; it is never routed
+    /// to the assistant.
+    fn secret_refusal(tool_name: &str, target_is_user: bool) -> (CancellationReason, String) {
+        if target_is_user {
+            (
+                CancellationReason::NoPromptBackend,
+                format!(
+                    "The tool '{tool_name}' asked for a secret value, which requires an \
+                     interactive prompt, but no interactive terminal is available."
+                ),
+            )
+        } else {
+            (
+                CancellationReason::AssistantRoutingDenied,
+                format!(
+                    "The tool '{tool_name}' asked for a secret value, which must be entered by a \
+                     human and cannot be routed to the assistant."
+                ),
+            )
+        }
+    }
+
+    /// The response a call ends with when its question prompt closed without an
+    /// answer.
+    ///
+    /// A user cancellation (Esc / Ctrl-C / EOF at the prompt) completes the
+    /// tool benignly; a prompt failure is a tool-level error.
+    fn cancelled_input_result(reason: &CancellationReason) -> Result<String, String> {
+        match reason {
+            CancellationReason::User => Ok("Tool input cancelled by user.".to_owned()),
+            _ => Err("Tool input prompt failed.".to_owned()),
         }
     }
 
@@ -2043,12 +2253,7 @@ impl ToolCoordinator {
     ) {
         state.prompt_active = false;
 
-        // A user cancellation (Esc / Ctrl-C / EOF at the prompt) completes the
-        // tool benignly; a prompt failure is a tool-level error.
-        let result = match reason {
-            CancellationReason::User => Ok("Tool input cancelled by user.".to_owned()),
-            _ => Err("Tool input prompt failed.".to_owned()),
-        };
+        let result = Self::cancelled_input_result(&reason);
         Self::record_inquiry_cancelled(services.conv, inquiry_id, reason);
 
         if let Some(tool) = state.tools.get(&index) {

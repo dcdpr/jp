@@ -802,6 +802,8 @@ pub(super) async fn run_turn_loop(
                                                 &mut turn_state,
                                                 &tool_renderer,
                                                 &printer,
+                                                &conv,
+                                                inquiry_backend.as_ref(),
                                             )
                                             .await;
 
@@ -902,6 +904,8 @@ pub(super) async fn run_turn_loop(
                             &mut turn_state,
                             &tool_renderer,
                             &printer,
+                            &lock.as_mut(),
+                            inquiry_backend.as_ref(),
                         )
                         .await;
 

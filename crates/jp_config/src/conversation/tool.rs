@@ -1230,6 +1230,8 @@ pub enum FormatMode {
     ///
     /// Safe default: an untrusted tool's formatter cannot run before the user
     /// has explicitly approved running the tool.
+    /// A question the formatter asks is answered after approval, before the
+    /// tool runs.
     #[default]
     Ask,
 
@@ -1237,6 +1239,8 @@ pub enum FormatMode {
     ///
     /// Only set this for trusted, side-effect-free formatters.
     /// The user sees the rendered tool call before deciding whether to approve.
+    /// A question the formatter asks is answered before the prompt, and the
+    /// tool runs with the same answer.
     Unattended,
 }
 

@@ -1,15 +1,20 @@
 use async_trait::async_trait;
+use camino::Utf8PathBuf;
 #[cfg(unix)]
 use camino_tempfile::Utf8TempDir;
 #[cfg(unix)]
 use jp_config::AppConfig;
 use jp_config::conversation::tool::{ToolConfig, ToolSource, style::PartialDisplayStyleConfig};
+use jp_conversation::Conversation;
+#[cfg(unix)]
+use jp_conversation::event::ChatRequest;
 use jp_inquire::{ReplyEditMode, ReplyOutcome, prompt::MockPromptBackend};
 #[cfg(unix)]
 use jp_mcp::{Client, server::builtin::BuiltinExecutors};
 use jp_printer::{ErrChannel, OutputFormat, Printer};
 #[cfg(unix)]
-use jp_tool::{InvocationContext, ToolDefinition, ToolDocs};
+use jp_tool::{InvocationContext, Outcome, ToolDefinition, ToolDocs};
+use jp_workspace::{ConversationLock, Workspace};
 use schematic::Config as _;
 #[cfg(unix)]
 use serde_json::json;
@@ -20,12 +25,26 @@ use crate::{
     access::approvals::ApprovalStore, cmd::query::tool::mcp_executor::TerminalExecutorSource,
 };
 use crate::{
-    cmd::query::tool::executor::mock::{MockExecutor, TestExecutorSource},
+    cmd::query::tool::{
+        executor::mock::{MockExecutor, TestExecutorSource},
+        inquiry::MockInquiryBackend,
+    },
     render::tool::ToolRenderer,
 };
 
 fn empty_executor_source() -> Box<dyn ExecutorSource> {
     Box::new(TestExecutorSource::new())
+}
+
+/// A lock on an empty in-memory conversation, for a permission phase whose
+/// calls ask no questions and so record nothing on it.
+fn test_lock() -> (Workspace, ConversationLock) {
+    let config = Arc::new(jp_config::AppConfig::new_test());
+    let mut workspace = Workspace::in_memory(Utf8PathBuf::new());
+    let id = workspace.create_conversation(Conversation::default(), config);
+    let handle = workspace.acquire_conversation(&id).unwrap();
+    let lock = workspace.test_lock(handle);
+    (workspace, lock)
 }
 
 fn strip_ansi(text: &str) -> String {
@@ -491,6 +510,7 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
     let prompter = ToolPrompter::with_backends(printer.clone(), None, Arc::new(prompt_backend));
 
     let mut turn_state = TurnState::default();
+    let (_workspace, lock) = test_lock();
 
     let decision = coordinator
         .resolve_tool_call_decision(
@@ -500,6 +520,8 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
             &mut turn_state,
             &tool_renderer,
             &printer,
+            &lock.as_mut(),
+            &MockInquiryBackend::new(HashMap::new()),
         )
         .await;
 
@@ -884,8 +906,18 @@ async fn remembered_denial_does_not_run_http_argument_formatter() {
     state
         .remembered_permission_decisions
         .insert(PermissionCacheKey::new("example"), false);
+    let (_workspace, lock) = test_lock();
     let decision = coordinator
-        .resolve_tool_call_decision(executor, &prompter, true, &mut state, &renderer, &printer)
+        .resolve_tool_call_decision(
+            executor,
+            &prompter,
+            true,
+            &mut state,
+            &renderer,
+            &printer,
+            &lock.as_mut(),
+            &MockInquiryBackend::new(HashMap::new()),
+        )
         .await;
     let ToolCallDecision::Skipped(response) = decision else {
         panic!("expected remembered denial")
@@ -899,6 +931,166 @@ async fn remembered_denial_does_not_run_http_argument_formatter() {
         .await
         .unwrap();
     owner.shutdown().await.unwrap();
+}
+
+/// Decide one unattended call to `example`, whose formatter asks the tool's
+/// `confirm` question and describes the call with the answer.
+///
+/// The configuration routes the question to the assistant, which answers from
+/// `answers`, keyed by inquiry id.
+/// Returns the decision, and the inquiry responses the conversation recorded.
+#[cfg(unix)]
+async fn decide_with_assistant(
+    answers: HashMap<String, Value>,
+) -> (ToolCallDecision, Vec<InquiryResponse>) {
+    let root = Utf8TempDir::new().unwrap();
+    // Serialized rather than hand-written, so the formatter speaks the wire
+    // format a real tool emits.
+    let question = serde_json::to_string(&Outcome::NeedsInput {
+        question: Question::boolean("confirm", "Continue?").unwrap(),
+    })
+    .unwrap();
+    let script = [
+        "{% if tool.answers.confirm is defined %}printf 'confirm = {{tool.answers.confirm}}'{% \
+         else %}printf '%s' '",
+        &question,
+        "'{% endif %}",
+    ]
+    .concat();
+    let mut config = AppConfig::new_test();
+    let partial = serde_json::from_value(json!({
+        "source": "builtin", "run": "unattended", "format": "unattended",
+        "questions": {"confirm": {"target": "assistant"}},
+        "style": {"parameters": {"program": "sh", "args": ["-c", script], "shell": false}},
+    }))
+    .unwrap();
+    config.conversation.tools.insert(
+        "example".into(),
+        ToolConfig::from_partial(partial, vec![]).unwrap(),
+    );
+    let definitions = vec![ToolDefinition {
+        name: "example".into(),
+        docs: ToolDocs::default(),
+        parameters: json!({"type":"object","properties":{}}),
+    }];
+    let (source, owner) = TerminalExecutorSource::start(
+        BuiltinExecutors::new(),
+        &definitions,
+        &config.conversation.tools,
+        Arc::new(ApprovalStore::default()),
+        InvocationContext::default(),
+        &Client::default(),
+        root.path().to_owned(),
+    )
+    .await
+    .unwrap();
+    let mut coordinator = ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source));
+    let request = ToolCallRequest {
+        id: "call-1".into(),
+        name: "example".into(),
+        arguments: Map::new(),
+    };
+    let executor = coordinator.prepare_one(request.clone()).unwrap();
+
+    // The assistant is asked from the conversation as it stands, so the turn
+    // holding the call has to exist.
+    let (_workspace, lock) = test_lock();
+    let conv = lock.as_mut();
+    conv.update_events(|events| {
+        events.start_turn(ChatRequest::from("Run it."));
+        events
+            .current_turn_mut()
+            .add_tool_call_request(request)
+            .build()
+            .unwrap();
+    });
+
+    let printer = Arc::new(Printer::sink());
+    let prompter = ToolPrompter::with_prompt_backend(
+        printer.clone(),
+        None,
+        Arc::new(MockPromptBackend::new()),
+        ReplyEditMode::default(),
+    );
+    let renderer = ToolRenderer::new(ErrChannel::new(printer.clone()), config.style);
+    let decision = coordinator
+        .resolve_tool_call_decision(
+            executor,
+            &prompter,
+            true,
+            &mut TurnState::default(),
+            &renderer,
+            &printer,
+            &conv,
+            &MockInquiryBackend::new(answers),
+        )
+        .await;
+    let inquiries = conv
+        .events()
+        .iter()
+        .filter_map(|event| event.event.as_inquiry_response())
+        .cloned()
+        .collect();
+
+    if let ToolCallDecision::Skipped(response) = &decision {
+        coordinator
+            .acknowledge_reviews(vec![Review::unchanged(response.clone())])
+            .await
+            .unwrap();
+    }
+    owner.shutdown().await.unwrap();
+    (decision, inquiries)
+}
+
+/// The assistant answers the formatter's question before the call is decided,
+/// so the call is shown, and recorded, as the formatter describes it with the
+/// answer.
+#[tokio::test]
+#[cfg(unix)]
+async fn the_assistant_answers_a_formatters_question_before_the_call_is_decided() {
+    let (decision, inquiries) = decide_with_assistant(HashMap::from([(
+        "call-1.confirm.1".to_owned(),
+        json!(true),
+    )]))
+    .await;
+
+    let ToolCallDecision::Approved {
+        rendered_arguments, ..
+    } = decision
+    else {
+        panic!("expected the call to be approved")
+    };
+    assert_eq!(rendered_arguments.as_deref(), Some("confirm = true"));
+    assert_eq!(inquiries, vec![InquiryResponse::answered(
+        InquiryId::new("call-1.confirm.1".to_owned()),
+        json!(true),
+    )]);
+}
+
+/// An assistant that cannot answer the formatter's question settles the call
+/// there, with a response telling the model why, and nothing runs.
+#[tokio::test]
+#[cfg(unix)]
+async fn an_unanswered_formatter_question_settles_the_call() {
+    let (decision, inquiries) = decide_with_assistant(HashMap::new()).await;
+
+    let ToolCallDecision::Skipped(response) = decision else {
+        panic!("expected the call to be settled")
+    };
+    assert_eq!(response, ToolCallResponse {
+        id: "call-1".into(),
+        result: Err(
+            "The tool 'example' asked a follow-up question (\"Continue?\") that was routed to a \
+             secondary assistant for resolution, but the secondary assistant failed to provide a \
+             valid answer. Error: No mock answer for inquiry: call-1.confirm.1. You may retry the \
+             tool call or end the turn."
+                .into()
+        ),
+    });
+    assert_eq!(inquiries, vec![InquiryResponse::Cancelled {
+        id: InquiryId::new("call-1.confirm.1".to_owned()),
+        reason: CancellationReason::BackendError,
+    }]);
 }
 
 /// A prompter whose inline editor submits `submitted`.

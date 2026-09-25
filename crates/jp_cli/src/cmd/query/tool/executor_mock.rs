@@ -7,11 +7,24 @@ use indexmap::IndexMap;
 use jp_config::conversation::tool::ToolConfigWithDefaults;
 use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
 use jp_mcp::server::StderrSink;
-use jp_tool::{ToolDefinition, ToolDocs};
+use jp_tool::{Question, ToolDefinition, ToolDocs};
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
-use super::{Executor, ExecutorResult, ExecutorSource, PermissionInfo};
+use super::{Executor, ExecutorResult, ExecutorSource, FormatterQuestions, PermissionInfo};
+
+/// Answers no formatter question, for a call whose tool has no formatter that
+/// asks one.
+///
+/// A question reaching it fails the test.
+pub(crate) struct NoFormatterQuestions;
+
+#[async_trait]
+impl FormatterQuestions for NoFormatterQuestions {
+    async fn answer(&mut self, question: Question) -> Result<Value, ToolCallResponse> {
+        panic!("unexpected formatter question `{}`", question.id)
+    }
+}
 
 /// A mock executor for testing that returns pre-configured results.
 ///

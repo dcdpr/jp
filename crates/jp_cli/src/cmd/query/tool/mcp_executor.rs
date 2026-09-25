@@ -58,7 +58,8 @@ use tracing::{debug, warn};
 use url::Url;
 
 use super::executor::{
-    Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo, Review, response,
+    Executor, ExecutorError, ExecutorResult, ExecutorSource, FormatterQuestions, PermissionInfo,
+    Review, response,
 };
 use crate::access::{approvals::ApprovalStore, compile::compile_tool_policy};
 
@@ -560,7 +561,6 @@ impl ExecutorSource for TerminalExecutorSource {
                 service: self.service.clone(),
                 slot,
                 formatted: None,
-                deferred: SyncMutex::new(None),
             }));
         }
 
@@ -593,7 +593,6 @@ impl ExecutorSource for TerminalExecutorSource {
             service: self.service.clone(),
             slot,
             formatted: None,
-            deferred: SyncMutex::new(None),
         }))
     }
 
@@ -902,10 +901,6 @@ pub(crate) struct ToolExecutor {
     service: Arc<Service>,
     slot: Arc<CallSlot>,
     formatted: Option<Formatted>,
-
-    /// Formatter output the service sent once the call had run, waiting for the
-    /// coordinator to take it.
-    deferred: SyncMutex<Option<Formatted>>,
 }
 
 impl ToolExecutor {
@@ -971,10 +966,6 @@ impl Executor for ToolExecutor {
         self.formatted.as_ref()
     }
 
-    fn take_deferred_arguments(&self) -> Option<Formatted> {
-        locked(&self.deferred).take()
-    }
-
     fn needs_permission(&self) -> bool {
         !matches!(self.config.run(), RunMode::Unattended | RunMode::Skip)
     }
@@ -1032,6 +1023,7 @@ impl Executor for ToolExecutor {
     async fn prepare(
         &mut self,
         render_arguments: bool,
+        questions: &mut dyn FormatterQuestions,
     ) -> Result<Option<ToolCallResponse>, ExecutorError> {
         let mut state = self.slot.state.lock().await;
         let restarting = self.slot.restarting.swap(false, Ordering::AcqRel);
@@ -1071,6 +1063,14 @@ impl Executor for ToolExecutor {
                     Interaction::RenderArguments { reply } => {
                         drop(reply.send(Ok(render_arguments)));
                     }
+                    Interaction::Input {
+                        request,
+                        supporting,
+                        reply,
+                        ..
+                    } => {
+                        answer_formatter(questions, request, &supporting, reply).await?;
+                    }
                     Interaction::Prepare {
                         arguments,
                         formatted_arguments,
@@ -1104,7 +1104,10 @@ impl Executor for ToolExecutor {
         }
     }
 
-    async fn approve(&mut self) -> Result<(), ExecutorError> {
+    async fn approve(
+        &mut self,
+        questions: &mut dyn FormatterQuestions,
+    ) -> Result<Option<ToolCallResponse>, ExecutorError> {
         let mut state = self.slot.state.lock().await;
         let Phase::Admission(reply) = mem::replace(&mut state.phase, Phase::Finished) else {
             state.phase = Phase::Finished;
@@ -1120,27 +1123,50 @@ impl Executor for ToolExecutor {
             .map_err(|_| ExecutorError::ReplyExpired {
                 operation: "approval",
             })?;
-        match state.next().await? {
-            Received::Interaction(interaction) => match *interaction {
-                Interaction::Release {
-                    arguments,
-                    formatted_arguments,
-                    reply,
-                } => {
-                    self.arguments = arguments;
-                    self.formatted = formatted_arguments;
-                    state.phase = Phase::Release(reply);
-                    Ok(())
+        loop {
+            match state.next().await? {
+                Received::Interaction(interaction) => match *interaction {
+                    Interaction::Release {
+                        arguments,
+                        formatted_arguments,
+                        reply,
+                    } => {
+                        self.arguments = arguments;
+                        self.formatted = formatted_arguments;
+                        state.phase = Phase::Release(reply);
+                        return Ok(None);
+                    }
+                    // A formatter held back until admission runs now, and asks
+                    // before the call is released.
+                    Interaction::Input {
+                        request,
+                        supporting,
+                        reply,
+                        ..
+                    } => {
+                        answer_formatter(questions, request, &supporting, reply).await?;
+                    }
+                    // The Host settled the call instead of answering the
+                    // formatter, so it is recorded without running.
+                    Interaction::Record { recording, reply } => {
+                        let response = response(&self.slot.request.id, &recording.result);
+                        state.phase = Phase::Record(reply);
+                        return Ok(Some(response));
+                    }
+                    _ => {
+                        return Err(ExecutorError::UnexpectedInteraction { phase: "approving" });
+                    }
+                },
+                // Validating the approved arguments can fail the call outright,
+                // which arrives as the MCP response rather than another barrier.
+                Received::Finished(result) if result.is_error() => {
+                    return Err(ExecutorError::Rejected {
+                        message: result.to_text(),
+                    });
                 }
-                _ => Err(ExecutorError::UnexpectedInteraction { phase: "approving" }),
-            },
-            // Validating the approved arguments can fail the call outright,
-            // which arrives as the MCP response rather than another barrier.
-            Received::Finished(result) if result.is_error() => Err(ExecutorError::Rejected {
-                message: result.to_text(),
-            }),
-            Received::Finished(_) => {
-                Err(ExecutorError::UnexpectedInteraction { phase: "approving" })
+                Received::Finished(_) => {
+                    return Err(ExecutorError::UnexpectedInteraction { phase: "approving" });
+                }
             }
         }
     }
@@ -1188,28 +1214,8 @@ impl Executor for ToolExecutor {
                 }
             }
             let id = &self.slot.request.id;
-            loop {
-                let interaction = match state.next().await? {
-                    Received::Interaction(interaction) => *interaction,
-                    Received::Finished(result) => {
-                        return Ok(ExecutorResult::Completed(response(id, &result)));
-                    }
-                };
-                return match interaction {
-                    // Kept for the coordinator, which shows it ahead of the
-                    // result that follows.
-                    Interaction::DeferredArguments {
-                        formatted_arguments,
-                        reply,
-                    } => {
-                        *locked(&self.deferred) = Some(formatted_arguments);
-                        reply
-                            .send(Ok(()))
-                            .map_err(|_| ExecutorError::ReplyExpired {
-                                operation: "deferred arguments",
-                            })?;
-                        continue;
-                    }
+            match state.next().await? {
+                Received::Interaction(interaction) => match *interaction {
                     Interaction::Input {
                         request,
                         supporting,
@@ -1243,7 +1249,8 @@ impl Executor for ToolExecutor {
                         Ok(ExecutorResult::Completed(response))
                     }
                     _ => Err(ExecutorError::UnexpectedInteraction { phase: "executing" }),
-                };
+                },
+                Received::Finished(result) => Ok(ExecutorResult::Completed(response(id, &result))),
             }
         };
         let result = tokio::select! {
@@ -1257,6 +1264,30 @@ impl Executor for ToolExecutor {
         *locked(&self.slot.stderr) = None;
         result.unwrap_or_else(|error| self.settle_failure(&mut state, error, released))
     }
+}
+
+/// Have the Host answer a question the call's argument formatter asked, and
+/// hand the service the answer, or the response the Host settled the call with.
+async fn answer_formatter(
+    questions: &mut dyn FormatterQuestions,
+    request: InputRequest,
+    supporting: &[ContentBlock],
+    reply: oneshot::Sender<HostReply<InputAnswer>>,
+) -> Result<(), ExecutorError> {
+    let answer = match questions.answer(question(request, supporting)).await {
+        Ok(answer) => InputAnswer::Answer(answer),
+        Err(settled) => InputAnswer::Complete {
+            result: match settled.result {
+                Ok(text) => ToolResult::text(text),
+                Err(text) => ToolResult::error(text),
+            },
+        },
+    };
+    reply
+        .send(Ok(answer))
+        .map_err(|_| ExecutorError::ReplyExpired {
+            operation: "formatter inquiry",
+        })
 }
 
 /// Render a shared input request as the question the terminal prompts with.
