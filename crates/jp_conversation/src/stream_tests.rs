@@ -187,6 +187,18 @@ fn a_delta_that_only_clears_is_recorded() {
     assert!(resolved_arguments(&stream).is_empty());
 }
 
+/// A stream that never cleared anything reports nothing, deltas or not.
+#[test]
+fn config_unsets_is_empty_without_a_clearing_delta() {
+    let mut stream = stream_with_server(&["serve"]);
+    stream.add_config_delta(ApplyDelta::new(
+        delta_timestamp(),
+        server_arguments_partial(&["run"]),
+    ));
+
+    assert!(stream.config_unsets().unwrap().is_empty());
+}
+
 #[test]
 fn config_unsets_keeps_clears_across_unrelated_deltas() {
     let mut stream = stream_with_server(&["serve"]);
