@@ -2,16 +2,13 @@ use std::path::Path;
 
 use camino::Utf8Path;
 use clean_path::clean;
+use jp_process::{ProcessOutput, ProcessRunner, RunnerOpts, SystemProcessRunner};
 use jp_tool::Context;
 use serde::Serialize;
 
 use crate::{
     to_xml,
-    util::{
-        OneOrMany, ToolResult, error,
-        runner::{DuctProcessRunner, ProcessOutput, ProcessRunner, RunnerOpts},
-        truncate,
-    },
+    util::{OneOrMany, ToolResult, error, truncate},
 };
 
 const ALLOWED_UTILS: &[&str] = &[
@@ -44,7 +41,7 @@ pub(crate) fn unix_utils(
     args: Option<OneOrMany<String>>,
     stdin: Option<&str>,
 ) -> ToolResult {
-    unix_utils_impl(ctx, util, args, stdin, &DuctProcessRunner)
+    unix_utils_impl(ctx, util, args, stdin, &SystemProcessRunner)
 }
 
 fn unix_utils_impl<R: ProcessRunner>(
@@ -77,13 +74,14 @@ fn unix_utils_impl<R: ProcessRunner>(
         return error(msg);
     }
 
-    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-
     let resolved = resolve_binary(util).map_err(|e| format!("Failed to resolve '{util}': {e}"))?;
     let exec_str = resolved.exec_path.to_string_lossy();
 
     let sandbox_profile = sandbox_profile(&ctx.root, util, &resolved)
         .map_err(|e| format!("Failed to build sandbox: {e}"))?;
+    let (program, args) = sandboxed(&exec_str, &args, sandbox_profile.as_deref());
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+
     let sandbox_env = sandbox_env(util);
     let env_refs: Vec<(&str, &str)> = sandbox_env
         .iter()
@@ -93,14 +91,13 @@ fn unix_utils_impl<R: ProcessRunner>(
         stdin,
         env: &env_refs,
         clean_env: true,
-        macos_sandbox_profile: sandbox_profile.as_deref(),
     };
 
     let ProcessOutput {
         stdout,
         stderr,
         status,
-    } = runner.run_with_opts(&exec_str, &arg_refs, &ctx.root, &opts)?;
+    } = runner.run_with_opts(&program, &arg_refs, &ctx.root, &opts)?;
 
     let output = CommandOutput {
         stdout: truncate(stdout.trim_end(), MAX_OUTPUT_BYTES),
@@ -109,6 +106,28 @@ fn unix_utils_impl<R: ProcessRunner>(
     };
 
     Ok(to_xml(output)?.into())
+}
+
+/// The command that runs `program` inside the macOS sandbox `profile`.
+///
+/// Off macOS there is no `sandbox-exec`, so `program` runs as it is.
+/// On macOS a missing `sandbox-exec` fails the run rather than running the
+/// program unsandboxed.
+fn sandboxed(program: &str, args: &[String], profile: Option<&str>) -> (String, Vec<String>) {
+    if cfg!(target_os = "macos")
+        && let Some(profile) = profile
+    {
+        let mut wrapped = vec![
+            "-p".to_owned(),
+            profile.to_owned(),
+            "--".to_owned(),
+            program.to_owned(),
+        ];
+        wrapped.extend(args.iter().cloned());
+        return ("sandbox-exec".to_owned(), wrapped);
+    }
+
+    (program.to_owned(), args.to_vec())
 }
 
 // ---------------------------------------------------------------------------

@@ -1,12 +1,10 @@
 use std::fmt::Write;
 
 use camino::Utf8Path;
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use serde_json::{Map, Value};
 
-use crate::util::{
-    OneOrMany, ToolResult, error,
-    runner::{DuctProcessRunner, ProcessRunner},
-};
+use crate::util::{OneOrMany, ToolResult, error};
 
 /// Maximum number of diff lines to show per file before truncation.
 const MAX_LINES_PER_FILE: usize = 50;
@@ -196,7 +194,7 @@ pub(crate) async fn git_diff(
     let status = DiffStatus::parse(&status)?;
     let paths = paths.unwrap_or_default();
     let env = super::env_from_options(options);
-    git_diff_impl(root, &paths, status, &DuctProcessRunner, &env)
+    git_diff_impl(root, &paths, status, &SystemProcessRunner, &env)
 }
 
 #[cfg(test)]

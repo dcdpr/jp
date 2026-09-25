@@ -36,7 +36,7 @@ use jp_config::{
 use jp_conversation::{
     Conversation, ConversationEvent,
     event::{
-        CancellationReason, ChatRequest, ChatResponse, InquiryResponse, InquirySource,
+        CancellationReason, ChatRequest, ChatResponse, InquiryId, InquiryResponse, InquirySource,
         ToolCallRequest, TurnStart,
     },
 };
@@ -73,13 +73,20 @@ use crate::{
             ToolCoordinator,
             executor::{
                 Executor, ExecutorResult, ExecutorSource, PermissionInfo,
-                mock::{MockExecutor, TestExecutorSource},
+                mock::{
+                    MockExecutor, TestExecutorSource, asking_formatter, asking_formatter_runner,
+                    no_commands,
+                },
             },
             mcp_executor::TerminalExecutorSource,
         },
     },
+    render::metadata::get_rendered_arguments,
     signals::testing::{detached_router, test_router},
 };
+
+#[path = "turn_loop_tool_order_tests.rs"]
+mod tool_order;
 
 fn empty_executor_source() -> Box<dyn ExecutorSource> {
     Box::new(TestExecutorSource::new())
@@ -1733,15 +1740,15 @@ impl Executor for SleepingExecutor {
         &self.tool_name
     }
 
-    fn arguments(&self) -> &Map<String, Value> {
-        &self.arguments
+    fn arguments(&self) -> Map<String, Value> {
+        self.arguments.clone()
     }
 
     fn permission_info(&self) -> Option<PermissionInfo> {
         None
     }
 
-    fn set_arguments(&mut self, _args: Value) {}
+    fn set_arguments(&self, _args: Value) {}
 
     async fn execute(
         &self,
@@ -5345,15 +5352,15 @@ impl Executor for TalkingExecutor {
         &self.tool_name
     }
 
-    fn arguments(&self) -> &Map<String, Value> {
-        &self.arguments
+    fn arguments(&self) -> Map<String, Value> {
+        self.arguments.clone()
     }
 
     fn permission_info(&self) -> Option<PermissionInfo> {
         None
     }
 
-    fn set_arguments(&mut self, _args: Value) {}
+    fn set_arguments(&self, _args: Value) {}
 
     async fn execute(
         &self,
@@ -6283,15 +6290,15 @@ impl Executor for AskingTalkingExecutor {
         &self.tool_name
     }
 
-    fn arguments(&self) -> &Map<String, Value> {
-        &self.arguments
+    fn arguments(&self) -> Map<String, Value> {
+        self.arguments.clone()
     }
 
     fn permission_info(&self) -> Option<PermissionInfo> {
         None
     }
 
-    fn set_arguments(&mut self, _args: Value) {}
+    fn set_arguments(&self, _args: Value) {}
 
     async fn execute(
         &self,
@@ -6315,8 +6322,6 @@ impl Executor for AskingTalkingExecutor {
         }
 
         ExecutorResult::NeedsInput {
-            tool_id: self.tool_id.clone(),
-            tool_name: self.tool_name.clone(),
             question: Question::boolean("which", "Which one?").expect("valid question id"),
             source: InquirySource::tool(self.tool_name.clone()),
             accumulated_answers: answers.clone(),
@@ -6357,13 +6362,13 @@ impl Executor for InquiryMockExecutor {
     fn tool_name(&self) -> &str {
         &self.tool_name
     }
-    fn arguments(&self) -> &Map<String, Value> {
-        &self.arguments
+    fn arguments(&self) -> Map<String, Value> {
+        self.arguments.clone()
     }
     fn permission_info(&self) -> Option<PermissionInfo> {
         None
     }
-    fn set_arguments(&mut self, _args: Value) {}
+    fn set_arguments(&self, _args: Value) {}
 
     async fn execute(
         &self,
@@ -6374,8 +6379,6 @@ impl Executor for InquiryMockExecutor {
         for q in &self.questions {
             if !answers.contains_key(q.id.as_str()) {
                 return ExecutorResult::NeedsInput {
-                    tool_id: self.tool_id.clone(),
-                    tool_name: self.tool_name.clone(),
                     question: q.clone(),
                     source: InquirySource::tool(self.tool_name.clone()),
                     accumulated_answers: answers.clone(),
@@ -7978,21 +7981,11 @@ async fn test_retry_counter_resets_on_successful_event() {
     assert!(test_result.is_ok(), "Test timed out");
 }
 
-/// Regression: when the LLM emits a tool call for an unconfigured tool (which
-/// becomes a `Resolved` pending entry) followed by a configured one (which
-/// becomes `Approved`), `build_execution_plan` assigns plan indices 0 and 1 in
-/// stream order.
-/// The approved entry then has plan index 1, but `execute_with_prompting` was
-/// sizing its internal `results` vector to `executors.len()` (= 1) and indexing
-/// into it with the plan index — which panicked with `index out of bounds: the
-/// len is 1 but the index is 1`.
+/// A call to an unconfigured tool, settled on arrival, followed by a configured
+/// one that runs: both get their responses, in the order the calls were made.
 ///
-/// The fix re-bases plan indices to contiguous local positions inside
-/// `execute_with_prompting`, then pairs each response back with its
-/// caller-provided plan index on output.
-/// The downstream `commit_tool_responses` uses those plan indices when merging
-/// approved + pre-resolved responses, so they appear in the original stream
-/// order.
+/// Mixing calls settled without running with calls that run once indexed the
+/// running ones out of bounds.
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn test_unavailable_tool_before_approved_does_not_panic() {
@@ -9007,6 +9000,7 @@ async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
         let client = Client::default();
         let (source, owner) = TerminalExecutorSource::start(
             BuiltinExecutors::new().register("http_tool", HttpInquiryTool(count.clone())),
+            no_commands(),
             &definitions,
             &config.conversation.tools,
             Arc::new(ApprovalStore::default()),
@@ -9083,6 +9077,255 @@ async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
             "\n── \x1b[1mjp\x1b[0m \x1b[2m(anthropic/test)\x1b[0m \
              ─────────────────────────────────────────────────────────\n\n"
         );
+        owner.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+/// A formatter that asks the tool's question has it answered before the call
+/// runs: the call is shown with the answer, and the tool runs once, with the
+/// same answer, without asking again.
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep the end-to-end setup and persisted assertions in one scenario"
+)]
+async fn a_formatters_question_is_answered_before_the_call_runs() {
+    timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let mut config = AppConfig::new_test();
+        let partial: PartialToolConfig = serde_json::from_value(json!({
+            "source": "builtin", "run": "unattended", "format": "unattended",
+            "questions": {"confirm": {"answer": true}},
+            "style": {
+                "parameters": asking_formatter(),
+                "results_file_link": "off",
+            },
+        }))
+        .unwrap();
+        config.conversation.tools.insert(
+            "http_tool".into(),
+            ToolConfig::from_partial(partial, vec![]).unwrap(),
+        );
+        let storage = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
+        let mut workspace = Workspace::in_memory(root).with_backend(storage.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+            .unwrap();
+        let definitions = vec![ToolDefinition {
+            name: "http_tool".into(),
+            docs: ToolDocs::default(),
+            parameters: json!({"type":"object","properties":{}}),
+        }];
+        let count = Arc::new(AtomicUsize::new(0));
+        let client = Client::default();
+        let (source, owner) = TerminalExecutorSource::start(
+            BuiltinExecutors::new().register("http_tool", HttpInquiryTool(count.clone())),
+            asking_formatter_runner("Continue?"),
+            &definitions,
+            &config.conversation.tools,
+            Arc::new(ApprovalStore::default()),
+            InvocationContext::default(),
+            &client,
+            root.to_owned(),
+        )
+        .await
+        .unwrap();
+        let provider = Arc::new(SequentialMockProvider::with_tool_then_message(
+            "http-call",
+            "http_tool",
+            "Finished.",
+        ));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+        let router = detached_router();
+        let (printer, _output, chrome) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        run_turn_loop(
+            provider.clone(),
+            &model,
+            &config,
+            &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &definitions,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)),
+            ChatRequest::from("Run the tool."),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
+        )
+        .await
+        .unwrap();
+
+        let stored =
+            serde_json::from_str(&storage.read_test_events_raw(&lock.id()).unwrap()).unwrap();
+        let events =
+            ConversationStream::from_parts(json!({}), stored, &config.clone().into()).unwrap();
+        let responses = events
+            .iter()
+            .filter_map(|event| event.event.as_tool_call_response())
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(responses, vec![ToolCallResponse {
+            id: "http-call".into(),
+            result: Ok("confirmed".into())
+        }]);
+        // Persisted, so a replay shows the call the way it was shown live.
+        let rendered = events
+            .iter()
+            .filter(|event| event.event.as_tool_call_request().is_some())
+            .map(|event| get_rendered_arguments(event.event))
+            .collect::<Vec<_>>();
+        assert_eq!(rendered, vec![Some("confirm = true".to_owned())]);
+        // The formatter's question is recorded like one the tool asks.
+        let inquiries = events
+            .iter()
+            .filter_map(|event| event.event.as_inquiry_response())
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(inquiries, vec![InquiryResponse::answered(
+            InquiryId::new("http-call.confirm.1".to_owned()),
+            json!(true),
+        )]);
+        assert_eq!(count.load(Ordering::SeqCst), 1, "the tool asked again");
+
+        printer.flush();
+        assert_eq!(
+            chrome.lock().as_str(),
+            "\n── \x1b[1mjp\x1b[0m \x1b[2m(anthropic/test)\x1b[0m \
+             ─────────────────────────────────────────────────────────\n\nCalling tool \
+             \x1b[38;5;11m\x1b[1mhttp_tool\x1b[0m\n\nconfirm = true\n\nconfirmed\n\n"
+        );
+        owner.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+/// A call whose formatter asks a question is put up for approval as the
+/// formatter describes it with the answer, and runs with that same answer: what
+/// the user approves is what executes.
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep the end-to-end setup and the prompt-time snapshot in one scenario"
+)]
+async fn an_approval_prompt_shows_the_call_its_formatter_describes_with_the_answer() {
+    timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let mut config = AppConfig::new_test();
+        let partial: PartialToolConfig = serde_json::from_value(json!({
+            "source": "builtin", "run": "ask", "format": "unattended",
+            "questions": {"confirm": {"answer": true}},
+            "style": {
+                "parameters": asking_formatter(),
+                "results_file_link": "off",
+            },
+        }))
+        .unwrap();
+        config.conversation.tools.insert(
+            "http_tool".into(),
+            ToolConfig::from_partial(partial, vec![]).unwrap(),
+        );
+        let storage = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
+        let mut workspace = Workspace::in_memory(root).with_backend(storage.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+            .unwrap();
+        let definitions = vec![ToolDefinition {
+            name: "http_tool".into(),
+            docs: ToolDocs::default(),
+            parameters: json!({"type":"object","properties":{}}),
+        }];
+        let count = Arc::new(AtomicUsize::new(0));
+        let client = Client::default();
+        let (source, owner) = TerminalExecutorSource::start(
+            BuiltinExecutors::new().register("http_tool", HttpInquiryTool(count.clone())),
+            asking_formatter_runner("Continue?"),
+            &definitions,
+            &config.conversation.tools,
+            Arc::new(ApprovalStore::default()),
+            InvocationContext::default(),
+            &client,
+            root.to_owned(),
+        )
+        .await
+        .unwrap();
+        let provider = Arc::new(SequentialMockProvider::with_tool_then_message(
+            "http-call",
+            "http_tool",
+            "Finished.",
+        ));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+        let router = detached_router();
+        let (printer, _output, chrome) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let prompts = Arc::new(ObservingPromptBackend::new(
+            Arc::clone(&printer),
+            Arc::clone(&chrome),
+            'y',
+        ));
+        run_turn_loop(
+            provider.clone(),
+            &model,
+            &config,
+            &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
+            true, // interactive: `run = "ask"` only prompts when a user is there
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &definitions,
+            printer.clone(),
+            Arc::clone(&prompts) as Arc<dyn PromptBackend>,
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)),
+            ChatRequest::from("Run the tool."),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "the approved call ran once, with the answer it was approved with"
+        );
+
+        printer.flush();
+        let seen = prompts.seen.lock().clone();
+        let chrome = chrome.lock().clone();
+        let after = chrome
+            .strip_prefix(seen.as_str())
+            .expect("the prompt-time snapshot is a prefix of the final chrome");
+
+        // What the user had in front of them when asked to approve: the
+        // formatter's description, with the answer the tool will run with.
+        assert_eq!(
+            seen,
+            "\n── \x1b[1mjp\x1b[0m \x1b[2m(anthropic/test)\x1b[0m \
+             ─────────────────────────────────────────────────────────\n\nCalling tool \
+             \x1b[38;5;11m\x1b[1mhttp_tool\x1b[0m\n\nconfirm = true\n"
+        );
+        // Only the result follows: the call was already described.
+        assert_eq!(after, "\nconfirmed\n\n");
         owner.shutdown().await.unwrap();
     })
     .await

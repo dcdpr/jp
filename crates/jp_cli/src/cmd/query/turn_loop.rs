@@ -4,6 +4,7 @@
 //! to enable integration testing with mock providers.
 
 use std::{
+    collections::VecDeque,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -26,7 +27,7 @@ use jp_config::{
 };
 use jp_conversation::{
     ConversationStream,
-    event::{ChatRequest, ToolCallRequest, ToolCallResponse},
+    event::{ChatRequest, ToolCallResponse},
 };
 use jp_inquire::prompt::PromptBackend;
 use jp_llm::{
@@ -56,10 +57,11 @@ use super::{
         commit_partial_response, handle_stream_error,
     },
     tool::{
-        PendingEntry, PendingTools, ToolCallDecision, ToolCallState, ToolCoordinator, ToolPrompter,
-        ToolRenderer, build_execution_plan,
-        executor::{Executor, Review},
+        Host, PendingTools, ToolCallState, ToolCoordinator, ToolEvent, ToolPrompter, ToolRenderer,
+        build_execution_plan,
+        executor::Review,
         inquiry::{InquiryBackend, InquiryConfig, LlmInquiryBackend},
+        unresponded_requests,
     },
     turn::{Action, CommittedEvent, TurnCoordinator, TurnPhase, TurnState},
 };
@@ -85,6 +87,24 @@ enum StreamingLoopEvent {
     ClientInterrupt(InterruptAction),
     /// An event from the LLM provider stream.
     Llm(Box<Result<Event, StreamError>>),
+    /// Something a tool call's work in flight reported back.
+    Tool(Box<ToolEvent>),
+}
+
+impl StreamingLoopEvent {
+    /// Whether handling this needs the terminal to itself: the interrupt menu,
+    /// or a stream error's retry notice and menu.
+    ///
+    /// While a tool call's prompt is open these wait until it closes, rather
+    /// than draw over it.
+    fn needs_terminal(&self) -> bool {
+        match self {
+            Self::Interrupt(_) => true,
+            Self::Llm(result) => result.is_err(),
+            // Nothing here draws: a client interrupt arrives already decided.
+            Self::ClientInterrupt(_) | Self::Tool(_) => false,
+        }
+    }
 }
 
 /// Wrapper enum that unifies heterogeneous stream sources for [`SelectAll`].
@@ -93,16 +113,14 @@ enum StreamingLoopEvent {
 /// [`StreamingLoopEvent`].
 /// This avoids boxing while allowing `select_all` to poll them as a single
 /// merged stream.
-enum StreamSource<S, C, L> {
+enum StreamSource<S, L> {
     Interrupt(S),
-    Client(C),
     Llm(L),
 }
 
-impl<S, C, L> Stream for StreamSource<S, C, L>
+impl<S, L> Stream for StreamSource<S, L>
 where
     S: Stream<Item = StreamingLoopEvent> + Unpin,
-    C: Stream<Item = StreamingLoopEvent> + Unpin,
     L: Stream<Item = StreamingLoopEvent> + Unpin,
 {
     type Item = StreamingLoopEvent;
@@ -110,7 +128,6 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.get_mut() {
             Self::Interrupt(s) => Pin::new(s).poll_next(cx),
-            Self::Client(s) => Pin::new(s).poll_next(cx),
             Self::Llm(s) => Pin::new(s).poll_next(cx),
         }
     }
@@ -155,7 +172,9 @@ fn event_keeps_waiting_indicator(event: &StreamingLoopEvent) -> bool {
             result.as_ref(),
             Ok(Event::KeepAlive | Event::Patch(_) | Event::Flush { .. })
         ),
-        StreamingLoopEvent::Interrupt(_) | StreamingLoopEvent::ClientInterrupt(_) => false,
+        StreamingLoopEvent::Interrupt(_)
+        | StreamingLoopEvent::ClientInterrupt(_)
+        | StreamingLoopEvent::Tool(_) => false,
     }
 }
 
@@ -235,6 +254,7 @@ pub(super) async fn run_turn_loop(
     // Share the owed-separator flag so visible assistant content rendered by
     // the coordinator can cancel a blank line owed by a preceding tool result.
     turn_coordinator.set_tool_separator(tool_renderer.separator_flag());
+    turn_coordinator.set_tool_drawn(tool_renderer.drawn_flag());
 
     let inquiry_backend: Arc<dyn InquiryBackend> = build_inquiry_backend(
         cfg,
@@ -253,12 +273,6 @@ pub(super) async fn run_turn_loop(
     // and re-prepares them.
     let mut restart_requested = false;
 
-    // Id-keyed scratchpad for tool work produced during the streaming
-    // phase. The executing phase derives an ordered execution plan from
-    // the conversation stream + this scratchpad via `build_execution_plan`.
-    // Crucially: there's no public way to enumerate this directly. The
-    // stream is the source of truth for "what needs to run."
-    let mut pending_tools = PendingTools::new();
     let mut continuation: Option<EventStream> = None;
     let mut execution = ToolExecution::Caller;
 
@@ -318,6 +332,11 @@ pub(super) async fn run_turn_loop(
             TurnPhase::Complete | TurnPhase::Aborted => return Ok(()),
 
             TurnPhase::Streaming => {
+                // Calls from a response that failed mid-stream are answered by
+                // the synthetic responses below, and requested again by the
+                // next one if the assistant still wants them.
+                tool_coordinator.abandon();
+
                 // Restore structural invariants before each provider request.
                 // Specifically: any `ToolCallRequest` without a matching
                 // `ToolCallResponse` gets a synthetic error response. Without
@@ -363,14 +382,6 @@ pub(super) async fn run_turn_loop(
                 let (interrupt_guard, interrupt_rx) = signals.push_handler();
                 let interrupt_stream = StreamSource::Interrupt(
                     ReceiverStream::new(interrupt_rx).map(StreamingLoopEvent::Interrupt),
-                );
-
-                // Polled alongside the provider stream so a client's interrupt
-                // lands while the turn is streaming, rather than waiting for
-                // the phase to end on its own.
-                let client_stream = StreamSource::Client(
-                    stream::poll_fn(|cx| interrupts.poll_next(cx))
-                        .map(StreamingLoopEvent::ClientInterrupt),
                 );
 
                 let fresh_request = continuation.is_none();
@@ -436,11 +447,47 @@ pub(super) async fn run_turn_loop(
                 let mut received_provider_event = false;
 
                 let mut streams: SelectAll<_> =
-                    SelectAll::from_iter([interrupt_stream, client_stream, llm_stream]);
+                    SelectAll::from_iter([interrupt_stream, llm_stream]);
 
                 let mut conv = lock.as_mut();
 
-                while let Some(event) = streams.next().await {
+                // Events that need the terminal to themselves, held while a tool
+                // call's prompt owns it.
+                let mut held: VecDeque<StreamingLoopEvent> = VecDeque::new();
+
+                loop {
+                    // A tool call's prompt does not stop the stream: text and
+                    // later calls keep arriving, and the printer holds what they
+                    // write until the prompt closes. Only what would draw over the
+                    // prompt waits for it.
+                    let event = if !tool_coordinator.prompt_active()
+                        && let Some(event) = held.pop_front()
+                    {
+                        event
+                    } else {
+                        let event = tokio::select! {
+                            event = streams.next() => match event {
+                                Some(event) => event,
+                                None => break,
+                            },
+                            event = tool_coordinator.next_event() => {
+                                StreamingLoopEvent::Tool(Box::new(event))
+                            }
+                            // Polled alongside the provider stream so a
+                            // client's interrupt lands while the turn is
+                            // streaming, rather than waiting for the phase to
+                            // end on its own.
+                            Some(action) = interrupts.next() => {
+                                StreamingLoopEvent::ClientInterrupt(action)
+                            }
+                        };
+                        if tool_coordinator.prompt_active() && event.needs_terminal() {
+                            held.push_back(event);
+                            continue;
+                        }
+                        event
+                    };
+
                     // The indicator survives events that render nothing and is
                     // released on the first event that can write to the
                     // terminal. The printer erases the row before that write
@@ -452,6 +499,19 @@ pub(super) async fn run_turn_loop(
                     }
 
                     match event {
+                        StreamingLoopEvent::Tool(event) => {
+                            let mut host = Host {
+                                prompter: &prompter,
+                                inquiry_backend: &inquiry_backend,
+                                conv: &conv,
+                                turn_state: &mut turn_state,
+                                renderer: &mut tool_renderer,
+                                printer: &printer,
+                                interactive,
+                            };
+                            tool_coordinator.handle(*event, &mut host);
+                        }
+
                         StreamingLoopEvent::Interrupt(notice) => {
                             let llm_alive =
                                 streams.iter().any(|s| matches!(s, StreamSource::Llm(_)));
@@ -778,64 +838,45 @@ pub(super) async fn run_turn_loop(
                             }
 
                             // On a flushed tool-call request: clear the temp
-                            // line, prepare the executor, decide permission,
-                            // then render the tool call header + arguments.
-                            // For attended tools the permission prompt comes
-                            // first, so the user approves before seeing the
-                            // full rendering.
+                            // line and hand the call to the coordinator. It
+                            // formats the call and asks what it needs to right
+                            // away; its header and approval prompt follow every
+                            // call before it, while the stream carries on.
                             if let CommittedEvent::ToolCallRequest(req) = committed {
                                 tool_coordinator.set_tool_state(&req.id, ToolCallState::Queued);
                                 tool_renderer.complete(&req.id);
 
-                                match tool_coordinator.prepare_one(req.clone()) {
-                                    Ok(executor) => {
-                                        // Run the unified per-tool permission
-                                        // pipeline. The await blocks the
-                                        // streaming event loop while the user
-                                        // decides; LLM events buffer in the
-                                        // channel and are processed after.
-                                        let decision = tool_coordinator
-                                            .resolve_tool_call_decision(
-                                                executor,
-                                                &prompter,
-                                                interactive,
-                                                &mut turn_state,
-                                                &tool_renderer,
-                                                &printer,
-                                            )
-                                            .await;
-
-                                        match decision {
-                                            ToolCallDecision::Approved {
-                                                executor,
-                                                rendered_arguments,
-                                            } => {
-                                                if let Some(content) = rendered_arguments {
-                                                    conv.update_events(|stream| {
-                                                        store_rendered_arguments(
-                                                            stream, &req.id, &content,
-                                                        );
-                                                    });
-                                                }
-                                                pending_tools
-                                                    .insert_approved(req.id.clone(), executor);
-                                            }
-                                            ToolCallDecision::Skipped(resp)
-                                            | ToolCallDecision::Failed(resp) => {
-                                                pending_tools.insert_resolved(req.id.clone(), resp);
-                                            }
-                                        }
-                                    }
-                                    Err(resp) => {
-                                        pending_tools.insert_resolved(req.id.clone(), resp);
-                                    }
-                                }
+                                let mut host = Host {
+                                    prompter: &prompter,
+                                    inquiry_backend: &inquiry_backend,
+                                    conv: &conv,
+                                    turn_state: &mut turn_state,
+                                    renderer: &mut tool_renderer,
+                                    printer: &printer,
+                                    interactive,
+                                };
+                                tool_coordinator.submit(req, &mut host);
                             }
 
                             if is_finished {
                                 tool_renderer.cancel_all();
                             }
                         }
+                    }
+                }
+
+                // What still waits for a prompt to close has nobody to handle it
+                // here anymore: an interrupt goes down the handler stack, and a
+                // stream error is moot now the stream has ended.
+                for event in held {
+                    match event {
+                        StreamingLoopEvent::Interrupt(notice) => notice.decline(),
+                        StreamingLoopEvent::Llm(event) => {
+                            if let Err(error) = *event {
+                                warn!(%error, "Stream error after the stream ended; ignored.");
+                            }
+                        }
+                        StreamingLoopEvent::ClientInterrupt(_) | StreamingLoopEvent::Tool(_) => {}
                     }
                 }
 
@@ -857,110 +898,37 @@ pub(super) async fn run_turn_loop(
             }
 
             TurnPhase::Executing => {
-                // On restart: walk the stream for unresponded tool-call
-                // requests in the current turn and re-prepare them into
-                // `pending_tools` via the existing batch APIs. From there
-                // the unified executing path below picks up.
-                //
-                // The streaming and restart prep flows are still two
-                // separate codepaths today; both converge on
-                // `pending_tools` and `build_execution_plan`, which is the
-                // load-bearing invariant for this refactor.
+                let mut conv = lock.as_mut();
+                let mut host = Host {
+                    prompter: &prompter,
+                    inquiry_backend: &inquiry_backend,
+                    conv: &conv,
+                    turn_state: &mut turn_state,
+                    renderer: &mut tool_renderer,
+                    printer: &printer,
+                    interactive,
+                };
+
+                // On restart: hand the calls in the current turn that have no
+                // response back to the coordinator, which takes them through
+                // the same path as calls that just streamed.
                 if restart_requested {
                     restart_requested = false;
 
-                    let restart_calls: Vec<ToolCallRequest> = lock
-                        .events()
-                        .iter_turns()
-                        .next_back()
-                        .map(|t| {
-                            t.iter()
-                                .filter_map(|e| e.event.as_tool_call_request())
-                                .filter(|req| {
-                                    lock.events().find_tool_call_response(&req.id).is_none()
-                                })
-                                .cloned()
-                                .collect()
-                        })
-                        .unwrap_or_default();
-
+                    let restart_calls = unresponded_requests(&host.conv.events());
                     if restart_calls.is_empty() {
                         break;
                     }
-
-                    let unavailable = tool_coordinator.prepare(restart_calls);
-                    let restart_prompter = ToolPrompter::with_prompt_backend(
-                        printer.clone(),
-                        build_editor_backend(&cfg.editor, &printer),
-                        prompt_backend.clone(),
-                        reply_edit_mode(cfg.editor.inline.edit_mode),
-                    );
-                    let (executors, skipped) = tool_coordinator
-                        .run_permission_phase(
-                            &restart_prompter,
-                            interactive,
-                            &mut turn_state,
-                            &tool_renderer,
-                            &printer,
-                        )
-                        .await;
-
-                    for (_idx, exec) in executors {
-                        let id = exec.tool_id().to_owned();
-                        pending_tools.insert_approved(id, exec);
-                    }
-                    for (_idx, resp) in skipped {
-                        pending_tools.insert_resolved(resp.id.clone(), resp);
-                    }
-                    for (_idx, resp) in unavailable {
-                        pending_tools.insert_resolved(resp.id.clone(), resp);
+                    for request in restart_calls {
+                        tool_coordinator.set_tool_state(&request.id, ToolCallState::Queued);
+                        tool_coordinator.submit(request, &mut host);
                     }
                 }
 
-                // Unified executing path: derive the work to do by walking
-                // the conversation stream and reconciling against
-                // `pending_tools`. The stream is the source of truth.
-                let mut conv = lock.as_mut();
-                let plan = build_execution_plan(&conv.events(), &mut pending_tools);
-
-                if plan.is_empty() {
+                // The stream is the source of truth for what needs a response.
+                if unresponded_requests(&host.conv.events()).is_empty() {
                     break;
                 }
-
-                let (items, orphaned) = plan.into_parts();
-
-                let mut approved: Vec<(usize, Box<dyn Executor>)> = Vec::new();
-                let mut pre_resolved: Vec<(usize, ToolCallResponse)> = Vec::new();
-                for item in items {
-                    match item.work {
-                        PendingEntry::Approved(exec) => approved.push((item.index, exec)),
-                        PendingEntry::Resolved(resp) => pre_resolved.push((item.index, resp)),
-                    }
-                }
-
-                // Orphans: a `ToolCallRequest` in the stream's current turn
-                // without a matching pending entry. Should never happen in
-                // correct operation: every flushed request goes through
-                // the prep flow which writes to `pending_tools`. Synthesize
-                // an error response so the conversation stays valid (every
-                // request must have a response before the next provider
-                // call) and surface the inconsistency.
-                for (idx, req) in orphaned {
-                    warn!(
-                        id = %req.id,
-                        name = %req.name,
-                        "ToolCallRequest in stream without a pending entry; synthesizing error \
-                         response.",
-                    );
-                    pre_resolved.push((idx, ToolCallResponse {
-                        id: req.id,
-                        result: Err(
-                            "Tool call had no prepared executor (internal inconsistency).".into(),
-                        ),
-                    }));
-                }
-
-                tool_coordinator.reset_for_execution();
 
                 let mut interrupt_ui = InterruptUi {
                     turn_coordinator: &mut turn_coordinator,
@@ -970,18 +938,7 @@ pub(super) async fn run_turn_loop(
                     edit_mode: reply_edit_mode(cfg.editor.inline.edit_mode),
                 };
                 let execution_result = tool_coordinator
-                    .execute_with_prompting(
-                        approved,
-                        Arc::clone(&prompter),
-                        signals,
-                        &mut turn_state,
-                        &mut interrupt_ui,
-                        Arc::clone(&inquiry_backend),
-                        &conv,
-                        &mut tool_renderer,
-                        interactive,
-                        &mut interrupts,
-                    )
+                    .finish(&mut host, signals, &mut interrupt_ui, &mut interrupts)
                     .await;
 
                 match execution_result.outcome {
@@ -993,7 +950,6 @@ pub(super) async fn run_turn_loop(
                         signals.shutdown_token().cancel();
                         commit_tool_responses(
                             execution_result,
-                            pre_resolved,
                             &mut tool_coordinator,
                             &mut turn_coordinator,
                             &mut conv,
@@ -1011,7 +967,6 @@ pub(super) async fn run_turn_loop(
                     ExecutionOutcome::Stopped => {
                         commit_tool_responses(
                             execution_result,
-                            pre_resolved,
                             &mut tool_coordinator,
                             &mut turn_coordinator,
                             &mut conv,
@@ -1029,7 +984,6 @@ pub(super) async fn run_turn_loop(
                     ExecutionOutcome::Completed => {
                         if commit_tool_responses(
                             execution_result,
-                            pre_resolved,
                             &mut tool_coordinator,
                             &mut turn_coordinator,
                             &mut conv,
@@ -1291,35 +1245,54 @@ async fn build_inquiry_overrides(
     Ok(overrides)
 }
 
-/// Assemble tool responses from the executor's results plus any pre-resolved
-/// responses (skipped tools, unavailable tools, orphan synthesizations), commit
-/// them to the conversation stream, and flush to disk.
+/// Commit what the Host settled on for each tool call to the conversation
+/// stream, in the stream's order, and flush to disk.
 ///
 /// Returns `true` if a follow-up LLM cycle is needed (i.e. tool responses were
 /// added and the coordinator wants to continue).
 async fn commit_tool_responses(
     result: ExecutionResult,
-    pre_resolved: Vec<(usize, ToolCallResponse)>,
     tool: &mut ToolCoordinator,
     turn: &mut super::turn::TurnCoordinator,
     conv: &mut ConversationMut,
 ) -> Result<bool, Error> {
-    // Persist any rendered custom-argument output accumulated during the
-    // permission phase into the corresponding ToolCallRequest events.
+    // Persist any rendered custom-argument output of the approved calls into
+    // the corresponding ToolCallRequest events.
     flush_rendered_arguments(tool, conv);
 
-    // Both `result.reviews` and `pre_resolved` are already keyed by the
-    // plan index assigned in `build_execution_plan`. Sorting by that
-    // index restores stream order for the persisted responses.
-    //
-    // A pre-resolved tool never reached an executor, so nothing offered it a
-    // result to edit.
-    let mut indexed: Vec<(usize, Review)> = result.reviews;
-    indexed.extend(
-        pre_resolved
-            .into_iter()
-            .map(|(index, response)| (index, Review::unchanged(response))),
-    );
+    let mut pending = PendingTools::new();
+    for (id, review) in result.reviews {
+        pending.insert(id, review);
+    }
+    let plan = build_execution_plan(&conv.events(), &mut pending);
+    let (items, orphaned) = plan.into_parts();
+    let mut indexed: Vec<(usize, Review)> = items
+        .into_iter()
+        .map(|item| (item.index, item.review))
+        .collect();
+
+    // Orphans: a `ToolCallRequest` in the stream's current turn that never
+    // reached the coordinator. Should never happen in correct operation: every
+    // flushed request is submitted to it. Synthesize an error response so the
+    // conversation stays valid (every request must have a response before the
+    // next provider call) and surface the inconsistency.
+    for (index, request) in orphaned {
+        warn!(
+            id = %request.id,
+            name = %request.name,
+            "ToolCallRequest in stream without a pending entry; synthesizing error response.",
+        );
+        indexed.push((
+            index,
+            Review::unchanged(ToolCallResponse {
+                id: request.id,
+                result: Err("Tool call had no prepared executor (internal inconsistency).".into()),
+            }),
+        ));
+    }
+
+    // The plan index is the call's position in the stream, so sorting by it
+    // restores stream order for the persisted responses.
     indexed.sort_by_key(|(index, _)| *index);
     let reviews: Vec<_> = indexed.into_iter().map(|(_, review)| review).collect();
 

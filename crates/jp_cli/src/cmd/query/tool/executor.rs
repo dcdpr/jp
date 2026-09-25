@@ -14,7 +14,7 @@ use indexmap::IndexMap;
 use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults, ToolSource};
 use jp_conversation::event::{InquirySource, ToolCallRequest, ToolCallResponse};
 use jp_llm::query::ToolExecution;
-use jp_mcp::server::{StderrSink, service::Formatted};
+use jp_mcp::server::StderrSink;
 use jp_tool::{Question, ToolResult};
 use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
@@ -26,22 +26,31 @@ pub(crate) use error::ExecutorError;
 
 /// The MCP Host's view of a logical tool call.
 ///
-/// Preparation and approval precede release.
-/// Input and completed results return control to the Host for inquiry routing,
-/// result review, and recording.
+/// Each step replies to whatever the call is parked on and returns the next
+/// thing it needs from the Host: a question answered, an admission decision, a
+/// release, or a result reviewed and recorded.
+/// A question is answered the same way whichever step raised it, the tool's or
+/// its argument formatter's: with [`execute`] and the answers so far.
+///
+/// [`execute`]: Self::execute
 #[async_trait]
 pub(crate) trait Executor: Send + Sync {
-    /// Prepare an invocation, or return a response resolved without execution.
+    /// Submit the call, and return the first thing it needs from the Host.
+    ///
+    /// `render_arguments` is whether the Host wants the argument formatter's
+    /// description of the call.
     async fn prepare(
-        &mut self,
+        &self,
         _render_arguments: bool,
-    ) -> Result<Option<ToolCallResponse>, ExecutorError> {
-        Ok(None)
+        _cancellation: CancellationToken,
+    ) -> ExecutorResult {
+        ExecutorResult::AwaitingAdmission
     }
 
-    /// Apply Host approval and wait until the invocation is ready for release.
-    async fn approve(&mut self) -> Result<(), ExecutorError> {
-        Ok(())
+    /// Admit the call with its current arguments, and return the next thing it
+    /// needs from the Host.
+    async fn approve(&self, _cancellation: CancellationToken) -> ExecutorResult {
+        ExecutorResult::AwaitingRelease
     }
 
     /// Custom argument rendering provided by the execution service.
@@ -49,7 +58,7 @@ pub(crate) trait Executor: Send + Sync {
     /// `None` when the execution service has not formatted this call's
     /// arguments, either because nothing asked it to or because its formatter
     /// waits for admission.
-    fn formatted_arguments(&self) -> Option<&Formatted> {
+    fn formatted_arguments(&self) -> Option<String> {
         None
     }
 
@@ -66,7 +75,7 @@ pub(crate) trait Executor: Send + Sync {
     /// a permission prompt.
     ///
     /// [`permission_info()`]: Self::permission_info
-    fn arguments(&self) -> &Map<String, Value>;
+    fn arguments(&self) -> Map<String, Value>;
 
     /// Returns information needed for permission prompting.
     ///
@@ -90,7 +99,7 @@ pub(crate) trait Executor: Send + Sync {
     /// arguments (via `RunMode::Edit`).
     /// The new arguments replace the original arguments from the tool call
     /// request.
-    fn set_arguments(&mut self, args: Value);
+    fn set_arguments(&self, args: Value);
 
     /// Hold this call's service-side invocation open while its current attempt
     /// is abandoned, so a replacement attempt continues the same logical call.
@@ -113,13 +122,13 @@ pub(crate) trait Executor: Send + Sync {
         false
     }
 
-    /// Advance the call to its next input request or result.
+    /// Release the call, or answer the question it is waiting on, and return
+    /// the next thing it needs from the Host.
     ///
-    /// An MCP-backed executor releases prepared work or answers the pending
-    /// inquiry on its existing MCP call.
-    /// The server re-executes a tool that returned `NeedsInput`; the executor
-    /// does not submit another MCP call.
-    /// The result remains subject to Host review and recording.
+    /// An MCP-backed executor replies on its existing MCP call; the server runs
+    /// the tool, or its formatter, again with the answer.
+    /// A question can come from either, before approval, after it, or while the
+    /// tool runs, and is answered here each time.
     ///
     /// The executor doesn't know how questions should be answered - it just
     /// reports that input is needed.
@@ -234,7 +243,7 @@ pub(crate) fn response(id: impl Into<String>, result: &ToolResult) -> ToolCallRe
     }
 }
 
-/// Result of a tool execution attempt.
+/// What a call needs from the Host after one step.
 ///
 /// Tools may need multiple rounds of execution if they require additional
 /// input.
@@ -247,11 +256,19 @@ pub(crate) fn response(id: impl Into<String>, result: &ToolResult) -> ToolCallRe
     reason = "A turn holds one of these per in-flight call, not a collection of them"
 )]
 pub(crate) enum ExecutorResult {
-    /// Tool completed (success or error).
+    /// Tool completed (success or error), or was settled before it ran.
     ///
     /// The full result stays with the executor, which hands it back unchanged
     /// if the Host records this response without editing it.
     Completed(ToolCallResponse),
+
+    /// The call is waiting for the Host to admit it, with
+    /// [`Executor::approve`].
+    AwaitingAdmission,
+
+    /// The call is admitted and waiting for the Host to release it, with
+    /// [`Executor::execute`].
+    AwaitingRelease,
 
     /// The call failed before the tool was released to run, so nothing ran.
     ///
@@ -277,12 +294,6 @@ pub(crate) enum ExecutorResult {
     /// - `User`: Prompt the user interactively, then restart the tool
     /// - `Assistant`: Format a response asking the LLM to re-run with answers
     NeedsInput {
-        /// Tool call ID.
-        tool_id: String,
-
-        /// Tool name (for persisting answers).
-        tool_name: String,
-
         /// The question that needs to be answered.
         question: Question,
 

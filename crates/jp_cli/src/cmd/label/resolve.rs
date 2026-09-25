@@ -24,6 +24,8 @@
 //! An explicit `n` drops the one label; a prompt error (Ctrl-C, Esc, a closed
 //! terminal) aborts the surrounding command, because the user asked to stop.
 
+use std::sync::Arc;
+
 use camino::Utf8Path;
 use indexmap::IndexMap;
 use jp_config::{
@@ -32,7 +34,8 @@ use jp_config::{
 };
 use jp_inquire::{InlineOption, prompt::PromptBackend};
 use jp_printer::Printer;
-use tokio::process::Command;
+use jp_process::{ProcessRunner, ProcessSpec, SystemProcessRunner, Watch};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 use crate::error::{Error, Result};
@@ -54,10 +57,14 @@ pub(crate) struct Resolver<'a> {
     interactive: bool,
     printer: &'a Printer,
     prompts: &'a dyn PromptBackend,
+
+    /// Runs a rule's command.
+    runner: Arc<dyn ProcessRunner>,
 }
 
 impl<'a> Resolver<'a> {
-    pub(crate) const fn new(
+    /// A resolver whose commands run as real processes.
+    pub(crate) fn new(
         rules: &'a IndexMap<String, LabelConfig>,
         root: &'a Utf8Path,
         interactive: bool,
@@ -70,7 +77,15 @@ impl<'a> Resolver<'a> {
             interactive,
             printer,
             prompts,
+            runner: Arc::new(SystemProcessRunner),
         }
+    }
+
+    /// Run the rules' commands through `runner` instead.
+    #[cfg(test)]
+    pub(crate) fn with_runner(mut self, runner: Arc<dyn ProcessRunner>) -> Self {
+        self.runner = runner;
+        self
     }
 
     /// Resolve every rule that opts into `trigger`, in declaration order.
@@ -120,7 +135,7 @@ impl<'a> Resolver<'a> {
             }
         }
 
-        for (key, output) in run_all(pending, self.root).await {
+        for (key, output) in run_all(&self.runner, pending, self.root).await {
             match output {
                 Ok(values) => {
                     resolved.insert(key, values);
@@ -182,7 +197,7 @@ impl<'a> Resolver<'a> {
                 }
                 Ok(None)
             }
-            Approval::Approved => match run_command(&cmd, self.root).await {
+            Approval::Approved => match run_command(&self.runner, &cmd, self.root).await {
                 Ok(values) => Ok(Some((key.to_owned(), values))),
                 Err(error) if rule.optional() => {
                     debug!(label = key, %error, "Skipping optional label.");
@@ -271,11 +286,12 @@ enum Approval {
 
 /// Run every approved command concurrently, pairing each result with its key.
 async fn run_all(
+    runner: &Arc<dyn ProcessRunner>,
     pending: Vec<(String, CommandConfig)>,
     root: &Utf8Path,
 ) -> Vec<(String, std::result::Result<Vec<String>, String>)> {
     let futures = pending.into_iter().map(|(key, cmd)| async move {
-        let result = run_command(&cmd, root).await;
+        let result = run_command(runner, &cmd, root).await;
         (key, result)
     });
 
@@ -295,36 +311,42 @@ async fn run_all(
 /// reason is visible without re-running by hand.
 ///
 /// The child stays in JP's process group, so Ctrl-C reaches it.
-/// Tool commands deliberately detach (`process_group(0)`) because JP drives
-/// their lifecycle through a cancellation token; a label command has no such
-/// handle, and blocking conversation creation on an unkillable command would be
-/// worse than losing the label.
+/// Tool commands deliberately detach because JP drives their lifecycle through
+/// a cancellation token; a label command has no such handle, and blocking
+/// conversation creation on an unkillable command would be worse than losing
+/// the label.
 async fn run_command(
+    runner: &Arc<dyn ProcessRunner>,
     cmd: &CommandConfig,
     root: &Utf8Path,
 ) -> std::result::Result<Vec<String>, String> {
-    let mut command = if cmd.shell {
-        let mut command = Command::new("sh");
-        command
-            .arg("-c")
-            .arg(shell_command_line(&cmd.program, &cmd.args));
-        command
+    let spec = if cmd.shell {
+        ProcessSpec::new(
+            "sh",
+            ["-c".to_owned(), shell_command_line(&cmd.program, &cmd.args)],
+            root,
+        )
     } else {
-        let mut command = Command::new(&cmd.program);
-        command.args(&cmd.args);
-        command
+        ProcessSpec::new(&cmd.program, &cmd.args, root)
     };
 
-    let output = command
-        .current_dir(root.as_std_path())
-        .kill_on_drop(true)
-        .output()
+    // The command runs on a blocking thread, which dropping this future would
+    // not stop, so dropping it cancels the run.
+    let cancellation = CancellationToken::new();
+    let _stop_on_drop = cancellation.clone().drop_guard();
+    let watch = Watch {
+        cancellation: Some(cancellation),
+        ..Watch::default()
+    };
+    let runner = Arc::clone(runner);
+    let output = tokio::task::spawn_blocking(move || runner.execute(&spec, &watch))
         .await
-        .map_err(|error| format!("could not run `{cmd}`: {error}"))?;
+        .map_err(|error| format!("could not run `{cmd}`: {error}"))?
+        .map_err(|error| format!("could not run `{cmd}`: {error}"))?
+        .output;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail = stderr.trim();
+    if !output.success() {
+        let detail = output.stderr.trim();
         let code = output
             .status
             .code()
@@ -337,7 +359,8 @@ async fn run_command(
         });
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout)
+    Ok(output
+        .stdout
         .lines()
         .filter(|line| !line.is_empty())
         .map(ToOwned::to_owned)

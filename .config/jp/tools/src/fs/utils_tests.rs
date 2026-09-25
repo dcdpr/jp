@@ -1,8 +1,8 @@
 use camino::Utf8PathBuf;
 use camino_tempfile::tempdir;
+use jp_process::MockProcessRunner;
 
 use super::*;
-use crate::util::runner::MockProcessRunner;
 
 mod suppress_matcher {
     use super::*;

@@ -1,7 +1,7 @@
 use camino::Utf8Path;
+use jp_process::MockProcessRunner;
 
 use super::*;
-use crate::util::runner::MockProcessRunner;
 
 fn root() -> &'static Utf8Path {
     Utf8Path::new("/tmp")

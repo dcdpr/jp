@@ -1,8 +1,7 @@
 use std::time::Duration;
 
 use camino::Utf8Path;
-
-use crate::util::runner::{ProcessOutput, ProcessRunner};
+use jp_process::{ProcessOutput, ProcessRunner};
 
 const MAX_RETRIES: u32 = 5;
 const BASE_DELAY_MS: u64 = 50;

@@ -2361,6 +2361,7 @@ dependencies = [
  "jp_openrouter",
  "jp_plugin",
  "jp_printer",
+ "jp_process",
  "jp_storage",
  "jp_task",
  "jp_term",
@@ -2620,6 +2621,7 @@ dependencies = [
  "futures",
  "indexmap",
  "jp_config",
+ "jp_process",
  "jp_tool",
  "minijinja",
  "reqwest",
@@ -2695,6 +2697,16 @@ dependencies = [
  "strip-ansi-escapes",
  "tracing",
  "vte 0.14.1",
+]
+
+[[package]]
+name = "jp_process"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "libc",
+ "tokio-util",
 ]
 
 [[package]]
@@ -5097,7 +5109,6 @@ dependencies = [
  "convert_case 0.11.0",
  "crossbeam-channel",
  "crossterm",
- "duct",
  "fancy-regex 0.19.0",
  "grep-matcher",
  "grep-printer",
@@ -5107,6 +5118,7 @@ dependencies = [
  "indoc",
  "jp_github",
  "jp_md",
+ "jp_process",
  "jp_tool",
  "jp_workspace",
  "libc",

@@ -22,6 +22,7 @@ use serde_json::json;
 use tokio::time::{Duration, timeout};
 
 use super::*;
+use crate::cmd::query::tool::executor::mock::no_commands;
 
 /// A tool that asks one question, then echoes the arguments and the answer.
 ///
@@ -82,6 +83,7 @@ impl Fixture {
         }];
         let (source, owner) = TerminalExecutorSource::start(
             BuiltinExecutors::new().register("example", tool),
+            no_commands(),
             &definitions,
             &cfg.conversation.tools,
             Arc::new(ApprovalStore::default()),
@@ -155,13 +157,19 @@ mod shutdown;
 #[tokio::test]
 async fn one_call_spans_input_and_recording() {
     let fixture = Fixture::inquiring("edit").await;
-    let mut executor = fixture.executor(&json!({"name": "original"}));
+    let executor = fixture.executor(&json!({"name": "original"}));
 
-    assert!(executor.prepare(false).await.unwrap().is_none());
+    assert!(matches!(
+        executor.prepare(false, CancellationToken::new()).await,
+        ExecutorResult::AwaitingAdmission
+    ));
     assert_eq!(fixture.attempts(), 0);
 
     executor.set_arguments(json!({"name": "edited"}));
-    executor.approve().await.unwrap();
+    assert!(matches!(
+        executor.approve(CancellationToken::new()).await,
+        ExecutorResult::AwaitingRelease
+    ));
     assert_eq!(fixture.attempts(), 0, "approval alone must not execute");
 
     let first = executor
@@ -263,9 +271,15 @@ async fn an_unedited_review_reaches_the_service_through_a_real_call() {
     // The unit tests above pin the decision; this pins that a review actually
     // reaches it, rather than the call resolving at some earlier barrier.
     let fixture = Fixture::inquiring("ask").await;
-    let mut executor = fixture.executor(&json!({}));
-    assert!(executor.prepare(false).await.unwrap().is_none());
-    executor.approve().await.unwrap();
+    let executor = fixture.executor(&json!({}));
+    assert!(matches!(
+        executor.prepare(false, CancellationToken::new()).await,
+        ExecutorResult::AwaitingAdmission
+    ));
+    assert!(matches!(
+        executor.approve(CancellationToken::new()).await,
+        ExecutorResult::AwaitingRelease
+    ));
 
     let first = executor
         .execute(&IndexMap::new(), CancellationToken::new(), None)
@@ -296,8 +310,11 @@ async fn an_unedited_review_reaches_the_service_through_a_real_call() {
 #[tokio::test]
 async fn a_denied_call_completes_without_executing() {
     let fixture = Fixture::inquiring("unattended").await;
-    let mut executor = fixture.executor(&json!({}));
-    assert!(executor.prepare(false).await.unwrap().is_none());
+    let executor = fixture.executor(&json!({}));
+    assert!(matches!(
+        executor.prepare(false, CancellationToken::new()).await,
+        ExecutorResult::AwaitingAdmission
+    ));
 
     fixture
         .acknowledge(recorded(Ok("not approved")))
@@ -316,9 +333,15 @@ async fn a_denied_call_completes_without_executing() {
 #[tokio::test]
 async fn a_failure_after_approval_resolves_the_call() {
     let fixture = Fixture::inquiring("skip").await;
-    let mut executor = fixture.executor(&json!({}));
-    executor.prepare(false).await.unwrap();
-    executor.approve().await.unwrap();
+    let executor = fixture.executor(&json!({}));
+    assert!(matches!(
+        executor.prepare(false, CancellationToken::new()).await,
+        ExecutorResult::AwaitingAdmission
+    ));
+    assert!(matches!(
+        executor.approve(CancellationToken::new()).await,
+        ExecutorResult::AwaitingRelease
+    ));
 
     // The Host abandons the call at the release barrier rather than executing.
     fixture
@@ -333,9 +356,15 @@ async fn a_failure_after_approval_resolves_the_call() {
 #[tokio::test]
 async fn a_declined_inquiry_finishes_without_another_attempt() {
     let fixture = Fixture::inquiring("skip").await;
-    let mut executor = fixture.executor(&json!({}));
-    executor.prepare(false).await.unwrap();
-    executor.approve().await.unwrap();
+    let executor = fixture.executor(&json!({}));
+    assert!(matches!(
+        executor.prepare(false, CancellationToken::new()).await,
+        ExecutorResult::AwaitingAdmission
+    ));
+    assert!(matches!(
+        executor.approve(CancellationToken::new()).await,
+        ExecutorResult::AwaitingRelease
+    ));
 
     let result = executor
         .execute(&IndexMap::new(), CancellationToken::new(), None)
@@ -359,9 +388,15 @@ async fn a_declined_inquiry_finishes_without_another_attempt() {
 #[tokio::test]
 async fn cancellation_before_release_does_not_execute() {
     let fixture = Fixture::inquiring("unattended").await;
-    let mut executor = fixture.executor(&json!({}));
-    executor.prepare(false).await.unwrap();
-    executor.approve().await.unwrap();
+    let executor = fixture.executor(&json!({}));
+    assert!(matches!(
+        executor.prepare(false, CancellationToken::new()).await,
+        ExecutorResult::AwaitingAdmission
+    ));
+    assert!(matches!(
+        executor.approve(CancellationToken::new()).await,
+        ExecutorResult::AwaitingRelease
+    ));
 
     let token = CancellationToken::new();
     token.cancel();
@@ -398,7 +433,7 @@ async fn a_held_call_delivers_the_recorded_response_to_its_agent() {
             correlation_key: "test/agentId",
         })
         .unwrap();
-    let mut executor = fixture.executor(&json!({}));
+    let executor = fixture.executor(&json!({}));
 
     let mut params = CallToolRequestParams::new("example");
     params.arguments = Some(Map::new());
@@ -409,8 +444,14 @@ async fn a_held_call_delivers_the_recorded_response_to_its_agent() {
     let peer = fixture.source.peer.clone();
     let agent = tokio::spawn(async move { peer.call_tool(params).await });
 
-    assert!(executor.prepare(false).await.unwrap().is_none());
-    executor.approve().await.unwrap();
+    assert!(matches!(
+        executor.prepare(false, CancellationToken::new()).await,
+        ExecutorResult::AwaitingAdmission
+    ));
+    assert!(matches!(
+        executor.approve(CancellationToken::new()).await,
+        ExecutorResult::AwaitingRelease
+    ));
 
     let token = CancellationToken::new();
     let answers = IndexMap::new();
@@ -510,9 +551,15 @@ async fn a_call_lost_after_release_is_not_reported_as_unexecuted() {
     )
     .await;
     fixture.count = count;
-    let mut executor = fixture.executor(&json!({}));
-    assert!(executor.prepare(false).await.unwrap().is_none());
-    executor.approve().await.unwrap();
+    let executor = fixture.executor(&json!({}));
+    assert!(matches!(
+        executor.prepare(false, CancellationToken::new()).await,
+        ExecutorResult::AwaitingAdmission
+    ));
+    assert!(matches!(
+        executor.approve(CancellationToken::new()).await,
+        ExecutorResult::AwaitingRelease
+    ));
 
     let result = timeout(
         Duration::from_secs(5),
@@ -532,10 +579,16 @@ async fn a_call_lost_after_release_is_not_reported_as_unexecuted() {
 #[tokio::test]
 async fn preparing_a_call_twice_is_refused() {
     let fixture = Fixture::inquiring("unattended").await;
-    let mut executor = fixture.executor(&json!({}));
-    executor.prepare(false).await.unwrap();
+    let executor = fixture.executor(&json!({}));
+    assert!(matches!(
+        executor.prepare(false, CancellationToken::new()).await,
+        ExecutorResult::AwaitingAdmission
+    ));
 
-    let error = executor.prepare(false).await.unwrap_err();
+    let ExecutorResult::Failed(error) = executor.prepare(false, CancellationToken::new()).await
+    else {
+        panic!("expected a refusal")
+    };
     assert_eq!(
         error.to_string(),
         "MCP call cannot be submitted while awaiting admission"
@@ -547,9 +600,11 @@ async fn preparing_a_call_twice_is_refused() {
 #[tokio::test]
 async fn approval_is_refused_before_the_call_is_submitted() {
     let fixture = Fixture::inquiring("unattended").await;
-    let mut executor = fixture.executor(&json!({}));
+    let executor = fixture.executor(&json!({}));
 
-    let error = executor.approve().await.unwrap_err();
+    let ExecutorResult::Failed(error) = executor.approve(CancellationToken::new()).await else {
+        panic!("expected a refusal")
+    };
     assert_eq!(
         error.to_string(),
         "MCP call cannot be approved while not awaiting admission"

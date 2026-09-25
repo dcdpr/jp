@@ -1,7 +1,7 @@
 use camino_tempfile::tempdir;
+use jp_process::MockProcessRunner;
 
 use super::*;
-use crate::util::runner::MockProcessRunner;
 
 fn sample_show_output() -> String {
     let header = "abc123full\0abc123\0Alice\x002024-06-01T10:00:00+00:00\0feat: add \

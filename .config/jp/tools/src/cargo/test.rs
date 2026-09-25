@@ -1,14 +1,11 @@
 use camino::Utf8Path;
+use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 use serde_json::{Value, from_str};
 
 use super::MAX_DIAGNOSTIC_BYTES;
 use crate::{
     to_simple_xml_with_root,
-    util::{
-        ToolResult,
-        runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
-        truncate,
-    },
+    util::{ToolResult, truncate},
 };
 
 /// Cap for a single failing test's captured output.
@@ -59,7 +56,7 @@ pub(crate) async fn cargo_test(
         testname,
         backtrace.unwrap_or(false),
         checksum_freshness,
-        &DuctProcessRunner,
+        &SystemProcessRunner,
     )
 }
 

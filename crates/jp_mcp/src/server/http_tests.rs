@@ -25,6 +25,7 @@ use crate::{
             Admission, CallRequest, ConfiguredTool, HostReceiver, Interaction, ReleaseDecision,
             ServiceError,
         },
+        testing::no_commands,
     },
 };
 
@@ -59,6 +60,7 @@ fn setup() -> (Service, HostReceiver, Arc<AtomicUsize>) {
         }],
         Client::default(),
         BuiltinExecutors::new().register("count", Count(count.clone())),
+        no_commands(),
         "/tmp".into(),
         InvocationContext::default(),
     )

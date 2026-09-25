@@ -12,12 +12,10 @@
 use std::{fmt::Write as _, fs};
 
 use camino::{Utf8Path, Utf8PathBuf};
+use jp_process::ProcessRunner;
 use sha2::{Digest, Sha256};
 
-use crate::{
-    Error,
-    util::{runner::ProcessRunner, truncate},
-};
+use crate::{Error, util::truncate};
 
 /// Truncate build output beyond this limit when reporting a build failure.
 const MAX_BUILD_LOG_BYTES: usize = 20_000;

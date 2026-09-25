@@ -1,5 +1,6 @@
+use jp_process::MockProcessRunner;
+
 use super::*;
-use crate::util::runner::MockProcessRunner;
 
 #[test]
 fn succeeds_first_try() {

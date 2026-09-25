@@ -1,12 +1,10 @@
 use std::fs;
 
 use camino::{Utf8Path, Utf8PathBuf};
+use jp_process::MockProcessRunner;
 
 use super::{NO_SCREEN_RECORDING, Window, WindowList, no_window, parse, report, run, shot_path};
-use crate::{
-    debug_app::session::{Console, Session, Slot},
-    util::runner::MockProcessRunner,
-};
+use crate::debug_app::session::{Console, Session, Slot};
 
 /// A slot every test in this file shares, so paths are predictable.
 fn dir_for(root: &Utf8Path) -> Utf8PathBuf {

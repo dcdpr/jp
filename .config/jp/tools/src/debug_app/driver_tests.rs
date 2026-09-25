@@ -1,5 +1,6 @@
+use jp_process::{ExitCode, ProcessOutput};
+
 use super::{failure, is_not_permitted, said};
-use crate::util::runner::{ExitCode, ProcessOutput};
 
 fn output(stdout: &str, stderr: &str) -> ProcessOutput {
     ProcessOutput {

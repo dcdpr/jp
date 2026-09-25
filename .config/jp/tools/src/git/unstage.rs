@@ -1,12 +1,11 @@
 use camino::Utf8Path;
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use serde_json::{Map, Value};
 
+use super::Reported;
 use crate::{
     to_xml_with_root,
-    util::{
-        OneOrMany, ToolResult,
-        runner::{DuctProcessRunner, ProcessRunner},
-    },
+    util::{OneOrMany, ToolResult},
 };
 
 pub(crate) async fn git_unstage(
@@ -15,7 +14,7 @@ pub(crate) async fn git_unstage(
     options: &Map<String, Value>,
 ) -> ToolResult {
     let env = super::env_from_options(options);
-    git_unstage_impl(root, &paths, &DuctProcessRunner, &env)
+    git_unstage_impl(root, &paths, &SystemProcessRunner, &env)
 }
 
 fn git_unstage_impl<R: ProcessRunner>(
@@ -33,7 +32,8 @@ fn git_unstage_impl<R: ProcessRunner>(
     }
 
     if results.iter().any(|v| !v.success()) {
-        return to_xml_with_root(&results, "failed_to_unstage").map(Into::into);
+        let reported: Vec<Reported<'_>> = results.iter().map(Reported::from).collect();
+        return to_xml_with_root(&reported, "failed_to_unstage").map(Into::into);
     }
 
     Ok("Changes unstaged.".into())

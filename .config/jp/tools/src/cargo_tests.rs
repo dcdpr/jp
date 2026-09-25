@@ -2,6 +2,7 @@ use std::{fs, time::Duration};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::tempdir;
+use jp_process::MockProcessRunner;
 use jp_tool::{AccessPolicy, Action, Capability, Context, FsRule, Outcome};
 use pretty_assertions::assert_eq;
 use serde_json::{Map, Value, json};
@@ -10,10 +11,7 @@ use super::{
     Tool, ensure_workspace_root, format_duration, note_duration, required_capabilities, run,
     rustflags,
 };
-use crate::util::{
-    root::{CARGO_MANIFEST, resolve_root},
-    runner::MockProcessRunner,
-};
+use crate::util::root::{CARGO_MANIFEST, resolve_root};
 
 /// Create `relative` under `root` as a cargo package.
 ///

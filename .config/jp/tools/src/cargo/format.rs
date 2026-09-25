@@ -1,20 +1,17 @@
 use std::collections::BTreeSet;
 
 use camino::Utf8Path;
+use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 
 use super::MAX_DIAGNOSTIC_BYTES;
-use crate::util::{
-    ToolResult, error,
-    runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
-    truncate,
-};
+use crate::util::{ToolResult, error, truncate};
 
 pub(crate) async fn cargo_format(
     root: &Utf8Path,
     rustflags: &str,
     package: Option<String>,
 ) -> ToolResult {
-    cargo_format_impl(root, rustflags, package.as_deref(), &DuctProcessRunner)
+    cargo_format_impl(root, rustflags, package.as_deref(), &SystemProcessRunner)
 }
 
 fn cargo_format_impl<R: ProcessRunner>(

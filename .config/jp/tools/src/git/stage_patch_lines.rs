@@ -1,14 +1,12 @@
 use camino::Utf8Path;
+use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 use serde_json::{Map, Value};
 
 use super::{
     apply::{apply_patch_to_index, build_patch},
     hunk::{hunk_id, split_hunks},
 };
-use crate::util::{
-    ToolResult,
-    runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
-};
+use crate::util::ToolResult;
 
 pub(crate) fn git_stage_patch_lines(
     root: &Utf8Path,
@@ -19,7 +17,7 @@ pub(crate) fn git_stage_patch_lines(
 ) -> ToolResult {
     let lines = parse_line_selectors(lines)?;
     let env = super::env_from_options(options);
-    git_stage_patch_lines_impl(root, path, patch_id, &lines, &DuctProcessRunner, &env)
+    git_stage_patch_lines_impl(root, path, patch_id, &lines, &SystemProcessRunner, &env)
 }
 
 fn git_stage_patch_lines_impl<R: ProcessRunner>(

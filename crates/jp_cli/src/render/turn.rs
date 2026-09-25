@@ -126,6 +126,7 @@ impl TurnRenderer {
         let tool_chrome_shown = style.tool_call.show;
         let tool = ToolRenderer::new(ErrChannel::new(printer.clone()), style);
         view.set_tool_separator(tool.separator_flag());
+        view.set_tool_drawn(tool.drawn_flag());
         Self {
             printer,
             source,
@@ -279,6 +280,7 @@ impl TurnRenderer {
         );
         self.tool = ToolRenderer::new(ErrChannel::new(self.printer.clone()), style);
         self.view.set_tool_separator(self.tool.separator_flag());
+        self.view.set_tool_drawn(self.tool.drawn_flag());
         self.tools_config = tools_config;
     }
 }

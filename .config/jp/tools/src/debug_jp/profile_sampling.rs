@@ -15,6 +15,7 @@ use std::{
 };
 
 use camino::Utf8Path;
+use jp_process::SystemProcessRunner;
 use jp_tool::Outcome;
 
 use crate::{
@@ -26,7 +27,7 @@ use crate::{
         sandbox::{Sandbox, SandboxOpts},
         shorten_paths, with_termination_note,
     },
-    util::{ToolResult, error, runner::DuctProcessRunner},
+    util::{ToolResult, error},
 };
 
 /// Default sample(1) duration ceiling.
@@ -118,13 +119,13 @@ fn run(
     let sandbox = Sandbox::create(
         workspace_root,
         SandboxOpts { clone_user_data },
-        &DuctProcessRunner,
+        &SystemProcessRunner,
     )?;
 
     // Build jp from the sandboxed source tree. `profiling` is release-level
     // optimization plus debug info, which is exactly what `sample(1)` needs
     // to resolve symbols cleanly.
-    let binary = build::build(&DuctProcessRunner, &BuildSpec {
+    let binary = build::build(&SystemProcessRunner, &BuildSpec {
         working_dir: sandbox.working_dir(),
         package: "jp_cli",
         bin: "jp",

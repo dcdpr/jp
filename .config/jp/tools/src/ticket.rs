@@ -23,7 +23,8 @@ use comfort::{
     DEFAULT_MAX_WIDTH,
     format::{FormatOptions, format_markdown_with},
 };
-use serde_json::Value;
+use jp_tool::Question;
+use serde_json::{Map, Value};
 
 use crate::{
     Context, Tool,
@@ -32,6 +33,20 @@ use crate::{
 
 /// The handle tickets and comments written by the assistant carry.
 const HANDLE: &str = "jp";
+
+/// The longest title `ticket_create` accepts, in characters, unless
+/// `options.max_title_length` overrides it (both routes carry the option).
+///
+/// Tied to the slug budget so the filename carries the whole title: a slug is
+/// never longer than the title it came from, since each character contributes
+/// at most one ASCII byte.
+const DEFAULT_MAX_TITLE_LENGTH: usize = store::MAX_SLUG_SIZE;
+
+/// The question `ticket_create` puts back when a title doesn't fit.
+///
+/// `create.toml` routes it to the assistant, and the answer must be read under
+/// this same id.
+const SHORTER_TITLE: &str = "shorter_title";
 
 #[expect(
     clippy::needless_pass_by_value,
@@ -59,6 +74,12 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
             let labels = match resolve_labels(root, t.opt::<Vec<String>>("labels")?.as_deref())? {
                 Ok(labels) => labels,
                 Err(refusal) => return error(refusal),
+            };
+
+            let limit = t.option_or("max_title_length", DEFAULT_MAX_TITLE_LENGTH);
+            let title = match fitting_title(&title, &t.answers, limit) {
+                Ok(title) => title,
+                Err(outcome) => return outcome,
             };
 
             if ctx.action.is_format_arguments() {
@@ -179,6 +200,60 @@ fn create(
     reflow(&path)?;
 
     Ok(format!("Created {id} at {}", relative(root, &path)).into())
+}
+
+/// Settle on a title of at most `limit` characters.
+///
+/// A title over the limit is put back as a [`SHORTER_TITLE`] question, so the
+/// ticket can be retitled without the body being sent a second time.
+/// The answer replaces the title outright; one that is itself unusable ends the
+/// call, because asking again under the same id would put the tool straight
+/// back where it started.
+///
+/// The error variant is the outcome to return in place of the caller's work.
+/// Both actions go through here: a preview drawn before the title is settled
+/// would show a heading and a filename the ticket won't carry, so the question
+/// is put back there too and the preview is drawn once the answer is in.
+fn fitting_title(
+    title: &str,
+    answers: &Map<String, Value>,
+    limit: usize,
+) -> Result<String, ToolResult> {
+    let Some(answer) = answers.get(SHORTER_TITLE) else {
+        let title = title.trim();
+        let count = title.chars().count();
+        if count <= limit {
+            return Ok(title.to_owned());
+        }
+
+        let question = match Question::text(
+            SHORTER_TITLE,
+            format!(
+                "The title is {count} characters, and a ticket takes at most {limit}. Give a \
+                 shorter title for: {title}"
+            ),
+        ) {
+            Ok(question) => question,
+            Err(err) => return Err(Err(err.into())),
+        };
+
+        return Err(Ok(question.into()));
+    };
+
+    let retitled = answer.as_str().unwrap_or_default().trim();
+    if retitled.is_empty() {
+        return Err(error("The shorter title was empty."));
+    }
+
+    let count = retitled.chars().count();
+    if count > limit {
+        return Err(error(format!(
+            "The shorter title is {count} characters, and a ticket takes at most {limit}: \
+             {retitled}"
+        )));
+    }
+
+    Ok(retitled.to_owned())
 }
 
 /// Render the ticket file `create` is about to write.

@@ -1,15 +1,13 @@
 use std::fmt::Write;
 
 use camino::Utf8Path;
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use serde_json::{Map, Value};
 
 use super::env_from_options;
 use crate::{
     to_list_with_root,
-    util::{
-        ToolResult, error,
-        runner::{DuctProcessRunner, ProcessRunner},
-    },
+    util::{ToolResult, error},
 };
 
 /// Maximum number of untracked files to list before truncating.
@@ -30,7 +28,7 @@ struct StatusEntry {
 
 pub(crate) async fn git_status(root: &Utf8Path, options: &Map<String, Value>) -> ToolResult {
     let env = env_from_options(options);
-    git_status_impl(root, &DuctProcessRunner, &env)
+    git_status_impl(root, &SystemProcessRunner, &env)
 }
 
 fn git_status_impl<R: ProcessRunner>(

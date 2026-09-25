@@ -13,6 +13,9 @@
 //!
 //! [`swift_test`]: super::test
 
+use std::{sync::Arc, time::Duration};
+
+use jp_process::{Ended, Finished, ProcessRunner, SystemProcessRunner};
 use jp_tool::Context;
 
 use super::{
@@ -23,10 +26,7 @@ use super::{
         collect_staged_issues, executed_tests, outcome, ui_bundle_filter,
     },
 };
-use crate::util::{
-    ToolResult, error,
-    runner::{DuctProcessRunner, ProcessOutput, ProcessRunner, Stopped},
-};
+use crate::util::{ToolResult, error};
 
 /// The line `xcodebuild` prints when a swift-testing expectation fails.
 ///
@@ -34,6 +34,14 @@ use crate::util::{
 /// appears, so a broken app costs one test's worth of time instead of the whole
 /// suite's.
 const FAILURE_MARKER: &str = "recorded an issue";
+
+/// How long `xcodebuild` gets to wind down after the first failure before it is
+/// killed.
+///
+/// Interrupted, it tears down its test session, which is what stops the app a
+/// UI test was driving; killed outright, it leaves that app running on the
+/// screen.
+const INTERRUPT_GRACE: Duration = Duration::from_secs(5);
 
 /// Whether this process is running under continuous integration.
 ///
@@ -58,7 +66,7 @@ fn is_ci(value: Option<&str>) -> bool {
 }
 
 pub(crate) async fn swift_test_ui(ctx: &Context, tests: Option<Vec<String>>) -> ToolResult {
-    swift_test_ui_impl(ctx, tests.as_deref(), &DuctProcessRunner)
+    swift_test_ui_impl(ctx, tests.as_deref(), &SystemProcessRunner)
 }
 
 fn swift_test_ui_impl<R: ProcessRunner>(
@@ -111,7 +119,7 @@ fn swift_test_ui_impl<R: ProcessRunner>(
     clear_screenshots();
     clear_result_bundle(&ctx.root);
 
-    let (output, stopped) = run(ctx, tests, runner)?;
+    let Finished { output, ended } = run(ctx, tests, runner)?;
 
     // What the runner itself printed, in the order the sources can be trusted.
     //
@@ -128,7 +136,7 @@ fn swift_test_ui_impl<R: ProcessRunner>(
         .unwrap_or_else(collect_failures);
     let detail = reported + &collect_screenshots(&ctx.root);
 
-    if stopped.is_yes() {
+    if ended == Ended::Stopped {
         close_leftover_apps();
 
         return error(format!(
@@ -282,7 +290,7 @@ fn run<R: ProcessRunner>(
     ctx: &Context,
     tests: &[String],
     runner: &R,
-) -> Result<(ProcessOutput, Stopped), std::io::Error> {
+) -> Result<Finished, std::io::Error> {
     let filters: Vec<String> = tests.iter().map(|test| ui_bundle_filter(test)).collect();
 
     let mut args = vec![
@@ -302,12 +310,19 @@ fn run<R: ProcessRunner>(
     args.extend(filters.iter().map(String::as_str));
 
     if under_ci() {
-        return Ok((runner.run("xcodebuild", &args, &ctx.root)?, Stopped::No));
+        return Ok(Finished {
+            output: runner.run("xcodebuild", &args, &ctx.root)?,
+            ended: Ended::Exited,
+        });
     }
 
-    runner.run_until("xcodebuild", &args, &ctx.root, &|line| {
-        line.contains(FAILURE_MARKER)
-    })
+    runner.run_until(
+        "xcodebuild",
+        &args,
+        &ctx.root,
+        Arc::new(|line: &str| line.contains(FAILURE_MARKER)),
+        INTERRUPT_GRACE,
+    )
 }
 
 #[cfg(test)]

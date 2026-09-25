@@ -1,10 +1,8 @@
 use camino::Utf8Path;
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use serde_json::{Map, Value};
 
-use crate::util::{
-    OneOrMany, ToolResult,
-    runner::{DuctProcessRunner, ProcessRunner},
-};
+use crate::util::{OneOrMany, ToolResult};
 
 pub(crate) async fn git_add_intent(
     root: &Utf8Path,
@@ -12,7 +10,7 @@ pub(crate) async fn git_add_intent(
     options: &Map<String, Value>,
 ) -> ToolResult {
     let env = super::env_from_options(options);
-    git_add_intent_impl(root, &paths, &DuctProcessRunner, &env)
+    git_add_intent_impl(root, &paths, &SystemProcessRunner, &env)
 }
 
 fn git_add_intent_impl<R: ProcessRunner>(

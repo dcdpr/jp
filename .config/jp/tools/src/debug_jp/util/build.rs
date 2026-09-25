@@ -6,8 +6,9 @@
 //! share artifacts.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use jp_process::ProcessRunner;
 
-use crate::{Error, util::runner::ProcessRunner};
+use crate::Error;
 
 /// What to build and how.
 #[derive(Debug, Clone)]

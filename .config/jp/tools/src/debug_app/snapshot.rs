@@ -16,6 +16,7 @@
 //! which neither of the other two can.
 
 use camino::Utf8Path;
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use jp_tool::Outcome;
 
 use crate::{
@@ -28,7 +29,6 @@ use crate::{
     util::{
         ToolResult, error,
         paths::{self, Shortening, shorten},
-        runner::{DuctProcessRunner, ProcessRunner},
         trace::parse_lines,
     },
 };
@@ -60,7 +60,7 @@ pub(crate) async fn debug_app_snapshot(ctx: &Context, t: &Tool) -> ToolResult {
     }
 
     let dir = Session::dir(&ctx.root, &Slot::for_context(ctx)?);
-    run(&ctx.root, &dir, &opts, pasteboard, &DuctProcessRunner)
+    run(&ctx.root, &dir, &opts, pasteboard, &SystemProcessRunner)
 }
 
 fn format_preview(opts: &tree::Options, pasteboard: bool) -> String {

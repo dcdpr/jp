@@ -1,17 +1,15 @@
 use std::{fs, time::Duration};
 
 use camino::Utf8Path;
+use jp_process::MockProcessRunner;
 
 use super::{
     Appearance, bundle_identifier, bundle_path, create_scratch_workspace, format_preview,
     open_args, prepare_state_dir, resolve_workspace, run, stage_bundle, wait_for_pid,
 };
-use crate::{
-    debug_app::{
-        launch::LaunchSpec,
-        session::{Console, Session, Slot},
-    },
-    util::runner::MockProcessRunner,
+use crate::debug_app::{
+    launch::LaunchSpec,
+    session::{Console, Session, Slot},
 };
 
 /// What `xcodebuild -showBuildSettings -json` reports, trimmed to the two keys

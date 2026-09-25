@@ -16,6 +16,7 @@ version.workspace = true
 comfort = { workspace = true }
 jp_github = { workspace = true }
 jp_md = { workspace = true }
+jp_process = { workspace = true }
 jp_tool = { workspace = true }
 jp_workspace = { workspace = true }
 ticket = { workspace = true }
@@ -28,7 +29,6 @@ clean-path = { workspace = true }
 convert_case = { workspace = true }
 crossbeam-channel = { workspace = true, features = ["std"] }
 crossterm = { workspace = true }
-duct = { workspace = true }
 fancy-regex = { workspace = true, features = ["perf", "std", "unicode"] }
 grep-matcher = { workspace = true }
 grep-printer = { workspace = true }
@@ -61,6 +61,8 @@ windows-sys = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+jp_process = { workspace = true, features = ["mock"] }
+
 assert_matches = { workspace = true }
 camino-tempfile = { workspace = true }
 pretty_assertions = { workspace = true, features = ["std"] }

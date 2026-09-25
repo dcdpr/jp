@@ -22,6 +22,7 @@
 //! its command line.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use jp_process::{ProcessOutput, ProcessRunner, RunnerOpts, SystemProcessRunner};
 use jp_tool::{Context, Outcome, Question, lexical_workspace_relative};
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -30,11 +31,7 @@ use crate::{
     Error, Tool,
     bash::runtime::{Install, RunSpec, Runtime, argv, detect, ensure_image},
     to_xml,
-    util::{
-        OneOrMany, ToolResult,
-        runner::{DuctProcessRunner, ProcessOutput, ProcessRunner, RunnerOpts},
-        truncate,
-    },
+    util::{OneOrMany, ToolResult, truncate},
 };
 
 mod runtime;
@@ -93,7 +90,7 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
         ));
     };
 
-    execute(&ctx.root, runtime, &plan, &DuctProcessRunner)
+    execute(&ctx.root, runtime, &plan, &SystemProcessRunner)
 }
 
 /// The container invocation a call resolves to, once policy has been applied.

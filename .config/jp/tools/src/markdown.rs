@@ -9,16 +9,13 @@
 
 use std::collections::BTreeSet;
 
+use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 use jp_tool::Context;
 
 use crate::{
     Tool,
     fs::utils::resolve_workspace_path,
-    util::{
-        OneOrMany, ToolResult, error,
-        runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
-        truncate, unknown_tool,
-    },
+    util::{OneOrMany, ToolResult, error, truncate, unknown_tool},
 };
 
 /// Cap for each chunk of `comfort` output embedded in a tool result.
@@ -39,7 +36,7 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
 }
 
 fn markdown_format(ctx: &Context, paths: Option<OneOrMany<String>>) -> ToolResult {
-    markdown_format_impl(ctx, paths, &DuctProcessRunner)
+    markdown_format_impl(ctx, paths, &SystemProcessRunner)
 }
 
 fn markdown_format_impl<R: ProcessRunner>(

@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use camino::Utf8Path;
+use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 use jp_tool::{Capability, Outcome};
 use serde_json::Value;
 
@@ -9,7 +10,6 @@ use crate::{
     util::{
         OneOrMany, ToolResult, error,
         root::{CARGO_MANIFEST, configured_root, note_root, resolve_root},
-        runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
         unknown_tool,
     },
 };
@@ -63,7 +63,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     };
 
     if root != ctx.root
-        && let Err(message) = ensure_workspace_root(&root, &DuctProcessRunner)
+        && let Err(message) = ensure_workspace_root(&root, &SystemProcessRunner)
     {
         return error(message);
     }

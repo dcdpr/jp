@@ -1,15 +1,13 @@
 use std::fmt::Write;
 
 use camino::Utf8Path;
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use serde_json::{Map, Value};
 
 use super::env_from_options;
 use crate::{
     Result,
-    util::{
-        OneOrMany, ToolResult, error,
-        runner::{DuctProcessRunner, ProcessRunner},
-    },
+    util::{OneOrMany, ToolResult, error},
 };
 
 /// Upper bound on how many commits we'll return, regardless of what the caller
@@ -54,7 +52,7 @@ pub(crate) async fn git_log(
         &paths,
         count,
         since.as_deref(),
-        &DuctProcessRunner,
+        &SystemProcessRunner,
         &env,
     )
 }

@@ -1,13 +1,11 @@
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use jp_tool::Context;
 
 use super::{PROJECT_PATH, SCHEME, prepare, report, strip};
-use crate::util::{
-    ToolResult, error,
-    runner::{DuctProcessRunner, ProcessRunner},
-};
+use crate::util::{ToolResult, error};
 
 pub(crate) async fn swift_check(ctx: &Context, configuration: Option<String>) -> ToolResult {
-    swift_check_impl(ctx, configuration.as_deref(), &DuctProcessRunner)
+    swift_check_impl(ctx, configuration.as_deref(), &SystemProcessRunner)
 }
 
 fn swift_check_impl<R: ProcessRunner>(

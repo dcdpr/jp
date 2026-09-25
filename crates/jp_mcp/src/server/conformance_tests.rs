@@ -1,9 +1,7 @@
 //! Independent HTTP client fixtures for the MCP Host/third-party boundary.
 
-#[cfg(unix)]
-use std::fs;
 use std::{
-    io,
+    fs, io,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -17,6 +15,7 @@ use jp_config::{
     AppConfig, Config as _,
     conversation::tool::{PartialToolConfig, ToolConfig},
 };
+use jp_process::{ExitCode, MockProcessRunner, ProcessOutput, ProcessRunner};
 use jp_tool::{Outcome, Question, ToolResult};
 use reqwest::{Client as HttpClient, Response, redirect::Policy};
 use rmcp::model::{CallToolRequestParams, Meta};
@@ -36,6 +35,7 @@ use crate::{
             Admission, ConfiguredTool, HostError, HostReceiver, HostRequest, InputAnswer,
             Interaction, ReleaseDecision, Service,
         },
+        testing::{no_commands, printed},
         tool_definitions,
     },
 };
@@ -277,12 +277,24 @@ impl Fixture {
 }
 
 async fn fixture(config: Value, builtins: BuiltinExecutors) -> Fixture {
-    fixture_reporting_every(config, builtins, super::PROGRESS_HEARTBEAT).await
+    fixture_reporting_every(config, builtins, no_commands(), super::PROGRESS_HEARTBEAT).await
+}
+
+/// A fixture whose `probe` tool is a local command, played by `runner`.
+async fn local_fixture(config: Value, runner: Arc<dyn ProcessRunner>) -> Fixture {
+    fixture_reporting_every(
+        config,
+        BuiltinExecutors::new(),
+        runner,
+        super::PROGRESS_HEARTBEAT,
+    )
+    .await
 }
 
 async fn fixture_reporting_every(
     config: Value,
     builtins: BuiltinExecutors,
+    runner: Arc<dyn ProcessRunner>,
     heartbeat: Duration,
 ) -> Fixture {
     let root = tempdir().unwrap();
@@ -313,6 +325,7 @@ async fn fixture_reporting_every(
         tools,
         upstream,
         builtins,
+        runner,
         root.path().to_owned(),
         InvocationContext {
             workspace_id: "workspace-1".into(),
@@ -394,16 +407,21 @@ async fn external_discovery_preserves_host_metadata_without_executing() {
 /// A caller given nothing to go on cannot tell a working tool from a stuck one,
 /// and clients abandon calls they have heard nothing about.
 #[tokio::test]
-#[cfg(unix)]
 async fn external_progress_token_receives_each_stderr_line_before_the_result() {
-    let mut fixture = fixture(
+    let mut fixture = local_fixture(
         json!({
             "source": "local",
-            "command": {"program": "sh", "shell": false, "args": [
-                "-c", "printf 'step one\\nstep two\\n' >&2; printf '%s' 'finished'",
-            ]},
+            "command": {"program": "probe", "shell": false, "args": []},
         }),
-        BuiltinExecutors::new(),
+        Arc::new(
+            MockProcessRunner::builder()
+                .expect("probe")
+                .returns(ProcessOutput {
+                    stdout: "finished".into(),
+                    stderr: "step one\nstep two\n".into(),
+                    status: ExitCode::success(),
+                }),
+        ),
     )
     .await;
     let client = ExternalClient::connect(fixture.endpoint.url()).await;
@@ -465,6 +483,7 @@ async fn external_progress_token_receives_liveness_while_the_call_waits() {
     let mut fixture = fixture_reporting_every(
         json!({"source":"builtin", "summary":"Probe"}),
         BuiltinExecutors::new().register("probe", Ordinal(count.clone())),
+        no_commands(),
         heartbeat,
     )
     .await;
@@ -522,23 +541,43 @@ async fn external_progress_token_receives_liveness_while_the_call_waits() {
 }
 
 #[tokio::test]
-#[cfg(unix)]
 #[expect(
     clippy::too_many_lines,
     reason = "Keep the inquiry, re-execution, and recording assertions in one linear scenario"
 )]
 async fn external_inquiry_reexecutes_with_host_answers_and_records_edited_output() {
-    let mut fixture = fixture(json!({
+    // Asks until it is given an answer, then prints the context it was run
+    // with, which it received as its second argument.
+    let asking = serde_json::to_string(&Outcome::NeedsInput {
+        question: Question::boolean("confirm", "Continue?").unwrap(),
+    })
+    .unwrap();
+    let runner = Arc::new(MockProcessRunner::responding(move |spec| {
+        Ok(printed(match spec.args.as_slice() {
+            [answer, context] if answer != "null" => context.clone(),
+            _ => asking.clone(),
+        }))
+    }));
+    let mut fixture = local_fixture(json!({
         "source":"local", "run":"ask", "result":"edit", "options":{"marker":"configured"},
         "parameters":{"value":{"type":"string","required":true}},
-        "command":{"program":"sh","shell":false,"args":["-c",
-            "printf 'attempt\\n' >> attempts; if [ \"$1\" = null ]; then printf '%s' '{\"type\":\"needs_input\",\"question\":{\"id\":\"confirm\",\"text\":\"Continue?\",\"answer_type\":{\"type\":\"boolean\"}}}'; else printf '%s' \"$2\"; fi",
-            "fixture", "{{tool.answers.confirm}}",
+        "command":{"program":"probe","shell":false,"args":[
+            "{{tool.answers.confirm}}",
             "{{ {'value':tool.arguments.value,'answer':tool.answers.confirm,'action':context.action,'workspace':context.workspace_id,'conversation':context.conversation_id,'marker':tool.options.marker} | tojson }}"
         ]}
-    }), BuiltinExecutors::new()).await;
+    }), runner.clone()).await;
     let attacker = fixture.root.path().join("attacker");
-    fs::create_dir(&attacker).unwrap();
+    // Every attempt runs in the workspace root, whatever the caller claims.
+    let attempts = |runner: &MockProcessRunner| {
+        runner
+            .calls()
+            .into_iter()
+            .map(|spec| {
+                assert_eq!(spec.dir, fixture.root.path(), "an attempt ran elsewhere");
+                spec.args[0].clone()
+            })
+            .collect::<Vec<_>>()
+    };
     let client = ExternalClient::connect(fixture.endpoint.url()).await;
     let meta = json!({
         "claudecode/toolUseId":"external-1",
@@ -566,7 +605,7 @@ async fn external_inquiry_reexecutes_with_host_answers_and_records_edited_output
         arguments,
         json!({"value":"requested"}).as_object().unwrap().clone()
     );
-    assert!(!fixture.root.path().join("attempts").exists());
+    assert_eq!(attempts(&runner), Vec::<String>::new());
     reply
         .send(Ok(Admission::Run {
             arguments: json!({"value":"edited"}).as_object().unwrap().clone(),
@@ -595,10 +634,7 @@ async fn external_inquiry_reexecutes_with_host_answers_and_records_edited_output
         json!({"type":"boolean"}).as_object().unwrap().clone()
     );
     assert!(answers.is_empty());
-    assert_eq!(
-        fs::read_to_string(fixture.root.path().join("attempts")).unwrap(),
-        "attempt\n"
-    );
+    assert_eq!(attempts(&runner), ["null"]);
     reply.send(Ok(InputAnswer::Answer(json!(false)))).unwrap();
     let pending = next(&mut fixture.host).await;
     assert_eq!(pending.call.id, id);
@@ -611,11 +647,8 @@ async fn external_inquiry_reexecutes_with_host_answers_and_records_edited_output
         serde_json::from_str::<Value>(&raw).unwrap(),
         json!({"value":"edited","answer":false,"action":"run","workspace":"workspace-1","conversation":"conversation-1","marker":"configured"})
     );
-    assert_eq!(
-        fs::read_to_string(fixture.root.path().join("attempts")).unwrap(),
-        "attempt\nattempt\n"
-    );
-    assert!(!attacker.join("attempts").exists());
+    assert_eq!(attempts(&runner), ["null", "false"]);
+    assert_ne!(fixture.root.path(), attacker);
     reply.send(Ok(ToolResult::text("approved output"))).unwrap();
     let pending = next(&mut fixture.host).await;
     assert_eq!(pending.call.id, id);

@@ -1,16 +1,14 @@
 use std::cmp::min;
 
 use camino::Utf8Path;
+use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
 use super::hunk::{hunk_id, split_hunks};
 use crate::{
     to_simple_xml_with_root,
-    util::{
-        OneOrMany, ToolResult,
-        runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
-    },
+    util::{OneOrMany, ToolResult},
 };
 
 #[derive(Debug, Serialize)]
@@ -38,7 +36,7 @@ pub(crate) fn git_list_patches(
     options: &Map<String, Value>,
 ) -> ToolResult {
     let env = super::env_from_options(options);
-    git_list_patches_impl(root, files, &DuctProcessRunner, &env)
+    git_list_patches_impl(root, files, &SystemProcessRunner, &env)
 }
 
 /// Discover all files with unstaged changes via `git diff-files --name-only`.

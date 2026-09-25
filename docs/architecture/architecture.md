@@ -121,6 +121,11 @@ jp_config/            Configuration system
 jp_mcp/               Model Context Protocol client
   └─ client.rs        MCP server lifecycle + tool calls
 
+jp_process/           Running a program to completion
+  ├─ lib.rs           ProcessRunner trait, ProcessSpec, ProcessOutput
+  ├─ system.rs        The runner that spawns real processes
+  └─ mock.rs          Scripted runner for tests (`mock` feature)
+
 jp_task/              Background task handling
   └─ task/title_generator.rs  Async title generation
 ```
@@ -597,7 +602,9 @@ jp_cli
   │   ├─ jp_conversation
   │   └─ jp_config
   ├─ jp_mcp
+  │   ├─ jp_process
   │   └─ rmcp (external)
+  ├─ jp_process
   ├─ jp_config
   │   └─ schematic (external)
   ├─ jp_task

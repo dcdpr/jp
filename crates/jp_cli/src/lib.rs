@@ -1444,6 +1444,7 @@ fn configure_logging(
         "reqwest=off",
         "rustls=off",
         "tokio=off",
+        "jp_llm::provider::anthropic::acp::protocol=off",
     ];
 
     // File layer: always captures full trace for post-mortem debugging.

@@ -1,13 +1,10 @@
 use std::collections::BTreeSet;
 
 use camino::Utf8Path;
+use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 
 use super::MAX_DIAGNOSTIC_BYTES;
-use crate::util::{
-    ToolResult, error,
-    runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
-    truncate,
-};
+use crate::util::{ToolResult, error, truncate};
 
 pub(crate) async fn cargo_check(
     root: &Utf8Path,
@@ -22,7 +19,7 @@ pub(crate) async fn cargo_check(
         profile,
         package.as_deref(),
         checksum_freshness,
-        &DuctProcessRunner,
+        &SystemProcessRunner,
     )
 }
 

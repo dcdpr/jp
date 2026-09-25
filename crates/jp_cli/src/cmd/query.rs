@@ -113,6 +113,7 @@ use jp_mcp::{
 };
 use jp_md::format::Formatter;
 use jp_printer::Printer;
+use jp_process::SystemProcessRunner;
 use jp_storage::backend::{FsStorageBackend, Projection};
 use jp_task::task::TitleGeneratorTask;
 use jp_tool::{Error as ToolError, InvocationContext, ToolDefinition, ToolDocs};
@@ -1178,6 +1179,7 @@ impl Query {
             BuiltinExecutors::new().register("describe_tools", DescribeTools::new(docs_map));
         let (executor_source, execution_owner) = TerminalExecutorSource::start_with_metadata(
             builtin_executors,
+            Arc::new(SystemProcessRunner),
             tools,
             &cfg.conversation.tools,
             approvals,
