@@ -859,10 +859,15 @@ async fn hidden_presentation_never_executes_formatter() {
     assert!(!root.path().join("formatter-ran").exists());
 }
 
-/// A service whose `count` tool has a formatter that can only describe the call
-/// once its `confirm` question is answered, and asks it otherwise.
+/// A service whose `count` tool has a formatter that asks the tool's `confirm`
+/// question, and describes the call with the answer once it has one.
+///
+/// `format` is the tool's `format` setting.
+/// The counter records how many times the tool itself ran.
 #[cfg(unix)]
-fn deferring_formatter_fixture() -> (Service, HostReceiver, Utf8TempDir) {
+fn asking_formatter_fixture(
+    format: &str,
+) -> (Service, HostReceiver, Arc<AtomicUsize>, Utf8TempDir) {
     let root = tempdir().unwrap();
     // Serialized rather than hand-written, so the formatter speaks the wire
     // format a real tool emits.
@@ -877,12 +882,13 @@ fn deferring_formatter_fixture() -> (Service, HostReceiver, Utf8TempDir) {
         "'{% endif %}",
     ]
     .concat();
+    let count = Arc::new(AtomicUsize::new(0));
     let (service, host) = service(
         json!({
             "source": "builtin",
             "run": "ask",
             "result": "unattended",
-            "format": "unattended",
+            "format": format,
             "style": {"parameters": {
                 "program": "sh",
                 "args": ["-c", script],
@@ -890,17 +896,98 @@ fn deferring_formatter_fixture() -> (Service, HostReceiver, Utf8TempDir) {
             }},
         }),
         root.path(),
-        BuiltinExecutors::new().register("count", CountingTool(Arc::new(AtomicUsize::new(0)))),
+        BuiltinExecutors::new().register("count", CountingTool(count.clone())),
         InvocationContext::default(),
     );
-    (service, host, root)
+    (service, host, count, root)
 }
 
-/// Take a deferring formatter's call up to the tool's own question: the
-/// formatter declines to describe it before approval, and the call runs anyway.
+/// Take the next interaction, which must be the formatter's `confirm` question.
 #[cfg(unix)]
-async fn run_until_input(host: &mut HostReceiver) -> oneshot::Sender<HostReply<InputAnswer>> {
-    let Interaction::RenderArguments { reply } = next(host).await.interaction else {
+async fn formatter_question(host: &mut HostReceiver) -> oneshot::Sender<HostReply<InputAnswer>> {
+    let Interaction::Input { request, reply, .. } = next(host).await.interaction else {
+        panic!("expected the formatter's question")
+    };
+    assert_eq!(request.id.as_str(), "confirm");
+    reply
+}
+
+/// Record the call and return what the caller received.
+#[cfg(unix)]
+async fn record(host: &mut HostReceiver, call: Call) -> ToolResult {
+    let Interaction::Record { reply, .. } = next(host).await.interaction else {
+        panic!("expected recording")
+    };
+    reply.send(Ok(())).unwrap();
+    call.finish().await.unwrap()
+}
+
+#[cfg(unix)]
+fn described(formatted: Option<Formatted>) -> Option<Result<String, String>> {
+    formatted.map(|result| result.map_err(|error| error.to_string()))
+}
+
+/// The formatter's question is answered before the call is put up for approval,
+/// so the Host approves the call as the formatter describes it with the answer.
+/// The tool runs once, with that same answer, and asks nothing.
+#[tokio::test]
+#[cfg(unix)]
+async fn a_formatters_question_is_answered_before_the_call_is_prepared() {
+    let (service, mut host, count, _root) = asking_formatter_fixture("unattended");
+    let call = service.start_call(request()).unwrap();
+    let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
+        panic!("expected visibility request")
+    };
+    reply.send(Ok(true)).unwrap();
+    formatter_question(&mut host)
+        .await
+        .send(Ok(json!(true).into()))
+        .unwrap();
+
+    let Interaction::Prepare {
+        arguments,
+        formatted_arguments,
+        reply,
+        ..
+    } = next(&mut host).await.interaction
+    else {
+        panic!("expected preparation")
+    };
+    assert_eq!(
+        described(formatted_arguments),
+        Some(Ok("confirmed:true".into()))
+    );
+    reply.send(Ok(Admission::Run { arguments })).unwrap();
+    let Interaction::Release {
+        formatted_arguments,
+        reply,
+        ..
+    } = next(&mut host).await.interaction
+    else {
+        panic!("expected release")
+    };
+    assert_eq!(
+        described(formatted_arguments),
+        Some(Ok("confirmed:true".into()))
+    );
+    reply.send(Ok(ReleaseDecision::Execute)).unwrap();
+
+    // Recording follows release directly: the tool already had its answer.
+    assert_eq!(
+        record(&mut host, call).await,
+        ToolResult::text(r#"{"arguments":{"path":"original"},"answer":true}"#)
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+}
+
+/// A formatter held back until admission asks its question between admission
+/// and release, so the call is still described before anything runs.
+#[tokio::test]
+#[cfg(unix)]
+async fn a_formatter_held_until_admission_asks_before_release() {
+    let (service, mut host, count, _root) = asking_formatter_fixture("ask");
+    let call = service.start_call(request()).unwrap();
+    let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
         panic!("expected visibility request")
     };
     reply.send(Ok(true)).unwrap();
@@ -909,76 +996,104 @@ async fn run_until_input(host: &mut HostReceiver) -> oneshot::Sender<HostReply<I
         formatted_arguments,
         reply,
         ..
-    } = next(host).await.interaction
+    } = next(&mut host).await.interaction
     else {
         panic!("expected preparation")
     };
-    assert_eq!(
-        formatted_arguments.map(|result| result.map_err(|error| error.to_string())),
-        Some(Err("Custom arguments formatter requested input.".into()))
-    );
+    assert!(formatted_arguments.is_none());
     reply.send(Ok(Admission::Run { arguments })).unwrap();
-    let Interaction::Release { reply, .. } = next(host).await.interaction else {
-        panic!("expected release")
-    };
-    reply.send(Ok(ReleaseDecision::Execute)).unwrap();
-    let Interaction::Input { reply, .. } = next(host).await.interaction else {
-        panic!("expected input")
-    };
-    reply
-}
-
-#[tokio::test]
-#[cfg(unix)]
-async fn a_deferred_formatter_describes_the_call_with_its_answers() {
-    let (service, mut host, _root) = deferring_formatter_fixture();
-    let call = service.start_call(request()).unwrap();
-    run_until_input(&mut host)
+    formatter_question(&mut host)
         .await
         .send(Ok(json!(true).into()))
         .unwrap();
 
-    // The description comes before the result is recorded, so the Host can
-    // show the call ahead of what it returned.
-    let Interaction::DeferredArguments {
+    let Interaction::Release {
         formatted_arguments,
         reply,
+        ..
     } = next(&mut host).await.interaction
     else {
-        panic!("expected the deferred description")
+        panic!("expected release")
     };
     assert_eq!(
-        formatted_arguments.map_err(|error| error.to_string()),
-        Ok("confirmed:true".into())
+        described(formatted_arguments),
+        Some(Ok("confirmed:true".into()))
     );
-    reply.send(Ok(())).unwrap();
-    let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
-        panic!("expected recording")
-    };
-    reply.send(Ok(())).unwrap();
+    reply.send(Ok(ReleaseDecision::Execute)).unwrap();
     assert_eq!(
-        call.finish().await.unwrap(),
+        record(&mut host, call).await,
         ToolResult::text(r#"{"arguments":{"path":"original"},"answer":true}"#)
     );
+    assert_eq!(count.load(Ordering::SeqCst), 1);
 }
 
+/// A Host that resolves the call instead of answering the formatter settles it
+/// there: nothing is prepared, and the tool never runs.
 #[tokio::test]
 #[cfg(unix)]
-async fn a_deferred_formatter_is_not_run_for_a_call_the_host_settled() {
-    let (service, mut host, _root) = deferring_formatter_fixture();
+async fn a_settled_formatter_question_records_the_call_without_running_it() {
+    let (service, mut host, count, _root) = asking_formatter_fixture("unattended");
     let call = service.start_call(request()).unwrap();
-    run_until_input(&mut host)
+    let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
+        panic!("expected visibility request")
+    };
+    reply.send(Ok(true)).unwrap();
+    formatter_question(&mut host)
         .await
         .send(Ok(InputAnswer::Complete {
             result: ToolResult::text("declined"),
         }))
         .unwrap();
 
-    // Recording follows directly: the call the formatter was waiting to
-    // describe never ran.
-    let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
-        panic!("expected recording, not a description")
+    assert_eq!(record(&mut host, call).await, ToolResult::text("declined"));
+    assert_eq!(count.load(Ordering::SeqCst), 0);
+}
+
+/// An answer given about the original arguments is not carried over to
+/// arguments the Host edited: the formatter asks again, and the tool runs with
+/// the new answer.
+#[tokio::test]
+#[cfg(unix)]
+async fn edited_arguments_ask_the_formatters_question_again() {
+    let (service, mut host, count, _root) = asking_formatter_fixture("unattended");
+    let call = service.start_call(request()).unwrap();
+    let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
+        panic!("expected visibility request")
     };
-    reply.send(Ok(())).unwrap();
-    assert_eq!(call.finish().await.unwrap(), ToolResult::text("declined"));
+    reply.send(Ok(true)).unwrap();
+    formatter_question(&mut host)
+        .await
+        .send(Ok(json!(true).into()))
+        .unwrap();
+    let Interaction::Prepare { reply, .. } = next(&mut host).await.interaction else {
+        panic!("expected preparation")
+    };
+    reply
+        .send(Ok(Admission::Run {
+            arguments: json!({"path": "edited"}).as_object().unwrap().clone(),
+        }))
+        .unwrap();
+
+    formatter_question(&mut host)
+        .await
+        .send(Ok(json!(false).into()))
+        .unwrap();
+    let Interaction::Release {
+        formatted_arguments,
+        reply,
+        ..
+    } = next(&mut host).await.interaction
+    else {
+        panic!("expected release")
+    };
+    assert_eq!(
+        described(formatted_arguments),
+        Some(Ok("confirmed:false".into()))
+    );
+    reply.send(Ok(ReleaseDecision::Execute)).unwrap();
+    assert_eq!(
+        record(&mut host, call).await,
+        ToolResult::text(r#"{"arguments":{"path":"edited"},"answer":false}"#)
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 1);
 }

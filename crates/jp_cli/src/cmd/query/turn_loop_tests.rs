@@ -33,6 +33,8 @@ use jp_config::{
     model::id::{self, ProviderId},
     style::stderr_rows::{RowCount, StderrRows},
 };
+#[cfg(unix)]
+use jp_conversation::event::InquiryId;
 use jp_conversation::{
     Conversation, ConversationEvent,
     event::{
@@ -65,6 +67,8 @@ use tokio::{sync::Notify, time::timeout};
 use tokio_util::sync::CancellationToken;
 
 use super::*;
+#[cfg(unix)]
+use crate::render::metadata::get_rendered_arguments;
 use crate::{
     access::approvals::ApprovalStore,
     cmd::query::{
@@ -78,7 +82,6 @@ use crate::{
             mcp_executor::TerminalExecutorSource,
         },
     },
-    render::metadata::get_rendered_arguments,
     signals::testing::{detached_router, test_router},
 };
 
@@ -9090,16 +9093,16 @@ async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
     .unwrap();
 }
 
-/// A formatter that can only describe a call once the tool's question is
-/// answered does not fail the call: the call runs, and is shown with the answer
-/// ahead of its result.
+/// A formatter that asks the tool's question has it answered before the call
+/// runs: the call is shown with the answer, and the tool runs once, with the
+/// same answer, without asking again.
 #[tokio::test]
 #[cfg(unix)]
 #[expect(
     clippy::too_many_lines,
     reason = "Keep the end-to-end setup and persisted assertions in one scenario"
 )]
-async fn a_formatter_waiting_for_answers_describes_the_call_after_it_runs() {
+async fn a_formatters_question_is_answered_before_the_call_runs() {
     timeout(Duration::from_secs(10), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
@@ -9207,17 +9210,154 @@ async fn a_formatter_waiting_for_answers_describes_the_call_after_it_runs() {
             .map(|event| get_rendered_arguments(event.event))
             .collect::<Vec<_>>();
         assert_eq!(rendered, vec![Some("confirm = true".to_owned())]);
-        assert_eq!(count.load(Ordering::SeqCst), 2);
+        // The formatter's question is recorded like one the tool asks.
+        let inquiries = events
+            .iter()
+            .filter_map(|event| event.event.as_inquiry_response())
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(inquiries, vec![InquiryResponse::answered(
+            InquiryId::new("http-call.confirm.1".to_owned()),
+            json!(true),
+        )]);
+        assert_eq!(count.load(Ordering::SeqCst), 1, "the tool asked again");
 
         printer.flush();
-        // The call's header and description come before its result: nothing
-        // was shown for it before it ran.
         assert_eq!(
             chrome.lock().as_str(),
             "\n── \x1b[1mjp\x1b[0m \x1b[2m(anthropic/test)\x1b[0m \
              ─────────────────────────────────────────────────────────\n\nCalling tool \
              \x1b[38;5;11m\x1b[1mhttp_tool\x1b[0m\n\nconfirm = true\n\nconfirmed\n\n"
         );
+        owner.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+/// A call whose formatter asks a question is put up for approval as the
+/// formatter describes it with the answer, and runs with that same answer: what
+/// the user approves is what executes.
+#[tokio::test]
+#[cfg(unix)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep the end-to-end setup and the prompt-time snapshot in one scenario"
+)]
+async fn an_approval_prompt_shows_the_call_its_formatter_describes_with_the_answer() {
+    timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let question = serde_json::to_string(&Outcome::NeedsInput {
+            question: Question::boolean("confirm", "Continue?").unwrap(),
+        })
+        .unwrap();
+        let script = [
+            "{% if tool.answers.confirm is defined %}printf 'confirm = \
+             {{tool.answers.confirm}}'{% else %}printf '%s' '",
+            &question,
+            "'{% endif %}",
+        ]
+        .concat();
+        let mut config = AppConfig::new_test();
+        let partial: PartialToolConfig = serde_json::from_value(json!({
+            "source": "builtin", "run": "ask", "format": "unattended",
+            "questions": {"confirm": {"answer": true}},
+            "style": {
+                "parameters": {"program": "sh", "args": ["-c", script], "shell": false},
+                "results_file_link": "off",
+            },
+        }))
+        .unwrap();
+        config.conversation.tools.insert(
+            "http_tool".into(),
+            ToolConfig::from_partial(partial, vec![]).unwrap(),
+        );
+        let storage = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
+        let mut workspace = Workspace::in_memory(root).with_backend(storage.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+            .unwrap();
+        let definitions = vec![ToolDefinition {
+            name: "http_tool".into(),
+            docs: ToolDocs::default(),
+            parameters: json!({"type":"object","properties":{}}),
+        }];
+        let count = Arc::new(AtomicUsize::new(0));
+        let client = Client::default();
+        let (source, owner) = TerminalExecutorSource::start(
+            BuiltinExecutors::new().register("http_tool", HttpInquiryTool(count.clone())),
+            &definitions,
+            &config.conversation.tools,
+            Arc::new(ApprovalStore::default()),
+            InvocationContext::default(),
+            &client,
+            root.to_owned(),
+        )
+        .await
+        .unwrap();
+        let provider = Arc::new(SequentialMockProvider::with_tool_then_message(
+            "http-call",
+            "http_tool",
+            "Finished.",
+        ));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+        let router = detached_router();
+        let (printer, _output, chrome) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let prompts = Arc::new(ObservingPromptBackend::new(
+            Arc::clone(&printer),
+            Arc::clone(&chrome),
+            'y',
+        ));
+        run_turn_loop(
+            provider.clone(),
+            &model,
+            &config,
+            &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
+            true, // interactive: `run = "ask"` only prompts when a user is there
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &definitions,
+            printer.clone(),
+            Arc::clone(&prompts) as Arc<dyn PromptBackend>,
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)),
+            ChatRequest::from("Run the tool."),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "the approved call ran once, with the answer it was approved with"
+        );
+
+        printer.flush();
+        let seen = prompts.seen.lock().clone();
+        let chrome = chrome.lock().clone();
+        let after = chrome
+            .strip_prefix(seen.as_str())
+            .expect("the prompt-time snapshot is a prefix of the final chrome");
+
+        // What the user had in front of them when asked to approve: the
+        // formatter's description, with the answer the tool will run with.
+        assert_eq!(
+            seen,
+            "\n── \x1b[1mjp\x1b[0m \x1b[2m(anthropic/test)\x1b[0m \
+             ─────────────────────────────────────────────────────────\n\nCalling tool \
+             \x1b[38;5;11m\x1b[1mhttp_tool\x1b[0m\n\nconfirm = true\n"
+        );
+        // Only the result follows: the call was already described.
+        assert_eq!(after, "\nconfirmed\n\n");
         owner.shutdown().await.unwrap();
     })
     .await
