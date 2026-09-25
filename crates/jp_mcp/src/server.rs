@@ -16,15 +16,18 @@ pub mod json_schema;
 pub mod result;
 pub mod service;
 mod upstream;
-use std::{ffi::OsStr, fmt, process::Stdio, sync::Arc};
+use std::{fmt, sync::Arc};
 
 pub use builtin::BuiltinTool;
 use camino::Utf8Path;
 use indexmap::IndexMap;
 use jp_config::{
-    conversation::tool::{CommandConfig, ToolConfigWithDefaults, ToolSource},
+    conversation::tool::{
+        CommandConfig, ToolConfigWithDefaults, ToolSource, style::ParametersStyle,
+    },
     types::command::shell_command_line,
 };
+use jp_process::{Ended, LineSink, ProcessRunner, ProcessSpec, Watch};
 use jp_tool::{
     AccessPolicy, Action, Error as ToolError, InvocationContext, Outcome, ParameterDocs, Question,
     ToolDefinition, ToolDocs, ToolResult,
@@ -35,10 +38,6 @@ use jp_tool::{
 use minijinja::{Environment, ErrorKind as MinijinjaErrorKind, value::ValueKind};
 use result::from_mcp;
 use serde_json::{Error as JsonError, Map, Value, json};
-use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
-    process::Command,
-};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, trace, warn};
 use upstream::{UpstreamResult, decode_result, replace_envelope};
@@ -345,10 +344,11 @@ impl CommandResult {
 
 /// Receives a running tool's stderr lines as they arrive.
 ///
-/// Called from the forwarder's read loop, so it must not block: the loop has to
-/// keep draining or the child fills its pipe and the tool call never completes.
+/// Called from the process runner's read loop, so it must not block: the loop
+/// has to keep draining or the child fills its pipe and the tool call never
+/// completes.
 /// A consumer that falls behind drops rather than stalls.
-pub type StderrSink = Arc<dyn Fn(&str) + Send + Sync>;
+pub type StderrSink = LineSink;
 
 /// Identity of a tool invocation, used to tag stderr lines forwarded to
 /// tracing.
@@ -418,25 +418,19 @@ fn format_tool_template_value(
     }
 }
 
-/// Run a tool command asynchronously with cancellation support.
+/// Run a tool command with cancellation support.
 ///
 /// This is the **single entry point** for running tool commands (both execution
 /// and argument formatting).
 /// It handles:
 ///
 /// 1. Template rendering via [`minijinja`]
-/// 2. Process spawning via Tokio's [`Command`]
+/// 2. Running the process through `runner`, on a blocking thread
 /// 3. Cancellation via [`CancellationToken`]
 /// 4. Parsing stdout as [`jp_tool::Outcome`]
 /// 5. Forwarding the child's stderr to tracing (when `trace_as` is `Some`)
-///
-/// # Panics
-///
-/// Panics if tokio fails to attach the piped stdout/stderr handles to the
-/// spawned child.
-/// Both are requested via `Stdio::piped()`, so this is not expected to happen
-/// in practice.
 pub async fn run_tool_command(
+    runner: &Arc<dyn ProcessRunner>,
     command: CommandConfig,
     ctx: Value,
     root: &Utf8Path,
@@ -469,117 +463,81 @@ pub async fn run_tool_command(
             error: Box::new(error),
         })?;
 
-    let mut cmd = if shell {
+    let mut spec = if shell {
         // `program` is shell syntax and used verbatim; `args` are shell-quoted
         // so multi-word arguments keep their boundaries.
-        let shell_cmd = shell_command_line(&program, &args);
-
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c").arg(&shell_cmd);
-        cmd
-    } else {
-        let mut cmd = Command::new(&program);
-        cmd.args(&args);
-        cmd
-    };
-
-    // Isolate the child from JP's process group so terminal signals
-    // (Ctrl+C / SIGINT) don't kill it. JP manages tool lifecycle via
-    // the cancellation token, not Unix signals.
-    #[cfg(unix)]
-    cmd.process_group(0);
-
-    // Ensure the child is killed when the tokio task is aborted on
-    // cancellation. Without this the process would be orphaned.
-    cmd.kill_on_drop(true);
-
-    let mut child = cmd
-        .current_dir(root.as_std_path())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| ToolError::SpawnError {
-            command: format!(
-                "{} {}",
-                cmd.as_std().get_program().to_string_lossy(),
-                cmd.as_std()
-                    .get_args()
-                    .filter_map(OsStr::to_str)
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            ),
-            error,
-        })?;
-
-    let stdout = child.stdout.take().expect("stdout piped");
-    let stderr = child.stderr.take().expect("stderr piped");
-
-    let run = async {
-        tokio::try_join!(
-            read_all(stdout),
-            forward_stderr(stderr, trace_as),
-            child.wait(),
+        ProcessSpec::new(
+            "sh",
+            ["-c".to_owned(), shell_command_line(&program, &args)],
+            root,
         )
+    } else {
+        ProcessSpec::new(program, args, root)
+    };
+    // A Ctrl-C at the terminal must not kill the tool: JP stops it through the
+    // cancellation token, once the user has chosen what the interrupt means.
+    spec.own_process_group = true;
+
+    // The process runs on a blocking thread, which dropping this future would
+    // not stop, so the token is cancelled on drop as well as by the caller.
+    let cancellation = cancellation_token.child_token();
+    let _stop_on_drop = cancellation.clone().drop_guard();
+    let watch = Watch {
+        stderr_lines: trace_as.map(stderr_lines),
+        cancellation: Some(cancellation),
+        ..Watch::default()
+    };
+    let run = {
+        let runner = Arc::clone(runner);
+        let spec = spec.clone();
+        tokio::task::spawn_blocking(move || runner.execute(&spec, &watch))
     };
 
-    tokio::select! {
-        biased;
-        () = cancellation_token.cancelled() => Ok(CommandResult::Cancelled),
-        result = run => Ok(match result {
-            Ok((stdout, stderr, status)) => {
-                parse_command_output(&stdout, &stderr, status.success())
-            }
-            Err(error) => CommandResult::RawOutput {
+    let finished = match run.await {
+        Ok(Ok(finished)) => finished,
+        Ok(Err(error)) => {
+            return Err(ToolError::SpawnError {
+                command: spec.to_string(),
+                error,
+            });
+        }
+        Err(error) => {
+            return Ok(CommandResult::RawOutput {
                 stdout: String::new(),
                 stderr: error.to_string(),
                 success: false,
-            },
-        }),
+            });
+        }
+    };
+
+    if finished.ended == Ended::Cancelled {
+        return Ok(CommandResult::Cancelled);
     }
+
+    let output = finished.output;
+    Ok(parse_command_output(
+        output.stdout.as_bytes(),
+        output.stderr.as_bytes(),
+        output.success(),
+    ))
 }
 
-/// Drain a child pipe into a byte buffer.
-async fn read_all(mut pipe: impl tokio::io::AsyncRead + Unpin) -> std::io::Result<Vec<u8>> {
-    let mut buf = Vec::new();
-    pipe.read_to_end(&mut buf).await?;
-    Ok(buf)
-}
-
-/// Drain a child's stderr into a byte buffer, optionally forwarding each line
-/// to tracing as it arrives.
+/// Forward each line of a tool's stderr to tracing, and to the display
+/// `trace_as` names, if any.
 ///
-/// Uses byte-level line reading so non-UTF-8 stderr doesn't terminate the
-/// forwarder.
-async fn forward_stderr(
-    pipe: impl tokio::io::AsyncRead + Unpin,
-    trace_as: Option<ToolTrace<'_>>,
-) -> std::io::Result<Vec<u8>> {
-    let mut reader = BufReader::new(pipe);
-    let mut all = Vec::new();
-    let mut line = Vec::new();
-
-    loop {
-        line.clear();
-        if reader.read_until(b'\n', &mut line).await? == 0 {
-            break;
+/// Blank lines carry nothing to show, so neither sees them.
+fn stderr_lines(trace_as: ToolTrace<'_>) -> LineSink {
+    let ToolTrace { id, name, stderr } = trace_as;
+    let (id, name) = (id.to_owned(), name.to_owned());
+    Arc::new(move |line: &str| {
+        if line.is_empty() {
+            return;
         }
-
-        if let Some(ToolTrace { id, name, stderr }) = &trace_as {
-            let text = String::from_utf8_lossy(&line);
-            let trimmed = text.trim_end_matches(['\n', '\r']);
-            if !trimmed.is_empty() {
-                trace!(target: "tool::stderr", tool_id = id, tool_name = name, "{trimmed}");
-
-                if let Some(sink) = stderr {
-                    sink(trimmed);
-                }
-            }
+        trace!(target: "tool::stderr", tool_id = %id, tool_name = %name, "{line}");
+        if let Some(sink) = &stderr {
+            sink(line);
         }
-
-        all.extend_from_slice(&line);
-    }
-
-    Ok(all)
+    })
 }
 
 /// Parse raw command output into a [`CommandResult`].
@@ -653,6 +611,13 @@ pub struct Execution<'a> {
     /// Each attempt coerces its own copy to the schema.
     pub arguments: Value,
 
+    /// What the tool is run for.
+    ///
+    /// [`Action::FormatArguments`] runs the tool's argument formatter, a local
+    /// command configured in `style.parameters`, whatever the tool's own source
+    /// is.
+    pub action: Action,
+
     /// Where the tool comes from, and how it is configured to run.
     pub config: &'a ToolConfigWithDefaults,
 
@@ -668,6 +633,9 @@ pub struct Execution<'a> {
 
     /// Rust implementations, reached by a `builtin` source.
     pub builtins: &'a builtin::BuiltinExecutors,
+
+    /// Runs a local command: a `local` tool, or any tool's argument formatter.
+    pub runner: &'a Arc<dyn ProcessRunner>,
 
     /// Upstream connections, reached by an `mcp` source.
     pub upstream: &'a Client,
@@ -690,14 +658,14 @@ impl Execution<'_> {
     }
 
     /// Build the trusted template and metadata context for one attempt.
-    fn context(&self, name: &str, arguments: &Value, answers: &Answers, action: &Action) -> Value {
+    fn context(&self, name: &str, arguments: &Value, answers: &Answers) -> Value {
         tool_context(
             name,
             arguments,
             answers,
             self.config,
             self.root,
-            action,
+            &self.action,
             self.access,
             self.invocation,
         )
@@ -733,11 +701,30 @@ pub async fn execute(
     if let Some(object) = arguments.as_object_mut() {
         execution.definition.coerce_arguments(object);
     }
-    info!(tool = %execution.definition.name, arguments = ?arguments, "Executing tool.");
+    info!(
+        tool = %execution.definition.name,
+        action = ?execution.action,
+        arguments = ?arguments,
+        "Executing tool."
+    );
+
+    if execution.action.is_format_arguments() {
+        let (ToolSource::Local { tool }
+        | ToolSource::Builtin { tool }
+        | ToolSource::Mcp { tool, .. }) = execution.config.source();
+        let ParametersStyle::Custom(command) = &execution.config.style().parameters else {
+            return Err(ToolError::MissingCommand);
+        };
+        let command = command.clone().command();
+        return execute_local(execution, arguments, answers, tool.as_deref(), command).await;
+    }
 
     match execution.config.source() {
         ToolSource::Local { tool } => {
-            execute_local(execution, arguments, answers, tool.as_deref()).await
+            let Some(command) = execution.config.command() else {
+                return Err(ToolError::MissingCommand);
+            };
+            execute_local(execution, arguments, answers, tool.as_deref(), command).await
         }
         ToolSource::Mcp { server, tool } => {
             execute_mcp(execution, arguments, answers, server, tool.as_deref()).await
@@ -748,16 +735,17 @@ pub async fn execute(
     }
 }
 
-/// Execute a local tool and return the outcome.
-///
-/// Runs one local command attempt.
-/// It validates arguments, runs the command, and converts the result to an
+/// Run one attempt of a local command, and convert its result to an
 /// `ExecutionOutcome`.
+///
+/// `command` is a local tool's own command, or any tool's argument formatter.
+/// Arguments are defaulted and validated first either way.
 async fn execute_local(
     execution: &Execution<'_>,
     mut arguments: Value,
     answers: &Answers,
     tool: Option<&str>,
+    command: CommandConfig,
 ) -> Result<ExecutionOutcome, ToolError> {
     let name = execution.invoked_name(tool);
     let id = execution.id.clone();
@@ -777,11 +765,7 @@ async fn execute_local(
         }
     }
 
-    let ctx = execution.context(name, &arguments, answers, &Action::Run);
-
-    let Some(command) = execution.config.command() else {
-        return Err(ToolError::MissingCommand);
-    };
+    let ctx = execution.context(name, &arguments, answers);
 
     let trace_as = ToolTrace {
         id: &id,
@@ -790,6 +774,7 @@ async fn execute_local(
     };
 
     let outcome = run_tool_command(
+        execution.runner,
         command,
         ctx,
         execution.root,
@@ -826,7 +811,7 @@ async fn execute_mcp(
     let name = execution.invoked_name(tool);
     let id = execution.id.clone();
 
-    let context = execution.context(name, &arguments, answers, &Action::Run);
+    let context = execution.context(name, &arguments, answers);
     let meta = Map::from_iter([
         ("computer.jp/tool".into(), context["tool"].clone()),
         ("computer.jp/context".into(), context["context"].clone()),
@@ -1102,6 +1087,10 @@ async fn resolve_mcp_tool(
         parameters,
     })
 }
+
+#[cfg(test)]
+#[path = "server_testing.rs"]
+pub(crate) mod testing;
 
 #[cfg(test)]
 #[path = "server_tests.rs"]

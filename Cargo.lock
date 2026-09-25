@@ -2621,6 +2621,7 @@ dependencies = [
  "futures",
  "indexmap",
  "jp_config",
+ "jp_process",
  "jp_tool",
  "minijinja",
  "reqwest",

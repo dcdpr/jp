@@ -1,5 +1,3 @@
-#[cfg(unix)]
-use std::fs;
 use std::{
     future::pending,
     io,
@@ -12,12 +10,11 @@ use std::{
 use assert_matches::assert_matches;
 use async_trait::async_trait;
 use camino::Utf8Path;
-#[cfg(unix)]
-use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_config::{
     AppConfig, Config as _,
     conversation::tool::{PartialToolConfig, ToolConfig},
 };
+use jp_process::{ExitCode, MockProcessRunner, ProcessOutput};
 use jp_tool::{Outcome, Question, ToolDefinition, ToolDocs};
 use serde_json::{Value, json};
 use tokio::{
@@ -26,7 +23,10 @@ use tokio::{
 };
 
 use super::*;
-use crate::server::builtin::BuiltinTool;
+use crate::server::{
+    builtin::BuiltinTool,
+    testing::{echoing, no_commands, printed},
+};
 
 struct CountingTool(Arc<AtomicUsize>);
 
@@ -54,6 +54,7 @@ fn service(
     config: Value,
     root: &Utf8Path,
     builtins: BuiltinExecutors,
+    runner: Arc<dyn ProcessRunner>,
     invocation: InvocationContext,
 ) -> (Service, HostReceiver) {
     let partial: PartialToolConfig = serde_json::from_value(config).unwrap();
@@ -80,6 +81,7 @@ fn service(
         vec![tool],
         Client::default(),
         builtins,
+        runner,
         root.to_owned(),
         invocation,
     )
@@ -99,6 +101,7 @@ fn fixture(run: &str, result: &str) -> (Service, HostReceiver, Arc<AtomicUsize>)
         json!({"source": "builtin", "run": run, "result": result}),
         "/tmp".into(),
         BuiltinExecutors::new().register("count", CountingTool(count.clone())),
+        no_commands(),
         InvocationContext::default(),
     );
     (service, host, count)
@@ -481,13 +484,22 @@ async fn skipped_delivery_records_original_without_delivering_it() {
 }
 
 #[tokio::test]
-#[cfg(unix)]
 async fn local_inquiry_exits_and_runs_a_new_process_with_the_answer() {
-    let root = tempdir().unwrap();
     let partial: PartialToolConfig = serde_json::from_value(json!({
         "source":"local", "run":"ask",
-        "command": {"program":"sh", "args":["-c", "printf 'run\\n' >> attempts; if [ \"$1\" = null ]; then printf '%s' '{\"type\":\"needs_input\",\"question\":{\"id\":\"confirm\",\"text\":\"Proceed?\",\"answer_type\":{\"type\":\"boolean\"},\"pre_amble\":null,\"default\":null}}'; else printf '%s' \"$1\"; fi", "probe", "{{tool.answers.confirm | default('null')}}"], "shell":false}
+        "command": {"program":"probe", "args":["{{tool.answers.confirm | default('null')}}"], "shell":false}
     })).unwrap();
+    // Asks until it is given an answer, then prints the answer.
+    let asking = serde_json::to_string(&Outcome::NeedsInput {
+        question: Question::boolean("confirm", "Proceed?").unwrap(),
+    })
+    .unwrap();
+    let runner = Arc::new(MockProcessRunner::responding(move |spec| {
+        Ok(printed(match spec.args.as_slice() {
+            [answer] if answer != "null" => answer.clone(),
+            _ => asking.clone(),
+        }))
+    }));
     let mut cfg = AppConfig::new_test();
     cfg.conversation.tools.insert(
         "local".into(),
@@ -507,7 +519,8 @@ async fn local_inquiry_exits_and_runs_a_new_process_with_the_answer() {
         vec![tool],
         Client::default(),
         BuiltinExecutors::new(),
-        root.path().to_owned(),
+        runner.clone(),
+        "/tmp".into(),
         InvocationContext::default(),
     )
     .unwrap();
@@ -522,18 +535,15 @@ async fn local_inquiry_exits_and_runs_a_new_process_with_the_answer() {
     let Interaction::Input { reply, .. } = next(&mut host).await.interaction else {
         panic!("expected local input")
     };
-    assert_eq!(
-        fs::read_to_string(root.path().join("attempts")).unwrap(),
-        "run\n"
-    );
+    let attempts = |runner: &MockProcessRunner| -> Vec<Vec<String>> {
+        runner.calls().into_iter().map(|spec| spec.args).collect()
+    };
+    assert_eq!(attempts(&runner), [["null"]]);
     reply.send(Ok(json!(true).into())).unwrap();
     let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
         panic!("expected recording")
     };
-    assert_eq!(
-        fs::read_to_string(root.path().join("attempts")).unwrap(),
-        "run\nrun\n"
-    );
+    assert_eq!(attempts(&runner), [["null"], ["true"]]);
     reply.send(Ok(())).unwrap();
     assert_eq!(call.finish().await.unwrap(), ToolResult::text("true"));
 }
@@ -585,6 +595,7 @@ async fn cancellation_drops_an_in_flight_builtin_attempt() {
             entered: entered.clone(),
             dropped: dropped.clone(),
         }),
+        no_commands(),
         InvocationContext::default(),
     );
     let call = service.start_call(request()).unwrap();
@@ -609,6 +620,7 @@ async fn a_completed_call_delivers_the_host_result_in_place_of_its_attempt() {
             entered: entered.clone(),
             dropped: dropped.clone(),
         }),
+        no_commands(),
         InvocationContext::default(),
     );
     let call = service.start_call(request()).unwrap();
@@ -680,43 +692,41 @@ async fn dropping_result_receiver_does_not_cancel_or_reexecute() {
     service.shutdown().await;
 }
 
-/// A service whose `count` tool formats its arguments with a shell command.
+/// A service whose `count` tool formats its arguments with a `formatter`
+/// command, and the runner that plays it.
 ///
-/// The formatter touches `formatter-ran` in the working root, so a test can
-/// tell "the formatter did not run" from "it ran and produced nothing", and
-/// echoes the action and the invocation identity the service supplied it.
-#[cfg(unix)]
-fn formatter_fixture(mode: &str) -> (Service, HostReceiver, Utf8TempDir) {
-    let root = tempdir().unwrap();
+/// The formatter echoes the action and the invocation identity the service
+/// supplied it, and the runner records each run, so a test can tell "the
+/// formatter did not run" from "it ran and produced nothing".
+fn formatter_fixture(mode: &str) -> (Service, HostReceiver, Arc<MockProcessRunner>) {
+    let runner = echoing();
     let (service, host) = service(
         json!({
             "source": "builtin",
             "run": "ask",
             "format": mode,
             "style": {"parameters": {
-                "program": "sh",
+                "program": "formatter",
                 "args": [
-                    "-c",
-                    "printf 'formatted' > formatter-ran; printf '%s' \
-                     '{{context.action}}:{{tool.arguments.path}}:{{context.workspace_id}}/{{context.conversation_id}}'",
+                    "{{context.action}}:{{tool.arguments.path}}:{{context.workspace_id}}/{{context.conversation_id}}",
                 ],
                 "shell": false,
             }},
         }),
-        root.path(),
+        "/tmp".into(),
         BuiltinExecutors::new().register("count", CountingTool(Arc::new(AtomicUsize::new(0)))),
+        runner.clone(),
         InvocationContext {
             workspace_id: "ws-abc".into(),
             conversation_id: "conv-xyz".into(),
         },
     );
-    (service, host, root)
+    (service, host, runner)
 }
 
 #[tokio::test]
-#[cfg(unix)]
 async fn formatter_asks_for_visibility_and_waits_for_approval() {
-    let (service, mut host, root) = formatter_fixture("ask");
+    let (service, mut host, runner) = formatter_fixture("ask");
     let call = service.start_call(request()).unwrap();
     let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
         panic!("expected visibility request")
@@ -731,7 +741,7 @@ async fn formatter_asks_for_visibility_and_waits_for_approval() {
         panic!("expected approval")
     };
     assert!(formatted_arguments.is_none());
-    assert!(!root.path().join("formatter-ran").exists());
+    assert_eq!(runner.calls(), vec![]);
     reply
         .send(Ok(Admission::Run {
             arguments: request().arguments,
@@ -748,22 +758,18 @@ async fn formatter_asks_for_visibility_and_waits_for_approval() {
     // The formatter runs under the action, arguments, and invocation identity
     // the service supplies, not values a caller could set.
     assert_eq!(
-        formatted_arguments.map(|result| result.map_err(|error| error.to_string())),
-        Some(Ok("format_arguments:original:ws-abc/conv-xyz".into()))
+        formatted_arguments.as_deref(),
+        Some("format_arguments:original:ws-abc/conv-xyz")
     );
-    assert_eq!(
-        fs::read_to_string(root.path().join("formatter-ran")).unwrap(),
-        "formatted"
-    );
+    assert_eq!(runner.calls().len(), 1);
     call.cancel();
     assert!(matches!(call.finish().await, Err(ServiceError::Cancelled)));
     assert!(reply.send(Ok(ReleaseDecision::Execute)).is_err());
 }
 
 #[tokio::test]
-#[cfg(unix)]
 async fn unattended_formatter_is_available_before_approval() {
-    let (service, mut host, root) = formatter_fixture("unattended");
+    let (service, mut host, runner) = formatter_fixture("unattended");
     let call = service.start_call(request()).unwrap();
     let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
         panic!("expected visibility request")
@@ -777,35 +783,34 @@ async fn unattended_formatter_is_available_before_approval() {
         panic!("expected preparation")
     };
     assert_eq!(
-        formatted_arguments.map(|result| result.map_err(|error| error.to_string())),
-        Some(Ok("format_arguments:original:ws-abc/conv-xyz".into()))
+        formatted_arguments.as_deref(),
+        Some("format_arguments:original:ws-abc/conv-xyz")
     );
-    assert!(root.path().join("formatter-ran").exists());
+    assert_eq!(runner.calls().len(), 1);
     call.cancel();
     assert!(matches!(call.finish().await, Err(ServiceError::Cancelled)));
 }
 
 #[tokio::test]
-#[cfg(unix)]
 async fn a_formatter_is_told_the_name_the_tool_runs_under() {
     // A `source` naming an implementation (`builtin.counter` under the key
     // `count`) is the name the tool executes as, so the formatter is asked
     // about that name rather than the key the assistant called. Handing it the
     // key asks about a tool that does not exist.
-    let root = tempdir().unwrap();
     let (service, mut host) = service(
         json!({
             "source": "builtin.counter",
             "run": "ask",
             "format": "unattended",
             "style": {"parameters": {
-                "program": "sh",
-                "args": ["-c", "printf '%s' '{{tool.name}}'"],
+                "program": "formatter",
+                "args": ["{{tool.name}}"],
                 "shell": false,
             }},
         }),
-        root.path(),
+        "/tmp".into(),
         BuiltinExecutors::new().register("counter", CountingTool(Arc::new(AtomicUsize::new(0)))),
+        echoing(),
         InvocationContext::default(),
     );
     let call = service.start_call(request()).unwrap();
@@ -820,18 +825,14 @@ async fn a_formatter_is_told_the_name_the_tool_runs_under() {
     else {
         panic!("expected preparation")
     };
-    assert_eq!(
-        formatted_arguments.map(|result| result.map_err(|error| error.to_string())),
-        Some(Ok("counter".into()))
-    );
+    assert_eq!(formatted_arguments.as_deref(), Some("counter"));
     call.cancel();
     assert!(matches!(call.finish().await, Err(ServiceError::Cancelled)));
 }
 
 #[tokio::test]
-#[cfg(unix)]
 async fn hidden_presentation_never_executes_formatter() {
-    let (service, mut host, root) = formatter_fixture("unattended");
+    let (service, mut host, runner) = formatter_fixture("unattended");
     let call = service.start_call(request()).unwrap();
     let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
         panic!("expected visibility request")
@@ -856,7 +857,98 @@ async fn hidden_presentation_never_executes_formatter() {
     };
     reply.send(Ok(())).unwrap();
     assert_eq!(call.finish().await.unwrap(), ToolResult::text("denied"));
-    assert!(!root.path().join("formatter-ran").exists());
+    assert_eq!(runner.calls(), vec![]);
+}
+
+/// A formatter that fails settles the call with its error: nobody could see
+/// what the call would do, so it is not put up for approval and never runs.
+#[tokio::test]
+async fn a_failing_formatter_settles_the_call_without_running_it() {
+    let count = Arc::new(AtomicUsize::new(0));
+    let (service, mut host) = service(
+        json!({
+            "source": "builtin",
+            "run": "ask",
+            "format": "unattended",
+            "style": {"parameters": {"program": "formatter", "args": [], "shell": false}},
+        }),
+        "/tmp".into(),
+        BuiltinExecutors::new().register("count", CountingTool(count.clone())),
+        Arc::new(
+            MockProcessRunner::builder()
+                .expect("formatter")
+                .returns(ProcessOutput {
+                    stdout: String::new(),
+                    stderr: "no preview".into(),
+                    status: ExitCode::from_code(3),
+                }),
+        ),
+        InvocationContext::default(),
+    );
+    let call = service.start_call(request()).unwrap();
+    let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
+        panic!("expected visibility request")
+    };
+    reply.send(Ok(true)).unwrap();
+
+    let Interaction::Record { recording, reply } = next(&mut host).await.interaction else {
+        panic!("expected recording, not preparation")
+    };
+    let failure = ToolResult::error(
+        "Tool 'count' was not executed because the argument formatter failed: {\"message\":\"Tool \
+         'count' execution failed.\",\"stderr\":\"no preview\",\"stdout\":\"\"}",
+    );
+    assert_eq!(recording.result, failure);
+    assert_eq!(recording.raw_result, None);
+    reply.send(Ok(())).unwrap();
+    assert_eq!(call.finish().await.unwrap(), failure);
+    assert_eq!(count.load(Ordering::SeqCst), 0);
+}
+
+/// A failure the formatter reports itself reads as its message and trace, not
+/// as the object a run's failure is reported to the model in.
+#[tokio::test]
+async fn a_formatters_reported_failure_settles_the_call_with_its_message() {
+    let reported = serde_json::to_string(&Outcome::Error {
+        message: "The shorter title is 71 characters.".into(),
+        trace: vec!["limit is 60".into()],
+        transient: true,
+    })
+    .unwrap();
+    let (service, mut host) = service(
+        json!({
+            "source": "builtin",
+            "run": "ask",
+            "format": "unattended",
+            "style": {"parameters": {"program": "formatter", "args": [], "shell": false}},
+        }),
+        "/tmp".into(),
+        BuiltinExecutors::new().register("count", CountingTool(Arc::default())),
+        Arc::new(
+            MockProcessRunner::builder()
+                .expect("formatter")
+                .returns_success(reported),
+        ),
+        InvocationContext::default(),
+    );
+    let call = service.start_call(request()).unwrap();
+    let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
+        panic!("expected visibility request")
+    };
+    reply.send(Ok(true)).unwrap();
+
+    let Interaction::Record { recording, reply } = next(&mut host).await.interaction else {
+        panic!("expected recording, not preparation")
+    };
+    reply.send(Ok(())).unwrap();
+    assert_eq!(
+        recording.result,
+        ToolResult::error(
+            "Tool 'count' was not executed because the argument formatter failed: The shorter \
+             title is 71 characters.\n\nTrace:\nlimit is 60"
+        )
+    );
+    call.finish().await.unwrap();
 }
 
 /// A service whose `count` tool has a formatter that asks the tool's `confirm`
@@ -864,24 +956,20 @@ async fn hidden_presentation_never_executes_formatter() {
 ///
 /// `format` is the tool's `format` setting.
 /// The counter records how many times the tool itself ran.
-#[cfg(unix)]
-fn asking_formatter_fixture(
-    format: &str,
-) -> (Service, HostReceiver, Arc<AtomicUsize>, Utf8TempDir) {
-    let root = tempdir().unwrap();
+fn asking_formatter_fixture(format: &str) -> (Service, HostReceiver, Arc<AtomicUsize>) {
     // Serialized rather than hand-written, so the formatter speaks the wire
     // format a real tool emits.
     let question = serde_json::to_string(&Outcome::NeedsInput {
         question: Question::boolean("confirm", "Proceed?").unwrap(),
     })
     .unwrap();
-    let script = [
-        "{% if tool.answers.confirm is defined %}printf 'confirmed:{{tool.answers.confirm}}'{% \
-         else %}printf '%s' '",
-        &question,
-        "'{% endif %}",
-    ]
-    .concat();
+    // An unanswered question renders as `null`.
+    let runner = MockProcessRunner::responding(move |spec| {
+        Ok(printed(match spec.args.as_slice() {
+            [answer] if answer != "null" => format!("confirmed:{answer}"),
+            _ => question.clone(),
+        }))
+    });
     let count = Arc::new(AtomicUsize::new(0));
     let (service, host) = service(
         json!({
@@ -890,20 +978,20 @@ fn asking_formatter_fixture(
             "result": "unattended",
             "format": format,
             "style": {"parameters": {
-                "program": "sh",
-                "args": ["-c", script],
+                "program": "formatter",
+                "args": ["{{tool.answers.confirm}}"],
                 "shell": false,
             }},
         }),
-        root.path(),
+        "/tmp".into(),
         BuiltinExecutors::new().register("count", CountingTool(count.clone())),
+        Arc::new(runner),
         InvocationContext::default(),
     );
-    (service, host, count, root)
+    (service, host, count)
 }
 
 /// Take the next interaction, which must be the formatter's `confirm` question.
-#[cfg(unix)]
 async fn formatter_question(host: &mut HostReceiver) -> oneshot::Sender<HostReply<InputAnswer>> {
     let Interaction::Input { request, reply, .. } = next(host).await.interaction else {
         panic!("expected the formatter's question")
@@ -913,7 +1001,6 @@ async fn formatter_question(host: &mut HostReceiver) -> oneshot::Sender<HostRepl
 }
 
 /// Record the call and return what the caller received.
-#[cfg(unix)]
 async fn record(host: &mut HostReceiver, call: Call) -> ToolResult {
     let Interaction::Record { reply, .. } = next(host).await.interaction else {
         panic!("expected recording")
@@ -922,18 +1009,12 @@ async fn record(host: &mut HostReceiver, call: Call) -> ToolResult {
     call.finish().await.unwrap()
 }
 
-#[cfg(unix)]
-fn described(formatted: Option<Formatted>) -> Option<Result<String, String>> {
-    formatted.map(|result| result.map_err(|error| error.to_string()))
-}
-
 /// The formatter's question is answered before the call is put up for approval,
 /// so the Host approves the call as the formatter describes it with the answer.
 /// The tool runs once, with that same answer, and asks nothing.
 #[tokio::test]
-#[cfg(unix)]
 async fn a_formatters_question_is_answered_before_the_call_is_prepared() {
-    let (service, mut host, count, _root) = asking_formatter_fixture("unattended");
+    let (service, mut host, count) = asking_formatter_fixture("unattended");
     let call = service.start_call(request()).unwrap();
     let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
         panic!("expected visibility request")
@@ -953,10 +1034,7 @@ async fn a_formatters_question_is_answered_before_the_call_is_prepared() {
     else {
         panic!("expected preparation")
     };
-    assert_eq!(
-        described(formatted_arguments),
-        Some(Ok("confirmed:true".into()))
-    );
+    assert_eq!(formatted_arguments.as_deref(), Some("confirmed:true"));
     reply.send(Ok(Admission::Run { arguments })).unwrap();
     let Interaction::Release {
         formatted_arguments,
@@ -966,10 +1044,7 @@ async fn a_formatters_question_is_answered_before_the_call_is_prepared() {
     else {
         panic!("expected release")
     };
-    assert_eq!(
-        described(formatted_arguments),
-        Some(Ok("confirmed:true".into()))
-    );
+    assert_eq!(formatted_arguments.as_deref(), Some("confirmed:true"));
     reply.send(Ok(ReleaseDecision::Execute)).unwrap();
 
     // Recording follows release directly: the tool already had its answer.
@@ -983,9 +1058,8 @@ async fn a_formatters_question_is_answered_before_the_call_is_prepared() {
 /// A formatter held back until admission asks its question between admission
 /// and release, so the call is still described before anything runs.
 #[tokio::test]
-#[cfg(unix)]
 async fn a_formatter_held_until_admission_asks_before_release() {
-    let (service, mut host, count, _root) = asking_formatter_fixture("ask");
+    let (service, mut host, count) = asking_formatter_fixture("ask");
     let call = service.start_call(request()).unwrap();
     let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
         panic!("expected visibility request")
@@ -1015,10 +1089,7 @@ async fn a_formatter_held_until_admission_asks_before_release() {
     else {
         panic!("expected release")
     };
-    assert_eq!(
-        described(formatted_arguments),
-        Some(Ok("confirmed:true".into()))
-    );
+    assert_eq!(formatted_arguments.as_deref(), Some("confirmed:true"));
     reply.send(Ok(ReleaseDecision::Execute)).unwrap();
     assert_eq!(
         record(&mut host, call).await,
@@ -1030,9 +1101,8 @@ async fn a_formatter_held_until_admission_asks_before_release() {
 /// A Host that resolves the call instead of answering the formatter settles it
 /// there: nothing is prepared, and the tool never runs.
 #[tokio::test]
-#[cfg(unix)]
 async fn a_settled_formatter_question_records_the_call_without_running_it() {
-    let (service, mut host, count, _root) = asking_formatter_fixture("unattended");
+    let (service, mut host, count) = asking_formatter_fixture("unattended");
     let call = service.start_call(request()).unwrap();
     let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
         panic!("expected visibility request")
@@ -1053,9 +1123,8 @@ async fn a_settled_formatter_question_records_the_call_without_running_it() {
 /// arguments the Host edited: the formatter asks again, and the tool runs with
 /// the new answer.
 #[tokio::test]
-#[cfg(unix)]
 async fn edited_arguments_ask_the_formatters_question_again() {
-    let (service, mut host, count, _root) = asking_formatter_fixture("unattended");
+    let (service, mut host, count) = asking_formatter_fixture("unattended");
     let call = service.start_call(request()).unwrap();
     let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
         panic!("expected visibility request")
@@ -1086,10 +1155,7 @@ async fn edited_arguments_ask_the_formatters_question_again() {
     else {
         panic!("expected release")
     };
-    assert_eq!(
-        described(formatted_arguments),
-        Some(Ok("confirmed:false".into()))
-    );
+    assert_eq!(formatted_arguments.as_deref(), Some("confirmed:false"));
     reply.send(Ok(ReleaseDecision::Execute)).unwrap();
     assert_eq!(
         record(&mut host, call).await,

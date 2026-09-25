@@ -2,13 +2,16 @@ use async_trait::async_trait;
 use camino::Utf8PathBuf;
 use jp_config::{
     AppConfig, Config as _,
-    conversation::tool::{PartialToolConfig, ToolConfig, ToolConfigWithDefaults},
+    conversation::tool::{CommandConfig, PartialToolConfig, ToolConfig, ToolConfigWithDefaults},
 };
 use jp_tool::{Outcome, ToolDefinition, ToolDocs};
 use serde_json::Map;
 
 use super::*;
-use crate::Client;
+use crate::{
+    Client,
+    server::testing::{echoing, no_commands},
+};
 
 struct EchoArguments;
 
@@ -27,6 +30,7 @@ struct Fixture {
     definition: ToolDefinition,
     config: ToolConfigWithDefaults,
     builtins: builtin::BuiltinExecutors,
+    runner: Arc<dyn ProcessRunner>,
     upstream: Client,
     root: Utf8PathBuf,
     invocation: InvocationContext,
@@ -49,6 +53,7 @@ impl Fixture {
             },
             config: app.conversation.tools.get(name).unwrap(),
             builtins: builtin::BuiltinExecutors::new(),
+            runner: no_commands(),
             upstream: Client::new(IndexMap::new()),
             root: "/tmp".into(),
             invocation: InvocationContext::default(),
@@ -60,9 +65,13 @@ impl Fixture {
         self
     }
 
-    #[cfg(unix)]
     fn with_invocation(mut self, invocation: InvocationContext) -> Self {
         self.invocation = invocation;
+        self
+    }
+
+    fn with_runner(mut self, runner: Arc<dyn ProcessRunner>) -> Self {
+        self.runner = runner;
         self
     }
 
@@ -71,11 +80,13 @@ impl Fixture {
             definition: &self.definition,
             id: id.to_owned(),
             arguments,
+            action: Action::Run,
             config: &self.config,
             root: &self.root,
             access: None,
             invocation: &self.invocation,
             builtins: &self.builtins,
+            runner: &self.runner,
             upstream: &self.upstream,
             cancellation: CancellationToken::new(),
             stderr: None,
@@ -312,16 +323,42 @@ async fn execute_coerces_json_strings_before_calling_tool() {
     assert_eq!(result, ToolResult::text(r#"{"start_line":1}"#));
 }
 
+/// Run `command` under `ctx` and return the process it started, as the runner
+/// was asked to start it.
+async fn spawned(command: CommandConfig, ctx: Value) -> ProcessSpec {
+    let runner = echoing();
+    let dyn_runner: Arc<dyn ProcessRunner> = runner.clone();
+    run_tool_command(
+        &dyn_runner,
+        command,
+        ctx,
+        "/tmp".into(),
+        CancellationToken::new(),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let mut calls = runner.calls();
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    calls.remove(0)
+}
+
+fn command(program: &str, args: &[&str]) -> CommandConfig {
+    CommandConfig {
+        program: program.to_owned(),
+        args: args.iter().map(ToString::to_string).collect(),
+        shell: false,
+    }
+}
+
 /// Regression: `{{tool}}` must render as valid JSON, including `null` for null
 /// fields (not Jinja2's `none`).
 /// Originally fixed with `AutoEscape::Json`, now handled by the custom
 /// formatter which JSON-serializes composite values while leaving scalars
 /// alone.
 #[tokio::test]
-#[cfg(unix)]
 async fn test_run_tool_command_renders_null_args_as_valid_json() {
-    use jp_config::conversation::tool::CommandConfig;
-
     let ctx = json!({
         "tool": {
             "name": "cargo_test",
@@ -339,24 +376,14 @@ async fn test_run_tool_command_renders_null_args_as_valid_json() {
         },
     });
 
-    let command = CommandConfig {
-        program: "echo".to_owned(),
-        args: vec!["{{tool}}".to_owned()],
-        shell: false,
-    };
+    let spec = spawned(command("echo", &["{{tool}}"]), ctx).await;
 
-    let result = run_tool_command(command, ctx, "/tmp".into(), CancellationToken::new(), None)
-        .await
-        .unwrap();
-
-    let stdout = match result {
-        CommandResult::RawOutput { stdout, .. } => stdout,
-        other => panic!("Expected RawOutput, got: {other:?}"),
-    };
-
-    // The rendered output must be valid JSON with proper `null` values.
-    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
-        panic!("run_tool_command produced invalid JSON: {e}\n\nOutput: {stdout}")
+    // The rendered argument must be valid JSON with proper `null` values.
+    let parsed: Value = serde_json::from_str(&spec.args[0]).unwrap_or_else(|e| {
+        panic!(
+            "run_tool_command rendered invalid JSON: {e}\n\nArgument: {}",
+            spec.args[0]
+        )
     });
 
     assert_eq!(parsed["arguments"]["package"], "jp_workspace");
@@ -370,32 +397,16 @@ async fn test_run_tool_command_renders_null_args_as_valid_json() {
 /// `just rfd-draft {{tool.arguments.title}}` where tool authors expect the bare
 /// value.
 #[tokio::test]
-#[cfg(unix)]
 async fn test_run_tool_command_renders_scalar_strings_raw() {
-    use jp_config::conversation::tool::CommandConfig;
-
     let ctx = json!({
         "tool": {
             "arguments": { "title": "Hello World" },
         },
     });
 
-    let command = CommandConfig {
-        program: "echo".to_owned(),
-        args: vec!["{{tool.arguments.title}}".to_owned()],
-        shell: false,
-    };
+    let spec = spawned(command("echo", &["{{tool.arguments.title}}"]), ctx).await;
 
-    let result = run_tool_command(command, ctx, "/tmp".into(), CancellationToken::new(), None)
-        .await
-        .unwrap();
-
-    let stdout = match result {
-        CommandResult::RawOutput { stdout, .. } => stdout,
-        other => panic!("Expected RawOutput, got: {other:?}"),
-    };
-
-    assert_eq!(stdout.trim_end(), "Hello World");
+    assert_eq!(spec.args, ["Hello World"]);
 }
 
 /// Null scalars render as literal `null` (not Jinja2's `none`, and not an empty
@@ -403,30 +414,14 @@ async fn test_run_tool_command_renders_scalar_strings_raw() {
 /// This keeps the behavior consistent with how null appears inside
 /// JSON-serialized composites.
 #[tokio::test]
-#[cfg(unix)]
 async fn test_run_tool_command_renders_null_scalar_as_literal_null() {
-    use jp_config::conversation::tool::CommandConfig;
-
     let ctx = json!({
         "tool": { "arguments": { "maybe": null } },
     });
 
-    let command = CommandConfig {
-        program: "echo".to_owned(),
-        args: vec!["{{tool.arguments.maybe}}".to_owned()],
-        shell: false,
-    };
+    let spec = spawned(command("echo", &["{{tool.arguments.maybe}}"]), ctx).await;
 
-    let result = run_tool_command(command, ctx, "/tmp".into(), CancellationToken::new(), None)
-        .await
-        .unwrap();
-
-    let stdout = match result {
-        CommandResult::RawOutput { stdout, .. } => stdout,
-        other => panic!("Expected RawOutput, got: {other:?}"),
-    };
-
-    assert_eq!(stdout.trim_end(), "null");
+    assert_eq!(spec.args, ["null"]);
 }
 
 /// End-to-end sanity check for the rfd-draft regression: with the old
@@ -435,10 +430,7 @@ async fn test_run_tool_command_renders_null_scalar_as_literal_null() {
 /// downstream `sed` command inside the just recipe.
 /// Verify the title now reaches the subprocess as a clean argument.
 #[tokio::test]
-#[cfg(unix)]
 async fn test_run_tool_command_rfd_draft_title_rendering() {
-    use jp_config::conversation::tool::CommandConfig;
-
     let ctx = json!({
         "tool": {
             "arguments": {
@@ -449,29 +441,22 @@ async fn test_run_tool_command_rfd_draft_title_rendering() {
     });
 
     // Mimic the real `just rfd-draft {{variant}} {{title}}` template.
-    let command = CommandConfig {
-        program: "printf".to_owned(),
-        args: vec![
-            "%s|%s".to_owned(),
-            "{{tool.arguments.variant}}".to_owned(),
-            "{{tool.arguments.title}}".to_owned(),
-        ],
-        shell: false,
-    };
+    let spec = spawned(
+        command("just", &[
+            "rfd-draft",
+            "{{tool.arguments.variant}}",
+            "{{tool.arguments.title}}",
+        ]),
+        ctx,
+    )
+    .await;
 
-    let result = run_tool_command(command, ctx, "/tmp".into(), CancellationToken::new(), None)
-        .await
-        .unwrap();
-
-    let stdout = match result {
-        CommandResult::RawOutput { stdout, .. } => stdout,
-        other => panic!("Expected RawOutput, got: {other:?}"),
-    };
-
-    assert_eq!(
-        stdout,
-        "design|Assistant-Initiated User Inquiries via an ask_user Builtin"
-    );
+    assert_eq!(spec.program, "just");
+    assert_eq!(spec.args, [
+        "rfd-draft",
+        "design",
+        "Assistant-Initiated User Inquiries via an ask_user Builtin",
+    ]);
 }
 
 /// The `tojson` filter still works for tool authors who want explicit
@@ -479,30 +464,46 @@ async fn test_run_tool_command_rfd_draft_title_rendering() {
 /// Safe strings produced by `tojson` must pass through the custom formatter
 /// unchanged — no double-encoding.
 #[tokio::test]
-#[cfg(unix)]
 async fn test_run_tool_command_tojson_filter_on_scalar_still_works() {
-    use jp_config::conversation::tool::CommandConfig;
-
     let ctx = json!({
         "tool": { "arguments": { "title": "Hello" } },
     });
 
-    let command = CommandConfig {
-        program: "echo".to_owned(),
-        args: vec!["{{tool.arguments.title | tojson}}".to_owned()],
-        shell: false,
-    };
+    let spec = spawned(command("echo", &["{{tool.arguments.title | tojson}}"]), ctx).await;
 
-    let result = run_tool_command(command, ctx, "/tmp".into(), CancellationToken::new(), None)
-        .await
-        .unwrap();
+    assert_eq!(spec.args, ["\"Hello\""]);
+}
 
-    let stdout = match result {
-        CommandResult::RawOutput { stdout, .. } => stdout,
-        other => panic!("Expected RawOutput, got: {other:?}"),
-    };
+/// A shell-mode command runs as a script: the program is shell syntax used
+/// verbatim, and each argument is quoted so a multi-word one stays one word.
+#[tokio::test]
+async fn test_run_tool_command_runs_a_shell_command_as_a_script() {
+    let ctx = json!({
+        "tool": { "arguments": { "title": "two words" } },
+    });
 
-    assert_eq!(stdout.trim_end(), "\"Hello\"");
+    let spec = spawned(
+        CommandConfig {
+            shell: true,
+            ..command("grep -c", &["{{tool.arguments.title}}", "notes.md"])
+        },
+        ctx,
+    )
+    .await;
+
+    assert_eq!(spec.program, "sh");
+    assert_eq!(spec.args, ["-c", "grep -c 'two words' notes.md"]);
+    assert_eq!(spec.dir, "/tmp");
+}
+
+/// A Ctrl-C at the terminal does not reach a tool command, which JP stops
+/// through its cancellation token once the user has said what the interrupt
+/// means.
+#[tokio::test]
+async fn test_run_tool_command_keeps_a_terminal_ctrl_c_from_the_tool() {
+    let spec = spawned(command("cargo", &["test"]), json!({})).await;
+
+    assert!(spec.own_process_group);
 }
 
 /// Regression: the `run` path must surface the invocation's workspace and
@@ -511,7 +512,6 @@ async fn test_run_tool_command_tojson_filter_on_scalar_still_works() {
 /// A non-empty `InvocationContext` pins the wiring so the fields can't be
 /// silently dropped or emptied.
 #[tokio::test]
-#[cfg(unix)]
 async fn test_execute_local_exposes_invocation_ids_in_context() {
     let fixture = Fixture::new(
         "echo_ids",
@@ -524,7 +524,8 @@ async fn test_execute_local_exposes_invocation_ids_in_context() {
     .with_invocation(InvocationContext {
         workspace_id: "ws-abc".to_owned(),
         conversation_id: "conv-xyz".to_owned(),
-    });
+    })
+    .with_runner(echoing());
 
     let outcome = execute(&fixture.execution("call-1", json!({})), &Answers::new())
         .await

@@ -9,7 +9,9 @@ use jp_config::{
     conversation::tool::{PartialToolConfig, ToolConfig},
     providers::mcp::{McpProviderConfig, StdioConfig},
 };
-use jp_tool::{ContentBlock, InvocationContext, Outcome, Question, ToolDefinition, ToolDocs};
+use jp_tool::{
+    Action, ContentBlock, InvocationContext, Outcome, Question, ToolDefinition, ToolDocs,
+};
 use rmcp::{
     ErrorData, ServerHandler,
     model::{
@@ -37,6 +39,7 @@ use crate::{
             Admission, CallRequest, ConfiguredTool, HostReceiver, Interaction, ReleaseDecision,
             Service,
         },
+        testing::no_commands,
         tool_definitions,
     },
 };
@@ -116,11 +119,13 @@ async fn upstream_receives_context_options_and_accumulated_answers() {
         definition: &definition,
         id: "call-1".into(),
         arguments: json!({"value":"edited"}),
+        action: Action::Run,
         config: &config,
         root: "/work".into(),
         access: None,
         invocation: &invocation,
         builtins: &builtins,
+        runner: &no_commands(),
         upstream: &client,
         cancellation: CancellationToken::new(),
         stderr: None,
@@ -176,6 +181,7 @@ async fn native_service(upstream: &Client) -> (Service, HostReceiver) {
         configured,
         upstream.clone(),
         BuiltinExecutors::new(),
+        no_commands(),
         "/work".into(),
         InvocationContext::default(),
     )
@@ -350,6 +356,7 @@ async fn native_upstream_result_survives_host_projection_and_http_delivery() {
             configured,
             upstream,
             BuiltinExecutors::new(),
+            no_commands(),
             "/work".into(),
             InvocationContext::default(),
         )

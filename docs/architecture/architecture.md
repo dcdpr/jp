@@ -602,6 +602,7 @@ jp_cli
   │   ├─ jp_conversation
   │   └─ jp_config
   ├─ jp_mcp
+  │   ├─ jp_process
   │   └─ rmcp (external)
   ├─ jp_process
   ├─ jp_config
