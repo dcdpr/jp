@@ -1,14 +1,13 @@
 use std::fs;
 
 use assert_matches::assert_matches;
-use camino::Utf8Path;
 use camino_tempfile::{Utf8TempDir, tempdir};
 use indoc::indoc;
+use jp_process::{Ended, ExitCode, Finished, ProcessOutput, ProcessSpec, Watch};
 use jp_tool::Action;
 use serde_json::{Map, Value};
 
 use super::*;
-use crate::util::runner::{ExitCode, ProcessOutput, RunnerOpts};
 
 fn ctx() -> (Utf8TempDir, Context) {
     let dir = tempdir().unwrap();
@@ -45,18 +44,15 @@ fn approved() -> Map<String, Value> {
 struct DirtyRunner(bool);
 
 impl ProcessRunner for DirtyRunner {
-    fn run_with_opts(
-        &self,
-        _program: &str,
-        _args: &[&str],
-        _working_dir: &Utf8Path,
-        _opts: &RunnerOpts<'_>,
-    ) -> Result<ProcessOutput, std::io::Error> {
+    fn execute(&self, _spec: &ProcessSpec, _watch: &Watch) -> Result<Finished, std::io::Error> {
         let stdout = if self.0 { " M file\n" } else { "" };
-        Ok(ProcessOutput {
-            stdout: stdout.to_owned(),
-            stderr: String::new(),
-            status: ExitCode::success(),
+        Ok(Finished {
+            output: ProcessOutput {
+                stdout: stdout.to_owned(),
+                stderr: String::new(),
+                status: ExitCode::success(),
+            },
+            ended: Ended::Exited,
         })
     }
 }

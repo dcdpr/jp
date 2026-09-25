@@ -524,7 +524,7 @@ fn output_beyond_the_cap_is_truncated_with_a_note() {
         envs: vec![],
         script: "set -euo pipefail\nyes\n".to_owned(),
     };
-    let runner = crate::util::runner::MockProcessRunner::success("x".repeat(MAX_OUTPUT_BYTES + 10));
+    let runner = jp_process::MockProcessRunner::success("x".repeat(MAX_OUTPUT_BYTES + 10));
 
     let content = execute(dir.path(), Runtime::Docker, &plan, &runner)
         .unwrap()
@@ -551,7 +551,7 @@ fn a_successful_run_still_reports_its_exit_code() {
         envs: vec![],
         script: "set -euo pipefail\necho hi\n".to_owned(),
     };
-    let runner = crate::util::runner::MockProcessRunner::success("hi");
+    let runner = jp_process::MockProcessRunner::success("hi");
 
     let content = execute(dir.path(), Runtime::Docker, &plan, &runner)
         .unwrap()

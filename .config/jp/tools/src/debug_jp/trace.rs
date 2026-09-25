@@ -16,6 +16,7 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use jp_process::SystemProcessRunner;
 use jp_tool::Outcome;
 use serde_json::Value;
 
@@ -31,7 +32,6 @@ use crate::{
     },
     util::{
         ToolResult, error,
-        runner::DuctProcessRunner,
         trace::{self, Level, TRACE_PATH_PREFIX, TraceEvent},
     },
 };
@@ -186,10 +186,10 @@ fn run(
     let sandbox = Sandbox::create(
         workspace_root,
         SandboxOpts { clone_user_data },
-        &DuctProcessRunner,
+        &SystemProcessRunner,
     )?;
 
-    let binary = build::build(&DuctProcessRunner, &BuildSpec {
+    let binary = build::build(&SystemProcessRunner, &BuildSpec {
         working_dir: sandbox.working_dir(),
         package: "jp_cli",
         bin: "jp",

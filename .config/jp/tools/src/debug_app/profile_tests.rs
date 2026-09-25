@@ -1,6 +1,7 @@
 use std::{fs, sync::Mutex, time::Duration};
 
 use camino::{Utf8Path, Utf8PathBuf};
+use jp_process::MockProcessRunner;
 
 use super::{start, stop};
 use crate::{
@@ -9,7 +10,6 @@ use crate::{
         capture::{Recording, Scope, Spawner, Tier, pending, unix_seconds},
         session::{Console, RealSignals, Session, Signal, Signals, Slot},
     },
-    util::runner::MockProcessRunner,
 };
 
 /// A recorder that is already gone, so a stop resolves without waiting.

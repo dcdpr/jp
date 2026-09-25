@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use camino::Utf8Path;
+use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 use jp_tool::{Action, Outcome, Question};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -9,10 +10,7 @@ use super::{
     apply::apply_patch_to_index,
     hunk::{diff_header, hunk_id, rewrite_hunk_y, split_hunks},
 };
-use crate::util::{
-    OneOrMany, ToolResult,
-    runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
-};
+use crate::util::{OneOrMany, ToolResult};
 
 #[derive(Debug, Deserialize)]
 pub struct PatchTarget {
@@ -28,7 +26,7 @@ pub(crate) async fn git_stage_patch(
     options: &Map<String, Value>,
 ) -> ToolResult {
     let env = super::env_from_options(options);
-    git_stage_patch_impl(root, action, answers, &patches, &DuctProcessRunner, &env)
+    git_stage_patch_impl(root, action, answers, &patches, &SystemProcessRunner, &env)
 }
 
 fn git_stage_patch_impl<R: ProcessRunner>(

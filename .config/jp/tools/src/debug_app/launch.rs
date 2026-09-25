@@ -30,6 +30,7 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use jp_tool::Outcome;
 use serde::Deserialize;
 
@@ -42,7 +43,6 @@ use crate::{
     util::{
         ToolResult, error,
         paths::{self, Shortening, shorten},
-        runner::{DuctProcessRunner, ProcessRunner},
     },
 };
 
@@ -198,7 +198,7 @@ pub(crate) async fn debug_app_launch(ctx: &Context, t: &Tool) -> ToolResult {
         fresh,
         allocation_stacks,
         appearance,
-        &DuctProcessRunner,
+        &SystemProcessRunner,
     )
 }
 

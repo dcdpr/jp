@@ -1,9 +1,9 @@
 use camino_tempfile::tempdir;
+use jp_process::MockProcessRunner;
 use jp_tool::Action;
 use serde_json::json;
 
 use super::*;
-use crate::util::runner::MockProcessRunner;
 
 /// Compute what the listing-side ID for a hunk would be, so tests can use the
 /// same content-addressed ID the agent would receive.

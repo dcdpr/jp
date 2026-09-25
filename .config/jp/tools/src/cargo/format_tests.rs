@@ -1,9 +1,9 @@
 use camino_tempfile::{Utf8TempDir, tempdir};
+use jp_process::{ExitCode, MockProcessRunner, ProcessOutput};
 use jp_tool::{Action, Context, Outcome};
 use pretty_assertions::assert_eq;
 
 use super::*;
-use crate::util::runner::{ExitCode, MockProcessRunner, ProcessOutput};
 
 fn ctx() -> (Utf8TempDir, Context) {
     let dir = tempdir().unwrap();

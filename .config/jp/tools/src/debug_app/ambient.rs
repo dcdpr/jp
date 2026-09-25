@@ -16,9 +16,8 @@
 //! the window back would undo the effect the run was measuring.
 
 use camino::Utf8Path;
+use jp_process::ProcessRunner;
 use serde::Deserialize;
-
-use crate::util::runner::ProcessRunner;
 
 /// What a run borrowed, to be handed back when it ends.
 ///

@@ -1,6 +1,7 @@
 use std::fs;
 
 use camino::{Utf8Path, Utf8PathBuf};
+use jp_process::{ExitCode, MockProcessRunner, ProcessOutput};
 use jp_tool::Outcome;
 use serde_json::json;
 
@@ -11,10 +12,7 @@ use crate::{
         steps::parse,
         tree::Options,
     },
-    util::{
-        paths::shortenings_from,
-        runner::{ExitCode, MockProcessRunner, ProcessOutput},
-    },
+    util::paths::shortenings_from,
 };
 
 /// The app before anything is selected.

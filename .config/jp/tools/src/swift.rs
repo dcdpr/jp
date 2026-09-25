@@ -6,15 +6,12 @@
 //! Every tool that builds brings its inputs up to date first, through
 //! [`prepare`], so a fresh checkout needs no setup step.
 
+use jp_process::{ProcessOutput, ProcessRunner};
 use jp_tool::Context;
 
 use crate::{
     Tool,
-    util::{
-        ToolResult,
-        runner::{ProcessOutput, ProcessRunner},
-        truncate, unknown_tool,
-    },
+    util::{ToolResult, truncate, unknown_tool},
 };
 
 mod check;

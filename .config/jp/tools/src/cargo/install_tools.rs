@@ -1,14 +1,11 @@
 use camino::Utf8Path;
+use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 
 use super::MAX_DIAGNOSTIC_BYTES;
-use crate::util::{
-    ToolResult, error,
-    runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
-    truncate,
-};
+use crate::util::{ToolResult, error, truncate};
 
 pub(crate) async fn cargo_install_tools(root: &Utf8Path) -> ToolResult {
-    cargo_install_tools_impl(root, &DuctProcessRunner)
+    cargo_install_tools_impl(root, &SystemProcessRunner)
 }
 
 fn cargo_install_tools_impl<R: ProcessRunner>(root: &Utf8Path, runner: &R) -> ToolResult {

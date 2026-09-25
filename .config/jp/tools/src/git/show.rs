@@ -1,15 +1,13 @@
 use std::fmt::{self, Write};
 
 use camino::Utf8Path;
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use serde_json::{Map, Value};
 
 use super::env_from_options;
 use crate::{
     Result, to_list_with_root,
-    util::{
-        ToolResult, error,
-        runner::{DuctProcessRunner, ProcessRunner},
-    },
+    util::{ToolResult, error},
 };
 
 /// NUL-separated format for the metadata header.
@@ -69,7 +67,7 @@ pub(crate) async fn git_show(
     options: &Map<String, Value>,
 ) -> ToolResult {
     let env = env_from_options(options);
-    git_show_impl(root, &revision, &DuctProcessRunner, &env)
+    git_show_impl(root, &revision, &SystemProcessRunner, &env)
 }
 
 fn git_show_impl<R: ProcessRunner>(

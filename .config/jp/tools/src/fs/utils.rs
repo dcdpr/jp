@@ -3,12 +3,10 @@ use std::{io, path::PathBuf};
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use clean_path::Clean as _;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 use jp_tool::{AccessPolicy, Capability};
 
-use crate::{
-    Error,
-    util::runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
-};
+use crate::Error;
 
 /// Matcher for the `suppress` tool option: paths a tool may read but must not
 /// return.
@@ -161,7 +159,7 @@ fn workspace_relative(
 }
 
 pub fn is_file_dirty(root: &Utf8Path, file: &Utf8Path) -> Result<bool, Error> {
-    is_file_dirty_impl(root, file, &DuctProcessRunner)
+    is_file_dirty_impl(root, file, &SystemProcessRunner)
 }
 
 pub(super) fn is_file_dirty_impl<R: ProcessRunner>(

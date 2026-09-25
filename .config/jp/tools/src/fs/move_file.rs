@@ -1,6 +1,7 @@
 use std::fs;
 
 use camino::Utf8Path;
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use jp_tool::{AccessPolicy, Capability, Outcome, Question};
 use serde_json::{Map, Value};
 
@@ -10,10 +11,7 @@ use super::utils::{
 };
 use crate::{
     Error,
-    util::{
-        ToolResult, error,
-        runner::{DuctProcessRunner, ProcessRunner},
-    },
+    util::{ToolResult, error},
 };
 
 /// Kind of source entry being moved.
@@ -35,7 +33,14 @@ pub(crate) async fn fs_move_file(
     source: String,
     target: String,
 ) -> ToolResult {
-    fs_move_file_impl(root, access, answers, &source, &target, &DuctProcessRunner)
+    fs_move_file_impl(
+        root,
+        access,
+        answers,
+        &source,
+        &target,
+        &SystemProcessRunner,
+    )
 }
 
 fn fs_move_file_impl<R: ProcessRunner>(
