@@ -3671,6 +3671,22 @@ testw *FLAGS:
 shear *FLAGS="--fix": (_install "cargo-shear@" + shear_version)
     cargo shear --check-test-targets {{FLAGS}}
 
+# Type-check the web UI's scripts.
+#
+# The scripts are served exactly as written, so nothing is compiled: `checkJs`
+# reads them as JavaScript against the DOM type definitions and emits no output.
+#
+# This is the only check they get. `cargo build` sees them as opaque strings, so
+# a syntax error, a redeclaration between two scripts sharing a page's global
+# scope, a misspelled property or a call with the wrong arity all reach the
+# browser otherwise.
+#
+# The version tracks `docs/package.json`, which is the other place this project
+# pins TypeScript.
+[group('check')]
+typecheck-js:
+    npx --yes --package=typescript@5 -- tsc --project crates/plugins/command/serve-web/tsconfig.json
+
 [group('check')]
 coverage: _coverage-setup
     # FIXME: Branch coverage seems to have broken recently?
@@ -3862,14 +3878,10 @@ fmt-markdown-ci: _install-comfort _install_ci_matchers
 
 # Type-check the web UI's scripts on CI.
 #
-# The scripts are served exactly as written, so nothing is compiled: `checkJs`
-# reads the JSDoc annotations and the DOM types and emits no output.
-#
-# The version tracks `docs/package.json`, which is the other place this project
-# pins TypeScript.
+# Identical to the local recipe: `tsc` emits nothing either way, so there is no
+# checking variant to switch to.
 [group('ci')]
-typecheck-js-ci:
-    npx --yes --package=typescript@5 -- tsc --project crates/plugins/command/serve-web/tsconfig.json
+typecheck-js-ci: typecheck-js
 
 # Test the code on CI.
 #
