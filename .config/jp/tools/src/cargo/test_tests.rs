@@ -371,6 +371,37 @@ fn test_rustflags_reaches_cargo() {
     );
 }
 
+/// A bare `insta` assertion resolves snapshots against the `CARGO_MANIFEST_DIR`
+/// compiled into the test binary.
+/// With a target directory shared across git worktrees, that binary may have
+/// been built by a sibling worktree, so every snapshot reads as new unless the
+/// root is named at runtime.
+#[test]
+fn insta_workspace_root_names_the_checkout_under_test() {
+    let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
+    let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
+    let _result = cargo_test_impl(
+        Utf8Path::new("/work/jp.git/bookworm-tool-def"),
+        "-W warnings",
+        None,
+        None,
+        None,
+        false,
+        false,
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(
+        runner
+            .captured_env()
+            .iter()
+            .find(|(k, _)| k == "INSTA_WORKSPACE_ROOT")
+            .map(|(_, v)| v.as_str()),
+        Some("/work/jp.git/bookworm-tool-def"),
+    );
+}
+
 #[test]
 fn test_backtrace_disabled_by_default() {
     let dir = tempdir().unwrap();
