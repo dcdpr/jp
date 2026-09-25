@@ -25,7 +25,10 @@ use super::{
     openai_compat::{assemble_event_stream, convert_events, convert_tool_choice, convert_tools},
     trace_to_tmpfile,
 };
-use crate::{error::Error, provider::Provider, query::ChatQuery, stream::with_tool_call_keepalive};
+use crate::{
+    decoding::ArgumentDecoders, error::Error, provider::Provider, query::ChatQuery,
+    stream::with_tool_call_keepalive,
+};
 
 static PROVIDER: ProviderId = ProviderId::Vllm;
 
@@ -76,7 +79,7 @@ impl Provider for Vllm {
     ) -> Result<EventStream, Error> {
         debug!(model = %model.id.name, "Starting vLLM chat completion stream.");
 
-        let (body, is_structured) = create_request(model, query)?;
+        let (body, is_structured, decoders) = create_request(model, query)?;
 
         trace!(
             request = %trace_to_tmpfile("jp-vllm-request", &body),
@@ -96,10 +99,10 @@ impl Provider for Vllm {
         // silently re-issuing the request.
         es.set_retry_policy(Box::new(Never));
 
-        Ok(with_tool_call_keepalive(
+        Ok(decoders.attach(with_tool_call_keepalive(
             assemble_event_stream(es, "vllm", is_structured),
             TOOL_CALL_KEEPALIVE_INTERVAL,
-        ))
+        )))
     }
 }
 
@@ -118,15 +121,19 @@ impl Vllm {
         model: &ModelDetails,
         query: ChatQuery,
     ) -> Result<serde_json::Value, Error> {
-        let (request, _) = create_request(model, query)?;
+        let (request, ..) = create_request(model, query)?;
         Ok(request)
     }
 }
 
 /// Build the JSON request body for the vLLM `/v1/chat/completions` endpoint.
 ///
-/// Returns `(body, is_structured)`.
-fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool), Error> {
+/// Returns the request, structured-output flag, and tool argument decoding
+/// plans.
+fn create_request(
+    model: &ModelDetails,
+    query: ChatQuery,
+) -> Result<(Value, bool, ArgumentDecoders), Error> {
     let ChatQuery {
         thread,
         tools,
@@ -195,7 +202,7 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
     }
 
     messages.extend(convert_events(parts.events));
-    let converted_tools = convert_tools(tools, &tool_choice);
+    let (converted_tools, decoders) = convert_tools(tools, &tool_choice);
     let tool_choice_val = convert_tool_choice(&tool_choice);
 
     trace!(
@@ -253,7 +260,7 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
         });
     }
 
-    Ok((body, is_structured))
+    Ok((body, is_structured, decoders))
 }
 
 /// A `/v1/models` listing from vLLM.

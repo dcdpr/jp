@@ -100,7 +100,7 @@ impl Provider for AgentProvider {
             params.meta = Some(Meta(Map::from_iter([("test/agentId".into(), "agent-call".into())])));
             let peer = client.peer().clone();
             let call = tokio::spawn(async move { peer.call_tool(params).await });
-            yield Ok(Event::Part { index: 0, part: EventPart::ToolCall(ToolCallPart::Start { id: "agent-call".into(), name: "http_tool".into() }), metadata: Map::new() });
+            yield Ok(Event::Part { index: 0, part: EventPart::ToolCall(ToolCallPart::Start { id: "agent-call".into(), name: "http_tool".into(), decoding: None }), metadata: Map::new() });
             yield Ok(Event::Part { index: 0, part: EventPart::ToolCall(ToolCallPart::ArgumentChunk("{}".into())), metadata: Map::new() });
             yield Ok(Event::flush(0));
             yield Ok(Event::Finished(FinishReason::Completed));
@@ -110,7 +110,7 @@ impl Provider for AgentProvider {
             second.meta = Some(Meta(Map::from_iter([("test/agentId".into(), "agent-call-2".into())])));
             let peer = client.peer().clone();
             let call = tokio::spawn(async move { peer.call_tool(second).await });
-            yield Ok(Event::Part { index: 1, part: EventPart::ToolCall(ToolCallPart::Start { id: "agent-call-2".into(), name: "http_tool".into() }), metadata: Map::new() });
+            yield Ok(Event::Part { index: 1, part: EventPart::ToolCall(ToolCallPart::Start { id: "agent-call-2".into(), name: "http_tool".into(), decoding: None }), metadata: Map::new() });
             yield Ok(Event::Part { index: 1, part: EventPart::ToolCall(ToolCallPart::ArgumentChunk("{}".into())), metadata: Map::new() });
             yield Ok(Event::flush(1));
             yield Ok(Event::Finished(FinishReason::Completed));

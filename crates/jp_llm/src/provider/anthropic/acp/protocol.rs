@@ -337,7 +337,11 @@ impl State {
         let events = vec![
             Event::Part {
                 index,
-                part: EventPart::ToolCall(ToolCallPart::Start { id, name }),
+                part: EventPart::ToolCall(ToolCallPart::Start {
+                    id,
+                    name,
+                    decoding: None,
+                }),
                 metadata: Map::new(),
             },
             Event::Part {

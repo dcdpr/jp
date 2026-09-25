@@ -276,8 +276,7 @@ expression: v
       "id": "call_NxNflSuTNIDQFn2A3boDANyS",
       "name": "run_me",
       "arguments": {
-        "bar": "Zm9v",
-        "foo": null
+        "bar": "Zm9v"
       }
     },
     {

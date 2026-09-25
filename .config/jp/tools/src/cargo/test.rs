@@ -82,6 +82,11 @@ fn cargo_test_impl<R: ProcessRunner>(
         ("NEXTEST_EXPERIMENTAL_LIBTEST_JSON", "1"),
         ("RUST_BACKTRACE", if backtrace { "1" } else { "0" }),
         ("RUSTFLAGS", rustflags),
+        // A bare `insta` assertion resolves snapshots against the
+        // `CARGO_MANIFEST_DIR` compiled into the test binary. Worktrees sharing
+        // a target directory can run a binary a sibling worktree built, and
+        // every snapshot then reads as new. Matches `just test`.
+        ("INSTA_WORKSPACE_ROOT", root.as_str()),
     ];
     if checksum_freshness {
         // Use content checksums instead of file mtimes for cargo's freshness

@@ -251,8 +251,7 @@ expression: v
       "id": "call_GEO5cUbY12uWDG7ocEeeZuqf",
       "name": "run_me",
       "arguments": {
-        "bar": "Zm9v",
-        "foo": null
+        "bar": "Zm9v"
       }
     },
     {

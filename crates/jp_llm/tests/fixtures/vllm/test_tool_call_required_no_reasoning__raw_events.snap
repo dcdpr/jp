@@ -49,6 +49,15 @@ expression: v
                 Start {
                     id: "chatcmpl-tool-95b70da4d5404eab",
                     name: "run_me",
+                    decoding: Some(
+                        ArgumentDecoding {
+                            omit_null: [
+                                "foo",
+                            ],
+                            properties: {},
+                            items: None,
+                        },
+                    ),
                 },
             ),
             metadata: {},

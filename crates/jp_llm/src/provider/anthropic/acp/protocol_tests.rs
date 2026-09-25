@@ -169,7 +169,8 @@ fn dispatch_uses_permission_identity_and_original_arguments() {
             index: 0,
             part: EventPart::ToolCall(ToolCallPart::Start {
                 id: "tool-fixed".into(),
-                name: "lookup".into()
+                name: "lookup".into(),
+                decoding: None
             }),
             metadata: Map::new()
         },
@@ -220,7 +221,8 @@ fn permission_uses_the_name_from_the_prior_tool_observation() {
         index: 0,
         part: EventPart::ToolCall(ToolCallPart::Start {
             id: "tool-fixed".into(),
-            name: "lookup".into()
+            name: "lookup".into(),
+            decoding: None
         }),
         metadata: Map::new()
     });

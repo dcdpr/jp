@@ -164,7 +164,7 @@ fn content_byte_size(item: &Result<Event, StreamError>) -> u64 {
                 | EventPart::Reasoning(text)
                 | EventPart::Structured(text) => text.len(),
                 EventPart::ToolCall(ToolCallPart::ArgumentChunk(json)) => json.len(),
-                EventPart::ToolCall(ToolCallPart::Start { id, name }) => id.len() + name.len(),
+                EventPart::ToolCall(ToolCallPart::Start { id, name, .. }) => id.len() + name.len(),
             };
 
             content + metadata_byte_size(metadata)

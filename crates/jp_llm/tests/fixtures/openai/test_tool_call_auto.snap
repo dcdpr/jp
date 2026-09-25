@@ -13,7 +13,6 @@ expression: v
                         name: "run_me",
                         arguments: {
                             "bar": String("foo"),
-                            "foo": Null,
                         },
                     },
                 ),

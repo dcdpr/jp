@@ -264,11 +264,11 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "call_2euwcbzEr77g3RSU0MNmSRmG",
+      "id": "call_tDA39nOhtC0WU3Bbg2LVggmd",
       "name": "run_me",
       "arguments": {
         "bar": "Zm9v",
-        "foo": null
+        "foo": "dXNlci1yZXF1ZXN0"
       }
     },
     {
@@ -287,7 +287,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "call_2euwcbzEr77g3RSU0MNmSRmG",
+      "id": "call_tDA39nOhtC0WU3Bbg2LVggmd",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
@@ -296,7 +296,7 @@ expression: v
       "type": "chat_response",
       "message": "The tool ran successfully.",
       "metadata": {
-        "openai_item_id": "bXNnXzBlNjA2Yjk4Y2FiNzM5NTcwMTZhYjNiODJlNGI4NDg3ZDI5MjI1ODlhMjBhZjlmNmNl",
+        "openai_item_id": "bXNnXzA2ZjhlYzRhMzU1YjZkNTUwMTZhYjY1ZDJkOWUwNDg3ZDJiZDJjNDNhOTg0Y2MzODVi",
         "openai_phase": "ZmluYWxfYW5zd2Vy"
       }
     }

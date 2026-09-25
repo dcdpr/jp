@@ -955,6 +955,7 @@ expression: v
                 Start {
                     id: "toolu_01VF4Z6KsrQ12necALfY2Cnn",
                     name: "run_me",
+                    decoding: None,
                 },
             ),
             metadata: {},

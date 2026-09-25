@@ -10,6 +10,7 @@ expression: v
                 Start {
                     id: "toolu_011rfvRMuKqw6jhp34Xt1MbK",
                     name: "run_me",
+                    decoding: None,
                 },
             ),
             metadata: {},

@@ -19,7 +19,7 @@ use crate::{model::ModelDetails, query::ChatQuery};
 /// The test harness compares two recordings with the same projection, through
 /// [`project_body`].
 pub(crate) fn assert_rewrite_preserves_meaning(model: &ModelDetails, query: ChatQuery) {
-    let (api, _, _) = create_request(model, query).expect("a valid OpenAI test request");
+    let (api, ..) = create_request(model, query).expect("a valid OpenAI test request");
     let mut subscription = api.clone();
     prepare_subscription_request(&mut subscription);
 
