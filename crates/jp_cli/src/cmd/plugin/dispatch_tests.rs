@@ -38,24 +38,14 @@ fn conversation_id(secs: u64) -> ConversationId {
 /// macro is never made.
 #[test]
 fn an_interrupt_is_issued_without_a_tracing_subscriber() {
-    let mut ws = bare_workspace();
-    let mut sink: Vec<u8> = Vec::new();
     let turns = RunningTurns::default();
 
     let id = conversation_id(1_700_000_000);
     let mut interrupted = turns.register(id);
 
-    handle_request(
-        PluginToHost::Interrupt(InterruptRequest::stop(wire_id(id))),
-        &mut sink,
-        &mut ws,
-        &json!({}),
-        None,
-        None,
-        &AppConfig::new_test(),
-        &turns,
-    )
-    .unwrap();
+    // Fire-and-forget, so nothing waits on an answer: queueing it is all the
+    // request does.
+    assert!(handle_interrupt(InterruptRequest::stop(wire_id(id)), &turns).is_none());
 
     assert_eq!(
         interrupted.try_next(),
@@ -66,30 +56,27 @@ fn an_interrupt_is_issued_without_a_tracing_subscriber() {
 
 /// An interrupt naming something that is not a conversation id is the plugin's
 /// bug, and must not be mistaken for a turn that already finished.
-#[test]
-fn an_unparseable_interrupt_reaches_no_handler() {
-    let mut ws = bare_workspace();
-    let mut sink: Vec<u8> = Vec::new();
+#[tokio::test]
+async fn an_unparseable_interrupt_reaches_no_handler() {
     let turns = RunningTurns::default();
 
     let mut interrupted = turns.register(conversation_id(1_700_000_000));
 
-    handle_request(
-        PluginToHost::Interrupt(InterruptRequest::stop("not-an-id".to_owned())),
-        &mut sink,
-        &mut ws,
-        &json!({}),
-        None,
-        None,
-        &AppConfig::new_test(),
+    let answer = handle_interrupt(
+        InterruptRequest::stop("not-an-id".to_owned()).with_id("req-1".to_owned()),
         &turns,
     )
-    .unwrap();
+    .expect("a request with an id is answered")
+    .await;
 
     assert_eq!(
         interrupted.try_next(),
         None,
         "a malformed id must not stop an unrelated turn"
+    );
+    assert!(
+        matches!(answer, HostToPlugin::Error(ErrorResponse { ref message, .. }) if !message.contains("no turn is running")),
+        "reported as the plugin's mistake, not as a finished turn: {answer:?}"
     );
 }
 
@@ -657,7 +644,6 @@ async fn a_conversation_written_after_startup_is_listed() {
         None,
         None,
         &AppConfig::new_test(),
-        &RunningTurns::default(),
     )
     .unwrap();
     assert_eq!(response, Flow::Continue);
@@ -707,7 +693,6 @@ async fn an_event_written_after_a_read_is_served_by_the_next_read() {
         None,
         None,
         &AppConfig::new_test(),
-        &RunningTurns::default(),
     )
     .unwrap();
 
@@ -729,7 +714,6 @@ async fn an_event_written_after_a_read_is_served_by_the_next_read() {
         None,
         None,
         &AppConfig::new_test(),
-        &RunningTurns::default(),
     )
     .unwrap();
 
@@ -795,7 +779,6 @@ async fn a_ready_carries_on_and_a_clean_exit_stops() {
             None,
             None,
             &AppConfig::new_test(),
-            &RunningTurns::default(),
         )
         .unwrap(),
         Flow::Continue
@@ -813,7 +796,6 @@ async fn a_ready_carries_on_and_a_clean_exit_stops() {
             None,
             None,
             &AppConfig::new_test(),
-            &RunningTurns::default(),
         )
         .unwrap(),
         Flow::Stop
@@ -838,7 +820,6 @@ async fn a_failing_exit_carries_its_code_and_reason() {
         None,
         None,
         &AppConfig::new_test(),
-        &RunningTurns::default(),
     )
     .expect_err("a non-zero exit is an error");
 
@@ -1018,7 +999,6 @@ async fn a_plugin_needing_a_newer_protocol_is_refused() {
         None,
         None,
         &AppConfig::new_test(),
-        &RunningTurns::default(),
     )
     .expect_err("a plugin needing a newer protocol must be refused");
 
@@ -1143,31 +1123,171 @@ fn an_interrupt_without_an_action_stops_the_turn() {
     assert_eq!(requested_action(&request).unwrap(), InterruptAction::Stop);
 }
 
-/// A request that asked for an answer gets one; one that did not is left alone.
+/// A request that asked for an answer gets one once the turn has taken it; one
+/// that did not is left alone.
 ///
 /// An uncorrelated response is a message the plugin has nowhere to put, and the
 /// dispatcher pairs replies to requests by id.
-#[test]
-fn only_an_interrupt_with_an_id_is_answered() {
+#[tokio::test]
+async fn only_an_interrupt_with_an_id_is_answered() {
     let turns = RunningTurns::default();
     let id = conversation_id(1_700_000_000);
-    let _rx = turns.register(id);
+    let mut rx = turns.register(id);
 
     assert!(
         handle_interrupt(InterruptRequest::stop(id.to_string()), &turns).is_none(),
         "a fire-and-forget interrupt is not answered"
     );
+    assert_eq!(rx.try_next(), Some(InterruptAction::Stop));
 
-    let answered = handle_interrupt(
+    let answer = handle_interrupt(
         InterruptRequest::stop(id.to_string()).with_id("req-1".to_owned()),
         &turns,
-    );
+    )
+    .expect("a request with an id is answered");
+
+    // The turn acts on it, and only then is it reported delivered.
+    assert_eq!(rx.try_next(), Some(InterruptAction::Stop));
 
     assert_eq!(
-        answered,
-        Some(HostToPlugin::Done(DoneResponse {
+        answer.await,
+        HostToPlugin::Done(DoneResponse {
             id: Some("req-1".to_owned())
-        }))
+        })
+    );
+}
+
+/// A reply queued for a turn that ends without reading it is refused, not
+/// reported delivered.
+///
+/// The turn can pass its last read and still be registered for a moment, so
+/// queueing succeeds; the refusal is what tells the client to send the message
+/// as a turn of its own rather than lose it.
+#[tokio::test]
+async fn a_reply_the_turn_never_read_is_refused() {
+    let turns = RunningTurns::default();
+    let id = conversation_id(1_700_000_000);
+    let rx = turns.register(id);
+
+    let answer = handle_interrupt(
+        InterruptRequest::reply(id.to_string(), "use Rust instead".to_owned())
+            .with_id("req-1".to_owned()),
+        &turns,
+    )
+    .expect("a request with an id is answered");
+
+    // The turn ends with the reply still queued.
+    drop(rx);
+    turns.finished(id);
+
+    assert_eq!(
+        answer.await,
+        HostToPlugin::Error(ErrorResponse {
+            id: Some("req-1".to_owned()),
+            request: Some("interrupt".to_owned()),
+            message: format!("the turn on conversation {id} ended before acting on this"),
+        })
+    );
+}
+
+/// A turn that finishes while its title is still being generated answers
+/// straight away, and hands the title on rather than waiting for it.
+///
+/// Waiting would keep the conversation locked, and the client's next message
+/// would be refused as already-locked for as long as the title model took.
+#[tokio::test]
+async fn a_turn_does_not_wait_for_its_title() {
+    let written = Arc::new(Mutex::new(Vec::<String>::new()));
+
+    let (outcome, outstanding) = tokio::time::timeout(
+        Duration::from_secs(5),
+        beside_title(
+            async { "answered" },
+            Some(Box::pin(std::future::pending())),
+            |title| written.lock().unwrap().push(title),
+        ),
+    )
+    .await
+    .expect("the turn's outcome must not wait on the title");
+
+    assert_eq!(outcome, "answered");
+    assert!(outstanding.is_some(), "the title is handed on");
+    assert!(written.lock().unwrap().is_empty());
+}
+
+/// A title that arrives while the turn runs is written through the turn's own
+/// lock, and nothing is left outstanding.
+#[tokio::test]
+async fn a_title_that_arrives_first_is_written_by_the_turn() {
+    let written = Arc::new(Mutex::new(Vec::<String>::new()));
+    let (finish, finished) = tokio::sync::oneshot::channel::<()>();
+
+    let turn = async move {
+        finished.await.unwrap();
+        "answered"
+    };
+    let title: TitleFuture = Box::pin(async move {
+        finish.send(()).unwrap();
+        Some("Rust or Python".to_owned())
+    });
+
+    let (outcome, outstanding) = beside_title(turn, Some(title), |title| {
+        written.lock().unwrap().push(title);
+    })
+    .await;
+
+    assert_eq!(outcome, "answered");
+    assert!(outstanding.is_none());
+    assert_eq!(*written.lock().unwrap(), ["Rust or Python"]);
+}
+
+/// A title that finishes after its turn, while the next turn on the same
+/// conversation holds it, is written when that turn lets go rather than lost.
+#[test]
+fn a_late_title_waits_for_a_busy_conversation() {
+    let (ws, id, _tmp) = workspace_with_conversation();
+    let (titles, _arrived) = Titles::new();
+    let title_of = |ws: &Workspace| {
+        let handle = ws.acquire_conversation(&id).unwrap();
+        ws.metadata(&handle).unwrap().title.clone()
+    };
+
+    let handle = ws.acquire_conversation(&id).unwrap();
+    let LockResult::Acquired(next_turn) = ws.lock_conversation(handle, None).unwrap() else {
+        panic!("the conversation starts unlocked");
+    };
+
+    titles.offer(&ws, ArrivedTitle {
+        conversation: id,
+        title: "Rust or Python".to_owned(),
+    });
+    assert_eq!(title_of(&ws), None, "the busy conversation is left alone");
+
+    titles.release(next_turn);
+    assert_eq!(title_of(&ws).as_deref(), Some("Rust or Python"));
+}
+
+/// A generated title never replaces one the user set while the model worked.
+#[test]
+fn a_late_title_does_not_replace_a_chosen_one() {
+    let (ws, id, _tmp) = workspace_with_conversation();
+    let (titles, _arrived) = Titles::new();
+
+    handle_set_title(&ws, None, SetTitleRequest {
+        id: None,
+        conversation: wire_id(id),
+        title: Some("Chosen".to_owned()),
+    });
+
+    titles.offer(&ws, ArrivedTitle {
+        conversation: id,
+        title: "Generated".to_owned(),
+    });
+
+    let handle = ws.acquire_conversation(&id).unwrap();
+    assert_eq!(
+        ws.metadata(&handle).unwrap().title.as_deref(),
+        Some("Chosen")
     );
 }
 

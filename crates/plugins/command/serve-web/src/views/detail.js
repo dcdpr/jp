@@ -1133,6 +1133,12 @@ composer.addEventListener('submit', async (event) => {
   // means. Stopping a turn someone else started asks first, from the indicator's
   // stop button.
   if (cancelling) {
+    // The message is the reader's again. A stop that lands before the turn
+    // starts leaves nothing in the transcript, so waiting for it to appear
+    // there would hold the field read-only for good; one that lands later
+    // leaves the text here to edit and send again.
+    clearWhenLanded = null;
+
     try {
       await fetch(location.pathname.replace(/\/$/, '') + '/interrupt', {
         method: 'POST',

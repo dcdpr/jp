@@ -1245,9 +1245,19 @@ impl ToolCoordinator {
             // through the router, so it is polled alongside the tools rather
             // than forwarded by a task: the receiver belongs to the turn, and
             // the turn outlives this phase.
+            //
+            // One per phase. Once the tools are being cancelled, the answer
+            // they give back is settled, and a second reply taken here would
+            // replace the first after both were reported delivered. Anything
+            // later stays queued for the phase that follows: a reply becomes
+            // the next request, and a stop ends the turn after this one's
+            // answer is recorded.
+            let taking = !cancellation_token.is_cancelled();
             let event = tokio::select! {
                 event = event_rx.recv() => event,
-                Some(action) = interrupts.next() => Some(ExecutionEvent::ClientInterrupt(action)),
+                Some(action) = interrupts.next(), if taking => {
+                    Some(ExecutionEvent::ClientInterrupt(action))
+                }
             };
 
             let Some(event) = event else { break };

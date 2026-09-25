@@ -449,12 +449,13 @@ async fn a_client_reply_continues_the_running_turn() {
             async move {
                 stalled.notified().await;
                 interrupt_tx
-                    .send(InterruptAction::Reply {
+                    .try_send(InterruptAction::Reply {
                         content: "No, use Rust.".to_owned(),
                         echo: true,
                     })
+                    .expect("the turn is still running")
                     .await
-                    .expect("the turn is still running");
+                    .expect("the turn acts on the reply");
             }
         });
 
@@ -564,9 +565,10 @@ async fn a_client_stop_ends_the_turn_mid_stream() {
             async move {
                 stalled.notified().await;
                 interrupt_tx
-                    .send(InterruptAction::Stop)
+                    .try_send(InterruptAction::Stop)
+                    .expect("the turn is still running")
                     .await
-                    .expect("the turn is still running");
+                    .expect("the turn acts on the stop");
             }
         });
 
@@ -612,6 +614,201 @@ async fn a_client_stop_ends_the_turn_mid_stream() {
         assert!(
             !content.contains("never asked"),
             "the turn ended, so the provider was never asked again.\nFile contents:\n{content}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out after 10 seconds");
+}
+
+fn client_reply(content: &str) -> InterruptAction {
+    InterruptAction::Reply {
+        content: content.to_owned(),
+        echo: true,
+    }
+}
+
+/// A client's interrupt is taken at the top of the turn loop only where it can
+/// be acted on there, and otherwise waits, unacknowledged, for the phase that
+/// owns the moment.
+///
+/// Taken before tools run, a reply lands between a call and its response and
+/// leaves the call to be answered with an error.
+/// Taken before an agent's stream resumes, it is recorded but never sent to the
+/// agent, whose request went out already.
+#[test]
+fn a_client_interrupt_waits_for_a_phase_that_can_act_on_it() {
+    let (client, mut interrupts) = TurnInterrupts::channel();
+    let mut delivery = client.try_send(client_reply("use Rust")).unwrap();
+
+    for (phase, resuming_agent) in [
+        (TurnPhase::Idle, false),
+        (TurnPhase::Executing, false),
+        (TurnPhase::Executing, true),
+        (TurnPhase::Streaming, true),
+    ] {
+        assert_eq!(
+            client_interrupt_between_phases(phase, resuming_agent, &mut interrupts),
+            None,
+            "{phase:?} with resuming_agent={resuming_agent} must leave it queued"
+        );
+    }
+
+    assert!(
+        delivery.try_recv().is_err(),
+        "nothing has acted on it yet, so nothing has told the client it was delivered"
+    );
+
+    assert_eq!(
+        client_interrupt_between_phases(TurnPhase::Streaming, false, &mut interrupts),
+        Some(client_reply("use Rust"))
+    );
+    assert_eq!(delivery.try_recv(), Ok(()));
+
+    let _delivery = client.try_send(InterruptAction::Stop).unwrap();
+    assert_eq!(
+        client_interrupt_between_phases(TurnPhase::Complete, false, &mut interrupts),
+        Some(InterruptAction::Stop)
+    );
+}
+
+/// Two replies sent while a tool runs both reach the conversation, in order.
+///
+/// The first cancels the tool and becomes the answer it gives back, the way
+/// `[r] Stop & respond` does at a terminal.
+/// The second waits for the tool's answer to be recorded and then follows it as
+/// the next request, rather than replacing the first after both were reported
+/// delivered.
+#[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::too_many_lines)]
+async fn two_client_replies_during_a_tool_both_reach_the_conversation() {
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config
+            .conversation
+            .tools
+            .insert("slow_tool".to_string(), ToolConfig {
+                source: ToolSource::Local { tool: None },
+                command: None,
+                run: Some(RunMode::Unattended),
+                format: None,
+                enable: None,
+                summary: None,
+                description: None,
+                examples: None,
+                parameters: IndexMap::new().into(),
+                result: None,
+                style: None,
+                questions: IndexMap::new().into(),
+                options: IndexMap::default().into(),
+                access: None,
+                cancellation_response: None,
+            });
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+        let conv_id = lock.id();
+
+        let provider = Arc::new(SequentialMockProvider::with_tool_then_message(
+            "call_slow",
+            "slow_tool",
+            "Both noted.",
+        ));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let router = detached_router();
+
+        // Runs until something cancels it, and says when it has started.
+        let tool_started = Arc::new(Notify::new());
+        let executor_source = TestExecutorSource::new().with_executor("slow_tool", {
+            let tool_started = Arc::clone(&tool_started);
+            move |req| {
+                Box::new(SleepingExecutor::notifying(
+                    &req.id,
+                    &req.name,
+                    Arc::clone(&tool_started),
+                ))
+            }
+        });
+
+        let (client, interrupts) = TurnInterrupts::channel();
+
+        // Both queued before the executing phase looks, so it is offered both.
+        let replies = tokio::spawn(async move {
+            tool_started.notified().await;
+            let first = client.try_send(client_reply("first reply")).unwrap();
+            let second = client.try_send(client_reply("second reply")).unwrap();
+
+            (first.await, second.await)
+        });
+
+        let result = run_turn_loop(
+            Arc::clone(&provider) as Arc<dyn Provider>,
+            &model,
+            &config,
+            &router,
+            root,
+            InvocationContext::default(),
+            false, // interactive
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            ChatRequest::from("Please use a tool"),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(),
+            interrupts,
+        )
+        .await;
+
+        assert!(result.is_ok(), "the turn should complete: {result:?}");
+        assert_eq!(
+            replies.await.unwrap(),
+            (Ok(()), Ok(())),
+            "both replies were acted on"
+        );
+        assert_eq!(
+            provider.call_index.load(Ordering::SeqCst),
+            2,
+            "the turn carries on after the replies"
+        );
+
+        let content = fs
+            .read_test_events_raw(&conv_id)
+            .expect("events should be persisted");
+
+        // Tool responses are base64-encoded in the raw events file.
+        let answered =
+            STANDARD.encode("Tool run cancelled by user with a custom message:\n\nfirst reply");
+        let first = content
+            .find(&answered)
+            .expect("the first reply is the cancelled tool's answer");
+        let second = content
+            .find("second reply")
+            .expect("the second reply is in the conversation");
+        let answer = content.find("Both noted.").expect("the final answer");
+
+        assert!(
+            first < second && second < answer,
+            "the second reply follows the tool's answer, and the assistant answers both.\nFile \
+             contents:\n{content}"
         );
     }))
     .await;

@@ -287,14 +287,11 @@ pub(super) async fn run_turn_loop(
         //
         // One per iteration, because applying one can end the turn, and
         // whatever followed it was aimed at a turn that no longer exists.
-        //
-        // Not before the turn has started: a client can reach this turn from
-        // the moment it is registered, which is a little before its own request
-        // is appended, and a reply applied in that window would sit above the
-        // message it answers.
-        if turn_coordinator.current_phase() != TurnPhase::Idle
-            && let Some(action) = interrupts.try_next()
-        {
+        if let Some(action) = client_interrupt_between_phases(
+            turn_coordinator.current_phase(),
+            continuation.is_some(),
+            &mut interrupts,
+        ) {
             info!(?action, "Client interrupt received between turn phases.");
             let result = lock.as_mut().update_events(|stream| {
                 apply_streaming_interrupt(action, &mut turn_coordinator, stream)
@@ -1048,6 +1045,41 @@ pub(super) async fn run_turn_loop(
     }
 
     Ok(())
+}
+
+/// Take a client's interrupt at the top of the turn loop, where this is a
+/// moment it can be acted on.
+///
+/// Anywhere else it stays queued, unacknowledged, for the phase that owns the
+/// moment:
+///
+/// - Not before the turn has started.
+///   A client can reach a turn from the moment it is registered, which is a
+///   little before its own request is appended, and a reply applied in that
+///   window would sit above the message it answers.
+/// - Not before tools run.
+///   Their requests have no responses yet, and a reply here would sit between
+///   the two and move the phase on, leaving the approved calls to be answered
+///   by `sanitize` with an error.
+///   The executing phase takes it instead, as the answer each cancelled call
+///   gives back.
+/// - Not before an agent's stream resumes.
+///   The request that stream answers has already been sent, so a reply recorded
+///   here would never reach the agent.
+///   The streaming loop takes it instead, and breaking out of that loop drops
+///   the stream for one rebuilt from the conversation.
+fn client_interrupt_between_phases(
+    phase: TurnPhase,
+    resuming_agent: bool,
+    interrupts: &mut TurnInterrupts,
+) -> Option<InterruptAction> {
+    let takes = match phase {
+        TurnPhase::Complete => true,
+        TurnPhase::Streaming => !resuming_agent,
+        TurnPhase::Idle | TurnPhase::Executing | TurnPhase::Aborted => false,
+    };
+
+    if takes { interrupts.try_next() } else { None }
 }
 
 async fn build_inquiry_backend(

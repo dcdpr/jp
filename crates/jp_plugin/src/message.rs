@@ -547,10 +547,11 @@ pub struct QueryRequest {
 /// cancelling the host's shutdown token or exiting the process is not something
 /// a request naming one conversation should reach.
 ///
-/// Answered with [`HostToPlugin::Done`] when `id` is set, and with
-/// [`HostToPlugin::Error`] when there is no turn left to reach — which is how
-/// a client tells "interrupted" from "it had already finished" without guessing
-/// from a timeout.
+/// With `id` set, answered once the turn has acted on it, with
+/// [`HostToPlugin::Done`], or with [`HostToPlugin::Error`] when it could not:
+/// there was no turn left to reach, or the turn ended before acting on it.
+/// That is how a client tells "interrupted" from "it had already finished"
+/// without guessing from a timeout.
 /// Without an `id` it stays fire-and-forget.
 /// The outcome of the turn itself still arrives as the reply to the original
 /// `query`.

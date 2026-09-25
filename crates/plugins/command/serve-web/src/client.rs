@@ -343,8 +343,13 @@ impl PluginClient {
     /// Awaited rather than fired off, because the answer is the difference
     /// between a delivered reply and one aimed at a turn that had just
     /// finished.
-    /// An `Err` means the message was not delivered and the caller still owns
-    /// it.
+    /// [`ClientError::Host`] means the turn never acted on the message and the
+    /// caller still owns it.
+    ///
+    /// No deadline: the host answers when the turn acts on the reply, which for
+    /// a turn still starting its MCP servers can be minutes away, and a reply
+    /// given up on here would still land there.
+    /// The host always answers, because every turn ends.
     pub async fn reply(&self, conversation: &str, content: &str) -> Result<(), ClientError> {
         let id = self.next_id();
         let msg = PluginToHost::Interrupt(
@@ -352,7 +357,7 @@ impl PluginClient {
                 .with_id(id.clone()),
         );
 
-        match self.request(&id, &msg).await? {
+        match self.request_within(&id, &msg, None).await? {
             HostToPlugin::Done(_) => Ok(()),
             HostToPlugin::Error(e) => Err(ClientError::Host(e.message)),
             other => Err(ClientError::Unexpected(format!("{other:?}"))),

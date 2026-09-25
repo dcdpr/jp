@@ -8,6 +8,7 @@ use std::{
     fmt::Write as _,
     fs,
     io::{self, BufRead, BufReader, Write},
+    pin::Pin,
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::{
         Arc, Mutex,
@@ -62,7 +63,9 @@ use crate::{
     Ctx, KeyValueOrPath, cmd,
     cmd::query::{
         NewTitle, PendingStreamTrim, TurnInputs,
-        interrupt::{InterruptAction, TurnInterruptSender, TurnInterrupts, reply_edit_mode},
+        interrupt::{
+            Delivery, InterruptAction, TurnInterruptSender, TurnInterrupts, reply_edit_mode,
+        },
         resolve_new_title,
     },
     config_pipeline::{build_partial_over, config_search_roots},
@@ -397,6 +400,7 @@ pub(crate) async fn run_plugin(
     // started it, and the plugin can exit while one is in flight, so they are
     // awaited below rather than left for the runtime to drop half-finished.
     let mut turns = JoinSet::new();
+    let (titles, mut arrived_titles) = Titles::new();
 
     let result = message_loop(
         &mut requests,
@@ -407,6 +411,8 @@ pub(crate) async fn run_plugin(
         &composer,
         &mut turns,
         &RunningTurns::default(),
+        &titles,
+        &mut arrived_titles,
     )
     .await;
 
@@ -614,8 +620,24 @@ async fn message_loop(
     composer: &Composer,
     turns: &mut JoinSet<()>,
     running: &RunningTurns,
+    titles: &Titles,
+    arrived_titles: &mut mpsc::UnboundedReceiver<ArrivedTitle>,
 ) -> Result<(), cmd::Error> {
-    while let Some(line) = requests.recv().await {
+    loop {
+        let line = tokio::select! {
+            line = requests.recv() => match line {
+                Some(line) => line,
+                None => break,
+            },
+
+            // Written from here because taking a conversation's lock takes the
+            // workspace, and this loop is what holds it.
+            Some(arrived) = arrived_titles.recv() => {
+                titles.offer(&ctx.workspace, arrived);
+                continue;
+            }
+        };
+
         if line.trim().is_empty() {
             continue;
         }
@@ -639,10 +661,24 @@ async fn message_loop(
 
             PluginToHost::Query(request) => {
                 // `None` means the turn is running and will answer for itself.
-                if let Some(response) = run_query(ctx, request, stdin, turns, running).await {
+                if let Some(response) = run_query(ctx, request, stdin, turns, running, titles).await
+                {
                     let mut writer = stdin.lock().expect("stdin lock poisoned");
                     write_message(&mut *writer, &response)
                         .map_err(|e| cmd::Error::from(format!("failed to answer a query: {e}")))?;
+                }
+            }
+
+            // Answered once the turn has acted on it, which can be well after
+            // this loop has moved on, so the wait gets a task of its own.
+            PluginToHost::Interrupt(request) => {
+                if let Some(answer) = handle_interrupt(request, running) {
+                    let stdin = Arc::clone(stdin);
+                    turns.spawn(async move {
+                        let response = answer.await;
+                        let mut writer = stdin.lock().expect("stdin lock poisoned");
+                        drop(write_message(&mut *writer, &response));
+                    });
                 }
             }
 
@@ -660,7 +696,6 @@ async fn message_loop(
                     session.as_ref(),
                     fs_backend.as_deref(),
                     &config,
-                    running,
                 )? == Flow::Stop
                 {
                     return Ok(());
@@ -701,6 +736,7 @@ async fn run_query(
     stdin: &Arc<Mutex<ChildStdin>>,
     turns: &mut JoinSet<()>,
     running: &RunningTurns,
+    titles: &Titles,
 ) -> Option<HostToPlugin> {
     let reply_id = request.id.clone();
     let failed = |message: String| Some(query_error(reply_id.clone(), message));
@@ -796,22 +832,28 @@ async fn run_query(
         }
     };
 
-    let title_task = resolve_title(&config, &lock, &stream, &chat_request);
+    let title = resolve_title(&config, &lock, &stream, &chat_request)
+        .map(|task| -> TitleFuture { Box::pin(generate_title(task, lock.id())) });
 
     // Hand the turn to its own task. It owns everything it needs and the lock owns
     // itself, so nothing here is borrowed for the minutes a turn can take, which
     // is what keeps the message loop answering reads while it runs.
     let stdin = Arc::clone(stdin);
     let running = running.clone();
+    let titles = titles.clone();
 
     turns.spawn(async move {
+        let id = lock.id();
+
         // Alongside the turn rather than after it: the two are independent
         // requests, and whoever is looking at a list of conversations wants a
         // name for this one long before the answer arrives.
-        let (outcome, ()) = tokio::join!(
+        let (outcome, outstanding) = Box::pin(beside_title(
             inputs.run(&lock, stream, turn_interrupt),
-            write_generated_title(title_task, &lock),
-        );
+            title,
+            |title| write_title(&lock, title),
+        ))
+        .await;
 
         // Reported through tracing rather than to the terminal. These are facts
         // about the host, not content: the turn's output belongs to the
@@ -837,12 +879,20 @@ async fn run_query(
         // waits on before sending its next request. Reporting the turn as
         // finished while it still held the conversation would have that request
         // refused as already-locked, and an interrupt aimed at a turn that has
-        // stopped reading would be accepted and then dropped.
-        running.finished(lock.id());
-        drop(lock);
+        // stopped reading would be queued only to be refused a moment later.
+        running.finished(id);
+        titles.release(lock);
 
-        let mut writer = stdin.lock().expect("stdin lock poisoned");
-        drop(write_message(&mut *writer, &reply));
+        {
+            let mut writer = stdin.lock().expect("stdin lock poisoned");
+            drop(write_message(&mut *writer, &reply));
+        }
+
+        // Not awaited here: this task is joined before the host exits, and a
+        // slow title model is no reason to hold that up.
+        if let Some(title) = outstanding {
+            titles.follow(id, title);
+        }
     });
 
     None
@@ -1123,33 +1173,166 @@ fn resolve_title(
     }
 }
 
-/// Run a title task and record what it produced.
-///
-/// Writes through the turn's own lock, so the name is on disk as soon as the
-/// model answers rather than when the turn ends.
-async fn write_generated_title(task: Option<TitleGeneratorTask>, lock: &ConversationLock) {
-    let Some(task) = task else {
-        return;
-    };
+/// A title request in flight, yielding `None` when it produced nothing usable.
+type TitleFuture = Pin<Box<dyn Future<Output = Option<String>> + Send>>;
 
-    let title = match task.generate().await {
-        Ok(Some(title)) => title,
+/// Ask the title model for a name, reporting a failure rather than returning
+/// it: a conversation without a generated title is still a working one.
+async fn generate_title(task: TitleGeneratorTask, conversation: ConversationId) -> Option<String> {
+    match task.generate().await {
+        Ok(Some(title)) => {
+            debug!(%conversation, %title, "Generated a conversation title.");
+            Some(title)
+        }
         Ok(None) => {
-            warn!(conversation = %lock.id(), "The title model answered without a title.");
-            return;
+            warn!(%conversation, "The title model answered without a title.");
+            None
         }
         Err(error) => {
-            warn!(%error, conversation = %lock.id(), "Failed to generate a title.");
-            return;
+            warn!(%error, %conversation, "Failed to generate a title.");
+            None
         }
+    }
+}
+
+/// Run a turn with its title request beside it.
+///
+/// A title that arrives while the turn is running goes to `write`, which has
+/// the turn's lock to write it through.
+/// One still outstanding when the turn ends is handed back rather than waited
+/// for: the turn's answer is what a client waits on before sending its next
+/// message, and that message is refused for as long as this turn holds the
+/// conversation.
+async fn beside_title<T>(
+    turn: impl Future<Output = T>,
+    title: Option<TitleFuture>,
+    write: impl FnOnce(String),
+) -> (T, Option<TitleFuture>) {
+    let Some(mut title) = title else {
+        return (turn.await, None);
     };
 
-    debug!(conversation = %lock.id(), %title, "Generated a conversation title.");
+    tokio::pin!(turn);
+
+    tokio::select! {
+        // The title first when both are ready, so it is written through the lock
+        // already held rather than handed on to take one of its own.
+        biased;
+
+        generated = &mut title => {
+            if let Some(generated) = generated {
+                write(generated);
+            }
+
+            (turn.await, None)
+        }
+
+        outcome = &mut turn => (outcome, Some(title)),
+    }
+}
+
+/// Name a conversation, unless it already has a name.
+///
+/// A title can arrive after the turn it was generated for, by which time the
+/// user may have renamed the conversation themselves.
+fn write_title(lock: &ConversationLock, title: String) {
+    if lock.metadata().title.is_some() {
+        debug!(conversation = %lock.id(), "Already titled; dropping the generated title.");
+        return;
+    }
 
     let mut conv = lock.as_mut();
     conv.update_metadata(|meta| meta.title = Some(title));
     if let Err(error) = conv.flush() {
-        warn!(%error, "Failed to persist the generated title.");
+        warn!(%error, conversation = %lock.id(), "Failed to persist the generated title.");
+    }
+}
+
+/// A generated title that finished after its turn, on its way to the message
+/// loop.
+struct ArrivedTitle {
+    conversation: ConversationId,
+    title: String,
+}
+
+/// Titles that finished after their turn had let go of the conversation.
+///
+/// Writing one takes the conversation's lock, which only the message loop can
+/// take, and which may be held by then: by the next turn on the same
+/// conversation, or by another process.
+/// A title that finds the lock held waits here, and whichever turn this host
+/// runs on that conversation next writes it before letting go.
+///
+/// Every write and every release goes through the same mutex, so a title cannot
+/// be set aside for a turn that has already released the lock.
+#[derive(Clone)]
+struct Titles {
+    waiting: Arc<Mutex<HashMap<ConversationId, String>>>,
+    arrived: mpsc::UnboundedSender<ArrivedTitle>,
+}
+
+impl Titles {
+    /// Create the store, and the receiver the message loop reads arrivals from.
+    fn new() -> (Self, mpsc::UnboundedReceiver<ArrivedTitle>) {
+        let (arrived, rx) = mpsc::unbounded_channel();
+        let titles = Self {
+            waiting: Arc::default(),
+            arrived,
+        };
+
+        (titles, rx)
+    }
+
+    /// Wait for a title the turn finished without, and send it to the message
+    /// loop.
+    ///
+    /// Detached: a host that exits first drops the title with it.
+    fn follow(&self, conversation: ConversationId, title: TitleFuture) {
+        let arrived = self.arrived.clone();
+        tokio::spawn(async move {
+            if let Some(title) = title.await {
+                drop(arrived.send(ArrivedTitle {
+                    conversation,
+                    title,
+                }));
+            }
+        });
+    }
+
+    /// Write a title that arrived after its turn, or hold it until the lock is
+    /// free.
+    fn offer(&self, workspace: &Workspace, arrived: ArrivedTitle) {
+        let ArrivedTitle {
+            conversation,
+            title,
+        } = arrived;
+
+        let mut waiting = self.waiting.lock().expect("titles lock poisoned");
+
+        // Gone from the index means archived or removed while the model worked.
+        let Ok(handle) = workspace.acquire_conversation(&conversation) else {
+            debug!(%conversation, "Dropping a title for a conversation that is gone.");
+            return;
+        };
+
+        match workspace.lock_conversation(handle, None) {
+            Ok(LockResult::Acquired(lock)) => write_title(&lock, title),
+            Ok(LockResult::AlreadyLocked(_)) => {
+                debug!(%conversation, "Conversation is busy; holding its title.");
+                waiting.insert(conversation, title);
+            }
+            Err(error) => warn!(%error, %conversation, "Could not lock for the title."),
+        }
+    }
+
+    /// Write any title waiting for this conversation, then let go of it.
+    fn release(&self, lock: ConversationLock) {
+        let mut waiting = self.waiting.lock().expect("titles lock poisoned");
+        if let Some(title) = waiting.remove(&lock.id()) {
+            write_title(&lock, title);
+        }
+
+        drop(lock);
     }
 }
 
@@ -1199,8 +1382,9 @@ enum Flow {
 ///
 /// An entry lives for exactly as long as its turn: registered before the turn
 /// starts, removed once it ends.
-/// A request that arrives a moment too late therefore finds nothing, and is
-/// told so rather than being dropped — which is what lets a client tell an
+/// A request that arrives a moment too late therefore finds nothing, and one
+/// that is queued but never read is refused when the turn ends; either way it
+/// is told so rather than being dropped, which is what lets a client tell an
 /// interrupted turn from one that had already finished.
 #[derive(Clone, Default)]
 struct RunningTurns(Arc<Mutex<HashMap<ConversationId, TurnInterruptSender>>>);
@@ -1229,15 +1413,16 @@ impl RunningTurns {
             .remove(&conversation);
     }
 
-    /// Deliver `action` to the turn running on `conversation`.
+    /// Queue `action` for the turn running on `conversation`.
     ///
+    /// The [`Delivery`] resolves once the turn acts on it.
     /// The error is the message to report, phrased for whoever sent the
     /// interrupt.
     fn interrupt(
         &self,
         conversation: ConversationId,
         action: InterruptAction,
-    ) -> Result<(), String> {
+    ) -> Result<Delivery, String> {
         let sender = self
             .0
             .lock()
@@ -1258,21 +1443,27 @@ impl RunningTurns {
     }
 }
 
-/// Deliver an interrupt to the turn it names.
+/// Queue an interrupt for the turn it names.
 ///
-/// Returns the answer to send, or `None` when the request carried no id: a
-/// plugin that is not waiting for one has nowhere to put an uncorrelated
+/// The interrupt is queued before this returns, whether or not anyone waits for
+/// the answer.
+/// Returns the answer to send, which is ready once the turn has acted on the
+/// interrupt or ended without doing so, or `None` when the request carried no
+/// id: a plugin that is not waiting for one has nowhere to put an uncorrelated
 /// response.
-fn handle_interrupt(req: InterruptRequest, turns: &RunningTurns) -> Option<HostToPlugin> {
-    let delivered = parse_conversation_id(&req.conversation)
+fn handle_interrupt(
+    req: InterruptRequest,
+    turns: &RunningTurns,
+) -> Option<impl Future<Output = HostToPlugin> + Send + 'static> {
+    let queued = parse_conversation_id(&req.conversation)
         .and_then(|id| Ok((id, requested_action(&req)?)))
         .and_then(|(id, action)| turns.interrupt(id, action));
 
-    match &delivered {
-        Ok(()) => debug!(
+    match &queued {
+        Ok(_) => debug!(
             conversation = %req.conversation,
             action = ?req.action,
-            "Interrupted a turn on a plugin's behalf."
+            "Queued an interrupt on a plugin's behalf."
         ),
         Err(error) => debug!(
             conversation = %req.conversation,
@@ -1283,14 +1474,24 @@ fn handle_interrupt(req: InterruptRequest, turns: &RunningTurns) -> Option<HostT
     }
 
     let id = req.id?;
+    let conversation = req.conversation;
 
-    Some(match delivered {
-        Ok(()) => HostToPlugin::Done(DoneResponse { id: Some(id) }),
-        Err(message) => HostToPlugin::Error(ErrorResponse {
-            id: Some(id),
-            request: Some("interrupt".to_owned()),
-            message,
-        }),
+    Some(async move {
+        let delivered = match queued {
+            Ok(delivery) => delivery.await.map_err(|_| {
+                format!("the turn on conversation {conversation} ended before acting on this")
+            }),
+            Err(message) => Err(message),
+        };
+
+        match delivered {
+            Ok(()) => HostToPlugin::Done(DoneResponse { id: Some(id) }),
+            Err(message) => HostToPlugin::Error(ErrorResponse {
+                id: Some(id),
+                request: Some("interrupt".to_owned()),
+                message,
+            }),
+        }
     })
 }
 
@@ -1333,7 +1534,6 @@ fn handle_request(
     session: Option<&Session>,
     fs_backend: Option<&FsStorageBackend>,
     config: &AppConfig,
-    turns: &RunningTurns,
 ) -> Result<Flow, cmd::Error> {
     match msg {
         PluginToHost::Ready(ready) => {
@@ -1387,12 +1587,6 @@ fn handle_request(
             write_message(writer, &response)?;
         }
 
-        PluginToHost::Interrupt(req) => {
-            if let Some(response) = handle_interrupt(req, turns) {
-                write_message(writer, &response)?;
-            }
-        }
-
         PluginToHost::ListConfigs(req) => {
             let response = handle_list_configs(config, workspace, fs_backend, req.id);
             write_message(writer, &response)?;
@@ -1416,7 +1610,7 @@ fn handle_request(
         }
 
         // Answered by the caller, before the lock this runs under is taken.
-        PluginToHost::Compose(_) | PluginToHost::Query(_) => {
+        PluginToHost::Compose(_) | PluginToHost::Query(_) | PluginToHost::Interrupt(_) => {
             unreachable!("answered before the lock")
         }
 

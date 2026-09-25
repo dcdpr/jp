@@ -1135,7 +1135,7 @@ impl Query {
         invocation: InvocationContext,
         pending_trim: PendingStreamTrim,
         mut turn_interrupt: TurnInterrupt,
-        interrupts: TurnInterrupts,
+        mut interrupts: TurnInterrupts,
     ) -> Result<()> {
         let model_id = cfg.assistant.model.id.resolved();
 
@@ -1158,6 +1158,11 @@ impl Query {
                     notice.handled();
                 }
                 info!("Interrupted during model lookup; the turn did not start.");
+                return Ok(());
+            }
+
+            Some(action) = interrupts.next_stop() => {
+                info!(?action, "Stopped by a client during model lookup; the turn did not start.");
                 return Ok(());
             }
         };
@@ -1554,6 +1559,7 @@ impl TurnInputs {
         mut turn_interrupt: TurnInterrupt,
     ) -> Result<()> {
         let cfg = &self.config;
+        let mut interrupts = self.interrupts;
 
         let tools = tokio::select! {
             result = async {
@@ -1595,6 +1601,14 @@ impl TurnInputs {
                 info!("Interrupted while preparing; the turn did not start.");
                 return Ok(());
             }
+
+            // A client's stop, for the same span: nothing has been appended, so
+            // ending here leaves the conversation as it was. A reply is held for
+            // the turn to take once its own request is in place.
+            Some(action) = interrupts.next_stop() => {
+                info!(?action, "Stopped by a client while preparing; the turn did not start.");
+                return Ok(());
+            }
         };
 
         let thread = build_thread(stream, self.attachments, &cfg.assistant, !tools.is_empty())?;
@@ -1629,7 +1643,7 @@ impl TurnInputs {
             },
             self.pending_trim,
             turn_interrupt,
-            self.interrupts,
+            interrupts,
         )
         .await
     }

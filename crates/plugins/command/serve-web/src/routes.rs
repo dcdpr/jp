@@ -437,6 +437,16 @@ async fn start_turn(
         Some(TurnStatus::Running { .. })
     );
 
+    if busy && let Some(error) = busy_refusal(&form) {
+        return (
+            StatusCode::CONFLICT,
+            Json(TurnRefused {
+                error: error.to_owned(),
+            }),
+        )
+            .into_response();
+    }
+
     if busy {
         match state.client.reply(&id, &content).await {
             Ok(()) => {
@@ -454,11 +464,24 @@ async fn start_turn(
                 return response;
             }
 
-            // The turn ended between the check above and the reply reaching it.
-            // There is nothing left to interrupt, which makes this an ordinary
-            // message: falling through starts a turn with it.
-            Err(error) => {
+            // The turn ended without acting on the reply. There is nothing left
+            // to interrupt, which makes this an ordinary message: falling
+            // through starts a turn with it.
+            Err(ClientError::Host(error)) => {
                 debug!(%id, %error, "No turn left to reply to; starting one instead.");
+            }
+
+            // The host gave no answer, so whether the turn has the message is
+            // unknown. Starting a second turn with it could send it twice.
+            Err(error) => {
+                error!(%id, %error, "Reply failed");
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(TurnRefused {
+                        error: format!("The message could not be delivered: {error}"),
+                    }),
+                )
+                    .into_response();
             }
         }
     }
@@ -496,6 +519,20 @@ async fn start_turn(
     });
 
     response
+}
+
+/// Why a message for a running turn cannot be delivered as it was sent.
+///
+/// A reply joins the turn already running, and that turn keeps the
+/// configuration it started with, so configuration chosen alongside the reply
+/// has nowhere to go.
+/// Refusing keeps both the message and the choices on the page, rather than
+/// delivering one and quietly dropping the other.
+fn busy_refusal(form: &TurnForm) -> Option<&'static str> {
+    (!form.cfg.args().is_empty()).then_some(
+        "A turn is running, and configuration applies to a new turn. Stop it first, or clear the \
+         configuration to reply.",
+    )
 }
 
 /// Stop the turn the host is running, then send the browser back.
@@ -789,6 +826,12 @@ struct TurnStarted {
     pending: String,
 }
 
+/// Why a message was not sent, for the page to show while it keeps the text.
+#[derive(Debug, Serialize)]
+struct TurnRefused {
+    error: String,
+}
+
 /// A query draft, as the page sees it.
 #[derive(Debug, Serialize)]
 struct DraftBody {
@@ -920,7 +963,8 @@ const WINDOW: usize = 200;
 ///
 /// `total` is how many rendered events there are, `held` how many the caller
 /// says it has, `floor` the index from which its copy was provisional when it
-/// was rendered, and `settled` the first index that can still change now.
+/// was rendered, and `provisional` the index from which the transcript can
+/// still change now, as [`provisional_from`] reports it.
 ///
 /// The caller's own floor is what carries a tool call's result to it.
 /// A call is rendered when it is requested and gains its result later, and by
@@ -931,30 +975,39 @@ const WINDOW: usize = 200;
 /// A caller that cannot say either is given the tail, and a boundary that moved
 /// backwards — the transcript was compacted or edited — wins over a floor
 /// that predates it.
-///
-/// `tail_unsettled` takes one more off the top, for a newest entry that can
-/// change without the count moving — a tool call that gains its result, a
-/// block of assistant text that the next flush adds to.
-/// `settled` does not cover it: a growing block is the last entry and nothing
-/// after it is provisional, so the boundary sits at the end and the caller
-/// holds the first version forever.
 fn resend_from(
     total: usize,
     held: Option<usize>,
     floor: Option<usize>,
-    settled: usize,
-    tail_unsettled: bool,
+    provisional: usize,
 ) -> usize {
-    let settled = if tail_unsettled {
-        settled.min(total.saturating_sub(1))
-    } else {
-        settled
-    };
-
     held.filter(|&count| count <= total)
         .unwrap_or_else(|| total.saturating_sub(WINDOW))
         .min(floor.unwrap_or(usize::MAX))
-        .min(settled)
+        .min(provisional)
+}
+
+/// The first rendered entry that can still change while `running`.
+///
+/// A tool call waiting on its result is provisional wherever it sits.
+/// While a turn runs, the newest entry is too: a block of assistant text or
+/// reasoning grows with the next flush, and neither that nor a tool call
+/// gaining its result moves the count.
+///
+/// This is also what the caller is told to send back as its floor, so the
+/// newest entry has to be counted here rather than only when deciding what to
+/// resend.
+/// A block that grows once more before the turn ends is otherwise delivered in
+/// its earlier form, and the poll after the turn ends has nothing left marking
+/// it provisional.
+fn provisional_from(rendered: &[render::RenderedEvent], running: bool) -> usize {
+    let settled = render::settled_upto(rendered);
+
+    if running && render::tail_can_change(rendered) {
+        settled.min(rendered.len().saturating_sub(1))
+    } else {
+        settled
+    }
 }
 
 /// What the poller already has, so the answer can leave it out.
@@ -999,7 +1052,6 @@ async fn messages(
 ) -> Result<Json<MessagesBody>, AppError> {
     let resp = read_conversation(&state, &id).await?;
     let rendered = render::render_events(&resp.data);
-    let settled = render::settled_upto(&rendered);
 
     // Walking backwards: a window of what came before what the caller holds.
     //
@@ -1008,6 +1060,7 @@ async fn messages(
     // taking either here would deliver it to nobody.
     if let Some(before) = query.before {
         let view = peek_turn_status(&state, &id);
+        let running = view.running || resp.lock.is_held();
         let before = before.min(rendered.len());
         let from = if query.all.is_some_and(|all| all != 0) {
             0
@@ -1021,10 +1074,10 @@ async fn messages(
             html: (from < before)
                 .then(|| views::detail::messages(&rendered[from..before]).into_string()),
             pending: None,
-            settled,
+            settled: provisional_from(&rendered, running),
             stop: stop_mode(&view, resp.lock, query.client.as_deref()),
             boot: state.boot.clone(),
-            running: view.running || resp.lock.is_held(),
+            running,
             error: None,
         }));
     }
@@ -1039,13 +1092,8 @@ async fn messages(
     let view = take_turn_status(&state, &id, &rendered);
     let running = view.running || resp.lock.is_held();
 
-    let from = resend_from(
-        rendered.len(),
-        query.count,
-        query.settled,
-        settled,
-        running && render::tail_can_change(&rendered),
-    );
+    let settled = provisional_from(&rendered, running);
+    let from = resend_from(rendered.len(), query.count, query.settled, settled);
     let stale = from != rendered.len();
 
     Ok(Json(MessagesBody {
@@ -1228,7 +1276,7 @@ async fn conversation_detail(
         &rendered[first..],
         first,
         rendered.len(),
-        render::settled_upto(&rendered),
+        provisional_from(&rendered, running),
         running,
         stoppable,
     )))
