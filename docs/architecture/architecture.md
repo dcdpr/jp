@@ -603,6 +603,7 @@ jp_cli
   │   └─ jp_config
   ├─ jp_mcp
   │   └─ rmcp (external)
+  ├─ jp_process
   ├─ jp_config
   │   └─ schematic (external)
   ├─ jp_task
