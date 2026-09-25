@@ -101,8 +101,7 @@ impl StreamingLoopEvent {
         match self {
             Self::Interrupt(_) => true,
             Self::Llm(result) => result.is_err(),
-            // A client interrupt is not taken while a prompt is open, so it
-            // is never held.
+            // Nothing here draws: a client interrupt arrives already decided.
             Self::ClientInterrupt(_) | Self::Tool(_) => false,
         }
     }
@@ -477,14 +476,8 @@ pub(super) async fn run_turn_loop(
                             // Polled alongside the provider stream so a
                             // client's interrupt lands while the turn is
                             // streaming, rather than waiting for the phase to
-                            // end on its own. Not while a tool call's prompt
-                            // is open: breaking out of the stream would leave
-                            // the prompt on screen for calls that are gone, so
-                            // the interrupt stays queued, undelivered, until
-                            // the prompt closes.
-                            Some(action) = interrupts.next(),
-                                if !tool_coordinator.prompt_active() =>
-                            {
+                            // end on its own.
+                            Some(action) = interrupts.next() => {
                                 StreamingLoopEvent::ClientInterrupt(action)
                             }
                         };
