@@ -505,7 +505,23 @@ fn dead_session_active_root_falls_through_to_error_without_candidates() {
 }
 
 #[test]
-fn interactive_run_without_session_identity_points_at_session_setup() {
+fn interactive_run_without_session_identity_resolves_the_cwd() {
+    let tmp = tempdir().unwrap();
+    let root = make_workspace(tmp.path(), "ws");
+
+    let env = env_at(root.clone(), tmp.path(), None, true);
+    let exec = resolve_from(&env, None).unwrap();
+
+    assert_eq!(exec.root, root);
+    assert_eq!(exec.source, RootSource::Cwd);
+}
+
+// Without a session identity the run still reaches the picker, because the
+// picker records nothing. With no known workspace the picker has nothing to
+// offer, and the error names the only way out: a session identity would not
+// help, so it is not suggested.
+#[test]
+fn interactive_run_without_session_identity_falls_through_the_empty_picker() {
     let tmp = tempdir().unwrap();
     let scratch = tmp.path().join("scratch");
     std::fs::create_dir_all(&scratch).unwrap();
@@ -514,10 +530,11 @@ fn interactive_run_without_session_identity_points_at_session_setup() {
     let error = error_message(&resolve_from(&env, None).unwrap_err());
 
     assert!(
-        error.contains("no session identity"),
+        error.contains("Could not locate workspace"),
         "unexpected error: {error}"
     );
-    assert!(error.contains("JP_SESSION"), "unexpected error: {error}");
+    assert!(error.contains("jp init"), "unexpected error: {error}");
+    assert!(!error.contains("JP_SESSION"), "unexpected error: {error}");
 }
 
 #[test]

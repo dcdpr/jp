@@ -1,7 +1,7 @@
 use chrono::Utc;
 use crossterm::style::Stylize as _;
 use jp_printer::Printer;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::cmd::{
     Output,
@@ -12,8 +12,11 @@ use crate::cmd::{
 ///
 /// After `jp w use`, workspace-consuming commands run against the selection
 /// from anywhere, the way an active conversation follows the session (RFD 020).
-/// `jp w use ?` opens a picker; `jp w use cwd` drops the selection and returns
-/// to cwd resolution.
+/// Bare `jp w use` returns to the session's previously active workspace, the
+/// way `cd -` returns to the previous directory, and opens the picker only when
+/// the session has no previous workspace to return to.
+/// `jp w use ?` always picks; `jp w use cwd` drops the selection and returns to
+/// cwd resolution.
 ///
 /// Interactive-only in every form — including `cwd` — because it mutates
 /// session state; scripts target a workspace per invocation with `jp
@@ -24,7 +27,8 @@ pub(crate) struct Use {
     /// See `jp w use help` for the grammar.
     ///
     /// Also settable with the global `--workspace` flag, but not both at once.
-    /// Defaults to the picker (`?`).
+    /// Defaults to the previously active workspace (`s`), or the picker (`?`)
+    /// when the session has none.
     pub(super) target: Option<WorkspaceTarget>,
 
     /// Keep using this workspace even from inside another one.
@@ -42,9 +46,7 @@ pub(crate) struct Use {
 
 impl Use {
     pub(crate) fn run(self, printer: &Printer, env: &TargetEnv<'_>) -> Output {
-        let target = self.target.unwrap_or(WorkspaceTarget::Picker);
-
-        if matches!(target, WorkspaceTarget::Help) {
+        if matches!(self.target, Some(WorkspaceTarget::Help)) {
             printer.println(target::help());
             return Ok(());
         }
@@ -72,7 +74,9 @@ impl Use {
 
         // `cwd` drops the record the sticky flag would live on, so the two
         // together ask for a selection that is both absent and permanent.
-        if self.always && matches!(target, WorkspaceTarget::Cwd) {
+        // Only an explicit target can be `cwd`; the bare default below never
+        // resolves to it.
+        if self.always && matches!(self.target, Some(WorkspaceTarget::Cwd)) {
             return Err(format!(
                 "`{}` clears the session-active workspace, so there is nothing for `{}` to keep \
                  active.",
@@ -87,7 +91,7 @@ impl Use {
         let previous = mapping.and_then(|mapping| mapping.history.into_iter().next());
         let suffix = sticky_suffix(self.always, was_sticky);
 
-        match target::resolve(&target, env)? {
+        match resolve_target(self.target, env)? {
             ResolvedTarget::Help => unreachable!("handled before resolution"),
 
             // Clearing is just selecting the cwd-derived workspace: the
@@ -170,6 +174,27 @@ impl Use {
         }
 
         Ok(())
+    }
+}
+
+/// Resolve the workspace this invocation selects.
+///
+/// A bare invocation returns to the workspace the session came from, like `cd
+/// -`, and falls back to the picker when there is no live one to return to.
+fn resolve_target(
+    target: Option<WorkspaceTarget>,
+    env: &TargetEnv<'_>,
+) -> crate::error::Result<ResolvedTarget> {
+    if let Some(target) = target {
+        return target::resolve(&target, env);
+    }
+
+    match target::resolve(&WorkspaceTarget::Session, env) {
+        Ok(resolved) => Ok(resolved),
+        Err(error) => {
+            debug!(%error, "No previous workspace to return to; picking instead.");
+            target::resolve(&WorkspaceTarget::Picker, env)
+        }
     }
 }
 

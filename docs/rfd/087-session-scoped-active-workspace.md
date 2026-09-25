@@ -6,6 +6,7 @@
 - **Date**: 2026-06-01
 - **Extends**: [RFD 020]
 - **Tracking Issue**: [\#793]
+- **Extended by**: [RFD 112]
 - **Summary**: Session-scoped active workspace lets JP commands run from
   anywhere after selecting a workspace with `jp w use`.
 
@@ -140,23 +141,32 @@ keeps the launch-cwd / root / child-cwd distinction from collapsing again.
 Not every command needs a workspace selected, so each command declares its
 requirement — the workspace-level analog of today's per-command
 `conversation_load_request` (`jp_cli::cmd`).
-The bootstrap step reads this declaration and only runs the resolution ladder
-(steps 5–6 above) when the command asks for it:
+The declaration drives the startup dispatch, so a command reaches exactly the
+pre-workspace work it asked for:
 
 - **none** — no workspace is bootstrapped.
-  `jp w ls` reads the user-global registries only; `jp w use cwd` just clears
-  the session record; `jp init` is unchanged.
-- **resolve** — resolve and validate a target root to record a selection,
-  without loading the conversation index.
-  `jp w use ?` and `jp w use <id>` need the root, not the conversation data.
-- **load** — resolve, construct `Workspace`, and load the conversation index.
-  `jp q`, `jp w show`, and most existing commands.
+  `jp init` creates the workspace another command would need selected.
+- **subject** — the workspace is the command's *subject* rather than its
+  context.
+  `jp w` resolves its own target against the pre-workspace environment, from
+  outside every workspace and possibly to no workspace at all, so the bootstrap
+  selects no root on its behalf.
+  `jp w show <id>` reports *on* a workspace instead of running *inside* one; `jp
+  w use <id>` records a selection for later runs to resolve; `jp w ls` reads the
+  user-global registries only.
+- **load** — run the resolution ladder, construct `Workspace`, and load the
+  conversation index.
+  `jp q` and every other existing command.
+
+A fourth *resolve* mode — a validated root without the conversation index —
+was specified for `jp w use` and has no client: a subject command resolves its
+own target, and nothing else wants a root it will not read conversations from.
+It is omitted rather than kept for a hypothetical caller.
 
 The bootstrap handoff therefore has a *no workspace selected* form.
-For `none` commands — and for `resolve` / `load` commands that legitimately
-resolve to no workspace, such as `jp w show` from outside any workspace with
-nothing active — the downstream consumers that assume a root (config loading,
-MCP / plugin child cwd, path parsing) simply do not run.
+For `none` and `subject` commands — including `jp w show` from outside any
+workspace with nothing active — the downstream consumers that assume a root
+(config loading, MCP / plugin child cwd, path parsing) simply do not run.
 This makes "absence of a selected workspace" a first-class bootstrap outcome
 rather than something each command has to fake.
 
@@ -247,7 +257,7 @@ work:
 - Each run upserts only its own file, recording the canonical path and a
   `last_used` timestamp.
   The rewrite is debounced: an entry refreshed within the last few minutes is
-  left untouched, since recency only feeds display ordering and `latest`
+  left untouched, since recency only feeds display ordering and `recent`
   targeting — a per-run rewrite would churn the user data directory on every
   invocation and re-trigger any external file watcher observing it.
   No file is read-modified-written by more than one checkout.
@@ -306,6 +316,8 @@ Examples below use `jp w` for brevity.
   targeting grammar below.
   `jp w use ?` opens the picker (list known workspaces, expand each through the
   roots registry to its live checkouts, pick one).
+  Bare `jp w use` returns to `s`, falling back to `?` when the session has no
+  live previous workspace, mirroring bare `jp c use`.
   `jp w use` is interactive-only in all forms — including `cwd` — because it
   mutates session state; scripts target with `jp -w` instead (see
   [Non-interactive mode](#precedence-and-the-cwd-vs-active-conflict)).
@@ -354,7 +366,7 @@ Examples below use `jp w` for brevity.
   read-only and script-friendly.
   Read-only is literal: inspecting a workspace creates no user-workspace
   directory, runs no migration or import, writes no registry entry, and leaves
-  recency untouched, so `jp w show` can never change what `l` / `latest`
+  recency untouched, so `jp w show` can never change what `r` / `recent`
   resolves to.
 - `jp -w <target>`: a per-command workspace override using the same targeting
   grammar.
@@ -443,6 +455,13 @@ Interactive ladder, in order:
 5. Else use the session-active workspace when live.
 6. Else picker.
 
+The picker at step 6 resolves the run only; it does not record a selection.
+Resolution may **repair** a recorded selection whose checkout is gone, but never
+creates one — attaching a workspace to a session is `jp w use`'s job, or the
+`C` / `A` answers below.
+A session that never selected one is asked again on the next run, mirroring the
+conversation picker, which likewise leaves the session mapping untouched.
+
 The conflict prompt fires on any difference (different workspace ID *or* a
 different checkout of the same ID):
 
@@ -469,8 +488,8 @@ This RFD does not pin that signal to a specific mechanism: [RFD 049] is the
 eventual canonical definition (controlling-terminal availability rather than
 stdout being a TTY), and RFD 087 inherits whatever the shared signal resolves to
 as it evolves.
-Non-interactively, a workspace-consuming command (bootstrap `load` or `resolve`)
-runs from inside a workspace or with an explicit `-w`, and errors otherwise.
+Non-interactively, a workspace-consuming command (bootstrap `load`) runs from
+inside a workspace or with an explicit `-w`, and errors otherwise.
 The explicit `-w` accepts only concrete targets — a workspace `<id>`, a path,
 `cwd` / `.` (resolve from the invocation directory), or `-` (read an ID from
 stdin).
@@ -494,13 +513,13 @@ Having no session identity is distinct from having no active workspace:
   session identity available.
   Set `$JP_SESSION` or run in a terminal with automatic session detection.").
   There is nothing to persist the selection against.
-- `jp q` launched from outside a workspace without a session identity errors
-  with guidance to pass `-w`.
-  It does not fall back to a non-persisted one-shot picker: a choice that cannot
-  be recorded would have to be re-made on every invocation, and [RFD 020]
-  already establishes that mappings are not persisted without a session
-  identity.
-  Scripts stay deterministic.
+- `jp q` launched interactively from outside a workspace without a session
+  identity skips the steps that read a session record (2, 3, and 5) and reaches
+  the step-6 picker, which resolves the run only.
+  That is the same picker a session with no selection gets: it records nothing,
+  so it needs no identity to record against.
+  Non-interactively it errors with guidance to pass `-w`, so scripts stay
+  deterministic.
 
 ### Reprompt on a missing active workspace
 
@@ -679,7 +698,7 @@ can be merged independently of the session layer.
 Move session resolution ahead of workspace construction and add the `jp_cli`
 bootstrap step that selects the root.
 Establish the root-as-working-directory invariant for from-anywhere runs.
-Add the per-command workspace bootstrap requirement (none / resolve / load), the
+Add the per-command workspace bootstrap requirement (none / subject / load), the
 analog of `conversation_load_request`.
 
 Depends on: Phase 1.
@@ -715,4 +734,5 @@ Depends on: Phase 3.
 [RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md
 [RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
 [RFD 065]: 065-typed-resource-model-for-attachments.md
+[RFD 112]: 112-hierarchy-targets-and-explicit-selection-clearing.md
 [\#793]: https://github.com/dcdpr/jp/issues/793
