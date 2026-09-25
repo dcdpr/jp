@@ -2969,6 +2969,9 @@ fn ensure_strict_schema(schema: &mut Value) {
     process_strict(schema, &root);
 }
 
+/// Composition keywords whose branch selection this traversal cannot follow.
+const UNFOLLOWABLE_COMPOSITION: &[&str] = &["$ref", "allOf", "oneOf"];
+
 #[expect(
     clippy::too_many_lines,
     reason = "schema rewriting and its decoding instructions share one traversal"
@@ -2981,7 +2984,7 @@ fn process_strict(schema: &mut Value, root: &Value) -> ArgumentDecoding {
     // Decoding references and general composition needs a branch-aware schema
     // walk (T-0h28vbn). Leave those arguments untouched to avoid deleting nulls
     // accepted by the source schema.
-    let skip_decoding = ["$ref", "allOf", "oneOf"]
+    let skip_decoding = UNFOLLOWABLE_COMPOSITION
         .iter()
         .any(|key| map.contains_key(*key))
         || map.get("anyOf").is_some_and(|v| !is_nullable_pair(v));
@@ -3028,8 +3031,13 @@ fn process_strict(schema: &mut Value, root: &Value) -> ArgumentDecoding {
             if let Some(Value::Object(props)) = map.get_mut("properties") {
                 for key in &newly_required {
                     if let Some(prop_schema) = props.get_mut(key) {
-                        let can_decode = ["$ref", "allOf", "anyOf", "oneOf"]
+                        // `anyOf` is excluded from the const because a nullable
+                        // pair is the wrapper we inject and is safe to descend
+                        // into. Here it means the source schema declared its own
+                        // nullability, so a null is a value the author accepts.
+                        let can_decode = UNFOLLOWABLE_COMPOSITION
                             .iter()
+                            .chain(&["anyOf"])
                             .all(|key| prop_schema.get(*key).is_none());
                         if make_schema_nullable(prop_schema) && can_decode {
                             decoding.omit_null.push(key.clone());
@@ -3058,11 +3066,9 @@ fn process_strict(schema: &mut Value, root: &Value) -> ArgumentDecoding {
     if let Some(Value::Array(variants)) = map.get_mut("anyOf") {
         for variant in variants.iter_mut() {
             let plan = process_strict(variant, root);
-            if !skip_decoding {
-                decoding.omit_null.extend(plan.omit_null);
-                decoding.properties.extend(plan.properties);
-                decoding.items = decoding.items.or(plan.items);
-            }
+            decoding.omit_null.extend(plan.omit_null);
+            decoding.properties.extend(plan.properties);
+            decoding.items = decoding.items.or(plan.items);
         }
     }
 

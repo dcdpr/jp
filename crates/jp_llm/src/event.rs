@@ -172,7 +172,13 @@ pub enum ToolCallPart {
         /// Name of the tool to execute.
         name: String,
 
-        /// Request-local decoding instructions, consumed before persistence.
+        /// Request-local instructions for restoring arguments the provider's
+        /// schema encoding turned into nulls.
+        ///
+        /// Set by `ArgumentDecoders::attach` on the provider's stream and
+        /// applied by `EventBuilder::handle_flush`.
+        /// It is never persisted: no code path constructs a `ToolCallRequest`
+        /// from a `ToolCallPart` outside the builder.
         decoding: Option<Arc<ArgumentDecoding>>,
     },
 

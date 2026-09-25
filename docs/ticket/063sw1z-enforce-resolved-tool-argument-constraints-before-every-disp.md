@@ -61,3 +61,32 @@ Shared dispatch validation and default-policy work in this ticket remain open.
 
 The new decoding tests were observed failing before the fix and pass after it.
 Existing strict-schema, event-builder, and CLI turn-loop tests pass.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-09-25T08:02:25Z
+
+Recording one consequence of where decoding lands, raised in review of PR #1164.
+
+Decoding runs in `EventBuilder::handle_flush`, before the `ToolCallRequest` is
+constructed, so the decoded arguments are what gets persisted and what goes back
+on the wire on the next turn (`openai.rs` re-serializes `request.arguments`
+verbatim into `types::FunctionCall`).
+On turn N+1 the assistant history therefore carries `{"query":"parse_document"}`
+for a tool whose outgoing strict schema lists `kinds` in `required`.
+
+This is not a new precedent: `handle_flush` already replaces unparseable
+argument JSON with an empty map before persistence, so persisted arguments have
+never been byte-identical to what the model emitted.
+
+Not verified empirically against provider-side replay validation.
+The expectation is that OpenAI, OpenRouter, and llama.cpp validate on generation
+rather than on replay.
+If one of them did validate history, the failure is a 400 on the next request
+rather than silent corruption.
+
+The alternative shape (persist what the model emitted, decode on the way into
+the executor) was weighed and rejected: anything reading arguments off the
+stream rather than off the dispatch path would still see `kinds: null`, which is
+the case this work exists to fix.

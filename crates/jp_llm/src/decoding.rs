@@ -8,6 +8,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use futures::StreamExt as _;
 use serde_json::{Map, Value};
+use tracing::trace;
 
 use crate::{
     EventStream,
@@ -33,6 +34,10 @@ impl ArgumentDecoding {
     pub(crate) fn apply(&self, arguments: &mut Map<String, Value>) {
         for name in &self.omit_null {
             if arguments.get(name) == Some(&Value::Null) {
+                trace!(
+                    argument = name,
+                    "Omitting null placeholder from tool arguments."
+                );
                 arguments.remove(name);
             }
         }
