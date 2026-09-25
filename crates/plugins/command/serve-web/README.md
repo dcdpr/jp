@@ -88,7 +88,8 @@ Sending while a turn is running interrupts the assistant and answers it, inside
 the turn that was already going: what it had produced is kept, the message
 follows it, and it carries on from there.
 This is Ctrl-C then `[r] Reply` at a terminal, and the conversation is never
-unlocked in between, so there is no window in which the message could be refused.
+unlocked in between, so there is no window in which the message could be
+refused.
 
 Events arrive in batches rather than token by token: the turn loop persists at
 each streaming boundary, so a page sees a complete assistant response or tool
