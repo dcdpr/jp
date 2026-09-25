@@ -10,8 +10,8 @@ use std::{
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{FixedOffset, Local};
 use jp_config::{
-    AppConfig, PartialAppConfig, ToPartial as _, editor::EditorConfig,
-    model::parameters::PartialReasoningConfig,
+    AppConfig, PartialAppConfig, PartialConfig as _, ToPartial as _, editor::EditorConfig,
+    fs::load_partial, model::parameters::PartialReasoningConfig,
 };
 use jp_conversation::{
     ConversationStream,
@@ -290,9 +290,19 @@ pub(crate) fn edit_query(
         doc.query = query;
     }
 
-    let config_value = build_config_text(config);
-    if doc.meta.config.value.is_empty() {
-        doc.meta.config.value = &config_value;
+    // A draft kept from an earlier run carries the config that run pre-filled.
+    // Show this run's config instead, keeping only what the user edited.
+    let seed = config_seed(config);
+    let seed_json = serde_json::to_string(&seed)
+        .ok()
+        .filter(|json| !json.contains("-->"));
+    let block = match reconcile_config_block(doc.meta.config.value, doc.meta.config.seed, &seed) {
+        ConfigBlock::Keep => None,
+        ConfigBlock::Replace(block) => Some(block),
+    };
+    if let Some(block) = &block {
+        doc.meta.config.value = block;
+        doc.meta.config.seed = seed_json.as_deref();
     }
 
     if let Some(error) = config_error {
@@ -331,11 +341,11 @@ pub(crate) fn edit_query(
     Ok((doc.query.to_owned(), partial))
 }
 
-fn build_config_text(config: &AppConfig) -> String {
-    let model_id = &config.assistant.model.id;
-    let mut active_config = PartialAppConfig::empty();
-    active_config.assistant.model.id = model_id.to_partial();
-    active_config.assistant.model.parameters.reasoning = config
+/// The config a draft's block is pre-filled with.
+fn config_seed(config: &AppConfig) -> PartialAppConfig {
+    let mut seed = PartialAppConfig::empty();
+    seed.assistant.model.id = config.assistant.model.id.to_partial();
+    seed.assistant.model.parameters.reasoning = config
         .assistant
         .model
         .parameters
@@ -343,7 +353,68 @@ fn build_config_text(config: &AppConfig) -> String {
         .map(|v| v.to_partial())
         .or(Some(PartialReasoningConfig::Auto));
 
-    toml::to_string_pretty(&active_config).unwrap_or_default()
+    seed
+}
+
+/// What to do with a draft's config block when the editor opens it.
+#[derive(Debug, PartialEq)]
+enum ConfigBlock {
+    /// Show the block exactly as stored, with its stored seed.
+    Keep,
+
+    /// Show this TOML instead, with the current seed.
+    Replace(String),
+}
+
+/// Bring a stored config block up to date with the config of this run.
+///
+/// The block is `stored_seed` plus whatever the user edited, so the edits are
+/// its difference from the seed.
+/// Those edits are laid over `seed`, and every value the user left alone takes
+/// the value `seed` has.
+///
+/// A block that is not valid TOML is kept as it is: its edits cannot be read,
+/// and the parse error it produces reopens the editor on it.
+/// A block without a readable seed is replaced by `seed` whole, because nothing
+/// tells the values the user edited apart from the pre-filled ones.
+fn reconcile_config_block(
+    block: &str,
+    stored_seed: Option<&str>,
+    seed: &PartialAppConfig,
+) -> ConfigBlock {
+    let render = |partial: &PartialAppConfig| {
+        ConfigBlock::Replace(toml::to_string_pretty(partial).unwrap_or_default())
+    };
+
+    if block.is_empty() {
+        return render(seed);
+    }
+
+    let Ok(stored) = toml::from_str::<PartialAppConfig>(block) else {
+        return ConfigBlock::Keep;
+    };
+
+    let Some(stored_seed) =
+        stored_seed.and_then(|json| serde_json::from_str::<PartialAppConfig>(json).ok())
+    else {
+        if stored != *seed {
+            warn!("Replacing the config block of a query draft written without a seed.");
+        }
+        return render(seed);
+    };
+
+    let edits = stored_seed.delta(stored);
+    if edits.is_empty() {
+        return render(seed);
+    }
+
+    match load_partial(seed.clone(), edits) {
+        Ok(merged) => render(&merged),
+        Err(error) => {
+            warn!(%error, "Failed to reapply query draft config edits.");
+            ConfigBlock::Keep
+        }
+    }
 }
 
 fn build_history_text(history: &ConversationStream) -> String {
@@ -459,3 +530,7 @@ fn inquiry_answer_line(response: &InquiryResponse) -> String {
 #[cfg(test)]
 #[path = "editor_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "editor_draft_tests.rs"]
+mod draft_tests;

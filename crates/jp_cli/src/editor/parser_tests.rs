@@ -47,6 +47,7 @@ fn test_query_config_section() {
                         name = "bar""#
                 ),
                 error: None,
+                seed: None,
             }),
         }),
         ("nested code block", TestCase {
@@ -84,6 +85,7 @@ fn test_query_config_section() {
                         """"#
                 ),
                 error: None,
+                seed: None,
             }),
         }),
         ("with error", TestCase {
@@ -111,6 +113,7 @@ fn test_query_config_section() {
                         name = "bar""#
                 ),
                 error: Some("> ERROR: Configuration parsing error\n>\n> foo"),
+                seed: None,
             }),
         }),
     ];
@@ -133,6 +136,7 @@ fn test_query_config_section_display() {
             input: QueryConfigSection {
                 value: "",
                 error: None,
+                seed: None,
             },
             want: indoc!(
                 "
@@ -154,6 +158,7 @@ fn test_query_config_section_display() {
             input: QueryConfigSection {
                 value: "",
                 error: Some("> ERROR: Configuration parsing error\n>\n> foo"),
+                seed: None,
             },
             want: indoc!(
                 "
@@ -179,6 +184,7 @@ fn test_query_config_section_display() {
                         "#
                 ),
                 error: None,
+                seed: None,
             },
             want: indoc!(
                 r#"
@@ -275,6 +281,7 @@ fn test_query_document() {
                                 model.parameters.reasoning.effort = "low""#
                             ),
                             error: None,
+                            seed: None,
                         },
                         history: QueryHistorySection { value: "" },
                     },
@@ -313,6 +320,7 @@ fn test_query_document() {
                                 model.parameters.reasoning.effort = "low""#
                             ),
                             error: Some("> ERROR: Configuration parsing error\n>\n> foo"),
+                            seed: None,
                         },
                         history: QueryHistorySection { value: "" },
                     },
@@ -349,6 +357,49 @@ fn test_query_document() {
                         config: QueryConfigSection {
                             value: "",
                             error: None,
+                            seed: None,
+                        },
+                        history: QueryHistorySection {
+                            value: "# Conversation History\n\nbar",
+                        },
+                    },
+                }),
+            }),
+            ("with seed and history", TestCase {
+                input: indoc!(
+                    r#"
+                    foo
+
+                    ---------------------------------------8<---------------------------------------
+                    --------------------- EVERYTHING BELOW THIS LINE IS IGNORED --------------------
+                    --------------------------------------->8---------------------------------------
+
+                    # Active Configuration
+
+                    > NOTE: You can edit this configuration to apply it to the current conversation.
+                    >       If the configuration is invalid, the editor will re-open.
+                    >
+                    >       Only the most relevant configuration is shown here, but you can add any
+                    >       configuration properties you want to apply.
+
+                    ```toml
+                    model.id = "openrouter"
+                    ```
+
+                    <!-- CONFIG_SEED: {"assistant":{}} -->
+
+                    <!-- CONVERSATION_MARKER -->
+                    # Conversation History
+
+                    bar"#
+                ),
+                want: Ok(QueryDocument {
+                    query: "foo",
+                    meta: QueryMetaSection {
+                        config: QueryConfigSection {
+                            value: r#"model.id = "openrouter""#,
+                            error: None,
+                            seed: Some(r#"{"assistant":{}}"#),
                         },
                         history: QueryHistorySection {
                             value: "# Conversation History\n\nbar",
