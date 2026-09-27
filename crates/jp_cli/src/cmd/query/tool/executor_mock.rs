@@ -11,7 +11,7 @@ use jp_tool::{ToolDefinition, ToolDocs};
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
-use super::{Executor, ExecutorResult, ExecutorSource, PermissionInfo};
+use super::{CallExecutors, Executor, ExecutorResult, ExecutorSource, PermissionInfo};
 
 /// A mock executor for testing that returns pre-configured results.
 ///
@@ -178,8 +178,8 @@ impl ExecutorSource for TestExecutorSource {
         &self,
         request: ToolCallRequest,
         _config: ToolConfigWithDefaults,
-    ) -> Option<Box<dyn Executor>> {
+    ) -> Option<CallExecutors> {
         let factory = self.factories.get(&request.name)?;
-        Some(factory(request))
+        Some(CallExecutors::call(factory(request)))
     }
 }

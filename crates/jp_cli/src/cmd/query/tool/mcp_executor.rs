@@ -30,11 +30,12 @@ use jp_mcp::{
     server::{
         StderrSink,
         builtin::BuiltinExecutors,
+        fan_out::{self, Split},
         http::{Endpoint, EndpointError},
         result::from_mcp,
         service::{
             AccessPolicyError, Admission, ConfiguredTool, Formatted, HostReply, HostRequest,
-            InputAnswer, Interaction, InvocationId, Progress, ReleaseDecision, Service,
+            InputAnswer, Interaction, InvocationId, Progress, Recording, ReleaseDecision, Service,
         },
     },
 };
@@ -58,7 +59,8 @@ use tracing::{debug, warn};
 use url::Url;
 
 use super::executor::{
-    Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo, Review, response,
+    CallExecutors, Executor, ExecutorError, ExecutorResult, ExecutorSource, FanOutCall,
+    PermissionInfo, Review, response,
 };
 use crate::access::{approvals::ApprovalStore, compile::compile_tool_policy};
 
@@ -153,7 +155,34 @@ struct CallSlot {
 
     /// The call as the assistant requested it.
     /// Argument edits do not change it.
+    ///
+    /// For an operation of a fanned-out call this is the whole call, envelope
+    /// included, which is what the service echoes back on every interaction.
     request: ToolCallRequest,
+
+    /// Which operation of a fanned-out call this slot runs, or `None` for an
+    /// ordinary call and for the fanned-out call itself.
+    op: Option<usize>,
+
+    /// For an operation, the slot of the call it belongs to, which owns the MCP
+    /// request.
+    parent: Option<Arc<CallSlot>>,
+
+    /// For a fanned-out call, whether its MCP request has been submitted.
+    ///
+    /// Every operation's first `prepare` asks for it; only the first submits.
+    submitted: AtomicBool,
+
+    /// For a fanned-out call JP submitted, cancelled once its MCP request
+    /// returns, so an operation still waiting for its first interaction stops
+    /// waiting.
+    done: CancellationToken,
+
+    /// For an operation, how it ended, once it has.
+    ///
+    /// A settled operation is never prepared again: a restart re-prepares only
+    /// the operations that were still running.
+    settled: SyncMutex<Option<ToolCallResponse>>,
 
     /// Where the router forwards this call's interactions.
     sender: mpsc::Sender<HostRequest>,
@@ -208,21 +237,54 @@ struct CallSlot {
     state: Mutex<PendingCall>,
 }
 
+/// Where a call's interactions go.
+#[derive(Clone)]
+enum Route {
+    /// An ordinary call: one slot takes everything.
+    Call(Arc<CallSlot>),
+
+    /// A fanned-out call: each operation's interactions go to its own slot, and
+    /// the call's own `Record` to the call's slot.
+    FanOut {
+        call: Arc<CallSlot>,
+        operations: Vec<Arc<CallSlot>>,
+    },
+}
+
+impl Route {
+    /// The slot of the call itself.
+    fn call(&self) -> &Arc<CallSlot> {
+        match self {
+            Self::Call(slot) | Self::FanOut { call: slot, .. } => slot,
+        }
+    }
+}
+
 /// The calls a turn has in flight, under the two names they are looked up by.
 ///
-/// Both maps hold the same slots: the router resolves an interaction by the
-/// correlation key it carries, and acknowledgement resolves a recorded response
-/// by the tool call id the conversation stores.
+/// The router resolves an interaction by the correlation key it carries, and
+/// acknowledgement resolves a recorded response by the tool call id the
+/// conversation stores.
+/// An operation of a fanned-out call is also kept under its call's id and its
+/// position, for a restart to find it again.
 #[derive(Default)]
 struct Registry {
-    by_key: HashMap<HostCallKey, Arc<CallSlot>>,
-    by_id: HashMap<String, Arc<CallSlot>>,
+    by_key: HashMap<HostCallKey, Route>,
+    by_id: HashMap<(String, Option<usize>), Arc<CallSlot>>,
 }
 
 impl Registry {
-    fn insert(&mut self, slot: &Arc<CallSlot>) {
-        self.by_key.insert(slot.key.clone(), slot.clone());
-        self.by_id.insert(slot.request.id.clone(), slot.clone());
+    fn insert(&mut self, route: Route) {
+        let call = route.call().clone();
+        self.by_id
+            .insert((call.request.id.clone(), None), call.clone());
+        if let Route::FanOut { operations, .. } = &route {
+            for slot in operations {
+                self.by_id
+                    .insert((slot.request.id.clone(), slot.op), slot.clone());
+            }
+        }
+        self.by_key.insert(call.key.clone(), route);
     }
 
     /// Claim a call for acknowledgement, leaving its route in place.
@@ -230,20 +292,34 @@ impl Registry {
     /// The service still has barriers to raise before the call finishes, and a
     /// request it cannot route fails closed, so the route outlives the claim.
     fn claim(&mut self, id: &str) -> Option<Arc<CallSlot>> {
-        self.by_id.remove(id)
+        self.by_id.remove(&(id.to_owned(), None))
     }
 
-    /// The call `id` names, if it is waiting to be restarted.
-    fn restarting(&self, id: &str) -> Option<Arc<CallSlot>> {
+    /// The slot `id` and `op` name, if it is waiting to be restarted.
+    fn restarting(&self, id: &str, op: Option<usize>) -> Option<Arc<CallSlot>> {
         self.by_id
-            .get(id)
+            .get(&(id.to_owned(), op))
             .filter(|slot| slot.restarting.load(Ordering::Acquire))
             .cloned()
     }
 
-    /// Drop a finished call's route.
+    /// The route of the fanned-out call `id`, if it is still in flight.
+    fn fan_out(&self, id: &str) -> Option<Route> {
+        let call = self.by_id.get(&(id.to_owned(), None))?;
+        self.by_key
+            .get(&call.key)
+            .filter(|route| matches!(route, Route::FanOut { .. }))
+            .cloned()
+    }
+
+    /// Drop a finished call's route, and its operations with it.
     fn forget(&mut self, slot: &CallSlot) {
-        self.by_key.remove(&slot.key);
+        if let Some(Route::FanOut { operations, .. }) = self.by_key.remove(&slot.key) {
+            for operation in operations {
+                self.by_id
+                    .remove(&(operation.request.id.clone(), operation.op));
+            }
+        }
     }
 }
 
@@ -480,6 +556,10 @@ async fn route(
 /// these too.
 /// They catch the service echoing the wrong correlation map, which would
 /// otherwise show up as a tool that silently never finishes.
+///
+/// An operation of a fanned-out call goes to its own slot.
+/// The Host sized its operations with the same split the service used, and a
+/// call the two split differently is refused rather than half-routed.
 fn resolve(
     calls: &SyncMutex<Registry>,
     dispatch: &Dispatch,
@@ -492,7 +572,24 @@ fn resolve(
         .get(dispatch.correlation_field())
         .and_then(Value::as_str)
         .map(|value| HostCallKey(value.to_owned()))?;
-    let slot = locked(calls).by_key.get(&key).cloned()?;
+    let route = locked(calls).by_key.get(&key).cloned()?;
+    let slot = match (&route, request.call.operation) {
+        (Route::Call(slot) | Route::FanOut { call: slot, .. }, None) => slot.clone(),
+        (Route::FanOut { operations, .. }, Some(operation))
+            if operation.count == operations.len() =>
+        {
+            operations.get(operation.index)?.clone()
+        }
+        _ => {
+            warn!(
+                tool_call_id = %route.call().request.id,
+                operation = ?request.call.operation,
+                "The service split this call into operations differently than the Host; \
+                 refusing the route."
+            );
+            return None;
+        }
+    };
     if slot.request.name != request.call.request.name
         || slot.request.arguments != request.call.request.arguments
     {
@@ -546,53 +643,22 @@ impl ExecutorSource for TerminalExecutorSource {
         &self,
         request: ToolCallRequest,
         config: ToolConfigWithDefaults,
-    ) -> Option<Box<dyn Executor>> {
-        self.definitions.get(&request.name)?;
+    ) -> Option<CallExecutors> {
+        let definition = self.definitions.get(&request.name)?;
 
-        // A restarted call keeps its slot, and with it the service-side
-        // invocation the paused attempt belongs to. Building a second slot
-        // would strand that invocation and submit a duplicate call.
-        if let Some(slot) = locked(&self.calls).restarting(&request.id) {
-            return Some(Box::new(ToolExecutor {
-                arguments: slot.request.arguments.clone(),
-                config,
-                peer: self.peer.clone(),
-                service: self.service.clone(),
-                slot,
-                formatted: None,
-            }));
-        }
-
-        let execution = self.dispatch.mode();
-        let (sender, receiver) = mpsc::channel(8);
-        let slot = Arc::new(CallSlot {
-            key: HostCallKey::for_execution(execution, &request.id),
-            request,
-            sender,
-            invocation: SyncMutex::new(None),
-            restarting: AtomicBool::new(false),
-            held: AtomicBool::new(false),
-            stderr: SyncMutex::new(None),
-            state: Mutex::new(PendingCall {
-                receiver,
-                task: None,
-                phase: Phase::Idle,
-                execution,
-                service: self.service.clone(),
-                invocation: None,
-            }),
-        });
-        locked(&self.calls).insert(&slot);
-        // An agent's MCP request may already be waiting on this route.
-        self.dispatch.registered.notify_one();
-        Some(Box::new(ToolExecutor {
-            arguments: slot.request.arguments.clone(),
-            config,
-            peer: self.peer.clone(),
-            service: self.service.clone(),
-            slot,
-            formatted: None,
-        }))
+        // Sized with the split the service applies to the same call, so every
+        // operation it runs has an executor waiting for it.
+        let operations = match config.fan_out() {
+            None => None,
+            Some(_) => match fan_out::split(definition, &request.arguments) {
+                Split::Envelope(operations) => Some(operations),
+                Split::Bare | Split::Malformed(_) => None,
+            },
+        };
+        Some(match operations {
+            None => CallExecutors::call(self.call_executor(request, config)),
+            Some(operations) => self.fan_out_executors(&request, &config, operations),
+        })
     }
 
     fn acknowledge(&self, review: Review) -> BoxFuture<'_, Result<(), ExecutorError>> {
@@ -607,6 +673,267 @@ impl ExecutorSource for TerminalExecutorSource {
             locked(&self.calls).forget(&slot);
             result
         })
+    }
+
+    fn settle(&self, review: Review, op: usize) -> BoxFuture<'_, Result<(), ExecutorError>> {
+        Box::pin(async move {
+            let slot = locked(&self.calls)
+                .by_id
+                .get(&(review.response.id.clone(), Some(op)))
+                .cloned();
+            match slot {
+                Some(slot) => slot.settle(&review).await,
+                None => Ok(()),
+            }
+        })
+    }
+}
+
+impl TerminalExecutorSource {
+    /// The tool definitions callers are shown, in configured order.
+    ///
+    /// A tool with `fan_out` configured appears with its envelope schema, so
+    /// this, not the resolved definitions, is what a provider request carries.
+    pub(crate) fn advertised(&self) -> Vec<ToolDefinition> {
+        self.service.definitions().cloned().collect()
+    }
+
+    /// The executor for an ordinary call.
+    fn call_executor(
+        &self,
+        request: ToolCallRequest,
+        config: ToolConfigWithDefaults,
+    ) -> Box<dyn Executor> {
+        // A restarted call keeps its slot, and with it the service-side
+        // invocation the paused attempt belongs to. Building a second slot
+        // would strand that invocation and submit a duplicate call.
+        // Bound on its own statement so the registry lock is released before
+        // `insert` takes it again.
+        let restarting = locked(&self.calls).restarting(&request.id, None);
+        let slot = restarting.unwrap_or_else(|| {
+            let slot = self.slot(request, None, None);
+            locked(&self.calls).insert(Route::Call(slot.clone()));
+            // An agent's MCP request may already be waiting on this route.
+            self.dispatch.registered.notify_one();
+            slot
+        });
+        self.executor(slot.request.arguments.clone(), config, slot)
+    }
+
+    /// The executors for a fanned-out call, one per operation.
+    fn fan_out_executors(
+        &self,
+        request: &ToolCallRequest,
+        config: &ToolConfigWithDefaults,
+        operations: Vec<Map<String, Value>>,
+    ) -> CallExecutors {
+        // A restart re-prepares the same call, whose operations keep their
+        // slots: a settled one answers from what it settled with, and one that
+        // was paused resumes its invocation.
+        // Bound on its own statement so the registry lock is released before
+        // `insert` takes it again.
+        let existing = locked(&self.calls).fan_out(&request.id);
+        let (call, slots) = match existing {
+            Some(Route::FanOut {
+                call,
+                operations: slots,
+            }) if slots.len() == operations.len() => (call, slots),
+            _ => {
+                let call = self.slot(request.clone(), None, None);
+                let slots = (0..operations.len())
+                    .map(|index| self.slot(request.clone(), Some(index), Some(call.clone())))
+                    .collect::<Vec<_>>();
+                locked(&self.calls).insert(Route::FanOut {
+                    call: call.clone(),
+                    operations: slots.clone(),
+                });
+                self.dispatch.registered.notify_one();
+                (call, slots)
+            }
+        };
+        CallExecutors {
+            operations: slots
+                .into_iter()
+                .zip(operations)
+                .map(|(slot, arguments)| self.executor(arguments, config.clone(), slot))
+                .collect(),
+            fan_out: Some(Arc::new(FanOutHandle { slot: call })),
+        }
+    }
+
+    fn slot(
+        &self,
+        request: ToolCallRequest,
+        op: Option<usize>,
+        parent: Option<Arc<CallSlot>>,
+    ) -> Arc<CallSlot> {
+        let execution = self.dispatch.mode();
+        let (sender, receiver) = mpsc::channel(8);
+        let parent_done = parent.as_ref().map(|parent| parent.done.clone());
+        Arc::new(CallSlot {
+            key: HostCallKey::for_execution(execution, &request.id),
+            request,
+            op,
+            parent,
+            submitted: AtomicBool::new(false),
+            done: CancellationToken::new(),
+            settled: SyncMutex::new(None),
+            sender,
+            invocation: SyncMutex::new(None),
+            restarting: AtomicBool::new(false),
+            held: AtomicBool::new(false),
+            stderr: SyncMutex::new(None),
+            state: Mutex::new(PendingCall {
+                receiver,
+                task: None,
+                phase: Phase::Idle,
+                execution,
+                service: self.service.clone(),
+                invocation: None,
+                parent_done,
+            }),
+        })
+    }
+
+    fn executor(
+        &self,
+        arguments: Map<String, Value>,
+        config: ToolConfigWithDefaults,
+        slot: Arc<CallSlot>,
+    ) -> Box<dyn Executor> {
+        Box::new(ToolExecutor {
+            arguments,
+            config,
+            peer: self.peer.clone(),
+            service: self.service.clone(),
+            slot,
+            formatted: None,
+        })
+    }
+}
+
+/// The Host's handle on a fanned-out call as a whole.
+struct FanOutHandle {
+    slot: Arc<CallSlot>,
+}
+
+#[async_trait]
+impl FanOutCall for FanOutHandle {
+    async fn recorded(&self) -> Result<ToolCallResponse, ExecutorError> {
+        let mut state = self.slot.state.lock().await;
+        match state.next().await? {
+            Received::Interaction(interaction) => match *interaction {
+                Interaction::Record { recording, reply } => {
+                    state.phase = Phase::Record(reply);
+                    Ok(response(&self.slot.request.id, &recording.result))
+                }
+                _ => Err(ExecutorError::UnexpectedInteraction { phase: "folding" }),
+            },
+            // Returned without asking to be recorded, which the service does
+            // only for a call it could not start.
+            Received::Finished(result) => Ok(response(&self.slot.request.id, &result)),
+        }
+    }
+}
+
+impl CallSlot {
+    /// Submit the fanned-out call's MCP request, once for all its operations.
+    ///
+    /// Nothing to do when an agent submits its own calls.
+    async fn submit(&self, peer: &Peer<RoleClient>) {
+        if self.submitted.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let mut state = self.state.lock().await;
+        if state.execution != ToolExecution::Caller {
+            return;
+        }
+        let mut params = CallToolRequestParams::new(self.request.name.clone());
+        params.arguments = Some(self.request.arguments.clone());
+        params.meta = Some(Meta(Map::from_iter([(
+            CORRELATION_KEY.into(),
+            self.key.0.clone().into(),
+        )])));
+        let peer = peer.clone();
+        let done = self.done.clone();
+        state.task = Some(tokio::spawn(async move {
+            let result = peer.call_tool(params).await;
+            done.cancel();
+            result
+        }));
+    }
+
+    /// Take an operation's settlement: remember how it ended and let the
+    /// service move on.
+    fn take_settlement(
+        &self,
+        state: &mut PendingCall,
+        settlement: &Recording,
+        reply: Reply<()>,
+    ) -> ToolCallResponse {
+        let settled = response(&self.request.id, &settlement.result);
+        *locked(&self.settled) = Some(settled.clone());
+        state.phase = Phase::Finished;
+        drop(reply.send(Ok(())));
+        settled
+    }
+
+    /// Resolve an operation of a fanned-out call with what the Host settled on,
+    /// without waiting for the call to be recorded.
+    ///
+    /// Its call is recorded once every operation is resolved, so an operation
+    /// cannot wait for that the way an ordinary call waits for acknowledgement.
+    async fn settle(&self, review: &Review) -> Result<(), ExecutorError> {
+        let mut state = self.state.lock().await;
+        if locked(&self.settled).is_some() {
+            return Ok(());
+        }
+        if self.held.swap(false, Ordering::AcqRel) {
+            // The attempt already stopped; the Host's result stands in for it,
+            // and no settlement follows.
+            state.phase = Phase::Finished;
+            *locked(&self.settled) = Some(review.response.clone());
+            // `false` means the operation finished on its own first, which
+            // its settlement then reports.
+            if let Some(id) = *locked(&self.invocation) {
+                let _ = state.service.complete_call(id, approved(None, review));
+            }
+            return Ok(());
+        }
+        match mem::replace(&mut state.phase, Phase::Finished) {
+            // Nothing outstanding: a failed attempt already ended the
+            // operation.
+            Phase::Idle | Phase::Finished | Phase::Record(_) => return Ok(()),
+            Phase::Admission(reply) => drop(reply.send(Ok(Admission::Complete {
+                result: approved(None, review),
+            }))),
+            Phase::Release(reply) => drop(reply.send(Ok(ReleaseDecision::Complete {
+                result: approved(None, review),
+            }))),
+            Phase::Input { reply, .. } => drop(reply.send(Ok(InputAnswer::Complete {
+                result: approved(None, review),
+            }))),
+            Phase::Review { offered, reply } => {
+                drop(reply.send(Ok(approved(Some(offered), review))));
+            }
+        }
+        loop {
+            match state.next().await? {
+                Received::Interaction(interaction) => match *interaction {
+                    Interaction::Review { result, reply, .. } => {
+                        drop(reply.send(Ok(approved(Some(result), review))));
+                    }
+                    Interaction::Settled { settlement, reply } => {
+                        self.take_settlement(&mut state, &settlement, reply);
+                        return Ok(());
+                    }
+                    _ => {
+                        return Err(ExecutorError::UnexpectedInteraction { phase: "settling" });
+                    }
+                },
+                Received::Finished(_) => return Ok(()),
+            }
+        }
     }
 }
 
@@ -682,6 +1009,13 @@ struct PendingCall {
 
     /// The service's name for this call, once an interaction has carried it.
     invocation: Option<InvocationId>,
+
+    /// For an operation of a fanned-out call, cancelled once the call's MCP
+    /// request returns.
+    ///
+    /// An operation holds no request of its own to wait on, so this is what
+    /// ends a wait for an operation the service will never start.
+    parent_done: Option<CancellationToken>,
 }
 
 impl PendingCall {
@@ -689,6 +1023,11 @@ impl PendingCall {
     /// receives its response.
     fn submitted_elsewhere(&self) -> bool {
         matches!(self.execution, ToolExecution::Agent { .. })
+    }
+
+    /// Whether this is an operation of a fanned-out call.
+    fn is_operation(&self) -> bool {
+        self.parent_done.is_some()
     }
 }
 
@@ -721,7 +1060,10 @@ impl PendingCall {
 
     /// Take the next thing to happen to this call, whoever submitted it.
     async fn receive(&mut self) -> Result<Received, ExecutorError> {
-        if matches!(self.execution, ToolExecution::Agent { .. }) {
+        // An operation's MCP request belongs to its call, so an operation
+        // waits the way a call an agent submitted does: on its interactions
+        // alone.
+        if self.is_operation() || matches!(self.execution, ToolExecution::Agent { .. }) {
             return self.receive_agent().await;
         }
         let task = self.task.as_mut().ok_or(ExecutorError::HostDisconnected)?;
@@ -763,10 +1105,7 @@ impl PendingCall {
                 // is coming for it.
                 None => Err(ExecutorError::Cancelled),
             },
-            None => match timeout(AGENT_CALL_TIMEOUT, self.receiver.recv()).await {
-                Ok(request) => request.ok_or(ExecutorError::HostDisconnected),
-                Err(_) => Err(ExecutorError::ExternalCallTimeout),
-            },
+            None => self.first_request().await,
         };
 
         let request = match request {
@@ -778,6 +1117,23 @@ impl PendingCall {
         };
         self.invocation = Some(request.call.id);
         Ok(Received::Interaction(Box::new(request.interaction)))
+    }
+
+    /// Wait for the first interaction of a call JP holds no request future for.
+    ///
+    /// For an operation of a fanned-out call, the call's MCP request returning
+    /// also ends the wait: the service will start no operation after that.
+    async fn first_request(&mut self) -> Result<HostRequest, ExecutorError> {
+        let parent_done = self.parent_done.clone().unwrap_or_default();
+        tokio::select! {
+            received = timeout(AGENT_CALL_TIMEOUT, self.receiver.recv()) => match received {
+                Ok(request) => request.ok_or(ExecutorError::HostDisconnected),
+                Err(_) => Err(ExecutorError::ExternalCallTimeout),
+            },
+            () = parent_done.cancelled(), if self.parent_done.is_some() => {
+                Err(ExecutorError::HostDisconnected)
+            }
+        }
     }
 }
 
@@ -957,6 +1313,10 @@ impl Executor for ToolExecutor {
         &self.slot.request.name
     }
 
+    fn op_index(&self) -> Option<usize> {
+        self.slot.op
+    }
+
     fn arguments(&self) -> &Map<String, Value> {
         &self.arguments
     }
@@ -976,6 +1336,7 @@ impl Executor for ToolExecutor {
         }
         Some(PermissionInfo {
             tool_id: self.slot.request.id.clone(),
+            state_key: self.state_key(),
             tool_name: self.slot.request.name.clone(),
             tool_source: self.config.source().clone(),
             run_mode,
@@ -1024,6 +1385,12 @@ impl Executor for ToolExecutor {
         render_arguments: bool,
     ) -> Result<Option<ToolCallResponse>, ExecutorError> {
         let mut state = self.slot.state.lock().await;
+
+        // An operation that settled before a restart keeps its result.
+        if let Some(settled) = locked(&self.slot.settled).clone() {
+            return Ok(Some(settled));
+        }
+
         let restarting = self.slot.restarting.swap(false, Ordering::AcqRel);
 
         if restarting {
@@ -1044,8 +1411,11 @@ impl Executor for ToolExecutor {
         }
 
         // A restart reuses the request already in flight, and an agent submits
-        // its own; only a first Host-submitted call issues one here.
-        if !restarting && state.execution == ToolExecution::Caller {
+        // its own; only a first Host-submitted call issues one here. An
+        // operation's request is its call's, submitted once for all of them.
+        if !restarting && let Some(parent) = &self.slot.parent {
+            parent.submit(&self.peer).await;
+        } else if !restarting && state.execution == ToolExecution::Caller {
             let mut params = CallToolRequestParams::new(self.slot.request.name.clone());
             params.arguments = Some(self.arguments.clone());
             params.meta = Some(Meta(Map::from_iter([(
@@ -1082,6 +1452,15 @@ impl Executor for ToolExecutor {
                         let response = response(&self.slot.request.id, &recording.result);
                         state.phase = Phase::Record(reply);
                         return Ok(Some(response));
+                    }
+                    // Resolved without being prepared: its arguments failed
+                    // validation, or the tool is configured not to run.
+                    Interaction::Settled { settlement, reply } => {
+                        return Ok(Some(self.slot.take_settlement(
+                            &mut state,
+                            &settlement,
+                            reply,
+                        )));
                     }
                     _ => {
                         return Err(ExecutorError::UnexpectedInteraction { phase: "preparing" });
@@ -1121,6 +1500,13 @@ impl Executor for ToolExecutor {
                     self.formatted = formatted_arguments;
                     state.phase = Phase::Release(reply);
                     Ok(())
+                }
+                // An operation whose approved arguments fail validation
+                // settles with the error instead.
+                Interaction::Settled { settlement, reply } => {
+                    let message = settlement.result.to_text();
+                    self.slot.take_settlement(&mut state, &settlement, reply);
+                    Err(ExecutorError::Rejected { message })
                 }
                 _ => Err(ExecutorError::UnexpectedInteraction { phase: "approving" }),
             },
@@ -1212,6 +1598,11 @@ impl Executor for ToolExecutor {
                         state.phase = Phase::Record(reply);
                         Ok(ExecutorResult::Completed(response))
                     }
+                    // An operation ends here: it ran, or a `stop` policy ruled
+                    // it out after the Host released it.
+                    Interaction::Settled { settlement, reply } => Ok(ExecutorResult::Completed(
+                        self.slot.take_settlement(&mut state, &settlement, reply),
+                    )),
                     _ => Err(ExecutorError::UnexpectedInteraction { phase: "executing" }),
                 },
                 Received::Finished(result) => Ok(ExecutorResult::Completed(response(id, &result))),

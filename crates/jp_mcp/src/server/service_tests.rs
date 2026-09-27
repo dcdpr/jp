@@ -200,6 +200,359 @@ async fn preparation_release_input_and_delivery_use_distinct_acknowledgements() 
     service.shutdown().await;
 }
 
+/// Answers with the `path` it was given, failing for `bad`, and records the
+/// order it ran in.
+struct PathTool(Arc<std::sync::Mutex<Vec<String>>>);
+
+#[async_trait]
+impl BuiltinTool for PathTool {
+    async fn execute(&self, arguments: &Value, _: &IndexMap<String, Value>) -> Outcome {
+        let path = arguments["path"].as_str().unwrap_or_default().to_owned();
+        self.0.lock().unwrap().push(path.clone());
+        if path == "bad" {
+            return Outcome::Error {
+                message: "bad path".into(),
+                trace: vec![],
+                transient: false,
+            };
+        }
+        Outcome::Success { content: path }
+    }
+}
+
+/// A service whose `count` tool is a [`PathTool`] configured by `config`.
+fn fan_out_fixture(config: Value) -> (Service, HostReceiver, Arc<std::sync::Mutex<Vec<String>>>) {
+    let runs = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (service, host) = service(
+        config,
+        "/tmp".into(),
+        BuiltinExecutors::new().register("count", PathTool(runs.clone())),
+        InvocationContext::default(),
+    );
+    (service, host, runs)
+}
+
+fn envelope_request(paths: &[&str]) -> CallRequest {
+    let ops = paths
+        .iter()
+        .map(|path| json!({ "path": path }))
+        .collect::<Vec<_>>();
+    CallRequest {
+        name: "count".into(),
+        arguments: json!({ "ops": ops }).as_object().unwrap().clone(),
+        correlation: Map::new(),
+    }
+}
+
+/// Answer every interaction like an approving Host until the call's `Record`,
+/// returning it with every `Settled` seen on the way, by operation index.
+async fn approve_all(host: &mut HostReceiver) -> (Box<Recording>, Vec<(usize, Box<Recording>)>) {
+    let mut settled = Vec::new();
+    loop {
+        let request = next(host).await;
+        match request.interaction {
+            Interaction::RenderArguments { reply } => reply.send(Ok(false)).unwrap(),
+            Interaction::Prepare {
+                arguments, reply, ..
+            } => reply.send(Ok(Admission::Run { arguments })).unwrap(),
+            Interaction::Release { reply, .. } => reply.send(Ok(ReleaseDecision::Execute)).unwrap(),
+            Interaction::Settled { settlement, reply } => {
+                let index = request
+                    .call
+                    .operation
+                    .expect("only operations settle")
+                    .index;
+                settled.push((index, settlement));
+                reply.send(Ok(())).unwrap();
+            }
+            Interaction::Record { recording, reply } => {
+                assert_eq!(request.call.operation, None, "only the call records");
+                reply.send(Ok(())).unwrap();
+                return (recording, settled);
+            }
+            Interaction::Input { .. } | Interaction::Review { .. } => {
+                panic!("unexpected interaction")
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_fan_out_tool_is_advertised_with_the_envelope() {
+    let (service, _host, _runs) = fan_out_fixture(json!({"source": "builtin", "fan_out": true}));
+
+    let advertised = service.definitions().next().unwrap();
+
+    assert_eq!(
+        advertised.parameters,
+        fan_out::envelope(&json!({
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        }))
+    );
+}
+
+#[tokio::test]
+async fn a_tool_without_fan_out_is_advertised_as_declared() {
+    let (service, _host, _runs) = fan_out_fixture(json!({"source": "builtin"}));
+
+    let advertised = service.definitions().next().unwrap();
+
+    assert_eq!(advertised.parameters["required"], json!(["path"]));
+}
+
+/// Each operation is its own invocation, talking to the Host tagged with its
+/// position, and the call records once with the folded result.
+#[tokio::test]
+async fn each_operation_runs_as_its_own_invocation_and_the_call_records_once() {
+    let (service, mut host, runs) =
+        fan_out_fixture(json!({"source": "builtin", "run": "unattended", "fan_out": true}));
+    let call = service.start_call(envelope_request(&["a", "b"])).unwrap();
+
+    let (recording, mut settled) = approve_all(&mut host).await;
+
+    assert_eq!(
+        recording.result,
+        ToolResult::text("[1/2] ok\na\n\n[2/2] ok\nb\n")
+    );
+    assert_eq!(
+        recording
+            .operations
+            .iter()
+            .map(|operation| operation.result.clone())
+            .collect::<Vec<_>>(),
+        vec![ToolResult::text("a"), ToolResult::text("b")]
+    );
+    settled.sort_by_key(|(index, _)| *index);
+    assert_eq!(
+        settled
+            .iter()
+            .map(|(index, settlement)| (*index, settlement.result.clone()))
+            .collect::<Vec<_>>(),
+        vec![(0, ToolResult::text("a")), (1, ToolResult::text("b"))]
+    );
+    assert_eq!(
+        call.finish().await.unwrap(),
+        ToolResult::text("[1/2] ok\na\n\n[2/2] ok\nb\n"),
+        "what the caller receives is what was recorded"
+    );
+    assert_eq!(runs.lock().unwrap().len(), 2);
+}
+
+/// A call without the envelope is an ordinary call: no operations, no framing.
+#[tokio::test]
+async fn a_bare_call_to_a_fan_out_tool_runs_as_an_ordinary_call() {
+    let (service, mut host, runs) =
+        fan_out_fixture(json!({"source": "builtin", "run": "unattended", "fan_out": true}));
+    let call = service
+        .start_call(CallRequest {
+            name: "count".into(),
+            arguments: json!({"path": "a"}).as_object().unwrap().clone(),
+            correlation: Map::new(),
+        })
+        .unwrap();
+
+    let (recording, settled) = approve_all(&mut host).await;
+
+    assert!(settled.is_empty());
+    assert!(recording.operations.is_empty());
+    assert_eq!(call.finish().await.unwrap(), ToolResult::text("a"));
+    assert_eq!(*runs.lock().unwrap(), vec!["a".to_owned()]);
+}
+
+#[tokio::test]
+async fn a_malformed_envelope_is_recorded_without_running() {
+    let (service, mut host, runs) =
+        fan_out_fixture(json!({"source": "builtin", "run": "unattended", "fan_out": true}));
+    let call = service.start_call(envelope_request(&[])).unwrap();
+
+    let (recording, _) = approve_all(&mut host).await;
+
+    let expected = ToolResult::error(
+        "Tool 'count' was called with an empty `ops` array, so there was nothing to do. Include \
+         at least one operation.",
+    );
+    assert_eq!(recording.result, expected);
+    assert_eq!(call.finish().await.unwrap(), expected);
+    assert!(runs.lock().unwrap().is_empty());
+}
+
+/// Under `concurrency = 1` operations run in the order the caller wrote them,
+/// even when the Host releases them in another order.
+#[tokio::test]
+async fn sequential_operations_run_in_the_order_written() {
+    let (service, mut host, runs) = fan_out_fixture(json!({
+        "source": "builtin", "run": "unattended", "fan_out": {"concurrency": 1}
+    }));
+    let call = service
+        .start_call(envelope_request(&["a", "b", "c"]))
+        .unwrap();
+
+    // Admit all three, and hold every release until all have asked for one.
+    let mut releases = Vec::new();
+    while releases.len() < 3 {
+        let request = next(&mut host).await;
+        let index = request.call.operation.unwrap().index;
+        match request.interaction {
+            Interaction::Prepare {
+                arguments, reply, ..
+            } => reply.send(Ok(Admission::Run { arguments })).unwrap(),
+            Interaction::Release { reply, .. } => releases.push((index, reply)),
+            _ => panic!("unexpected interaction"),
+        }
+    }
+    releases.sort_by_key(|(index, _)| std::cmp::Reverse(*index));
+    for (_, reply) in releases {
+        reply.send(Ok(ReleaseDecision::Execute)).unwrap();
+    }
+
+    approve_all(&mut host).await;
+    call.finish().await.unwrap();
+
+    assert_eq!(*runs.lock().unwrap(), vec!["a", "b", "c"]);
+}
+
+#[tokio::test]
+async fn stop_leaves_the_operations_after_a_failure_not_run() {
+    let (service, mut host, runs) = fan_out_fixture(json!({
+        "source": "builtin",
+        "run": "unattended",
+        "fan_out": {"concurrency": 1, "on_error": "stop"},
+    }));
+    let call = service
+        .start_call(envelope_request(&["bad", "good"]))
+        .unwrap();
+
+    let (recording, _) = approve_all(&mut host).await;
+
+    assert_eq!(
+        recording.result,
+        ToolResult::text(
+            "[1/2] error\nbad path\n\n[2/2] not run (stopped after operation 1 failed)\n"
+        )
+    );
+    call.finish().await.unwrap();
+    assert_eq!(*runs.lock().unwrap(), vec!["bad"], "the second never ran");
+}
+
+/// `result = "skip"` tells the caller the delivery was skipped whatever the
+/// tool did; `stop` still acts on the tool's own failure.
+#[tokio::test]
+async fn stop_acts_on_a_failure_that_result_skip_hides() {
+    let (service, mut host, runs) = fan_out_fixture(json!({
+        "source": "builtin",
+        "run": "unattended",
+        "result": "skip",
+        "fan_out": {"concurrency": 1, "on_error": "stop"},
+    }));
+    let call = service
+        .start_call(envelope_request(&["bad", "good"]))
+        .unwrap();
+
+    let (recording, _) = approve_all(&mut host).await;
+
+    assert_eq!(
+        recording.result,
+        ToolResult::text(
+            "[1/2] ok\nResult delivery skipped by configuration.\n\n[2/2] not run (stopped after \
+             operation 1 failed)\n"
+        )
+    );
+    call.finish().await.unwrap();
+    assert_eq!(*runs.lock().unwrap(), vec!["bad"]);
+}
+
+/// An operation the Host declines settles without running, and the rest run.
+#[tokio::test]
+async fn a_declined_operation_settles_and_the_rest_run() {
+    let (service, mut host, runs) =
+        fan_out_fixture(json!({"source": "builtin", "run": "ask", "fan_out": true}));
+    let call = service.start_call(envelope_request(&["a", "b"])).unwrap();
+
+    let mut settled = 0;
+    let recording = loop {
+        let request = next(&mut host).await;
+        let index = request.call.operation.map(|operation| operation.index);
+        match request.interaction {
+            Interaction::Prepare { reply, .. } if index == Some(0) => reply
+                .send(Ok(Admission::Skip {
+                    reason: "Tool skipped by user.".into(),
+                }))
+                .unwrap(),
+            Interaction::Prepare {
+                arguments, reply, ..
+            } => reply.send(Ok(Admission::Run { arguments })).unwrap(),
+            Interaction::Release { reply, .. } => reply.send(Ok(ReleaseDecision::Execute)).unwrap(),
+            Interaction::Settled { reply, .. } => {
+                settled += 1;
+                reply.send(Ok(())).unwrap();
+            }
+            Interaction::Record { recording, reply } => {
+                reply.send(Ok(())).unwrap();
+                break recording;
+            }
+            _ => panic!("unexpected interaction"),
+        }
+    };
+
+    assert_eq!(settled, 2);
+    assert_eq!(
+        recording.result,
+        ToolResult::text("[1/2] ok\nTool skipped by user.\n\n[2/2] ok\nb\n")
+    );
+    call.finish().await.unwrap();
+    assert_eq!(*runs.lock().unwrap(), vec!["b"]);
+}
+
+/// The Host resolving an operation itself (as it does when the user stops a
+/// running tool) ends that operation with the Host's result and no settlement.
+#[tokio::test]
+async fn an_operation_the_host_completes_folds_the_hosts_result() {
+    let (service, mut host, runs) =
+        fan_out_fixture(json!({"source": "builtin", "run": "ask", "fan_out": true}));
+    let call = service.start_call(envelope_request(&["a", "b"])).unwrap();
+
+    let mut settled = 0;
+    let recording = loop {
+        let request = next(&mut host).await;
+        let operation = request.call.operation;
+        match request.interaction {
+            Interaction::Prepare { .. }
+                if operation.map(|operation| operation.index) == Some(0) =>
+            {
+                // Held open, then resolved by the Host in place of an attempt.
+                assert!(service.pause_call(request.call.id));
+                assert!(service.complete_call(request.call.id, ToolResult::text("cancelled")));
+            }
+            Interaction::Prepare {
+                arguments, reply, ..
+            } => reply.send(Ok(Admission::Run { arguments })).unwrap(),
+            Interaction::Release { reply, .. } => reply.send(Ok(ReleaseDecision::Execute)).unwrap(),
+            Interaction::Settled { reply, .. } => {
+                settled += 1;
+                reply.send(Ok(())).unwrap();
+            }
+            Interaction::Record { recording, reply } => {
+                reply.send(Ok(())).unwrap();
+                break recording;
+            }
+            _ => panic!("unexpected interaction"),
+        }
+    };
+
+    assert_eq!(
+        settled, 1,
+        "only the operation the service concluded settles"
+    );
+    assert_eq!(
+        recording.result,
+        ToolResult::text("[1/2] ok\ncancelled\n\n[2/2] ok\nb\n")
+    );
+    call.finish().await.unwrap();
+    assert_eq!(*runs.lock().unwrap(), vec!["b"]);
+}
+
 #[tokio::test]
 async fn restart_keeps_the_logical_call_open_and_replaces_old_replies() {
     let (service, mut host, count) = fixture("ask", "unattended");

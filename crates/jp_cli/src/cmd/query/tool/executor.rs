@@ -8,6 +8,8 @@
 //!
 //! Execution itself lives in `jp_mcp::server`; nothing here runs a tool.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
@@ -54,10 +56,30 @@ pub(crate) trait Executor: Send + Sync {
     }
 
     /// Returns the tool call ID.
+    ///
+    /// Every operation of a fanned-out call shares one id, because the provider
+    /// asked for one call and expects one response.
     fn tool_id(&self) -> &str;
 
     /// Returns the tool name.
     fn tool_name(&self) -> &str;
+
+    /// Position of this executor's operation within its tool call.
+    ///
+    /// `None` when the call carries exactly one operation, which is every call
+    /// to a tool without fan-out configured.
+    fn op_index(&self) -> Option<usize> {
+        None
+    }
+
+    /// Key identifying this operation's display state.
+    ///
+    /// A fanned-out call renders one line per operation and prompts once per
+    /// operation, so each needs a slot of its own rather than sharing the one
+    /// its tool call id would name.
+    fn state_key(&self) -> String {
+        state_key(self.tool_id(), self.op_index())
+    }
 
     /// Returns the tool call arguments.
     ///
@@ -171,7 +193,19 @@ pub(crate) trait ExecutorSource: Send + Sync {
         Box::pin(async { Ok(()) })
     }
 
-    /// Creates an executor for the given tool call request.
+    /// Resolve operation `op` of the fanned-out call `review` answers with what
+    /// the Host settled on.
+    ///
+    /// An operation is not recorded on its own: its call is recorded once every
+    /// operation is resolved, so whatever barrier the operation is parked on is
+    /// answered now rather than on acknowledgement.
+    /// An operation that already ended is left as it is.
+    fn settle(&self, _review: Review, _op: usize) -> BoxFuture<'_, Result<(), ExecutorError>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Creates the executors for the given tool call request: one for an
+    /// ordinary call, one per operation for a fanned-out call.
     ///
     /// Returns `None` if the tool cannot be resolved (e.g. missing from the
     /// definitions).
@@ -179,7 +213,50 @@ pub(crate) trait ExecutorSource: Send + Sync {
         &self,
         request: ToolCallRequest,
         config: ToolConfigWithDefaults,
-    ) -> Option<Box<dyn Executor>>;
+    ) -> Option<CallExecutors>;
+}
+
+/// What the Host runs for one tool call.
+pub(crate) struct CallExecutors {
+    /// One executor for an ordinary call; one per operation, in the order the
+    /// assistant wrote them, for a fanned-out call.
+    pub operations: Vec<Box<dyn Executor>>,
+
+    /// For a fanned-out call, the call as a whole: what it records once every
+    /// operation is resolved.
+    pub fan_out: Option<Arc<dyn FanOutCall>>,
+}
+
+impl CallExecutors {
+    /// An ordinary call, run by one executor.
+    pub fn call(executor: Box<dyn Executor>) -> Self {
+        Self {
+            operations: vec![executor],
+            fan_out: None,
+        }
+    }
+}
+
+/// The Host's view of a fanned-out call as a whole.
+#[async_trait]
+pub(crate) trait FanOutCall: Send + Sync {
+    /// Wait for the call's folded result, which the service offers for
+    /// recording once every operation is resolved.
+    ///
+    /// The call stays parked on that barrier until
+    /// [`ExecutorSource::acknowledge`] releases it.
+    async fn recorded(&self) -> Result<ToolCallResponse, ExecutorError>;
+}
+
+/// The display-state key for operation `op` of tool call `tool_id`.
+///
+/// The tool call id itself when the call carries one operation, so a call
+/// without fan-out is addressed exactly as it always was.
+pub(crate) fn state_key(tool_id: &str, op: Option<usize>) -> String {
+    match op {
+        None => tool_id.to_owned(),
+        Some(op) => format!("{tool_id}#{op}"),
+    }
 }
 
 /// What the Host settled on for one call, once the conversation has it.
@@ -301,7 +378,17 @@ pub(crate) enum ExecutorResult {
 #[derive(Debug, Clone)]
 pub(crate) struct PermissionInfo {
     /// The tool call ID.
+    ///
+    /// Shared by every operation of a fanned-out call; use [`state_key`] to
+    /// address one operation's display state.
+    ///
+    /// [`state_key`]: Self::state_key
     pub tool_id: String,
+
+    /// Key identifying this operation's display state.
+    ///
+    /// Matches [`Executor::state_key`] for the executor this info came from.
+    pub state_key: String,
 
     /// The tool name.
     pub tool_name: String,

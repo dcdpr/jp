@@ -32,6 +32,63 @@ fn strip_ansi(text: &str) -> String {
     String::from_utf8(strip_ansi_escapes::strip(text)).expect("valid utf-8 after stripping ANSI")
 }
 
+/// A call that does not fan out keeps its failure a failure.
+///
+/// The argument formatter failing resolves the call's only operation to an
+/// `Err`, and turning it into `Ok` would reach Anthropic as `is_error: false`
+/// and render in the success style on replay.
+#[tokio::test]
+async fn a_decided_failure_on_a_call_without_fan_out_stays_a_failure() {
+    let group = ExecutorGroup {
+        tool_id: "call_1".to_owned(),
+        fan_out: None,
+        ops: vec![GroupOp::Resolved(ToolCallResponse {
+            id: "call_1".to_owned(),
+            result: Err(
+                "Tool 'fs_modify_file' was not executed because the argument formatter failed: \
+                 boom"
+                    .to_owned(),
+            ),
+        })],
+    };
+
+    let coordinator = ToolCoordinator::new(
+        jp_config::AppConfig::new_test().conversation.tools,
+        empty_executor_source(),
+    );
+    let response = coordinator.resolve_decided_group(group).await;
+
+    assert_eq!(
+        response.result,
+        Err(
+            "Tool 'fs_modify_file' was not executed because the argument formatter failed: boom"
+                .to_owned()
+        ),
+        "no framing is added and the error variant survives"
+    );
+}
+
+/// A skip on a call without fan-out answers with the skip message verbatim.
+#[tokio::test]
+async fn a_decided_skip_on_a_call_without_fan_out_is_unframed() {
+    let group = ExecutorGroup {
+        tool_id: "call_1".to_owned(),
+        fan_out: None,
+        ops: vec![GroupOp::Resolved(ToolCallResponse {
+            id: "call_1".to_owned(),
+            result: Ok("Tool skipped by user.".to_owned()),
+        })],
+    };
+
+    let coordinator = ToolCoordinator::new(
+        jp_config::AppConfig::new_test().conversation.tools,
+        empty_executor_source(),
+    );
+    let response = coordinator.resolve_decided_group(group).await;
+
+    assert_eq!(response.result, Ok("Tool skipped by user.".to_owned()));
+}
+
 #[test]
 fn test_is_prompting_default_false() {
     let coordinator = ToolCoordinator::new(
@@ -334,6 +391,7 @@ fn test_pre_render_for_prompt_function_call_fires_before_approval() {
         .with_arguments(args)
         .with_permission_info(PermissionInfo {
             tool_id: "call-1".into(),
+            state_key: "call-1".into(),
             tool_name: "fs_delete_file".into(),
             tool_source: ToolSource::Builtin { tool: None },
             run_mode: RunMode::Ask,
@@ -473,6 +531,7 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
         arguments: pre_edit_args.clone(),
         permission_info: PermissionInfo {
             tool_id: "call_1".into(),
+            state_key: "call_1".into(),
             tool_name: "fs_delete_file".into(),
             tool_source: ToolSource::Builtin { tool: None },
             run_mode: RunMode::Ask,
@@ -527,6 +586,79 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
     );
 }
 
+/// Approving a fanned-out operation must leave no prompt state behind.
+///
+/// The permission prompt and its outcome have to name the same key.
+/// Writing `AwaitingPermission` under the shared tool call id and `Running`
+/// under the operation key strands the first entry: `is_prompting` then reports
+/// true for the rest of the turn, and `handle_tool_interrupt` declines every
+/// Ctrl-C as though a prompt were still open, so the tool cancellation menu
+/// never appears.
+#[tokio::test]
+async fn approving_a_fanned_out_operation_clears_its_prompt_state() {
+    let tool_config = ToolConfig::from_partial(
+        jp_config::conversation::tool::PartialToolConfig {
+            source: Some(ToolSource::Builtin { tool: None }),
+            run: Some(RunMode::Ask),
+            ..Default::default()
+        },
+        vec![],
+    )
+    .expect("valid tool config");
+
+    let mut tools_config = jp_config::AppConfig::new_test().conversation.tools;
+    tools_config.insert("my_tool".to_string(), tool_config);
+
+    let mut coordinator = ToolCoordinator::new(tools_config, empty_executor_source());
+
+    let (printer, _stdout, _stderr) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let tool_renderer = ToolRenderer::new(
+        ErrChannel::new(printer.clone()),
+        jp_config::AppConfig::new_test().style,
+    );
+
+    // Operation 1 of a fanned-out call: one id, its own state key.
+    let executor: Box<dyn Executor> = Box::new(
+        MockExecutor::completed("call_1", "my_tool", "done").with_permission_info(PermissionInfo {
+            tool_id: "call_1".into(),
+            state_key: "call_1#1".into(),
+            tool_name: "my_tool".into(),
+            tool_source: ToolSource::Builtin { tool: None },
+            run_mode: RunMode::Ask,
+            arguments: Value::Object(Map::new()),
+        }),
+    );
+
+    let prompter = ToolPrompter::with_prompt_backend(
+        printer.clone(),
+        None,
+        Arc::new(MockPromptBackend::new().with_inline_responses(['y'])),
+        ReplyEditMode::default(),
+    );
+    let mut turn_state = TurnState::default();
+
+    let decision = coordinator
+        .resolve_tool_call_decision(
+            executor,
+            &prompter,
+            true,
+            &mut turn_state,
+            &tool_renderer,
+            &printer,
+        )
+        .await;
+
+    assert!(
+        matches!(decision, ToolCallDecision::Approved { .. }),
+        "the user approved the operation"
+    );
+    assert!(
+        !coordinator.is_prompting(),
+        "no prompt is open once the operation is approved"
+    );
+}
+
 #[test]
 fn test_permission_decision_cache_is_isolated_from_answers() {
     let mut coordinator = ToolCoordinator::new(
@@ -537,6 +669,7 @@ fn test_permission_decision_cache_is_isolated_from_answers() {
 
     let info = PermissionInfo {
         tool_id: "call_1".into(),
+        state_key: "call_1".into(),
         tool_name: "my_tool".into(),
         tool_source: ToolSource::Builtin { tool: None },
         run_mode: RunMode::Ask,
@@ -655,7 +788,7 @@ fn test_pending_prompt_result_mode_variant() {
 
     let pending = PendingPrompt::ResultMode {
         index: 1,
-        tool_id: "call_1".to_string(),
+        state_key: "call_1".to_string(),
         tool_name: "my_tool".to_string(),
         response: response.clone(),
         result_mode: ResultMode::Ask,
@@ -664,7 +797,7 @@ fn test_pending_prompt_result_mode_variant() {
     // Verify we can match and extract fields
     let PendingPrompt::ResultMode {
         index,
-        tool_id,
+        state_key,
         tool_name,
         response: r,
         result_mode,
@@ -673,7 +806,7 @@ fn test_pending_prompt_result_mode_variant() {
         panic!("Expected ResultMode variant");
     };
     assert_eq!(index, 1);
-    assert_eq!(tool_id, "call_1");
+    assert_eq!(state_key, "call_1");
     assert_eq!(tool_name, "my_tool");
     assert_eq!(r.id, "call_1");
     assert_eq!(result_mode, ResultMode::Ask);
@@ -693,7 +826,7 @@ fn test_pending_prompt_queue_fifo_order() {
     // Add a result mode prompt
     queue.push_back(PendingPrompt::ResultMode {
         index: 1,
-        tool_id: "call_1".to_string(),
+        state_key: "call_1".to_string(),
         tool_name: "tool_a".to_string(),
         response: ToolCallResponse {
             id: "call_1".to_string(),
@@ -723,11 +856,14 @@ fn test_pending_prompt_queue_fifo_order() {
     assert_eq!(question.id, "q1");
 
     // Second: ResultMode at index 1
-    let PendingPrompt::ResultMode { index, tool_id, .. } = queue.pop_front().unwrap() else {
+    let PendingPrompt::ResultMode {
+        index, state_key, ..
+    } = queue.pop_front().unwrap()
+    else {
         panic!("Expected ResultMode");
     };
     assert_eq!(index, 1);
-    assert_eq!(tool_id, "call_1");
+    assert_eq!(state_key, "call_1");
 
     // Third: Question at index 2
     let PendingPrompt::Question {
@@ -757,7 +893,7 @@ fn test_pending_prompt_mixed_types_interleaved() {
 
     queue.push_back(PendingPrompt::ResultMode {
         index: 1,
-        tool_id: "call_tool1".to_string(),
+        state_key: "call_tool1".to_string(),
         tool_name: "fs_read".to_string(),
         response: ToolCallResponse {
             id: "call_tool1".to_string(),
@@ -866,12 +1002,15 @@ async fn remembered_denial_does_not_run_http_argument_formatter() {
     .unwrap();
     let mut coordinator = ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source));
     let executor = coordinator
-        .prepare_one(ToolCallRequest {
+        .prepare_one(&ToolCallRequest {
             id: "call-1".into(),
             name: "example".into(),
             arguments: Map::new(),
         })
-        .unwrap();
+        .unwrap()
+        .operations
+        .pop()
+        .expect("a call without fan-out prepares one executor");
     let printer = Arc::new(Printer::sink());
     let prompter = ToolPrompter::with_prompt_backend(
         printer.clone(),
