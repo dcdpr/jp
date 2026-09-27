@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     sync::{Arc, Mutex, PoisonError},
     time::Duration,
 };
@@ -3304,23 +3303,19 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> (Vec<types::Tool>, ArgumentDecod
     let tools = tools
         .into_iter()
         .map(|tool| {
-            let schema = tool.provider_schema();
-
             // The strict subset requires a type on every property, which a
             // parameter the server left free-form does not have. Dropping
             // strict mode for that one tool costs its adherence guarantee;
             // sending it strict costs the whole request, and every other tool
             // in it.
-            let strict = !jp_tool::schema::has_unconstrained_node(&schema);
-            let (parameters, decoding) = parameters_with_decoding(&schema, strict);
+            let strict = !jp_tool::schema::has_unconstrained_node(&tool.parameters);
+            let (parameters, decoding) = parameters_with_decoding(&tool.parameters, strict);
             decoders.insert(&tool.name, decoding);
-            drop(schema);
-            let description = tool.provider_description().map(Cow::into_owned);
 
             types::Tool::Function {
                 name: tool.name,
                 strict,
-                description,
+                description: tool.docs.schema_description().map(str::to_owned),
                 parameters: parameters.into(),
             }
         })

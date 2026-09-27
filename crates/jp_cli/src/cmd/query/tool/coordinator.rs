@@ -86,7 +86,7 @@ use indexmap::IndexMap;
 use inquire::error::InquireError;
 use jp_config::{
     conversation::tool::{
-        FanOut, QuestionTarget, ResultMode, RunMode, ToolsConfig, style::ParametersStyle,
+        QuestionTarget, ResultMode, RunMode, ToolsConfig, style::ParametersStyle,
     },
     interrupt::ToolInterruptConfig,
 };
@@ -97,10 +97,7 @@ use jp_conversation::event::{
 use jp_llm::query::ToolExecution;
 use jp_mcp::server::StderrSink;
 use jp_printer::Printer;
-use jp_tool::{
-    AnswerType, Question,
-    fan_out::{self, OperationOutcome},
-};
+use jp_tool::{AnswerType, Question};
 use jp_workspace::ConversationMut;
 use serde_json::{Map, Value};
 use tokio::sync::mpsc;
@@ -110,10 +107,12 @@ use url::Url;
 
 use super::{
     ToolRenderer,
-    executor::{Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo, Review},
+    executor::{
+        CallExecutors, Executor, ExecutorError, ExecutorResult, ExecutorSource, FanOutCall,
+        PermissionInfo, Review,
+    },
     inquiry::{self, InquiryBackend, InquiryError},
     prompter::{PermissionResult, ToolPrompter},
-    schedule::Schedule,
 };
 use crate::{
     Error,
@@ -137,14 +136,11 @@ use crate::{
 /// they are collected as the interrupt lands rather than after the loop, where
 /// a result that arrived in between would have filled one in.
 ///
-/// Every outcome that cancels the running tools also gives up on the operations
-/// `schedule` is still holding back behind a concurrency limit: they were never
-/// spawned, so the execution loop would otherwise wait forever for results they
-/// cannot send.
+/// An operation of a fanned-out call is addressed like any call: each one is
+/// its own invocation.
 fn record_tool_interrupt(
     result: &ToolInterruptResult,
     state: &PhaseState,
-    schedule: &mut Schedule,
     cancellation_token: &CancellationToken,
     outcome: &mut ExecutionOutcome,
     tools_cancelled: &mut bool,
@@ -162,24 +158,23 @@ fn record_tool_interrupt(
         ToolInterruptResult::Restart => {
             // Hold each call's service-side invocation open before cancelling
             // the Host workers, so the re-preparation that follows continues
-            // the same logical calls instead of submitting new ones. An
-            // operation still queued behind a concurrency limit was prepared
-            // and approved too, so it is held the same way.
+            // the same logical calls instead of submitting new ones.
             for tool in state.tools.values() {
                 tool.executor.pause_for_restart();
             }
-            for executor in schedule.queued() {
-                executor.pause_for_restart();
-            }
 
-            schedule.abandon_unstarted();
             cancellation_token.cancel();
             outcome.upgrade(ExecutionOutcome::Restart);
         }
 
         ToolInterruptResult::Cancelled { response, exit } => {
-            let unfinished = schedule.unfinished(&state.reviews);
-            schedule.abandon_unstarted();
+            let unfinished: Vec<usize> = state
+                .reviews
+                .iter()
+                .enumerate()
+                .filter(|(_, review)| review.is_none())
+                .map(|(index, _)| index)
+                .collect();
 
             // Hold each unfinished call open before cancelling the Host
             // workers, so the cancellation response this phase records is what
@@ -203,10 +198,7 @@ fn record_tool_interrupt(
         // The menu itself was cancelled with Ctrl-C: the tools are already
         // cancelled; surface the escalation so the turn loop begins a graceful
         // shutdown.
-        ToolInterruptResult::Escalate => {
-            schedule.abandon_unstarted();
-            outcome.upgrade(ExecutionOutcome::Escalated);
-        }
+        ToolInterruptResult::Escalate => outcome.upgrade(ExecutionOutcome::Escalated),
     }
 }
 
@@ -463,25 +455,20 @@ pub enum GroupOp {
 
     /// Decided before it ran: skipped by the user, or its argument formatter
     /// failed.
-    /// The response stands in for the operation when the call's result is
-    /// folded.
     Resolved(ToolCallResponse),
 }
 
 /// Every operation belonging to one tool call.
 ///
-/// A call to a tool without fan-out holds exactly one operation, which is what
-/// makes the fan-out machinery a no-op for it: one operation in, one response
-/// out, no framing added.
+/// An ordinary call holds exactly one operation.
+/// A fanned-out call holds one per operation, and the call itself, which the
+/// execution service folds and records once every operation is resolved.
 pub struct ExecutorGroup {
     /// The tool call id every operation in the group answers to.
     pub tool_id: String,
 
-    /// The tool being called.
-    pub tool_name: String,
-
-    /// The call's fan-out policy, or `None` when it carries one operation.
-    pub fan_out: Option<FanOut>,
+    /// For a fanned-out call, the call as a whole.
+    pub fan_out: Option<Arc<dyn FanOutCall>>,
 
     /// The operations, in the order the assistant wrote them.
     pub ops: Vec<GroupOp>,
@@ -490,46 +477,94 @@ pub struct ExecutorGroup {
 impl ExecutorGroup {
     /// Whether any operation still needs to run.
     ///
-    /// A group with nothing left to run is folded straight into its response
+    /// A group with nothing left to run is resolved straight into its response
     /// rather than entering the execution loop.
     #[must_use]
     pub fn has_work(&self) -> bool {
         self.ops.iter().any(|op| matches!(op, GroupOp::Run(_)))
     }
+}
 
-    /// Fold a group whose operations were all decided before running.
-    ///
-    /// Returns the response the call answers with, and the review each
-    /// operation's MCP call is acknowledged with.
-    fn fold_resolved(self) -> (ToolCallResponse, Vec<Review>) {
-        let fans_out = self.fan_out.is_some();
-        let mut outcomes = Vec::with_capacity(self.ops.len());
-        let mut operations = Vec::with_capacity(self.ops.len());
+/// One call of an execution phase, by the phase's flat operation indices.
+struct PhaseCall {
+    /// The plan index the call's review is paired with on output.
+    plan_index: usize,
 
-        for (position, op) in self.ops.into_iter().enumerate() {
-            let GroupOp::Resolved(response) = op else {
-                unreachable!("fold_resolved is only called on a group with no work")
-            };
-            outcomes.push(match &response.result {
-                Ok(content) => OperationOutcome::Ok(content.clone()),
-                Err(message) => OperationOutcome::Error(message.clone()),
-            });
-            operations.push(Review::unchanged(response).for_op(fans_out.then_some(position)));
-        }
+    /// The tool call id the call answers to.
+    tool_id: String,
 
-        // A call without fan-out answers with its one decision verbatim.
-        if !fans_out && let Some(review) = operations.pop() {
-            return (review.response, Vec::new());
-        }
+    /// For a fanned-out call, the call as a whole.
+    fan_out: Option<Arc<dyn FanOutCall>>,
 
-        // Every operation was skipped or failed the same way, so the call as a
-        // whole did not run. `Ok` matches how a single skipped tool answers
-        // today: the user declining is not an error the assistant should retry.
-        let response = ToolCallResponse {
-            id: self.tool_id,
-            result: Ok(fan_out::fold(&outcomes)),
+    /// Local indices of the call's operations, in the order the assistant wrote
+    /// them.
+    operations: Vec<usize>,
+}
+
+/// An execution phase's calls, flattened into one index space of operations.
+struct PhasePlan {
+    calls: Vec<PhaseCall>,
+
+    /// Per operation, the review it settled on; already present for one decided
+    /// before the phase began.
+    reviews: Vec<Option<Review>>,
+
+    /// The operations to start, by local index.
+    runnable: Vec<(usize, Box<dyn Executor>)>,
+}
+
+impl PhasePlan {
+    fn new(groups: Vec<(usize, ExecutorGroup)>) -> Self {
+        let mut plan = Self {
+            calls: Vec::with_capacity(groups.len()),
+            reviews: Vec::new(),
+            runnable: Vec::new(),
         };
-        (response, operations)
+        for (plan_index, group) in groups {
+            let mut operations = Vec::with_capacity(group.ops.len());
+            for op in group.ops {
+                let local = plan.reviews.len();
+                operations.push(local);
+                match op {
+                    GroupOp::Run(executor) => {
+                        plan.reviews.push(None);
+                        plan.runnable.push((local, executor));
+                    }
+                    GroupOp::Resolved(response) => {
+                        plan.reviews.push(Some(Review::unchanged(response)));
+                    }
+                }
+            }
+            plan.calls.push(PhaseCall {
+                plan_index,
+                tool_id: group.tool_id,
+                fan_out: group.fan_out,
+                operations,
+            });
+        }
+        plan
+    }
+}
+
+/// The response a fanned-out call is recorded with.
+///
+/// A call the execution service could not fold is recorded as failed, so the
+/// conversation still pairs every request with a response.
+async fn recorded(call: &dyn FanOutCall, tool_id: &str) -> ToolCallResponse {
+    call.recorded().await.unwrap_or_else(|error| {
+        warn!(%error, tool_id, "A fanned-out call could not be completed.");
+        ToolCallResponse {
+            id: tool_id.to_owned(),
+            result: Err(format!("Tool call could not be completed: {error}")),
+        }
+    })
+}
+
+/// The response of a call that ended without one.
+fn did_not_complete(tool_id: &str) -> ToolCallResponse {
+    ToolCallResponse {
+        id: tool_id.to_owned(),
+        result: Err("Tool did not complete".to_owned()),
     }
 }
 
@@ -606,11 +641,8 @@ fn tool_question_to_inquiry_question(q: &Question) -> InquiryQuestion {
 }
 
 pub struct ToolCoordinator {
-    /// Prepared executors, grouped by the plan index of the call they belong
-    /// to.
-    /// A group holds one executor per operation, so a call without fan-out
-    /// holds exactly one.
-    executors: Vec<(usize, Vec<Box<dyn Executor>>)>,
+    /// Prepared executors, by the plan index of the call they belong to.
+    executors: Vec<(usize, CallExecutors)>,
 
     /// Display state per *operation*, keyed by `Executor::state_key`.
     ///
@@ -626,22 +658,6 @@ pub struct ToolCoordinator {
     /// Keyed by tool call ID.
     /// Drained by the turn loop to write into event metadata.
     rendered_arguments: HashMap<String, String>,
-
-    /// What each operation of a fanned-out call settled on, keyed by tool call
-    /// id.
-    ///
-    /// The conversation records one folded response per call, but every
-    /// operation ran as its own MCP call and is acknowledged with its own
-    /// result, so [`Self::acknowledge_reviews`] expands a call's review into
-    /// these.
-    /// A call without fan-out has no entry and is acknowledged as recorded.
-    operation_reviews: HashMap<String, Vec<Review>>,
-
-    /// Who submits the MCP request for each call.
-    ///
-    /// Fan-out applies only when JP submits them: an agent submitting its own
-    /// calls was shown each tool's own schema, never the envelope.
-    execution: ToolExecution,
 }
 
 impl ToolCoordinator {
@@ -651,10 +667,8 @@ impl ToolCoordinator {
     }
 
     /// Bind upcoming tool observations to the selected dispatch contract.
-    pub fn set_execution(&mut self, execution: ToolExecution) -> Result<(), ExecutorError> {
-        self.executor_source.set_execution(execution)?;
-        self.execution = execution;
-        Ok(())
+    pub fn set_execution(&self, execution: ToolExecution) -> Result<(), ExecutorError> {
+        self.executor_source.set_execution(execution)
     }
 
     pub fn new(tools_config: ToolsConfig, executor_source: Box<dyn ExecutorSource>) -> Self {
@@ -666,8 +680,6 @@ impl ToolCoordinator {
             executor_source,
             cancellation_token: CancellationToken::new(),
             rendered_arguments: HashMap::new(),
-            operation_reviews: HashMap::new(),
-            execution: ToolExecution::default(),
         }
     }
 
@@ -939,20 +951,7 @@ impl ToolCoordinator {
     /// MCP response has not been returned to the caller.
     /// Every call is acknowledged even when one fails, so one call's
     /// disagreement does not strand the rest; the first failure is returned.
-    ///
-    /// A fanned-out call's review is replaced by the reviews of its operations,
-    /// because each operation is its own MCP call whose result is its own, not
-    /// the folded response the conversation recorded.
-    pub async fn acknowledge_reviews(&mut self, reviews: Vec<Review>) -> Result<(), ExecutorError> {
-        let reviews: Vec<_> = reviews
-            .into_iter()
-            .flat_map(|review| {
-                self.operation_reviews
-                    .remove(&review.response.id)
-                    .unwrap_or_else(|| vec![review])
-            })
-            .collect();
-
+    pub async fn acknowledge_reviews(&self, reviews: Vec<Review>) -> Result<(), ExecutorError> {
         let mut failure = None;
         for review in reviews {
             if let Err(error) = self.executor_source.acknowledge(review).await {
@@ -1035,12 +1034,11 @@ impl ToolCoordinator {
     pub fn prepare(&mut self, requests: Vec<ToolCallRequest>) -> Vec<(usize, ToolCallResponse)> {
         self.executors.clear();
         self.clear_tool_states();
-        self.operation_reviews.clear();
         self.cancellation_token = CancellationToken::new();
 
         let mut unavailable = Vec::new();
         for (index, request) in requests.into_iter().enumerate() {
-            match self.prepare_one(request) {
+            match self.prepare_one(&request) {
                 Ok(executors) => self.executors.push((index, executors)),
                 Err(response) => unavailable.push((index, response)),
             }
@@ -1051,78 +1049,32 @@ impl ToolCoordinator {
 
     /// Prepares the executors for a tool call request.
     ///
-    /// A call to a tool without fan-out yields exactly one executor.
-    /// A call to a fan-out tool yields one per operation in its `ops` array,
-    /// all sharing the request's tool call id and each carrying that
-    /// operation's arguments.
+    /// An ordinary call yields exactly one executor.
+    /// A call that carries a fan-out envelope yields one per operation, all
+    /// sharing the request's tool call id; the execution service decides which
+    /// calls those are.
     ///
     /// # Errors
     ///
     /// Returns an error response when the tool cannot be resolved (missing from
-    /// config or definitions), or when a fan-out call's envelope is malformed.
-    #[allow(clippy::needless_pass_by_value)]
+    /// config or definitions).
     pub fn prepare_one(
         &mut self,
-        request: ToolCallRequest,
-    ) -> Result<Vec<Box<dyn Executor>>, ToolCallResponse> {
-        let Some(config) = self.tools_config.get(&request.name) else {
-            return Err(self.unavailable(&request));
+        request: &ToolCallRequest,
+    ) -> Result<CallExecutors, ToolCallResponse> {
+        let Some(prepared) = self
+            .tools_config
+            .get(&request.name)
+            .and_then(|config| self.executor_source.create(request.clone(), config))
+        else {
+            return Err(self.unavailable(request));
         };
 
-        // The envelope is taken apart here rather than inside the executor
-        // source, so a malformed one answers with a message naming what went
-        // wrong instead of looking like a tool that does not exist.
-        let operations = if self.fan_out(&request.name).is_some() {
-            match fan_out::expand(&request.arguments) {
-                Ok(ops) => ops
-                    .into_iter()
-                    .enumerate()
-                    .map(|(op, arguments)| (Some(op), arguments))
-                    .collect(),
-                Err(error) => {
-                    warn!(
-                        tool = %request.name,
-                        id = %request.id,
-                        "Malformed fan-out envelope, returning error to LLM",
-                    );
-                    self.set_tool_state(&request.id, ToolCallState::Completed);
-                    return Err(ToolCallResponse {
-                        id: request.id.clone(),
-                        result: Err(error.message(&request.name)),
-                    });
-                }
-            }
-        } else {
-            vec![(None, request.arguments.clone())]
-        };
-
-        let mut executors = Vec::with_capacity(operations.len());
-        for (op, arguments) in operations {
-            let mut op_request = request.clone();
-            op_request.arguments = arguments;
-
-            let Some(executor) = self.executor_source.create(op_request, config.clone(), op) else {
-                return Err(self.unavailable(&request));
-            };
-
+        for executor in &prepared.operations {
             self.tool_states
                 .insert(executor.state_key(), ToolCallState::Queued);
-            executors.push(executor);
         }
-
-        Ok(executors)
-    }
-
-    /// The fan-out policy calls to `tool_name` run under, if they fan out.
-    ///
-    /// `None` for a tool without `fan_out` configured, and for every tool while
-    /// an agent submits its own calls: that agent was shown each tool's own
-    /// schema, so its arguments are one operation's, never the envelope.
-    fn fan_out(&self, tool_name: &str) -> Option<FanOut> {
-        if self.execution != ToolExecution::Caller {
-            return None;
-        }
-        self.tools_config.get(tool_name)?.fan_out()
+        Ok(prepared)
     }
 
     /// The response for a tool the LLM named but JP cannot run.
@@ -1274,8 +1226,8 @@ impl ToolCoordinator {
     /// prompt would ask the user to approve something other than what they were
     /// shown.
     ///
-    /// Returns the groups with work left to do, and the folded responses of the
-    /// calls whose every operation was decided here.
+    /// Returns the groups with work left to do, and the responses of the calls
+    /// whose every operation was decided here.
     pub async fn run_permission_phase(
         &mut self,
         prompter: &ToolPrompter,
@@ -1302,46 +1254,56 @@ impl ToolCoordinator {
             if group.has_work() {
                 groups.push((index, group));
             } else {
-                resolved.push((index, self.fold_decided_group(group)));
+                resolved.push((index, self.resolve_decided_group(group).await));
             }
         }
 
         (groups, resolved)
     }
 
-    /// Fold a group whose every operation was decided before it could run.
+    /// The response of a call whose every operation was decided before it could
+    /// run.
     ///
-    /// The caller has already checked [`ExecutorGroup::has_work`]; this turns
-    /// what is left into the one response the call answers with, and keeps each
-    /// operation's own decision for [`Self::acknowledge_reviews`].
-    pub fn fold_decided_group(&mut self, group: ExecutorGroup) -> ToolCallResponse {
-        let (response, operations) = group.fold_resolved();
-        if !operations.is_empty() {
-            self.operation_reviews
-                .insert(response.id.clone(), operations);
+    /// For an ordinary call that is its one decision.
+    /// A fanned-out call is folded and recorded by the execution service, which
+    /// it does once `decide_group` has resolved every operation.
+    pub async fn resolve_decided_group(&self, group: ExecutorGroup) -> ToolCallResponse {
+        let ExecutorGroup {
+            tool_id,
+            fan_out,
+            ops,
+        } = group;
+        match fan_out {
+            Some(call) => recorded(call.as_ref(), &tool_id).await,
+            None => match ops.into_iter().next() {
+                Some(GroupOp::Resolved(response)) => response,
+                _ => did_not_complete(&tool_id),
+            },
         }
-        response
     }
 
     /// Run every operation of one call through the permission pipeline.
+    ///
+    /// An operation of a fanned-out call decided here is resolved with the
+    /// execution service at once, because its call is recorded only once every
+    /// operation is.
     pub async fn decide_group(
         &mut self,
-        executors: Vec<Box<dyn Executor>>,
+        prepared: CallExecutors,
         prompter: &ToolPrompter,
         interactive: bool,
         turn_state: &mut TurnState,
         tool_renderer: &ToolRenderer,
         printer: &Printer,
     ) -> ExecutorGroup {
+        let CallExecutors {
+            operations: executors,
+            fan_out,
+        } = prepared;
         let tool_id = executors
             .first()
             .map(|e| e.tool_id().to_owned())
             .unwrap_or_default();
-        let tool_name = executors
-            .first()
-            .map(|e| e.tool_name().to_owned())
-            .unwrap_or_default();
-        let fan_out = self.fan_out(&tool_name);
 
         let mut ops = Vec::with_capacity(executors.len());
         let mut rendered = Vec::new();
@@ -1388,11 +1350,29 @@ impl ToolCoordinator {
                 .insert(tool_id.clone(), rendered.join("\n"));
         }
 
+        if fan_out.is_some() {
+            for (position, op) in ops.iter().enumerate() {
+                if let GroupOp::Resolved(response) = op {
+                    self.settle(Review::unchanged(response.clone()), position)
+                        .await;
+                }
+            }
+        }
+
         ExecutorGroup {
             tool_id,
-            tool_name,
             fan_out,
             ops,
+        }
+    }
+
+    /// Resolve operation `op` of a fanned-out call with the execution service.
+    ///
+    /// A failure leaves the operation to the service, which fails its call
+    /// closed; there is nothing more the Host can do for it.
+    async fn settle(&self, review: Review, op: usize) {
+        if let Err(error) = self.executor_source.settle(review, op).await {
+            warn!(%error, op, "Could not resolve a fanned-out operation.");
         }
     }
 
@@ -1434,11 +1414,14 @@ impl ToolCoordinator {
         // sparse (e.g. when some tools in the same plan are pre-resolved and
         // don't reach this function), and one call may hold several operations.
         // Both are flattened here: every operation gets a contiguous local index
-        // for internal bookkeeping, and `Schedule` remembers which call each one
-        // belongs to so the responses can be folded back per call on output.
-        let mut schedule = Schedule::new(groups);
+        // for internal bookkeeping, and each call remembers its operations' so
+        // it can be concluded on output.
+        let PhasePlan {
+            calls,
+            reviews,
+            runnable,
+        } = PhasePlan::new(groups);
 
-        let total_ops = schedule.total_ops();
         let cancellation_token = self.cancellation_token.clone();
         let (event_tx, mut event_rx) = mpsc::channel::<ExecutionEvent>(32);
         let services = PhaseServices {
@@ -1451,7 +1434,7 @@ impl ToolCoordinator {
         };
         let mut state = PhaseState {
             tools: HashMap::new(),
-            reviews: vec![None; total_ops],
+            reviews,
             pending_prompts: VecDeque::new(),
             prompt_active: false,
         };
@@ -1470,7 +1453,9 @@ impl ToolCoordinator {
         // shows how long a tool has been going.
         tool_renderer.start_progress();
 
-        for (index, executor) in schedule.release(&state.reviews) {
+        // The execution service applies a fanned-out call's concurrency and
+        // error policy, so every operation starts here and waits there.
+        for (index, executor) in runnable {
             self.start_operation(index, executor, &mut state, &services, tool_renderer);
         }
 
@@ -1496,14 +1481,6 @@ impl ToolCoordinator {
         let mut cancelled_indices: Vec<usize> = Vec::new();
 
         loop {
-            // Checked before the receive, not after handling one: a call whose
-            // `stop` policy ruled out every remaining operation spawned nothing
-            // at all, so no event will ever arrive to wake this loop. The
-            // senders are still alive, so `recv` would wait forever.
-            if schedule.all_accounted_for(&state.reviews) {
-                break;
-            }
-
             // A client's interrupt arrives on its own channel rather than
             // through the router, so it is polled alongside the tools rather
             // than forwarded by a task: the receiver belongs to the turn, and
@@ -1531,7 +1508,7 @@ impl ToolCoordinator {
                         warn!(index, "Received ToolResult for unknown tool.");
                         continue;
                     }
-                    let failed = self.handle_tool_result(
+                    self.handle_tool_result(
                         result,
                         index,
                         &mut state,
@@ -1539,13 +1516,6 @@ impl ToolCoordinator {
                         turn_state,
                         tool_renderer,
                     );
-
-                    // Recorded from the tool's own outcome rather than from
-                    // `state.reviews[index]`, which result-mode policy may
-                    // have already turned into a success.
-                    if failed {
-                        schedule.record_failure(index);
-                    }
                 }
                 ExecutionEvent::PromptAnswer {
                     index,
@@ -1672,7 +1642,6 @@ impl ToolCoordinator {
                         record_tool_interrupt(
                             &result,
                             &state,
-                            &mut schedule,
                             &cancellation_token,
                             &mut outcome,
                             &mut tools_cancelled,
@@ -1696,7 +1665,6 @@ impl ToolCoordinator {
                     record_tool_interrupt(
                         &result,
                         &state,
-                        &mut schedule,
                         &cancellation_token,
                         &mut outcome,
                         &mut tools_cancelled,
@@ -1706,24 +1674,8 @@ impl ToolCoordinator {
                 }
             }
 
-            // Backstop for the failure paths that write `state.reviews`
-            // directly (a cancelled prompt, an inquiry that could not be
-            // answered, a lost call). The execution outcome itself is recorded
-            // above, before result-mode policy can rewrite it. Recording the
-            // same failure twice is a no-op: the earliest position wins.
-            for (index, review) in state.reviews.iter().enumerate() {
-                if let Some(review) = review {
-                    schedule.record_outcome(index, &review.response);
-                }
-            }
-
-            // Release whatever the finished operations made room for: the next
-            // operation of a call with a concurrency limit, or nothing at all
-            // for a call already running everything it has.
-            if !tools_cancelled {
-                for (index, executor) in schedule.release(&state.reviews) {
-                    self.start_operation(index, executor, &mut state, &services, tool_renderer);
-                }
+            if state.reviews.iter().all(Option::is_some) {
+                break;
             }
         }
 
@@ -1739,28 +1691,69 @@ impl ToolCoordinator {
                     format!("Tool run cancelled by user with a custom message:\n\n{msg}")
                 } else {
                     // No custom message: each cancelled tool answers with its
-                    // configured cancellation response. Read off the schedule
-                    // rather than `state.tools`, which only knows the
-                    // operations that were actually spawned.
-                    self.cancellation_response(schedule.tool_name(i))
+                    // configured cancellation response.
+                    let tool_name = state
+                        .tools
+                        .get(&i)
+                        .map(|tool| tool.tool_name.as_str())
+                        .unwrap_or_default();
+                    self.cancellation_response(tool_name)
+                };
+                let Some(tool) = state.tools.get(&i) else {
+                    continue;
                 };
 
                 // The cancellation message stands in for whatever the tool
                 // would have produced.
                 state.reviews[i] = Some(Review::replaced(ToolCallResponse {
-                    id: schedule.tool_id(i).to_owned(),
+                    id: tool.tool_id.clone(),
                     result: Ok(content),
                 }));
             }
         }
 
-        let folded = schedule.fold(state.reviews);
-        self.operation_reviews.extend(folded.operations);
+        // A restart re-prepares every call that has no response yet, so
+        // nothing is concluded now: an operation that settled keeps its result
+        // for the next attempt, and one that did not runs again.
+        let reviews = if outcome == ExecutionOutcome::Restart {
+            Vec::new()
+        } else {
+            self.conclude(calls, state.reviews).await
+        };
 
-        ExecutionResult {
-            reviews: folded.recorded,
-            outcome,
+        ExecutionResult { reviews, outcome }
+    }
+
+    /// The review each call is recorded with, by plan index.
+    ///
+    /// An ordinary call's review is its one operation's.
+    /// A fanned-out call's operations are resolved with the execution service,
+    /// which then folds them into the result the call records.
+    async fn conclude(
+        &self,
+        calls: Vec<PhaseCall>,
+        mut reviews: Vec<Option<Review>>,
+    ) -> Vec<(usize, Review)> {
+        let mut concluded = Vec::with_capacity(calls.len());
+        for call in calls {
+            let review = match call.fan_out {
+                None => call
+                    .operations
+                    .first()
+                    .and_then(|&local| reviews[local].take())
+                    .unwrap_or_else(|| Review::replaced(did_not_complete(&call.tool_id))),
+                Some(fan_out) => {
+                    for (position, &local) in call.operations.iter().enumerate() {
+                        if let Some(review) = reviews[local].take() {
+                            self.settle(review, position).await;
+                        }
+                    }
+                    Review::unchanged(recorded(fan_out.as_ref(), &call.tool_id).await)
+                }
+            };
+            concluded.push((call.plan_index, review));
         }
+        concluded
     }
 
     /// Builds an error response for a tool whose argument rendering failed.
@@ -1781,9 +1774,6 @@ impl ToolCoordinator {
     }
 
     /// Register an operation and spawn it.
-    ///
-    /// Called once per operation when the schedule releases it, which for a
-    /// call without a concurrency limit is all of them up front.
     fn start_operation(
         &mut self,
         index: usize,
@@ -2031,13 +2021,6 @@ impl ToolCoordinator {
     ///
     /// `index` names a call the phase started; the caller checks that before
     /// dispatching here.
-    ///
-    /// Returns whether the *tool* reported a failure, which is not the same as
-    /// whether the review recorded for it holds one: `result = "skip"` and a
-    /// declined `result = "ask"` prompt both answer the assistant with a
-    /// success.
-    /// A `stop` fan-out policy keys off this return value, so it acts on what
-    /// the tool did rather than on what the assistant was told.
     fn handle_tool_result(
         &mut self,
         result: ExecutorResult,
@@ -2046,7 +2029,7 @@ impl ToolCoordinator {
         services: &PhaseServices<'_>,
         turn_state: &mut TurnState,
         tool_renderer: &ToolRenderer,
-    ) -> bool {
+    ) {
         let PhaseState {
             tools,
             reviews,
@@ -2054,16 +2037,11 @@ impl ToolCoordinator {
             prompt_active,
         } = state;
         let Some(tool) = tools.get_mut(&index) else {
-            return false;
+            return;
         };
         let tracked_review = &mut reviews[index];
         match result {
             ExecutorResult::Completed(response) => {
-                // Read before any branch below can replace the response. The
-                // service substitutes its own text for `result = "skip"`, so
-                // the executor is asked what the tool itself reported.
-                let is_error = response.result.is_err() || tool.executor.tool_failed();
-
                 match self.result_mode(&tool.tool_name) {
                     ResultMode::Unattended => {
                         self.finish_tool_call(tool, response, tracked_review, tool_renderer);
@@ -2106,16 +2084,12 @@ impl ToolCoordinator {
                         }
                     }
                 }
-
-                is_error
             }
             ExecutorResult::Failed(error) => {
                 self.record_lost_call(tool, tracked_review, &error, false);
-                true
             }
             ExecutorResult::OutcomeUnknown(error) => {
                 self.record_lost_call(tool, tracked_review, &error, true);
-                true
             }
             ExecutorResult::NeedsInput {
                 tool_id,
@@ -2140,10 +2114,6 @@ impl ToolCoordinator {
                     services,
                     turn_state,
                 );
-
-                // Waiting on an answer, or failed in a way the review already
-                // carries, which the backstop in the execution loop records.
-                false
             }
         }
     }

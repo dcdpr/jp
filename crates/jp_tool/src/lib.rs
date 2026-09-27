@@ -8,7 +8,6 @@ mod access;
 pub mod content;
 pub mod definition;
 mod error;
-pub mod fan_out;
 pub mod schema;
 
 pub use access::{

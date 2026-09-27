@@ -32,74 +32,7 @@ fn definition(parameters: Value) -> ToolDefinition {
         name: "test".to_owned(),
         docs: ToolDocs::default(),
         parameters,
-        fan_out: false,
     }
-}
-
-/// A definition carrying a summary, optionally configured for fan-out.
-fn documented(parameters: Value, fan_out: bool) -> ToolDefinition {
-    ToolDefinition {
-        name: "fs_read_file".to_owned(),
-        docs: ToolDocs {
-            summary: Some("Read a file.".to_owned()),
-            ..ToolDocs::default()
-        },
-        parameters,
-        fan_out,
-    }
-}
-
-#[test]
-fn provider_schema_is_the_operation_schema_without_fan_out() {
-    let parameters = schema([("path", param("string"), true)]);
-    let definition = documented(parameters.clone(), false);
-
-    assert_eq!(*definition.provider_schema(), parameters);
-}
-
-#[test]
-fn provider_schema_wraps_the_operation_schema_when_fanning_out() {
-    let parameters = schema([("path", param("string"), true)]);
-    let definition = documented(parameters.clone(), true);
-
-    let wrapped = definition.provider_schema();
-    assert_eq!(wrapped["properties"]["ops"]["items"], parameters);
-    assert_eq!(wrapped["required"], json!(["ops"]));
-
-    // The per-operation schema is what validation and defaults still see, so a
-    // tool receives the same shape either way.
-    assert_eq!(definition.parameters, parameters);
-}
-
-/// A tool that has not opted in is described exactly as its docs say, which is
-/// what keeps fan-out invisible to it.
-#[test]
-fn provider_description_is_the_summary_without_fan_out() {
-    let definition = documented(schema([]), false);
-
-    assert_eq!(
-        definition.provider_description().as_deref(),
-        Some("Read a file.")
-    );
-}
-
-/// The model is told how the envelope relates to the per-operation docs, after
-/// the tool's own summary; the docs themselves stay untouched for anything else
-/// that reads them.
-#[test]
-fn provider_description_explains_the_envelope_when_fanning_out() {
-    let definition = documented(schema([]), true);
-
-    assert_eq!(
-        definition.provider_description().as_deref(),
-        Some(
-            "Read a file. This tool accepts several operations in a single call. Put each one in \
-             the `ops` array as its own complete object; the documented parameters and examples \
-             describe one element. Batch every operation you already know you need into one call \
-             rather than issuing them one at a time."
-        )
-    );
-    assert_eq!(definition.docs.schema_description(), Some("Read a file."));
 }
 
 /// Assert that validation reported exactly these missing and unknown arguments,

@@ -32,16 +32,15 @@ fn strip_ansi(text: &str) -> String {
     String::from_utf8(strip_ansi_escapes::strip(text)).expect("valid utf-8 after stripping ANSI")
 }
 
-/// A tool that never opted into fan-out keeps its failure a failure.
+/// A call that does not fan out keeps its failure a failure.
 ///
 /// The argument formatter failing resolves the call's only operation to an
-/// `Err`, and folding it into `Ok` would reach Anthropic as `is_error: false`
+/// `Err`, and turning it into `Ok` would reach Anthropic as `is_error: false`
 /// and render in the success style on replay.
-#[test]
-fn a_failure_on_a_tool_without_fan_out_stays_a_failure() {
+#[tokio::test]
+async fn a_decided_failure_on_a_call_without_fan_out_stays_a_failure() {
     let group = ExecutorGroup {
         tool_id: "call_1".to_owned(),
-        tool_name: "fs_modify_file".to_owned(),
         fan_out: None,
         ops: vec![GroupOp::Resolved(ToolCallResponse {
             id: "call_1".to_owned(),
@@ -53,11 +52,11 @@ fn a_failure_on_a_tool_without_fan_out_stays_a_failure() {
         })],
     };
 
-    let mut coordinator = ToolCoordinator::new(
+    let coordinator = ToolCoordinator::new(
         jp_config::AppConfig::new_test().conversation.tools,
         empty_executor_source(),
     );
-    let response = coordinator.fold_decided_group(group);
+    let response = coordinator.resolve_decided_group(group).await;
 
     assert_eq!(
         response.result,
@@ -69,12 +68,11 @@ fn a_failure_on_a_tool_without_fan_out_stays_a_failure() {
     );
 }
 
-/// A skip on a tool without fan-out answers with the skip message verbatim.
-#[test]
-fn a_skip_on_a_tool_without_fan_out_is_unframed() {
+/// A skip on a call without fan-out answers with the skip message verbatim.
+#[tokio::test]
+async fn a_decided_skip_on_a_call_without_fan_out_is_unframed() {
     let group = ExecutorGroup {
         tool_id: "call_1".to_owned(),
-        tool_name: "fs_delete_file".to_owned(),
         fan_out: None,
         ops: vec![GroupOp::Resolved(ToolCallResponse {
             id: "call_1".to_owned(),
@@ -82,65 +80,13 @@ fn a_skip_on_a_tool_without_fan_out_is_unframed() {
         })],
     };
 
-    let mut coordinator = ToolCoordinator::new(
+    let coordinator = ToolCoordinator::new(
         jp_config::AppConfig::new_test().conversation.tools,
         empty_executor_source(),
     );
-    let response = coordinator.fold_decided_group(group);
+    let response = coordinator.resolve_decided_group(group).await;
 
     assert_eq!(response.result, Ok("Tool skipped by user.".to_owned()));
-    assert!(
-        coordinator.operation_reviews.is_empty(),
-        "the recorded response is the one its MCP call is acknowledged with"
-    );
-}
-
-/// A fanned-out call whose operations were all decided still frames them, so
-/// the assistant can tell which of the three it asked for was refused.
-#[test]
-fn a_fully_skipped_fan_out_call_frames_each_operation() {
-    let group = ExecutorGroup {
-        tool_id: "call_1".to_owned(),
-        tool_name: "fs_delete_file".to_owned(),
-        fan_out: Some(jp_config::conversation::tool::FanOut {
-            concurrency: None,
-            on_error: jp_config::conversation::tool::FanOutOnError::Continue,
-        }),
-        ops: vec![
-            GroupOp::Resolved(ToolCallResponse {
-                id: "call_1".to_owned(),
-                result: Ok("Tool skipped by user.".to_owned()),
-            }),
-            GroupOp::Resolved(ToolCallResponse {
-                id: "call_1".to_owned(),
-                result: Err("formatter failed".to_owned()),
-            }),
-        ],
-    };
-
-    let mut coordinator = ToolCoordinator::new(
-        jp_config::AppConfig::new_test().conversation.tools,
-        empty_executor_source(),
-    );
-    let response = coordinator.fold_decided_group(group);
-
-    assert_eq!(
-        response.result,
-        Ok("[1/2] ok\nTool skipped by user.\n\n[2/2] error\nformatter failed\n".to_owned())
-    );
-
-    // Each operation is its own MCP call, acknowledged with its own decision
-    // rather than the folded body.
-    assert_eq!(
-        coordinator.operation_reviews["call_1"]
-            .iter()
-            .map(|review| (review.op, review.response.result.clone()))
-            .collect::<Vec<_>>(),
-        vec![
-            (Some(0), Ok("Tool skipped by user.".to_owned())),
-            (Some(1), Err("formatter failed".to_owned())),
-        ]
-    );
 }
 
 #[test]
@@ -1042,7 +988,6 @@ async fn remembered_denial_does_not_run_http_argument_formatter() {
         name: "example".into(),
         docs: ToolDocs::default(),
         parameters: json!({"type":"object","properties":{}}),
-        fan_out: false,
     }];
     let (source, owner) = TerminalExecutorSource::start(
         BuiltinExecutors::new(),
@@ -1057,12 +1002,13 @@ async fn remembered_denial_does_not_run_http_argument_formatter() {
     .unwrap();
     let mut coordinator = ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source));
     let executor = coordinator
-        .prepare_one(ToolCallRequest {
+        .prepare_one(&ToolCallRequest {
             id: "call-1".into(),
             name: "example".into(),
             arguments: Map::new(),
         })
         .unwrap()
+        .operations
         .pop()
         .expect("a call without fan-out prepares one executor");
     let printer = Arc::new(Printer::sink());

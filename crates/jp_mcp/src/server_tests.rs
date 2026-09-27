@@ -46,7 +46,6 @@ impl Fixture {
                 name: name.to_owned(),
                 docs: ToolDocs::default(),
                 parameters,
-                fan_out: false,
             },
             config: app.conversation.tools.get(name).unwrap(),
             builtins: builtin::BuiltinExecutors::new(),
@@ -255,89 +254,6 @@ fn schema<const N: usize>(properties: [(&str, Value, bool); N]) -> Value {
 /// A schema node of the given type.
 fn param(kind: &str) -> Value {
     json!({ "type": kind })
-}
-
-/// A tool configured for fan-out is shown the envelope, told about it in the
-/// text the provider receives, and keeps its own schema for validation.
-#[tokio::test]
-async fn resolve_tool_wraps_a_fan_out_tool_for_the_provider() {
-    let partial: PartialToolConfig = serde_json::from_value(json!({
-        "source": "local",
-        "summary": "Read a file.",
-        "fan_out": true,
-        "parameters": {
-            "path": { "type": "string", "required": true }
-        }
-    }))
-    .unwrap();
-    let tool = ToolConfig::from_partial(partial, vec![]).unwrap();
-    let mut app = AppConfig::new_test();
-    app.conversation
-        .tools
-        .insert("fs_read_file".to_owned(), tool);
-    let config = app.conversation.tools.get("fs_read_file").unwrap();
-
-    let definition = resolve_tool("fs_read_file", &config, &Client::new(IndexMap::new()))
-        .await
-        .expect("the tool resolves");
-
-    assert_eq!(
-        definition.parameters["properties"]["path"],
-        json!({ "type": "string" }),
-        "validation still sees one operation's schema"
-    );
-
-    let provider_schema = definition.provider_schema();
-    assert_eq!(provider_schema["required"], json!(["ops"]));
-    assert_eq!(
-        provider_schema["properties"]["ops"]["items"]["properties"]["path"],
-        json!({ "type": "string" }),
-        "the envelope's items are the tool's own schema"
-    );
-
-    let description = definition
-        .provider_description()
-        .expect("the tool has a summary");
-    assert!(
-        description.starts_with("Read a file."),
-        "the tool's own summary comes first: {description}"
-    );
-    assert!(
-        description.contains("`ops` array"),
-        "the model is told how the envelope relates to the documented parameters: {description}"
-    );
-}
-
-/// A tool that says nothing about fan-out is untouched, which is what keeps
-/// this feature invisible to every tool that has not opted in.
-#[tokio::test]
-async fn resolve_tool_leaves_a_plain_tool_alone() {
-    let partial: PartialToolConfig = serde_json::from_value(json!({
-        "source": "local",
-        "summary": "Read a file.",
-        "parameters": {
-            "path": { "type": "string", "required": true }
-        }
-    }))
-    .unwrap();
-    let tool = ToolConfig::from_partial(partial, vec![]).unwrap();
-    let mut app = AppConfig::new_test();
-    app.conversation
-        .tools
-        .insert("fs_read_file".to_owned(), tool);
-    let config = app.conversation.tools.get("fs_read_file").unwrap();
-
-    let definition = resolve_tool("fs_read_file", &config, &Client::new(IndexMap::new()))
-        .await
-        .expect("the tool resolves");
-
-    assert!(!definition.fan_out);
-    assert_eq!(*definition.provider_schema(), definition.parameters);
-    assert_eq!(
-        definition.provider_description().as_deref(),
-        Some("Read a file."),
-        "no envelope instruction is added"
-    );
 }
 
 #[tokio::test]

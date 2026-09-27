@@ -171,7 +171,6 @@ async fn provider_round_trip(provider_id: ProviderId, body: &'static str, stream
     query.tools.push(ToolDefinition {
         name: "search".to_owned(),
         docs: ToolDocs::default(),
-        fan_out: false,
         parameters: json!({
             "type": "object", "required": ["query"],
             "properties": {

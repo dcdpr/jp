@@ -1187,12 +1187,17 @@ impl Query {
             provider.mcp_tool_metadata(&model),
         )
         .await?;
+        // What the service advertises, which is what the provider is shown: a
+        // fan-out tool appears with its envelope.
+        let tools = executor_source.advertised();
         let tool_coordinator =
             ToolCoordinator::new(cfg.conversation.tools.clone(), Box::new(executor_source))
                 .with_interrupt(cfg.interrupt.tool_call.clone());
         let prompt_backend = Arc::new(TerminalPromptBackend);
 
-        let result = run_turn_loop(
+        // Boxed because the loop's state machine is large, and inlining it
+        // would put the whole of it in every future that awaits this one.
+        let result = Box::pin(run_turn_loop(
             provider,
             &model,
             cfg,
@@ -1203,7 +1208,7 @@ impl Query {
             attachments,
             lock,
             tool_choice,
-            tools,
+            &tools,
             printer,
             prompt_backend,
             tool_coordinator,
@@ -1211,7 +1216,7 @@ impl Query {
             pending_trim,
             turn_interrupt,
             interrupts,
-        )
+        ))
         .await;
         if let Err(error) = execution_owner.shutdown().await {
             if result.is_ok() {

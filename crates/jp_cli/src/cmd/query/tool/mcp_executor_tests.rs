@@ -57,20 +57,6 @@ impl BuiltinTool for EchoName {
     }
 }
 
-/// A tool that always reports a failure.
-struct FailingTool;
-
-#[async_trait]
-impl BuiltinTool for FailingTool {
-    async fn execute(&self, _: &Value, _: &IndexMap<String, Value>) -> Outcome {
-        Outcome::Error {
-            message: "disk full".into(),
-            trace: vec![],
-            transient: false,
-        }
-    }
-}
-
 /// A tool that runs until its attempt is abandoned, so an interrupt always
 /// lands while it is still in flight.
 struct BlockingTool(Arc<AtomicUsize>);
@@ -107,7 +93,6 @@ impl Fixture {
                 "type": "object",
                 "properties": {"name": {"type": "string"}},
             }),
-            fan_out: false,
         }];
         let (source, owner) = TerminalExecutorSource::start(
             BuiltinExecutors::new().register("example", tool),
@@ -150,8 +135,10 @@ impl Fixture {
                     arguments: arguments.as_object().cloned().unwrap_or_default(),
                 },
                 self.config.clone(),
-                None,
             )
+            .unwrap()
+            .operations
+            .pop()
             .unwrap()
     }
 
@@ -182,49 +169,71 @@ fn recorded(result: Result<&str, &str>) -> Review {
 #[path = "mcp_executor_shutdown_tests.rs"]
 mod shutdown;
 
-/// The operations of a fanned-out call share one tool call id but are separate
-/// MCP calls, each delivering its own result.
-/// Each is acknowledged with its own review, and that review has to reach the
-/// call it belongs to: routed to a sibling, it would disagree with what that
-/// sibling delivered.
-#[tokio::test]
-async fn each_operation_of_a_call_is_acknowledged_on_its_own_mcp_call() {
+/// Start a fixture whose `example` tool echoes its `name` and fans out.
+async fn fanning_out(run: &str) -> Fixture {
     let count = Arc::new(AtomicUsize::new(0));
     let mut fixture = Fixture::start(
-        json!({"source": "builtin", "run": "unattended", "fan_out": true}),
+        json!({"source": "builtin", "run": run, "fan_out": true}),
         EchoName(count.clone()),
     )
     .await;
     fixture.count = count;
+    fixture
+}
+
+/// A call to `example` carrying one operation per name.
+fn envelope(names: &[&str]) -> ToolCallRequest {
+    let ops = names
+        .iter()
+        .map(|name| json!({ "name": name }))
+        .collect::<Vec<_>>();
+    ToolCallRequest {
+        id: "call-1".into(),
+        name: "example".into(),
+        arguments: json!({ "ops": ops }).as_object().unwrap().clone(),
+    }
+}
+
+/// Run an approved operation to its result.
+async fn run(executor: &mut Box<dyn Executor>) -> ToolCallResponse {
+    assert!(executor.prepare(false).await.unwrap().is_none());
+    executor.approve().await.unwrap();
+    let result = executor
+        .execute(&IndexMap::new(), CancellationToken::new(), None)
+        .await;
+    let ExecutorResult::Completed(response) = result else {
+        panic!("expected a completed operation, got {result:?}")
+    };
+    response
+}
+
+/// A call carrying the envelope becomes one executor per operation, each
+/// running its own arguments, and the call records the folded result, which is
+/// also what its MCP request delivers.
+#[tokio::test]
+async fn a_fanned_out_call_runs_each_operation_and_records_the_fold() {
+    let fixture = fanning_out("unattended").await;
+
+    let CallExecutors {
+        operations,
+        fan_out,
+    } = fixture
+        .source
+        .create(envelope(&["first", "second"]), fixture.config.clone())
+        .unwrap();
+    let fan_out = fan_out.expect("the call fans out");
+    assert_eq!(
+        operations
+            .iter()
+            .map(|executor| executor.state_key())
+            .collect::<Vec<_>>(),
+        vec!["call-1#0", "call-1#1"]
+    );
 
     let mut responses = Vec::new();
-    for (op, name) in ["first", "second"].into_iter().enumerate() {
-        let mut executor = fixture
-            .source
-            .create(
-                ToolCallRequest {
-                    id: "call-1".into(),
-                    name: "example".into(),
-                    arguments: Map::from_iter([("name".into(), json!(name))]),
-                },
-                fixture.config.clone(),
-                Some(op),
-            )
-            .unwrap();
-        assert_eq!(executor.state_key(), format!("call-1#{op}"));
-
-        assert!(executor.prepare(false).await.unwrap().is_none());
-        executor.approve().await.unwrap();
-        let result = executor
-            .execute(&IndexMap::new(), CancellationToken::new(), None)
-            .await;
-        let ExecutorResult::Completed(response) = result else {
-            panic!("expected a completed operation, got {result:?}")
-        };
-        responses.push(response);
+    for mut executor in operations {
+        responses.push(run(&mut executor).await);
     }
-
-    assert_eq!(fixture.attempts(), 2, "each operation runs once");
     assert_eq!(
         responses
             .iter()
@@ -232,53 +241,54 @@ async fn each_operation_of_a_call_is_acknowledged_on_its_own_mcp_call() {
             .collect::<Vec<_>>(),
         vec![Ok("first".to_owned()), Ok("second".to_owned())]
     );
-
-    // The first operation is acknowledged first: were the two registered under
-    // the tool call id alone, the later one would have replaced it and receive
-    // this review instead.
     for (op, response) in responses.into_iter().enumerate() {
         fixture
-            .acknowledge(Review::unchanged(response).for_op(Some(op)))
+            .source
+            .settle(Review::unchanged(response), op)
             .await
             .unwrap();
     }
-    assert_eq!(fixture.attempts(), 2, "acknowledgement must not re-execute");
+
+    let folded = timeout(Duration::from_secs(5), fan_out.recorded())
+        .await
+        .expect("the call is recorded")
+        .unwrap();
+    assert_eq!(folded, ToolCallResponse {
+        id: "call-1".into(),
+        result: Ok("[1/2] ok\nfirst\n\n[2/2] ok\nsecond\n".into()),
+    });
+
+    // Acknowledgement checks the MCP response against what was recorded.
+    fixture
+        .acknowledge(Review::unchanged(folded))
+        .await
+        .unwrap();
+    assert_eq!(fixture.attempts(), 2, "each operation ran once");
     fixture.shutdown().await;
 }
 
-/// Run one unattended call to completion and return what the Host was handed.
-async fn run_to_completion(fixture: &Fixture) -> (ToolCallResponse, bool) {
-    let mut executor = fixture.executor(&json!({"name": "x"}));
-    assert!(executor.prepare(false).await.unwrap().is_none());
-    executor.approve().await.unwrap();
-    let result = executor
-        .execute(&IndexMap::new(), CancellationToken::new(), None)
-        .await;
-    let ExecutorResult::Completed(response) = result else {
-        panic!("expected a completed call, got {result:?}")
-    };
-    (response, executor.tool_failed())
-}
-
-/// `result = "skip"` hands the Host a success whatever the tool did, so the
-/// executor is what remembers that the tool itself failed.
+/// A call to a fan-out tool without the envelope is an ordinary call.
 #[tokio::test]
-async fn a_skipped_result_still_reports_the_tools_own_failure() {
-    let fixture = Fixture::start(
-        json!({"source": "builtin", "run": "unattended", "result": "skip"}),
-        FailingTool,
-    )
-    .await;
+async fn a_bare_call_to_a_fan_out_tool_has_one_executor() {
+    let fixture = fanning_out("unattended").await;
 
-    let (response, tool_failed) = run_to_completion(&fixture).await;
+    let prepared = fixture
+        .source
+        .create(
+            ToolCallRequest {
+                id: "call-1".into(),
+                name: "example".into(),
+                arguments: json!({"name": "only"}).as_object().unwrap().clone(),
+            },
+            fixture.config.clone(),
+        )
+        .unwrap();
+    assert!(prepared.fan_out.is_none());
+    let mut executor = prepared.operations.into_iter().next().unwrap();
+    assert_eq!(executor.state_key(), "call-1");
 
-    assert_eq!(
-        response.result,
-        Ok("Result delivery skipped by configuration.".into()),
-        "the assistant is told the delivery was skipped"
-    );
-    assert!(tool_failed, "the tool's own failure is still known");
-
+    let response = run(&mut executor).await;
+    assert_eq!(response.result, Ok("only".into()));
     fixture
         .acknowledge(Review::unchanged(response))
         .await
@@ -286,28 +296,55 @@ async fn a_skipped_result_still_reports_the_tools_own_failure() {
     fixture.shutdown().await;
 }
 
-/// The counterpart: a skipped success is not reported as a failure.
+/// An operation the user declines is resolved with its skip message, which is
+/// folded into the call's result, and the tool never runs for it.
 #[tokio::test]
-async fn a_skipped_success_is_not_reported_as_a_failure() {
-    let count = Arc::new(AtomicUsize::new(0));
-    let fixture = Fixture::start(
-        json!({"source": "builtin", "run": "unattended", "result": "skip"}),
-        EchoName(count),
-    )
-    .await;
+async fn a_declined_operation_is_folded_with_its_decision() {
+    let fixture = fanning_out("ask").await;
 
-    let (response, tool_failed) = run_to_completion(&fixture).await;
+    let CallExecutors {
+        operations,
+        fan_out,
+    } = fixture
+        .source
+        .create(envelope(&["first", "second"]), fixture.config.clone())
+        .unwrap();
+    let mut operations = operations.into_iter();
+    let mut declined = operations.next().unwrap();
+    let mut approved = operations.next().unwrap();
 
-    assert_eq!(
-        response.result,
-        Ok("Result delivery skipped by configuration.".into())
-    );
-    assert!(!tool_failed);
-
+    assert!(declined.prepare(false).await.unwrap().is_none());
     fixture
-        .acknowledge(Review::unchanged(response))
+        .source
+        .settle(
+            Review::unchanged(ToolCallResponse {
+                id: "call-1".into(),
+                result: Ok("Tool skipped by user.".into()),
+            }),
+            0,
+        )
         .await
         .unwrap();
+    let response = run(&mut approved).await;
+    fixture
+        .source
+        .settle(Review::unchanged(response), 1)
+        .await
+        .unwrap();
+
+    let folded = timeout(Duration::from_secs(5), fan_out.unwrap().recorded())
+        .await
+        .expect("the call is recorded")
+        .unwrap();
+    assert_eq!(
+        folded.result,
+        Ok("[1/2] ok\nTool skipped by user.\n\n[2/2] ok\nsecond\n".into())
+    );
+    fixture
+        .acknowledge(Review::unchanged(folded))
+        .await
+        .unwrap();
+    assert_eq!(fixture.attempts(), 1, "the declined operation never ran");
     fixture.shutdown().await;
 }
 

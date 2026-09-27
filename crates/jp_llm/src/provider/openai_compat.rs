@@ -271,13 +271,13 @@ pub(crate) fn convert_tools(
             _ => true,
         })
         .map(|tool| {
-            let (parameters, decoding) = parameters_with_decoding(&tool.provider_schema(), true);
+            let (parameters, decoding) = parameters_with_decoding(&tool.parameters, true);
             decoders.insert(&tool.name, decoding);
             json!({
                 "type": "function",
                 "function": {
                     "name": tool.name,
-                    "description": tool.provider_description().unwrap_or_default(),
+                    "description": tool.docs.schema_description().unwrap_or_default(),
                     "parameters": parameters,
                     "strict": true,
                 },

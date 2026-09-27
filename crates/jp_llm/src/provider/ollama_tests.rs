@@ -11,7 +11,6 @@ fn tool_references_are_expanded() {
     let tools = vec![ToolDefinition {
         name: "crate_search_items".to_owned(),
         docs: ToolDocs::default(),
-        fan_out: false,
         parameters: json!({
             "type": "object",
             "properties": {
@@ -40,59 +39,6 @@ fn tool_references_are_expanded() {
     );
 }
 
-/// Wrapping a referenced schema in the fan-out envelope keeps its references
-/// resolvable.
-/// Nesting `$defs` under `properties.ops.items` would leave every `#/$defs/...`
-/// pointing at a root that no longer holds it, and the inliner leaves an
-/// unresolvable reference in place: Ollama drops `$ref` while decoding, so the
-/// property would reach the model with no type at all.
-#[test]
-fn fan_out_tool_references_are_expanded() {
-    let tools = vec![ToolDefinition {
-        name: "crate_search_items".to_owned(),
-        docs: ToolDocs::default(),
-        fan_out: true,
-        parameters: json!({
-            "type": "object",
-            "properties": {
-                "kinds": { "type": "array", "items": { "$ref": "#/$defs/EntryType" } }
-            },
-            "required": ["kinds"],
-            "$defs": { "EntryType": { "type": "string", "enum": ["Enum", "Method"] } }
-        }),
-    }];
-
-    let converted = convert_tools(tools).expect("tools convert");
-    let parameters = serde_json::to_value(&converted[0].function.parameters).expect("serializes");
-
-    assert_eq!(
-        parameters,
-        json!({
-            "type": "object",
-            "properties": {
-                "ops": {
-                    "type": "array",
-                    "minItems": 1,
-                    "description": "The operations to perform. Each element is one complete set \
-                                    of this tool's arguments.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "kinds": {
-                                "type": "array",
-                                "items": { "type": "string", "enum": ["Enum", "Method"] }
-                            }
-                        },
-                        "required": ["kinds"]
-                    }
-                }
-            },
-            "required": ["ops"],
-            "additionalProperties": false
-        })
-    );
-}
-
 /// The whole document is sent, not just its properties: Ollama reads `type` and
 /// `required` from the same object.
 #[test]
@@ -100,7 +46,6 @@ fn tool_parameters_keep_the_schema_document() {
     let tools = vec![ToolDefinition {
         name: "read_file".to_owned(),
         docs: ToolDocs::default(),
-        fan_out: false,
         parameters: json!({
             "type": "object",
             "properties": { "path": { "type": "string" } },

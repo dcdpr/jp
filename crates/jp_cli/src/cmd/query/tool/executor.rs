@@ -8,6 +8,8 @@
 //!
 //! Execution itself lives in `jp_mcp::server`; nothing here runs a tool.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
@@ -112,18 +114,6 @@ pub(crate) trait Executor: Send + Sync {
     /// request.
     fn set_arguments(&mut self, args: Value);
 
-    /// Whether the tool itself reported a failure on its last completed
-    /// attempt, whatever response the Host was handed for it.
-    ///
-    /// `result = "skip"` replaces a tool's result with the service's own
-    /// success text before [`execute`] returns it, so the response alone cannot
-    /// say whether the tool failed.
-    ///
-    /// [`execute`]: Self::execute
-    fn tool_failed(&self) -> bool {
-        false
-    }
-
     /// Hold this call's service-side invocation open while its current attempt
     /// is abandoned, so a replacement attempt continues the same logical call.
     ///
@@ -203,13 +193,19 @@ pub(crate) trait ExecutorSource: Send + Sync {
         Box::pin(async { Ok(()) })
     }
 
-    /// Creates an executor for one operation of the given tool call request.
+    /// Resolve operation `op` of the fanned-out call `review` answers with what
+    /// the Host settled on.
     ///
-    /// `request.arguments` holds that operation's arguments, already taken out
-    /// of the fan-out envelope by the caller, so an implementation never sees
-    /// the envelope itself.
-    /// `op` is the operation's position within the call, or `None` when the
-    /// call carries exactly one operation.
+    /// An operation is not recorded on its own: its call is recorded once every
+    /// operation is resolved, so whatever barrier the operation is parked on is
+    /// answered now rather than on acknowledgement.
+    /// An operation that already ended is left as it is.
+    fn settle(&self, _review: Review, _op: usize) -> BoxFuture<'_, Result<(), ExecutorError>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Creates the executors for the given tool call request: one for an
+    /// ordinary call, one per operation for a fanned-out call.
     ///
     /// Returns `None` if the tool cannot be resolved (e.g. missing from the
     /// definitions).
@@ -217,8 +213,39 @@ pub(crate) trait ExecutorSource: Send + Sync {
         &self,
         request: ToolCallRequest,
         config: ToolConfigWithDefaults,
-        op: Option<usize>,
-    ) -> Option<Box<dyn Executor>>;
+    ) -> Option<CallExecutors>;
+}
+
+/// What the Host runs for one tool call.
+pub(crate) struct CallExecutors {
+    /// One executor for an ordinary call; one per operation, in the order the
+    /// assistant wrote them, for a fanned-out call.
+    pub operations: Vec<Box<dyn Executor>>,
+
+    /// For a fanned-out call, the call as a whole: what it records once every
+    /// operation is resolved.
+    pub fan_out: Option<Arc<dyn FanOutCall>>,
+}
+
+impl CallExecutors {
+    /// An ordinary call, run by one executor.
+    pub fn call(executor: Box<dyn Executor>) -> Self {
+        Self {
+            operations: vec![executor],
+            fan_out: None,
+        }
+    }
+}
+
+/// The Host's view of a fanned-out call as a whole.
+#[async_trait]
+pub(crate) trait FanOutCall: Send + Sync {
+    /// Wait for the call's folded result, which the service offers for
+    /// recording once every operation is resolved.
+    ///
+    /// The call stays parked on that barrier until
+    /// [`ExecutorSource::acknowledge`] releases it.
+    async fn recorded(&self) -> Result<ToolCallResponse, ExecutorError>;
 }
 
 /// The display-state key for operation `op` of tool call `tool_id`.
@@ -247,13 +274,6 @@ pub(crate) struct Review {
 
     /// Whether the Host changed the content it was offered.
     pub edited: bool,
-
-    /// Which operation of a fanned-out call this settles, or `None` when the
-    /// call carries one operation.
-    ///
-    /// Every operation runs as its own MCP call under the shared tool call id,
-    /// so this is what tells them apart when each is acknowledged.
-    pub op: Option<usize>,
 }
 
 impl Review {
@@ -262,7 +282,6 @@ impl Review {
         Self {
             response,
             edited: false,
-            op: None,
         }
     }
 
@@ -271,15 +290,7 @@ impl Review {
         Self {
             response,
             edited: true,
-            op: None,
         }
-    }
-
-    /// This review, settling operation `op` of its call.
-    #[must_use]
-    pub fn for_op(mut self, op: Option<usize>) -> Self {
-        self.op = op;
-        self
     }
 }
 

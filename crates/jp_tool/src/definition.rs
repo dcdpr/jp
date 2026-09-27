@@ -6,16 +6,10 @@
 //! Definition resolution lives in `jp_mcp::server`; this module holds the
 //! resolved shape and the argument handling that reads its schema.
 
-use std::borrow::Cow;
-
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 
-use crate::{
-    Error,
-    fan_out::{FAN_OUT_DESCRIPTION, envelope},
-    schema::Node,
-};
+use crate::{Error, schema::Node};
 
 /// Documentation for a single tool parameter.
 #[derive(Debug, Clone)]
@@ -75,62 +69,14 @@ pub struct ToolDefinition {
     /// Descriptions used by providers and tool discovery.
     pub docs: ToolDocs,
 
-    /// JSON Schema for **one operation's** arguments, as the tool's source
-    /// declared it, with configuration overrides applied.
-    ///
-    /// Argument coercion, defaults, and validation all run against this, so a
-    /// tool receives and validates the same shape whether or not it fans out.
-    /// Use [`provider_schema`] for the document sent to the LLM.
+    /// JSON Schema for the tool's arguments, as its source declared it, with
+    /// configuration overrides applied.
     ///
     /// Adapting this to what a given API accepts belongs to that provider.
-    ///
-    /// [`provider_schema`]: Self::provider_schema
     pub parameters: Value,
-
-    /// Whether one call may carry several operations.
-    ///
-    /// `true` means the LLM provider is shown the fan-out envelope and
-    /// description rather than `parameters` and `docs` directly.
-    /// Anything else reading the definition, such as an MCP client listing
-    /// tools, sees one operation's shape either way.
-    pub fan_out: bool,
 }
 
 impl ToolDefinition {
-    /// The JSON Schema shown to the LLM provider.
-    ///
-    /// Without fan-out this is [`parameters`] unchanged.
-    /// With fan-out it is the envelope: an object holding a single required
-    /// `ops` array whose items are [`parameters`].
-    ///
-    /// [`parameters`]: Self::parameters
-    #[must_use]
-    pub fn provider_schema(&self) -> Cow<'_, Value> {
-        if self.fan_out {
-            Cow::Owned(envelope(&self.parameters))
-        } else {
-            Cow::Borrowed(&self.parameters)
-        }
-    }
-
-    /// The short description shown to the LLM provider.
-    ///
-    /// Without fan-out this is [`ToolDocs::schema_description`].
-    /// With fan-out a sentence explaining the `ops` array follows it, because
-    /// the tool's own documentation describes one element of that array.
-    #[must_use]
-    pub fn provider_description(&self) -> Option<Cow<'_, str>> {
-        let description = self.docs.schema_description();
-        if !self.fan_out {
-            return description.map(Cow::Borrowed);
-        }
-
-        Some(Cow::Owned(match description {
-            Some(description) => format!("{description} {FAN_OUT_DESCRIPTION}"),
-            None => FAN_OUT_DESCRIPTION.to_owned(),
-        }))
-    }
-
     /// Coerce JSON-encoded argument strings to non-string schema types.
     ///
     /// Strings stay unchanged when the schema accepts strings or their contents

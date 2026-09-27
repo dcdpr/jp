@@ -52,7 +52,6 @@ fn setup() -> (Service, HostReceiver, Arc<AtomicUsize>) {
                 name: "count".into(),
                 docs: ToolDocs::default(),
                 parameters: json!({"type":"object","properties":{}}),
-                fan_out: false,
             },
             config: cfg.conversation.tools.get("count").unwrap(),
             access: Ok(None),

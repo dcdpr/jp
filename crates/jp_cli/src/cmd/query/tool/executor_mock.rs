@@ -6,12 +6,12 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::ToolConfigWithDefaults;
 use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
-use jp_mcp::server::{StderrSink, service::Formatted};
+use jp_mcp::server::StderrSink;
 use jp_tool::{ToolDefinition, ToolDocs};
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
-use super::{Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo};
+use super::{CallExecutors, Executor, ExecutorResult, ExecutorSource, PermissionInfo};
 
 /// A mock executor for testing that returns pre-configured results.
 ///
@@ -31,9 +31,6 @@ pub(crate) struct MockExecutor {
     arguments: Map<String, Value>,
     permission_info: Option<PermissionInfo>,
     result: Mutex<Option<ExecutorResult>>,
-
-    /// The diagnostic `prepare` rejects the call with, if it does.
-    prepare_error: Option<String>,
 }
 
 impl MockExecutor {
@@ -57,17 +54,7 @@ impl MockExecutor {
                 id: tool_id.to_owned(),
                 result,
             }))),
-            prepare_error: None,
         }
-    }
-
-    /// Makes `prepare` reject the call with `message`, the way the execution
-    /// service reports an argument formatter that failed.
-    ///
-    /// The call never reaches execution.
-    pub(crate) fn rejected_at_prepare(mut self, message: &str) -> Self {
-        self.prepare_error = Some(message.to_owned());
-        self
     }
 
     /// Sets the arguments for this executor.
@@ -88,18 +75,6 @@ impl MockExecutor {
 
 #[async_trait]
 impl Executor for MockExecutor {
-    async fn prepare(
-        &mut self,
-        _render_arguments: bool,
-    ) -> Result<Option<ToolCallResponse>, ExecutorError> {
-        match &self.prepare_error {
-            Some(message) => Err(ExecutorError::Rejected {
-                message: message.clone(),
-            }),
-            None => Ok(None),
-        }
-    }
-
     fn tool_id(&self) -> &str {
         &self.tool_id
     }
@@ -193,7 +168,6 @@ impl TestExecutorSource {
                 name: name.clone(),
                 docs: ToolDocs::default(),
                 parameters: json!({ "type": "object", "properties": {} }),
-                fan_out: false,
             })
             .collect()
     }
@@ -204,101 +178,8 @@ impl ExecutorSource for TestExecutorSource {
         &self,
         request: ToolCallRequest,
         _config: ToolConfigWithDefaults,
-        op: Option<usize>,
-    ) -> Option<Box<dyn Executor>> {
+    ) -> Option<CallExecutors> {
         let factory = self.factories.get(&request.name)?;
-        let executor = factory(request);
-
-        Some(match op {
-            None => executor,
-            Some(op) => Box::new(OpExecutor {
-                inner: executor,
-                op,
-            }),
-        })
-    }
-}
-
-/// Wraps a test executor so it reports the operation it stands for.
-///
-/// Test factories build one executor from one request and know nothing about
-/// fan-out; this carries the operation index the source was asked for without
-/// every factory having to thread it through.
-struct OpExecutor {
-    inner: Box<dyn Executor>,
-    op: usize,
-}
-
-#[async_trait]
-impl Executor for OpExecutor {
-    async fn prepare(
-        &mut self,
-        render_arguments: bool,
-    ) -> Result<Option<ToolCallResponse>, ExecutorError> {
-        self.inner.prepare(render_arguments).await
-    }
-
-    async fn approve(&mut self) -> Result<(), ExecutorError> {
-        self.inner.approve().await
-    }
-
-    fn formatted_arguments(&self) -> Option<&Formatted> {
-        self.inner.formatted_arguments()
-    }
-
-    fn tool_id(&self) -> &str {
-        self.inner.tool_id()
-    }
-
-    fn tool_name(&self) -> &str {
-        self.inner.tool_name()
-    }
-
-    fn op_index(&self) -> Option<usize> {
-        Some(self.op)
-    }
-
-    fn arguments(&self) -> &Map<String, Value> {
-        self.inner.arguments()
-    }
-
-    fn permission_info(&self) -> Option<PermissionInfo> {
-        // The inner executor keys its info by the call alone; this one stands
-        // for an operation of it.
-        self.inner.permission_info().map(|info| PermissionInfo {
-            state_key: self.state_key(),
-            ..info
-        })
-    }
-
-    fn needs_permission(&self) -> bool {
-        self.inner.needs_permission()
-    }
-
-    fn set_arguments(&mut self, args: Value) {
-        self.inner.set_arguments(args);
-    }
-
-    fn tool_failed(&self) -> bool {
-        self.inner.tool_failed()
-    }
-
-    fn pause_for_restart(&self) -> bool {
-        self.inner.pause_for_restart()
-    }
-
-    fn hold_for_response(&self) -> bool {
-        self.inner.hold_for_response()
-    }
-
-    async fn execute(
-        &self,
-        answers: &IndexMap<String, Value>,
-        cancellation_token: CancellationToken,
-        stderr: Option<StderrSink>,
-    ) -> ExecutorResult {
-        self.inner
-            .execute(answers, cancellation_token, stderr)
-            .await
+        Some(CallExecutors::call(factory(request)))
     }
 }

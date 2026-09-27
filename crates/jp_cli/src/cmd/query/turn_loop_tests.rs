@@ -5321,479 +5321,278 @@ async fn test_single_tool_call_rendered_with_args() {
     assert!(test_result.is_ok(), "Test timed out");
 }
 
-/// One provider tool call carrying three operations runs the tool three times
-/// and answers with one response holding all three results.
-///
-/// This is the whole of fan-out end to end: the envelope goes in, three
-/// separate executions come out, the terminal shows three headers, and the
-/// provider gets back the single response its one call is waiting for.
-#[tokio::test]
-#[expect(clippy::too_many_lines)]
-async fn a_fanned_out_call_runs_every_operation_and_answers_once() {
-    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        let storage = root.join(".jp");
+/// Answers `contents of <path>` for the `path` it is given, failing for
+/// `bad.rs`, and records the order it ran in.
+struct PathReader(Arc<Mutex<Vec<String>>>);
 
-        let mut config = AppConfig::new_test();
-        config.style.tool_call.show = true;
-        config.conversation.tools.defaults.run = RunMode::Unattended;
-        config
-            .conversation
-            .tools
-            .insert("fs_read_file".to_string(), ToolConfig {
-                source: ToolSource::Local { tool: None },
-                command: None,
-                run: Some(RunMode::Unattended),
-                format: None,
-                enable: None,
-                summary: None,
-                description: None,
-                examples: None,
-                parameters: IndexMap::new().into(),
-                result: None,
-                style: None,
-                questions: IndexMap::new().into(),
-                options: IndexMap::default().into(),
-                access: None,
-                cancellation_response: None,
-                fan_out: Some(jp_config::conversation::tool::FanOutConfig {
-                    enabled: Some(true),
-                    concurrency: None,
-                    on_error: None,
-                }),
-            });
+#[async_trait]
+impl BuiltinTool for PathReader {
+    async fn execute(&self, arguments: &Value, _: &IndexMap<String, Value>) -> Outcome {
+        let path = arguments["path"].as_str().unwrap_or_default().to_owned();
+        self.0.lock().unwrap().push(path.clone());
+        if path == "bad.rs" {
+            return Outcome::Error {
+                message: "no such file".into(),
+                trace: vec![],
+                transient: false,
+            };
+        }
+        Outcome::Success {
+            content: format!("contents of {path}"),
+        }
+    }
+}
 
-        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+/// What one turn calling a fan-out tool left behind.
+struct FanOutTurn {
+    /// The one response recorded for the call.
+    response: ToolCallResponse,
 
-        let lock = workspace
-            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
-            .unwrap();
+    /// The `path` of every time the tool ran, in order.
+    runs: Vec<String>,
 
-        let chat_request = ChatRequest::from("Read three files");
+    /// What the terminal showed on stderr.
+    chrome: String,
+}
 
-        // The envelope the provider is shown, carrying three operations.
-        let args = json!({
-            "ops": [
-                { "path": "a.rs" },
-                { "path": "b.rs" },
-                { "path": "c.rs" },
-            ]
-        });
+/// Run one turn in which the assistant calls `fs_read_file`, configured by
+/// `tool`, with `arguments`, against the real execution service.
+#[expect(
+    clippy::too_many_lines,
+    reason = "One end-to-end fixture: workspace, service, provider, and the turn"
+)]
+async fn fan_out_turn(tool: Value, arguments: &Value) -> FanOutTurn {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
 
-        let provider: Arc<dyn Provider> = Arc::new({
-            let events = vec![
+    let mut config = AppConfig::new_test();
+    config.style.tool_call.show = true;
+    let partial: PartialToolConfig = serde_json::from_value(tool).unwrap();
+    config.conversation.tools.insert(
+        "fs_read_file".into(),
+        ToolConfig::from_partial(partial, vec![]).unwrap(),
+    );
+    let storage = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
+    let mut workspace = Workspace::in_memory(root).with_backend(storage);
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+
+    let definitions = vec![ToolDefinition {
+        name: "fs_read_file".into(),
+        docs: ToolDocs::default(),
+        parameters: json!({
+            "type": "object",
+            "properties": { "path": { "type": "string" } },
+            "required": ["path"],
+        }),
+    }];
+    let runs = Arc::new(Mutex::new(Vec::new()));
+    let (source, owner) = TerminalExecutorSource::start(
+        BuiltinExecutors::new().register("fs_read_file", PathReader(runs.clone())),
+        &definitions,
+        &config.conversation.tools,
+        Arc::new(ApprovalStore::default()),
+        InvocationContext::default(),
+        &Client::default(),
+        root.to_owned(),
+    )
+    .await
+    .unwrap();
+    // What production hands the provider: the service's advertisement.
+    let tools = source.advertised();
+
+    let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        responses: vec![
+            vec![
                 Event::tool_call_start(0, "call_1".to_string(), "fs_read_file".to_string()),
-                Event::tool_call_args(0, serde_json::to_string(&args).unwrap()),
+                Event::tool_call_args(0, arguments.to_string()),
                 Event::flush(0),
                 Event::Finished(FinishReason::Completed),
-            ];
-
-            let followup = vec![
+            ],
+            vec![
                 Event::message(0, "Done.\n\n"),
                 Event::flush(0),
                 Event::Finished(FinishReason::Completed),
-            ];
-
-            SequentialMockProvider {
-                responses: vec![events, followup],
-                call_index: AtomicUsize::new(0),
-                model: ModelDetails::empty(id::ModelIdConfig {
-                    provider: ProviderId::Test,
-                    name: "fan-out-mock".parse().expect("valid name"),
-                }),
-            }
-        });
-
-        let model = provider
-            .model_details(&"test-model".parse().unwrap())
-            .await
-            .unwrap();
-
-        let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
-        let printer = Arc::new(printer);
-        let router = detached_router();
-
-        // Counts how many executors the plan expanded the envelope into, which
-        // is decided in `prepare_one` before anything runs. The per-operation
-        // output asserted below is what proves each one then executed.
-        let runs = Arc::new(AtomicUsize::new(0));
-        let executor_source = TestExecutorSource::new().with_executor("fs_read_file", {
-            let runs = Arc::clone(&runs);
-            move |req| {
-                runs.fetch_add(1, Ordering::SeqCst);
-                let path = req
-                    .arguments
-                    .get("path")
-                    .and_then(Value::as_str)
-                    .unwrap_or("<missing>")
-                    .to_owned();
-
-                Box::new(
-                    MockExecutor::completed(&req.id, &req.name, &format!("contents of {path}"))
-                        .with_arguments(req.arguments.clone()),
-                )
-            }
-        });
-        let tool_defs = executor_source.tool_definitions();
-
-        run_turn_loop(
-            Arc::clone(&provider),
-            &model,
-            &config,
-            &router,
-            root,
-            InvocationContext::default(),
-            false, // interactive
-            &[],
-            &lock,
-            ToolChoice::Auto,
-            &tool_defs,
-            printer.clone(),
-            Arc::new(MockPromptBackend::new()),
-            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
-            chat_request.clone(),
-            PendingStreamTrim::default(),
-            router.turn_interrupt(),
-            TurnInterrupts::none(),
-        )
+            ],
+        ],
+        call_index: AtomicUsize::new(0),
+        model: ModelDetails::empty(id::ModelIdConfig {
+            provider: ProviderId::Test,
+            name: "fan-out-mock".parse().expect("valid name"),
+        }),
+    });
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
         .await
         .unwrap();
+    let router = detached_router();
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
 
-        printer.flush();
+    run_turn_loop(
+        provider,
+        &model,
+        &config,
+        &router,
+        root,
+        InvocationContext::default(),
+        false,
+        &[],
+        &lock,
+        ToolChoice::Auto,
+        &tools,
+        printer.clone(),
+        Arc::new(MockPromptBackend::new()),
+        ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)),
+        ChatRequest::from("Read the files"),
+        PendingStreamTrim::default(),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
+    )
+    .await
+    .unwrap();
+    owner.shutdown().await.unwrap();
+    printer.flush();
 
-        assert_eq!(
-            runs.load(Ordering::SeqCst),
-            3,
-            "the envelope expands into one executor per operation"
-        );
-
-        // One request in, one response out: the provider asked for one call and
-        // a second response would leave the stream unpaired.
-        let conv = lock.as_mut();
-        let events = conv.events();
-        let responses: Vec<_> = events
-            .iter()
-            .filter_map(|e| e.event.as_tool_call_response())
-            .filter(|r| r.id == "call_1")
-            .collect();
-
-        assert_eq!(responses.len(), 1, "one call is answered once");
-        assert_eq!(
-            responses[0].content(),
-            "[1/3] ok\ncontents of a.rs\n\n[2/3] ok\ncontents of b.rs\n\n[3/3] ok\ncontents of \
-             c.rs\n",
-            "every operation's result is framed with its position"
-        );
-
-        // Three operations render as three calls, matching what a model that
-        // issued them separately would have shown.
-        let chrome = err.lock().clone();
-        assert_eq!(
-            chrome.matches("Calling tool").count(),
-            3,
-            "one header per operation.\nChrome:\n{chrome}"
-        );
-        for path in ["a.rs", "b.rs", "c.rs"] {
-            assert!(
-                chrome.contains(path),
-                "header for {path} is missing.\nChrome:\n{chrome}"
-            );
-        }
-        assert!(
-            !chrome.contains("ops"),
-            "the envelope must not reach the terminal.\nChrome:\n{chrome}"
-        );
-    }))
-    .await;
-
-    assert!(test_result.is_ok(), "Test timed out");
+    let responses = lock
+        .events()
+        .iter()
+        .filter_map(|event| event.event.as_tool_call_response())
+        .filter(|response| response.id == "call_1")
+        .cloned()
+        .collect::<Vec<_>>();
+    let [response] = <[_; 1]>::try_from(responses).expect("one call is answered once");
+    let runs = runs.lock().unwrap().clone();
+    let chrome = err.lock().clone();
+    FanOutTurn {
+        response,
+        runs,
+        chrome,
+    }
 }
 
-/// A `stop` policy that rules out every remaining operation before any of them
-/// started must still end the turn.
+/// One provider tool call carrying three operations runs the tool three times
+/// and answers with one response holding all three results.
 ///
-/// The execution service rejects the first operation while preparing it, as it
-/// does when an argument formatter fails, which resolves it to an error before
-/// the execution loop begins.
-/// Under `on_error = "stop"` the second operation is then never released, so no
-/// tool task is spawned and no event will ever arrive.
-/// The loop has to notice it is already done rather than wait on a channel
-/// whose senders it holds itself.
+/// This is fan-out end to end through the execution service: the envelope goes
+/// in, three separate executions come out, the terminal shows three headers,
+/// and the provider gets back the single response its one call is waiting for.
 #[tokio::test]
-#[expect(clippy::too_many_lines)]
-async fn a_stop_policy_that_rules_out_every_operation_ends_the_turn() {
-    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        let storage = root.join(".jp");
+async fn a_fanned_out_call_runs_every_operation_and_answers_once() {
+    let turn = timeout(
+        Duration::from_secs(10),
+        fan_out_turn(
+            json!({"source": "builtin", "run": "unattended", "fan_out": true}),
+            &json!({ "ops": [{ "path": "a.rs" }, { "path": "b.rs" }, { "path": "c.rs" }] }),
+        ),
+    )
+    .await
+    .expect("the turn ends");
 
-        let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
-        config
-            .conversation
-            .tools
-            .insert("writer".to_string(), ToolConfig {
-                source: ToolSource::Local { tool: None },
-                command: None,
-                run: Some(RunMode::Unattended),
-                format: None,
-                enable: None,
-                summary: None,
-                description: None,
-                examples: None,
-                parameters: IndexMap::new().into(),
-                result: None,
-                style: None,
-                questions: IndexMap::new().into(),
-                options: IndexMap::default().into(),
-                access: None,
-                cancellation_response: None,
-                fan_out: Some(jp_config::conversation::tool::FanOutConfig {
-                    enabled: Some(true),
-                    concurrency: Some(1),
-                    on_error: Some(jp_config::conversation::tool::FanOutOnError::Stop),
-                }),
-            });
-
-        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
-        let lock = workspace
-            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
-            .unwrap();
-
-        let args = json!({ "ops": [{ "path": "bad.rs" }, { "path": "good.rs" }] });
-
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
-            responses: vec![
-                vec![
-                    Event::tool_call_start(0, "call_1".to_string(), "writer".to_string()),
-                    Event::tool_call_args(0, serde_json::to_string(&args).unwrap()),
-                    Event::flush(0),
-                    Event::Finished(FinishReason::Completed),
-                ],
-                vec![
-                    Event::message(0, "Done.\n\n"),
-                    Event::flush(0),
-                    Event::Finished(FinishReason::Completed),
-                ],
-            ],
-            call_index: AtomicUsize::new(0),
-            model: ModelDetails::empty(id::ModelIdConfig {
-                provider: ProviderId::Test,
-                name: "fan-out-stop-mock".parse().expect("valid name"),
-            }),
-        });
-
-        let model = provider
-            .model_details(&"test-model".parse().unwrap())
-            .await
-            .unwrap();
-
-        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
-        let printer = Arc::new(printer);
-        let router = detached_router();
-
-        // `bad.rs` is rejected while preparing, so it resolves to a failure
-        // before the loop starts while `good.rs` is still runnable.
-        let executor_source = TestExecutorSource::new().with_executor("writer", |req| {
-            let mock = MockExecutor::completed(&req.id, &req.name, "wrote")
-                .with_arguments(req.arguments.clone());
-            if req.arguments.get("path") == Some(&json!("bad.rs")) {
-                return Box::new(mock.rejected_at_prepare("formatter failed"));
-            }
-            Box::new(mock)
-        });
-        let tool_defs = executor_source.tool_definitions();
-
-        run_turn_loop(
-            Arc::clone(&provider),
-            &model,
-            &config,
-            &router,
-            root,
-            InvocationContext::default(),
-            false,
-            &[],
-            &lock,
-            ToolChoice::Auto,
-            &tool_defs,
-            printer.clone(),
-            Arc::new(MockPromptBackend::new()),
-            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
-            ChatRequest::from("Write two files"),
-            PendingStreamTrim::default(),
-            router.turn_interrupt(),
-            TurnInterrupts::none(),
+    // Counted rather than read off the response: running one operation and
+    // printing three sections would pass the text assertion below.
+    let mut runs = turn.runs.clone();
+    runs.sort();
+    assert_eq!(runs, vec!["a.rs", "b.rs", "c.rs"], "one run per operation");
+    assert_eq!(
+        turn.response.result,
+        Ok(
+            "[1/3] ok\ncontents of a.rs\n\n[2/3] ok\ncontents of b.rs\n\n[3/3] ok\ncontents of \
+             c.rs\n"
+                .to_owned()
         )
-        .await
-        .unwrap();
+    );
 
-        let conv = lock.as_mut();
-        let events = conv.events();
-        let response = events
-            .iter()
-            .filter_map(|e| e.event.as_tool_call_response())
-            .find(|r| r.id == "call_1")
-            .expect("the call is answered");
-
-        // Had the second operation run, its "wrote" would stand in place of
-        // the not-run line: a result always wins over that marker.
-        assert_eq!(
-            response.content(),
-            "[1/2] error\nformatter failed\n\n[2/2] not run (stopped after operation 1 failed)\n",
-            "the rejection is operation 1, and the second never started"
-        );
-    }))
-    .await;
-
+    // Three operations render as three calls, matching what a model that
+    // issued them separately would have shown.
+    assert_eq!(
+        turn.chrome.matches("Calling tool").count(),
+        3,
+        "one header per operation.\nChrome:\n{}",
+        turn.chrome
+    );
     assert!(
-        test_result.is_ok(),
-        "the turn hung: nothing was spawned, so no event ever arrived to wake the loop"
+        !turn.chrome.contains("ops"),
+        "the envelope must not reach the terminal.\nChrome:\n{}",
+        turn.chrome
+    );
+}
+
+/// A `stop` policy that rules out the operations after a failure still ends the
+/// turn.
+///
+/// The second operation never runs, so no tool attempt is left to report it;
+/// the service settling it as not run is what lets the Host finish.
+#[tokio::test]
+async fn a_stop_policy_that_rules_out_the_rest_ends_the_turn() {
+    let turn = timeout(
+        Duration::from_secs(10),
+        fan_out_turn(
+            json!({
+                "source": "builtin",
+                "run": "unattended",
+                "fan_out": { "concurrency": 1, "on_error": "stop" },
+            }),
+            &json!({ "ops": [{ "path": "bad.rs" }, { "path": "good.rs" }] }),
+        ),
+    )
+    .await
+    .expect("the turn ends");
+
+    assert_eq!(turn.runs, vec!["bad.rs"], "the second operation never ran");
+    assert_eq!(
+        turn.response.result,
+        Ok(
+            "[1/2] error\nno such file\n\n[2/2] not run (stopped after operation 1 failed)\n"
+                .to_owned()
+        )
     );
 }
 
 /// A malformed envelope answers with a message naming what went wrong, and the
 /// tool never runs.
 #[tokio::test]
-#[expect(clippy::too_many_lines)]
 async fn a_fanned_out_call_with_an_empty_envelope_is_refused() {
-    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
-        let tmp = tempdir().unwrap();
-        let root = tmp.path();
-        let storage = root.join(".jp");
+    let turn = timeout(
+        Duration::from_secs(10),
+        fan_out_turn(
+            json!({"source": "builtin", "run": "unattended", "fan_out": true}),
+            &json!({ "ops": [] }),
+        ),
+    )
+    .await
+    .expect("the turn ends");
 
-        let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
-        config
-            .conversation
-            .tools
-            .insert("fs_read_file".to_string(), ToolConfig {
-                source: ToolSource::Local { tool: None },
-                command: None,
-                run: Some(RunMode::Unattended),
-                format: None,
-                enable: None,
-                summary: None,
-                description: None,
-                examples: None,
-                parameters: IndexMap::new().into(),
-                result: None,
-                style: None,
-                questions: IndexMap::new().into(),
-                options: IndexMap::default().into(),
-                access: None,
-                cancellation_response: None,
-                fan_out: Some(jp_config::conversation::tool::FanOutConfig {
-                    enabled: Some(true),
-                    concurrency: None,
-                    on_error: None,
-                }),
-            });
-
-        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
-
-        let lock = workspace
-            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
-            .unwrap();
-
-        let provider: Arc<dyn Provider> = Arc::new({
-            let events = vec![
-                Event::tool_call_start(0, "call_1".to_string(), "fs_read_file".to_string()),
-                Event::tool_call_args(0, r#"{"ops":[]}"#.to_owned()),
-                Event::flush(0),
-                Event::Finished(FinishReason::Completed),
-            ];
-            let followup = vec![
-                Event::message(0, "Sorry.\n\n"),
-                Event::flush(0),
-                Event::Finished(FinishReason::Completed),
-            ];
-
-            SequentialMockProvider {
-                responses: vec![events, followup],
-                call_index: AtomicUsize::new(0),
-                model: ModelDetails::empty(id::ModelIdConfig {
-                    provider: ProviderId::Test,
-                    name: "fan-out-empty-mock".parse().expect("valid name"),
-                }),
-            }
-        });
-
-        let model = provider
-            .model_details(&"test-model".parse().unwrap())
-            .await
-            .unwrap();
-
-        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
-        let printer = Arc::new(printer);
-        let router = detached_router();
-
-        let runs = Arc::new(AtomicUsize::new(0));
-        let executor_source = TestExecutorSource::new().with_executor("fs_read_file", {
-            let runs = Arc::clone(&runs);
-            move |req| {
-                runs.fetch_add(1, Ordering::SeqCst);
-                Box::new(MockExecutor::completed(
-                    &req.id,
-                    &req.name,
-                    "should not run",
-                ))
-            }
-        });
-        let tool_defs = executor_source.tool_definitions();
-
-        run_turn_loop(
-            Arc::clone(&provider),
-            &model,
-            &config,
-            &router,
-            root,
-            InvocationContext::default(),
-            false,
-            &[],
-            &lock,
-            ToolChoice::Auto,
-            &tool_defs,
-            printer.clone(),
-            Arc::new(MockPromptBackend::new()),
-            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
-            ChatRequest::from("Read nothing"),
-            PendingStreamTrim::default(),
-            router.turn_interrupt(),
-            TurnInterrupts::none(),
+    assert!(
+        turn.runs.is_empty(),
+        "a call with no operations runs nothing"
+    );
+    assert_eq!(
+        turn.response.result,
+        Err(
+            "Tool 'fs_read_file' was called with an empty `ops` array, so there was nothing to \
+             do. Include at least one operation."
+                .to_owned()
         )
-        .await
-        .unwrap();
+    );
+}
 
-        assert_eq!(
-            runs.load(Ordering::SeqCst),
-            0,
-            "a call with no operations runs nothing"
-        );
+/// A call to a fan-out tool without the envelope runs as an ordinary call.
+#[tokio::test]
+async fn a_bare_call_to_a_fan_out_tool_runs_once_unframed() {
+    let turn = timeout(
+        Duration::from_secs(10),
+        fan_out_turn(
+            json!({"source": "builtin", "run": "unattended", "fan_out": true}),
+            &json!({ "path": "a.rs" }),
+        ),
+    )
+    .await
+    .expect("the turn ends");
 
-        let conv = lock.as_mut();
-        let events = conv.events();
-        let response = events
-            .iter()
-            .filter_map(|e| e.event.as_tool_call_response())
-            .find(|r| r.id == "call_1")
-            .expect("the call is answered");
-
-        assert_eq!(
-            response.result,
-            Err(
-                "Tool 'fs_read_file' was called with an empty `ops` array, so there was nothing \
-                 to do. Include at least one operation."
-                    .to_owned()
-            )
-        );
-    }))
-    .await;
-
-    assert!(test_result.is_ok(), "Test timed out");
+    assert_eq!(turn.runs, vec!["a.rs"]);
+    assert_eq!(turn.response.result, Ok("contents of a.rs".to_owned()));
 }
 
 /// An executor that writes to the stderr sink the coordinator hands it, then
@@ -9506,7 +9305,6 @@ async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
             name: "http_tool".into(),
             docs: ToolDocs::default(),
             parameters: json!({"type":"object","properties":{}}),
-            fan_out: false,
         }];
         let count = Arc::new(AtomicUsize::new(0));
         let client = Client::default();

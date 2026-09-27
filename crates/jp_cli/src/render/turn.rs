@@ -22,8 +22,8 @@ use jp_conversation::{
     EventKind,
     stream::{TurnOrigin, turn_iter::Turn},
 };
+use jp_mcp::server::fan_out;
 use jp_printer::{ErrChannel, Printer};
-use jp_tool::fan_out;
 use tracing::warn;
 
 use super::{RenderFlow, ToolRenderer, TurnView, metadata::get_rendered_arguments};

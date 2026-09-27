@@ -22,12 +22,11 @@ fn resp(id: &str, content: &str) -> ToolCallResponse {
     }
 }
 
-/// A call carrying one approved operation, which is what a tool without fan-out
+/// A call carrying one approved operation, which is what an ordinary call
 /// produces.
 fn approved_executor(id: &str, name: &str) -> ExecutorGroup {
     ExecutorGroup {
         tool_id: id.to_owned(),
-        tool_name: name.to_owned(),
         fan_out: None,
         ops: vec![GroupOp::Run(
             Box::new(MockExecutor::completed(id, name, "done")) as Box<dyn Executor>,

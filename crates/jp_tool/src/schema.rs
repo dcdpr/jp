@@ -5,16 +5,8 @@
 //! For an MCP tool that is the server's `inputSchema` with the user's
 //! configured overrides applied; for a local or built-in tool it is generated
 //! from configuration.
-//! Adapting a schema to what a given API accepts is the responsibility of that
-//! provider.
-//!
-//! One thing does rewrite it.
-//! A tool configured for fan-out is shown an envelope holding an array of its
-//! own schema, so one call can carry several operations; see [`fan_out`].
-//! That envelope is JP's construction, not anything the tool's source declared,
-//! and it exists only on the way out: `ToolDefinition::parameters` still holds
-//! the per-operation document, and argument validation, defaults, and coercion
-//! all run against that.
+//! Nothing else rewrites it: adapting a schema to what a given API accepts is
+//! the responsibility of that provider.
 //!
 //! [`Node`] is the read-only view used by argument handling and validation.
 //! It follows same-document `$ref` pointers while reading, so a referenced enum
@@ -22,8 +14,6 @@
 //!
 //! Building a schema from configuration lives with the configuration types;
 //! this module only reads and checks one that already exists.
-//!
-//! [`fan_out`]: crate::fan_out
 
 use std::borrow::Cow;
 

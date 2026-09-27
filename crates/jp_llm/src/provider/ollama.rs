@@ -423,18 +423,21 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Result<Vec<ToolInfo>> {
     tools
         .into_iter()
         .map(|tool| {
-            let parameters = jp_tool::schema::inline(&tool.provider_schema())
+            let parameters = jp_tool::schema::inline(&tool.parameters)
                 .as_object()
                 .cloned()
                 .unwrap_or_default();
-            let description = tool.provider_description().unwrap_or_default().into_owned();
 
             Ok(ToolInfo {
                 tool_type: ToolType::Function,
                 function: ToolFunctionInfo {
                     parameters: parameters.into(),
                     name: tool.name,
-                    description,
+                    description: tool
+                        .docs
+                        .schema_description()
+                        .unwrap_or_default()
+                        .to_owned(),
                 },
             })
         })

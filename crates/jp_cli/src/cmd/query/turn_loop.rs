@@ -787,7 +787,7 @@ pub(super) async fn run_turn_loop(
                                 tool_coordinator.set_tool_state(&req.id, ToolCallState::Queued);
                                 tool_renderer.complete(&req.id);
 
-                                match tool_coordinator.prepare_one(req.clone()) {
+                                match tool_coordinator.prepare_one(&req) {
                                     Ok(executors) => {
                                         // Run the unified permission pipeline
                                         // over every operation of the call. The
@@ -819,7 +819,7 @@ pub(super) async fn run_turn_loop(
                                         } else {
                                             pending_tools.insert_resolved(
                                                 req.id.clone(),
-                                                tool_coordinator.fold_decided_group(group),
+                                                tool_coordinator.resolve_decided_group(group).await,
                                             );
                                         }
                                     }

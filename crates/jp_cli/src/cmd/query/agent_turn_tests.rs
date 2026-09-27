@@ -255,7 +255,7 @@ async fn assert_agent_fallback(next_execution: ToolExecution) {
         let id = ConversationId::try_from(timestamp).unwrap();
         let conversation = Conversation { last_activated_at: timestamp, ..Conversation::default() };
         let lock = workspace.create_and_lock_conversation_with_id(id, conversation, config.clone().into(), None).unwrap();
-        let definitions = vec![ToolDefinition { name: "http_tool".into(), docs: ToolDocs::default(), parameters: json!({"type":"object","properties":{}}), fan_out: false }];
+        let definitions = vec![ToolDefinition { name: "http_tool".into(), docs: ToolDocs::default(), parameters: json!({"type":"object","properties":{}}) }];
         let count = Arc::new(AtomicUsize::new(0));
         let client = Client::default();
         let (source, owner) = TerminalExecutorSource::start(BuiltinExecutors::new().register("http_tool", InquiringTool(count.clone())), &definitions, &config.conversation.tools, Arc::new(ApprovalStore::default()), InvocationContext::default(), &client, root.to_owned()).await.unwrap();
@@ -287,7 +287,7 @@ async fn agent_continuation_waits_for_host_recording_without_resubmission() {
         let id = ConversationId::try_from(timestamp).unwrap();
         let conversation = Conversation { last_activated_at: timestamp, ..Conversation::default() };
         let lock = workspace.create_and_lock_conversation_with_id(id, conversation, config.clone().into(), None).unwrap();
-        let definitions = vec![ToolDefinition { name: "http_tool".into(), docs: ToolDocs::default(), parameters: json!({"type":"object","properties":{}}), fan_out: false }];
+        let definitions = vec![ToolDefinition { name: "http_tool".into(), docs: ToolDocs::default(), parameters: json!({"type":"object","properties":{}}) }];
         let count = Arc::new(AtomicUsize::new(0));
         let client = Client::default();
         let (source, owner) = TerminalExecutorSource::start(BuiltinExecutors::new().register("http_tool", InquiringTool(count.clone())), &definitions, &config.conversation.tools, Arc::new(ApprovalStore::default()), InvocationContext::default(), &client, root.to_owned()).await.unwrap();

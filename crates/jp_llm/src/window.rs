@@ -71,11 +71,11 @@ pub fn estimate_overhead_chars(
 
     for tool in tools {
         chars += tool.name.len();
-        if let Some(desc) = tool.provider_description() {
+        if let Some(desc) = tool.docs.schema_description() {
             chars += desc.len();
         }
         // Parameter schemas are serialized as JSON by providers.
-        chars += serde_json::to_string(&*tool.provider_schema()).map_or(0, |s| s.len());
+        chars += serde_json::to_string(&tool.parameters).map_or(0, |s| s.len());
     }
 
     chars

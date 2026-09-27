@@ -1854,7 +1854,6 @@ fn test_forced_tool_with_reasoning_returns_fallback() {
         tools: vec![ToolDefinition {
             name: "my_tool".into(),
             docs: ToolDocs::default(),
-            fan_out: false,
             parameters: json!({ "type": "object", "properties": {} }),
         }],
         tool_choice: ToolChoice::Function("my_tool".into()),
@@ -1929,7 +1928,6 @@ fn test_forced_tool_thinking_always_on_uses_escalating_nudge() {
         tools: vec![ToolDefinition {
             name: "my_tool".into(),
             docs: ToolDocs::default(),
-            fan_out: false,
             parameters: json!({ "type": "object", "properties": {} }),
         }],
         tool_choice: ToolChoice::Function("my_tool".into()),
@@ -2016,7 +2014,6 @@ fn test_forced_tool_thinking_always_on_reasoning_off_still_soft_forces() {
         tools: vec![ToolDefinition {
             name: "my_tool".into(),
             docs: ToolDocs::default(),
-            fan_out: false,
             parameters: json!({ "type": "object", "properties": {} }),
         }],
         tool_choice: ToolChoice::Function("my_tool".into()),
@@ -2078,13 +2075,11 @@ fn test_forced_tool_function_multi_tool_preserves_name() {
             ToolDefinition {
                 name: "read_file".into(),
                 docs: ToolDocs::default(),
-                fan_out: false,
                 parameters: json!({ "type": "object", "properties": {} }),
             },
             ToolDefinition {
                 name: "commit".into(),
                 docs: ToolDocs::default(),
-                fan_out: false,
                 parameters: json!({ "type": "object", "properties": {} }),
             },
         ],
@@ -2155,7 +2150,6 @@ fn test_forced_tool_without_reasoning_no_fallback() {
         tools: vec![ToolDefinition {
             name: "my_tool".into(),
             docs: ToolDocs::default(),
-            fan_out: false,
             parameters: json!({ "type": "object", "properties": {} }),
         }],
         tool_choice: ToolChoice::Required,

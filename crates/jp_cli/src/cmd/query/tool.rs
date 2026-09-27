@@ -10,7 +10,6 @@ pub(crate) mod inquiry;
 pub(crate) mod mcp_executor;
 pub(crate) mod pending;
 pub(crate) mod prompter;
-pub(crate) mod schedule;
 
 pub(crate) use coordinator::{ExecutorGroup, ToolCallState, ToolCoordinator};
 pub(crate) use mcp_executor::TerminalExecutorSource;

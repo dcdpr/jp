@@ -1,32 +1,49 @@
 //! Fan-out: one tool call carrying several independent operations.
 //!
-//! A tool with fan-out enabled is shown an envelope schema instead of its own:
-//! an object holding a single [`FAN_OUT_KEY`] array whose elements each hold
-//! one complete set of the tool's arguments.
-//! The tool implementation is untouched, and still receives one operation's
-//! arguments per invocation.
+//! A tool with `fan_out` configured is advertised with an envelope schema: an
+//! object holding a single [`FAN_OUT_KEY`] array whose elements each hold one
+//! complete set of the tool's own arguments.
+//! The service expands a call carrying that envelope into one child invocation
+//! per operation, so the tool itself still receives one operation's arguments
+//! per invocation.
 //!
-//! This module owns both halves of that translation: [`envelope`] builds the
-//! schema the provider sees, and [`expand`] takes a call's arguments back apart
-//! into the operations to run.
-//!
-//! Result folding lives with the caller that collects the responses, not here.
+//! This module holds the pure halves of that translation: [`advertise`] builds
+//! what callers are shown, [`split`] decides whether a call's arguments are an
+//! envelope or an ordinary call, and [`fold`] frames the operations' results
+//! into the one response the caller receives.
+//! Running the operations lives in the service.
 
+use jp_tool::{ToolDefinition, schema::Node};
 use serde_json::{Map, Value, json};
+
+use super::service::validate_arguments;
 
 /// The envelope's only property: the array of operations to run.
 pub const FAN_OUT_KEY: &str = "ops";
 
-/// Sentence appended to a fan-out tool's description, telling the model how the
-/// envelope relates to the per-operation documentation it already has.
+/// Sentence appended to a fan-out tool's advertised description.
 ///
-/// The tool's own `examples` need no rewrite: each one already shows exactly
-/// one operation, which is the shape of one element.
-pub const FAN_OUT_DESCRIPTION: &str = "This tool accepts several operations in a single call. Put \
-                                       each one in the `ops` array as its own complete object; \
-                                       the documented parameters and examples describe one \
-                                       element. Batch every operation you already know you need \
-                                       into one call rather than issuing them one at a time.";
+/// It asks for batching; the envelope schema already says what one element
+/// holds.
+pub const BATCH_DESCRIPTION: &str = "Batch every operation you already know you need into one \
+                                     call, each as its own element of `ops`, rather than issuing \
+                                     them one at a time.";
+
+/// The definition a fan-out tool is advertised with.
+///
+/// The parameters are the [`envelope`] around the tool's own schema, and the
+/// description gains [`BATCH_DESCRIPTION`].
+/// The name is unchanged, and so is everything a caller never sees.
+#[must_use]
+pub fn advertise(definition: &ToolDefinition) -> ToolDefinition {
+    let mut advertised = definition.clone();
+    advertised.parameters = envelope(&definition.parameters);
+    advertised.docs.summary = Some(match definition.docs.schema_description() {
+        Some(description) => format!("{description} {BATCH_DESCRIPTION}"),
+        None => BATCH_DESCRIPTION.to_owned(),
+    });
+    advertised
+}
 
 /// Build the envelope schema wrapping a tool's per-operation schema.
 ///
@@ -37,13 +54,10 @@ pub const FAN_OUT_DESCRIPTION: &str = "This tool accepts several operations in a
 /// envelope's root.
 /// Same-document references are anchored at the document root (`#/$defs/Name`),
 /// so leaving the block nested under `properties.ops.items` would point every
-/// reference at a root that no longer holds it: Ollama's inliner would give up
-/// and the property would reach the model with no type, and providers that
-/// validate references would reject the request.
+/// reference at a root that no longer holds it.
 ///
 /// A schema referring to its own root (`$ref: "#"`) is not rewritten, and would
 /// resolve to the envelope rather than the operation.
-/// No tool in the tree declares one.
 #[must_use]
 pub fn envelope(operation: &Value) -> Value {
     let mut operation = operation.clone();
@@ -76,7 +90,56 @@ pub fn envelope(operation: &Value) -> Value {
     envelope
 }
 
-/// Why a call's arguments could not be taken apart into operations.
+/// What a call to a fan-out tool carries.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Split {
+    /// One operation's arguments, not an envelope: run as an ordinary call.
+    Bare,
+
+    /// An envelope, taken apart into one argument map per operation.
+    Envelope(Vec<Map<String, Value>>),
+
+    /// An envelope that cannot be taken apart.
+    Malformed(ExpandError),
+}
+
+/// Decide whether a fan-out tool's call is an envelope or an ordinary call.
+///
+/// For a tool whose own schema does not declare a top-level [`FAN_OUT_KEY`]
+/// parameter, the key alone decides: present means an envelope, which is
+/// malformed if it is not a non-empty array of objects.
+///
+/// For a tool that does declare one, the arguments are an envelope only if the
+/// key holds a non-empty array of objects that each validate against the tool's
+/// own schema.
+/// Anything else is the tool's own parameter, and the call is bare.
+/// When both readings validate, the envelope wins: it is the shape every caller
+/// was shown.
+#[must_use]
+pub fn split(definition: &ToolDefinition, arguments: &Map<String, Value>) -> Split {
+    let declares_key = Node::root(&definition.parameters)
+        .properties()
+        .iter()
+        .any(|(name, _)| name == FAN_OUT_KEY);
+
+    match expand(arguments) {
+        Err(ExpandError::Missing) => Split::Bare,
+        Err(_) if declares_key => Split::Bare,
+        Err(error) => Split::Malformed(error),
+        Ok(operations) if declares_key && !all_validate(definition, &operations) => Split::Bare,
+        Ok(operations) => Split::Envelope(operations),
+    }
+}
+
+/// Whether every operation is a valid call to the tool on its own.
+fn all_validate(definition: &ToolDefinition, operations: &[Map<String, Value>]) -> bool {
+    operations.iter().all(|operation| {
+        let mut operation = operation.clone();
+        validate_arguments(definition, &mut operation).is_ok()
+    })
+}
+
+/// Why an envelope could not be taken apart into operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExpandError {
     /// The `ops` key is absent.
@@ -96,17 +159,16 @@ pub enum ExpandError {
 }
 
 impl ExpandError {
-    /// The message handed back to the assistant.
+    /// The message handed back to the caller.
     ///
-    /// Each one names the envelope explicitly, because the model reaching this
-    /// point has the envelope schema in front of it and got the shape wrong.
+    /// Each one names the envelope explicitly, because the caller reaching this
+    /// point was shown the envelope schema and got the shape wrong.
     #[must_use]
     pub fn message(&self, tool_name: &str) -> String {
         match self {
             Self::Missing => format!(
-                "Tool '{tool_name}' takes its arguments in an `{FAN_OUT_KEY}` array, but the call \
-                 had no `{FAN_OUT_KEY}` key. Wrap the arguments in one: {{\"{FAN_OUT_KEY}\": \
-                 [{{...}}]}}."
+                "Tool '{tool_name}' takes its operations in an `{FAN_OUT_KEY}` array, but the \
+                 call had no `{FAN_OUT_KEY}` key."
             ),
             Self::NotAnArray => format!(
                 "Tool '{tool_name}' expects `{FAN_OUT_KEY}` to be an array of operations, and the \
@@ -124,15 +186,10 @@ impl ExpandError {
     }
 }
 
-/// Take a fan-out call's arguments apart into one argument map per operation.
+/// Take an envelope apart into one argument map per operation.
 ///
-/// The returned maps are what the tool is actually invoked with, so each is the
-/// shape the tool's own schema describes.
-///
-/// A call that omits the envelope entirely but looks like a single operation is
-/// **not** accepted: a tool whose schema says `ops` and receives `path` has
-/// been called wrongly, and silently running it would hide the mistake from the
-/// model that made it.
+/// This reads the shape only; [`split`] decides whether the arguments are an
+/// envelope at all.
 ///
 /// # Errors
 ///
@@ -167,7 +224,8 @@ pub enum OperationOutcome {
     /// The operation ran and succeeded.
     Ok(String),
 
-    /// The operation ran and reported an error.
+    /// The operation ran, or was resolved before running, and reported an
+    /// error.
     Error(String),
 
     /// The operation never started, because an earlier one failed under
@@ -178,7 +236,7 @@ pub enum OperationOutcome {
     },
 }
 
-/// Fold per-operation outcomes into the single body the assistant receives.
+/// Fold per-operation outcomes into the single body the caller receives.
 ///
 /// Each operation gets a header naming its position, so a model reading the
 /// result can line each section up with the operation it wrote.
@@ -186,8 +244,8 @@ pub enum OperationOutcome {
 /// asked for five and reads three assumes the other two succeeded silently.
 ///
 /// A single successful operation is returned bare, with no framing at all, so a
-/// one-operation fan-out call reads exactly like a call to the same tool
-/// without fan-out.
+/// one-operation call reads exactly like a call to the same tool without
+/// fan-out.
 #[must_use]
 pub fn fold(outcomes: &[OperationOutcome]) -> String {
     if let [OperationOutcome::Ok(content)] = outcomes {
@@ -219,17 +277,6 @@ pub fn fold(outcomes: &[OperationOutcome]) -> String {
     }
 
     body
-}
-
-/// Whether the outcomes so far mean no further operation should start.
-///
-/// `stops_on_error` is the call's `on_error = "stop"` policy.
-#[must_use]
-pub fn should_stop(stops_on_error: bool, outcomes: &[OperationOutcome]) -> bool {
-    stops_on_error
-        && outcomes
-            .iter()
-            .any(|outcome| matches!(outcome, OperationOutcome::Error(_)))
 }
 
 #[cfg(test)]
