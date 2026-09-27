@@ -1340,6 +1340,109 @@ fn sync_projection_overwrites_user_local_from_workspace() {
 }
 
 #[test]
+fn sync_projection_keeps_the_user_local_query_draft() {
+    let tmp = tempdir().unwrap();
+    let (storage, workspace, user_dir) = dual_root_storage(tmp.path());
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+
+    storage
+        .persist_conversation(
+            &id,
+            &Conversation::default(),
+            &ConversationStream::new_test(),
+            Projection::Projected,
+        )
+        .unwrap();
+
+    // The draft is only ever written to the user-local copy.
+    let user_conv = user_dir.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    fs::write(user_conv.join("QUERY_MESSAGE.md"), "unsent draft").unwrap();
+
+    let ws_conv = workspace.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    fs::write(ws_conv.join(EVENTS_FILE), "[]").unwrap();
+
+    storage.sync_projection(&id).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(user_conv.join(EVENTS_FILE)).unwrap(),
+        "[]"
+    );
+    assert_eq!(
+        fs::read_to_string(user_conv.join("QUERY_MESSAGE.md")).unwrap(),
+        "unsent draft"
+    );
+}
+
+#[test]
+fn sync_projection_moves_the_query_draft_with_a_title_change() {
+    let tmp = tempdir().unwrap();
+    let (storage, workspace, user_dir) = dual_root_storage(tmp.path());
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+
+    storage
+        .persist_conversation(
+            &id,
+            &Conversation::default(),
+            &ConversationStream::new_test(),
+            Projection::Projected,
+        )
+        .unwrap();
+
+    let user_convs = user_dir.join(CONVERSATIONS_DIR);
+    let old_user_conv = user_convs.join(id.to_dirname(None));
+    fs::write(old_user_conv.join("QUERY_MESSAGE.md"), "unsent draft").unwrap();
+
+    // A `--metadata` edit that sets a title leaves the workspace copy under the
+    // new directory name.
+    let ws_convs = workspace.join(CONVERSATIONS_DIR);
+    let new_ws_conv = ws_convs.join(id.to_dirname(Some("renamed")));
+    fs::rename(ws_convs.join(id.to_dirname(None)), &new_ws_conv).unwrap();
+    let metadata = Conversation::new("renamed");
+    write_json(&new_ws_conv.join(METADATA_FILE), &metadata).unwrap();
+
+    storage.sync_projection(&id).unwrap();
+
+    let new_user_conv = user_convs.join(id.to_dirname(Some("renamed")));
+    assert!(!old_user_conv.exists(), "the old directory name is gone");
+    assert_eq!(
+        fs::read_to_string(new_user_conv.join("QUERY_MESSAGE.md")).unwrap(),
+        "unsent draft"
+    );
+    assert_eq!(
+        fs::read_to_string(new_user_conv.join(METADATA_FILE)).unwrap(),
+        fs::read_to_string(new_ws_conv.join(METADATA_FILE)).unwrap(),
+    );
+}
+
+#[test]
+fn sync_projection_removes_a_managed_file_the_workspace_copy_lacks() {
+    let tmp = tempdir().unwrap();
+    let (storage, workspace, user_dir) = dual_root_storage(tmp.path());
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+
+    storage
+        .persist_conversation(
+            &id,
+            &Conversation::default(),
+            &ConversationStream::new_test(),
+            Projection::Projected,
+        )
+        .unwrap();
+
+    // A legacy-format workspace copy has no `base_config.json`. Leaving the
+    // user-local one behind would make the loader read the synced legacy
+    // `events.json` as the current format.
+    let ws_conv = workspace.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    fs::remove_file(ws_conv.join(BASE_CONFIG_FILE)).unwrap();
+
+    storage.sync_projection(&id).unwrap();
+
+    let user_conv = user_dir.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    assert!(!user_conv.join(BASE_CONFIG_FILE).exists());
+    assert!(user_conv.join(EVENTS_FILE).is_file());
+}
+
+#[test]
 fn sync_projection_is_noop_for_local_only() {
     let tmp = tempdir().unwrap();
     let (storage, workspace, user_dir) = dual_root_storage(tmp.path());

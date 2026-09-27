@@ -86,6 +86,16 @@ fn write_json_impl<T: Serialize>(path: &Utf8Path, value: &T, force: bool) -> Res
     write_bytes(path, &bytes, force)
 }
 
+/// Copy the file at `src` to `dst` atomically.
+///
+/// Shares [`write_json`]'s guarantees: `dst` is replaced through a temp-file
+/// rename, and is left untouched (mtime included) when it already holds the
+/// same bytes.
+pub(crate) fn copy_file(src: &Utf8Path, dst: &Utf8Path) -> Result<()> {
+    let bytes = fs::read(src)?;
+    write_bytes(dst, &bytes, false)
+}
+
 /// Atomically write `bytes` to `path` via a temporary sibling file.
 ///
 /// When `force` is false and `path` already holds these exact bytes, the write
