@@ -257,8 +257,11 @@ incomplete feature, it is a non-compliant one.
 The typed attributions from [RFD D31] are rendered inline or as a source list,
 and web rendering in the `serve-web` plugin follows the same rule.
 
-Hosted-activity spend (`usage.server_tool_use.web_search_requests`) surfaces
-alongside token usage.
+Hosted-activity spend is shown as the number of searches in the turn, counted
+from the recorded `HostedActivity` events.
+[RFD D31] persists no usage counters, so the provider's own count
+(`usage.server_tool_use.web_search_requests`) is a diagnostic, not a display
+source.
 
 ## Drawbacks
 
@@ -397,8 +400,8 @@ This is the slice that makes web search work end to end.
 
 ### Phase 4: Rendering and usage
 
-Activity display, citation rendering in terminal and `serve-web`, hosted usage
-reporting.
+Activity display, citation rendering in terminal and `serve-web`, and the
+per-turn search count.
 Gates the release, per Rendering above.
 
 ### Phase 5: Second provider

@@ -12,8 +12,10 @@ LLM providers return response artifacts JP cannot represent: activity executed
 on the provider's own infrastructure, citations attached to assistant text, and
 usage counters for that activity.
 This RFD adds a normalized **hosted activity** event, a typed **provider
-payload** envelope for exact same-provider replay, typed citations on assistant
-content, and hosted-activity usage.
+payload** envelope for exact same-provider replay, and typed citations on
+assistant content.
+Hosted-activity usage counters are parsed and reported as diagnostics, not
+persisted.
 
 It adds no user-visible feature on its own.
 It is the response-model prerequisite for exposing any provider-hosted tool.
@@ -103,9 +105,10 @@ mutated in place.
 activity began and never finished, which a reader can detect and a provider
 adapter can act on.
 
-Append-only is the established principle ([RFD 064]); the one existing deviation
-(`jp_llm::event::apply_patches`) documents itself as a deviation.
-This RFD does not add a second.
+Append-only is the established principle ([RFD 064]).
+Provider-issued repairs already follow it: `jp_llm::event::record_patches`
+appends an overlay rather than rewriting the events it targets.
+Hosted-activity transitions follow the same rule.
 
 `sanitize_orphaned_tool_calls` matches on `EventKind::ToolCallResponse` and
 `as_tool_call_request()`, so a distinct kind is invisible to it.
@@ -151,23 +154,65 @@ reference once [RFD 066] exists; nothing here depends on that.
 
 Citations annotate assistant text, so they attach to the assistant content
 event, not to hosted activity.
-A typed attribution carries the source URL, title, the cited span or excerpt,
-and the provider-specific index required for replay.
+A typed attribution keeps four things apart, because they answer different
+questions:
 
-Citations arrive when a text block completes, so the adapter attaches them
-through the existing `Event::Flush { index, metadata }` path — the same
-mechanism thinking signatures already use — and `EventBuilder` merges them into
-the event on flush.
+```text
+Attribution
+    source      URL and title of the cited source
+    excerpt     text quoted from the source, optional
+    range       span within the event's stored text, optional
+    replay      ProviderPayload carrying the provider's opaque replay value
+```
+
+The content event itself is the answer-side anchor.
+Anthropic emits each cited passage as its own text block, which becomes its own
+event, so the block is the anchor and `range` is absent.
+OpenAI's `url_citation` carries offsets into the response text, which become
+`range`.
+`excerpt` is always source-side text and never stands in for `range`.
+
+`range` addresses the event's final stored text.
+An adapter that rewrites text after citations arrive (the Anthropic max-token
+continuation trims overlapping text) remaps every range it keeps, or drops it.
+A stale range is never persisted.
+
+#### Streaming lifecycle
+
+Citations stream inside a text block: Anthropic sends one `citations_delta` per
+citation before `content_block_stop`.
+The adapter forwards each citation with its block's index as it arrives,
+`EventBuilder` appends it to that block's attribution list, and `Flush`
+finalizes the event.
+
+Flush is not the only point where citations reach storage.
+When a stream is interrupted or retried, `EventBuilder::peek_partial_events`
+commits unflushed message text as its own event.
+That event carries the citations received so far, marked incomplete, so a reader
+can tell a block that cites nothing from a block cut off before its attribution
+finished.
+Partial commits drop all other accumulated metadata, which is correct for
+thinking signatures because partial reasoning is resent unsigned; citations are
+the exception.
 
 ### Usage
 
-Provider usage gains hosted-activity counters (Anthropic reports
-`usage.server_tool_use.web_search_requests`).
-These bill separately from tokens, so a user who cannot see them cannot predict
-their spend.
+Anthropic reports hosted-activity counters
+(`usage.server_tool_use.web_search_requests`), billed separately from tokens.
 
-Usage attaches to the terminal event of each provider response batch.
-That is deliberately less precise than per-response attribution; see Non-Goals.
+JP persists no token usage today.
+No HTTP provider adapter reads its usage counters, and the ACP adapter keeps
+usage out of event metadata and reports it as a `debug` diagnostic
+(`anthropic/acp/usage.rs`).
+Hosted counters take the same path: the adapter parses and reports them, and
+they do not enter the conversation stream.
+
+The spend is still visible.
+Every hosted search is recorded as a `HostedActivity` event, so a consumer can
+count searches from the durable stream.
+That count approximates billed requests; whether a failed search is billed is
+unverified.
+Persisting usage belongs with provider-response identity; see Non-Goals.
 
 ### Two projections
 
@@ -234,16 +279,17 @@ means every consumer of assistant text handles a variant that has no text.
 
 ## Non-Goals
 
-**Provider-response identity.** A single `ChatRequest` produces many provider
-responses (max-token chaining, retries, paused-turn continuations, tool cycles),
-and JP has no way to say which response produced which events.
-That is a real gap, and it is deferred deliberately: [RFD 097] provides the
-stable-identifier primitive that a provider-response record should build on, and
-097 is not yet Accepted.
-Depending on it here would gate this RFD's acceptance on 097's, for a capability
-the first provider integration does not need.
-Usage attaches to a response batch's terminal event until a consumer forces the
-issue.
+**Provider-response identity and durable usage.** A single `ChatRequest`
+produces many provider responses (max-token chaining, retries, paused-turn
+continuations, tool cycles), and JP has no way to say which response produced
+which events.
+Usage is a property of a provider response, so persisting it needs that identity
+first; attaching counters to whichever event happened to be last records them
+against the wrong thing.
+Both are deferred on scope: the first consumer needs neither.
+[RFD 097] is Implemented and supplies the stable-identifier primitive a
+provider-response record would build on, so a later RFD can add both without a
+dependency gate.
 
 **Rendering.** This RFD defines the data a renderer needs.
 Terminal and web rendering, including the citation-display obligations, belong
@@ -261,8 +307,9 @@ translation, no provider capability list.
   crate breaks immediately or routes hosted artifacts through generic metadata
   — recreating the problem this RFD removes.
 - **`async-anthropic` needs extending before any of this is observable.** The
-  fork's `MessageContent` cannot parse `server_tool_use`, `Text` has no
-  `citations`, and `Usage` has no `server_tool_use` counters.
+  fork's `MessageContent` cannot parse `server_tool_use`, `ContentBlockDelta`
+  has no `citations_delta`, `Text` has no `citations`, and `Usage` has no
+  `server_tool_use` counters.
   Whether serde can express a catch-all arm on that internally-tagged enum needs
   verifying — `#[serde(other)]` covers unit variants only, so an untagged
   `Unknown(Map)` arm is the likely shape, mirroring what `types::Tool` already
@@ -275,14 +322,18 @@ translation, no provider capability list.
   Validating against a second provider is the consuming RFD's job.
 - **Citation shape across providers is unverified.** Anthropic's
   `web_search_result_location` is the only one modelled here.
+- **`range` needs one coordinate unit.** OpenAI's `url_citation` offsets are the
+  only source of ranges, and whether they count bytes or code points is
+  unverified.
+  The unit `range` stores is chosen once that is known.
 
 ## Implementation Plan
 
 ### Phase 1: `async-anthropic` support
 
 Extend the fork: `server_tool_use` and `web_search_tool_result` content blocks,
-an unknown-block arm, `Text::citations`, `Usage::server_tool_use`, and the
-`pause_turn` stop reason.
+an unknown-block arm, `Text::citations`, the `citations_delta` stream delta,
+`Usage::server_tool_use`, and the `pause_turn` stop reason.
 No JP changes.
 Independently mergeable, and a prerequisite for observing anything below.
 
@@ -299,10 +350,10 @@ An `EventPart` variant carrying hosted activity, plus `EventBuilder`
 accumulation and flush.
 Independently mergeable; no provider emits it yet.
 
-### Phase 4: Citations and usage
+### Phase 4: Citations
 
-Typed attribution on assistant content, attached via flush metadata.
-Hosted-usage counters on the provider usage type.
+Typed attribution on assistant content: accumulation while the block streams,
+finalization on flush, and preservation, marked incomplete, on a partial commit.
 Independently mergeable.
 
 Phases 2 through 4 are all inert until a provider adapter produces the
@@ -312,7 +363,10 @@ artifacts, which is the consuming RFD's first phase.
 
 - `crates/jp_llm/src/provider/openai.rs` — the discarded output items
 - `crates/jp_conversation/src/event.rs` — `EventKind`, `ChatResponse`
-- `crates/jp_llm/src/event_builder.rs` — flush-metadata accumulation
+- `crates/jp_llm/src/event_builder.rs` — flush-metadata accumulation and
+  partial commits
+- `crates/jp_llm/src/provider/anthropic/acp/usage.rs` — usage reported as a
+  diagnostic
 - <https://platform.claude.com/docs/en/agents-and-tools/tool-use/server-tools>
 
 [RFD 064]: ../064-non-destructive-conversation-compaction.md
