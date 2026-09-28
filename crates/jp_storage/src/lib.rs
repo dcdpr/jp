@@ -442,6 +442,8 @@ impl Storage {
     /// The user-local directory is renamed to the workspace copy's name when
     /// the title changed, and files that exist only in user-local storage (such
     /// as the query draft) are kept.
+    /// A conversation with no user-local copy yet is imported whole, so
+    /// non-managed files in the workspace copy are carried across.
     /// A local-only conversation (no workspace copy) is left untouched.
     pub fn sync_projection(&self, id: &ConversationId) -> Result<()> {
         let conversations_path = RelativePath::new(CONVERSATIONS_DIR);
@@ -461,6 +463,13 @@ impl Storage {
             .file_name()
             .expect("conversation dir has a name")
             .to_owned();
+
+        // Without a user-local copy, a managed-files-only directory would make
+        // every later write skip `import_external_copy`, stranding any
+        // non-managed files in the workspace copy.
+        if find_normal_conversation_dir_path(&user_conversations, &prefix).is_none() {
+            return import_conversation_dir(&workspace_conv, &user_conversations, &dirname);
+        }
 
         let user_conv = user_conversations.join(&dirname);
         reconcile_conversation_dir(id, &user_conversations, &user_conv)?;
@@ -877,10 +886,6 @@ fn remove_conversation_dirs(id: &ConversationId, conversations_dir: &Utf8Path) -
 /// name the upcoming write will use.
 /// A conversation already present in user-local, or one with no workspace copy,
 /// is left untouched.
-///
-/// The copy lands in a staging directory and is renamed into place, so the
-/// import is all-or-nothing: a failed or killed run leaves nothing that later
-/// runs can mistake for an imported conversation.
 fn import_external_copy(
     id: &ConversationId,
     title: Option<&str>,
@@ -896,6 +901,20 @@ fn import_external_copy(
         return Ok(());
     };
 
+    import_conversation_dir(&workspace_conv, user_conversations, &id.to_dirname(title))
+}
+
+/// Copy conversation directory `src`, non-managed files included, into
+/// `user_conversations` under `dirname`.
+///
+/// The copy lands in a staging directory and is renamed into place, so the
+/// import is all-or-nothing: a failed or killed run leaves nothing that later
+/// runs can mistake for an imported conversation.
+fn import_conversation_dir(
+    src: &Utf8Path,
+    user_conversations: &Utf8Path,
+    dirname: &str,
+) -> Result<()> {
     fs::create_dir_all(user_conversations)
         .map_err(|error| Error::write_failed(user_conversations, error))?;
 
@@ -910,14 +929,13 @@ fn import_external_copy(
     // would make correctness depend on that removal succeeding: a partial
     // failure leaves entries the source no longer has, and the rename publishes
     // them.
-    let dirname = id.to_dirname(title);
-    let staging = user_conversations.join(import_staging_dirname(&dirname));
-    let target = user_conversations.join(&dirname);
+    let staging = user_conversations.join(import_staging_dirname(dirname));
+    let target = user_conversations.join(dirname);
 
     // Both cleanups are best-effort: a leftover under a unique name is inert.
     // It is never copied into, `find_normal_conversation_dir_path` cannot match
     // it, and the sanitize sweep reaps it under the conversation's lock.
-    if let Err(error) = copy_dir_all(&workspace_conv, &staging) {
+    if let Err(error) = copy_dir_all(src, &staging) {
         let _err = fs::remove_dir_all(&staging);
         return Err(error);
     }

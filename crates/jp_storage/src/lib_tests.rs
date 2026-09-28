@@ -1443,6 +1443,43 @@ fn sync_projection_removes_a_managed_file_the_workspace_copy_lacks() {
 }
 
 #[test]
+fn sync_projection_imports_the_whole_directory_of_a_workspace_only_conversation() {
+    let tmp = tempdir().unwrap();
+    let (storage, workspace, user_dir) = dual_root_storage(tmp.path());
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+
+    // A workspace-only conversation, as if committed by another contributor,
+    // carrying a non-managed file alongside its managed files.
+    let ws_conv = workspace.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    fs::create_dir_all(&ws_conv).unwrap();
+    write_valid_stream(&ws_conv);
+    write_json(&ws_conv.join(METADATA_FILE), &Conversation::default()).unwrap();
+    fs::write(ws_conv.join("NOTE.md"), "external note").unwrap();
+
+    storage.sync_projection(&id).unwrap();
+
+    // Dropping the workspace projection deletes the committed copy, so the
+    // user-local copy is the only place the note can survive. A sync that
+    // created the user-local directory with managed files only would have made
+    // the persist below skip its import.
+    storage
+        .persist_conversation(
+            &id,
+            &Conversation::default(),
+            &ConversationStream::new_test(),
+            Projection::LocalOnly,
+        )
+        .unwrap();
+
+    assert!(!ws_conv.exists(), "the workspace copy is dropped");
+    let user_conv = user_dir.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    assert_eq!(
+        fs::read_to_string(user_conv.join("NOTE.md")).unwrap(),
+        "external note"
+    );
+}
+
+#[test]
 fn sync_projection_is_noop_for_local_only() {
     let tmp = tempdir().unwrap();
     let (storage, workspace, user_dir) = dual_root_storage(tmp.path());
