@@ -1,10 +1,11 @@
 # RFD 072: Command Plugin System
 
-- **Status**: Discussion
+- **Status**: Accepted
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-06
 - **Required by**: [RFD 077]
+- **Extended by**: [RFD 114]
 - **Summary**: Standalone command plugins communicate with JP via JSON-lines
   protocol to extend subcommands across languages.
 
@@ -127,9 +128,8 @@ JP spawns the plugin as a child process with three channels:
 
 The plugin never writes directly to the user's terminal.
 All user-facing output goes through the protocol as `print` commands, which JP
-routes through its printer.
-This gives plugins automatic support for `--quiet`, `--format json`, and other
-output modes.
+routes through its printer, so a plugin's output follows the host's `--quiet`
+and `--format` the way the rules in [Output](#output) describe.
 
 Stderr is captured line-by-line and emitted as `trace`-level tracing events
 attributed to the plugin.
@@ -174,8 +174,13 @@ responses to the originating request.
 
 For synchronous plugins (shell scripts, single-threaded tools), `id` can be
 omitted entirely.
-JP processes requests in order and responses arrive in the same order, so
-correlation is implicit.
+JP processes requests in order, and a request answered immediately is answered
+in that order, so correlation is implicit.
+
+`query` and `interrupt` are answered later, from the turn they act on, and their
+replies can arrive between replies to requests sent after them.
+A plugin that sends either must set `id`: an `interrupt` without one is
+performed and never answered.
 
 ```json
 {
@@ -260,10 +265,16 @@ message that the host displays through its normal error rendering pipeline:
 }
 ```
 
-JP then cleans up any locks held on behalf of the plugin and exits with the
+JP then waits for any turn the plugin delegated to finish, and exits with the
 given code.
 If the plugin process exits without sending `exit` (crash, signal), JP detects
-the EOF, releases locks, and exits with code 1.
+the EOF, waits the same way, and exits with code 1.
+
+A delegated turn outlives the plugin that asked for it.
+Its conversation stays locked until the turn ends, and the host waits for it
+without a time limit, because the work is the user's.
+A run that has to end sooner goes through the interrupt ladder, which stops the
+turn.
 
 #### Shutdown
 
@@ -277,8 +288,14 @@ When JP receives a signal (SIGINT, SIGTERM), it sends:
 
 The plugin should begin graceful shutdown and eventually send `exit`.
 If the plugin does not exit within a grace period (configurable, default 5
-seconds), JP sends SIGKILL (Unix) or `TerminateProcess` (Windows) to the child
-process.
+seconds), JP terminates it.
+
+JP owns the plugin's process tree for the lifetime of the invocation, not only
+the process it spawned.
+Termination kills the plugin's process group on Unix and its job object on
+Windows, so a worker a shell-script plugin started cannot outlive it, keep a
+port bound, or hold the pipes JP waits on.
+A descendant that deliberately detaches from the group is unsupported.
 
 To ensure the plugin receives `Shutdown` via the protocol rather than being
 killed directly by the OS signal, JP spawns the child in its own process group
@@ -336,8 +353,17 @@ plugin help through clap for consistent formatting.
 When a plugin binary is invoked directly (not through `jp`), it should detect
 that stdin is a TTY and print its own help to stderr before exiting.
 
-For `jp -h`, the host discovers plugins by scanning `$PATH` for `jp-*` binaries,
-spawning each, sending `describe`, and collecting responses.
+Admission — the `run` policy, a pinned checksum, approval of a `$PATH` binary
+([RFD 077]) — precedes every spawn of a plugin binary, including one that only
+answers `describe`.
+Sending `describe` does not make running an unapproved executable safe: it can
+do anything before it reads its first message.
+
+For `jp -h`, the host discovers plugins by scanning `$PATH` for `jp-*` binaries
+and sending `describe` to each one that is admitted.
+A plugin that is not admitted is listed by its file name and is not run.
+`jp <plugin> -h` goes through ordinary admission, prompting where the policy is
+`ask`.
 The `command` field from each response determines where the plugin appears in
 the command listing.
 Plugin descriptions are appended as a "Plugins:" section after the built-in
@@ -526,141 +552,41 @@ An invalid path returns an error.
 
 #### Workspace Mutations
 
-> [!NOTE]
-> The shipped protocol replaced this lock-and-push design with task-level
-> operations — `ArchiveConversation`, `SetTitle`, `WriteDraft`, and `Query`
-> (answered by `Created`) — each locking internally for the duration of one
-> message.
-> A plugin never holds a lock across messages and never appends events directly,
-> so the lock tracking, orphan release, and event validation described below do
-> not exist.
-> See [Phase 4](#implementation-plan).
+A plugin changes a workspace through task-level operations.
+The host takes the conversation's lock itself for each one, so a plugin never
+holds a lock and never appends events to a stream directly.
 
-**Lock a conversation:**
+| Request                | Reply                                                                | Lock held                        |
+| ---------------------- | -------------------------------------------------------------------- | -------------------------------- |
+| `archive_conversation` | `done`                                                               | for the request                  |
+| `set_title`            | `done`                                                               | for the request                  |
+| `write_draft`          | `draft`, with `conflict` when refused                                | none; a revision check guards it |
+| `query`                | `created` (new conversations only), then `query_complete` or `error` | until the turn ends              |
+| `interrupt`            | `done` or `error`, once the turn has acted, when it carries an `id`  | the turn's own                   |
 
-```json
-{
-  "type": "lock",
-  "conversation": "17127583920"
-}
-```
+`query` asks the host to run a turn: it locks the conversation, appends the
+request, calls the provider, runs the tools the assistant asks for, and persists
+the result — the same turn `jp query` runs.
+A plugin doing this itself would need the user's credentials, the tool registry,
+and the MCP servers.
 
-Response (success):
+The turn runs beside the message loop, which keeps answering other requests
+while it does.
+When the request starts a conversation, `created` arrives as soon as it exists,
+carrying the id the host assigned.
+`query_complete` arrives when the turn ends; an `error` arrives instead if it
+could not start or failed.
+The conversation stays locked in between, so a second `query` for it is refused
+as already locked, and a message meant for the running turn goes through
+`interrupt`.
 
-```json
-{
-  "type": "locked",
-  "conversation": "17127583920"
-}
-```
-
-Response (already locked by another process):
-
-```json
-{
-  "type": "error",
-  "request": "lock",
-  "conversation": "17127583920",
-  "message": "conversation is locked by another process"
-}
-```
-
-JP acquires the flock on behalf of the plugin and tracks it internally.
-The lock is released when the plugin sends `unlock`, sends `exit`, or the
-process terminates.
-
-**Push events to a locked conversation:**
-
-```json
-{
-  "type": "push_events",
-  "conversation": "17127583920",
-  "events": [
-    {
-      "type": "turn_start"
-    },
-    {
-      "type": "chat_request",
-      "content": "Hello"
-    }
-  ]
-}
-```
-
-Response:
-
-```json
-{
-  "type": "pushed",
-  "conversation": "17127583920",
-  "count": 2
-}
-```
-
-The conversation must be locked by this plugin.
-JP validates the events before appending them to the stream.
-Validation includes:
-
-- Every `ToolCallResponse` must reference an existing `ToolCallRequest` ID.
-- Every `InquiryResponse` must reference an existing `InquiryRequest` ID.
-- A `ChatRequest` must be preceded by a `TurnStart` (JP injects one if the push
-  batch starts with a `ChatRequest` and no turn is active).
-- Event types must be well-formed (required fields present, correct types).
-
-If validation fails, the entire push is rejected — no partial writes.
-The response is an error with details about which event failed:
-
-```json
-{
-  "type": "error",
-  "request": "push_events",
-  "message": "ToolCallResponse references unknown request ID `tc_99`"
-}
-```
-
-**Unlock a conversation:**
-
-```json
-{
-  "type": "unlock",
-  "conversation": "17127583920"
-}
-```
-
-Response:
-
-```json
-{
-  "type": "unlocked",
-  "conversation": "17127583920"
-}
-```
-
-**Create a conversation:**
-
-```json
-{
-  "type": "create_conversation",
-  "title": "Web chat session"
-}
-```
-
-Response:
-
-```json
-{
-  "type": "created",
-  "conversation": "17127583921"
-}
-```
-
-The new conversation is created and automatically locked by the plugin.
+What happens to a running turn when the plugin exits is described under
+[Lifecycle](#lifecycle).
 
 #### Output
 
-All user-facing output goes through the protocol.
-JP routes it through the `Printer`, which respects `--quiet`, `--format json`,
-and other output modes.
+All user-facing output goes through the protocol, and JP routes it through the
+`Printer`.
 
 **Print command:**
 
@@ -712,6 +638,34 @@ For `code`, a `language` hint can be provided:
 
 The simplest case remains simple — a shell script can send
 `{"type":"print","text":"hello\n"}` and it works.
+
+**Output modes.** The host's output rules ([RFD 048]) decide where a `print`
+lands and how it is shaped:
+
+- `content` goes to stdout.
+  `chrome`, `tool_call`, `tool_result`, and `reasoning` are chrome on stderr,
+  which `--quiet` suppresses.
+  `error` goes to stderr and is never suppressed.
+- In terminal output, `format` decides the rendering in the table above.
+- Under `--format json`, rendering is off.
+  A `print` with `format: "json"` is emitted as the JSON value its `text` holds;
+  every other format is wrapped in the printer's message record.
+  A plugin that wants its own structure reads `init.output_format` and sends
+  `json`.
+
+For `jp --format json titles`:
+
+```json
+{"type":"print","text":"Refactor config\n"}
+{"type":"print","format":"json","text":"{\"id\":\"17127583920\"}"}
+```
+
+emits on stdout:
+
+```json
+{"message":"Refactor config\n"}
+{"id":"17127583920"}
+```
 
 **Structured log message:**
 
@@ -770,10 +724,9 @@ echo '{"type":"ready"}'
 echo '{"type":"list_conversations"}'
 read -r response
 
-# Print each title.
-for title in $(echo "$response" | jq -r '.data[].title'); do
-    echo "{\"type\":\"print\",\"text\":\"$title\n\"}"
-done
+# Print each title. jq builds each message, so quotes and spaces in a title
+# stay inside one valid JSON string.
+echo "$response" | jq -c '.data[] | {type: "print", text: ((.title // "Untitled") + "\n")}'
 
 # Exit cleanly.
 echo '{"type":"exit","code":0}'
@@ -792,9 +745,9 @@ its own HTTP listener:
 5. On `shutdown`, stops accepting connections, finishes in-flight requests,
    sends `exit`.
 
-A future chat interface would need a subscription and query delegation
-mechanisms to stream LLM responses to the browser and handle tool approval
-prompts.
+A chat interface adds `query` and `interrupt` to this, and polls `read_events`
+while a turn runs; pushing events to it as they happen needs the subscriptions
+listed under Non-Goals.
 
 ### Plugin Registry
 
@@ -835,8 +788,10 @@ The registry is a JSON file served from `https://jp.computer/plugins.json`:
 
 Registry keys are space-separated command paths.
 `"serve web"` corresponds to `jp serve web`.
-Each key is unique by construction (JSON object keys), which guarantees that no
-two plugins can claim the same subcommand.
+Each key is unique by construction (JSON object keys), so no two registry
+entries can claim the same subcommand.
+That says nothing about installed binaries outside the registry; how the host
+chooses between claims is part of [Phase 5](#implementation-plan).
 
 The `kind` field identifies the entry type:
 
@@ -955,6 +910,19 @@ Rejected because:
 - Users must compile from source to choose features.
 - Does not establish a plugin pattern for the ecosystem.
 
+### Lock-and-push writes
+
+The plugin locks a conversation, pushes events into it, and unlocks it, with the
+host validating each batch.
+
+Rejected in favor of task-level operations.
+A plugin holding a lock across messages needs the host to track it and release
+it when the plugin crashes, and events written from outside have to be validated
+against the stream's invariants, which the host otherwise upholds by
+construction.
+The cost of the task-level surface is that it is closed: a new kind of write
+needs a new message.
+
 ### Wasm plugin model ([RFD 016])
 
 Use the Wasm component model for command plugins.
@@ -977,9 +945,11 @@ commands for coarse-grained extensions.
   convenient API is future work.
   The protocol is simple enough that early plugins can be written against it
   directly.
-- **Event subscriptions and query delegation**: Live event streaming, agent loop
-  delegation, and interactive events (tool approval, inquiries) will be defined
-  in a future extending RFD.
+- **Event subscriptions**: Live event streaming and forwarding interactive
+  events (tool approval, inquiries) to a plugin will be defined in a future
+  extending RFD.
+  Delegating a turn is in scope; see [Workspace
+  Mutations](#workspace-mutations).
 - **Plugin-to-plugin communication**: Plugins communicate with JP, not with each
   other.
 
@@ -999,17 +969,11 @@ commands for coarse-grained extensions.
   This is already partially true for on-disk compatibility, but the plugin
   protocol makes it explicit.
 
-- **Conversation write validation**: When a plugin pushes events, JP must
-  validate them (e.g., `ToolCallResponse` must have a matching
-  `ToolCallRequest`).
-  The existing `ConversationStream::sanitize` logic handles some of this, but
-  the validation boundary for external writers needs to be clearly defined.
-
-- **Protocol evolution**: The `version` field in `init` provides basic
-  versioning, but the strategy for handling version mismatches (plugin wants v2,
-  JP only speaks v1) needs to be defined.
-  The simplest approach: JP refuses to run plugins that require a higher version
-  than it supports, and plugins must handle missing optional fields gracefully.
+- **Protocol evolution**: A plugin states in `ready` the lowest protocol version
+  it needs, and the host refuses one that needs more than it speaks.
+  Nothing lets the host refuse a plugin too old for it, so removing a message or
+  a field means answering the old form with an error rather than relying on the
+  version check.
 
 - **Registry trust model**: Auto-installing official plugins requires trusting
   the registry file and the download URLs.
@@ -1073,6 +1037,24 @@ commands for coarse-grained extensions.
       `jp_cli` reads it yet: routing still derives the command path from the
       binary name, and `jp plugin install` installs one plugin at a time.
 
+  Once the `command` field routes, several sources can claim one path, and
+      the host chooses by these rules:
+
+  1. A built-in command path wins; an unknown child of an extensible
+         built-in group can still resolve to a plugin.
+  2. The longest claimed path wins, and the unmatched arguments go to that
+         plugin: with `jp-serve` and `jp-serve-web` both installed, `jp serve
+         web` runs `jp-serve-web`.
+  3. A registry-installed binary must claim the path its registry key names;
+         a mismatch is an error, not a reroute.
+  4. Two plugin identities claiming the same path produce a diagnostic
+         naming both, never a silent choice.
+  5. `plugins.command.<key>` is keyed by the registry `id`, or by the binary
+         name without its `jp-` prefix for a plugin found on `$PATH`, never by
+         the command path.
+
+  <!-- end list -->
+
   - Use the `command` field from `Describe` and the registry keys for
         routing instead of relying solely on binary name conventions.
   - Cache `describe` responses to avoid spawning plugins repeatedly for `jp
@@ -1082,6 +1064,16 @@ commands for coarse-grained extensions.
   - Update help rendering to merge suggested sub-plugins (installed and
         uninstalled) into parent plugin help output.
   - Depends on Phase 3 (registry).
+
+- [ ] **Phase 6: Admission, containment, and output**
+
+  - Admit a plugin before every spawn, including `describe` for help.
+  - Terminate the plugin's process group (Unix) or job object (Windows)
+        after the shutdown grace period.
+  - Route `print` through the printer by channel and format, as
+        [Output](#output) describes; today the host writes `text` to stdout
+        unrendered, so `--quiet` and `--format json` do not reach it.
+  - Depends on Phase 1.
 
 ## References
 
@@ -1094,6 +1086,8 @@ commands for coarse-grained extensions.
 [RFD 016]: 016-wasm-plugin-architecture.md
 [RFD 026]: 026-agent-loop-extraction.md
 [RFD 027]: 027-client-server-query-architecture.md
+[RFD 048]: 048-four-channel-output-model.md
 [RFD 077]: 077-plugin-configuration-and-trust-policy.md
+[RFD 114]: 114-plugin-workspace-scope-and-addressing.md
 [cargo-external]: https://doc.rust-lang.org/cargo/reference/external-tools.html#custom-subcommands
 [git-remote-helpers]: https://git-scm.com/docs/gitremote-helpers

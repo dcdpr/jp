@@ -323,6 +323,33 @@ intricate part of the design — for a V1 that works without it.
   `stateful = false` is a contract the user asserts: the server holds no
   cross-call or cross-instance state.
 
+  The deferred form is an `exclusive` flag on the server's configuration: at
+  most one instance runs at a time, and a turn that needs it waits for the
+  holder to finish, whether the holder is a concurrent turn in the same process
+  or another `jp` process.
+  It is orthogonal to `stateful`: `stateful` decides how long an instance lives,
+  `exclusive` decides how many can live at once, and "stateless and exclusive"
+  is exactly the serialized case above.
+  A server holding a database file, a browser profile, or a fixed port needs it,
+  and becomes easier to hit once a long-running host starts one instance per
+  distinct configuration and spawn directory ([RFD 113]).
+  Before it can be specified:
+
+  - **Lock scope.** Server names are config keys, so two workspaces can use one
+    name for different servers.
+    The lock belongs on the state the server guards, which may be per machine,
+    per workspace, or per checkout.
+  - **Wait surface.** A lease lasts a turn, and an interactive terminal turn can
+    last minutes, so a waiting turn needs a visible, interruptible wait in the
+    terminal, the plugin protocol, and any other frontend.
+  - **Deadlock.** A turn needing two exclusive servers can deadlock against one
+    taking them in the other order, so acquisition needs a fixed order, and one
+    that composes with the conversation lock the turn already holds.
+  - **Honesty.** A flag that serializes within one process but not across
+    processes promises more than it does, so the cross-process lock
+    (`jp_storage::ResourceLocker`) is part of the first version, not a
+    follow-up.
+
 - **Replacing call authorization.** Argument-conditional tool policy remains the
   per-call authorization layer for MCP tools.
   This RFD does not touch it.
@@ -440,3 +467,4 @@ Depends on Phase 4 (policy resolution) and Phase 5 (per-call attribution).
 [RFD 037]: ../037-await-tool-for-stateful-handle-synchronization.md
 [RFD 075]: ../075-tool-sandbox-and-access-policy.md
 [RFD 076]: ../076-tool-access-grants.md
+[RFD 113]: ../113-context-decomposition-for-invocation-and-workspace-scope.md
