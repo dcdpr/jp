@@ -147,7 +147,7 @@ fn a_poisoned_matcher_stops_matching() {
     // engine invocations are wasted work — each can burn the full backtrack
     // limit again. The gate is observable: a line the pattern genuinely
     // matches reports `false` after the poison.
-    let matcher = Matcher::new(r"(a+)+\1b", true, false).unwrap();
+    let matcher = Matcher::new(&[r"(a+)+\1b"], true, Some(false)).unwrap();
     assert!(matcher.is_match("aab"), "sanity: pattern matches this line");
     assert!(matcher.failure().is_none());
 
@@ -167,6 +167,56 @@ fn a_poisoned_matcher_stops_matching() {
         matcher.find_spans("aab").is_empty(),
         "find_spans shares the gate"
     );
+}
+
+// --- multiple patterns ------------------------------------------------------
+
+/// A matcher over literal patterns with smart-case, as `c grep -e` builds it.
+fn literal_matcher(patterns: &[&str]) -> Matcher {
+    Matcher::new(patterns, false, None).unwrap()
+}
+
+#[test]
+fn record_match_marks_every_pattern_the_line_matches() {
+    // Stopping at the first pattern that matches would leave `beta` unseen, and
+    // `--all-match` would reject a conversation that satisfies it.
+    let matcher = literal_matcher(&["alpha", "beta", "gamma"]);
+    let mut coverage = Coverage::new(&matcher);
+
+    assert!(matcher.record_match("alpha and beta", &mut coverage));
+    assert!(!coverage.is_complete());
+
+    assert!(!matcher.record_match("nothing here", &mut coverage));
+    assert!(!coverage.is_complete());
+
+    assert!(matcher.record_match("gamma", &mut coverage));
+    assert!(coverage.is_complete());
+}
+
+#[test]
+fn overlapping_spans_from_different_patterns_merge() {
+    // `highlight` skips a span that starts inside the previous one, so an
+    // unmerged overlap would leave the tail of the second match unstyled.
+    let matcher = literal_matcher(&["alph", "lpha"]);
+    assert_eq!(matcher.find_spans("alpha"), vec![Range {
+        start: 0,
+        end: 5
+    }]);
+}
+
+#[test]
+fn touching_spans_from_different_patterns_stay_separate() {
+    let matcher = literal_matcher(&["beta", "alpha"]);
+    assert_eq!(matcher.find_spans("alphabeta"), [0..5, 5..9]);
+}
+
+#[test]
+fn a_compile_error_names_the_failing_pattern_among_several() {
+    // The rest of the message is the regex engine's, not ours.
+    let Err(error) = Matcher::new(&["ok", "("], true, None) else {
+        panic!("`(` must not compile as a regex");
+    };
+    assert!(error.starts_with("`(`: "), "got: {error}");
 }
 
 // --- filter_ids -------------------------------------------------------------

@@ -23,8 +23,7 @@ use crate::{
     ctx::Ctx,
     output::print_json,
     shared::search::{
-        ConcreteScope, Matcher, event_lines, event_scope, label_lines, resolve_ignore_case,
-        title_for,
+        ConcreteScope, Coverage, Matcher, event_lines, event_scope, label_lines, title_for,
     },
 };
 
@@ -71,12 +70,37 @@ pub(crate) struct Grep {
     /// Multiple words are joined with single spaces, so quoting is optional:
     /// `jp c grep two words` searches for `two words`.
     /// A pattern that starts with `-` still needs `--` ahead of it.
-    // `required` because a `Vec` positional is optional by default in clap, and
-    // `num_args` only constrains values per occurrence. Without it a bare
-    // `jp c grep` compiles the empty pattern, which matches every line of every
-    // conversation.
-    #[arg(value_name = "PATTERN", required = true, num_args = 1..)]
+    /// To search for several separate patterns, use `-e` instead.
+    // Required unless `-e` is given, because a `Vec` positional is optional by
+    // default in clap, and `num_args` only constrains values per occurrence.
+    // Without it a bare `jp c grep` compiles the empty pattern, which matches
+    // every line of every conversation.
+    #[arg(
+        value_name = "PATTERN",
+        required_unless_present = "patterns",
+        conflicts_with = "patterns",
+        num_args = 1..
+    )]
     pattern: Vec<String>,
+
+    /// A pattern to search for.
+    /// Repeat to give several.
+    ///
+    /// A line matches when it contains any of the patterns.
+    /// Replaces the positional pattern: `jp c grep -e alpha -e beta`.
+    #[arg(long = "pattern", short = 'e', value_name = "PATTERN")]
+    patterns: Vec<String>,
+
+    /// Only report conversations that contain every `-e` pattern.
+    ///
+    /// The patterns may match in any order, on different lines, and in
+    /// different parts of the conversation.
+    /// Every line matching any of them is shown.
+    // The conflict is what rejects `--all-match alpha beta`: clap waives a
+    // `requires` whose target conflicts with an argument that is present, and
+    // the positional conflicts with `-e`.
+    #[arg(long, requires = "patterns", conflicts_with = "pattern")]
+    all_match: bool,
 
     #[command(flatten)]
     target: FlagIds<true, true>,
@@ -101,7 +125,7 @@ pub(crate) struct Grep {
     #[arg(long)]
     descending: bool,
 
-    /// Treat the pattern as a regular expression instead of a literal.
+    /// Treat every pattern as a regular expression instead of a literal.
     #[arg(long, short)]
     regex: bool,
 
@@ -183,14 +207,9 @@ impl Grep {
             (_, true) => Some(false),
             _ => None,
         };
-        // Rejoined with single spaces: the shell already split on whitespace, so
-        // an unquoted multi-word pattern arrives as several arguments.
-        let pattern = self.pattern.join(" ");
-        let ignore_case = resolve_ignore_case(&pattern, explicit_case);
-
         // An unusable pattern is a failure, not an empty result: exit 2 so a
         // script can tell a broken pattern from a pattern that found nothing.
-        let matcher = Matcher::new(&pattern, self.regex, ignore_case)
+        let matcher = Matcher::new(&self.search_patterns(), self.regex, explicit_case)
             .map_err(|e| (2, format!("invalid pattern: {e}")))?;
 
         let wanted = expand_scopes(&self.scopes);
@@ -262,6 +281,36 @@ impl Grep {
 
         self.render(&groups, ctx);
         Ok(())
+    }
+
+    /// The patterns to search for: each `-e`, or else the positional words as
+    /// one pattern.
+    fn search_patterns(&self) -> Vec<String> {
+        if !self.patterns.is_empty() {
+            return self.patterns.clone();
+        }
+
+        // Rejoined with single spaces: the shell already split on whitespace, so
+        // an unquoted multi-word pattern arrives as several arguments.
+        vec![self.pattern.join(" ")]
+    }
+
+    /// Whether reading more of a conversation can change its result.
+    ///
+    /// Once the budget is spent no further hits are taken, but `--all-match`
+    /// still has to learn whether the remaining patterns occur.
+    fn walk_is_done(&self, budget: &Budget, coverage: &Coverage) -> bool {
+        budget.is_exhausted() && (!self.all_match || coverage.is_complete())
+    }
+
+    /// `group` as the search reports it: emptied under `--all-match` when some
+    /// pattern never matched.
+    fn qualify(&self, mut group: ConversationHits, coverage: &Coverage) -> ConversationHits {
+        if self.all_match && !coverage.is_complete() {
+            group.hits.clear();
+        }
+
+        group
     }
 
     /// Whether any conversation contains a match.
@@ -365,6 +414,7 @@ impl Grep {
         // Counts down as matches are taken, so `--max-matches` applies across
         // the whole conversation rather than per scope.
         let mut budget = Budget::new(max_matches);
+        let mut coverage = Coverage::new(matcher);
 
         if wanted.contains(&ConcreteScope::Title)
             && let Some(title) = &group.title
@@ -379,6 +429,7 @@ impl Grep {
                 matcher,
                 self.context,
                 &mut budget,
+                &mut coverage,
             );
         }
 
@@ -394,18 +445,19 @@ impl Grep {
                 matcher,
                 self.context,
                 &mut budget,
+                &mut coverage,
             );
         }
 
         if !needs_events {
-            return group;
+            return self.qualify(group, &coverage);
         }
 
         let events = match ctx.workspace.events(&handle) {
             Ok(events) => events,
             Err(error) => {
                 warn!(%id, %error, "Failed to load conversation events");
-                return group;
+                return self.qualify(group, &coverage);
             }
         };
 
@@ -416,8 +468,8 @@ impl Grep {
         // `iter_events_by_turn` rather than `iter_turns`: the latter resolves and
         // clones a `PartialAppConfig` per event, which grep never reads.
         for event in events.iter_events_by_turn() {
-            if budget.is_exhausted() {
-                return group;
+            if self.walk_is_done(&budget, &coverage) {
+                break;
             }
 
             let Some(scope) = event_scope(&event.kind) else {
@@ -441,10 +493,11 @@ impl Grep {
                 matcher,
                 self.context,
                 &mut budget,
+                &mut coverage,
             );
         }
 
-        group
+        self.qualify(group, &coverage)
     }
 
     fn render(&self, groups: &[ConversationHits], ctx: &Ctx) {
@@ -835,6 +888,9 @@ impl Budget {
 }
 
 /// Run the match+context pipeline for a single scope source and append hits.
+///
+/// Every line is recorded in `coverage`, including matches the budget no longer
+/// has room for.
 fn collect_scope_hits(
     hits: &mut Vec<Hit>,
     turn: Option<usize>,
@@ -844,12 +900,13 @@ fn collect_scope_hits(
     matcher: &Matcher,
     context: usize,
     budget: &mut Budget,
+    coverage: &mut Coverage,
 ) {
     if lines.is_empty() {
         return;
     }
 
-    let match_indices = budget.take(matching_lines(lines, matcher));
+    let match_indices = budget.take(matching_lines(lines, matcher, coverage));
     if match_indices.is_empty() {
         return;
     }
@@ -878,12 +935,13 @@ fn collect_scope_hits(
     mark_block_break(hits, block_start);
 }
 
-/// Return indices of lines that match the pattern.
-fn matching_lines(lines: &[&str], matcher: &Matcher) -> Vec<usize> {
+/// Return indices of lines that match any pattern, recording in `coverage`
+/// which patterns did.
+fn matching_lines(lines: &[&str], matcher: &Matcher, coverage: &mut Coverage) -> Vec<usize> {
     lines
         .iter()
         .enumerate()
-        .filter(|(_, line)| matcher.is_match(line))
+        .filter(|(_, line)| matcher.record_match(line, coverage))
         .map(|(i, _)| i)
         .collect()
 }

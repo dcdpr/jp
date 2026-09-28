@@ -168,11 +168,11 @@ pub(crate) fn label_lines(ctx: &Ctx, handle: &ConversationHandle) -> Vec<String>
 /// Without one, smart-case applies: an all-lowercase pattern matches
 /// case-insensitively, and any uppercase character in the pattern makes the
 /// whole pattern case-sensitive.
-pub(crate) fn resolve_ignore_case(pattern: &str, explicit: Option<bool>) -> bool {
+fn resolve_ignore_case(pattern: &str, explicit: Option<bool>) -> bool {
     explicit.unwrap_or_else(|| !pattern.chars().any(char::is_uppercase))
 }
 
-/// The compiled pattern behind a [`Matcher`].
+/// One compiled pattern of a [`Matcher`].
 enum Pattern {
     /// A literal pattern.
     ///
@@ -189,10 +189,12 @@ enum Pattern {
 
 /// A compiled match predicate over a single line of text.
 ///
-/// `c grep` builds one of these from the user's pattern and reuses it across
+/// Holds one or more patterns, and a line matches when any of them does.
+/// `c grep` builds one of these from the user's patterns and reuses it across
 /// every line of every conversation it searches.
 /// Match positions are reported as byte ranges into the line exactly as it was
 /// passed in, so a caller can highlight what matched.
+/// Which patterns matched is tracked separately, in a [`Coverage`].
 ///
 /// A `fancy-regex` pattern can fail part-way through a search — an exceeded
 /// backtrack limit is the common case — which is a different outcome from
@@ -200,7 +202,7 @@ enum Pattern {
 /// Such a failure is recorded rather than swallowed; check [`Self::failure`]
 /// once the search is done and report it instead of the results.
 pub(crate) struct Matcher {
-    pattern: Pattern,
+    patterns: Vec<Pattern>,
 
     /// Whether a match attempt has failed.
     ///
@@ -218,28 +220,40 @@ pub(crate) struct Matcher {
 }
 
 impl Matcher {
-    /// Compile `pattern`, treating it as a regular expression when `regex` is
-    /// set and as a literal otherwise.
+    /// Compile `patterns`, treating each as a regular expression when `regex`
+    /// is set and as a literal otherwise.
+    ///
+    /// `explicit_case` forces case-insensitive (`Some(true)`) or case-sensitive
+    /// (`Some(false)`) matching for every pattern.
+    /// Without it, smart-case decides for each pattern on its own: an
+    /// all-lowercase pattern ignores case, one with an uppercase character
+    /// respects it.
     ///
     /// The error is the underlying engine's message, suitable for showing to
     /// the user.
-    pub(crate) fn new(pattern: &str, regex: bool, ignore_case: bool) -> Result<Self, String> {
-        let pattern = if regex {
-            fancy_regex::RegexBuilder::new(pattern)
-                .case_insensitive(ignore_case)
-                .build()
-                .map(|re| Pattern::Regex(Box::new(re)))
-                .map_err(|e| e.to_string())?
-        } else {
-            RegexBuilder::new(&regex::escape(pattern))
-                .case_insensitive(ignore_case)
-                .build()
-                .map(|re| Pattern::Literal(Box::new(re)))
-                .map_err(|e| e.to_string())?
-        };
+    /// When there are several patterns it is prefixed with the one that failed.
+    pub(crate) fn new<S: AsRef<str>>(
+        patterns: &[S],
+        regex: bool,
+        explicit_case: Option<bool>,
+    ) -> Result<Self, String> {
+        let patterns = patterns
+            .iter()
+            .map(|pattern| {
+                let pattern = pattern.as_ref();
+                let ignore_case = resolve_ignore_case(pattern, explicit_case);
+                compile(pattern, regex, ignore_case).map_err(|error| {
+                    if patterns.len() > 1 {
+                        format!("`{pattern}`: {error}")
+                    } else {
+                        error
+                    }
+                })
+            })
+            .collect::<Result<_, _>>()?;
 
         Ok(Self {
-            pattern,
+            patterns,
             failed: AtomicBool::new(false),
             message: Mutex::new(None),
             gate_on_failure: true,
@@ -289,11 +303,37 @@ impl Matcher {
         self.failed.store(true, Ordering::Relaxed);
     }
 
-    /// Whether `line` matches.
+    /// Whether any pattern matches `line`.
     ///
     /// A failed attempt reports `false` and is recorded; see [`Self::failure`].
     pub(crate) fn is_match(&self, line: &str) -> bool {
-        match &self.pattern {
+        self.patterns
+            .iter()
+            .any(|pattern| self.pattern_matches(pattern, line))
+    }
+
+    /// Whether any pattern matches `line`, marking each one that does in
+    /// `coverage`.
+    ///
+    /// Every pattern is tried, even after one has matched, so `coverage` learns
+    /// about all of them.
+    pub(crate) fn record_match(&self, line: &str, coverage: &mut Coverage) -> bool {
+        let mut matched = false;
+        for (seen, pattern) in coverage.seen.iter_mut().zip(&self.patterns) {
+            if self.pattern_matches(pattern, line) {
+                *seen = true;
+                matched = true;
+            }
+        }
+
+        matched
+    }
+
+    /// Whether `pattern` matches `line`.
+    ///
+    /// A failed attempt reports `false` and is recorded; see [`Self::failure`].
+    fn pattern_matches(&self, pattern: &Pattern, line: &str) -> bool {
+        match pattern {
             Pattern::Literal(re) => re.is_match(line),
             Pattern::Regex(re) => {
                 // A recorded failure supersedes every result, so further
@@ -315,21 +355,37 @@ impl Matcher {
         }
     }
 
-    /// Byte ranges of every match in `line`, in order.
+    /// Byte ranges of every match of every pattern in `line`, in order.
     ///
+    /// Spans from different patterns that overlap are merged into one, so no
+    /// byte is covered twice.
     /// Zero-width matches are skipped: an empty pattern matches at every
     /// position and there is nothing there to highlight.
-    /// A failed attempt ends the scan, keeping the spans already found, and is
-    /// recorded; see [`Self::failure`].
+    /// A failed attempt ends that pattern's scan, keeping the spans already
+    /// found, and is recorded; see [`Self::failure`].
     pub(crate) fn find_spans(&self, line: &str) -> Vec<Range<usize>> {
         let mut spans = Vec::new();
-        match &self.pattern {
+        for pattern in &self.patterns {
+            self.pattern_spans(pattern, line, &mut spans);
+        }
+
+        spans.retain(|span| !span.is_empty());
+        if self.patterns.len() > 1 {
+            spans = merge_overlaps(spans);
+        }
+
+        spans
+    }
+
+    /// Append the byte range of every match of `pattern` in `line` to `spans`.
+    fn pattern_spans(&self, pattern: &Pattern, line: &str, spans: &mut Vec<Range<usize>>) {
+        match pattern {
             Pattern::Literal(re) => spans.extend(re.find_iter(line).map(|m| m.start()..m.end())),
             Pattern::Regex(re) => {
                 // Same early exit as `is_match`: a poisoned matcher stops
                 // paying the backtrack limit for results nobody will see.
                 if self.gate_on_failure && self.failed.load(Ordering::Relaxed) {
-                    return spans;
+                    return;
                 }
 
                 for found in re.find_iter(line) {
@@ -343,10 +399,68 @@ impl Matcher {
                 }
             }
         }
-
-        spans.retain(|span| !span.is_empty());
-        spans
     }
+}
+
+/// Which of a [`Matcher`]'s patterns have matched at least one line so far.
+///
+/// Filled in by [`Matcher::record_match`].
+pub(crate) struct Coverage {
+    /// One entry per pattern, in the order the matcher was given them.
+    seen: Vec<bool>,
+}
+
+impl Coverage {
+    /// A record of `matcher`'s patterns in which none has matched yet.
+    pub(crate) fn new(matcher: &Matcher) -> Self {
+        Self {
+            seen: vec![false; matcher.patterns.len()],
+        }
+    }
+
+    /// Whether every pattern has matched at least one line.
+    pub(crate) fn is_complete(&self) -> bool {
+        self.seen.iter().all(|seen| *seen)
+    }
+}
+
+/// Compile one pattern, as a regular expression when `regex` is set and as a
+/// literal otherwise.
+fn compile(pattern: &str, regex: bool, ignore_case: bool) -> Result<Pattern, String> {
+    if regex {
+        return fancy_regex::RegexBuilder::new(pattern)
+            .case_insensitive(ignore_case)
+            .build()
+            .map(|re| Pattern::Regex(Box::new(re)))
+            .map_err(|e| e.to_string());
+    }
+
+    RegexBuilder::new(&regex::escape(pattern))
+        .case_insensitive(ignore_case)
+        .build()
+        .map(|re| Pattern::Literal(Box::new(re)))
+        .map_err(|e| e.to_string())
+}
+
+/// Sort `spans` by position and merge the ones that overlap.
+///
+/// Spans that only touch stay separate: each is a match of its own.
+fn merge_overlaps(mut spans: Vec<Range<usize>>) -> Vec<Range<usize>> {
+    spans.sort_by_key(|span| (span.start, span.end));
+
+    let mut merged: Vec<Range<usize>> = Vec::with_capacity(spans.len());
+    for span in spans {
+        if let Some(last) = merged.last_mut()
+            && span.start < last.end
+        {
+            last.end = last.end.max(span.end);
+            continue;
+        }
+
+        merged.push(span);
+    }
+
+    merged
 }
 
 /// Filter conversation IDs to those containing `pattern` as a literal.
@@ -367,8 +481,7 @@ pub(crate) fn filter_ids(
     ids: &[ConversationId],
     pattern: &str,
 ) -> Result<Vec<ConversationId>, String> {
-    let ignore_case = resolve_ignore_case(pattern, None);
-    let matcher = Matcher::new(pattern, false, ignore_case)?;
+    let matcher = Matcher::new(&[pattern], false, None)?;
 
     Ok(ids
         .par_iter()

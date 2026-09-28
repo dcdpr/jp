@@ -2542,6 +2542,257 @@ fn json_marks_context_lines_and_leaves_their_submatches_empty() {
     assert_eq!(parsed[2]["match"], false);
 }
 
+// --- multiple patterns ------------------------------------------------------
+
+/// A search for lines matching any of `patterns`, as `-e` gives them.
+fn any_of(patterns: &[&str]) -> Grep {
+    Grep {
+        patterns: patterns.iter().map(|p| (*p).to_owned()).collect(),
+        ..Default::default()
+    }
+}
+
+/// A search for conversations containing every one of `patterns`, as
+/// `--all-match` with `-e` gives them.
+fn all_of(patterns: &[&str]) -> Grep {
+    Grep {
+        all_match: true,
+        ..any_of(patterns)
+    }
+}
+
+#[test]
+fn repeated_patterns_match_a_line_carrying_any_of_them() {
+    let id_alpha = make_id(9100);
+    let id_beta = make_id(9101);
+    let id_neither = make_id(9102);
+    let (mut ctx, out) = setup(vec![
+        (
+            id_alpha,
+            turn(vec![ConversationEvent::new(
+                ChatRequest::from("alpha-mark here"),
+                ts(),
+            )]),
+        ),
+        (
+            id_beta,
+            turn(vec![ConversationEvent::new(
+                ChatRequest::from("beta-mark here"),
+                ts(),
+            )]),
+        ),
+        (
+            id_neither,
+            turn(vec![ConversationEvent::new(
+                ChatRequest::from("gamma-mark here"),
+                ts(),
+            )]),
+        ),
+    ]);
+
+    assert_eq!(run(any_of(&["alpha-mark", "beta-mark"]), &mut ctx, &out), [
+        format!("{id_alpha}:1:user:m:alpha-mark here"),
+        format!("{id_beta}:1:user:m:beta-mark here"),
+    ]);
+}
+
+#[test]
+fn all_match_reports_only_conversations_containing_every_pattern() {
+    // The patterns sit in different events and no line carries both, so a
+    // per-line AND would find nothing here.
+    let id_both = make_id(9200);
+    let id_one = make_id(9201);
+    let (mut ctx, out) = setup(vec![
+        (
+            id_both,
+            turn(vec![
+                ConversationEvent::new(ChatRequest::from("where is alpha-mark"), ts()),
+                ConversationEvent::new(ChatResponse::message("next to beta-mark"), ts()),
+            ]),
+        ),
+        (
+            id_one,
+            turn(vec![ConversationEvent::new(
+                ChatRequest::from("only alpha-mark"),
+                ts(),
+            )]),
+        ),
+    ]);
+
+    assert_eq!(run(all_of(&["alpha-mark", "beta-mark"]), &mut ctx, &out), [
+        format!("{id_both}:1:user:m:where is alpha-mark"),
+        format!("{id_both}:1:assistant:m:next to beta-mark"),
+    ]);
+}
+
+#[test]
+fn all_match_is_satisfied_across_turns_and_scopes() {
+    // One pattern in the title, the other two turns later: the requirement is
+    // on the conversation as a whole.
+    let id = make_id(9300);
+    let conv = Conversation {
+        title: Some("alpha-mark investigation".into()),
+        ..Default::default()
+    };
+    let mut events = turn(vec![ConversationEvent::new(
+        ChatRequest::from("unrelated"),
+        ts(),
+    )]);
+    events.extend(turn(vec![ConversationEvent::new(
+        ChatRequest::from("found beta-mark"),
+        ts(),
+    )]));
+    let (mut ctx, out) = setup_conversations(vec![(id, conv, events)]);
+
+    assert_eq!(run(all_of(&["alpha-mark", "beta-mark"]), &mut ctx, &out), [
+        format!("{id}:..:title:m:alpha-mark investigation"),
+        format!("{id}:2:user:m:found beta-mark"),
+    ]);
+}
+
+#[test]
+fn all_match_reads_past_the_max_matches_budget() {
+    // Two `alpha-mark` lines exhaust a budget of one before `beta-mark` is
+    // reached. The budget caps what is shown, not what qualifies the
+    // conversation, so the walk has to continue past it.
+    let id = make_id(9400);
+    let (mut ctx, out) = setup(vec![(
+        id,
+        turn(vec![
+            ConversationEvent::new(ChatRequest::from("alpha-mark one\nalpha-mark two"), ts()),
+            ConversationEvent::new(ChatResponse::message("beta-mark"), ts()),
+        ]),
+    )]);
+
+    let grep = Grep {
+        max_matches: NonZeroUsize::new(1),
+        ..all_of(&["alpha-mark", "beta-mark"])
+    };
+    assert_eq!(run(grep, &mut ctx, &out), [format!(
+        "{id}:1:user:m:alpha-mark one"
+    )]);
+}
+
+#[test]
+fn quiet_all_match_fails_when_a_pattern_is_missing() {
+    // `--quiet` stops at the first match. Under `--all-match` that first
+    // `alpha-mark` line is not an answer on its own.
+    let id = make_id(9500);
+    let (mut ctx, _out) = setup(vec![(
+        id,
+        turn(vec![ConversationEvent::new(
+            ChatRequest::from("only alpha-mark"),
+            ts(),
+        )]),
+    )]);
+    ctx.term.args.quiet = true;
+
+    let error = all_of(&["alpha-mark", "beta-mark"])
+        .run(&mut ctx, vec![])
+        .unwrap_err();
+    assert_eq!(error.code.get(), 1);
+}
+
+#[test]
+fn quiet_all_match_reads_past_the_first_match() {
+    // `--quiet` caps the search at one match, and `beta-mark` sits past it.
+    let id = make_id(9510);
+    let (mut ctx, _out) = setup(vec![(
+        id,
+        turn(vec![
+            ConversationEvent::new(ChatRequest::from("alpha-mark"), ts()),
+            ConversationEvent::new(ChatResponse::message("beta-mark"), ts()),
+        ]),
+    )]);
+    ctx.term.args.quiet = true;
+
+    assert!(
+        all_of(&["alpha-mark", "beta-mark"])
+            .run(&mut ctx, vec![])
+            .is_ok()
+    );
+}
+
+#[test]
+fn smart_case_is_decided_per_pattern() {
+    // Deciding over the patterns together would make `wasm` case-sensitive
+    // because `Rust` carries an uppercase letter, and the first conversation
+    // would be lost.
+    let id_match = make_id(9600);
+    let id_lowercase_rust = make_id(9601);
+    let (mut ctx, out) = setup(vec![
+        (
+            id_match,
+            turn(vec![ConversationEvent::new(
+                ChatRequest::from("Tell me about WASM\nand Rust"),
+                ts(),
+            )]),
+        ),
+        (
+            id_lowercase_rust,
+            turn(vec![ConversationEvent::new(
+                ChatRequest::from("Tell me about WASM\nand rust"),
+                ts(),
+            )]),
+        ),
+    ]);
+
+    let grep = Grep {
+        output: OutputKind::Ids,
+        ..all_of(&["wasm", "Rust"])
+    };
+    assert_eq!(run(grep, &mut ctx, &out), [id_match.to_string()]);
+}
+
+#[test]
+fn regex_applies_to_every_pattern() {
+    let id = make_id(9700);
+    let (mut ctx, out) = setup(vec![(
+        id,
+        turn(vec![ConversationEvent::new(
+            ChatRequest::from("alpha-mark 42\nbeta-mark 7"),
+            ts(),
+        )]),
+    )]);
+
+    let grep = Grep {
+        regex: true,
+        ..all_of(&[r"alpha-mark \d+", r"beta-mark \d"])
+    };
+    assert_eq!(run(grep, &mut ctx, &out), [
+        format!("{id}:1:user:m:alpha-mark 42"),
+        format!("{id}:1:user:m:beta-mark 7"),
+    ]);
+}
+
+#[test]
+fn json_submatches_cover_every_pattern_in_order_of_position() {
+    // Given in reverse, so the offsets have to be sorted rather than grouped by
+    // pattern.
+    let id = make_id(9800);
+    let (mut ctx, out) = setup_json(vec![(
+        id,
+        turn(vec![ConversationEvent::new(
+            ChatRequest::from("alpha-mark and beta-mark"),
+            ts(),
+        )]),
+    )]);
+
+    any_of(&["beta-mark", "alpha-mark"])
+        .run(&mut ctx, vec![])
+        .unwrap();
+    ctx.printer.flush();
+    let parsed: Value = serde_json::from_str(&out.lock().clone()).unwrap();
+
+    assert_eq!(
+        parsed[0]["submatches"],
+        json!([
+            { "match": "alpha-mark", "start": 0, "end": 10 },
+            { "match": "beta-mark", "start": 15, "end": 24 },
+        ])
+    );
+}
+
 // --- flags ------------------------------------------------------------------
 
 fn parse(args: &[&str]) -> Result<Grep, clap::Error> {
@@ -2625,6 +2876,28 @@ fn a_pattern_is_required() {
 
     // An explicit empty pattern still matches everything, as in `grep`(1).
     assert_eq!(parse(&[""]).unwrap().pattern, [""]);
+}
+
+#[test]
+fn e_is_repeatable_and_stands_in_for_the_positional_pattern() {
+    let grep = parse(&["-e", "alpha", "--pattern", "beta"]).unwrap();
+    assert_eq!(grep.patterns, ["alpha", "beta"]);
+    assert!(grep.pattern.is_empty());
+}
+
+#[test]
+fn e_and_the_positional_pattern_are_mutually_exclusive() {
+    // With `-e` present, a trailing word could be meant as another pattern or
+    // as part of the last one. Rejecting it beats guessing.
+    assert!(parse(&["-e", "alpha", "beta"]).is_err());
+}
+
+#[test]
+fn all_match_requires_e() {
+    // `jp c grep --all-match alpha beta` would otherwise search for the phrase
+    // `alpha beta` and ignore the flag without a word.
+    assert!(parse(&["--all-match", "alpha", "beta"]).is_err());
+    assert!(parse(&["--all-match", "-e", "alpha", "-e", "beta"]).is_ok());
 }
 
 #[test]
