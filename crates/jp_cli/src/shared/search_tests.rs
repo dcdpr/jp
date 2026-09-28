@@ -198,7 +198,10 @@ fn overlapping_spans_from_different_patterns_merge() {
     // `highlight` skips a span that starts inside the previous one, so an
     // unmerged overlap would leave the tail of the second match unstyled.
     let matcher = literal_matcher(&["alph", "lpha"]);
-    assert_eq!(matcher.find_spans("alpha"), vec![Range { start: 0, end: 5 }]);
+    assert_eq!(matcher.find_spans("alpha"), vec![Range {
+        start: 0,
+        end: 5
+    }]);
 }
 
 #[test]
