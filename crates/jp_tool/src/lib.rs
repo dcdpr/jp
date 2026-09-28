@@ -246,10 +246,17 @@ pub struct Question {
 
     /// The question to ask.
     ///
-    /// This MUST be a single line of text for it to be displayed correctly.
+    /// This MUST be a single line of plain text for it to be displayed
+    /// correctly.
+    /// Control characters, including line breaks and tabs, are removed before
+    /// it is displayed.
     pub text: String,
 
     /// An optional preamble to display before the question.
+    ///
+    /// Plain text, which may span several lines.
+    /// Control characters other than line breaks and tabs are removed before it
+    /// is displayed.
     pub pre_amble: Option<String>,
 
     /// Type of answer expected
@@ -260,6 +267,10 @@ pub struct Question {
     /// This can be used to select a default option when the question is
     /// presented to the user, or to use as the answer in non-interactive mode
     /// when no answer can be provided interactively.
+    ///
+    /// A text question displays its default as plain text, with control
+    /// characters removed, and a user who accepts it answers with the default
+    /// as given here.
     pub default: Option<Value>,
 }
 
@@ -385,6 +396,10 @@ pub enum AnswerType {
     Boolean,
 
     /// Select from predefined options
+    ///
+    /// Each option is a single line of plain text.
+    /// Control characters are removed from the options displayed, and the
+    /// answer is the chosen option as given here.
     Select { options: Vec<String> },
 
     /// Free-form text input

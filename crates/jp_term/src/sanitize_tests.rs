@@ -322,6 +322,32 @@ fn visible_sgr_rejects_everything_but_sgr() {
 }
 
 #[test]
+fn strip_controls_removes_every_control_character() {
+    // C0 (a line feed, a tab, a carriage return), DEL, and C1. Only the `ESC`
+    // of an escape sequence is a control character, so the rest of it stays.
+    assert_eq!(
+        strip_controls("a\nb\tc\rd\x7fe\u{9b}f\x1b[2Jg", &[]),
+        "abcdef[2Jg"
+    );
+}
+
+#[test]
+fn strip_controls_keeps_the_characters_it_is_given() {
+    assert_eq!(
+        strip_controls("a\nb\tc\r\nd\x07", &['\n', '\t']),
+        "a\nb\tc\nd"
+    );
+}
+
+#[test]
+fn strip_controls_leaves_other_text_alone() {
+    assert_eq!(
+        strip_controls("jp-abc: Fix the 🦀 build", &[]),
+        "jp-abc: Fix the 🦀 build"
+    );
+}
+
+#[test]
 fn visible_sgr_rebuilds_the_sequence_from_its_parameters() {
     assert_eq!(visible_sgr("\x1b[m").as_deref(), Some("\x1b[0m"));
     assert_eq!(visible_sgr("\x1b[01;031m").as_deref(), Some("\x1b[1;31m"));

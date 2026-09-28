@@ -10,6 +10,8 @@
 //! [`SanitizeMode`] says.
 //! [`visible_sgr`] is the writer's SGR parsing and conceal removal on their
 //! own, for a filter that applies a policy of its own.
+//! [`strip_controls`] removes control characters from text that is only ever
+//! shown as plain text.
 //!
 //! Only what is displayed is filtered, never what is stored.
 //! This is unrelated to `Workspace::sanitize` (storage) and
@@ -374,6 +376,18 @@ pub fn visible_sgr(escape: &str) -> Option<String> {
     let mut probe = SgrProbe::default();
     Parser::new().advance(&mut probe, escape.as_bytes());
     probe.visible
+}
+
+/// `text` with every control character removed except those in `keep`.
+///
+/// Control characters are C0 (line feeds and tabs among them), DEL, and C1.
+/// Escape sequences are not parsed: the `ESC` that opens one is removed, and
+/// the rest of it stays as visible text, so `\x1b[2J` becomes `[2J`.
+#[must_use]
+pub fn strip_controls(text: &str, keep: &[char]) -> String {
+    text.chars()
+        .filter(|c| !c.is_control() || keep.contains(c))
+        .collect()
 }
 
 /// Keeps the visible part of the SGR sequence a parse dispatches.

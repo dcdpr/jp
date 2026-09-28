@@ -1,3 +1,5 @@
+use crate::sanitize::strip_controls;
+
 /// Wrap `text` in an OSC 8 hyperlink to `uri`.
 ///
 /// Every control character is removed from `uri` first, so it cannot end the
@@ -7,7 +9,7 @@
 pub fn hyperlink(uri: impl AsRef<str>, text: impl AsRef<str>) -> String {
     format!(
         "\x1b]8;;{}\x07{}\x1b]8;;\x07",
-        without_controls(uri.as_ref()),
+        strip_controls(uri.as_ref(), &[]),
         text.as_ref()
     )
 }
@@ -30,16 +32,7 @@ pub fn set_title(title: impl AsRef<str>) {
 /// The OSC 2 sequence that sets the window title to `title`, with every control
 /// character removed from it.
 fn title_sequence(title: &str) -> String {
-    format!("\x1b]2;{}\x07", without_controls(title))
-}
-
-/// `s` without its control characters: C0 (`BEL` and `ESC` among them), DEL,
-/// and C1.
-///
-/// A string embedded in an OSC sequence has no use for any of them, and `BEL`,
-/// the `ESC` of `ESC \`, and C1 `ST` each end the sequence.
-fn without_controls(s: &str) -> String {
-    s.chars().filter(|c| !c.is_control()).collect()
+    format!("\x1b]2;{}\x07", strip_controls(title, &[]))
 }
 
 #[cfg(test)]

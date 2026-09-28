@@ -1910,7 +1910,7 @@ impl PromptBackend for DelayedPromptBackend {
         options: Vec<String>,
         default: Option<usize>,
         writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<usize, InquireError> {
         self.started.notify_one();
         std::thread::sleep(self.delay);
         self.inner.select(message, options, default, writer)
@@ -6192,7 +6192,7 @@ impl PromptBackend for ObservingPromptBackend {
         options: Vec<String>,
         default: Option<usize>,
         writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<usize, InquireError> {
         self.observe();
         self.inner.select(message, options, default, writer)
     }
