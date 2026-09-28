@@ -6,6 +6,9 @@
 - **Date**: 2026-09-08
 - **Requires**: [RFD 113]
 - **Extends**: [RFD 072], [RFD 087]
+- **Summary**: Command plugins declare single- or multi-workspace scope;
+  multi-scope plugins address a checkout per request, and turns record their
+  checkout.
 
 ## Summary
 
