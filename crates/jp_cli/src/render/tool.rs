@@ -19,7 +19,12 @@ use jp_config::{
 use jp_conversation::event::ToolCallResponse;
 use jp_md::format::Formatter;
 use jp_printer::{ErrChannel, LineSink, OutputLines, RegionStyle, StatusRegion};
-use jp_term::{background::DefaultBackground, osc::hyperlink, shade::ShadedWriter};
+use jp_term::{
+    background::DefaultBackground,
+    osc::hyperlink,
+    sanitize::{ContentClass, ContentWriter, SanitizeMode},
+    shade::ShadedWriter,
+};
 use serde_json::{Map, Value};
 
 /// Map the `stderr_rows` config key onto the printer's window budget.
@@ -303,13 +308,17 @@ impl ToolRenderer {
 
     /// Render already-formatted custom argument content.
     ///
-    /// Used by [`render_approved`] internally and by the replay path when the
-    /// stored event has rendered arguments in its metadata.
+    /// Used by [`render_custom_result`] and by the replay path when the stored
+    /// event has rendered arguments in its metadata.
     ///
-    /// [`render_approved`]: Self::render_approved
+    /// [`render_custom_result`]: Self::render_custom_result
     pub fn render_formatted_arguments(&self, content: &str) {
         let trimmed = content.trim();
-        self.write_chrome(self.current_region.as_ref(), |w| writeln!(w, "\n{trimmed}"));
+        self.write_chrome(self.current_region.as_ref(), |w| {
+            w.write_char('\n')?;
+            write_tool_output(w, trimmed)?;
+            w.write_char('\n')
+        });
         self.separator.store(true, Ordering::Relaxed);
     }
 
@@ -464,43 +473,51 @@ impl ToolRenderer {
         if wrote_inline {
             let lang = ext.as_ref().filter(|e| !e.is_empty());
             let mut code_state = lang.map(|lang| self.formatter.begin_code_block(lang));
-            let mut output = "\n".to_owned();
+            let mut head = "\n".to_owned();
 
             if let Some(lang) = ext.as_ref() {
-                output.push_str("```");
-                output.push_str(lang);
-                output.push('\n');
+                head.push_str("```");
+                head.push_str(lang);
+                head.push('\n');
             }
 
+            let mut kept = String::new();
             for line in inner_content.lines().take(max_lines) {
                 // highlight_line expects the trailing newline.
                 let with_nl = format!("{line}\n");
                 if let Some(ref mut state) = code_state {
                     let rendered = self.formatter.render_code_line(&with_nl, state, None, 0);
-                    output.push_str(&rendered);
+                    kept.push_str(&rendered);
                 } else {
-                    output.push_str(line);
-                    output.push('\n');
+                    kept.push_str(line);
+                    kept.push('\n');
                 }
             }
 
+            let mut tail = String::new();
             if ext.is_some() {
-                output.push_str("```");
-            }
-
-            if !output.ends_with('\n') {
-                output.push('\n');
+                tail.push_str("```\n");
             }
 
             if inline_results.is_truncated() && max_lines < total_lines {
-                output.push_str(&format!(" _(truncated to {max_lines} lines)_"));
+                tail.push_str(&format!(" _(truncated to {max_lines} lines)_\n"));
             }
 
-            if !output.ends_with('\n') {
-                output.push('\n');
-            }
+            self.write_chrome(region, |w| {
+                w.write_str(&head)?;
 
-            self.write_chrome(region, |w| write!(w, "{output}"));
+                // Every kept line ends in a newline, so this finds the final
+                // line break unless nothing was kept. It is the last `\n`, not
+                // the last byte: a highlighted line ends with the
+                // highlighter's reset, written after its newline.
+                if let Some((lines, after)) = kept.rsplit_once('\n') {
+                    write_tool_output(w, lines)?;
+                    w.write_char('\n')?;
+                    w.write_str(after)?;
+                }
+
+                w.write_str(&tail)
+            });
         }
 
         // Render file links
@@ -665,6 +682,20 @@ impl ToolRenderer {
 
         format!("Calling {label} {}", names.join(", "))
     }
+}
+
+/// Write a tool's own output as a content span.
+///
+/// The bytes pass through unchanged, and the span closes with `\x1b[0m`, so
+/// styling the output left open ends with it instead of running into what JP
+/// writes next.
+/// Pass the output without its final line break and write that afterwards: a
+/// line break written under a background the output left open paints the row
+/// below it.
+fn write_tool_output(w: &mut dyn fmt::Write, output: &str) -> fmt::Result {
+    let mut span = ContentWriter::new(w, ContentClass::ToolOutput, SanitizeMode::Off);
+    span.write_str(output)?;
+    span.finish()
 }
 
 /// Formats tool call arguments for display based on the configured style.

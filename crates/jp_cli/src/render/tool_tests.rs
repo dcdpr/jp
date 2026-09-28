@@ -327,6 +327,82 @@ fn test_render_result_truncated() {
 }
 
 #[test]
+fn truncation_closes_the_color_a_result_left_open() {
+    // The result closes its red on a line the cut drops, so the kept lines end
+    // with the red still active. Left open, it runs into the truncation note
+    // and on into whatever JP writes next (#1201).
+    let (renderer, err, _) = create_renderer();
+    let response = ToolCallResponse {
+        id: "call_1".into(),
+        result: Ok("\x1b[31mline 1\nline 2\nline 3\x1b[0m".into()),
+    };
+    renderer.render_result(
+        &response,
+        &InlineResults::Truncate(TruncateLines { lines: 2 }),
+        &LinkStyle::Off,
+    );
+    renderer.channel.flush();
+    assert_eq!(
+        err.lock().as_str(),
+        "\n\x1b[31mline 1\nline 2\x1b[0m\n _(truncated to 2 lines)_\n"
+    );
+}
+
+#[test]
+fn a_highlighted_result_closes_before_its_final_line_break() {
+    // The highlighter ends each line with a reset of its own, written after
+    // the line's newline. The reset JP closes the result with still has to
+    // come before that newline, or a background the result left open paints
+    // the row below.
+    let (renderer, err, _) = create_renderer();
+    let response = ToolCallResponse {
+        id: "call_1".into(),
+        result: Ok("```rust\nlet a = 1;\nlet b = 2;\n```".into()),
+    };
+    renderer.render_result(
+        &response,
+        &InlineResults::Truncate(TruncateLines { lines: 1 }),
+        &LinkStyle::Off,
+    );
+    renderer.channel.flush();
+    let raw = err.lock().clone();
+    assert!(
+        raw.ends_with("\x1b[0m\n\x1b[0m```\n _(truncated to 1 lines)_\n"),
+        "raw: {raw:?}"
+    );
+}
+
+#[test]
+fn a_background_a_result_left_open_stays_off_the_row_below() {
+    // Closed after the final line break, the tool's red background would fill
+    // the rest of its row, and the break, written under it, would paint the
+    // next row when the terminal scrolls. Closed before, the row is filled
+    // with the region background, which closes ahead of the break.
+    let (mut renderer, err, _) = create_renderer();
+    renderer.set_region("call_1", Some(terminal_region()));
+    let response = ToolCallResponse {
+        id: "call_1".into(),
+        result: Ok("\x1b[41mfailed".into()),
+    };
+    renderer.render_result(&response, &InlineResults::Full, &LinkStyle::Off);
+    renderer.channel.flush();
+    assert_eq!(
+        err.lock().as_str(),
+        "\x1b[48;5;236m\x1b[K\x1b[49m\n\x1b[41mfailed\x1b[0m\x1b[48;5;236m\x1b[K\x1b[49m\n"
+    );
+}
+
+#[test]
+fn formatted_arguments_close_the_styling_they_left_open() {
+    // A custom formatter's output is the tool's own, and its bold green would
+    // otherwise carry into everything JP writes after it.
+    let (renderer, err, _) = create_renderer();
+    renderer.render_formatted_arguments("\x1b[1;32mplan output");
+    renderer.channel.flush();
+    assert_eq!(err.lock().as_str(), "\n\x1b[1;32mplan output\x1b[0m\n");
+}
+
+#[test]
 fn test_empty_result_does_not_separate_following_header() {
     // An empty result writes nothing, so it owes no separator: the next tool
     // header must land directly under it rather than below a stray blank line.
