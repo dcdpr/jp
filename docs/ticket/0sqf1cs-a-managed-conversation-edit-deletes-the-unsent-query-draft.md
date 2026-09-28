@@ -1,6 +1,6 @@
 # A managed conversation edit deletes the unsent query draft
 
-- **Status**: Todo
+- **Status**: Done
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-27
