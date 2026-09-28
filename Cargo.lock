@@ -2769,6 +2769,7 @@ dependencies = [
  "strip-ansi-escapes",
  "unicode-segmentation",
  "unicode-width",
+ "vte 0.14.1",
 ]
 
 [[package]]
