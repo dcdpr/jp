@@ -234,6 +234,33 @@ The example above is case-sensitive for that reason.
 Pass `--ignore-case` explicitly when a regex needs those escapes and
 case-insensitive matching.
 
+## Several patterns
+
+`-e` (long form `--pattern`) gives one pattern and can be repeated.
+A line matches when it contains any of them:
+
+```sh
+jp c grep -e 'timeout' -e 'deadline'
+```
+
+Add `--all-match` to keep only conversations that contain *every* pattern.
+The patterns can match in any order, on different lines, in different turns, and
+in different scopes:
+
+```sh
+jp c grep --all-match -e 'httpmock' -e 'openrouter'
+```
+
+Every line matching any of the patterns is shown, so each one is highlighted
+where it occurs.
+`--max-matches` still caps the lines shown, but not which conversations qualify:
+the search reads on until every pattern is found.
+
+`--regex` applies to every pattern, and smart-case is decided for each pattern
+on its own: in `-e wasm -e Rust`, `wasm` also matches `WASM`, while `Rust` does
+not match `rust`.
+`-e` replaces the positional pattern; the two can't be combined.
+
 ## What to emit
 
 `--output` picks *which records* you get.
