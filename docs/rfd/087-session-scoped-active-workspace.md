@@ -6,7 +6,7 @@
 - **Date**: 2026-06-01
 - **Extends**: [RFD 020]
 - **Tracking Issue**: [\#793]
-- **Extended by**: [RFD 112], [RFD 113], [RFD 114](114-plugin-workspace-scope-and-addressing.md)
+- **Extended by**: [RFD 112], [RFD 113], [RFD 114]
 - **Summary**: Session-scoped active workspace lets JP commands run from
   anywhere after selecting a workspace with `jp w use`.
 
@@ -736,4 +736,5 @@ Depends on: Phase 3.
 [RFD 065]: 065-typed-resource-model-for-attachments.md
 [RFD 112]: 112-hierarchy-targets-and-explicit-selection-clearing.md
 [RFD 113]: 113-context-decomposition-for-invocation-and-workspace-scope.md
+[RFD 114]: 114-plugin-workspace-scope-and-addressing.md
 [\#793]: https://github.com/dcdpr/jp/issues/793
