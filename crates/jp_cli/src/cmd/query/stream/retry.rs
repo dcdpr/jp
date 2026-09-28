@@ -333,18 +333,21 @@ pub enum StreamErrorOutcome {
     Interrupted(InterruptNotice),
 }
 
-/// Whether an agent request can be rebuilt after a credential change.
+/// Whether an agent-owned request can be rebuilt from committed history.
 ///
-/// Calls without recorded results may have executed side effects.
-/// They cannot be replayed automatically, even when the next credential is
-/// ready.
-pub(crate) fn can_restart_agent(error: &StreamError, events: &ConversationStream) -> bool {
-    error.kind == StreamErrorKind::CredentialChanged
-        && events.iter_turns().next_back().is_none_or(|turn| {
-            turn.iter()
-                .filter_map(|event| event.event.as_tool_call_request())
-                .all(|request| events.find_tool_call_response(&request.id).is_some())
-        })
+/// The agent runs tools on its own, so a call in the current turn without a
+/// recorded result may already have executed side effects.
+/// Rebuilding the request would ask the model to issue it again, so a turn
+/// holding such a call cannot be restarted automatically.
+///
+/// Whether the error warrants a restart at all is a separate decision, made by
+/// [`handle_stream_error`].
+pub(crate) fn agent_restart_is_safe(events: &ConversationStream) -> bool {
+    events.iter_turns().next_back().is_none_or(|turn| {
+        turn.iter()
+            .filter_map(|event| event.event.as_tool_call_request())
+            .all(|request| events.find_tool_call_response(&request.id).is_some())
+    })
 }
 
 /// Single source of truth for handling stream errors during LLM streaming.
