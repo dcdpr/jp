@@ -134,10 +134,25 @@ and `"always"` are unchanged — `-e` never re-enables the inline fallback that
 A leftover `QUERY_MESSAGE.md` draft takes part in composition on both surfaces;
 item 1 defines what seeds the query text when the draft and the invocation both
 provide some.
-Both surfaces run the same query-document config step: parse the `QueryDocument`
-structure, parse the TOML preamble, resolve model aliases, compute the notice
-delta against the conversation's current config, and return the parsed partial
-for recording.
+
+The draft's config preamble is pre-filled from the config in effect when the
+draft was written, and the draft outlives that run: it is kept after an empty
+query, an interrupt, or a failed turn.
+A later run can resolve a different config, so not every value in a kept
+preamble is user intent.
+The draft therefore records what its preamble was pre-filled with, the *config
+seed*, in a hidden `<!-- CONFIG_SEED: ... -->` comment below the preamble.
+Before either surface reads the preamble, it is reconciled with the current
+invocation: the user's edits (the preamble's difference from its config seed)
+are laid over this invocation's pre-fill, and the config seed is replaced.
+A draft without a config seed takes this invocation's pre-fill whole, because
+nothing tells its edits apart from its pre-filled values.
+A preamble that is not valid TOML is left as it is, for item 3 to handle.
+
+Both surfaces then run the same query-document config step: parse the
+`QueryDocument` structure, parse the reconciled TOML preamble, resolve model
+aliases, compute the notice delta against the conversation's current config, and
+return the parsed partial for recording.
 The surfaces differ only in where the query *text* comes from; what gets
 recorded is identical on both — today the parsed partial, wholesale, and
 uniformly whatever [RFD 080] changes that to when it lands.
@@ -154,9 +169,12 @@ uniformly whatever [RFD 080] changes that to when it lands.
    A direct send (`jp q <query>` or piped stdin without `-e`/`--quote`) bypasses
    composition entirely: the draft is neither seeded, nor modified, nor
    consumed.
-2. On a non-empty inline submit, the draft's config preamble is applied exactly
-   as the external-editor path applies it: the parsed partial is recorded on the
-   conversation as a config delta.
+2. On a non-empty inline submit, the draft's reconciled config preamble is
+   applied exactly as the external-editor path applies it: the parsed partial is
+   recorded on the conversation as a config delta.
+   Because the preamble is reconciled first, a pre-filled value the user never
+   edited matches this invocation's config and changes nothing, so a draft kept
+   after a failed turn applies only what the user wrote.
    An empty (or whitespace-only) submit follows the empty-query rule instead: no
    config delta is recorded and the draft is kept.
    The preamble's effect — its delta against the conversation's current config
@@ -189,9 +207,11 @@ uniformly whatever [RFD 080] changes that to when it lands.
    Today `edit_query` uses the passed query only when `doc.query` is empty; this
    flips to buffer-wins: the buffer is the user's most recent statement of the
    query text, whatever seeded it.
-   The config preamble persists untouched and keeps today's behavior: parsed and
-   recorded as a conversation config delta, applied from the next turn until
-   [RFD 080] moves it into same-turn config resolution.
+   The config preamble is reconciled before the editor opens, so the user
+   reviews this invocation's config with their earlier edits on top.
+   The saved preamble is parsed and recorded as a conversation config delta,
+   applied from the next turn until [RFD 080] moves it into same-turn config
+   resolution.
 5. The draft is consumed (removed) after a successful turn regardless of which
    surface composed the message.
    Today only the external-editor path triggers removal; without extending it,
@@ -335,8 +355,9 @@ Depends on nothing; mergeable with the key unused.
 ### Phase 3: compose loop and draft lifecycle
 
 Add `compose_query`; wire bare `jp q` (and forced composition) through it.
-Flip `edit_query` seeding to buffer-wins; apply the draft preamble on inline
-submit (with the delta-gated notice and the parse-error escalation); extend
+Flip `edit_query` seeding to buffer-wins; apply the reconciled draft preamble on
+inline submit (with the delta-gated notice and the parse-error escalation),
+reusing the reconciliation `edit_query` runs before opening the editor; extend
 draft consumption to inline submissions.
 Replace the `query_from_editor` boolean with the two independent facts from the
 Composition loop section.
