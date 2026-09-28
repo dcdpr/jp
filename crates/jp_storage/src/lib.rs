@@ -20,11 +20,24 @@ pub use load::LoadError;
 use relative_path::RelativePath;
 use tracing::{trace, warn};
 
-use crate::{backend::Projection, error::Result, value::write_json};
+use crate::{
+    backend::Projection,
+    error::Result,
+    value::{copy_file, write_json},
+};
 
 pub(crate) const METADATA_FILE: &str = "metadata.json";
 const EVENTS_FILE: &str = "events.json";
 const BASE_CONFIG_FILE: &str = "base_config.json";
+
+/// The files storage owns inside a conversation directory, in write order.
+///
+/// Anything else in the directory (the query draft, for one) belongs to someone
+/// else and is never replaced or removed by a write or a sync.
+/// `base_config.json` precedes `events.json` for the reason given in
+/// `Storage::persist_conversation_to`.
+const MANAGED_FILES: [&str; 3] = [METADATA_FILE, BASE_CONFIG_FILE, EVENTS_FILE];
+
 pub(crate) const CONVERSATIONS_DIR: &str = "conversations";
 
 /// Name prefix for a conversation directory being staged by an import.
@@ -422,9 +435,15 @@ impl Storage {
     /// A managed editor command (`jp conversation edit --events` / `--metadata`
     /// / `--base-config`) edits the workspace copy of a projected or external
     /// conversation.
-    /// Overwriting the user-local copy with it keeps both roots consistent
-    /// immediately, rather than deferring to lazy mtime reconciliation on the
-    /// next load.
+    /// Copying its managed files over the user-local copy keeps both roots
+    /// consistent immediately, rather than deferring to lazy mtime
+    /// reconciliation on the next load.
+    ///
+    /// The user-local directory is renamed to the workspace copy's name when
+    /// the title changed, and files that exist only in user-local storage (such
+    /// as the query draft) are kept.
+    /// A conversation with no user-local copy yet is imported whole, so
+    /// non-managed files in the workspace copy are carried across.
     /// A local-only conversation (no workspace copy) is left untouched.
     pub fn sync_projection(&self, id: &ConversationId) -> Result<()> {
         let conversations_path = RelativePath::new(CONVERSATIONS_DIR);
@@ -445,9 +464,17 @@ impl Storage {
             .expect("conversation dir has a name")
             .to_owned();
 
-        remove_conversation_dirs(id, &user_conversations)?;
-        fs::create_dir_all(&user_conversations)?;
-        copy_dir_all(&workspace_conv, &user_conversations.join(&dirname))
+        // Without a user-local copy, a managed-files-only directory would make
+        // every later write skip `import_external_copy`, stranding any
+        // non-managed files in the workspace copy.
+        if find_normal_conversation_dir_path(&user_conversations, &prefix).is_none() {
+            return import_conversation_dir(&workspace_conv, &user_conversations, &dirname);
+        }
+
+        let user_conv = user_conversations.join(&dirname);
+        reconcile_conversation_dir(id, &user_conversations, &user_conv)?;
+        fs::create_dir_all(&user_conv).map_err(|error| Error::write_failed(&user_conv, error))?;
+        sync_managed_files(&workspace_conv, &user_conv)
     }
 
     /// Load a session mapping from user storage.
@@ -859,10 +886,6 @@ fn remove_conversation_dirs(id: &ConversationId, conversations_dir: &Utf8Path) -
 /// name the upcoming write will use.
 /// A conversation already present in user-local, or one with no workspace copy,
 /// is left untouched.
-///
-/// The copy lands in a staging directory and is renamed into place, so the
-/// import is all-or-nothing: a failed or killed run leaves nothing that later
-/// runs can mistake for an imported conversation.
 fn import_external_copy(
     id: &ConversationId,
     title: Option<&str>,
@@ -878,6 +901,20 @@ fn import_external_copy(
         return Ok(());
     };
 
+    import_conversation_dir(&workspace_conv, user_conversations, &id.to_dirname(title))
+}
+
+/// Copy conversation directory `src`, non-managed files included, into
+/// `user_conversations` under `dirname`.
+///
+/// The copy lands in a staging directory and is renamed into place, so the
+/// import is all-or-nothing: a failed or killed run leaves nothing that later
+/// runs can mistake for an imported conversation.
+fn import_conversation_dir(
+    src: &Utf8Path,
+    user_conversations: &Utf8Path,
+    dirname: &str,
+) -> Result<()> {
     fs::create_dir_all(user_conversations)
         .map_err(|error| Error::write_failed(user_conversations, error))?;
 
@@ -892,14 +929,13 @@ fn import_external_copy(
     // would make correctness depend on that removal succeeding: a partial
     // failure leaves entries the source no longer has, and the rename publishes
     // them.
-    let dirname = id.to_dirname(title);
-    let staging = user_conversations.join(import_staging_dirname(&dirname));
-    let target = user_conversations.join(&dirname);
+    let staging = user_conversations.join(import_staging_dirname(dirname));
+    let target = user_conversations.join(dirname);
 
     // Both cleanups are best-effort: a leftover under a unique name is inert.
     // It is never copied into, `find_normal_conversation_dir_path` cannot match
     // it, and the sanitize sweep reaps it under the conversation's lock.
-    if let Err(error) = copy_dir_all(&workspace_conv, &staging) {
+    if let Err(error) = copy_dir_all(src, &staging) {
         let _err = fs::remove_dir_all(&staging);
         return Err(error);
     }
@@ -909,6 +945,31 @@ fn import_external_copy(
         return Err(Error::write_failed(&target, error));
     }
 
+    Ok(())
+}
+
+/// Make the managed files in conversation directory `dst` match those in `src`.
+///
+/// Each file present in `src` is copied atomically; one absent from `src` is
+/// removed from `dst`, so `dst` never pairs a legacy `events.json` with a stale
+/// `base_config.json`.
+/// Every other file in `dst` is left alone.
+fn sync_managed_files(src: &Utf8Path, dst: &Utf8Path) -> Result<()> {
+    for name in MANAGED_FILES {
+        let from = src.join(name);
+        let to = dst.join(name);
+        if from.is_file() {
+            copy_file(&from, &to)?;
+            continue;
+        }
+
+        match fs::remove_file(&to) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => {
+                return Err(Error::write_failed(&to, error));
+            }
+            _ => {}
+        }
+    }
     Ok(())
 }
 
