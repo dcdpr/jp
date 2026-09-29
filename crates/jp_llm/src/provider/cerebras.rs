@@ -34,7 +34,7 @@ use crate::{
         ModelDeprecation, ReasoningDetails,
         catalog::{Catalog, Entry},
     },
-    provider::trace_to_tmpfile,
+    provider::{output_schema_is_open, trace_to_tmpfile},
     query::ChatQuery,
     stream::with_tool_call_keepalive,
 };
@@ -598,12 +598,22 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
     }
 
     if let Some(schema) = structured_schema {
+        // Strict mode closes every object, which would leave the model only
+        // `{}` for an open one. Unstrict, the schema is a hint and goes as
+        // declared, since the strict-subset rules no longer apply.
+        let strict = !output_schema_is_open(&schema);
+        let schema = if strict {
+            transform_schema(schema)
+        } else {
+            Value::Object(schema)
+        };
+
         body["response_format"] = json!({
             "type": "json_schema",
             "json_schema": {
                 "name": "structured_output",
-                "schema": transform_schema(schema),
-                "strict": true,
+                "schema": schema,
+                "strict": strict,
             },
         });
     }

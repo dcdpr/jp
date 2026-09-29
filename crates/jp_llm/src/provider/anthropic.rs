@@ -37,12 +37,12 @@ use jp_conversation::{
     event::{ChatResponse, ConversationEvent, EventKind},
 };
 use jp_credentials::CredentialStore;
-use jp_tool::ToolDefinition;
+use jp_tool::{ToolDefinition, schema::has_unconstrained_node};
 use serde_json::{Map, Value, json};
 use tracing::{debug, info, trace, warn};
 
 use self::resolve::Route;
-use super::{Provider, trace_to_tmpfile};
+use super::{Provider, output_schema_is_open, trace_to_tmpfile};
 use crate::{
     credential::Credential,
     error::{
@@ -1764,12 +1764,23 @@ fn create_request(
     builder.stream(stream);
 
     // Extract schema and config before into_parts() consumes the thread.
+    //
+    // Anthropic has no unconstrained structured output mode, and its grammar
+    // requires every object closed, so an open object cannot be sent as
+    // declared.
     let format = thread
         .events
         .schema()
-        .map(|schema| JsonOutputFormat::JsonSchema {
-            schema: transform_schema(schema),
-        });
+        .map(|schema| {
+            if output_schema_is_open(&schema) {
+                return Err(Error::UnsupportedOutputSchema { provider: PROVIDER });
+            }
+
+            Ok(JsonOutputFormat::JsonSchema {
+                schema: transform_schema(schema),
+            })
+        })
+        .transpose()?;
 
     let config = thread.events.config()?;
     let cache = resolve_cache_control(config.assistant.request.cache);
@@ -2840,6 +2851,11 @@ fn convert_tools(
     let mut tools: Vec<_> = tools
         .into_iter()
         .map(|tool| {
+            // Strict mode closes every object, which would leave the model
+            // only `{}` for an open one or drop a map type's extra keys, so a
+            // tool with an open object is sent unstrict.
+            let strict = strict && !has_unconstrained_node(&tool.parameters);
+
             types::Tool::Custom(types::CustomTool {
                 name: tool.name,
                 description: tool.docs.schema_description().map(str::to_owned),

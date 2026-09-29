@@ -2017,7 +2017,12 @@ fn test_adaptive_thinking_with_structured_output() {
         features: vec!["adaptive-thinking"],
     };
 
-    let schema = Map::from_iter([("type".into(), json!("object"))]);
+    // A fixed shape: a bare `{"type": "object"}` is free-form, which
+    // Anthropic cannot constrain.
+    let schema = Map::from_iter([
+        ("type".into(), json!("object")),
+        ("properties".into(), json!({"name": {"type": "string"}})),
+    ]);
 
     let events = ConversationStream::new_test().with_turn(ChatRequest {
         content: "Extract data".into(),
@@ -2053,6 +2058,7 @@ fn test_adaptive_thinking_with_structured_output() {
     assert_eq!(output_config.effort, Some(Effort::High));
     let expected_schema = Map::from_iter([
         ("type".into(), json!("object")),
+        ("properties".into(), json!({"name": {"type": "string"}})),
         ("additionalProperties".into(), json!(false)),
     ]);
     assert_eq!(
@@ -3026,6 +3032,141 @@ fn test_create_request_drops_trailing_redacted_thinking() {
         &assistant.content.0[0],
         types::MessageContent::Text(text) if text.text == "partial answer"
     ));
+}
+
+mod strict_tools {
+    use jp_tool::{ToolDefinition, ToolDocs};
+    use serde_json::{Value, json};
+
+    use super::convert_tools;
+
+    /// One tool converted with strict tool use available, as it goes on the
+    /// wire.
+    fn converted(parameters: Value) -> Value {
+        let tools = convert_tools(
+            vec![ToolDefinition {
+                name: "post".to_owned(),
+                docs: ToolDocs::default(),
+                parameters,
+            }],
+            true,
+            None,
+            &mut 0,
+        );
+
+        serde_json::to_value(tools.first().expect("one tool")).expect("serializable tool")
+    }
+
+    /// Strict tool use requires `additionalProperties: false` on every object,
+    /// which would leave the model only `{}` for `body`.
+    #[test]
+    fn a_free_form_object_parameter_is_sent_unstrict() {
+        let parameters = json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string" },
+                "body": { "type": "object" }
+            },
+            "required": ["url", "body"]
+        });
+
+        let tool = converted(parameters.clone());
+
+        assert_eq!(tool.get("strict"), None);
+        assert_eq!(tool["input_schema"], parameters);
+    }
+
+    /// Strict mode would overwrite `additionalProperties` and drop the extra
+    /// keys a map type admits.
+    #[test]
+    fn a_map_type_parameter_is_sent_unstrict() {
+        let parameters = json!({
+            "type": "object",
+            "properties": {
+                "headers": {
+                    "type": "object",
+                    "properties": { "host": { "type": "string" } },
+                    "additionalProperties": { "type": "string" }
+                }
+            }
+        });
+
+        let tool = converted(parameters.clone());
+
+        assert_eq!(tool.get("strict"), None);
+        assert_eq!(tool["input_schema"], parameters);
+    }
+
+    #[test]
+    fn a_fixed_shape_stays_strict() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": { "url": { "type": "string" } },
+            "required": ["url"]
+        }));
+
+        assert_eq!(tool["strict"], json!(true));
+        assert_eq!(
+            tool["input_schema"],
+            json!({
+                "type": "object",
+                "properties": { "url": { "type": "string" } },
+                "required": ["url"],
+                "additionalProperties": false
+            })
+        );
+    }
+}
+
+/// Anthropic always constrains structured output, and every object in the
+/// grammar must be closed.
+/// A free-form object could only ever come back as `{}`, so the request is
+/// refused rather than answered with that.
+#[test]
+fn structured_output_with_a_free_form_object_is_refused() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-sonnet-4-5").try_into().unwrap(),
+        display_name: None,
+        context_window: Some(200_000),
+        max_output_tokens: Some(64_000),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(true),
+        prefill: None,
+        subscription: None,
+        features: vec![],
+    };
+
+    let schema = Map::from_iter([
+        ("type".into(), json!("object")),
+        ("properties".into(), json!({"meta": {"type": "object"}})),
+    ]);
+    let events = ConversationStream::new_test().with_turn(ChatRequest {
+        content: "Extract".into(),
+        schema: Some(schema),
+        author: None,
+    });
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+
+    let error = create_request(&model, query, true, &BetaFeatures(vec![]), false)
+        .expect_err("an open object cannot be constrained");
+
+    assert_eq!(
+        error.to_string(),
+        "The `anthropic` provider cannot constrain structured output to this schema: it contains \
+         an object with no declared properties, or one that allows additional properties"
+    );
 }
 
 mod transform_schema {

@@ -123,6 +123,116 @@ mod truncation {
     }
 }
 
+mod structured_output {
+    use jp_config::assistant::tool_choice::ToolChoice;
+    use jp_conversation::{ConversationStream, event::ChatRequest, thread::Thread};
+    use serde_json::{Value, json};
+
+    use super::super::create_request;
+    use crate::{
+        model::ModelDetails,
+        provider::ProviderId,
+        query::{ChatQuery, Truncation},
+    };
+
+    /// The `text.format` a request for `schema` sends.
+    fn format_for(schema: Value) -> Value {
+        let events = ConversationStream::new_test().with_turn(ChatRequest {
+            content: "Extract".into(),
+            schema: Some(serde_json::from_value(schema).unwrap()),
+            author: None,
+        });
+        let query = ChatQuery {
+            thread: Thread {
+                system_prompt: None,
+                sections: vec![],
+                attachments: vec![],
+                events,
+            },
+            tools: vec![],
+            tool_choice: ToolChoice::Auto,
+            truncation: Truncation::default(),
+        };
+
+        let model = ModelDetails::empty((ProviderId::Openai, "gpt-5.6").try_into().unwrap());
+        let (request, ..) = create_request(&model, query).unwrap();
+
+        serde_json::to_value(request).unwrap()["text"]["format"].clone()
+    }
+
+    /// Strict mode would close `meta` and leave the model only `{}` for it.
+    #[test]
+    fn a_free_form_object_sends_the_schema_unstrict() {
+        let format = format_for(json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" },
+                "meta": { "type": "object" }
+            },
+            "required": ["name"]
+        }));
+
+        assert_eq!(
+            format,
+            json!({
+                "type": "json_schema",
+                "name": "structured_output",
+                "description": "Structured output",
+                "strict": false,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string" },
+                        "meta": { "type": "object" }
+                    },
+                    "required": ["name"]
+                }
+            })
+        );
+    }
+
+    /// For structured output the root is the answer itself, so an open root
+    /// counts too.
+    #[test]
+    fn a_root_allowing_additional_properties_sends_the_schema_unstrict() {
+        let format = format_for(json!({
+            "type": "object",
+            "properties": { "name": { "type": "string" } },
+            "additionalProperties": { "type": "string" }
+        }));
+
+        assert_eq!(format["strict"], json!(false));
+        assert_eq!(
+            format["schema"],
+            json!({
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "additionalProperties": { "type": "string" }
+            })
+        );
+    }
+
+    #[test]
+    fn a_fixed_shape_stays_strict() {
+        let format = format_for(json!({
+            "type": "object",
+            "properties": { "name": { "type": "string" } },
+            "required": ["name"]
+        }));
+
+        assert_eq!(format["strict"], json!(true));
+        assert_eq!(
+            format["schema"],
+            json!({
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "required": ["name"],
+                "additionalProperties": false
+            })
+        );
+    }
+}
+
 mod make_schema_nullable {
     use serde_json::json;
 
@@ -431,6 +541,135 @@ mod convert_tools {
         }));
 
         assert_eq!(tool["strict"], json!(false));
+    }
+
+    /// An object parameter that declares no properties accepts any keys, and
+    /// the strict subset has no way to say so: closing it leaves the model only
+    /// `{}`, and OpenAI rejects the whole request besides.
+    #[test]
+    fn a_free_form_object_parameter_drops_strict_mode() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string" },
+                "body": { "type": "object", "description": "The request body." }
+            },
+            "required": ["url", "body"]
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+        assert_eq!(
+            tool["parameters"]["properties"]["body"],
+            json!({ "type": "object", "description": "The request body." })
+        );
+    }
+
+    /// An empty `properties` map declares no keys, the same as omitting it.
+    #[test]
+    fn an_object_parameter_with_empty_properties_drops_strict_mode() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": {
+                "body": { "type": "object", "properties": {} }
+            },
+            "required": ["body"]
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+        assert_eq!(
+            tool["parameters"]["properties"]["body"],
+            json!({ "type": "object", "properties": {} })
+        );
+    }
+
+    /// A map type admits keys beyond the declared ones.
+    /// Strict mode would overwrite `additionalProperties` with `false` and drop
+    /// them.
+    #[test]
+    fn an_object_parameter_allowing_additional_properties_drops_strict_mode() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": {
+                "headers": {
+                    "type": "object",
+                    "properties": { "host": { "type": "string" } },
+                    "additionalProperties": { "type": "string" }
+                }
+            },
+            "required": ["headers"]
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+        assert_eq!(
+            tool["parameters"]["properties"]["headers"],
+            json!({
+                "type": "object",
+                "properties": { "host": { "type": "string" } },
+                "additionalProperties": { "type": "string" }
+            })
+        );
+    }
+
+    /// `Optional[dict]` in Pydantic: the free-form object sits inside `anyOf`.
+    #[test]
+    fn a_nullable_free_form_object_parameter_drops_strict_mode() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": {
+                "meta": { "anyOf": [{ "type": "object" }, { "type": "null" }] }
+            }
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+        assert_eq!(
+            tool["parameters"]["properties"]["meta"],
+            json!({ "anyOf": [{ "type": "object" }, { "type": "null" }] })
+        );
+    }
+
+    /// `Optional[Model]` in Pydantic: the wrapper has no `type` of its own, but
+    /// every branch is typed and closed, so the tool stays strict.
+    #[test]
+    fn a_nullable_object_with_declared_properties_stays_strict() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": {
+                "meta": {
+                    "anyOf": [
+                        { "type": "object", "properties": { "id": { "type": "string" } } },
+                        { "type": "null" }
+                    ]
+                }
+            }
+        }));
+
+        assert_eq!(tool["strict"], json!(true));
+    }
+
+    #[test]
+    fn a_nested_object_with_declared_properties_stays_strict() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } }
+                }
+            },
+            "required": ["body"]
+        }));
+
+        assert_eq!(tool["strict"], json!(true));
+        // `id` was optional, so strict mode requires it and makes it nullable.
+        assert_eq!(
+            tool["parameters"]["properties"]["body"],
+            json!({
+                "type": "object",
+                "properties": { "id": { "type": ["string", "null"] } },
+                "required": ["id"],
+                "additionalProperties": false
+            })
+        );
     }
 
     #[test]

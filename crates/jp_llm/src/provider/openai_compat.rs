@@ -28,7 +28,7 @@ use jp_conversation::{
     ConversationStream,
     event::{ChatResponse, EventKind, ToolCallResponse},
 };
-use jp_tool::ToolDefinition;
+use jp_tool::{ToolDefinition, schema::has_unconstrained_node};
 use reqwest_eventsource::Event as SseEvent;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -271,7 +271,11 @@ pub(crate) fn convert_tools(
             _ => true,
         })
         .map(|tool| {
-            let (parameters, decoding) = parameters_with_decoding(&tool.parameters, true);
+            // A server that compiles the schema into a grammar honors a closed
+            // object literally, so a schema outside the strict subset goes
+            // unstrict rather than losing its open objects.
+            let strict = !has_unconstrained_node(&tool.parameters);
+            let (parameters, decoding) = parameters_with_decoding(&tool.parameters, strict);
             decoders.insert(&tool.name, decoding);
             json!({
                 "type": "function",
@@ -279,7 +283,7 @@ pub(crate) fn convert_tools(
                     "name": tool.name,
                     "description": tool.docs.schema_description().unwrap_or_default(),
                     "parameters": parameters,
-                    "strict": true,
+                    "strict": strict,
                 },
             })
         })

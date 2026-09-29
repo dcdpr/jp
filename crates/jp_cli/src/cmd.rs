@@ -833,6 +833,11 @@ impl From<jp_llm::Error> for Error {
                 ("tier", tier.to_string()),
             ]
             .into(),
+            error @ UnsupportedOutputSchema { .. } => [
+                ("message", "Unsupported structured output schema".into()),
+                ("error", error.to_string()),
+            ]
+            .into(),
             Stream(stream_error) => [
                 ("message", "Stream error".into()),
                 ("error", stream_error.to_string()),

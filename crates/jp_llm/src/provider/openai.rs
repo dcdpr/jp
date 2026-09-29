@@ -22,7 +22,7 @@ use jp_conversation::{
     thread::text_attachments_to_xml,
 };
 use jp_credentials::CredentialStore;
-use jp_tool::ToolDefinition;
+use jp_tool::{ToolDefinition, schema::has_unconstrained_node};
 use openai_responses::{
     Client, CreateError, StreamError as OpenaiStreamError,
     types::{self, Include, Request, SummaryConfig},
@@ -46,7 +46,7 @@ use crate::{
         ModelDeprecation, ReasoningDetails,
         catalog::{Catalog, Entry},
     },
-    provider::trace_to_tmpfile,
+    provider::{output_schema_is_open, trace_to_tmpfile},
     query::{ChatQuery, Truncation},
     stream::with_tool_call_keepalive,
 };
@@ -1426,21 +1426,27 @@ fn create_request(
     let service_tier = parameters.service_tier.and_then(convert_service_tier);
 
     // Build the text config from structured output schema and/or verbosity.
-    // Transform the schema for OpenAI's strict structured output mode.
+    // A schema inside the strict subset is transformed into its strict shape.
+    // One with an open object goes unstrict as declared: closing the object
+    // would leave the model only `{}` for it, or drop a map type's extra keys.
     let text = match thread.events.schema() {
-        Some(schema) => Some(types::TextConfig {
-            format: types::TextFormat::JsonSchema {
-                schema: {
-                    let mut v = Value::Object(schema);
-                    ensure_strict_schema(&mut v);
-                    v
+        Some(schema) => {
+            let strict = !output_schema_is_open(&schema);
+            let mut schema = Value::Object(schema);
+            if strict {
+                ensure_strict_schema(&mut schema);
+            }
+
+            Some(types::TextConfig {
+                format: types::TextFormat::JsonSchema {
+                    schema,
+                    description: "Structured output".to_owned(),
+                    name: "structured_output".to_owned(),
+                    strict: Some(strict),
                 },
-                description: "Structured output".to_owned(),
-                name: "structured_output".to_owned(),
-                strict: Some(true),
-            },
-            verbosity,
-        }),
+                verbosity,
+            })
+        }
         None => verbosity.map(|v| types::TextConfig {
             format: types::TextFormat::default(),
             verbosity: Some(v),
@@ -3466,12 +3472,13 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> (Vec<types::Tool>, ArgumentDecod
     let tools = tools
         .into_iter()
         .map(|tool| {
-            // The strict subset requires a type on every property, which a
-            // parameter the server left free-form does not have. Dropping
-            // strict mode for that one tool costs its adherence guarantee;
-            // sending it strict costs the whole request, and every other tool
-            // in it.
-            let strict = !jp_tool::schema::has_unconstrained_node(&tool.parameters);
+            // The strict subset requires a type on every property and a
+            // fixed, closed key set on every object, which a free-form
+            // parameter, an object that declares no properties, or a map type
+            // does not have. Dropping strict mode for that one tool costs its
+            // adherence guarantee; sending it strict costs the whole request,
+            // and every other tool in it.
+            let strict = !has_unconstrained_node(&tool.parameters);
             let (parameters, decoding) = parameters_with_decoding(&tool.parameters, strict);
             decoders.insert(&tool.name, decoding);
 

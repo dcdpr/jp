@@ -32,7 +32,7 @@ use jp_openrouter::{
         tool::{self, FunctionCall, Tool, ToolCall, ToolCallType, ToolFunction},
     },
 };
-use jp_tool::ToolDefinition;
+use jp_tool::{ToolDefinition, schema::has_unconstrained_node};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use tracing::{debug, error, info, trace, warn};
@@ -45,7 +45,9 @@ use crate::{
     event::{self, Event, EventPart, ToolCallPart},
     event_builder::EventBuilder,
     model::ReasoningDetails as ModelReasoningDetails,
-    provider::{Provider, openai::parameters_with_decoding, trace_to_tmpfile},
+    provider::{
+        Provider, openai::parameters_with_decoding, output_schema_is_open, trace_to_tmpfile,
+    },
     query::ChatQuery,
     stream::with_tool_call_keepalive,
 };
@@ -741,14 +743,17 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> (Vec<Tool>, ArgumentDecoders) {
     let tools = tools
         .into_iter()
         .map(|tool| {
-            let (parameters, decoding) = parameters_with_decoding(&tool.parameters, true);
+            // A schema outside the strict subset gets the whole request
+            // rejected, or its open objects closed; send that one tool unstrict.
+            let strict = !has_unconstrained_node(&tool.parameters);
+            let (parameters, decoding) = parameters_with_decoding(&tool.parameters, strict);
             decoders.insert(&tool.name, decoding);
             Tool::Function {
                 function: ToolFunction {
                     parameters,
                     name: tool.name,
                     description: tool.docs.schema_description().map(str::to_owned),
-                    strict: true,
+                    strict,
                 },
             }
         })
@@ -786,8 +791,10 @@ fn create_request(
         .map(|schema| ResponseFormat::JsonSchema {
             json_schema: JsonSchemaFormat {
                 name: "structured_output".to_owned(),
+                // An open object is outside the strict subset of the upstream
+                // providers that enforce one.
+                strict: Some(!output_schema_is_open(&schema)),
                 schema: Value::Object(schema),
-                strict: Some(true),
             },
         });
 
