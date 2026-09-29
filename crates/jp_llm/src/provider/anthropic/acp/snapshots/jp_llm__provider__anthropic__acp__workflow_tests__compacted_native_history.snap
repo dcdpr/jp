@@ -8,7 +8,7 @@ expression: prepared.history
     "content": [
       {
         "type": "text",
-        "text": "[Summary of previous conversation]"
+        "text": "[Summary of the earlier part of this conversation. The messages after it are still in your context.]"
       }
     ]
   },
