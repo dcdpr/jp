@@ -239,11 +239,17 @@ pub fn validate_types(path: &str, types: &[String]) -> Result<(), Error> {
     Ok(())
 }
 
-/// Whether any node in the document leaves the JSON type of its value open.
+/// Whether any node below the root leaves its value open: either the JSON type,
+/// or the keys of an object (see [`Node::is_open_object`]).
 ///
-/// Walks properties and array items, reading through `$ref` the way [`Node`]
-/// does, and stops at a definition already on the path so a recursive schema
-/// terminates.
+/// The root object is not checked, so a tool with no parameters, whose root
+/// declares no properties, does not count.
+///
+/// Walks properties, array items, and `anyOf`, `oneOf` and `allOf` branches,
+/// reading through `$ref` the way [`Node`] does, and stops at a definition
+/// already on the path so a recursive schema terminates.
+/// A node that composes branches is open when one of its branches is, not
+/// merely because it declares no `type` of its own.
 #[must_use]
 pub fn has_unconstrained_node(schema: &Value) -> bool {
     Node::root(schema)
@@ -260,7 +266,10 @@ fn is_open(node: &Node<'_>, visiting: &mut Vec<String>) -> bool {
         visiting.push(origin.to_owned());
     }
 
-    let open = node.is_unconstrained()
+    let branches = node.branches();
+    let open = (branches.is_empty() && node.is_unconstrained())
+        || node.is_open_object()
+        || branches.iter().any(|branch| is_open(branch, visiting))
         || node.items().is_some_and(|items| is_open(&items, visiting))
         || node
             .properties()
@@ -397,6 +406,34 @@ impl<'a> Node<'a> {
         self.node.is_object() && self.node.get("type").is_none() && self.node.get("$ref").is_none()
     }
 
+    /// Whether this node is an object schema without a fixed, non-empty set of
+    /// keys.
+    ///
+    /// That is an object that declares no properties (the `properties` keyword
+    /// is missing or empty), which is how a schema declares a free-form JSON
+    /// object, or one whose `additionalProperties` is anything other than
+    /// `false`, which admits keys beyond the declared ones, as a map type does.
+    ///
+    /// An object declaring no properties counts even when it sets
+    /// `additionalProperties: false`.
+    /// The only value it accepts is `{}`, so a strict schema adds nothing, and
+    /// OpenAI's strict mode rejects the form without a `properties` keyword.
+    /// An object that lists properties and says nothing about
+    /// `additionalProperties` does not count: its declared keys are its shape.
+    #[must_use]
+    pub fn is_open_object(&self) -> bool {
+        if !self.types().iter().any(|type_| type_ == "object") {
+            return false;
+        }
+
+        let admits_extra_keys = self
+            .node
+            .get("additionalProperties")
+            .is_some_and(|additional| additional != &Value::Bool(false));
+
+        !self.has_properties() || admits_extra_keys
+    }
+
     /// Whether a value satisfies this node's declared types.
     ///
     /// Ignores every other constraint the node carries; [`permits`] applies
@@ -464,6 +501,16 @@ impl<'a> Node<'a> {
     #[must_use]
     pub fn items(&self) -> Option<Node<'a>> {
         self.node.get("items").map(|items| self.child(items))
+    }
+
+    /// The `anyOf`, `oneOf` and `allOf` branches of this node, in that order.
+    fn branches(&self) -> Vec<Node<'a>> {
+        ["anyOf", "oneOf", "allOf"]
+            .iter()
+            .filter_map(|key| self.node.get(*key).and_then(Value::as_array))
+            .flatten()
+            .map(|branch| self.child(branch))
+            .collect()
     }
 
     /// The schemas for this node's object properties, in declaration order.

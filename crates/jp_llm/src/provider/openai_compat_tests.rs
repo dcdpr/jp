@@ -1,5 +1,6 @@
 use eventsource_stream::Event as MessageEvent;
 use jp_conversation::{ConversationEvent, event::ToolCallRequest};
+use jp_tool::ToolDocs;
 use reqwest_eventsource::Error as SseError;
 use serde_json::json;
 
@@ -664,4 +665,45 @@ fn an_ordinary_chunk_carries_no_error() {
     let chunk: StreamChunk = serde_json::from_str(data).expect("chunk parses");
 
     assert_eq!(chunk.error, None);
+}
+
+/// An object parameter with no declared properties is outside the strict
+/// subset.
+/// Sent strict, it would be closed, and a server that compiles the schema into
+/// a grammar would let the model send only `{}`.
+#[test]
+fn a_free_form_object_parameter_is_sent_unstrict() {
+    let (tools, _) = convert_tools(
+        vec![ToolDefinition {
+            name: "post".to_owned(),
+            docs: ToolDocs::default(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string" },
+                    "body": { "type": "object" }
+                },
+                "required": ["url", "body"]
+            }),
+        }],
+        &ToolChoice::Auto,
+    );
+
+    assert_eq!(tools, vec![json!({
+        "type": "function",
+        "function": {
+            "name": "post",
+            "description": "",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string" },
+                    "body": { "type": "object" }
+                },
+                "additionalProperties": true,
+                "required": ["url", "body"]
+            },
+            "strict": false
+        }
+    })]);
 }

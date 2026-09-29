@@ -1,5 +1,5 @@
 use jp_config::providers::llm::LlmProviderConfig;
-use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
+use jp_conversation::event::{ChatRequest, ToolCallRequest, ToolCallResponse};
 use jp_test::{Result, function_name};
 use serde_json::json;
 
@@ -190,6 +190,99 @@ fn request_preserves_integer_tool_parameter_type() -> Result {
         })
     );
     Ok(())
+}
+
+/// An object parameter with no declared properties is outside the strict
+/// subset, so the tool is sent unstrict and the object stays open.
+#[test]
+fn request_sends_a_free_form_object_parameter_unstrict() -> Result {
+    let request = TestRequest::chat(ProviderId::Openrouter)
+        .tool(
+            "post",
+            json!({
+              "type": "object",
+              "properties": {
+                "url": { "type": "string" },
+                "body": { "type": "object" }
+              },
+              "required": ["url", "body"]
+            }),
+        )
+        .chat_request("Post it");
+    let TestRequest::Chat { model, query, .. } = request else {
+        unreachable!();
+    };
+
+    let (request, ..) = create_request(&model, query)?;
+    let request = serde_json::to_value(request)?;
+
+    assert_eq!(
+        request["tools"][0]["function"],
+        json!({
+            "name": "post",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string" },
+                    "body": { "type": "object" }
+                },
+                "additionalProperties": true,
+                "required": ["url", "body"]
+            }
+        })
+    );
+    Ok(())
+}
+
+/// The `response_format` a request for `schema` sends.
+fn response_format_for(schema: serde_json::Value) -> serde_json::Value {
+    let request = TestRequest::chat(ProviderId::Openrouter).chat_request(ChatRequest {
+        content: "Extract".into(),
+        schema: Some(serde_json::from_value(schema).expect("object schema")),
+        author: None,
+    });
+    let TestRequest::Chat { model, query, .. } = request else {
+        unreachable!();
+    };
+
+    let (request, ..) = create_request(&model, query).expect("request builds");
+    serde_json::to_value(request).expect("serializable request")["response_format"].clone()
+}
+
+/// Strict mode would reject the free-form `meta` object upstream, or close it.
+#[test]
+fn structured_output_with_a_free_form_object_is_unstrict() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "name": { "type": "string" },
+            "meta": { "type": "object" }
+        },
+        "required": ["name"]
+    });
+
+    assert_eq!(
+        response_format_for(schema.clone()),
+        json!({
+            "type": "json_schema",
+            "json_schema": {
+                "name": "structured_output",
+                "schema": schema,
+                "strict": false
+            }
+        })
+    );
+}
+
+#[test]
+fn structured_output_with_a_fixed_shape_is_strict() {
+    let format = response_format_for(json!({
+        "type": "object",
+        "properties": { "name": { "type": "string" } },
+        "required": ["name"]
+    }));
+
+    assert_eq!(format["json_schema"]["strict"], json!(true));
 }
 
 /// A tool-call finish closes the provider stream without ending the Turn.
