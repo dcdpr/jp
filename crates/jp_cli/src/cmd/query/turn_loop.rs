@@ -52,7 +52,7 @@ use super::{
         signals::InterruptUi,
     },
     stream::{
-        ResponseBoundary, StreamErrorOutcome, StreamRetryState, can_restart_agent,
+        ResponseBoundary, StreamErrorOutcome, StreamRetryState, agent_restart_is_safe,
         commit_partial_response, handle_stream_error,
     },
     tool::{
@@ -535,8 +535,11 @@ pub(super) async fn run_turn_loop(
                                 Ok(event) => event,
                                 Err(e) => {
                                     tool_renderer.cancel_all();
+                                    // Retryable or not, an agent stream with a
+                                    // call of unknown outcome ends the turn:
+                                    // restarting it could run that call twice.
                                     if matches!(execution, ToolExecution::Agent { .. })
-                                        && !can_restart_agent(&e, &conv.events())
+                                        && !agent_restart_is_safe(&conv.events())
                                     {
                                         commit_partial_response(
                                             &mut turn_coordinator,
