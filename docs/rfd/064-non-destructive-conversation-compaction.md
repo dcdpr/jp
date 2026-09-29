@@ -509,7 +509,8 @@ Compaction event (after turn 2):
 
 Projected view:
 
-  ChatRequest("[Summary of previous conversation]")
+  ChatRequest("[Summary of the earlier part of this conversation.
+    The messages after it are still in your context.]")
   ChatResponse::Message("Set up a Rust project at src/main.rs
     with error handling and tracing-based logging.")
   ...turns 3+ uncompacted...

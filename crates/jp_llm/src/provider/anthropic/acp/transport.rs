@@ -16,7 +16,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use tokio::sync::{Notify, mpsc};
-use tracing::{debug, instrument::WithSubscriber as _, warn};
+use tracing::{debug, info, instrument::WithSubscriber as _, warn};
 use uuid::Uuid;
 
 use super::{
@@ -198,7 +198,8 @@ fn record_failure(state: &Mutex<State>, error: StreamError) -> RpcError {
 /// What a connection needs on disk and in the child's environment before it can
 /// reach the adapter.
 pub(super) struct Launch {
-    /// The derived transcript the adapter resumes from, removed when dropped.
+    /// The derived transcript the adapter resumes from, removed when dropped
+    /// unless `JP_DEBUG` keeps it.
     pub(super) artifact: NativeArtifact,
 
     /// The environment the adapter is given, and that the session options are
@@ -217,6 +218,7 @@ pub(super) struct Launch {
 /// Otherwise reads `HOME` and `CLAUDE_CONFIG_DIR`, and writes into the
 /// directory they name, so a caller that has no adapter to run should build its
 /// own pieces rather than call this.
+/// Also reads `JP_DEBUG`, which keeps the transcript after the request.
 pub(super) fn launch(
     prepared: &PreparedRequest,
     context: &QueryContext,
@@ -225,7 +227,13 @@ pub(super) fn launch(
 ) -> Result<Launch, Error> {
     let directory = native_directory(login_directory)?;
     let project = project_name(context);
-    let artifact = NativeArtifact::write(prepared, &context.root, &directory, &project)?;
+    let artifact = NativeArtifact::write(
+        prepared,
+        &context.root,
+        &directory,
+        &project,
+        keep_transcript(),
+    )?;
     let mut environment = options::environment(prepared, cache);
     configure_storage_environment(
         &mut environment,
@@ -570,23 +578,40 @@ fn native_directory(configured: Option<&Utf8Path>) -> Result<Utf8PathBuf, Error>
     Ok(directory)
 }
 
+/// Whether `JP_DEBUG` asks for the derived transcript to outlive the request.
+///
+/// The transcript is the only record of what JP handed Claude Code, so keeping
+/// it is what lets a debugging session compare it with the conversation.
+/// Read the same way `jp` reads the variable: only `1` and `true` turn it on.
+fn keep_transcript() -> bool {
+    env::var("JP_DEBUG")
+        .as_deref()
+        .is_ok_and(|value| value == "1" || value == "true")
+}
+
 /// The transcript a connection resumes from.
 ///
 /// `session` decides which request JP opens with: `session/load` when there is
 /// one to resume, `session/new` otherwise.
-/// `path` is the file backing it, which only a run with an adapter to read it
-/// needs.
+/// `path` is the file removed when this is dropped: `None` when nothing was
+/// written, or when the file is kept for debugging.
 pub(super) struct NativeArtifact {
     pub(super) session: Option<Uuid>,
     pub(super) path: Option<Utf8PathBuf>,
 }
 
 impl NativeArtifact {
+    /// Write the transcript under `directory`.
+    ///
+    /// With `keep`, the file stays on disk after the request and its path is
+    /// logged at `info`; otherwise the path is logged at `debug` and the file
+    /// is removed on drop.
     fn write(
         prepared: &PreparedRequest,
         root: &Utf8Path,
         directory: &Utf8Path,
         project: &str,
+        keep: bool,
     ) -> Result<Self, Error> {
         if prepared.history.is_empty() {
             return Ok(Self {
@@ -609,9 +634,14 @@ impl NativeArtifact {
             options.mode(0o600);
         }
         let mut file = options.open(&path).map_err(Error::NativeIo)?;
+        if keep {
+            info!(%path, "Keeping the derived Claude transcript because JP_DEBUG is set.");
+        } else {
+            debug!(%path, "Wrote the derived Claude transcript.");
+        }
         let artifact = Self {
             session: Some(session),
-            path: Some(path),
+            path: (!keep).then_some(path),
         };
         for record in prepared.records(session, root, Utc::now()) {
             serde_json::to_writer(&mut file, &record).map_err(Error::NativeJson)?;
