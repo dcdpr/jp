@@ -7,7 +7,7 @@ expression: request
     {
       "parts": [
         {
-          "text": "[Summary of previous conversation]"
+          "text": "[Summary of the earlier part of this conversation. The messages after it are still in your context.]"
         }
       ],
       "role": "user"
@@ -23,7 +23,7 @@ expression: request
     {
       "parts": [
         {
-          "text": "[Summary of previous conversation]"
+          "text": "[Summary of a middle part of this conversation. The messages before and after it are still in your context.]"
         }
       ],
       "role": "user"

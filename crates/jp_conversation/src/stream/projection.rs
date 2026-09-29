@@ -244,10 +244,13 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>, event_ids: &mut EventIds) -
                             &mut projected,
                             &mut event_origins,
                             event_ids,
+                            summary_marker(turn > 0, run_to + 1 < policies.len()),
                             &summary.text,
                             conv_event.timestamp,
-                            turn,
-                            run_to,
+                            TurnOrigin::Summary {
+                                from: turn,
+                                to: run_to,
+                            },
                         );
                     }
                     // Drop the original event — it's covered by the summary.
@@ -555,6 +558,35 @@ fn resolve_policies(max_turn: usize, compactions: &[crate::Compaction]) -> Vec<T
     policies
 }
 
+/// The synthetic request text that introduces an injected summary.
+///
+/// The marker says which part of the conversation the summary stands for, and
+/// that the messages around it are still in the model's context.
+/// A single "summary of previous conversation" marker is only true for a
+/// summary that opens the conversation: placed after kept turns, it tells the
+/// model everything above it was replaced, and the model then disowns turns it
+/// can plainly read.
+///
+/// `has_before` and `has_after` say whether any turn precedes or follows the
+/// summarized run in the projected view.
+const fn summary_marker(has_before: bool, has_after: bool) -> &'static str {
+    match (has_before, has_after) {
+        (false, true) => {
+            "[Summary of the earlier part of this conversation. The messages after it are still in \
+             your context.]"
+        }
+        (true, true) => {
+            "[Summary of a middle part of this conversation. The messages before and after it are \
+             still in your context.]"
+        }
+        (true, false) => {
+            "[Summary of the latest part of this conversation. The messages before it are still in \
+             your context.]"
+        }
+        (false, false) => "[Summary of this conversation so far.]",
+    }
+}
+
 /// Inject a synthetic `ChatRequest`/`ChatResponse` pair for a summary.
 ///
 /// A leading `TurnStart` keeps the synthetic pair as its own turn so that
@@ -563,25 +595,21 @@ fn resolve_policies(max_turn: usize, compactions: &[crate::Compaction]) -> Vec<T
 /// The `TurnStart` is not provider-visible, so it is filtered out before the
 /// LLM request is built.
 ///
-/// `from`/`to` are the raw turn range this summary replaces; every injected
-/// event records it as its [`TurnOrigin`] so the run stays in lockstep with
-/// `events`.
+/// `marker` is the synthetic request text (see [`summary_marker`]).
+/// `origin` is the raw turn range this summary replaces; every injected event
+/// records it so the run stays in lockstep with `events`.
 fn inject_summary(
     events: &mut Vec<InternalEvent>,
     origins: &mut Vec<TurnOrigin>,
     event_ids: &mut EventIds,
+    marker: &str,
     summary: &str,
     timestamp: DateTime<Utc>,
-    from: usize,
-    to: usize,
+    origin: TurnOrigin,
 ) {
-    let origin = TurnOrigin::Summary { from, to };
     for event in [
         ConversationEvent::new(TurnStart, timestamp),
-        ConversationEvent::new(
-            ChatRequest::from("[Summary of previous conversation]"),
-            timestamp,
-        ),
+        ConversationEvent::new(ChatRequest::from(marker), timestamp),
         ConversationEvent::new(ChatResponse::message(summary), timestamp),
     ] {
         events.push(InternalEvent {
