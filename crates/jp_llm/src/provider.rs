@@ -22,6 +22,7 @@ use jp_config::{
     model::id::{Name, ProviderId},
     providers::llm::LlmProviderConfig,
 };
+use jp_tool::schema::{Node, has_unconstrained_node};
 use llamacpp::Llamacpp;
 use ollama::Ollama;
 use openai::Openai;
@@ -169,6 +170,16 @@ pub(crate) fn build_request_value(
             unreachable!("{id:?} is not part of the request snapshot suite")
         }
     }
+}
+
+/// Whether a structured-output schema has an object a strict,
+/// grammar-constrained mode cannot express: one with no declared properties, or
+/// one that allows additional properties.
+///
+/// The root counts too, since for structured output it is the answer itself.
+pub(crate) fn output_schema_is_open(schema: &Map<String, Value>) -> bool {
+    let schema = Value::Object(schema.clone());
+    Node::root(&schema).is_open_object() || has_unconstrained_node(&schema)
 }
 
 /// Serialize a value to a temporary JSON file and return its path as a string.
