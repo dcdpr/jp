@@ -1521,7 +1521,7 @@ style: StyleConfig
           top_k: int | null
           top_p: float | null
       |: null
-  sanitize?: "strip" | "visualize" | "off"
+  sanitize?: bool | "strip" (aka true) | "visualize" | "off" (aka false)
   streaming: StreamingConfig
     progress: ProgressConfig
       delay_secs?: int

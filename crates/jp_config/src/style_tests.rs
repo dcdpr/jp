@@ -41,11 +41,45 @@ fn sanitize_accepts_strip_visualize_and_off() {
 }
 
 #[test]
+fn sanitize_accepts_true_for_strip_and_false_for_off() {
+    assert_eq!(
+        from_str::<Sanitization>("true").unwrap(),
+        Sanitization::Strip
+    );
+    assert_eq!(
+        from_str::<Sanitization>("false").unwrap(),
+        Sanitization::Off
+    );
+    assert_eq!(
+        from_str::<Sanitization>(r#""true""#).unwrap(),
+        Sanitization::Strip
+    );
+    assert_eq!(
+        from_str::<Sanitization>(r#""false""#).unwrap(),
+        Sanitization::Off
+    );
+}
+
+#[test]
+fn sanitize_reads_a_boolean_from_the_style_table() {
+    let partial: PartialAppConfig = toml::from_str("[style]\nsanitize = false\n").unwrap();
+
+    assert_eq!(partial.style.sanitize, Some(Sanitization::Off));
+}
+
+#[test]
 fn sanitize_rejects_anything_else() {
-    // A boolean is refused rather than read as `off` or `strip`: the setting
-    // names one of three modes, and a boolean names none of them.
-    assert!(from_str::<Sanitization>("false").is_err());
     assert!(from_str::<Sanitization>(r#""none""#).is_err());
+    assert!(from_str::<Sanitization>("0").is_err());
+}
+
+#[test]
+fn a_boolean_sanitize_is_written_as_the_mode_it_names() {
+    // A conversation stores the mode, so a stored `false` reads back as `off`
+    // whichever spelling set it.
+    let off = from_str::<Sanitization>("false").unwrap();
+
+    assert_eq!(serde_json::to_string(&off).unwrap(), r#""off""#);
 }
 
 #[test]
@@ -64,6 +98,35 @@ fn sanitize_can_be_set_with_cfg() {
 
     partial
         .assign(KvAssignment::try_from_cli("style.sanitize", "off").unwrap())
+        .unwrap();
+
+    assert_eq!(partial.style.sanitize, Some(Sanitization::Off));
+}
+
+#[test]
+fn sanitize_can_be_set_to_a_boolean_with_cfg() {
+    // `KEY=false` arrives as a string and `KEY:=false` as JSON; both spellings
+    // mean the same thing.
+    let mut partial = PartialAppConfig::default();
+
+    partial
+        .assign(KvAssignment::try_from_cli("style.sanitize", "false").unwrap())
+        .unwrap();
+    assert_eq!(partial.style.sanitize, Some(Sanitization::Off));
+
+    partial
+        .assign(KvAssignment::try_from_cli("style.sanitize:", "true").unwrap())
+        .unwrap();
+    assert_eq!(partial.style.sanitize, Some(Sanitization::Strip));
+}
+
+#[test]
+fn sanitize_can_be_set_to_a_boolean_from_the_environment() {
+    // `JP_CFG_STYLE_SANITIZE=false`, as `from_envs` hands it over.
+    let mut partial = PartialAppConfig::default();
+
+    partial
+        .assign(KvAssignment::try_from_env("style_sanitize", "false").unwrap())
         .unwrap();
 
     assert_eq!(partial.style.sanitize, Some(Sanitization::Off));

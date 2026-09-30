@@ -13,7 +13,7 @@ pub mod typewriter;
 
 use std::fmt;
 
-use schematic::{Config, ConfigEnum};
+use schematic::{Config, ConfigEnum, Schema, SchemaBuilder, schema::BooleanType};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -47,7 +47,7 @@ pub struct StyleConfig {
     /// from a pasted log, from colored command output, or written to move the
     /// cursor, clear the screen, or change the window title.
     ///
-    /// - `strip`: Remove everything that does more than style text.
+    /// - `strip` or `true`: Remove everything that does more than style text.
     ///   Your messages and tool results keep their colors, bold, and other
     ///   styling that does not hide text.
     ///   The assistant's replies, conversation titles, and search results from
@@ -55,7 +55,7 @@ pub struct StyleConfig {
     ///   rendered.
     /// - `visualize`: Like `strip`, and show a `␛` where something was
     ///   removed.
-    /// - `off`: Show content exactly as written.
+    /// - `off` or `false`: Show content exactly as written.
     ///
     /// Stored conversations keep the original text, and the assistant always
     /// receives it.
@@ -64,7 +64,7 @@ pub struct StyleConfig {
     /// never contain control characters, tool questions are shown as plain
     /// text, styling left open by a message or tool result ends with it, and
     /// plain-text and JSON output never contain escape sequences.
-    #[setting(default)]
+    #[setting(default, schema_union_with = sanitization_input_shapes)]
     pub sanitize: Sanitization,
 
     /// Fenced code block style.
@@ -129,7 +129,7 @@ impl AssignKeyValue for PartialStyleConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
-            "sanitize" => self.sanitize = kv.try_some_from_str()?,
+            "sanitize" => self.sanitize = kv.try_some_bool_or_from_str()?,
             _ if kv.p("code") => self.code.assign(kv)?,
             _ if kv.p("inline_code") => self.inline_code.assign(kv)?,
             _ if kv.p("markdown") => self.markdown.assign(kv)?,
@@ -223,18 +223,81 @@ impl ToPartial for StyleConfig {
 }
 
 /// How escape sequences in conversation content are shown.
+///
+/// Written as a mode name, or as `true` for `strip` and `false` for `off`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ConfigEnum)]
-#[config(rename_all = "snake_case", serde_as_string)]
+#[config(rename_all = "snake_case")]
 pub enum Sanitization {
     /// Remove everything that does more than style text.
     #[default]
+    #[variant(aliases("true"))]
     Strip,
 
     /// Like `strip`, and show a `␛` where something was removed.
     Visualize,
 
     /// Show content exactly as written.
+    #[variant(aliases("false"))]
     Off,
+}
+
+impl From<bool> for Sanitization {
+    /// `true` is `strip` and `false` is `off`.
+    fn from(v: bool) -> Self {
+        if v { Self::Strip } else { Self::Off }
+    }
+}
+
+/// Written as the mode's name, however it was spelled when read.
+impl Serialize for Sanitization {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for Sanitization {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct SanitizationVisitor;
+
+        impl serde::de::Visitor<'_> for SanitizationVisitor {
+            type Value = Sanitization;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a boolean or a string (\"strip\", \"visualize\", \"off\")")
+            }
+
+            fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(Sanitization::from(v))
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                v.parse().map_err(E::custom)
+            }
+        }
+
+        deserializer.deserialize_any(SanitizationVisitor)
+    }
+}
+
+/// The boolean shorthand `style.sanitize` accepts, for the schema.
+///
+/// The mode names and their `"true"` and `"false"` spellings come from
+/// [`Sanitization`] itself; a bare boolean is what its `Deserialize` also
+/// takes, which an enum cannot describe.
+fn sanitization_input_shapes(schema: &SchemaBuilder) -> Vec<Schema> {
+    vec![schema.nest().boolean(BooleanType::default())]
 }
 
 /// Formatting style for links.
