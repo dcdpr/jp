@@ -497,3 +497,41 @@ fn visible_sgr_rebuilds_the_sequence_from_its_parameters() {
     assert_eq!(visible_sgr("\x1b[m").as_deref(), Some("\x1b[0m"));
     assert_eq!(visible_sgr("\x1b[01;031m").as_deref(), Some("\x1b[1;31m"));
 }
+
+#[test]
+fn sanitize_unclosed_leaves_closing_the_span_to_the_caller() {
+    // A truncated tool result shows its first lines, and the reset belongs after
+    // them rather than at the end of the part that is cut.
+    assert_eq!(
+        sanitize_unclosed(
+            "\x1b[31mline 1\nline 2\x1b[2J",
+            ContentClass::ToolOutput,
+            SanitizeMode::Strip
+        ),
+        "\x1b[31mline 1\nline 2"
+    );
+}
+
+#[test]
+fn sanitize_unclosed_drops_an_unfinished_sequence() {
+    assert_eq!(
+        sanitize_unclosed("text\x1b[3", ContentClass::ToolOutput, SanitizeMode::Strip),
+        "text"
+    );
+    assert_eq!(
+        sanitize_unclosed(
+            "text\x1b]0;tit",
+            ContentClass::ToolOutput,
+            SanitizeMode::Visualize
+        ),
+        "text\u{241b}"
+    );
+}
+
+#[test]
+fn sanitize_unclosed_passes_everything_through_under_off() {
+    assert_eq!(
+        sanitize_unclosed("\x1b[2J\r", ContentClass::ToolOutput, SanitizeMode::Off),
+        "\x1b[2J\r"
+    );
+}

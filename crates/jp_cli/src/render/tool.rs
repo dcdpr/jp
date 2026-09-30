@@ -22,10 +22,14 @@ use jp_printer::{ErrChannel, LineSink, OutputLines, RegionStyle, StatusRegion};
 use jp_term::{
     background::DefaultBackground,
     osc::hyperlink,
-    sanitize::{ContentClass, ContentWriter, SanitizeMode},
+    sanitize::{
+        ContentClass, ContentWriter, SanitizeMode, sanitize_str, sanitize_unclosed, strip_controls,
+    },
     shade::ShadedWriter,
 };
 use serde_json::{Map, Value};
+
+use crate::format::sanitize_mode;
 
 /// Map the `stderr_rows` config key onto the printer's window budget.
 ///
@@ -229,6 +233,19 @@ impl ToolRenderer {
         let _ = self.channel.writer().write_str(&buffer);
     }
 
+    /// How `style.sanitize` has untrusted content shown.
+    const fn sanitize(&self) -> SanitizeMode {
+        sanitize_mode(self.config.sanitize)
+    }
+
+    /// A tool name as the chrome shows it.
+    ///
+    /// The model names the tool it calls, so the name is filtered as model
+    /// output.
+    fn shown_name(&self, name: &str) -> String {
+        sanitize_str(name, ContentClass::ModelOutput, self.sanitize())
+    }
+
     /// The reasoning-region background this tool call sits in, if any.
     ///
     /// Chrome the renderer writes is shaded by [`Self::write_chrome`]; a prompt
@@ -260,8 +277,8 @@ impl ToolRenderer {
         arguments: &Map<String, Value>,
         style: &ParametersStyle,
     ) {
-        let styled_name = name.yellow().bold();
-        let args = format_args(arguments, style);
+        let styled_name = self.shown_name(name).yellow().bold();
+        let args = format_args(arguments, style, self.sanitize());
 
         self.write_chrome(self.current_region.as_ref(), |w| {
             self.emit_separator_to(w)?;
@@ -294,7 +311,7 @@ impl ToolRenderer {
     /// returns that output for the caller to persist for replay.
     /// An empty description prints only the header, and returns `None`.
     pub(crate) fn render_custom_result(&self, name: &str, content: String) -> Option<String> {
-        let styled_name = name.yellow().bold();
+        let styled_name = self.shown_name(name).yellow().bold();
         self.write_chrome(self.current_region.as_ref(), |w| {
             self.emit_separator_to(w)?;
             writeln!(w, "Calling tool {styled_name}")
@@ -313,7 +330,10 @@ impl ToolRenderer {
     ///
     /// [`render_custom_result`]: Self::render_custom_result
     pub fn render_formatted_arguments(&self, content: &str) {
-        let trimmed = content.trim();
+        // Trimmed once filtered, so a sequence at either end leaves no blank
+        // line behind.
+        let shown = sanitize_unclosed(content, ContentClass::ToolOutput, self.sanitize());
+        let trimmed = shown.trim();
         self.write_chrome(self.current_region.as_ref(), |w| {
             w.write_char('\n')?;
             write_tool_output(w, trimmed)?;
@@ -460,8 +480,13 @@ impl ToolRenderer {
         let path = env::temp_dir().join(&file_name);
         let _err = fs::write(&path, &inner_content);
 
+        // Filtered ahead of the highlighter, which adds JP's own styling. The
+        // span is closed after the lines that are kept, not at the end of the
+        // text a truncated result cuts.
+        let shown = sanitize_unclosed(&inner_content, ContentClass::ToolOutput, self.sanitize());
+
         // Determine max lines based on config
-        let total_lines = inner_content.lines().count();
+        let total_lines = shown.lines().count();
         let max_lines = match inline_results {
             InlineResults::Off => 0,
             InlineResults::Full => total_lines,
@@ -482,7 +507,7 @@ impl ToolRenderer {
             }
 
             let mut kept = String::new();
-            for line in inner_content.lines().take(max_lines) {
+            for line in shown.lines().take(max_lines) {
                 // highlight_line expects the trailing newline.
                 let with_nl = format!("{line}\n");
                 if let Some(ref mut state) = code_state {
@@ -674,17 +699,25 @@ impl ToolRenderer {
             "tools"
         };
 
+        // The row is redrawn in place, so a name keeps no control character at
+        // all, whatever `style.sanitize` says: a line break or a tab would put
+        // the printer's row count out of step with the screen.
         let names: Vec<_> = self
             .pending
             .iter()
-            .map(|t| t.name.as_str().yellow().bold().to_string())
+            .map(|t| {
+                strip_controls(&self.shown_name(&t.name), &[])
+                    .yellow()
+                    .bold()
+                    .to_string()
+            })
             .collect();
 
         format!("Calling {label} {}", names.join(", "))
     }
 }
 
-/// Write a tool's own output as a content span.
+/// Write a tool's own output, already filtered, as a content span.
 ///
 /// The bytes pass through unchanged, and the span closes with `\x1b[0m`, so
 /// styling the output left open ends with it instead of running into what JP
@@ -702,11 +735,18 @@ fn write_tool_output(w: &mut dyn fmt::Write, output: &str) -> fmt::Result {
 ///
 /// Arguments with empty values (`{}`, `[]`, `null`) are stripped before
 /// formatting.
+/// The arguments are model output, filtered under `mode`: values are shown as
+/// JSON, which escapes C0 characters in a string but leaves DEL and C1 as they
+/// are, and a `FunctionCall` name is shown bare.
 ///
 /// - `Off` / `Custom` → `""` (Custom content is rendered separately)
 /// - `Json` → JSON block with arguments
 /// - `FunctionCall` → `(key=value, ...)`
-fn format_args(arguments: &Map<String, Value>, style: &ParametersStyle) -> String {
+fn format_args(
+    arguments: &Map<String, Value>,
+    style: &ParametersStyle,
+    mode: SanitizeMode,
+) -> String {
     let filtered = filter_display_args(arguments);
 
     if filtered.is_empty() {
@@ -718,7 +758,7 @@ fn format_args(arguments: &Map<String, Value>, style: &ParametersStyle) -> Strin
         // Custom content is rendered separately via render_approved.
         ParametersStyle::Off | ParametersStyle::Custom(_) => String::new(),
 
-        ParametersStyle::Json => format_args_json(filtered),
+        ParametersStyle::Json => format_args_json(filtered, mode),
 
         ParametersStyle::FunctionCall => {
             let mut buf = String::new();
@@ -727,7 +767,8 @@ fn format_args(arguments: &Map<String, Value>, style: &ParametersStyle) -> Strin
                 if i > 0 {
                     buf.push_str(", ");
                 }
-                let dim_key = key.clone().dim();
+                let dim_key = sanitize_str(key, ContentClass::ModelOutput, mode).dim();
+                let value = sanitize_str(&value.to_string(), ContentClass::ModelOutput, mode);
                 buf.push_str(&format!("{dim_key}: {value}"));
             }
             buf.push(')');
@@ -793,9 +834,13 @@ fn has_xml_envelope(content: &str) -> bool {
     !name.is_empty() && has_open_tag_end && content.ends_with(&format!("</{name}>"))
 }
 
-/// Render a JSON representation of the arguments.
-fn format_args_json(arguments: Map<String, Value>) -> String {
-    let pretty = format!("{:#}", Value::Object(arguments));
+/// Render a JSON representation of the arguments, filtered under `mode`.
+fn format_args_json(arguments: Map<String, Value>, mode: SanitizeMode) -> String {
+    let pretty = sanitize_str(
+        &format!("{:#}", Value::Object(arguments)),
+        ContentClass::ModelOutput,
+        mode,
+    );
     format!(" with arguments:\n\n```json\n{pretty}\n```")
 }
 

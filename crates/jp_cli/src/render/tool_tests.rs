@@ -3,7 +3,10 @@ use std::sync::Arc;
 use jp_config::{
     AppConfig,
     conversation::tool::{CommandConfigOrString, style::ParametersStyle},
-    style::stderr_rows::{RowCount, StderrRows},
+    style::{
+        Sanitization,
+        stderr_rows::{RowCount, StderrRows},
+    },
 };
 use jp_conversation::event::ToolCallResponse;
 use jp_printer::{ErrChannel, OutputFormat, Printer, SharedBuffer, TerminalCapability};
@@ -89,6 +92,26 @@ fn create_renderer() -> (ToolRenderer, SharedBuffer, SharedBuffer) {
     config.tool_call.show = true;
     let renderer = ToolRenderer::new(ErrChannel::new(Arc::new(printer)), config);
     (renderer, err, out)
+}
+
+/// A renderer showing untrusted content the way `sanitize` asks.
+fn create_sanitizing_renderer(sanitize: Sanitization) -> (ToolRenderer, SharedBuffer) {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let mut config = AppConfig::new_test().style;
+    config.tool_call.show = true;
+    // No status region: `register` would otherwise start a ticking row.
+    config.tool_call.preparing.show = false;
+    config.sanitize = sanitize;
+    let renderer = ToolRenderer::new(ErrChannel::new(Arc::new(printer)), config);
+    (renderer, err)
+}
+
+/// A tool response carrying `result`.
+fn response(result: &str) -> ToolCallResponse {
+    ToolCallResponse {
+        id: "call_1".into(),
+        result: Ok(result.into()),
+    }
 }
 
 fn create_renderer_with_show(show: bool) -> (ToolRenderer, SharedBuffer) {
@@ -403,6 +426,137 @@ fn formatted_arguments_close_the_styling_they_left_open() {
 }
 
 #[test]
+fn a_result_keeps_its_colors_and_loses_its_other_escapes() {
+    // A colored diff should still look like one; an erase must not run.
+    let (renderer, err) = create_sanitizing_renderer(Sanitization::Strip);
+    renderer.render_result(
+        &response("\x1b[31mred\x1b[0m\x1b[2J done"),
+        &InlineResults::Full,
+        &LinkStyle::Off,
+    );
+    renderer.channel.flush();
+    assert_eq!(err.lock().as_str(), "\n\x1b[31mred\x1b[0m done\x1b[0m\n");
+}
+
+#[test]
+fn a_result_marks_what_it_lost_under_visualize() {
+    let (renderer, err) = create_sanitizing_renderer(Sanitization::Visualize);
+    renderer.render_result(
+        &response("\x1b[31mred\x1b[0m\x1b[2J done"),
+        &InlineResults::Full,
+        &LinkStyle::Off,
+    );
+    renderer.channel.flush();
+    assert_eq!(
+        err.lock().as_str(),
+        "\n\x1b[31mred\x1b[0m\u{241b} done\x1b[0m\n"
+    );
+}
+
+#[test]
+fn a_result_passes_through_under_off_and_still_closes_its_styling() {
+    let (renderer, err) = create_sanitizing_renderer(Sanitization::Off);
+    renderer.render_result(
+        &response("\x1b[31mred\x1b[2J done"),
+        &InlineResults::Full,
+        &LinkStyle::Off,
+    );
+    renderer.channel.flush();
+    assert_eq!(err.lock().as_str(), "\n\x1b[31mred\x1b[2J done\x1b[0m\n");
+}
+
+#[test]
+fn a_result_is_filtered_before_it_is_highlighted() {
+    // The highlighter styles the bytes it is given. Handed an escape sequence,
+    // it can split the sequence across tokens and leave its tail as text.
+    let (renderer, err) = create_sanitizing_renderer(Sanitization::Strip);
+    renderer.render_result(
+        &response("```rust\nlet x\x1b[2J = 1;\n```"),
+        &InlineResults::Full,
+        &LinkStyle::Off,
+    );
+    renderer.channel.flush();
+    let raw = err.lock().clone();
+    assert!(!raw.contains("\x1b[2J"), "raw: {raw:?}");
+    assert_eq!(strip_ansi(&raw), "\n```rust\nlet x = 1;\n```\n");
+}
+
+#[test]
+fn formatted_arguments_lose_everything_but_their_colors() {
+    let (renderer, err) = create_sanitizing_renderer(Sanitization::Strip);
+    renderer.render_formatted_arguments("\x1b[1;32mplan\x1b[2J output");
+    renderer.channel.flush();
+    assert_eq!(err.lock().as_str(), "\n\x1b[1;32mplan output\x1b[0m\n");
+}
+
+#[test]
+fn a_tool_name_is_shown_without_its_escapes() {
+    // The name comes from the model, which can make up one of its own.
+    let (renderer, err) = create_sanitizing_renderer(Sanitization::Strip);
+    renderer.render_tool_call("fs_read\x1b[2J_file", &Map::new(), &ParametersStyle::Off);
+    renderer.channel.flush();
+    let raw = err.lock().clone();
+    assert!(!raw.contains("\x1b[2J"), "raw: {raw:?}");
+    assert_eq!(strip_ansi(&raw), "Calling tool fs_read_file\n");
+}
+
+#[test]
+fn argument_names_are_shown_without_their_escapes() {
+    // A function-call style prints each argument's name bare, next to its
+    // JSON-encoded value.
+    let (renderer, err) = create_sanitizing_renderer(Sanitization::Strip);
+    let mut args = Map::new();
+    args.insert("pa\x1b[2Jth".into(), Value::String("src".into()));
+    renderer.render_tool_call("fs_read_file", &args, &ParametersStyle::FunctionCall);
+    renderer.channel.flush();
+    let raw = err.lock().clone();
+    assert!(!raw.contains("\x1b[2J"), "raw: {raw:?}");
+    assert_eq!(
+        strip_ansi(&raw),
+        "Calling tool fs_read_file(path: \"src\")\n"
+    );
+}
+
+#[test]
+fn argument_values_lose_the_controls_json_leaves_raw() {
+    // JSON escapes C0 characters in a string, but not DEL or C1, and a
+    // terminal reads U+009B as the start of a control sequence.
+    let (renderer, err) = create_sanitizing_renderer(Sanitization::Strip);
+    let mut args = Map::new();
+    args.insert("path".into(), Value::String("a\u{9b}2Jb\x7f".into()));
+    renderer.render_tool_call("fs_read_file", &args, &ParametersStyle::Json);
+    renderer.channel.flush();
+    let raw = err.lock().clone();
+    assert!(!raw.contains(['\u{9b}', '\x7f']), "raw: {raw:?}");
+    assert!(raw.contains(r#""path": "a2Jb""#), "raw: {raw:?}");
+}
+
+#[test]
+fn argument_values_show_escaped_controls_as_json_writes_them() {
+    // What the approval prompt shows has to match what the tool gets, so an
+    // escaped `ESC` stays visible rather than being dropped.
+    let (renderer, err) = create_sanitizing_renderer(Sanitization::Strip);
+    let mut args = Map::new();
+    args.insert("path".into(), Value::String("a\x1bb".into()));
+    renderer.render_tool_call("fs_read_file", &args, &ParametersStyle::Json);
+    renderer.channel.flush();
+    let raw = err.lock().clone();
+    assert!(raw.contains(r#""path": "a\u001bb""#), "raw: {raw:?}");
+}
+
+#[test]
+fn a_streaming_tool_name_is_plain_text_on_the_preparing_row() {
+    // The row is redrawn in place, so a line break or a tab would put the
+    // printer's row count out of step with the screen.
+    let (mut renderer, _err) = create_sanitizing_renderer(Sanitization::Strip);
+    renderer.register("id1", "evil\x1b[2J\tname");
+    let row = renderer.temp_line_content();
+    assert!(!row.contains("\x1b[2J"), "row: {row:?}");
+    assert!(!row.contains('\t'), "row: {row:?}");
+    assert_eq!(strip_ansi(&row), "Calling tool evilname");
+}
+
+#[test]
 fn test_empty_result_does_not_separate_following_header() {
     // An empty result writes nothing, so it owes no separator: the next tool
     // header must land directly under it rather than below a stray blank line.
@@ -694,7 +848,7 @@ fn test_tool_call_show_false_suppresses_output() {
 #[test]
 fn test_format_args_off() {
     let args = Map::new();
-    let result = format_args(&args, &ParametersStyle::Off);
+    let result = format_args(&args, &ParametersStyle::Off, SanitizeMode::Strip);
     assert_eq!(result, "");
 }
 
@@ -702,7 +856,7 @@ fn test_format_args_off() {
 fn test_format_args_json() {
     let mut args = Map::new();
     args.insert("path".into(), Value::String("/tmp/test.txt".into()));
-    let result = format_args(&args, &ParametersStyle::Json);
+    let result = format_args(&args, &ParametersStyle::Json, SanitizeMode::Strip);
     insta::assert_snapshot!(result);
 }
 
@@ -711,7 +865,7 @@ fn test_format_args_function_call() {
     let mut args = Map::new();
     args.insert("a".into(), Value::Number(1.into()));
     args.insert("b".into(), Value::String("hello".into()));
-    let result = format_args(&args, &ParametersStyle::FunctionCall);
+    let result = format_args(&args, &ParametersStyle::FunctionCall, SanitizeMode::Strip);
     let plain = strip_ansi(&result);
     insta::assert_snapshot!(plain);
 }
@@ -723,7 +877,7 @@ fn test_format_args_custom_returns_empty() {
     let mut args = Map::new();
     args.insert("key".into(), Value::String("value".into()));
     let style = ParametersStyle::Custom(CommandConfigOrString::String("echo custom-output".into()));
-    let result = format_args(&args, &style);
+    let result = format_args(&args, &style, SanitizeMode::Strip);
     assert_eq!(result, "");
 }
 
@@ -733,7 +887,11 @@ fn test_format_args_hides_empty_object_value() {
     args.insert("path".into(), Value::String("/tmp/test.txt".into()));
     args.insert("options".into(), Value::Object(Map::new()));
 
-    let plain = strip_ansi(&format_args(&args, &ParametersStyle::FunctionCall));
+    let plain = strip_ansi(&format_args(
+        &args,
+        &ParametersStyle::FunctionCall,
+        SanitizeMode::Strip,
+    ));
     assert!(plain.contains("/tmp/test.txt"));
     assert!(
         !plain.contains("options"),
@@ -747,7 +905,11 @@ fn test_format_args_hides_null_value() {
     args.insert("path".into(), Value::String("/tmp/test.txt".into()));
     args.insert("optional_field".into(), Value::Null);
 
-    let plain = strip_ansi(&format_args(&args, &ParametersStyle::FunctionCall));
+    let plain = strip_ansi(&format_args(
+        &args,
+        &ParametersStyle::FunctionCall,
+        SanitizeMode::Strip,
+    ));
     assert!(plain.contains("/tmp/test.txt"));
     assert!(
         !plain.contains("optional_field"),
@@ -761,7 +923,11 @@ fn test_format_args_hides_empty_array_value() {
     args.insert("path".into(), Value::String("/tmp/test.txt".into()));
     args.insert("tags".into(), Value::Array(vec![]));
 
-    let plain = strip_ansi(&format_args(&args, &ParametersStyle::FunctionCall));
+    let plain = strip_ansi(&format_args(
+        &args,
+        &ParametersStyle::FunctionCall,
+        SanitizeMode::Strip,
+    ));
     assert!(plain.contains("/tmp/test.txt"));
     assert!(
         !plain.contains("tags"),
@@ -776,7 +942,11 @@ fn test_format_args_keeps_nonempty_object_value() {
     let mut args = Map::new();
     args.insert("config".into(), Value::Object(inner));
 
-    let plain = strip_ansi(&format_args(&args, &ParametersStyle::FunctionCall));
+    let plain = strip_ansi(&format_args(
+        &args,
+        &ParametersStyle::FunctionCall,
+        SanitizeMode::Strip,
+    ));
     assert!(
         plain.contains("config"),
         "non-empty object should be shown: {plain}"
@@ -791,7 +961,11 @@ fn test_format_args_keeps_nonempty_array_value() {
         Value::Array(vec![Value::String("foo".into())]),
     );
 
-    let plain = strip_ansi(&format_args(&args, &ParametersStyle::FunctionCall));
+    let plain = strip_ansi(&format_args(
+        &args,
+        &ParametersStyle::FunctionCall,
+        SanitizeMode::Strip,
+    ));
     assert!(
         plain.contains("tags"),
         "non-empty array should be shown: {plain}"

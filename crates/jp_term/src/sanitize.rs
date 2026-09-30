@@ -8,7 +8,8 @@
 //! [`ContentWriter`] filters such content on its way to the terminal, keeping
 //! what its [`ContentClass`] allows and rendering the rest the way the
 //! [`SanitizeMode`] says.
-//! [`sanitize_str`] runs the same filter over text that is already whole.
+//! [`sanitize_str`] runs the same filter over text that is already whole, and
+//! [`sanitize_unclosed`] leaves closing a tool output's span to the caller.
 //! [`sanitize_decoded`] filters text again after a markdown parser has turned
 //! character references such as `&#27;` into the characters they name.
 //! [`visible_sgr`] is the writer's SGR parsing and conceal removal on their
@@ -438,6 +439,25 @@ pub fn sanitize_str(text: &str, class: ContentClass, mode: SanitizeMode) -> Stri
     writer.output
 }
 
+/// `text`, whole, filtered as `class` content under `mode`, with no reset to
+/// close its span.
+///
+/// For a caller that writes only part of `text` and closes the span after that
+/// part: a tool result cut to its first lines ends its styling after them, not
+/// at the end of the text it cut.
+/// A sequence `text` leaves unfinished is dropped.
+#[must_use]
+pub fn sanitize_unclosed(text: &str, class: ContentClass, mode: SanitizeMode) -> String {
+    let mut writer = ContentWriter::new(String::new(), class, mode);
+
+    // Writing to a `String` is infallible.
+    let _ = writer.write_str(text);
+    writer.settle();
+    let _ = writer.flush();
+
+    writer.output
+}
+
 /// Text a markdown parser decoded from character references, filtered again as
 /// `class` content under `mode`.
 ///
@@ -475,14 +495,7 @@ pub fn sanitize_decoded(text: &str, class: ContentClass, mode: SanitizeMode) -> 
         return Cow::Owned(kept);
     }
 
-    let mut writer = ContentWriter::new(String::new(), class, mode);
-
-    // Writing to a `String` is infallible.
-    let _ = writer.write_str(text);
-    writer.settle();
-    let _ = writer.flush();
-
-    Cow::Owned(writer.output)
+    Cow::Owned(sanitize_unclosed(text, class, mode))
 }
 
 /// Keeps the visible part of the SGR sequence a parse dispatches.
