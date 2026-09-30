@@ -592,6 +592,11 @@ fn map_model_with_catalog_absent_capabilities_keeps_table() {
 }
 
 #[test]
+fn model_override_ids_are_unique() {
+    assert_eq!(MODEL_OVERRIDES.duplicate_id(), None);
+}
+
+#[test]
 fn map_model_known() {
     let details = map_model("gemma-4-31b").unwrap();
     assert_eq!(details.display_name.as_deref(), Some("Gemma 4 31B"));

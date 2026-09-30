@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, sync::LazyLock, time::Duration};
 
 use async_trait::async_trait;
 use futures::{Stream, StreamExt as _, future, stream};
@@ -30,7 +30,10 @@ use super::{
 use crate::{
     error::{Error, Result, StreamError, StreamErrorKind},
     event::{Event, FinishReason},
-    model::{ModelDeprecation, ReasoningDetails},
+    model::{
+        ModelDeprecation, ReasoningDetails,
+        catalog::{Catalog, Entry},
+    },
     provider::trace_to_tmpfile,
     query::ChatQuery,
     stream::with_tool_call_keepalive,
@@ -361,68 +364,95 @@ fn map_model_with_catalog(id: &str, public: Option<&PublicModel>) -> Result<Mode
     Ok(details)
 }
 
+/// Map a Cerebras model id onto the built-in details.
+///
+/// An id absent from [`MODEL_OVERRIDES`] maps to empty details, with a warning.
 fn map_model(id: &str) -> Result<ModelDetails> {
-    let details = match id {
-        // Context and output limits use paid-tier values. Free-tier users
-        // get lower limits enforced server-side.
-        "gemma-4-31b" => ModelDetails {
-            id: (PROVIDER, id).try_into()?,
-            display_name: Some("Gemma 4 31B".to_owned()),
-            context_window: Some(131_072),
-            max_output_tokens: Some(40_960),
-            // The public catalog reports that this model reasons but names no
-            // effort levels, so support stays unknown rather than inheriting a
-            // ladder invented from its siblings. `auto` then omits the effort and
-            // lets the server pick, and an explicit `off` still sends
-            // `reasoning_effort: "none"`, both of which are recorded as accepted
-            // for this model.
-            reasoning: None,
-            knowledge_cutoff: None,
-            deprecated: None,
-            structured_output: Some(true),
-            prefill: None,
-            subscription: None,
-            features: vec![],
-        },
-        "gpt-oss-120b" => ModelDetails {
-            id: (PROVIDER, id).try_into()?,
-            display_name: Some("GPT-OSS 120B".to_owned()),
-            context_window: Some(131_072),
-            max_output_tokens: Some(40_960),
-            reasoning: Some(
-                ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
-            ),
-            knowledge_cutoff: None,
-            deprecated: None,
-            structured_output: Some(true),
-            prefill: None,
-            subscription: None,
-            features: vec![],
-        },
-        "zai-glm-4.7" => ModelDetails {
-            id: (PROVIDER, id).try_into()?,
-            display_name: Some("Zai GLM 4.7".to_owned()),
-            context_window: Some(131_072),
-            max_output_tokens: Some(40_960),
-            // Reasoning is enabled by default; only `none` disables it.
-            reasoning: Some(ReasoningDetails::leveled(
-                false, false, false, false, false, false,
-            )),
-            knowledge_cutoff: None,
-            deprecated: None,
-            structured_output: Some(true),
-            prefill: None,
-            subscription: None,
-            features: vec![],
-        },
-        _ => {
-            warn!(model = id, "Unknown Cerebras model, using empty details.");
-            ModelDetails::empty((PROVIDER, id).try_into()?)
-        }
-    };
+    if let Some(details) = model_overrides(id) {
+        return Ok(details.clone());
+    }
 
-    Ok(details)
+    warn!(model = id, "Unknown Cerebras model, using empty details.");
+    Ok(ModelDetails::empty((PROVIDER, id).try_into()?))
 }
+
+/// Look up the built-in details for `id`.
+///
+/// `None` for a model absent from [`MODEL_OVERRIDES`].
+fn model_overrides(id: &str) -> Option<&'static ModelDetails> {
+    MODEL_OVERRIDES.get(id)
+}
+
+/// The Cerebras facts the public catalog does not report, chiefly the effort
+/// ladder, plus fallback limits for when the catalog is unavailable.
+///
+/// Context and output limits use paid-tier values.
+/// Free-tier users get lower limits enforced server-side.
+static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
+    let id = |name: &str| ModelIdConfig::try_from((PROVIDER, name)).unwrap();
+
+    Catalog::new(vec![
+        Entry {
+            aliases: &[],
+            value: ModelDetails {
+                id: id("gemma-4-31b"),
+                display_name: Some("Gemma 4 31B".to_owned()),
+                context_window: Some(131_072),
+                max_output_tokens: Some(40_960),
+                // The public catalog reports that this model reasons but names
+                // no effort levels, so support stays unknown rather than
+                // inheriting a ladder invented from its siblings. `auto` then
+                // omits the effort and lets the server pick, and an explicit
+                // `off` still sends `reasoning_effort: "none"`, both of which
+                // are recorded as accepted for this model.
+                reasoning: None,
+                knowledge_cutoff: None,
+                deprecated: None,
+                structured_output: Some(true),
+                prefill: None,
+                subscription: None,
+                features: vec![],
+            },
+        },
+        Entry {
+            aliases: &[],
+            value: ModelDetails {
+                id: id("gpt-oss-120b"),
+                display_name: Some("GPT-OSS 120B".to_owned()),
+                context_window: Some(131_072),
+                max_output_tokens: Some(40_960),
+                reasoning: Some(
+                    ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
+                ),
+                knowledge_cutoff: None,
+                deprecated: None,
+                structured_output: Some(true),
+                prefill: None,
+                subscription: None,
+                features: vec![],
+            },
+        },
+        Entry {
+            aliases: &[],
+            value: ModelDetails {
+                id: id("zai-glm-4.7"),
+                display_name: Some("Zai GLM 4.7".to_owned()),
+                context_window: Some(131_072),
+                max_output_tokens: Some(40_960),
+                // Reasoning is enabled by default; only `none` disables it.
+                reasoning: Some(ReasoningDetails::leveled(
+                    false, false, false, false, false, false,
+                )),
+                knowledge_cutoff: None,
+                deprecated: None,
+                structured_output: Some(true),
+                prefill: None,
+                subscription: None,
+                features: vec![],
+            },
+        },
+    ])
+});
 
 #[cfg(test)]
 impl Cerebras {

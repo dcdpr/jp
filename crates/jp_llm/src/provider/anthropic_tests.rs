@@ -1004,6 +1004,30 @@ fn test_map_model_opus_5_5() {
     assert!(!details.supports_prefill());
 }
 
+#[test]
+fn model_override_ids_are_unique() {
+    assert_eq!(MODEL_OVERRIDES.duplicate_id(), None);
+}
+
+/// A dated snapshot takes its model's overrides but keeps its own id.
+#[test]
+fn test_map_model_snapshot_alias_uses_the_model_overrides() {
+    let model = adaptive_api_model("claude-opus-4-7-20260416", "Claude Opus 4.7", true, true);
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(
+        details.id,
+        (PROVIDER, "claude-opus-4-7-20260416").try_into().unwrap()
+    );
+    assert_eq!(
+        details.knowledge_cutoff,
+        NaiveDate::from_ymd_opt(2026, 1, 1)
+    );
+    assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+    assert_eq!(details.prefill, Some(false));
+}
+
 /// Verify the `map_model` arm for Claude Fable 5.1 produces the expected
 /// `ModelDetails`, including the `thinking-always-on` capability that stops JP
 /// from sending `thinking: disabled` and from hard-forcing a `tool_choice`,

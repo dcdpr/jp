@@ -107,6 +107,74 @@ fn test_map_model_thinking_flag_overrides_table() {
 }
 
 #[test]
+fn model_override_ids_are_unique() {
+    assert_eq!(MODEL_OVERRIDES.duplicate_id(), None);
+}
+
+/// An alias takes the catalog's facts but keeps the id and the limits the API
+/// reported for it.
+#[test]
+fn test_map_model_alias_uses_catalog_facts_under_its_own_id() {
+    let model = types::Model {
+        base_model_id: "gemini-3-flash-preview".to_owned(),
+        display_name: "Gemini 3 Flash Preview".to_owned(),
+        input_token_limit: 1_048_576,
+        output_token_limit: 65_536,
+        thinking: true,
+        ..Default::default()
+    };
+
+    let details = map_model(model);
+
+    assert_eq!(
+        details.id,
+        (PROVIDER, "gemini-3-flash-preview").try_into().unwrap()
+    );
+    assert_eq!(
+        details.display_name,
+        Some("Gemini 3 Flash Preview".to_owned())
+    );
+    assert_eq!(details.context_window, Some(1_048_576));
+    assert_eq!(
+        details.reasoning,
+        Some(ReasoningDetails::leveled(true, true, true, true, false, false).always_on())
+    );
+    assert_eq!(
+        details.knowledge_cutoff,
+        Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap())
+    );
+}
+
+/// A model absent from the catalog keeps the API's limits and nothing else.
+#[test]
+fn test_map_model_unknown_keeps_only_api_facts() {
+    let model = types::Model {
+        base_model_id: "gemini-9-unreleased".to_owned(),
+        display_name: "Gemini 9".to_owned(),
+        input_token_limit: 2_000_000,
+        output_token_limit: 100_000,
+        thinking: false,
+        ..Default::default()
+    };
+
+    let details = map_model(model);
+
+    assert_eq!(details, ModelDetails {
+        id: (PROVIDER, "gemini-9-unreleased").try_into().unwrap(),
+        display_name: Some("Gemini 9".to_owned()),
+        context_window: Some(2_000_000),
+        max_output_tokens: Some(100_000),
+        reasoning: apply_thinking_support(None, false),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        subscription: None,
+        features: vec![],
+    });
+}
+
+#[test]
 fn test_map_model_gemini_3_8_flash() {
     let model = types::Model {
         base_model_id: "gemini-3.8-flash".to_owned(),
