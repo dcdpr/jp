@@ -1,4 +1,4 @@
-# Promote D24 and rank bounded tool output for implementation
+# Promote 115 and rank bounded tool output for implementation
 
 - **Status**: Todo
 - **Kind**: Chore
@@ -14,10 +14,10 @@ JP places no ceiling on a tool call response.
 flushes it, so an oversized response is durable: every later turn re-sends it,
 the provider rejects the request, and the conversation needs hand-editing to
 recover.
-RFD D24 records the case that prompted it, a 1,293,623-token request against a
+RFD 115 records the case that prompted it, a 1,293,623-token request against a
 1,000,000-token limit.
 
-D24 has been a Draft since 2026-07-27 and sits unranked in the backlog.
+115 has been a Draft since 2026-07-27 and sits unranked in the backlog.
 
 ## Why now
 
@@ -37,7 +37,7 @@ new axis.
 
 ## What to do
 
-1. Promote D24 to Discussion.
+1. Promote 115 to Discussion.
 2. Rank it.
    It gates the value of everything else done about context pressure: an
    automatic compaction trigger that fires on a conversation already poisoned by

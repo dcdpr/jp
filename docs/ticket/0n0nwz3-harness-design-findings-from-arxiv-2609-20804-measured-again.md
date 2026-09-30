@@ -67,7 +67,7 @@ The proposals it produced are filed separately and listed at the bottom.
 | M2 recall (`recall_event` tool)                                            | absent; `--reset` plus always-preserved raw events                             | correct by design                                 |
 | M3 summarization (running summary)                                         | `SummaryPolicy`                                                                | exists, manual only                               |
 | Soft / hard thresholds (0.6 / 0.85), verbatim recent window (0.3, floor 2) | none                                                                           | RFD D50 proposes a single `trigger_ratio`         |
-| Per-result cap (24k chars)                                                 | none                                                                           | RFD D24                                           |
+| Per-result cap (24k chars)                                                 | none                                                                           | RFD 115                                           |
 | Truncation fallback                                                        | `window::truncate_to_fit`                                                      | exists; two call sites, neither on the query path |
 
 JP has every mechanism the paper tested.
@@ -117,7 +117,7 @@ It has no trigger.
 
 - **No context management on the query path.** The failure the paper measures
   most directly, and T-0de0hry is in-repo evidence it already bites.
-- **Unbounded tool output.** RFD D24 records a 1,293,623-token request against a
+- **Unbounded tool output.** RFD 115 records a 1,293,623-token request against a
   1,000,000 limit, durably persisted.
 - **No loop bound and no repetition detection.** The turn loop cycles streaming
   to executing with no cap.
@@ -172,7 +172,7 @@ Ordered by leverage per unit of cost.
 The first two attack the failure the paper measures most directly; the third is
 what makes any of them checkable.
 
-1. **T-0n0pcr0**: promote D24 and rank bounded tool output.
+1. **T-0n0pcr0**: promote 115 and rank bounded tool output.
    The cheapest change, and it sits upstream of the rest: a single oversized
    response poisons a conversation permanently, and no compaction trigger
    rescues one that has already happened.

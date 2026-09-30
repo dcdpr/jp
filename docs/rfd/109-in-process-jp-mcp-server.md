@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-12
+- **Extended by**: [RFD 115]
 - **Summary**: Tool execution moves into an in-process JP MCP Server that JP and
   third-party MCP clients both call over loopback Streamable HTTP.
 
@@ -473,4 +474,5 @@ shared contracts and execution behavior specified here.
 [RFD 058]: 058-typed-content-blocks-for-tool-responses.md
 [RFD 065]: 065-typed-resource-model-for-attachments.md
 [RFD 111]: 111-transitional-jp-protocol-bridge-for-mcp-tools.md
+[RFD 115]: 115-bounded-tool-output.md
 [Streamable HTTP]: https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#streamable-http
