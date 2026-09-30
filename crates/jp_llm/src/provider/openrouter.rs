@@ -794,7 +794,7 @@ fn create_request(
     let is_structured = response_format.is_some();
 
     let slug = model.id.name.to_string();
-    let reasoning = model.custom_reasoning_config(parameters.reasoning);
+    let reasoning = model.custom_reasoning_config(parameters.reasoning, model.max_output_tokens);
 
     let mut messages: RequestMessages = (&model.id, thread).try_into()?;
     let (tools, decoders) = convert_tools(tools);

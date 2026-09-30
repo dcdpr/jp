@@ -555,7 +555,7 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
     }
 
     // Reasoning effort for gpt-oss-120b and zai-glm-4.7.
-    let reasoning = model.custom_reasoning_config(parameters.reasoning);
+    let reasoning = model.custom_reasoning_config(parameters.reasoning, model.max_output_tokens);
     if let Some(r) = &reasoning {
         // `auto` asks for the server's own default rather than a level of our
         // choosing, so it omits the field instead of picking one.

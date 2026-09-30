@@ -229,7 +229,10 @@ fn create_request(
         convert_tool_choice(tool_choice)
     };
 
-    let reasoning = model.custom_reasoning_config(parameters.reasoning);
+    let reasoning = model.custom_reasoning_config(
+        parameters.reasoning,
+        max_output_tokens.map(i32::cast_unsigned),
+    );
     let supports_thinking = model.reasoning.is_some_and(|r| !r.is_unsupported());
 
     // Add thinking config if the model supports it.

@@ -1972,7 +1972,8 @@ fn create_request(
             DEFAULT_MAX_TOKENS as u32
         });
 
-    let reasoning_config = model.custom_reasoning_config(parameters.reasoning);
+    let reasoning_config =
+        model.custom_reasoning_config(parameters.reasoning, model.max_output_tokens);
 
     // Whether this request runs with thinking active. Configuring reasoning
     // turns it on; so does a model that always thinks (Fable 5), which keeps

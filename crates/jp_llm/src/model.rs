@@ -135,10 +135,18 @@ impl ModelDetails {
         self.display_name.as_deref().unwrap_or(&self.id.name)
     }
 
+    /// Resolve the reasoning configuration to send for this model.
+    ///
+    /// On a leveled model, an explicit effort is clamped to the nearest level
+    /// the model supports.
+    /// An absolute token effort is first converted to a level against
+    /// `max_tokens`, which must be the output limit the request itself resolves
+    /// absolute efforts against.
     #[must_use]
     pub fn custom_reasoning_config(
         &self,
         config: Option<ReasoningConfig>,
+        max_tokens: Option<u32>,
     ) -> Option<CustomReasoningConfig> {
         match self.reasoning {
             // Unknown support
@@ -235,7 +243,7 @@ impl ModelDetails {
                 Some(ReasoningConfig::Custom(custom)) => {
                     let requested = custom
                         .effort
-                        .abs_to_rel(self.max_output_tokens)
+                        .abs_to_rel(max_tokens)
                         .unwrap_or(custom.effort);
                     let effort = nearest_level(
                         requested,

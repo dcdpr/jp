@@ -1460,7 +1460,8 @@ fn create_request(
     let supports_reasoning = model
         .reasoning
         .is_none_or(|v| !matches!(v, ReasoningDetails::Unsupported));
-    let custom_reasoning = model.custom_reasoning_config(parameters.reasoning);
+    let custom_reasoning =
+        model.custom_reasoning_config(parameters.reasoning, model.max_output_tokens);
     let reasoning_enabled = custom_reasoning.is_some();
     let mut reasoning = match custom_reasoning {
         Some(r) => Some(convert_reasoning(r, model)),
