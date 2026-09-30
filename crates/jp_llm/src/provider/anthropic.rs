@@ -2210,19 +2210,36 @@ fn create_request(
         builder.output_config(OutputConfig { effort, format });
     }
 
-    if let Some(temperature) = parameters.temperature {
-        builder.temperature(temperature);
-    }
-
     #[expect(clippy::cast_possible_wrap)]
     builder.max_tokens(max_tokens as i32);
 
-    if let Some(top_p) = parameters.top_p {
-        builder.top_p(top_p);
-    }
-
-    if let Some(top_k) = parameters.top_k {
-        builder.top_k(top_k);
+    // A model absent from the override table gets no sampling parameters: every
+    // model since Claude 4.7 rejects them with a 400, so dropping a setting
+    // with a warning beats failing the request.
+    if model.features.contains(&SAMPLING_PARAMETERS) {
+        if let Some(temperature) = parameters.temperature {
+            builder.temperature(temperature);
+        }
+        if let Some(top_p) = parameters.top_p {
+            builder.top_p(top_p);
+        }
+        if let Some(top_k) = parameters.top_k {
+            builder.top_k(top_k);
+        }
+    } else {
+        for (parameter, configured) in [
+            ("temperature", parameters.temperature.is_some()),
+            ("top_p", parameters.top_p.is_some()),
+            ("top_k", parameters.top_k.is_some()),
+        ] {
+            if configured {
+                warn!(
+                    id = %model.id,
+                    parameter,
+                    "Model is not known to accept sampling parameters; ignoring."
+                );
+            }
+        }
     }
 
     // See: <https://docs.claude.com/en/docs/build-with-claude/context-editing>
@@ -2343,6 +2360,12 @@ fn adaptive_effort(
 /// model writes between tool calls (Sonnet 5.5).
 const BETWEEN_TOOLS_THINKING: &str = "between-tools-thinking";
 
+/// Feature flag: the model accepts `temperature`, `top_p`, and `top_k`.
+///
+/// Every model from Claude 4.7 onwards rejects a non-default value for any of
+/// them with a 400, so they are only sent when this flag is present.
+const SAMPLING_PARAMETERS: &str = "sampling-parameters";
+
 /// Model facts the capabilities API does not report.
 ///
 /// Everything else (token limits, reasoning mode and effort ladder, structured
@@ -2368,6 +2391,10 @@ struct ModelOverrides {
     /// Rejected from Opus 4.7 onwards.
     prefill: bool,
 
+    /// Whether `temperature`, `top_p`, and `top_k` are accepted.
+    /// Rejected from Claude 4.7 onwards.
+    sampling: bool,
+
     /// Whether reasoning cannot be turned off, as on Fable 5.
     always_on: bool,
 
@@ -2386,6 +2413,7 @@ impl ModelOverrides {
             knowledge_cutoff: None,
             deprecated: ModelDeprecation::Active,
             prefill: false,
+            sampling: false,
             always_on: false,
             between_tools: false,
         }
@@ -2479,6 +2507,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             aliases: &[],
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2025, 8),
+                sampling: true,
                 ..ModelOverrides::new("claude-sonnet-4-6")
             },
         },
@@ -2486,6 +2515,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             aliases: &["claude-opus-4-6-20260205"],
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2025, 8),
+                sampling: true,
                 ..ModelOverrides::new("claude-opus-4-6")
             },
         },
@@ -2494,6 +2524,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2025, 8),
                 prefill: true,
+                sampling: true,
                 ..ModelOverrides::new("claude-opus-4-5")
             },
         },
@@ -2502,6 +2533,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2025, 7),
                 prefill: true,
+                sampling: true,
                 ..ModelOverrides::new("claude-haiku-4-5")
             },
         },
@@ -2510,6 +2542,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2025, 7),
                 prefill: true,
+                sampling: true,
                 ..ModelOverrides::new("claude-sonnet-4-5")
             },
         },
@@ -2522,6 +2555,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
                     NaiveDate::from_ymd_opt(2026, 8, 5),
                 ),
                 prefill: true,
+                sampling: true,
                 ..ModelOverrides::new("claude-opus-4-1")
             },
         },
@@ -2568,6 +2602,9 @@ fn map_model(model: types::Model) -> Result<ModelDetails> {
     let mut features = derive_features(&model.capabilities);
     if overrides.is_some_and(|o| o.between_tools) {
         features.push(BETWEEN_TOOLS_THINKING);
+    }
+    if overrides.is_some_and(|o| o.sampling) {
+        features.push(SAMPLING_PARAMETERS);
     }
 
     let mut reasoning = derive_reasoning(&model.capabilities);
