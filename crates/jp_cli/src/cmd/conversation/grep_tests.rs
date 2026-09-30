@@ -3,6 +3,7 @@ use std::time::Duration;
 use camino_tempfile::tempdir;
 use chrono::{TimeZone as _, Utc};
 use clap::Parser as _;
+use crossterm::style::Stylize as _;
 use jp_config::AppConfig;
 use jp_conversation::{
     Conversation, ConversationEvent, ConversationId, Labels,
@@ -2791,6 +2792,136 @@ fn json_submatches_cover_every_pattern_in_order_of_position() {
             { "match": "beta-mark", "start": 15, "end": 24 },
         ])
     );
+}
+
+// --- escape sequences -------------------------------------------------------
+
+#[test]
+fn a_terminal_shows_hits_without_their_escapes() {
+    // A stored message can carry an erase or a window title; a terminal would
+    // run either one if the hit showed it.
+    let id = make_id(17_000);
+    let (mut ctx, out) = setup_pretty(
+        vec![(
+            id,
+            turn(vec![ConversationEvent::new(
+                ChatRequest::from("\x1b[2Jrho-mark\x1b]0;pwned\x07 here"),
+                ts(),
+            )]),
+        )],
+        80,
+    );
+
+    grep("rho-mark").run(&mut ctx, vec![]).unwrap();
+    ctx.printer.flush();
+    let raw = out.lock().clone();
+
+    assert!(!raw.contains("\x1b[2J"), "raw: {raw:?}");
+    assert!(!raw.contains("\x1b]0;"), "raw: {raw:?}");
+    assert_eq!(lines(&raw)[1], "  1:user:rho-mark here");
+}
+
+#[test]
+fn a_terminal_highlights_the_match_where_it_is_shown() {
+    // The match follows a sequence the terminal isn't shown, so it sits earlier
+    // in the shown text than in the stored one.
+    let id = make_id(17_100);
+    let (mut ctx, out) = setup_pretty(
+        vec![(
+            id,
+            turn(vec![ConversationEvent::new(
+                ChatRequest::from("\x1b[31msigma-mark\x1b[0m"),
+                ts(),
+            )]),
+        )],
+        80,
+    );
+
+    grep("sigma-mark").run(&mut ctx, vec![]).unwrap();
+    ctx.printer.flush();
+    let raw = out.lock().clone();
+
+    assert!(
+        raw.contains(&"sigma-mark".red().bold().to_string()),
+        "raw: {raw:?}"
+    );
+}
+
+#[test]
+fn a_terminal_shows_the_heading_title_without_its_escapes() {
+    // The heading cuts a long title to the columns beside the stats, counting
+    // every character it is given: an escape left in spends columns the
+    // terminal never shows, and can be cut in half.
+    let id = make_id(17_200);
+    let conv = Conversation {
+        title: Some("Deploy\x1b[2J plan for the quarter".into()),
+        ..Default::default()
+    };
+    let (mut ctx, out) = setup_conversations_with(
+        vec![(
+            id,
+            conv,
+            turn(vec![ConversationEvent::new(
+                ChatRequest::from("tau-mark"),
+                ts(),
+            )]),
+        )],
+        OutputFormat::TextPretty,
+        OutputWidth::Terminal(50),
+    );
+
+    grep("tau-mark").run(&mut ctx, vec![]).unwrap();
+    ctx.printer.flush();
+    let raw = out.lock().clone();
+
+    assert!(!raw.contains("\x1b[2J"), "raw: {raw:?}");
+    assert_eq!(
+        lines(&raw)[0],
+        format!("{id}  Deploy plan for the…  1 match · 1 turn")
+    );
+}
+
+#[test]
+fn output_text_in_a_terminal_drops_escapes() {
+    let id = make_id(17_300);
+    let (mut ctx, out) = setup_pretty(
+        vec![(
+            id,
+            turn(vec![ConversationEvent::new(
+                ChatRequest::from("upsilon-mark\x1b[2J here"),
+                ts(),
+            )]),
+        )],
+        80,
+    );
+
+    let grep = Grep {
+        output: OutputKind::Text,
+        ..grep("upsilon-mark")
+    };
+    grep.run(&mut ctx, vec![]).unwrap();
+    ctx.printer.flush();
+
+    assert_eq!(out.lock().as_str(), "upsilon-mark here\n");
+}
+
+#[test]
+fn json_hits_carry_the_stored_text() {
+    // Only a terminal is shown filtered text: a machine reader gets the data.
+    let id = make_id(17_400);
+    let (mut ctx, out) = setup_json(vec![(
+        id,
+        turn(vec![ConversationEvent::new(
+            ChatRequest::from("\x1b[2Jphi-mark"),
+            ts(),
+        )]),
+    )]);
+
+    grep("phi-mark").run(&mut ctx, vec![]).unwrap();
+    ctx.printer.flush();
+    let parsed: Value = serde_json::from_str(&out.lock().clone()).unwrap();
+
+    assert_eq!(parsed[0]["text"], "\u{1b}[2Jphi-mark");
 }
 
 // --- flags ------------------------------------------------------------------

@@ -15,6 +15,24 @@ fn sanitize_mode_follows_the_style_setting() {
     assert_eq!(sanitize_mode(Sanitization::Off), SanitizeMode::Off);
 }
 
+#[test]
+fn derived_text_is_filtered_for_pretty_output_only() {
+    let title = "Evil\x1b[2J title";
+
+    assert_eq!(
+        DerivedText::new(true, Sanitization::Strip).show(title),
+        "Evil title"
+    );
+    assert_eq!(
+        DerivedText::new(true, Sanitization::Visualize).show(title),
+        "Evil\u{241b} title"
+    );
+    assert_eq!(
+        DerivedText::new(false, Sanitization::Strip).show(title),
+        title
+    );
+}
+
 /// Values are listed beneath their key rather than comma-separated, because a
 /// value may contain a comma itself.
 #[test]

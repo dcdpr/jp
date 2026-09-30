@@ -17,6 +17,7 @@ use crate::{
         label::{self, LabelSelector},
     },
     ctx::Ctx,
+    format::DerivedText,
     output::print_table,
 };
 
@@ -158,12 +159,19 @@ impl Ls {
             Some(handles.iter().map(ConversationHandle::id).collect())
         };
 
+        // Only a terminal is shown the filtered title, so the JSON payload
+        // keeps the stored one.
+        let derived = DerivedText::new(
+            ctx.printer.pretty_printing_enabled(),
+            ctx.config().style.sanitize,
+        );
+
         let to_details =
             |id: ConversationId, c: &Conversation, local: bool, external: bool| Details {
                 active: active_conversation_id == Some(id),
                 pinned_at: c.pinned_at,
                 archived_at: c.archived_at,
-                title: c.title.clone(),
+                title: c.title.as_deref().map(|t| derived.show(t).into_owned()),
                 messages: c.events_count,
                 last_event_at: c.last_event_at.or(Some(id.timestamp())),
                 expires_at: c.expires_at,

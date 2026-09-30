@@ -2,10 +2,15 @@ pub(crate) mod conversation;
 pub(crate) mod datetime;
 pub(crate) mod workspace;
 
+use std::borrow::Cow;
+
 use indexmap::IndexSet;
 use jp_config::{style::Sanitization, types::color::Color};
 use jp_conversation::{ByteSize, Compaction, Labels, ToolCallPolicy};
-use jp_term::{sanitize::SanitizeMode, table::DetailItem};
+use jp_term::{
+    sanitize::{ContentClass, SanitizeMode, sanitize_str},
+    table::DetailItem,
+};
 use serde_json::json;
 use url::Url;
 
@@ -225,6 +230,40 @@ pub(crate) const fn sanitize_mode(setting: Sanitization) -> SanitizeMode {
         Sanitization::Strip => SanitizeMode::Strip,
         Sanitization::Visualize => SanitizeMode::Visualize,
         Sanitization::Off => SanitizeMode::Off,
+    }
+}
+
+/// Shows strings derived from a conversation, such as its title or a line `jp
+/// conversation grep` found, the way `style.sanitize` asks.
+///
+/// Only pretty output is filtered.
+/// Every other format gets the string as stored: the printer strips escape
+/// sequences from those itself, and a machine reader wants the data.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DerivedText {
+    /// The mode pretty output is filtered under, or `None` for any other
+    /// format.
+    mode: Option<SanitizeMode>,
+}
+
+impl DerivedText {
+    /// Filter under `setting` when output is `pretty`.
+    pub(crate) const fn new(pretty: bool, setting: Sanitization) -> Self {
+        let mode = if pretty {
+            Some(sanitize_mode(setting))
+        } else {
+            None
+        };
+
+        Self { mode }
+    }
+
+    /// `text` as it is shown.
+    pub(crate) fn show(self, text: &str) -> Cow<'_, str> {
+        match self.mode {
+            Some(mode) => Cow::Owned(sanitize_str(text, ContentClass::DerivedString, mode)),
+            None => Cow::Borrowed(text),
+        }
     }
 }
 

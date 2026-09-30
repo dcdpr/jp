@@ -1,6 +1,62 @@
+use camino_tempfile::tempdir;
+use jp_config::AppConfig;
+use jp_printer::{OutputFormat, OutputWidth, Printer, SharedBuffer};
+use jp_workspace::Workspace;
 use strip_ansi_escapes::strip_str;
 
 use super::*;
+use crate::Globals;
+
+/// A context whose workspace holds `conversations`, printing in `format` to the
+/// returned buffer.
+fn setup(
+    conversations: Vec<(ConversationId, Conversation)>,
+    format: OutputFormat,
+) -> (Ctx, SharedBuffer) {
+    let tmp = tempdir().unwrap();
+    let workspace = Workspace::in_memory(tmp.path());
+    let (printer, out, _err) = Printer::memory(format);
+    let printer = printer.with_output_width(OutputWidth::Terminal(120));
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        None,
+        tokio::runtime::Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    for (id, conversation) in conversations {
+        ctx.workspace
+            .create_conversation_with_id(id, conversation, ctx.config());
+    }
+
+    (ctx, out)
+}
+
+/// `jp conversation ls` with no flags.
+fn ls() -> Ls {
+    Ls {
+        target: PositionalIds::default(),
+        sort: None,
+        descending: false,
+        limit: None,
+        full: false,
+        local: false,
+        archived: false,
+        labels: vec![],
+    }
+}
+
+/// A conversation created a fixed time after the epoch.
+fn conversation_id() -> ConversationId {
+    ConversationId::try_from(
+        DateTime::<Utc>::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000),
+    )
+    .unwrap()
+}
 
 #[test]
 fn fit_title_is_full_within_width() {
@@ -74,6 +130,42 @@ fn local_cell_marks_external_distinctly() {
     assert_eq!(strip_str(local_cell(false, false)), "N");
     assert_eq!(strip_str(local_cell(true, false)), "Y");
     assert_eq!(strip_str(local_cell(false, true)), "ext");
+}
+
+#[test]
+fn a_terminal_shows_a_title_without_its_escapes() {
+    let conversation = Conversation {
+        title: Some("Evil\x1b[2J title".into()),
+        ..Default::default()
+    };
+    let (mut ctx, out) = setup(
+        vec![(conversation_id(), conversation)],
+        OutputFormat::TextPretty,
+    );
+
+    ls().run(&mut ctx, &[]).unwrap();
+    ctx.printer.flush();
+    let raw = out.lock().clone();
+
+    assert!(!raw.contains("\x1b[2J"), "raw: {raw:?}");
+    assert!(strip_str(&raw).contains("Evil title"), "raw: {raw:?}");
+}
+
+#[test]
+fn json_keeps_a_title_as_stored() {
+    // Only a terminal is shown the filtered title: a machine reader gets the
+    // data.
+    let conversation = Conversation {
+        title: Some("Evil\x1b[2J title".into()),
+        ..Default::default()
+    };
+    let (mut ctx, out) = setup(vec![(conversation_id(), conversation)], OutputFormat::Json);
+
+    ls().run(&mut ctx, &[]).unwrap();
+    ctx.printer.flush();
+    let items: serde_json::Value = serde_json::from_str(&out.lock().clone()).unwrap();
+
+    assert_eq!(items[0]["title"], "Evil\u{1b}[2J title");
 }
 
 #[test]
