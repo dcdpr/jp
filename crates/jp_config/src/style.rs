@@ -64,7 +64,7 @@ pub struct StyleConfig {
     /// never contain control characters, tool questions are shown as plain
     /// text, styling left open by a message or tool result ends with it, and
     /// plain-text and JSON output never contain escape sequences.
-    #[setting(default, schema_union_with = sanitization_input_shapes)]
+    #[setting(default, schema_union_with = boolean_shorthand)]
     pub sanitize: Sanitization,
 
     /// Fenced code block style.
@@ -291,26 +291,37 @@ impl<'de> Deserialize<'de> for Sanitization {
     }
 }
 
-/// The boolean shorthand `style.sanitize` accepts, for the schema.
+/// The boolean shorthand of an enum setting whose `Deserialize` also takes
+/// `true` and `false`, for the schema.
 ///
-/// The mode names and their `"true"` and `"false"` spellings come from
-/// [`Sanitization`] itself; a bare boolean is what its `Deserialize` also
-/// takes, which an enum cannot describe.
-fn sanitization_input_shapes(schema: &SchemaBuilder) -> Vec<Schema> {
+/// The enum's names and their `"true"` and `"false"` spellings come from the
+/// enum itself; a bare boolean is a shape an enum cannot describe.
+pub(crate) fn boolean_shorthand(schema: &SchemaBuilder) -> Vec<Schema> {
     vec![schema.nest().boolean(BooleanType::default())]
 }
 
 /// Formatting style for links.
+///
+/// Written as a style name, or as `true` for `full` and `false` for `off`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, ConfigEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum LinkStyle {
     /// No link.
+    #[variant(aliases("false"))]
     Off,
     /// Unformatted link.
+    #[variant(aliases("true"))]
     Full,
     /// Link with OSC-8 escape sequences.
     #[default]
     Osc8,
+}
+
+impl From<bool> for LinkStyle {
+    /// `true` is `full` and `false` is `off`.
+    fn from(v: bool) -> Self {
+        if v { Self::Full } else { Self::Off }
+    }
 }
 
 impl<'de> Deserialize<'de> for LinkStyle {
@@ -331,11 +342,7 @@ impl<'de> Deserialize<'de> for LinkStyle {
             where
                 E: serde::de::Error,
             {
-                if v {
-                    Ok(LinkStyle::Full)
-                } else {
-                    Ok(LinkStyle::Off)
-                }
+                Ok(LinkStyle::from(v))
             }
 
             fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
@@ -343,8 +350,8 @@ impl<'de> Deserialize<'de> for LinkStyle {
                 E: serde::de::Error,
             {
                 match v {
-                    "off" => Ok(LinkStyle::Off),
-                    "full" => Ok(LinkStyle::Full),
+                    "off" | "false" => Ok(LinkStyle::Off),
+                    "full" | "true" => Ok(LinkStyle::Full),
                     "osc8" => Ok(LinkStyle::Osc8),
                     _ => Err(serde::de::Error::unknown_variant(v, &[
                         "off", "full", "osc8",

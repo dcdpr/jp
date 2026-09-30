@@ -13,6 +13,52 @@ fn test_link_style_deserialization() {
 }
 
 #[test]
+fn link_style_reads_true_and_false_written_as_strings() {
+    // `--cfg KEY=false` hands the value over as a string, and so does a config
+    // file that quotes it.
+    assert_eq!("true".parse::<LinkStyle>().unwrap(), LinkStyle::Full);
+    assert_eq!("false".parse::<LinkStyle>().unwrap(), LinkStyle::Off);
+    assert_eq!(from_str::<LinkStyle>(r#""true""#).unwrap(), LinkStyle::Full);
+    assert_eq!(from_str::<LinkStyle>(r#""false""#).unwrap(), LinkStyle::Off);
+}
+
+#[test]
+fn a_boolean_link_style_is_written_as_the_style_it_names() {
+    let off = from_str::<LinkStyle>("false").unwrap();
+
+    assert_eq!(serde_json::to_string(&off).unwrap(), r#""off""#);
+}
+
+#[test]
+fn code_links_can_be_set_to_a_boolean_with_cfg() {
+    // `KEY=false` arrives as a string and `KEY:=true` as JSON; both spellings
+    // mean the same thing.
+    let mut partial = PartialAppConfig::default();
+
+    partial
+        .assign(KvAssignment::try_from_cli("style.code.file_link", "false").unwrap())
+        .unwrap();
+    partial
+        .assign(KvAssignment::try_from_cli("style.code.copy_link:", "true").unwrap())
+        .unwrap();
+
+    assert_eq!(partial.style.code.file_link, Some(LinkStyle::Off));
+    assert_eq!(partial.style.code.copy_link, Some(LinkStyle::Full));
+}
+
+#[test]
+fn code_links_can_be_set_to_a_boolean_from_the_environment() {
+    // `JP_CFG_STYLE_CODE_FILE_LINK=false`, as `from_envs` hands it over.
+    let mut partial = PartialAppConfig::default();
+
+    partial
+        .assign(KvAssignment::try_from_env("style_code_file_link", "false").unwrap())
+        .unwrap();
+
+    assert_eq!(partial.style.code.file_link, Some(LinkStyle::Off));
+}
+
+#[test]
 fn sanitize_defaults_to_strip() {
     assert_eq!(AppConfig::new_test().style.sanitize, Sanitization::Strip);
 }

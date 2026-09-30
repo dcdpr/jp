@@ -1472,8 +1472,8 @@ providers: ProviderConfig
 style: StyleConfig
   code: CodeConfig
     color?: bool
-    copy_link?: "off" | "full" | "osc8"
-    file_link?: "off" | "full" | "osc8"
+    copy_link?: bool | "off" (aka false) | "full" (aka true) | "osc8"
+    file_link?: bool | "off" (aka false) | "full" (aka true) | "osc8"
     line_numbers?: bool
   inline_code: InlineCodeConfig
     background: int | string | null
