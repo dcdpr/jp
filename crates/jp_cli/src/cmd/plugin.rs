@@ -26,6 +26,7 @@ mod uninstall;
 mod update;
 
 use jp_printer::Printer;
+use tokio_util::sync::CancellationToken;
 
 use crate::{KeyValueOrPath, cmd};
 
@@ -76,8 +77,27 @@ impl PluginManagement {
             PluginCmd::Install(cmd) => cmd.run(printer, interactive).await,
             PluginCmd::Uninstall(cmd) => cmd.run(printer),
             PluginCmd::Update(cmd) => cmd.run(printer, cfg).await,
-            PluginCmd::Approve(cmd) => cmd.run(printer, cfg),
+            PluginCmd::Approve(cmd) => cmd.run(printer, cfg, &cancel_on_ctrl_c()),
             PluginCmd::Revoke(cmd) => cmd.run(printer),
         }
     }
+}
+
+/// A token the first Ctrl-C cancels.
+///
+/// `jp plugin` runs without the signal router, so Ctrl-C would otherwise end
+/// `jp` at once, before it could stop a plugin it is running.
+/// Listening also takes the signal's default action away for the rest of the
+/// process, so only a command that watches the token may ask for one.
+fn cancel_on_ctrl_c() -> CancellationToken {
+    let token = CancellationToken::new();
+    let cancel = token.clone();
+
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            cancel.cancel();
+        }
+    });
+
+    token
 }

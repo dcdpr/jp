@@ -172,7 +172,7 @@ fn approve(tmp: &Utf8TempDir, path: &Utf8Path, cfg: &[&str]) -> Result<(), Strin
     Approve {
         path: path.to_owned(),
     }
-    .run(&printer, &cfg)
+    .run(&printer, &cfg, &CancellationToken::new())
     .map_err(|e| e.message.unwrap_or_default())
 }
 

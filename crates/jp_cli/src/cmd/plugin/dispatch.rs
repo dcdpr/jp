@@ -55,6 +55,7 @@ use tokio::{
     sync::mpsc::{self, error::TrySendError},
     task::JoinSet,
 };
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 
 use super::{
@@ -64,7 +65,7 @@ use super::{
     help, install, output,
     process_tree::ProcessTree,
     registry::{self, Refresh},
-    routing::{self, Route},
+    routing::{self, Route, RouteError},
 };
 use crate::{
     Ctx, KeyValueOrPath, cmd,
@@ -2463,16 +2464,28 @@ fn check_not_denied(name: &str, plugins_config: &PluginsConfig) -> Result<(), cm
 /// For a binary without a manifest there is nothing to compare, and the caller
 /// decides what the answer is worth.
 ///
+/// Cancelling `cancel` stops the plugin and everything it started, and the call
+/// fails as interrupted.
+///
 /// # Errors
 ///
 /// Fails when the plugin gives no answer, an answer whose manifest fields are
-/// unusable, or one that disagrees with its manifest.
-pub(crate) fn describe(plugin: &LocalPlugin) -> Result<DescribeResponse, cmd::Error> {
+/// unusable, or one that disagrees with its manifest, and when `cancel` is
+/// cancelled before it answers.
+pub(crate) fn describe(
+    plugin: &LocalPlugin,
+    cancel: &CancellationToken,
+) -> Result<DescribeResponse, cmd::Error> {
     let name = &plugin.name;
     let path = &plugin.path;
 
-    let answer = describe_plugin(path)
-        .ok_or_else(|| format!("the plugin `{name}` at {path} did not describe itself"))?;
+    let answer = describe_plugin(path, cancel);
+    if cancel.is_cancelled() {
+        return Err(cmd::Error::interrupted());
+    }
+
+    let answer =
+        answer.ok_or_else(|| format!("the plugin `{name}` at {path} did not describe itself"))?;
 
     answer
         .manifest
@@ -2518,7 +2531,13 @@ fn manifest_differences(a: &Manifest, b: &Manifest) -> Vec<&'static str> {
 /// The plugin and everything it started are killed once the answer is read, or
 /// once reading it failed: the plugin has nothing left to do, and one that
 /// keeps running would otherwise be waited on forever.
-fn describe_plugin(binary: &Utf8Path) -> Option<DescribeResponse> {
+/// They are killed as well when `cancel` is cancelled before the answer comes,
+/// which ends the read, and `None` is returned.
+fn describe_plugin(binary: &Utf8Path, cancel: &CancellationToken) -> Option<DescribeResponse> {
+    if cancel.is_cancelled() {
+        return None;
+    }
+
     let mut command = Command::new(binary);
     command
         .stdin(Stdio::piped())
@@ -2533,9 +2552,34 @@ fn describe_plugin(binary: &Utf8Path) -> Option<DescribeResponse> {
     }
 
     let mut child = command.spawn().ok()?;
-    let tree = ProcessTree::new(&child);
+    let tree = Arc::new(ProcessTree::new(&child));
+
+    // The read below blocks, so a cancellation is acted on from a thread of
+    // its own: killing the tree closes the plugin's stdout, which ends the
+    // read.
+    let done = CancellationToken::new();
+    let watcher = {
+        let (tree, cancel, done) = (Arc::clone(&tree), cancel.clone(), done.clone());
+        thread::spawn(move || {
+            let cancelled = futures::executor::block_on(async {
+                tokio::select! {
+                    () = cancel.cancelled() => true,
+                    () = done.cancelled() => false,
+                }
+            });
+
+            if cancelled {
+                tree.terminate();
+            }
+        })
+    };
 
     let answer = read_describe(&mut child);
+
+    // Joined before the child is reaped, so nothing signals the group once its
+    // id can be reused.
+    done.cancel();
+    drop(watcher.join());
 
     tree.terminate();
     drop(child.wait());
@@ -2572,17 +2616,33 @@ fn read_describe(child: &mut Child) -> Option<DescribeResponse> {
 /// Running a command a plugin on this machine claims never reaches the network.
 async fn registry_for(args: &[String], local: &[LocalPlugin]) -> Option<Registry> {
     let cached = registry::load_cached();
+    let route = routing::route(args, local, cached.as_ref());
 
-    let unclaimed = matches!(
-        routing::route(args, local, cached.as_ref()),
-        Ok(Route::NotFound | Route::ThirdParty { .. } | Route::Official { binary: None, .. })
-    );
-
-    if unclaimed && let Some(fresh) = registry::refresh(Refresh::WhenStale).await {
+    if needs_registry(args, &route)
+        && let Some(fresh) = registry::refresh(Refresh::WhenStale).await
+    {
         return Some(fresh);
     }
 
     cached
+}
+
+/// Whether routing `args` against the cached registry leaves the command to
+/// something only the registry can supply.
+///
+/// A command group answers for itself and its help, but a command under it that
+/// the cache does not list may have been published since the cache was written.
+fn needs_registry(args: &[String], route: &Result<Route<'_>, RouteError>) -> bool {
+    match route {
+        Ok(Route::NotFound | Route::ThirdParty { .. } | Route::Official { binary: None, .. }) => {
+            true
+        }
+        Ok(Route::Group { consumed, .. }) => {
+            let rest = &args[*consumed..];
+            !rest.is_empty() && !is_help(rest)
+        }
+        _ => false,
+    }
 }
 
 /// The plugin binaries on this machine, with the manifests their approvals
@@ -2644,13 +2704,16 @@ fn is_help(rest: &[String]) -> bool {
 
 /// Show a plugin's help, from a fresh `describe`, and the commands other
 /// plugins add under it.
+///
+/// `cancel` stops the plugin if it is cancelled before the plugin answers.
 fn show_help(
     plugin: &LocalPlugin,
     path: &[String],
     local: &[LocalPlugin],
     registry: Option<&Registry>,
+    cancel: &CancellationToken,
 ) -> cmd::Output {
-    let describe = describe(plugin)?;
+    let describe = describe(plugin, cancel)?;
 
     let mut out = std::io::stdout().lock();
     drop(writeln!(out, "{}", describe.help.trim_end()));
@@ -2851,7 +2914,16 @@ pub(crate) async fn run_external(args: &[String], ctx: &mut Ctx) -> cmd::Output 
 
     let rest = &args[consumed..];
     if is_help(rest) {
-        return show_help(plugin, &args[..consumed], &local, registry.as_ref());
+        // A Ctrl-C with no handler pushed cancels the shutdown token, which
+        // stops the plugin rather than leaving it running once `jp` exits.
+        let cancel = ctx.signals.shutdown_token();
+        return show_help(
+            plugin,
+            &args[..consumed],
+            &local,
+            registry.as_ref(),
+            &cancel,
+        );
     }
 
     let (name, binary) = (plugin.name.clone(), plugin.path.clone());

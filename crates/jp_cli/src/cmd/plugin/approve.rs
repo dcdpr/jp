@@ -5,6 +5,7 @@ use chrono::Utc;
 use jp_config::{PartialAppConfig, plugins::command::RunPolicy};
 use jp_plugin::{PROTOCOL_VERSION, registry::ApprovedPlugin};
 use jp_printer::Printer;
+use tokio_util::sync::CancellationToken;
 
 use super::{
     admission::pin_mismatch,
@@ -26,7 +27,16 @@ pub(crate) struct Approve {
 }
 
 impl Approve {
-    pub(crate) fn run(&self, printer: &Printer, cfg: &[KeyValueOrPath]) -> cmd::Output {
+    /// Run the binary once to describe itself, and record the approval.
+    ///
+    /// `cancel` stops the plugin if it is cancelled while the plugin is
+    /// describing itself.
+    pub(crate) fn run(
+        &self,
+        printer: &Printer,
+        cfg: &[KeyValueOrPath],
+        cancel: &CancellationToken,
+    ) -> cmd::Output {
         // Named by the file given, the way discovery names it: a link on
         // `$PATH` into a versioned install is the plugin its link name says,
         // whatever the file it points at is called.
@@ -78,7 +88,7 @@ impl Approve {
         };
 
         let recorded = approval_manifest(&plugin)?;
-        let answer = dispatch::describe(&plugin)?;
+        let answer = dispatch::describe(&plugin, cancel)?;
 
         if answer.manifest.protocol > PROTOCOL_VERSION {
             return Err(format!(

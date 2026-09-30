@@ -3,7 +3,7 @@ use chrono::Utc;
 use jp_conversation::{Conversation, ConversationId, event::ChatResponse};
 use jp_plugin::{
     message::{ExitMessage, InterruptRequest, OptionalId, ReadEventsRequest, ReadyMessage},
-    registry::ApprovedPlugin,
+    registry::{ApprovedPlugin, PluginKind, RegistryPlugin},
 };
 use jp_storage::backend::{FsStorageBackend, PersistBackend as _};
 use relative_path::RelativePathBuf;
@@ -1876,7 +1876,7 @@ echo '{"type":"describe","protocol":1,"name":"titles","version":"0.1.0","descrip
     };
     assert!(matches!(plugin.manifest, ManifestState::Valid(_)));
 
-    let error = describe(&plugin).unwrap_err();
+    let error = describe(&plugin, &CancellationToken::new()).unwrap_err();
 
     assert_eq!(
         error.message.as_deref(),
@@ -1923,7 +1923,7 @@ sleep 60
     // instead of hanging it.
     let (tx, rx) = mpsc::channel();
     let binary = path.clone();
-    thread::spawn(move || drop(tx.send(describe_plugin(&binary))));
+    thread::spawn(move || drop(tx.send(describe_plugin(&binary, &CancellationToken::new()))));
 
     let answer = rx
         .recv_timeout(Duration::from_secs(10))
@@ -1942,4 +1942,138 @@ sleep 60
         assert!(Instant::now() < deadline, "the worker outlived describe");
         thread::sleep(Duration::from_millis(20));
     }
+}
+
+/// A plugin that starts a worker and never answers: cancelling the describe, as
+/// Ctrl-C does, stops it and the worker, and reports the call as interrupted.
+///
+/// Unix only: on Windows a plugin is a `jp-*.exe`, which a test cannot write as
+/// a script.
+#[cfg(unix)]
+#[test]
+fn a_cancelled_describe_stops_everything_the_plugin_started() {
+    use std::{os::unix::fs::PermissionsExt as _, sync::mpsc};
+
+    use crate::cmd::plugin::discovery::{Location, ManifestState};
+
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("jp-slow");
+    let pid_file = tmp.path().join("worker.pid");
+    fs::write(
+        &path,
+        format!("#!/bin/sh\nsleep 60 &\necho $! > {pid_file}\nsleep 60\n"),
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let plugin = LocalPlugin {
+        name: "slow".to_owned(),
+        path,
+        location: Location::Path,
+        manifest: ManifestState::Missing,
+    };
+
+    let cancel = CancellationToken::new();
+    let (tx, rx) = mpsc::channel();
+    {
+        let cancel = cancel.clone();
+        thread::spawn(move || {
+            let result = describe(&plugin, &cancel).map_err(|e| (e.code.get(), e.message));
+            drop(tx.send(result));
+        });
+    }
+
+    // Cancelled once the plugin is running, and before it could answer.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let worker: u32 = loop {
+        if let Ok(pid) = fs::read_to_string(&pid_file)
+            && let Ok(pid) = pid.trim().parse()
+        {
+            break pid;
+        }
+        assert!(Instant::now() < deadline, "the plugin never started");
+        thread::sleep(Duration::from_millis(20));
+    };
+    cancel.cancel();
+
+    let result = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("describe returned rather than waiting on the plugin");
+    assert_eq!(result.unwrap_err(), (130, Some("Interrupted".to_owned())));
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while is_process_alive(worker) {
+        assert!(Instant::now() < deadline, "the worker outlived the cancel");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// A registry with the official `serve` group and nothing under it.
+fn serve_group() -> Registry {
+    Registry {
+        version: 1,
+        plugins: [("serve".to_owned(), RegistryPlugin {
+            id: "serve".to_owned(),
+            description: "JP server components".to_owned(),
+            official: true,
+            repository: None,
+            kind: PluginKind::CommandGroup { suggests: vec![] },
+        })]
+        .into_iter()
+        .collect(),
+    }
+}
+
+fn needs(line: &str, registry: &Registry) -> bool {
+    let args: Vec<String> = line.split(' ').map(ToOwned::to_owned).collect();
+    let route = routing::route(&args, &[], Some(registry));
+    needs_registry(&args, &route)
+}
+
+/// A command published under a group after the cache was written routes to the
+/// group, which knows nothing of it: only a fresh registry can.
+#[test]
+fn an_unknown_command_under_a_group_needs_the_registry() {
+    let registry = serve_group();
+
+    assert!(needs("serve http-api", &registry));
+    assert!(needs("serve http-api --port 1", &registry));
+}
+
+/// The group itself, and its help, are answered from the cache.
+#[test]
+fn a_group_or_its_help_does_not_need_the_registry() {
+    let registry = serve_group();
+
+    assert!(!needs("serve", &registry));
+    assert!(!needs("serve -h", &registry));
+    assert!(!needs("serve --help", &registry));
+}
+
+#[test]
+fn a_command_nothing_claims_needs_the_registry() {
+    assert!(needs("frobnicate", &serve_group()));
+}
+
+/// Running a plugin installed on this machine never reaches the network.
+#[test]
+fn a_command_an_installed_plugin_claims_does_not_need_the_registry() {
+    use crate::cmd::plugin::discovery::{Location, ManifestState};
+
+    let local = [LocalPlugin {
+        name: "webui".to_owned(),
+        path: "/bin/jp-webui".into(),
+        location: Location::Path,
+        manifest: ManifestState::Valid(Manifest {
+            protocol: 1,
+            description: "Web UI".to_owned(),
+            command: vec!["serve".to_owned(), "web".to_owned()],
+        }),
+    }];
+    let args = vec!["serve".to_owned(), "web".to_owned()];
+    let registry = serve_group();
+
+    let route = routing::route(&args, &local, Some(&registry));
+
+    assert!(!needs_registry(&args, &route));
 }
