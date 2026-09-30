@@ -1122,7 +1122,7 @@ async fn text_streamed_during_an_approval_prompt_waits_for_it_to_close() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_restart_while_a_call_is_being_prepared_prepares_it_again() {
     timeout(Duration::from_secs(10), async {
-        let config = described_tool(&json!({"run": "unattended"}));
+        let config = described_tool(&json!({"run": "allow"}));
         let runs = Arc::new(AtomicUsize::new(0));
         let stalled = Arc::new(Notify::new());
         let source = StagedExecutor::source({
@@ -1170,7 +1170,7 @@ async fn a_restart_while_a_call_is_being_prepared_prepares_it_again() {
 async fn a_retried_response_withdraws_an_open_formatter_question() {
     timeout(Duration::from_secs(10), async {
         let mut config = described_tool(&json!({
-            "run": "unattended",
+            "run": "allow",
             "questions": {"confirm": {"target": "assistant"}},
         }));
         // Keep the retry backoff out of the test's runtime.
@@ -1219,7 +1219,7 @@ async fn a_retried_response_withdraws_an_open_formatter_question() {
 async fn a_stop_while_the_assistant_answers_a_formatters_question_cancels_it() {
     timeout(Duration::from_secs(10), async {
         let config = described_tool(&json!({
-            "run": "unattended",
+            "run": "allow",
             "questions": {"confirm": {"target": "assistant"}},
             "cancellation_response": "stopped",
         }));

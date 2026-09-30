@@ -1283,7 +1283,7 @@ fn test_builtin_config_merges_under_a_shadowing_local_tool() {
     );
     assert_eq!(
         tool.run,
-        Some(RunMode::Unattended),
+        Some(RunMode::Allow),
         "an unset `run` comes from the built-in, not from the global default"
     );
     assert!(

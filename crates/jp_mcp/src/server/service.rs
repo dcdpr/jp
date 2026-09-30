@@ -757,7 +757,7 @@ async fn run_call(
     // `format = "ask"` holds a user-configured command back until the Host has
     // admitted the call.
     let mut formatted_arguments = None;
-    if formats && tool.config.format() == FormatMode::Unattended {
+    if formats && tool.config.format() == FormatMode::Allow {
         match describe(inner, call, &tool, &arguments, &mut answers, cancellation).await? {
             Ok(description) => formatted_arguments = Some(description),
             Err(result) => return record_without_executing(inner, call, arguments, result).await,
@@ -942,7 +942,7 @@ async fn deliver_result(
     } else {
         match tool.config.result() {
             ResultMode::Skip => ToolResult::text("Result delivery skipped by configuration."),
-            ResultMode::Unattended => raw_result.clone(),
+            ResultMode::Allow => raw_result.clone(),
             mode @ (ResultMode::Ask | ResultMode::Edit) => {
                 ask(inner, call, |reply| Interaction::Review {
                     mode,

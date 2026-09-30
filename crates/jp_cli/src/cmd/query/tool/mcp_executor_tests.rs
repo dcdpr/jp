@@ -309,7 +309,7 @@ async fn an_unedited_review_reaches_the_service_through_a_real_call() {
 
 #[tokio::test]
 async fn a_denied_call_completes_without_executing() {
-    let fixture = Fixture::inquiring("unattended").await;
+    let fixture = Fixture::inquiring("allow").await;
     let executor = fixture.executor(&json!({}));
     assert!(matches!(
         executor.prepare(false, CancellationToken::new()).await,
@@ -387,7 +387,7 @@ async fn a_declined_inquiry_finishes_without_another_attempt() {
 
 #[tokio::test]
 async fn cancellation_before_release_does_not_execute() {
-    let fixture = Fixture::inquiring("unattended").await;
+    let fixture = Fixture::inquiring("allow").await;
     let executor = fixture.executor(&json!({}));
     assert!(matches!(
         executor.prepare(false, CancellationToken::new()).await,
@@ -438,7 +438,7 @@ async fn intercept<T>(
 /// another thread, before a cancellation noticed afterwards could stop it.
 #[tokio::test]
 async fn a_release_cancelled_before_it_runs_is_not_sent() {
-    let fixture = Fixture::inquiring("unattended").await;
+    let fixture = Fixture::inquiring("allow").await;
     let executor = fixture.executor(&json!({}));
     assert!(matches!(
         executor.prepare(false, CancellationToken::new()).await,
@@ -473,7 +473,7 @@ async fn a_release_cancelled_before_it_runs_is_not_sent() {
 /// run the tool again.
 #[tokio::test]
 async fn an_answer_cancelled_before_it_runs_is_not_sent() {
-    let fixture = Fixture::inquiring("unattended").await;
+    let fixture = Fixture::inquiring("allow").await;
     let executor = fixture.executor(&json!({}));
     assert!(matches!(
         executor.prepare(false, CancellationToken::new()).await,
@@ -519,7 +519,7 @@ async fn an_answer_cancelled_before_it_runs_is_not_sent() {
 /// would start a formatter held back until admission.
 #[tokio::test]
 async fn an_admission_cancelled_before_it_runs_is_not_sent() {
-    let fixture = Fixture::inquiring("unattended").await;
+    let fixture = Fixture::inquiring("allow").await;
     let executor = fixture.executor(&json!({}));
     assert!(matches!(
         executor.prepare(false, CancellationToken::new()).await,
@@ -553,7 +553,7 @@ async fn a_held_call_delivers_the_recorded_response_to_its_agent() {
     // by the model if it is what the agent receives.
     let count = Arc::new(AtomicUsize::new(0));
     let mut fixture = Fixture::start(
-        json!({"source": "builtin", "run": "unattended"}),
+        json!({"source": "builtin", "run": "allow"}),
         BlockingTool(count.clone()),
     )
     .await;
@@ -642,7 +642,7 @@ async fn a_held_call_delivers_the_recorded_response_to_its_agent() {
 /// once that request arrives.
 #[tokio::test]
 async fn a_call_held_before_its_agent_submits_it_delivers_the_recorded_response() {
-    let fixture = Fixture::inquiring("unattended").await;
+    let fixture = Fixture::inquiring("allow").await;
     fixture
         .source
         .set_execution(ToolExecution::Agent {
@@ -709,7 +709,7 @@ async fn a_protocol_failure_is_reported_as_a_failure_not_as_tool_output() {
     // Executing before the call is released puts the adapter and the service
     // out of step. That is JP's problem, so it must not arrive as a tool
     // result the model reads as "the tool said this".
-    let fixture = Fixture::inquiring("unattended").await;
+    let fixture = Fixture::inquiring("allow").await;
     let executor = fixture.executor(&json!({}));
 
     let result = executor
@@ -744,7 +744,7 @@ async fn a_call_lost_after_release_is_not_reported_as_unexecuted() {
     // model it did not run would invite it to repeat the side effect.
     let count = Arc::new(AtomicUsize::new(0));
     let mut fixture = Fixture::start(
-        json!({"source": "builtin", "run": "unattended"}),
+        json!({"source": "builtin", "run": "allow"}),
         VanishingTool(count.clone()),
     )
     .await;
@@ -776,7 +776,7 @@ async fn a_call_lost_after_release_is_not_reported_as_unexecuted() {
 
 #[tokio::test]
 async fn preparing_a_call_twice_is_refused() {
-    let fixture = Fixture::inquiring("unattended").await;
+    let fixture = Fixture::inquiring("allow").await;
     let executor = fixture.executor(&json!({}));
     assert!(matches!(
         executor.prepare(false, CancellationToken::new()).await,
@@ -797,7 +797,7 @@ async fn preparing_a_call_twice_is_refused() {
 
 #[tokio::test]
 async fn approval_is_refused_before_the_call_is_submitted() {
-    let fixture = Fixture::inquiring("unattended").await;
+    let fixture = Fixture::inquiring("allow").await;
     let executor = fixture.executor(&json!({}));
 
     let ExecutorResult::Failed(error) = executor.approve(CancellationToken::new()).await else {
@@ -816,7 +816,7 @@ async fn caller_metadata_cannot_claim_another_call() {
     // The correlation key is the Host's own, so an MCP call that arrives
     // without it (or with the wrong one) never reaches a Host route and fails
     // closed rather than borrowing another call's approval.
-    let fixture = Fixture::inquiring("unattended").await;
+    let fixture = Fixture::inquiring("allow").await;
     let _executor = fixture.executor(&json!({}));
 
     let mut params = CallToolRequestParams::new("example");

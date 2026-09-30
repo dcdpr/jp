@@ -83,7 +83,7 @@ fn an_inquiry_inherits_the_assistant_s_provider_parameters() {
             id = "anthropic/test"
 
             [conversation.tools.'*']
-            run = "unattended"
+            run = "allow"
 
             [assistant.model.parameters]
             verbosity = "high"

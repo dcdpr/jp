@@ -996,7 +996,7 @@ async fn release(host: &mut HostReceiver) {
 async fn cancellation_is_scoped_to_the_requesting_client_session() {
     let count = Arc::new(AtomicUsize::new(0));
     let mut fixture = fixture(
-        json!({"source":"builtin", "run":"ask", "result":"unattended"}),
+        json!({"source":"builtin", "run":"ask", "result":"allow"}),
         BuiltinExecutors::new().register("probe", Inquiring(count.clone())),
     )
     .await;
@@ -1080,7 +1080,7 @@ async fn large_result_reaches_external_client_byte_for_byte() {
     // value catches truncation, duplication, and newline changes.
     let payload = "line\n".repeat(48_000);
     let mut fixture = fixture(
-        json!({"source":"builtin", "run":"ask", "result":"unattended"}),
+        json!({"source":"builtin", "run":"ask", "result":"allow"}),
         BuiltinExecutors::new().register("probe", LargeResult(payload.clone())),
     )
     .await;

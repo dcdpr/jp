@@ -19,18 +19,18 @@ fn a_tool_keeps_its_own_print_stderr_through_the_loader() {
     let loaded: PartialAppConfig = toml::from_str(
         r#"
 [conversation.tools.'*']
-run = "unattended"
+run = "allow"
 
 [conversation.tools.'*'.style]
 inline_results = "off"
 
 [conversation.tools.loud]
 source = "local"
-run = "unattended"
+run = "allow"
 
 [conversation.tools.quiet]
 source = "local"
-run = "unattended"
+run = "allow"
 
 [conversation.tools.quiet.style]
 print_stderr = false
@@ -87,7 +87,7 @@ fn a_tool_keeps_its_own_joins_reasoning_through_the_loader() {
     let loaded: PartialAppConfig = toml::from_str(
         r#"
 [conversation.tools.'*']
-run = "unattended"
+run = "allow"
 
 [conversation.tools.'*'.style]
 inline_results = "off"
@@ -834,12 +834,12 @@ fn test_format_mode_survives_merge_with_persona_override() {
     use schematic::PartialConfig as _;
 
     // Simulate the real-world layering: MCP tool TOML sets `format =
-    // "unattended"`; persona later sets only `enable = true`. The
-    // resulting merged config must still have `format = Unattended`.
+    // "allow"`; persona later sets only `enable = true`. The
+    // resulting merged config must still have `format = Allow`.
     let mcp_toml = r#"
 source = "local"
 enable = false
-format = "unattended"
+format = "allow"
 command = "just"
 "#;
     let persona_toml = r"
@@ -851,7 +851,7 @@ enable = true
 
     base.merge(&(), next).unwrap();
 
-    assert_eq!(base.format, Some(FormatMode::Unattended));
+    assert_eq!(base.format, Some(FormatMode::Allow));
     assert_eq!(base.enable, Some(PartialEnableConfig::ON));
 }
 
@@ -860,12 +860,43 @@ fn test_format_mode_deserializes_from_toml() {
     let toml = r#"
 source = "local"
 enable = false
-format = "unattended"
+format = "allow"
 run = "ask"
 "#;
     let partial: PartialToolConfig = toml::from_str(toml).unwrap();
-    assert_eq!(partial.format, Some(FormatMode::Unattended));
+    assert_eq!(partial.format, Some(FormatMode::Allow));
     assert_eq!(partial.run, Some(RunMode::Ask));
+}
+
+/// `unattended` is the retired spelling of `allow`, and config files written
+/// before the rename keep working.
+#[test]
+fn unattended_reads_as_allow_and_writes_as_allow() {
+    let toml = r#"
+source = "local"
+run = "unattended"
+format = "unattended"
+result = "unattended"
+"#;
+    let partial: PartialToolConfig = toml::from_str(toml).unwrap();
+    assert_eq!(partial.run, Some(RunMode::Allow));
+    assert_eq!(partial.format, Some(FormatMode::Allow));
+    assert_eq!(partial.result, Some(ResultMode::Allow));
+
+    let written = serde_json::to_value(&partial).unwrap();
+    assert_eq!(written["run"], "allow");
+    assert_eq!(written["format"], "allow");
+    assert_eq!(written["result"], "allow");
+}
+
+#[test]
+fn unattended_is_accepted_from_the_command_line() {
+    let mut p = PartialToolsConfig::default_values(&()).unwrap().unwrap();
+
+    let kv = KvAssignment::try_from_cli("my_tool.run", "unattended").unwrap();
+    p.assign(kv).unwrap();
+
+    assert_eq!(p.tools.get("my_tool").unwrap().run, Some(RunMode::Allow));
 }
 
 #[test]
@@ -1312,13 +1343,12 @@ fn test_tool_config_json_merge_preserves_existing_fields() {
     });
 
     // Override only enable and run via a JSON object.
-    let kv =
-        KvAssignment::try_from_cli("my_tool:", r#"{"enable":true,"run":"unattended"}"#).unwrap();
+    let kv = KvAssignment::try_from_cli("my_tool:", r#"{"enable":true,"run":"allow"}"#).unwrap();
     p.assign(kv).unwrap();
 
     let tool = p.tools.get("my_tool").unwrap();
     assert_eq!(tool.enable, Some(PartialEnableConfig::ON));
-    assert_eq!(tool.run, Some(RunMode::Unattended));
+    assert_eq!(tool.run, Some(RunMode::Allow));
     // These must survive the merge.
     assert_eq!(tool.source, Some(ToolSource::Local { tool: None }));
     assert_eq!(

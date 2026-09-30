@@ -226,14 +226,14 @@ impl<'a> Resolver<'a> {
         optional: bool,
     ) -> Result<Approval> {
         match run {
-            LabelRunMode::Unattended => Ok(Approval::Approved),
+            LabelRunMode::Allow => Ok(Approval::Approved),
             LabelRunMode::Deny => Ok(Approval::Declined),
             // An unanswerable prompt is one of the ways an optional rule can't
             // be produced, which is exactly what it asked to have skipped.
             LabelRunMode::Ask if !self.interactive && optional => Ok(Approval::Declined),
             LabelRunMode::Ask if !self.interactive => Err(Error::Label(format!(
                 "label '{key}' needs confirmation to run `{cmd}`, but there is no terminal to ask \
-                 on; set `conversation.labels.{key}.run` to \"unattended\" or \"deny\""
+                 on; set `conversation.labels.{key}.run` to \"allow\" or \"deny\""
             ))),
             LabelRunMode::Ask => {
                 let question = format!("Run `{cmd}` for label '{key}'?");

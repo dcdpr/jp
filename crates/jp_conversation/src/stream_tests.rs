@@ -797,7 +797,7 @@ fn pop_and_trim_preserve_trailing_config_delta() {
     // The other global event variant: a config delta must survive the same
     // pruning paths as a compaction.
     let mut partial = PartialAppConfig::empty();
-    partial.conversation.tools.defaults.run = Some(RunMode::Unattended);
+    partial.conversation.tools.defaults.run = Some(RunMode::Allow);
 
     let mut stream = ConversationStream::new_test();
     stream.start_turn("hello");
@@ -1560,7 +1560,7 @@ fn test_roundtrip_empty_delta() {
 #[test]
 fn test_roundtrip_delta_with_tool_defaults() {
     let mut partial = jp_config::PartialAppConfig::empty();
-    partial.conversation.tools.defaults.run = Some(RunMode::Unattended);
+    partial.conversation.tools.defaults.run = Some(RunMode::Allow);
 
     let original = ConfigDelta::from(partial);
     let result = roundtrip_delta(original.clone());
@@ -1583,7 +1583,7 @@ fn test_roundtrip_delta_with_per_tool_overrides() {
         .tools
         .tools
         .insert("fs_read_file".into(), PartialToolConfig {
-            run: Some(RunMode::Unattended),
+            run: Some(RunMode::Allow),
             ..Default::default()
         });
     partial
@@ -1591,7 +1591,7 @@ fn test_roundtrip_delta_with_per_tool_overrides() {
         .tools
         .tools
         .insert("cargo_check".into(), PartialToolConfig {
-            run: Some(RunMode::Unattended),
+            run: Some(RunMode::Allow),
             ..Default::default()
         });
 
@@ -1898,7 +1898,7 @@ fn test_deserialize_config_delta_preserves_timestamp_on_bad_delta() {
 #[test]
 fn test_from_parts_tolerates_unknown_fields_in_config_deltas() {
     let mut partial = jp_config::PartialAppConfig::empty();
-    partial.conversation.tools.defaults.run = Some(RunMode::Unattended);
+    partial.conversation.tools.defaults.run = Some(RunMode::Allow);
     partial.style.code.color = Some(false);
 
     let mut stream = ConversationStream::new_test().with_config_delta(partial);
@@ -1923,8 +1923,50 @@ fn test_from_parts_tolerates_unknown_fields_in_config_deltas() {
     assert_eq!(result.len(), stream.len());
 
     let config = result.config().unwrap();
-    assert_eq!(config.conversation.tools.defaults.run, RunMode::Unattended);
+    assert_eq!(config.conversation.tools.defaults.run, RunMode::Allow);
     assert!(!config.style.code.color);
+}
+
+/// A conversation stored before `unattended` was renamed to `allow` carries the
+/// old spelling in its base config and its config deltas, and still loads.
+#[test]
+fn test_from_parts_reads_unattended_as_allow() {
+    let mut partial = jp_config::PartialAppConfig::empty();
+    partial.conversation.tools.defaults.run = Some(RunMode::Allow);
+
+    let mut stream = ConversationStream::new_test().with_config_delta(partial);
+    stream.start_turn(ChatRequest::from("hello"));
+
+    let (base_config, events) = stream.to_parts().unwrap();
+
+    // Written the way a stored conversation spells it.
+    let base_config: serde_json::Value = serde_json::from_str(
+        &serde_json::to_string(&base_config)
+            .unwrap()
+            .replace("\"allow\"", "\"unattended\""),
+    )
+    .unwrap();
+    let events: Vec<serde_json::Value> = serde_json::from_str(
+        &serde_json::to_string(&events)
+            .unwrap()
+            .replace("\"allow\"", "\"unattended\""),
+    )
+    .unwrap();
+    assert!(
+        serde_json::to_string(&events)
+            .unwrap()
+            .contains("unattended")
+    );
+
+    let result = ConversationStream::from_parts(
+        serde_json::from_value(base_config).unwrap(),
+        events,
+        &PartialAppConfig::empty(),
+    )
+    .unwrap();
+
+    let config = result.config().unwrap();
+    assert_eq!(config.conversation.tools.defaults.run, RunMode::Allow);
 }
 
 #[test]
@@ -2034,7 +2076,7 @@ fn test_from_parts_repairs_only_what_recovery_had_to_drop() {
     );
 
     let mut fallback = PartialAppConfig::empty();
-    fallback.conversation.tools.defaults.run = Some(RunMode::Unattended);
+    fallback.conversation.tools.defaults.run = Some(RunMode::Allow);
     fallback.assistant.model.id = PartialModelIdConfig {
         provider: Some(ProviderId::Anthropic),
         name: Some(Name("from-the-workspace".to_owned())),
@@ -2048,7 +2090,7 @@ fn test_from_parts_repairs_only_what_recovery_had_to_drop() {
 
     assert_eq!(
         config.conversation.tools.defaults.run,
-        RunMode::Unattended,
+        RunMode::Allow,
         "the field recovery removed takes the workspace value"
     );
     assert_eq!(
@@ -2977,7 +3019,7 @@ fn test_from_parts_tolerates_unknown_event_kind() {
 #[test]
 fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
     let mut partial1 = jp_config::PartialAppConfig::empty();
-    partial1.conversation.tools.defaults.run = Some(RunMode::Unattended);
+    partial1.conversation.tools.defaults.run = Some(RunMode::Allow);
 
     let mut partial2 = jp_config::PartialAppConfig::empty();
     partial2.style.code.color = Some(false);

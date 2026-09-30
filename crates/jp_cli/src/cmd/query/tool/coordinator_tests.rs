@@ -150,10 +150,10 @@ fn test_result_mode_default() {
         jp_config::AppConfig::new_test().conversation.tools,
         empty_executor_source(),
     );
-    // Non-existent tool returns default (Unattended)
+    // Non-existent tool returns default (Allow)
     assert_eq!(
         coordinator.result_mode("nonexistent_tool"),
-        ResultMode::Unattended
+        ResultMode::Allow
     );
 }
 
@@ -182,10 +182,7 @@ fn test_result_mode_with_configured_tool() {
     assert_eq!(coordinator.result_mode("my_tool"), ResultMode::Ask);
 
     // Non-existent tool still returns default
-    assert_eq!(
-        coordinator.result_mode("other_tool"),
-        ResultMode::Unattended
-    );
+    assert_eq!(coordinator.result_mode("other_tool"), ResultMode::Allow);
 }
 
 /// A tool the model named but the config never declared reads its membership
@@ -749,7 +746,7 @@ async fn remembered_denial_does_not_run_http_argument_formatter() {
     let root = Utf8TempDir::new().unwrap();
     let mut config = AppConfig::new_test();
     let partial = serde_json::from_value(json!({
-        "source":"builtin", "run":"ask", "format":"unattended",
+        "source":"builtin", "run":"ask", "format":"allow",
         "style":{"parameters":{"program":"formatter", "args":[], "shell":false}}
     }))
     .unwrap();
@@ -862,7 +859,7 @@ async fn a_remembered_no_stops_a_later_calls_formatter() {
     let root = Utf8TempDir::new().unwrap();
     let mut config = AppConfig::new_test();
     let partial = serde_json::from_value(json!({
-        "source": "builtin", "run": "ask", "format": "unattended",
+        "source": "builtin", "run": "ask", "format": "allow",
         "style": {"parameters": {
             "program": "formatter", "args": ["{{tool.arguments.n}}"], "shell": false,
         }},
@@ -971,7 +968,7 @@ async fn decide_with_assistant(
     answers: HashMap<String, Value>,
 ) -> (ToolCallResponse, Option<String>, Vec<InquiryResponse>) {
     let partial: jp_config::conversation::tool::PartialToolConfig = serde_json::from_value(json!({
-        "source": "builtin", "run": "unattended",
+        "source": "builtin", "run": "allow",
         "questions": {"confirm": {"target": "assistant"}},
         "style": {"parameters": "describe"},
     }))

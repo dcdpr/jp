@@ -80,7 +80,7 @@ pub(crate) trait Executor: Send + Sync {
     /// Returns information needed for permission prompting.
     ///
     /// Returns `None` if the tool doesn't need a permission prompt (e.g.,
-    /// `RunMode::Unattended` or `RunMode::Skip`).
+    /// `RunMode::Allow` or `RunMode::Skip`).
     fn permission_info(&self) -> Option<PermissionInfo>;
 
     /// Whether this call needs a permission prompt before it runs.

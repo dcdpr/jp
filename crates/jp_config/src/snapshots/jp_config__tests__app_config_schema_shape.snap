@@ -349,7 +349,7 @@ conversation: ConversationConfig
             fork?: bool
             new?: bool
           optional?: bool
-          run?: "ask" | "unattended" | "deny"
+          run?: "ask" | "allow" | "deny"
           value?: LabelValue
             |: string
             |: [string]
@@ -372,7 +372,7 @@ conversation: ConversationConfig
               fork?: bool
               new?: bool
             optional?: bool
-            run?: "ask" | "unattended" | "deny"
+            run?: "ask" | "allow" | "deny"
             value?: LabelValue
               |: string
               |: [string]
@@ -471,9 +471,9 @@ conversation: ConversationConfig
             allow_toggle: "any" | "never" | "if_named" | "if_named_or_group" | null
             state: bool | null
         |: null
-      format: "ask" | "unattended" | null
-      result?: "unattended" | "ask" | "edit" | "skip"
-      run: "ask" | "unattended" | "edit" | "skip"
+      format: "ask" | "allow" | null
+      result?: "allow" | "ask" | "edit" | "skip"
+      run: "ask" | "allow" | "edit" | "skip"
       style: DisplayStyleConfig
         error: ErrorStyleConfig
           inline_results: "off" | "full" | string | null
@@ -556,7 +556,7 @@ conversation: ConversationConfig
                 state: bool | null
             |: null
           examples: string | null
-          format: "ask" | "unattended" | null
+          format: "ask" | "allow" | null
           options: MergeableMap_JsonValue
             |:
               *: unknown
@@ -847,8 +847,8 @@ conversation: ConversationConfig
                               |: null
                         |: null
                       tool_choice?: "auto" | "none" | "required" | string | null
-          result: "unattended" | "ask" | "edit" | "skip" | null
-          run: "ask" | "unattended" | "edit" | "skip" | null
+          result: "allow" | "ask" | "edit" | "skip" | null
+          run: "ask" | "allow" | "edit" | "skip" | null
           source: string(/^(builtin|local)(\..+)?$|^mcp\.[^.]+(\..+)?$/)
           style:
             |: DisplayStyleConfig
@@ -937,7 +937,7 @@ conversation: ConversationConfig
                   state: bool | null
               |: null
             examples: string | null
-            format: "ask" | "unattended" | null
+            format: "ask" | "allow" | null
             options: MergeableMap_JsonValue
               |:
                 *: unknown
@@ -1228,8 +1228,8 @@ conversation: ConversationConfig
                                 |: null
                           |: null
                         tool_choice?: "auto" | "none" | "required" | string | null
-            result: "unattended" | "ask" | "edit" | "skip" | null
-            run: "ask" | "unattended" | "edit" | "skip" | null
+            result: "allow" | "ask" | "edit" | "skip" | null
+            run: "ask" | "allow" | "edit" | "skip" | null
             source: string(/^(builtin|local)(\..+)?$|^mcp\.[^.]+(\..+)?$/)
             style:
               |: DisplayStyleConfig

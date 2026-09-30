@@ -296,9 +296,11 @@ pub struct ToolsDefaultsConfig {
     /// How to run the tool.
     ///
     /// - `ask`: Ask for confirmation before running the tool.
-    /// - `unattended`: Run the tool without asking for confirmation.
+    /// - `allow`: Run the tool without asking for confirmation.
     /// - `edit`: Open an editor to edit the tool call before running it.
     /// - `skip`: Skip running the tool.
+    ///
+    /// `unattended` is accepted as a deprecated spelling of `allow`.
     #[setting(required)]
     pub run: RunMode,
 
@@ -313,18 +315,16 @@ pub struct ToolsDefaultsConfig {
     ///
     /// - `ask`: Defer the custom formatter until after approval (safe default
     ///   — keeps an untrusted shell command from running unprompted).
-    /// - `unattended`: Run the custom formatter ahead of the approval prompt so
-    ///   the user sees the rendered call before deciding.
+    /// - `allow`: Run the custom formatter ahead of the approval prompt so the
+    ///   user sees the rendered call before deciding.
     ///
-    /// If unset, derives from [`run`]: `Ask`/`Edit`/`Skip` map to `Ask`;
-    /// `Unattended` maps to `Unattended`.
-    ///
-    /// [`run`]: Self::run
+    /// If unset, derives from `run`: `ask`, `edit` and `skip` map to `ask`;
+    /// `allow` maps to `allow`.
     pub format: Option<FormatMode>,
 
     /// How to deliver the results of the tool to the assistant.
     ///
-    /// - `unattended`: Always deliver the results of the tool call.
+    /// - `allow`: Always deliver the results of the tool call.
     /// - `ask`: Ask for confirmation before delivering the results.
     /// - `edit`: Open an editor to edit the result before delivering it.
     /// - `skip`: Skip delivering the results.
@@ -560,10 +560,8 @@ pub struct ToolConfig {
     /// [`ToolsDefaultsConfig::format`] for details.
     ///
     /// Overrides the global default.
-    /// If unset, derives from [`run`]: `Ask`/`Edit`/`Skip` map to
-    /// `FormatMode::Ask`; `Unattended` maps to `FormatMode::Unattended`.
-    ///
-    /// [`run`]: Self::run
+    /// If unset, derives from `run`: `ask`, `edit` and `skip` map to `ask`;
+    /// `allow` maps to `allow`.
     pub format: Option<FormatMode>,
 
     /// How to deliver the results of the tool to the assistant.
@@ -1190,15 +1188,16 @@ impl schematic::Schematic for ToolSource {
 }
 
 /// The run mode of a tool.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ConfigEnum)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Default, ConfigEnum)]
+#[config(rename_all = "lowercase", serde_as_string)]
 pub enum RunMode {
     /// Ask for confirmation before running the tool.
     #[default]
     Ask,
 
     /// Run the tool without asking for confirmation.
-    Unattended,
+    #[variant(deprecated_aliases("unattended"))]
+    Allow,
 
     /// Open an editor to edit the tool call before running it.
     Edit,
@@ -1215,16 +1214,16 @@ pub enum RunMode {
 ///
 /// `Ask` defers rendering until after approval (safe default for untrusted
 /// tools).
-/// `Unattended` runs the formatter up front, so the rendered output appears in
-/// the approval prompt — the user makes their decision based on the rendered
-/// call, not raw arguments.
+/// `Allow` runs the formatter up front, so the rendered output appears in the
+/// approval prompt — the user makes their decision based on the rendered call,
+/// not raw arguments.
 ///
-/// **Contract**: Tools that opt into `Unattended` MUST be side-effect-free in
-/// format mode.
+/// **Contract**: Tools that opt into `Allow` MUST be side-effect-free in format
+/// mode.
 /// They MAY make read-only network calls.
 /// They MUST NOT mutate any state, write files, or send notifications.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ConfigEnum)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Default, ConfigEnum)]
+#[config(rename_all = "lowercase", serde_as_string)]
 pub enum FormatMode {
     /// Defer formatter execution until after approval.
     ///
@@ -1237,16 +1236,18 @@ pub enum FormatMode {
     ///
     /// Only set this for trusted, side-effect-free formatters.
     /// The user sees the rendered tool call before deciding whether to approve.
-    Unattended,
+    #[variant(deprecated_aliases("unattended"))]
+    Allow,
 }
 
 /// How to deliver the results of the tool to the assistant.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ConfigEnum)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Default, ConfigEnum)]
+#[config(rename_all = "lowercase", serde_as_string)]
 pub enum ResultMode {
     /// Always deliver the results of the tool call.
     #[default]
-    Unattended,
+    #[variant(deprecated_aliases("unattended"))]
+    Allow,
 
     /// Ask for confirmation before delivering the results of the tool call.
     Ask,
@@ -1375,8 +1376,8 @@ impl ToolConfigWithDefaults {
     /// mode is derived from [`run`]: `Ask`/`Edit`/`Skip` map to
     /// `FormatMode::Ask` (custom formatter runs after approval, safe default
     /// for an untrusted shell command; `Skip` is grouped here so we don't run a
-    /// formatter for a tool that's about to be discarded); `Unattended` maps to
-    /// `FormatMode::Unattended` (the tool was already going to run without an
+    /// formatter for a tool that's about to be discarded); `Allow` maps to
+    /// `FormatMode::Allow` (the tool was already going to run without an
     /// approval prompt anyway).
     ///
     /// [`run`]: Self::run
@@ -1391,7 +1392,7 @@ impl ToolConfigWithDefaults {
                 // Default to `Ask` so the formatter only runs when the
                 // tool is actually going to be invoked.
                 RunMode::Ask | RunMode::Edit | RunMode::Skip => FormatMode::Ask,
-                RunMode::Unattended => FormatMode::Unattended,
+                RunMode::Allow => FormatMode::Allow,
             })
     }
 

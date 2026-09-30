@@ -1766,7 +1766,7 @@ impl ToolCoordinator {
     ) {
         let tool_name = batch.calls[index].tool_name.clone();
         match self.result_mode(&tool_name) {
-            ResultMode::Unattended => {
+            ResultMode::Allow => {
                 host.renderer.focus(&batch.calls[index].tool_id);
                 self.render_result(&tool_name, &response, host.renderer);
                 self.settle(batch, index, Review::unchanged(response), host);

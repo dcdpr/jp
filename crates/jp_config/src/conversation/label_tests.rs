@@ -81,7 +81,7 @@ fn an_empty_list_resolves_to_no_values() {
 
 #[test]
 fn object_form_deserializes() {
-    let json = r#"{"value":"review","apply_on":{"new":false,"fork":true},"run":"unattended"}"#;
+    let json = r#"{"value":"review","apply_on":{"new":false,"fork":true},"run":"allow"}"#;
 
     let config: LabelConfig = serde_json::from_str(json).unwrap();
 
@@ -90,7 +90,7 @@ fn object_form_deserializes() {
         new: false,
         fork: true
     });
-    assert_eq!(config.run(), LabelRunMode::Unattended);
+    assert_eq!(config.run(), LabelRunMode::Allow);
 }
 
 /// A rule is required unless it says otherwise, so an unmarked rule reports its
@@ -113,9 +113,20 @@ fn optional_deserializes() {
     assert!(config.optional());
 }
 
+/// `unattended` is the retired spelling of `allow`, and label rules written
+/// before the rename keep working.
+#[test]
+fn unattended_reads_as_allow() {
+    let json = r#"{"value":{"cmd":"date"},"run":"unattended"}"#;
+
+    let config: LabelConfig = serde_json::from_str(json).unwrap();
+
+    assert_eq!(config.run(), LabelRunMode::Allow);
+}
+
 #[test]
 fn command_shorthand_value_deserializes() {
-    let json = r#"{"value":{"cmd":"git rev-parse --abbrev-ref HEAD"},"run":"unattended"}"#;
+    let json = r#"{"value":{"cmd":"git rev-parse --abbrev-ref HEAD"},"run":"allow"}"#;
 
     let config: LabelConfig = serde_json::from_str(json).unwrap();
 
@@ -126,7 +137,7 @@ fn command_shorthand_value_deserializes() {
     assert_eq!(cmd.program, "git");
     assert_eq!(cmd.args, ["rev-parse", "--abbrev-ref", "HEAD"]);
     assert!(!cmd.shell);
-    assert_eq!(config.run(), LabelRunMode::Unattended);
+    assert_eq!(config.run(), LabelRunMode::Allow);
 }
 
 #[test]

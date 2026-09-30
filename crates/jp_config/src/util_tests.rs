@@ -126,7 +126,7 @@ fn test_build() {
     }
     .into();
 
-    partial.conversation.tools.defaults.run = Some(RunMode::Unattended);
+    partial.conversation.tools.defaults.run = Some(RunMode::Allow);
 
     let config = build(partial).unwrap();
     assert_eq!(
@@ -151,7 +151,7 @@ fn test_build_without_required_fields() {
 
     let error = build(partial.clone()).unwrap_err();
     assert_matches!(error, Error::Schematic(MissingRequired{ fields }) if fields == vec!["conversation", "tools", "*", "run"]);
-    partial.conversation.tools.defaults.run = Some(RunMode::Unattended);
+    partial.conversation.tools.defaults.run = Some(RunMode::Allow);
 
     build(partial).unwrap();
 }
@@ -159,7 +159,7 @@ fn test_build_without_required_fields() {
 #[test]
 fn test_build_sorted_instructions() {
     let mut partial = PartialAppConfig::empty();
-    partial.conversation.tools.defaults.run = Some(RunMode::Unattended);
+    partial.conversation.tools.defaults.run = Some(RunMode::Allow);
     partial.assistant.model.id = PartialModelIdConfig {
         provider: Some(ProviderId::Openrouter),
         name: Some("foo".parse().unwrap()),
