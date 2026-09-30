@@ -238,7 +238,6 @@ expression: v
       }
     },
     "plugins": {
-      "auto_install": true,
       "shutdown_timeout_secs": 5
     }
   },

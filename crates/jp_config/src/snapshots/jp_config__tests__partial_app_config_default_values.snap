@@ -610,9 +610,6 @@ Ok(
                 ),
             },
             plugins: PartialPluginsConfig {
-                auto_install: Some(
-                    true,
-                ),
                 shutdown_timeout_secs: Some(
                     5,
                 ),

@@ -412,10 +412,13 @@ fn a_server_removed_by_config_set_survives_the_next_invocation() {
 /// way.
 #[test]
 fn a_removed_command_plugin_survives_the_next_invocation() {
-    use jp_config::{PartialConfigDelta as _, plugins::command::PartialCommandPluginConfig};
+    use jp_config::{
+        PartialConfigDelta as _,
+        plugins::command::{PartialCommandPluginConfig, RunPolicy},
+    };
 
-    let plugin = |install: bool| PartialCommandPluginConfig {
-        install: Some(install),
+    let plugin = |run: RunPolicy| PartialCommandPluginConfig {
+        run: Some(run),
         ..PartialCommandPluginConfig::default()
     };
 
@@ -424,12 +427,12 @@ fn a_removed_command_plugin_survives_the_next_invocation() {
         .base
         .plugins
         .command
-        .insert("serve".to_owned(), plugin(true));
+        .insert("serve".to_owned(), plugin(RunPolicy::Allow));
     pipeline
         .base
         .plugins
         .command
-        .insert("ticket".to_owned(), plugin(false));
+        .insert("ticket".to_owned(), plugin(RunPolicy::Deny));
 
     let before = pipeline.base.clone();
     let mut after = pipeline.base.clone();

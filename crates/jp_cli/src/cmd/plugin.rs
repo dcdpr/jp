@@ -2,18 +2,32 @@
 //!
 //! This module handles:
 //!
-//! - `jp plugin list|install|update` management subcommands
-//! - External plugin dispatch (spawning `jp-<name>` binaries)
+//! - `jp plugin list|install|uninstall|update|approve|revoke` management
+//!   subcommands, which need no workspace
+//! - External plugin dispatch: routing an unknown subcommand to the plugin
+//!   whose manifest claims it, and spawning it
 //!
 //! See: `docs/rfd/072-command-plugin-system.md`
 
+mod admission;
+mod approvals;
+mod approve;
+pub(crate) mod discovery;
 pub(crate) mod dispatch;
+pub(crate) mod help;
 mod install;
 mod list;
+mod output;
+mod process_tree;
 pub(crate) mod registry;
+mod revoke;
+pub(crate) mod routing;
+mod uninstall;
 mod update;
 
-use crate::{Ctx, cmd};
+use jp_printer::Printer;
+
+use crate::{KeyValueOrPath, cmd};
 
 /// `jp plugin` subcommand group for managing plugins.
 #[derive(Debug, clap::Args)]
@@ -24,23 +38,46 @@ pub(crate) struct PluginManagement {
 
 #[derive(Debug, clap::Subcommand)]
 enum PluginCmd {
-    /// List available and installed plugins.
+    /// List installed plugins, and the ones the registry offers.
     #[command(visible_alias = "ls")]
     List(list::List),
 
-    /// Install a plugin from the registry.
+    /// Install a plugin from the registry, with the plugins it requires.
     Install(install::Install),
 
-    /// Refresh the plugin registry cache and check for updates.
+    /// Remove a plugin JP installed, and its approval.
+    Uninstall(uninstall::Uninstall),
+
+    /// Refresh the plugin registry, and update the plugins JP installed.
     Update(update::Update),
+
+    /// Approve a plugin binary, so it runs without asking.
+    Approve(approve::Approve),
+
+    /// Withdraw a plugin's approval, so it asks again before it runs.
+    Revoke(revoke::Revoke),
 }
 
 impl PluginManagement {
-    pub(crate) async fn run(&self, ctx: &Ctx) -> cmd::Output {
+    /// Run a management command.
+    ///
+    /// Plugin binaries and the registry cache are user-global, so none of these
+    /// needs a workspace, and they work from any directory.
+    /// `cfg` is the invocation's `--cfg` arguments, layered over the
+    /// user-global configuration where a command reads configuration.
+    pub(crate) async fn run(
+        &self,
+        printer: &Printer,
+        interactive: bool,
+        cfg: &[KeyValueOrPath],
+    ) -> cmd::Output {
         match &self.command {
-            PluginCmd::List(cmd) => cmd.run(),
-            PluginCmd::Install(cmd) => cmd.run(ctx).await,
-            PluginCmd::Update(cmd) => cmd.run(ctx).await,
+            PluginCmd::List(cmd) => cmd.run(printer).await,
+            PluginCmd::Install(cmd) => cmd.run(printer, interactive).await,
+            PluginCmd::Uninstall(cmd) => cmd.run(printer),
+            PluginCmd::Update(cmd) => cmd.run(printer, cfg).await,
+            PluginCmd::Approve(cmd) => cmd.run(printer, cfg),
+            PluginCmd::Revoke(cmd) => cmd.run(printer),
         }
     }
 }

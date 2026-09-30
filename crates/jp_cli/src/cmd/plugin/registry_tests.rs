@@ -1,4 +1,31 @@
+use camino_tempfile::tempdir;
+
 use super::*;
+
+/// A newer `jp` sharing the data directory reads the same cache, so an entry
+/// this version does not understand is kept in it.
+#[test]
+fn the_cache_holds_the_registry_as_served() {
+    let tmp = tempdir().unwrap();
+    let cache = tmp.path().join("registry.json");
+    let body = r#"{"version":1,"plugins":{"path":{"id":"path","description":"Paths"},"lint":{"id":"lint","type":"wasm","description":"Lints"}}}"#;
+
+    let registry = parse_and_cache(body, Some(&cache)).unwrap();
+
+    assert_eq!(registry.plugins.keys().collect::<Vec<_>>(), ["path"]);
+    assert_eq!(std::fs::read_to_string(&cache).unwrap(), body);
+}
+
+/// A body that does not parse is not cached over a good copy.
+#[test]
+fn an_invalid_registry_leaves_the_cache_alone() {
+    let tmp = tempdir().unwrap();
+    let cache = tmp.path().join("registry.json");
+    std::fs::write(&cache, "the old copy").unwrap();
+
+    assert!(parse_and_cache("{ not json", Some(&cache)).is_err());
+    assert_eq!(std::fs::read_to_string(&cache).unwrap(), "the old copy");
+}
 
 #[test]
 fn sha256_hex_known_value() {
@@ -37,15 +64,4 @@ fn plugin_binary_name_unix() {
         assert_eq!(plugin_binary_name("serve"), "jp-serve");
         assert_eq!(plugin_binary_name("my-tool"), "jp-my-tool");
     }
-}
-
-#[test]
-fn strip_plugin_prefix_basic() {
-    assert_eq!(strip_plugin_prefix("jp-serve"), Some("serve"));
-    assert_eq!(
-        strip_plugin_prefix("jp-conversation-export"),
-        Some("conversation-export")
-    );
-    assert_eq!(strip_plugin_prefix("not-a-plugin"), None);
-    assert_eq!(strip_plugin_prefix("jp"), None);
 }

@@ -18,7 +18,7 @@ mod signals;
 
 use std::{
     env, fmt, fs,
-    io::{self, IsTerminal as _, Write as _, stderr, stdout},
+    io::{self, IsTerminal as _, stderr, stdout},
     num::{self, NonZeroUsize},
     process::ExitCode,
     str::FromStr,
@@ -64,11 +64,8 @@ use tracing::{debug, info, trace, warn};
 
 use crate::{
     bootstrap::WorkspaceRequirement,
-    cmd::{
-        plugin::dispatch::{describe_plugin, discover_plugins},
-        target::resolve_request,
-    },
-    config_pipeline::{ConfigPipeline, ConfigReset, ConfigResetEvents},
+    cmd::{plugin::help::print_root_section, target::resolve_request},
+    config_pipeline::{ConfigPipeline, ConfigReset, ConfigResetEvents, build_partial_over},
 };
 
 static WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
@@ -419,7 +416,7 @@ pub fn run() -> ExitCode {
         Err(e) => {
             if e.kind() == clap::error::ErrorKind::DisplayHelp && is_root_help_request() {
                 drop(e.print());
-                print_plugin_help_section();
+                print_root_section();
                 return ExitCode::from(0);
             }
             // All other cases (subcommand help, version, errors): let clap handle it.
@@ -599,15 +596,26 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let requirement = cli.command.workspace_requirement();
     match requirement {
         // Nothing to resolve: `jp init` creates the workspace another command
-        // would need selected, and `jp provider` works on user-global
-        // credentials, so the consumers that assume a root — config loading,
-        // MCP and plugin child cwd, path parsing — do not run.
+        // would need selected, and `jp provider` and `jp plugin` work on
+        // user-global credentials and plugins, so the consumers that assume a
+        // root — config loading, MCP and plugin child cwd, path parsing — do
+        // not run.
         WorkspaceRequirement::None => {
             let no_interactive = cli.globals.no_interactive;
             let output = match cli.command {
                 Commands::Init(args) => args.run(&printer, no_interactive),
                 Commands::Provider(args) => args.run(&printer, no_interactive),
-                _ => unreachable!("`None` is declared by `jp init` and `jp provider` alone"),
+                Commands::Plugin(args) => {
+                    let cfg = effective_cfg_overrides(&cli.globals);
+                    build_runtime(cli.root.threads, "jp-worker")?.block_on(args.run(
+                        &printer,
+                        stdin_interactive(no_interactive),
+                        &cfg,
+                    ))
+                }
+                _ => unreachable!(
+                    "`None` is declared by `jp init`, `jp provider`, and `jp plugin` alone"
+                ),
             };
 
             return output.map_err(Into::into);
@@ -905,31 +913,6 @@ fn is_root_help_request() -> bool {
     args.len() == 2 && (args[1] == "-h" || args[1] == "--help")
 }
 
-/// Discover plugins on `$PATH`, describe them, and print a "Plugins:" section.
-fn print_plugin_help_section() {
-    let plugins = discover_plugins();
-    if plugins.is_empty() {
-        return;
-    }
-
-    let mut descriptions: Vec<(String, String)> = Vec::new();
-    for (name, binary) in &plugins {
-        let desc = describe_plugin(binary);
-        let display_name = desc
-            .as_ref()
-            .filter(|d| !d.command.is_empty())
-            .map_or_else(|| name.clone(), |d| d.command.join(" "));
-        let description = desc.map_or_else(|| "(no description)".into(), |d| d.description);
-        descriptions.push((display_name, description));
-    }
-
-    let mut out = io::stdout().lock();
-    drop(writeln!(out, "\nPlugins:"));
-    for (name, desc) in &descriptions {
-        drop(writeln!(out, "  {name:<16}{desc}"));
-    }
-}
-
 fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
     let cmd::Error {
         code,
@@ -1160,6 +1143,17 @@ pub(crate) fn load_base_partial(
     let partial = load_partials_with_inheritance(partials)?;
 
     load_envs(partial).map_err(|error| Error::CliConfig(error.to_string()))
+}
+
+/// Load the configuration that holds outside any workspace: the user-global
+/// config file, `JP_CFG_*` environment variables, and the `--cfg` arguments
+/// `cfg` carries.
+pub(crate) fn load_user_global_partial(cfg: &[KeyValueOrPath]) -> Result<PartialAppConfig> {
+    let partials = load_partial_configs_from_files(None, None)?;
+    let partial = load_partials_with_inheritance(partials)?;
+    let partial = load_envs(partial).map_err(|error| Error::CliConfig(error.to_string()))?;
+
+    build_partial_over(partial, cfg, None, None)
 }
 
 fn load_partial_configs_from_files(

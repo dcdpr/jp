@@ -91,9 +91,11 @@ impl Commands {
                 debug_assert!(handles.is_empty(), "Attachment commands don't use handles");
                 args.run(ctx)
             }
-            Commands::Plugin(args) => args.run(ctx).await,
             Commands::External(args) => plugin::dispatch::run_external(&args, ctx).await,
-            Commands::Init(_) | Commands::Provider(_) | Commands::Workspace(_) => {
+            Commands::Init(_)
+            | Commands::Plugin(_)
+            | Commands::Provider(_)
+            | Commands::Workspace(_) => {
                 unreachable!("handled before workspace initialization")
             }
         }
@@ -123,16 +125,17 @@ impl Commands {
     /// the pre-workspace work it asked for.
     pub(crate) fn workspace_requirement(&self) -> WorkspaceRequirement {
         match self {
-            // Credentials are user-global, so the auth commands need no
-            // workspace at all.
-            Commands::Init(_) | Commands::Provider(_) => WorkspaceRequirement::None,
+            // Credentials, plugin binaries, and the plugin registry are
+            // user-global, so these commands need no workspace at all.
+            Commands::Init(_) | Commands::Plugin(_) | Commands::Provider(_) => {
+                WorkspaceRequirement::None
+            }
             Commands::Workspace(_) => WorkspaceRequirement::Subject,
             Commands::Query(_)
             | Commands::Config(_)
             | Commands::Conversation(_)
             | Commands::Attachment(_)
             | Commands::AttachmentAdd(_)
-            | Commands::Plugin(_)
             | Commands::External(_) => WorkspaceRequirement::Load,
         }
     }

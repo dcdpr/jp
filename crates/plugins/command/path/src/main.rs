@@ -18,6 +18,16 @@ use jp_plugin::message::{
 /// It only reads paths out of `init`, so anything that can spawn it will do.
 const REQUIRED_PROTOCOL: u32 = 1;
 
+/// Where this plugin attaches to `jp`, readable from the binary without running
+/// it.
+///
+/// `protocol` has to match [`REQUIRED_PROTOCOL`].
+static MANIFEST: &str = jp_plugin::manifest!(
+    protocol: 1,
+    description: "Print JP directory paths",
+    command: ["path"],
+);
+
 const HELP_TEXT: &str = "\
 Print JP directory paths.
 
@@ -139,18 +149,14 @@ fn handle_user_workspace(init: &InitMessage) -> Result<String, String> {
 }
 
 fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Describe(DescribeResponse {
-            name: "path".to_owned(),
-            version: env!("CARGO_PKG_VERSION").to_owned(),
-            description: "Print JP directory paths".to_owned(),
-            command: vec!["path".to_owned()],
-            author: Some("Jean Mertz <git@jeanmertz.com>".to_owned()),
-            help: Some(HELP_TEXT.to_owned()),
-            repository: Some("https://github.com/dcdpr/jp".to_owned()),
-        }),
-    )
+    let mut describe =
+        DescribeResponse::from_manifest(MANIFEST, "path", env!("CARGO_PKG_VERSION"), HELP_TEXT)
+            .map_err(|e| format!("invalid embedded manifest: {e}"))?;
+
+    describe.author = Some("Jean Mertz <git@jeanmertz.com>".to_owned());
+    describe.repository = Some("https://github.com/dcdpr/jp".to_owned());
+
+    send(stdout, &PluginToHost::Describe(describe))
 }
 
 fn send_exit(stdout: &mut impl Write, code: u8, reason: Option<&str>) -> Result<(), String> {
@@ -177,3 +183,7 @@ fn send(stdout: &mut impl Write, msg: &PluginToHost) -> Result<(), String> {
     writeln!(stdout, "{json}").map_err(|e| format!("write error: {e}"))?;
     stdout.flush().map_err(|e| format!("flush error: {e}"))
 }
+
+#[cfg(test)]
+#[path = "main_tests.rs"]
+mod tests;

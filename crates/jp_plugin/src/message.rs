@@ -8,6 +8,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
+use crate::manifest::{Manifest, ManifestError};
+
 /// Well-known JP directory paths.
 ///
 /// Provided in the `init` message so plugins can locate JP data directories
@@ -958,37 +960,65 @@ pub struct LogMessage {
 }
 
 /// Plugin metadata returned in response to a `Describe` request.
+///
+/// Carries every field of the plugin's [`Manifest`], with the same meaning, and
+/// what the host only needs from a plugin it has agreed to run.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DescribeResponse {
-    /// The plugin's display name (e.g. "serve").
+    /// The fields the binary's manifest carries.
+    #[serde(flatten)]
+    pub manifest: Manifest,
+
+    /// The plugin's name (e.g. "serve-web").
     pub name: String,
 
     /// Plugin version string.
     pub version: String,
 
-    /// One-line description for command listings.
-    pub description: String,
-
-    /// The command path this plugin provides.
-    ///
-    /// Each element is a subcommand segment.
-    /// For example, `["serve", "web"]` means the plugin handles `jp serve web`.
-    /// When absent, the host derives the path from the binary name by stripping
-    /// the `jp-` prefix and splitting on `-`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub command: Vec<String>,
+    /// Full help text shown for `jp <plugin> -h`.
+    pub help: String,
 
     /// Plugin author.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
 
-    /// Full help text shown for `jp <plugin> -h`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub help: Option<String>,
-
     /// Repository URL.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
+}
+
+impl DescribeResponse {
+    /// Build the answer to `describe` from the plugin's embedded manifest line.
+    ///
+    /// `manifest` is the constant [`manifest!`] built.
+    /// Reading the answer out of it means the two cannot disagree, and keeps
+    /// the constant in the binary, where the host looks for it: a constant
+    /// nothing reads can be dropped by the linker.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`ManifestError`] that makes the line unusable.
+    ///
+    /// [`manifest!`]: crate::manifest!
+    pub fn from_manifest(
+        manifest: &str,
+        name: impl Into<String>,
+        version: impl Into<String>,
+        help: impl Into<String>,
+    ) -> Result<Self, ManifestError> {
+        // `black_box` keeps the optimizer from reading the constant at compile
+        // time and emitting only the parts it needs.
+        let manifest = Manifest::from_line(std::hint::black_box(manifest))?;
+
+        Ok(Self {
+            manifest,
+            name: name.into(),
+            version: version.into(),
+            help: help.into(),
+            author: None,
+            repository: None,
+        })
+    }
 }
 
 /// The plugin is done and wants JP to exit with this code.

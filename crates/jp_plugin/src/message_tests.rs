@@ -212,52 +212,63 @@ fn host_describe_roundtrip() {
     assert_eq!(msg, parsed);
 }
 
+/// The manifest's fields sit beside the rest on the wire, not nested under a
+/// key of their own.
 #[test]
-fn plugin_describe_roundtrip() {
+fn plugin_describe_carries_the_manifest_fields_flat() {
     let msg = PluginToHost::Describe(DescribeResponse {
-        name: "serve".to_owned(),
-        version: "0.1.0".to_owned(),
-        description: "Web UI for conversations".to_owned(),
-        command: vec![],
-        author: Some("Test Author".to_owned()),
-        help: Some("Full help text here".to_owned()),
-        repository: None,
-    });
-    let json = serde_json::to_string(&msg).unwrap();
-    let parsed: PluginToHost = from_str(&json).unwrap();
-    assert_eq!(msg, parsed);
-    // Empty vecs and None fields should not appear in JSON.
-    assert!(!json.contains("repository"));
-    assert!(!json.contains("command"));
-}
-
-#[test]
-fn plugin_describe_with_command_path() {
-    let msg = PluginToHost::Describe(DescribeResponse {
+        manifest: crate::Manifest {
+            protocol: 9,
+            description: "Web UI server".to_owned(),
+            command: vec!["serve".to_owned(), "web".to_owned()],
+        },
         name: "serve-web".to_owned(),
         version: "0.1.0".to_owned(),
-        description: "Web UI server".to_owned(),
-        command: vec!["serve".to_owned(), "web".to_owned()],
+        help: "Usage: jp serve web".to_owned(),
         author: None,
-        help: None,
         repository: None,
     });
-    let json = serde_json::to_string(&msg).unwrap();
-    let parsed: PluginToHost = from_str(&json).unwrap();
+
+    let json = serde_json::to_value(&msg).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "type": "describe",
+            "protocol": 9,
+            "description": "Web UI server",
+            "command": ["serve", "web"],
+            "name": "serve-web",
+            "version": "0.1.0",
+            "help": "Usage: jp serve web",
+        })
+    );
+
+    let parsed: PluginToHost = serde_json::from_value(json).unwrap();
     assert_eq!(msg, parsed);
-    assert!(json.contains(r#"command":["serve","web"]"#));
 }
 
 #[test]
-fn plugin_describe_without_command_deserializes() {
-    // Simple plugins can omit the `command` field entirely.
-    let json = r#"{"type":"describe","name":"serve","version":"0.1.0","description":"test"}"#;
-    let msg: PluginToHost = from_str(json).unwrap();
-    if let PluginToHost::Describe(desc) = msg {
-        assert!(desc.command.is_empty());
-    } else {
-        panic!("expected Describe");
-    }
+fn plugin_describe_without_help_is_refused() {
+    let json = r#"{"type":"describe","protocol":1,"name":"serve","version":"0.1.0","description":"test","command":["serve"]}"#;
+
+    assert!(from_str::<PluginToHost>(json).is_err());
+}
+
+#[test]
+fn describe_is_built_from_the_manifest_line() {
+    const MANIFEST: &str = crate::manifest!(
+        protocol: 2,
+        description: "Track work items",
+        command: ["ticket"],
+    );
+
+    let describe =
+        DescribeResponse::from_manifest(MANIFEST, "ticket", "0.1.0", "Usage: jp ticket").unwrap();
+
+    assert_eq!(describe.manifest.protocol, 2);
+    assert_eq!(describe.manifest.description, "Track work items");
+    assert_eq!(describe.manifest.command, ["ticket"]);
+    assert_eq!(describe.help, "Usage: jp ticket");
 }
 
 #[test]

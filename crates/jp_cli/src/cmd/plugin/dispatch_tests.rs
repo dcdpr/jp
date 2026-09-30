@@ -1,7 +1,9 @@
 use camino_tempfile::{Utf8TempDir, tempdir};
+use chrono::Utc;
 use jp_conversation::{Conversation, ConversationId, event::ChatResponse};
-use jp_plugin::message::{
-    ExitMessage, InterruptRequest, OptionalId, ReadEventsRequest, ReadyMessage,
+use jp_plugin::{
+    message::{ExitMessage, InterruptRequest, OptionalId, ReadEventsRequest, ReadyMessage},
+    registry::ApprovedPlugin,
 };
 use jp_storage::backend::{FsStorageBackend, PersistBackend as _};
 use relative_path::RelativePathBuf;
@@ -9,7 +11,7 @@ use serde_json::json;
 use serial_test::serial;
 
 use super::*;
-use crate::{editor::CUT_MARKER, env_testing::EnvVarGuard};
+use crate::{Globals, editor::CUT_MARKER, env_testing::EnvVarGuard};
 
 /// A workspace no request in these tests reaches into, so it needs no storage.
 fn bare_workspace() -> Workspace {
@@ -866,7 +868,7 @@ fn stop_plugin_kills_a_plugin_and_its_workers() {
     let mut line = String::new();
     BufReader::new(stdout).read_line(&mut line).unwrap();
     assert_eq!(line, "ready\n");
-    let plugin = tree.pid;
+    let plugin = tree.pid();
 
     // On its own thread with a deadline: if `stop_plugin` ever goes back to
     // waiting indefinitely, this fails rather than hanging the suite — which is
@@ -881,10 +883,10 @@ fn stop_plugin_kills_a_plugin_and_its_workers() {
     rx.recv_timeout(Duration::from_secs(10))
         .expect("stop_plugin returned rather than waiting forever");
 
-    assert!(
-        child.wait().is_ok(),
-        "the child is reaped, so it is no longer running"
-    );
+    // Killed, not finished: left alone, the child runs for a minute and exits
+    // successfully.
+    let status = child.wait().unwrap();
+    assert!(!status.success(), "the plugin was killed: {status:?}");
     assert!(
         !is_process_alive(plugin),
         "a plugin that ignored the request is gone"
@@ -933,7 +935,7 @@ fn stop_plugin_kills_a_plugin_and_its_workers() {
     let mut line = String::new();
     BufReader::new(stdout).read_line(&mut line).unwrap();
     assert_eq!(line, "ready\r\n");
-    let plugin = tree.pid;
+    let plugin = tree.pid();
 
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
@@ -1735,8 +1737,155 @@ fn a_query_without_a_schema_replies_without_data() {
     );
 }
 
+/// `jp <plugin> -h` without a terminal: a binary nobody approved is refused
+/// before it runs, and once approved it answers.
+///
+/// The script writes a marker whenever it runs, so its absence proves it was
+/// never spawned, `describe` included.
+///
+/// Unix only: on Windows a plugin is a `jp-*.exe`, which a test cannot write as
+/// a script.
+#[cfg(unix)]
 #[test]
-fn find_plugin_binary_nonexistent() {
-    let result = find_plugin_binary(&["__jp_test_nonexistent_plugin_42__"]);
-    assert!(result.is_none());
+#[serial(env_vars)]
+fn plugin_help_does_not_run_an_unapproved_binary() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let tmp = tempdir().unwrap();
+    let bin = tmp.path().join("bin");
+    let data = tmp.path().join("data");
+    let marker = tmp.path().join("ran");
+    fs::create_dir_all(&bin).unwrap();
+
+    let script = bin.join("jp-titles");
+    fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+# jp-plugin/v1 {{"protocol":1,"description":"Titles","command":["titles"]}}
+: > {marker}
+read -r msg
+echo '{{"type":"describe","protocol":1,"name":"titles","version":"0.1.0","description":"Titles","command":["titles"],"help":"Usage: jp titles"}}'
+"#
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let _path = EnvVarGuard::set("PATH", bin.as_str());
+    let _data = EnvVarGuard::set("JP_USER_DATA_DIR", data.as_str());
+    let _offline = EnvVarGuard::set("JP_NO_PLUGIN_DOWNLOAD", "1");
+
+    let workspace = Workspace::in_memory(tmp.path().join("workspace"));
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        None,
+        tokio::runtime::Runtime::new().unwrap(),
+        Globals {
+            no_interactive: true,
+            ..Globals::default()
+        },
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+    let args = ["titles".to_owned(), "-h".to_owned()];
+
+    let error = runtime.block_on(run_external(&args, &mut ctx)).unwrap_err();
+    assert_eq!(
+        error.message.as_deref(),
+        Some(
+            format!(
+                "plugin `titles` at {script} is not approved. Approve it with `jp plugin approve \
+                 {script}`, or set plugins.command.titles.run = \"allow\" in config."
+            )
+            .as_str()
+        )
+    );
+    assert!(!marker.exists(), "the unapproved binary was never run");
+
+    ApprovalStore::load()
+        .record("titles", ApprovedPlugin {
+            path: script.canonicalize_utf8().unwrap(),
+            sha256: registry::sha256_file(&script).unwrap(),
+            approved_at: Utc::now(),
+            installed: false,
+            manifest: None,
+        })
+        .unwrap();
+
+    runtime.block_on(run_external(&args, &mut ctx)).unwrap();
+    assert!(marker.exists(), "the approved binary answered describe");
+}
+
+#[test]
+fn a_describe_answer_is_compared_with_the_manifest_field_by_field() {
+    let manifest = Manifest {
+        protocol: 1,
+        description: "Titles".to_owned(),
+        command: vec!["titles".to_owned()],
+    };
+
+    assert!(manifest_differences(&manifest, &manifest).is_empty());
+    assert_eq!(
+        manifest_differences(&manifest, &Manifest {
+            protocol: 2,
+            command: vec!["other".to_owned()],
+            ..manifest.clone()
+        }),
+        ["protocol", "command"]
+    );
+}
+
+/// A script plugin whose `describe` answer claims another command than its
+/// manifest: the host refuses the answer rather than choosing between them.
+///
+/// Unix only: on Windows a plugin is a `jp-*.exe`, which a test cannot write as
+/// a script.
+/// `a_describe_answer_is_compared_with_the_manifest_field_by_field` covers the
+/// comparison on every platform.
+#[cfg(unix)]
+#[test]
+fn a_describe_answer_that_disagrees_with_the_manifest_is_refused() {
+    use crate::cmd::plugin::discovery::{Location, ManifestState, read_manifest};
+
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("jp-titles");
+    fs::write(
+        &path,
+        r#"#!/bin/sh
+# jp-plugin/v1 {"protocol":1,"description":"Titles","command":["titles"]}
+read -r msg
+echo '{"type":"describe","protocol":1,"name":"titles","version":"0.1.0","description":"Titles","command":["other"],"help":"Usage"}'
+"#,
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let plugin = LocalPlugin {
+        name: "titles".to_owned(),
+        manifest: read_manifest(&path),
+        path: path.clone(),
+        location: Location::Path,
+    };
+    assert!(matches!(plugin.manifest, ManifestState::Valid(_)));
+
+    let error = describe(&plugin).unwrap_err();
+
+    assert_eq!(
+        error.message.as_deref(),
+        Some(
+            format!(
+                "the plugin `titles` at {path} describes itself differently from its manifest \
+                 (command), so it does not run"
+            )
+            .as_str()
+        )
+    );
 }

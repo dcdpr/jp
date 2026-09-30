@@ -159,20 +159,102 @@ fn command_group_with_suggests() {
     assert_eq!(web.kind.binaries().len(), 1);
 }
 
+/// A newer registry can publish plugin kinds this `jp` does not know, such as
+/// Wasm plugins.
+/// They are left out, and the rest of the registry still routes.
+#[test]
+fn an_entry_of_an_unknown_kind_is_left_out() {
+    let json = json!({
+        "version": 1,
+        "plugins": {
+            "path": {"id": "path", "type": "command", "description": "Paths"},
+            "lint": {"id": "lint", "type": "wasm", "description": "Lints"},
+        }
+    });
+
+    let registry: Registry = serde_json::from_value(json).unwrap();
+
+    assert_eq!(registry.plugins.keys().collect::<Vec<_>>(), ["path"]);
+}
+
+#[test]
+fn an_entry_without_a_kind_is_a_command() {
+    let json = json!({
+        "version": 1,
+        "plugins": {
+            "path": {"id": "path", "description": "Paths"},
+        }
+    });
+
+    let registry: Registry = serde_json::from_value(json).unwrap();
+
+    assert!(registry.plugins["path"].kind.is_command());
+}
+
+/// One malformed entry costs that entry, not every official command.
+#[test]
+fn a_malformed_entry_is_left_out() {
+    let json = json!({
+        "version": 1,
+        "plugins": {
+            "path": {"id": "path", "type": "command", "description": "Paths"},
+            "broken": {"id": "broken", "type": "command", "description": 42},
+            "odd": {"id": "odd", "type": 7, "description": "Odd"},
+        }
+    });
+
+    let registry: Registry = serde_json::from_value(json).unwrap();
+
+    assert_eq!(registry.plugins.keys().collect::<Vec<_>>(), ["path"]);
+}
+
 #[test]
 fn approvals_roundtrip() {
     let approvals = PluginApprovals {
         approved: [("dashboard".to_owned(), ApprovedPlugin {
             path: "/usr/local/bin/jp-dashboard".into(),
             sha256: "abc123def456".to_owned(),
+            approved_at: "2026-09-28T10:12:00Z".parse().unwrap(),
+            installed: false,
+            manifest: None,
         })]
         .into_iter()
         .collect(),
     };
 
-    let json = serde_json::to_string(&approvals).unwrap();
-    let parsed: PluginApprovals = serde_json::from_str(&json).unwrap();
+    let json = serde_json::to_value(&approvals).unwrap();
+    assert_eq!(
+        json,
+        json!({
+            "approved": {
+                "dashboard": {
+                    "path": "/usr/local/bin/jp-dashboard",
+                    "sha256": "abc123def456",
+                    "approved_at": "2026-09-28T10:12:00Z",
+                }
+            }
+        }),
+        "`installed` and `manifest` are left out when unset"
+    );
+
+    let parsed: PluginApprovals = serde_json::from_value(json).unwrap();
     assert_eq!(approvals, parsed);
+}
+
+#[test]
+fn an_approval_carries_the_install_marker_and_a_recorded_manifest() {
+    let json = json!({
+        "path": "/data/jp-packed",
+        "sha256": "abc",
+        "approved_at": "2026-09-28T10:12:00Z",
+        "installed": true,
+        "manifest": {"protocol": 1, "description": "Packed", "command": ["packed"]},
+    });
+
+    let approval: ApprovedPlugin = serde_json::from_value(json).unwrap();
+
+    assert!(approval.installed);
+    assert_eq!(approval.manifest.unwrap().command, ["packed"]);
 }
 
 #[test]

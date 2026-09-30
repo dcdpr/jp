@@ -36,6 +36,16 @@ const BUNDLE_ID: &str = "computer.jp.jean-pierre";
 /// first version carries, so anything able to spawn it will do.
 const REQUIRED_PROTOCOL: u32 = 1;
 
+/// Where this plugin attaches to `jp`, readable from the binary without running
+/// it.
+///
+/// `protocol` has to match [`REQUIRED_PROTOCOL`].
+pub static MANIFEST: &str = jp_plugin::manifest!(
+    protocol: 1,
+    description: "Open the current workspace in the JP macOS app",
+    command: ["gui"],
+);
+
 /// Serve one plugin session: read the host's first message and answer it.
 ///
 /// A `describe` is answered and ends the session; an `init` launches the app on
@@ -116,18 +126,14 @@ fn validate(init: &InitMessage, root: &str) -> Result<(), String> {
 }
 
 fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Describe(DescribeResponse {
-            name: "gui".to_owned(),
-            version: env!("CARGO_PKG_VERSION").to_owned(),
-            description: "Open the current workspace in the JP macOS app".to_owned(),
-            command: vec!["gui".to_owned()],
-            author: Some("Jean Mertz <git@jeanmertz.com>".to_owned()),
-            help: Some(HELP_TEXT.to_owned()),
-            repository: Some("https://github.com/dcdpr/jp".to_owned()),
-        }),
-    )
+    let mut describe =
+        DescribeResponse::from_manifest(MANIFEST, "gui", env!("CARGO_PKG_VERSION"), HELP_TEXT)
+            .map_err(|e| format!("invalid embedded manifest: {e}"))?;
+
+    describe.author = Some("Jean Mertz <git@jeanmertz.com>".to_owned());
+    describe.repository = Some("https://github.com/dcdpr/jp".to_owned());
+
+    send(stdout, &PluginToHost::Describe(describe))
 }
 
 fn send_exit(stdout: &mut impl Write, code: u8, reason: Option<&str>) -> Result<(), String> {
