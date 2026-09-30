@@ -2514,37 +2514,52 @@ fn manifest_differences(a: &Manifest, b: &Manifest) -> Vec<&'static str> {
 /// Spawns the binary, sends `{"type":"describe"}`, reads one response line, and
 /// returns the parsed [`DescribeResponse`].
 /// Returns `None` if the plugin doesn't support describe or fails to respond.
+///
+/// The plugin and everything it started are killed once the answer is read, or
+/// once reading it failed: the plugin has nothing left to do, and one that
+/// keeps running would otherwise be waited on forever.
 fn describe_plugin(binary: &Utf8Path) -> Option<DescribeResponse> {
-    let mut child = Command::new(binary)
+    let mut command = Command::new(binary);
+    command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
+        .stderr(Stdio::null());
 
-    let mut child_stdin = child.stdin.take()?;
-    let child_stdout = child.stdout.take()?;
-
-    // Send describe request.
-    let json = serde_json::to_string(&HostToPlugin::Describe).ok()?;
-    writeln!(child_stdin, "{json}").ok()?;
-    child_stdin.flush().ok()?;
-    drop(child_stdin); // Signal no more messages.
-
-    // Read one line response.
-    let mut reader = BufReader::new(child_stdout);
-    let mut line = String::new();
-    reader.read_line(&mut line).ok()?;
-
-    drop(child.wait());
-
-    if line.trim().is_empty() {
-        return None;
+    // Its own group, as for a run, so the group is what `ProcessTree` kills.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        command.process_group(0);
     }
 
-    let msg: PluginToHost = serde_json::from_str(line.trim()).ok()?;
-    match msg {
-        PluginToHost::Describe(resp) => Some(resp),
+    let mut child = command.spawn().ok()?;
+    let tree = ProcessTree::new(&child);
+
+    let answer = read_describe(&mut child);
+
+    tree.terminate();
+    drop(child.wait());
+
+    answer
+}
+
+/// Ask a spawned plugin to describe itself, and read its one-line answer.
+fn read_describe(child: &mut Child) -> Option<DescribeResponse> {
+    let mut stdin = child.stdin.take()?;
+    let stdout = child.stdout.take()?;
+
+    let json = serde_json::to_string(&HostToPlugin::Describe).ok()?;
+    writeln!(stdin, "{json}").ok()?;
+    stdin.flush().ok()?;
+
+    // Closed, so a plugin reading for more messages sees the end of them.
+    drop(stdin);
+
+    let mut line = String::new();
+    BufReader::new(stdout).read_line(&mut line).ok()?;
+
+    match serde_json::from_str(line.trim()).ok()? {
+        PluginToHost::Describe(answer) => Some(answer),
         _ => None,
     }
 }

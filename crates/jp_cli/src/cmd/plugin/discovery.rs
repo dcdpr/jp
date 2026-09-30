@@ -8,7 +8,7 @@
 
 use std::{collections::HashSet, fs};
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::{Utf8Path, Utf8PathBuf, absolute_utf8};
 use jp_plugin::manifest::{self, Manifest};
 use tracing::debug;
 
@@ -101,6 +101,10 @@ pub(crate) fn discover() -> Vec<LocalPlugin> {
 /// binary.
 /// Two different files with the same name are both returned: that they conflict
 /// is the router's to report.
+///
+/// Every returned path is absolute, resolved against the current directory, so
+/// it names the same file from whatever directory it is later used.
+/// Symlinks are kept, so a path reads the way it does on `$PATH`.
 pub(crate) fn discover_in(
     install_dir: Option<&Utf8Path>,
     path_dirs: &[Utf8PathBuf],
@@ -114,7 +118,13 @@ pub(crate) fn discover_in(
         .chain(path_dirs.iter().map(|dir| (dir.as_path(), Location::Path)));
 
     for (dir, location) in dirs {
-        for (name, path) in executables(dir) {
+        // An empty `$PATH` entry has no absolute form, and names no directory
+        // to list either.
+        let Ok(dir) = absolute_utf8(dir) else {
+            continue;
+        };
+
+        for (name, path) in executables(&dir) {
             // Identity is the file itself, so a symlink into a package store
             // and the file it points at are one binary.
             let Ok(canonical) = path.canonicalize_utf8() else {

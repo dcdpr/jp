@@ -219,6 +219,10 @@ pub struct ApprovedPlugin {
     pub sha256: String,
 
     /// When the approval was recorded.
+    ///
+    /// An approval stored without one reads as the Unix epoch, rather than
+    /// making the whole store unreadable.
+    #[serde(default)]
     pub approved_at: DateTime<Utc>,
 
     /// Whether JP wrote this binary itself, from the registry.

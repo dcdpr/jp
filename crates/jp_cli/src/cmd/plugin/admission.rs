@@ -8,6 +8,7 @@
 //! See: `docs/rfd/077-plugin-configuration-and-trust-policy.md`, "Dispatch
 //! Integration" and "Approval Store".
 
+use camino::Utf8Path;
 use chrono::Utc;
 use crossterm::style::Stylize as _;
 use jp_config::plugins::{
@@ -98,14 +99,9 @@ pub(crate) fn decide(candidate: &Candidate<'_>, config: Option<&CommandPluginCon
     }
 
     if let Some(pinned) = config.and_then(|c| c.checksum.as_ref())
-        && pinned.value != candidate.sha256
+        && let Some(refusal) = pin_mismatch(name, path, &pinned.value, candidate.sha256)
     {
-        return Verdict::Refuse(format!(
-            "plugin `{name}` binary checksum mismatch.\nexpected: {}\nactual:   {}\nThe binary at \
-             {path} has changed since it was pinned. Update plugins.command.{name}.checksum.value \
-             in your config to accept the new binary.",
-            pinned.value, candidate.sha256,
-        ));
+        return Verdict::Refuse(refusal);
     }
 
     if policy == RunPolicy::Allow {
@@ -122,6 +118,23 @@ pub(crate) fn decide(candidate: &Candidate<'_>, config: Option<&CommandPluginCon
         ApprovalMatch::Elsewhere(approved) => Reason::Elsewhere(approved.clone()),
         ApprovalMatch::None if candidate.official => Reason::NotTheRelease,
         ApprovalMatch::None => Reason::New,
+    })
+}
+
+/// Why a binary is refused, when its contents do not match the checksum pinned
+/// for it; `None` when they do.
+pub(crate) fn pin_mismatch(
+    name: &str,
+    path: &Utf8Path,
+    pinned: &str,
+    sha256: &str,
+) -> Option<String> {
+    (pinned != sha256).then(|| {
+        format!(
+            "plugin `{name}` binary checksum mismatch.\nexpected: {pinned}\nactual:   \
+             {sha256}\nThe binary at {path} has changed since it was pinned. Update \
+             plugins.command.{name}.checksum.value in your config to accept the new binary.",
+        )
     })
 }
 

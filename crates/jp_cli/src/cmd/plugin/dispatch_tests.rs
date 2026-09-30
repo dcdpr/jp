@@ -1889,3 +1889,57 @@ echo '{"type":"describe","protocol":1,"name":"titles","version":"0.1.0","descrip
         )
     );
 }
+
+/// A plugin that starts a worker, answers `describe`, and then keeps running:
+/// asking it to describe itself returns, and takes the worker with it.
+///
+/// Unix only: on Windows a plugin is a `jp-*.exe`, which a test cannot write as
+/// a script.
+/// `process_tree::tests` covers the tree on every platform.
+#[cfg(unix)]
+#[test]
+fn describing_a_plugin_stops_everything_it_started() {
+    use std::{os::unix::fs::PermissionsExt as _, sync::mpsc};
+
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("jp-titles");
+    let pid_file = tmp.path().join("worker.pid");
+    fs::write(
+        &path,
+        format!(
+            r#"#!/bin/sh
+sleep 60 &
+echo $! > {pid_file}
+read -r msg
+echo '{{"type":"describe","protocol":1,"name":"titles","version":"0.1.0","description":"Titles","command":["titles"],"help":"Usage"}}'
+sleep 60
+"#
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+
+    // On a thread, so a describe that waits on the plugin fails the test
+    // instead of hanging it.
+    let (tx, rx) = mpsc::channel();
+    let binary = path.clone();
+    thread::spawn(move || drop(tx.send(describe_plugin(&binary))));
+
+    let answer = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("describe returned rather than waiting on the plugin");
+    assert_eq!(answer.map(|a| a.name).as_deref(), Some("titles"));
+
+    let worker: u32 = fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+
+    // The killed worker is an orphan, reaped by init a moment later.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while is_process_alive(worker) {
+        assert!(Instant::now() < deadline, "the worker outlived describe");
+        thread::sleep(Duration::from_millis(20));
+    }
+}

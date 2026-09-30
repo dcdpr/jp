@@ -6,6 +6,14 @@ use super::*;
 const TITLES: &str = "#!/bin/sh\n# jp-plugin/v1 \
                       {\"protocol\":1,\"description\":\"Titles\",\"command\":[\"titles\"]}\n";
 
+/// The file name a plugin named `name` has on this platform.
+///
+/// These files are only scanned, never run, so a script's text serves on
+/// Windows too.
+fn plugin_file(name: &str) -> String {
+    format!("jp-{name}{}", std::env::consts::EXE_SUFFIX)
+}
+
 /// Write an executable file.
 fn script(dir: &Utf8Path, file: &str, content: &str) -> Utf8PathBuf {
     let path = dir.join(file);
@@ -40,7 +48,7 @@ fn dirs() -> (Utf8TempDir, Utf8PathBuf, Utf8PathBuf) {
 #[test]
 fn a_plugin_is_found_with_its_manifest() {
     let (_tmp, install, bin) = dirs();
-    let path = script(&bin, "jp-titles", TITLES);
+    let path = script(&bin, &plugin_file("titles"), TITLES);
 
     let found = discover_in(Some(&install), &[bin]);
 
@@ -55,7 +63,7 @@ fn a_plugin_is_found_with_its_manifest() {
 #[test]
 fn a_binary_without_a_manifest_is_found_and_says_so() {
     let (_tmp, install, bin) = dirs();
-    script(&bin, "jp-tools", "#!/bin/sh\necho hi\n");
+    script(&bin, &plugin_file("tools"), "#!/bin/sh\necho hi\n");
 
     let found = discover_in(Some(&install), &[bin]);
 
@@ -88,8 +96,8 @@ fn a_file_that_cannot_be_run_is_skipped() {
 #[test]
 fn the_install_directory_comes_first() {
     let (_tmp, install, bin) = dirs();
-    script(&bin, "jp-a", TITLES);
-    script(&install, "jp-b", TITLES);
+    script(&bin, &plugin_file("a"), TITLES);
+    script(&install, &plugin_file("b"), TITLES);
 
     let found = discover_in(Some(&install), &[bin]);
     let names: Vec<_> = found
@@ -105,12 +113,40 @@ fn the_install_directory_comes_first() {
 #[test]
 fn two_files_with_one_name_are_both_found() {
     let (_tmp, install, bin) = dirs();
-    script(&install, "jp-titles", TITLES);
-    script(&bin, "jp-titles", TITLES);
+    script(&install, &plugin_file("titles"), TITLES);
+    script(&bin, &plugin_file("titles"), TITLES);
 
     let found = discover_in(Some(&install), &[bin]);
 
     assert_eq!(found.len(), 2);
+}
+
+/// A relative `$PATH` entry is resolved against the current directory, so the
+/// path names the same file however the plugin's working directory is set
+/// later.
+///
+/// Unix only: the relative spelling climbs to the root with `..`, and on
+/// Windows the temporary directory can sit on another drive than the current
+/// one, where no relative path reaches it.
+#[cfg(unix)]
+#[test]
+fn a_relative_directory_yields_an_absolute_path() {
+    let (_tmp, install, bin) = dirs();
+    let written = script(&bin, &plugin_file("titles"), TITLES);
+
+    let cwd = Utf8PathBuf::try_from(std::env::current_dir().unwrap()).unwrap();
+    let up = "../".repeat(cwd.components().count() - 1);
+    let relative = Utf8PathBuf::from(format!("{up}{}", bin.as_str().trim_start_matches('/')));
+    assert!(relative.is_relative());
+
+    let found = discover_in(Some(&install), &[relative]);
+
+    assert_eq!(found.len(), 1);
+    assert!(found[0].path.is_absolute(), "{}", found[0].path);
+    assert_eq!(
+        found[0].path.canonicalize_utf8().unwrap(),
+        written.canonicalize_utf8().unwrap()
+    );
 }
 
 #[cfg(unix)]

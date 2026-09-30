@@ -98,6 +98,27 @@ fn removing_an_approval_returns_it() {
     assert!(store.get("a").is_none());
 }
 
+/// A store written without approval timestamps keeps its entries when another
+/// approval is recorded, rather than being read as empty and overwritten.
+#[test]
+fn recording_over_a_store_without_timestamps_keeps_its_entries() {
+    let tmp = tempdir().unwrap();
+    fs::write(
+        tmp.path().join("approvals.json"),
+        r#"{"approved":{"old":{"path":"/old","sha256":"1"}}}"#,
+    )
+    .unwrap();
+
+    let mut approvals = store(&tmp);
+    approvals
+        .record("new", approval("/new".into(), "2"))
+        .unwrap();
+
+    let reread = store(&tmp);
+    assert_eq!(reread.get("old").map(|a| a.sha256.as_str()), Some("1"));
+    assert_eq!(reread.get("new").map(|a| a.sha256.as_str()), Some("2"));
+}
+
 #[test]
 fn a_malformed_store_is_treated_as_empty() {
     let tmp = tempdir().unwrap();

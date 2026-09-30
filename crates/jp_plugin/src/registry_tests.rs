@@ -257,6 +257,22 @@ fn an_approval_carries_the_install_marker_and_a_recorded_manifest() {
     assert_eq!(approval.manifest.unwrap().command, ["packed"]);
 }
 
+/// A store whose approvals carry no timestamp still reads, entry and all.
+#[test]
+fn an_approval_without_a_timestamp_reads_as_the_epoch() {
+    let json = json!({"approved": {"x": {"path": "/x", "sha256": "a"}}});
+
+    let approvals: PluginApprovals = serde_json::from_value(json).unwrap();
+
+    assert_eq!(approvals.approved["x"], ApprovedPlugin {
+        path: "/x".into(),
+        sha256: "a".to_owned(),
+        approved_at: DateTime::<Utc>::UNIX_EPOCH,
+        installed: false,
+        manifest: None,
+    });
+}
+
 #[test]
 fn approvals_default_is_empty() {
     let approvals = PluginApprovals::default();
