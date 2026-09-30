@@ -318,6 +318,50 @@ fn test_off_on_always_on_leveled_model_uses_lowest_level() {
     assert_eq!(thinking.thinking_level, Some(types::ThinkingLevel::Low));
 }
 
+/// An absolute reasoning effort resolves against the request's output limit,
+/// not the model's capacity. 12,000 tokens is `high` of a configured
+/// 16,000-token limit, but only `low` of the model's 65,536.
+#[test]
+fn test_absolute_effort_resolves_against_configured_max_tokens() {
+    let mut model = ModelDetails::empty((PROVIDER, "gemini-3.8-flash").try_into().unwrap());
+    model.max_output_tokens = Some(65_536);
+    // Mirrors the table entry: low through high, reasoning always on.
+    model.reasoning =
+        Some(ReasoningDetails::leveled(false, true, true, true, false, false).always_on());
+
+    let mut events = jp_conversation::ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.max_tokens = Some(16_000);
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Custom(
+        PartialCustomReasoningConfig {
+            effort: Some(ReasoningEffort::Absolute(12_000.into())),
+            exclude: Some(false),
+        },
+    ));
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+
+    let (request, _) = create_request(&model, query).unwrap();
+
+    let thinking = request
+        .generation_config
+        .and_then(|c| c.thinking_config)
+        .expect("configured reasoning sends a thinking config");
+
+    assert_eq!(thinking.thinking_level, Some(types::ThinkingLevel::High));
+}
+
 /// A model the API reports as not thinking is recorded as not reasoning, even
 /// when the built-in table claims a ladder for it.
 /// Sending a thinking budget to such a model configures a mode it does not

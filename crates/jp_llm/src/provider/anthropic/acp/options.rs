@@ -75,6 +75,7 @@ enum Thinking {
         display: Option<ThinkingDisplay>,
     },
     Disabled,
+    BetweenTools,
 }
 
 impl From<&ExtendedThinking> for Thinking {
@@ -94,6 +95,7 @@ impl From<&ExtendedThinking> for Thinking {
                 display: display.clone(),
             },
             ExtendedThinking::Disabled => Self::Disabled,
+            ExtendedThinking::BetweenTools => Self::BetweenTools,
         }
     }
 }

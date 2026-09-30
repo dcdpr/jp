@@ -1460,7 +1460,10 @@ fn create_request(
     let supports_reasoning = model
         .reasoning
         .is_none_or(|v| !matches!(v, ReasoningDetails::Unsupported));
-    let mut reasoning = match model.custom_reasoning_config(parameters.reasoning) {
+    let custom_reasoning =
+        model.custom_reasoning_config(parameters.reasoning, model.max_output_tokens);
+    let reasoning_enabled = custom_reasoning.is_some();
+    let mut reasoning = match custom_reasoning {
         Some(r) => Some(convert_reasoning(r, model)),
         // Explicitly disable reasoning for models that support it when the
         // user has turned it off. Sending `null` lets the model use its
@@ -1490,9 +1493,6 @@ fn create_request(
         }
         None => None,
     };
-    let reasoning_enabled = model
-        .custom_reasoning_config(parameters.reasoning)
-        .is_some();
 
     if reasoning_enabled && let Some(r) = reasoning.as_mut() {
         r.mode = reasoning_mode;
@@ -1736,6 +1736,32 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
                 // Reasoning is always active, so TEMP_REQUIRES_NO_REASONING drops
                 // temperature and top_p on every request, which is what this model
                 // wants: it rejects both outright.
+                features: vec![
+                    TEMP_REQUIRES_NO_REASONING,
+                    REASONING_PRO_MODE,
+                    PERSISTED_REASONING,
+                    EXPLICIT_PROMPT_CACHING,
+                ],
+            },
+        },
+        Entry {
+            aliases: &[],
+            value: ModelDetails {
+                id: id("gpt-6.1-sol"),
+                display_name: Some("GPT-6.1 Sol".to_owned()),
+                context_window: Some(1_050_000),
+                max_output_tokens: Some(128_000),
+                // Reasoning.effort supports: low, medium, high, xhigh, max. Neither
+                // `none` nor `minimal` is accepted, so reasoning cannot be turned
+                // off; the lowest level stands in for a disable.
+                reasoning: Some(
+                    ReasoningDetails::leveled(false, true, true, true, true, true).always_on(),
+                ),
+                knowledge_cutoff: Some(date(2026, 4, 30)),
+                deprecated: Some(ModelDeprecation::Active),
+                structured_output: None,
+                prefill: None,
+                subscription: Some(true),
                 features: vec![
                     TEMP_REQUIRES_NO_REASONING,
                     REASONING_PRO_MODE,

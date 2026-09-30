@@ -1028,6 +1028,157 @@ fn test_map_model_snapshot_alias_uses_the_model_overrides() {
     assert_eq!(details.prefill, Some(false));
 }
 
+/// Verify the `map_model` arm for Claude Sonnet 5.5.
+///
+/// Sonnet 5.5 rejects `thinking: disabled` and forced `tool_choice`, so it is
+/// marked always-on like Opus 5.5, and carries the flag that turns `reasoning =
+/// off` into `thinking: between_tools`.
+#[test]
+fn test_map_model_sonnet_5_5() {
+    let model = adaptive_api_model("claude-sonnet-5-5", "Claude Sonnet 5.5", true, true);
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(
+        details.id,
+        (PROVIDER, "claude-sonnet-5-5").try_into().unwrap()
+    );
+    assert_eq!(details.display_name.as_deref(), Some("Claude Sonnet 5.5"));
+    assert_eq!(details.context_window, Some(1_000_000));
+    assert_eq!(details.max_output_tokens, Some(128_000));
+    assert_eq!(
+        details.knowledge_cutoff,
+        NaiveDate::from_ymd_opt(2026, 6, 1)
+    );
+    assert_eq!(
+        details.reasoning,
+        Some(ReasoningDetails::adaptive(true, true).always_on())
+    );
+    assert_eq!(details.structured_output, Some(true));
+    assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+    assert_eq!(details.features, vec![
+        "interleaved-thinking",
+        "context-editing",
+        "adaptive-thinking",
+        BETWEEN_TOOLS_THINKING,
+    ]);
+    assert!(!details.supports_disabling_thinking());
+    assert!(!details.supports_prefill());
+}
+
+/// A query against Claude Sonnet 5.5 with the given reasoning config and tool
+/// choice, built from the model as `map_model` reports it.
+fn sonnet_5_5_request(
+    reasoning: PartialReasoningConfig,
+    tool_choice: ToolChoice,
+) -> (types::CreateMessagesRequest, Option<ForcedToolFallback>) {
+    use jp_tool::{ToolDefinition, ToolDocs};
+
+    let model = map_model(adaptive_api_model(
+        "claude-sonnet-5-5",
+        "Claude Sonnet 5.5",
+        true,
+        true,
+    ))
+    .unwrap();
+
+    let mut events = ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(reasoning);
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![
+            ToolDefinition {
+                name: "my_tool".into(),
+                docs: ToolDocs::default(),
+                parameters: json!({ "type": "object", "properties": {} }),
+            },
+            ToolDefinition {
+                name: "other_tool".into(),
+                docs: ToolDocs::default(),
+                parameters: json!({ "type": "object", "properties": {} }),
+            },
+        ],
+        tool_choice,
+        truncation: Truncation::default(),
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, fallback) = create_request(&model, query, true, &beta, false).unwrap();
+    (request, fallback)
+}
+
+/// Sonnet 5.5 answers `thinking: disabled` with a 400.
+/// With reasoning off it gets `between_tools` instead, with no effort (so the
+/// API default `high` applies, the highest level `between_tools` accepts) and
+/// no `display`, which `between_tools` also rejects.
+#[test]
+fn test_sonnet_5_5_reasoning_off_sends_between_tools() {
+    let (request, fallback) = sonnet_5_5_request(PartialReasoningConfig::Off, ToolChoice::Auto);
+
+    assert_eq!(
+        request.thinking,
+        Some(types::ExtendedThinking::BetweenTools)
+    );
+    assert_eq!(request.output_config, None);
+    assert!(fallback.is_none());
+}
+
+/// With reasoning on, Sonnet 5.5 takes adaptive thinking with a summarized
+/// display, so the progress updates it writes between tool calls arrive with
+/// their text rather than empty.
+#[test]
+fn test_sonnet_5_5_reasoning_on_uses_summarized_adaptive_thinking() {
+    let (request, _) = sonnet_5_5_request(
+        PartialReasoningConfig::Custom(PartialCustomReasoningConfig {
+            effort: Some(ReasoningEffort::Max),
+            exclude: Some(false),
+        }),
+        ToolChoice::Auto,
+    );
+
+    assert_eq!(
+        request.thinking,
+        Some(types::ExtendedThinking::Adaptive {
+            display: Some(types::ThinkingDisplay::Summarized),
+        })
+    );
+    assert_eq!(request.output_config.unwrap().effort, Some(Effort::Max));
+}
+
+/// Sonnet 5.5 rejects `tool_choice` `any` and `tool` whatever the thinking
+/// setting, so a forced call soft-forces even with reasoning off, and the
+/// fallback never takes the disable-thinking hard retry.
+#[test]
+fn test_sonnet_5_5_forced_tool_soft_forces_with_reasoning_off() {
+    let (request, fallback) = sonnet_5_5_request(
+        PartialReasoningConfig::Off,
+        ToolChoice::Function("my_tool".into()),
+    );
+
+    assert_matches!(request.tool_choice, Some(types::ToolChoice::Auto { .. }));
+    assert_eq!(
+        request.thinking,
+        Some(types::ExtendedThinking::BetweenTools)
+    );
+
+    let fallback = fallback.expect("Expected an escalating-nudge fallback");
+    assert_matches!(fallback.strategy, ForceStrategy::EscalatingNudge {
+        remaining: SOFT_FORCE_MAX_RETRIES
+    });
+    assert_matches!(
+        fallback.tool_choice,
+        types::ToolChoice::Tool { ref name, .. } if name == "my_tool"
+    );
+}
+
 /// Verify the `map_model` arm for Claude Fable 5.1 produces the expected
 /// `ModelDetails`, including the `thinking-always-on` capability that stops JP
 /// from sending `thinking: disabled` and from hard-forcing a `tool_choice`,

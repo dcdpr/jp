@@ -385,7 +385,7 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(ChatMessage
     // explicit request and lets the provider decide.
     request = request.think(
         model
-            .custom_reasoning_config(parameters.reasoning)
+            .custom_reasoning_config(parameters.reasoning, model.max_output_tokens)
             .is_some(),
     );
 

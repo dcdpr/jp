@@ -71,3 +71,37 @@ Low and self-correcting today.
 The repair works, and the user sees a slower turn rather than a broken one.
 It gets worse the longer a conversation runs and the more often its config
 changes, and it is silent about the reasoning it discards to get unstuck.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-09-29T18:58:28Z
+
+Claude Sonnet 5.5 joins Fable 5.1 and Opus 5.5 under the same prefix check, and
+its docs settle the open question above: a replayed block the current model
+can't read is **dropped silently**, not rejected.
+The request succeeds and the model runs that turn without the reasoning.
+Only a prefix edit (`system`, `tools`, or an earlier message) produces the 400,
+and its message (`Invalid 'signature' in 'thinking' block. The block is bound to
+a different conversation...`) is one `classify_thinking_rejection` already
+matches as `InvalidSignature`.
+
+Sonnet 5.5 narrows the options for fixing this:
+
+- The documented mitigation is the `thinking-binding-controls-2026-08-01` beta
+  plus `thinking.block_binding.prefix_mismatch_behavior = "drop_block"`.
+  On Sonnet 5.5 that field is accepted only with `thinking: adaptive`.
+  JP sends `thinking: between_tools` there when `reasoning = off`, and sending
+  `block_binding` with it is a 400.
+  So with reasoning off, the only fixes are an append-only history or JP
+  stripping the stale blocks itself, which is the proactive approach this ticket
+  proposes.
+- Sonnet 5.5 blocks are also bound to the account that produced them.
+  Blocks replayed through a different credential are dropped silently
+  (`organization_binding_mismatch`).
+  JP's credential fallback can move a conversation between accounts, so that is
+  a second way reasoning gets lost without any notice.
+
+Source: https://platform.claude.com/docs/en/build-with-claude/preserved-thinking

@@ -1972,7 +1972,8 @@ fn create_request(
             DEFAULT_MAX_TOKENS as u32
         });
 
-    let reasoning_config = model.custom_reasoning_config(parameters.reasoning);
+    let reasoning_config =
+        model.custom_reasoning_config(parameters.reasoning, model.max_output_tokens);
 
     // Whether this request runs with thinking active. Configuring reasoning
     // turns it on; so does a model that always thinks (Fable 5), which keeps
@@ -2169,6 +2170,13 @@ fn create_request(
                 );
             }
         }
+    } else if model.features.contains(&BETWEEN_TOOLS_THINKING) {
+        // Reasoning is off on a model that rejects `thinking: disabled`.
+        // `between_tools` is the lowest setting it accepts; omitting the field
+        // instead would run full adaptive thinking at the default effort.
+        // No effort is sent here, and the API default (`high`) is the highest
+        // level `between_tools` accepts.
+        builder.thinking(types::ExtendedThinking::BetweenTools);
     } else if supports_thinking && !thinking_active {
         // Reasoning is off and the model can disable thinking, so disable it
         // explicitly to prevent thinking by default.
@@ -2328,6 +2336,13 @@ fn adaptive_effort(
     mapped
 }
 
+/// Feature flag: `reasoning = off` is sent as `thinking: between_tools`.
+///
+/// Set on models that reject `thinking: disabled` but accept `between_tools`,
+/// which drops up-front thinking while keeping the short progress updates the
+/// model writes between tool calls (Sonnet 5.5).
+const BETWEEN_TOOLS_THINKING: &str = "between-tools-thinking";
+
 /// Model facts the capabilities API does not report.
 ///
 /// Everything else (token limits, reasoning mode and effort ladder, structured
@@ -2355,6 +2370,11 @@ struct ModelOverrides {
 
     /// Whether reasoning cannot be turned off, as on Fable 5.
     always_on: bool,
+
+    /// Whether `reasoning = off` maps to `thinking: between_tools`, as on
+    /// Sonnet 5.5, rather than to omitting the thinking field.
+    /// Only meaningful together with `always_on`.
+    between_tools: bool,
 }
 
 impl ModelOverrides {
@@ -2367,6 +2387,7 @@ impl ModelOverrides {
             deprecated: ModelDeprecation::Active,
             prefill: false,
             always_on: false,
+            between_tools: false,
         }
     }
 }
@@ -2420,6 +2441,17 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
             value: ModelOverrides {
                 knowledge_cutoff: cutoff(2026, 5),
                 ..ModelOverrides::new("claude-opus-5")
+            },
+        },
+        // Rejects `thinking: disabled` and forced `tool_choice`, like Opus 5.5,
+        // but can still drop up-front thinking with `between_tools`.
+        Entry {
+            aliases: &[],
+            value: ModelOverrides {
+                knowledge_cutoff: cutoff(2026, 6),
+                always_on: true,
+                between_tools: true,
+                ..ModelOverrides::new("claude-sonnet-5-5")
             },
         },
         Entry {
@@ -2533,7 +2565,10 @@ fn map_model(model: types::Model) -> Result<ModelDetails> {
     let max_output_tokens = (model.max_tokens != 0).then_some(model.max_tokens);
     // Reported per property, so an unreported capability stays unknown.
     let structured_output = model.capabilities.structured_outputs.supported;
-    let features = derive_features(&model.capabilities);
+    let mut features = derive_features(&model.capabilities);
+    if overrides.is_some_and(|o| o.between_tools) {
+        features.push(BETWEEN_TOOLS_THINKING);
+    }
 
     let mut reasoning = derive_reasoning(&model.capabilities);
     if overrides.is_some_and(|o| o.always_on) {
