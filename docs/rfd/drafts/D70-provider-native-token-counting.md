@@ -41,7 +41,7 @@ that number is exactly what a provider counting endpoint returns.
 
 Doing nothing leaves the search manual and leaves every future consumer
 estimating.
-Two other drafts, `D24` (bounded tool output) and `D50` (automatic compaction),
+Two other drafts, `115` (bounded tool output) and `D50` (automatic compaction),
 each defer accurate counting for the same stated reason — a tokenizer is a real
 dependency — and each works around its absence with a safety margin.
 
