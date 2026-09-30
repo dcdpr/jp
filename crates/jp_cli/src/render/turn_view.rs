@@ -24,6 +24,7 @@ use jp_printer::Printer;
 use jp_term::background::DefaultBackground;
 
 use super::{ChatRenderer, RenderFlow, StructuredRenderer};
+use crate::format::sanitize_mode;
 
 /// Fallback label used when no [`assistant.name`][an] is configured.
 ///
@@ -90,9 +91,10 @@ impl TurnView {
         model_id: Option<String>,
         flow: RenderFlow,
     ) -> Self {
+        let sanitize = sanitize_mode(style.sanitize);
         Self {
             chat: ChatRenderer::new(printer.clone(), style, flow),
-            structured: StructuredRenderer::new(printer),
+            structured: StructuredRenderer::new(printer, sanitize),
             assistant_name,
             model_id,
             flow,
@@ -107,16 +109,16 @@ impl TurnView {
     ///
     /// [`ToolRenderer`]: super::ToolRenderer
     pub(crate) fn set_tool_separator(&mut self, flag: Arc<AtomicBool>) {
-        self.tool_separator = flag;
-    }
+    self.tool_separator = flag;
+}
 
     /// Wire this view's drawn-chrome flag to a [`ToolRenderer`].
     ///
     /// [`ToolRenderer`]: super::ToolRenderer
     pub(crate) fn set_tool_drawn(&mut self, flag: Arc<AtomicBool>) {
-        self.chat.set_tool_drawn(Arc::clone(&flag));
-        self.tool_drawn = Some(flag);
-    }
+    self.chat.set_tool_drawn(Arc::clone(&flag));
+    self.tool_drawn = Some(flag);
+}
 
     /// Set the dimmed detail attached to the first role header of the upcoming
     /// turn (e.g. `turn 2, 12 minutes ago`).
@@ -124,32 +126,32 @@ impl TurnView {
     /// Consumed by whichever header (user or assistant) renders first; later
     /// headers in the same turn render without it.
     pub(crate) fn set_turn_detail(&mut self, detail: Option<String>) {
-        self.pending_turn_detail = detail;
-    }
+    self.pending_turn_detail = detail;
+}
 
     /// Mark the start of a new turn.
     /// The next assistant event will emit a fresh role header.
     /// Closes any open structured fence so a turn that ended on a
     /// `ChatResponse::Structured` doesn't bleed into the next turn's content.
     pub fn begin_turn(&mut self) {
-        self.structured.flush();
-        self.assistant_header_rendered = false;
-    }
+    self.structured.flush();
+    self.assistant_header_rendered = false;
+}
 
     /// Render a user request: a labeled role header followed by the request
     /// body.
     /// Resets assistant-header gating so the next assistant event emits a fresh
     /// header.
     pub fn render_user_request(&mut self, req: &ChatRequest) {
-        // Close any open structured fence before the user header so the
-        // boundary marker isn't rendered inside a `json` block.
-        self.structured.flush();
-        self.tool_separator.store(false, Ordering::Relaxed);
-        let label = req.author.as_deref().unwrap_or(DEFAULT_USER_LABEL);
-        self.emit_role_header(label, None);
-        self.chat.render_request(&req.content);
-        self.assistant_header_rendered = false;
-    }
+    // Close any open structured fence before the user header so the
+    // boundary marker isn't rendered inside a `json` block.
+    self.structured.flush();
+    self.tool_separator.store(false, Ordering::Relaxed);
+    let label = req.author.as_deref().unwrap_or(DEFAULT_USER_LABEL);
+    self.emit_role_header(label, None);
+    self.chat.render_request(&req.content);
+    self.assistant_header_rendered = false;
+}
 
     /// Render a complete chat response, closing its response item.
     ///
@@ -159,9 +161,9 @@ impl TurnView {
     ///
     /// [`render_chat_response_chunk`]: Self::render_chat_response_chunk
     pub fn render_chat_response(&mut self, resp: &ChatResponse) {
-        self.render_chat_response_chunk(resp);
-        self.end_chat_response();
-    }
+    self.render_chat_response_chunk(resp);
+    self.end_chat_response();
+}
 
     /// Render a fragment of a chat response that is still streaming in,
     /// emitting the assistant role header first if it hasn't been emitted yet
@@ -181,35 +183,35 @@ impl TurnView {
     ///
     /// [`end_chat_response`]: Self::end_chat_response
     pub fn render_chat_response_chunk(&mut self, resp: &ChatResponse) {
-        self.ensure_assistant_header();
+    self.ensure_assistant_header();
 
-        // Visible assistant content supplies its own spacing, so a preceding
-        // tool block no longer owes a separator before the next tool call.
-        // Reasoning that renders nothing must not clear that debt: the display
-        // mode may swallow it, and a whitespace-only chunk puts nothing on
-        // screen even in a rendering mode.
-        let clears_debt = match resp {
-            ChatResponse::Reasoning { reasoning } => {
-                self.chat.reasoning_supplies_separation(reasoning)
-            }
-            _ => true,
-        };
-        if clears_debt {
-            self.tool_separator.store(false, Ordering::Relaxed);
+    // Visible assistant content supplies its own spacing, so a preceding
+    // tool block no longer owes a separator before the next tool call.
+    // Reasoning that renders nothing must not clear that debt: the display
+    // mode may swallow it, and a whitespace-only chunk puts nothing on
+    // screen even in a rendering mode.
+    let clears_debt = match resp {
+        ChatResponse::Reasoning { reasoning } => {
+            self.chat.reasoning_supplies_separation(reasoning)
         }
-
-        if resp.is_structured() {
-            self.chat.flush();
-            // The chat renderer draws none of this, so it has to be told the
-            // region ended: a JSON answer on screen is not reasoning, and a
-            // prompt taken over it carries no background.
-            self.chat.leave_response_region();
-            self.structured.render_chunk(resp);
-        } else {
-            self.structured.flush();
-            self.chat.render_response(resp);
-        }
+        _ => true,
+    };
+    if clears_debt {
+        self.tool_separator.store(false, Ordering::Relaxed);
     }
+
+    if resp.is_structured() {
+        self.chat.flush();
+        // The chat renderer draws none of this, so it has to be told the
+        // region ended: a JSON answer on screen is not reasoning, and a
+        // prompt taken over it carries no background.
+        self.chat.leave_response_region();
+        self.structured.render_chunk(resp);
+    } else {
+        self.structured.flush();
+        self.chat.render_response(resp);
+    }
+}
 
     /// Close the response item the provider just finished.
     ///
@@ -228,8 +230,8 @@ impl TurnView {
     ///
     /// [`render_chat_response`]: Self::render_chat_response
     pub fn end_chat_response(&mut self) {
-        self.structured.flush();
-    }
+    self.structured.flush();
+}
 
     /// Resolve the tool-call boundary, returning the background the tool's
     /// chrome should be filled with to keep a reasoning region continuous.
@@ -250,18 +252,18 @@ impl TurnView {
     /// stays continuous across the invisible tool, and `None` is returned since
     /// there is no chrome to shade.
     pub(crate) fn enter_tool_call_region(
-        &mut self,
-        chrome_visible: bool,
-    ) -> Option<DefaultBackground> {
-        self.ensure_assistant_header();
-        self.structured.flush();
-        if chrome_visible {
-            self.chat.enter_tool_call()
-        } else {
-            self.chat.skip_tool_call();
-            None
-        }
+    &mut self,
+    chrome_visible: bool,
+) -> Option<DefaultBackground> {
+    self.ensure_assistant_header();
+    self.structured.flush();
+    if chrome_visible {
+        self.chat.enter_tool_call()
+    } else {
+        self.chat.skip_tool_call();
+        None
     }
+}
 
     /// Flush pending output across both chat and structured renderers.
     ///
@@ -270,9 +272,9 @@ impl TurnView {
     /// the last turn relies on this to terminate a trailing structured
     /// response.
     pub fn flush(&mut self) {
-        self.chat.flush();
-        self.structured.flush();
-    }
+    self.chat.flush();
+    self.structured.flush();
+}
 
     /// Flush pending output at a streaming-cycle boundary the same response
     /// continues across.
@@ -281,9 +283,9 @@ impl TurnView {
     /// owed by reasoning pending: nothing persistent renders between the two
     /// cycles, so the continuation's first content decides the gap's shading.
     pub fn flush_for_continuation(&mut self) {
-        self.chat.flush_for_continuation();
-        self.structured.flush();
-    }
+    self.chat.flush_for_continuation();
+    self.structured.flush();
+}
 
     /// Signal to the printer that the current streaming cycle has ended.
     ///
@@ -292,8 +294,8 @@ impl TurnView {
     /// holds its current pace as the queue empties (instead of slowing back
     /// toward the configured cap).
     pub fn signal_typewriter_drain(&self) {
-        self.chat.signal_typewriter_drain();
-    }
+    self.chat.signal_typewriter_drain();
+}
 
     /// Reset internal renderer state, discarding partial buffers.
     ///
@@ -305,9 +307,9 @@ impl TurnView {
     /// been rendered yet (the user interrupted before the first chunk), the
     /// flag stays `false` and the next assistant event will emit one.
     pub fn reset_for_continuation(&mut self) {
-        self.chat.reset();
-        self.structured.reset();
-    }
+    self.chat.reset();
+    self.structured.reset();
+}
 
     /// Reset internal renderer state at a stream-retry boundary, keeping the
     /// chat renderer's content region open.
@@ -316,9 +318,9 @@ impl TurnView {
     /// between, so the reasoning region and the separator it owes span the
     /// boundary and the continuation's first content resolves the gap.
     pub fn reset_for_stream_retry(&mut self) {
-        self.chat.reset_preserving_region();
-        self.structured.reset();
-    }
+    self.chat.reset_preserving_region();
+    self.structured.reset();
+}
 
     /// Replace the underlying renderers and identity.
     ///
@@ -330,21 +332,22 @@ impl TurnView {
     /// fence or buffered chat output is committed before the new instances take
     /// over.
     pub fn reconfigure(
-        &mut self,
-        printer: Arc<Printer>,
-        style: StyleConfig,
-        assistant_name: Option<String>,
-        model_id: Option<String>,
-    ) {
-        self.flush();
-        self.chat = ChatRenderer::new(printer.clone(), style, self.flow);
-        if let Some(flag) = &self.tool_drawn {
-            self.chat.set_tool_drawn(Arc::clone(flag));
-        }
-        self.structured = StructuredRenderer::new(printer);
-        self.assistant_name = assistant_name;
-        self.model_id = model_id;
+    &mut self,
+    printer: Arc<Printer>,
+    style: StyleConfig,
+    assistant_name: Option<String>,
+    model_id: Option<String>,
+) {
+    self.flush();
+    let sanitize = sanitize_mode(style.sanitize);
+    self.chat = ChatRenderer::new(printer.clone(), style, self.flow);
+    if let Some(flag) = &self.tool_drawn {
+        self.chat.set_tool_drawn(Arc::clone(flag));
     }
+    self.structured = StructuredRenderer::new(printer, sanitize);
+    self.assistant_name = assistant_name;
+    self.model_id = model_id;
+}
 
     /// Emit a role-boundary header, attaching the pending turn detail to it.
     ///
@@ -355,10 +358,10 @@ impl TurnView {
     /// "first header wins" rule lives in one spot instead of being
     /// re-implemented at each call site.
     fn emit_role_header(&mut self, label: &str, suffix: Option<&str>) {
-        let detail = self.pending_turn_detail.take();
-        self.chat
-            .render_role_header(label, suffix, detail.as_deref());
-    }
+    let detail = self.pending_turn_detail.take();
+    self.chat
+        .render_role_header(label, suffix, detail.as_deref());
+}
 
     fn ensure_assistant_header(&mut self) {
         if self.assistant_header_rendered {
