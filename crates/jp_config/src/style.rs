@@ -18,9 +18,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, path},
+    delta::{PartialConfigDelta, delta_opt, path},
     fill::FillDefaults,
-    partial::ToPartial,
+    partial::{ToPartial, partial_opt},
     style::{
         code::{CodeConfig, PartialCodeConfig},
         inline_code::{InlineCodeConfig, PartialInlineCodeConfig},
@@ -38,6 +38,35 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct StyleConfig {
+    /// How escape sequences in conversation content are shown.
+    ///
+    /// Defaults to `strip`.
+    ///
+    /// Your messages, the assistant's replies, tool results, and conversation
+    /// titles can contain terminal escape sequences and control characters:
+    /// from a pasted log, from colored command output, or written to move the
+    /// cursor, clear the screen, or change the window title.
+    ///
+    /// - `strip`: Remove everything that does more than style text.
+    ///   Your messages and tool results keep their colors, bold, and other
+    ///   styling that does not hide text.
+    ///   The assistant's replies, conversation titles, and search results from
+    ///   `jp conversation grep` lose theirs; the assistant's markdown is still
+    ///   rendered.
+    /// - `visualize`: Like `strip`, and show a `␛` where something was
+    ///   removed.
+    /// - `off`: Show content exactly as written.
+    ///
+    /// Stored conversations keep the original text, and the assistant always
+    /// receives it.
+    ///
+    /// Some protections apply whatever this is set to: window titles and links
+    /// never contain control characters, tool questions are shown as plain
+    /// text, styling left open by a message or tool result ends with it, and
+    /// plain-text and JSON output never contain escape sequences.
+    #[setting(default)]
+    pub sanitize: Sanitization,
+
     /// Fenced code block style.
     ///
     /// Configures how code blocks in the assistant's response are rendered.
@@ -100,6 +129,7 @@ impl AssignKeyValue for PartialStyleConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
+            "sanitize" => self.sanitize = kv.try_some_from_str()?,
             _ if kv.p("code") => self.code.assign(kv)?,
             _ if kv.p("inline_code") => self.inline_code.assign(kv)?,
             _ if kv.p("markdown") => self.markdown.assign(kv)?,
@@ -119,6 +149,7 @@ impl AssignKeyValue for PartialStyleConfig {
 impl PartialConfigDelta for PartialStyleConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
+            sanitize: delta_opt(self.sanitize.as_ref(), next.sanitize),
             code: self.code.delta(next.code),
             inline_code: self.inline_code.delta(next.inline_code),
             markdown: self.markdown.delta(next.markdown),
@@ -133,6 +164,7 @@ impl PartialConfigDelta for PartialStyleConfig {
 
     fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
         Self {
+            sanitize: delta_opt(self.sanitize.as_ref(), next.sanitize),
             code: self.code.delta(next.code),
             inline_code: self.inline_code.delta_with_unsets(
                 next.inline_code,
@@ -157,6 +189,7 @@ impl PartialConfigDelta for PartialStyleConfig {
 impl FillDefaults for PartialStyleConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
+            sanitize: self.sanitize.or(defaults.sanitize),
             code: self.code.fill_from(defaults.code),
             inline_code: self.inline_code.fill_from(defaults.inline_code),
             markdown: self.markdown.fill_from(defaults.markdown),
@@ -172,7 +205,10 @@ impl FillDefaults for PartialStyleConfig {
 
 impl ToPartial for StyleConfig {
     fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
         Self::Partial {
+            sanitize: partial_opt(&self.sanitize, defaults.sanitize),
             code: self.code.to_partial(),
             inline_code: self.inline_code.to_partial(),
             markdown: self.markdown.to_partial(),
@@ -184,6 +220,21 @@ impl ToPartial for StyleConfig {
             typewriter: self.typewriter.to_partial(),
         }
     }
+}
+
+/// How escape sequences in conversation content are shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ConfigEnum)]
+#[config(rename_all = "snake_case", serde_as_string)]
+pub enum Sanitization {
+    /// Remove everything that does more than style text.
+    #[default]
+    Strip,
+
+    /// Like `strip`, and show a `␛` where something was removed.
+    Visualize,
+
+    /// Show content exactly as written.
+    Off,
 }
 
 /// Formatting style for links.
