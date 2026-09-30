@@ -1249,6 +1249,43 @@ fn silenced_chrome_drops_writer_output() {
     assert_eq!(*err.lock(), "");
 }
 
+// An error is not chrome: `--quiet` removes the run's commentary on itself, not
+// the report that it failed.
+#[test]
+fn silenced_chrome_keeps_errors() {
+    let (printer, _, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = printer.with_chrome(Chrome::Silenced);
+
+    printer.eprintln("a status line");
+    printer.error_println("the plugin failed");
+    printer.flush();
+
+    assert_eq!(*err.lock(), "the plugin failed\n");
+}
+
+#[test]
+fn an_error_under_json_is_a_message_record() {
+    let (printer, _, err) = Printer::memory(OutputFormat::Json);
+
+    printer.error_println("the plugin failed");
+    printer.flush();
+
+    assert_eq!(*err.lock(), "{\"message\":\"the plugin failed\"}\n");
+}
+
+// An error that is its own record is written as-is, and still survives
+// `--quiet`.
+#[test]
+fn a_raw_error_is_not_wrapped_and_survives_silenced_chrome() {
+    let (printer, _, err) = Printer::memory(OutputFormat::Json);
+    let printer = printer.with_chrome(Chrome::Silenced);
+
+    printer.error_println_raw("{\"code\":1}");
+    printer.flush();
+
+    assert_eq!(*err.lock(), "{\"code\":1}\n");
+}
+
 // Renderers hold clones of the printer, and a clone that printed chrome would
 // reopen the channel the flag closed.
 #[test]
