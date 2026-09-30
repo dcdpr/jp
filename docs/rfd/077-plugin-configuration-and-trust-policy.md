@@ -128,12 +128,12 @@ web.host = "127.0.0.1"
 
 **`run`** (`RunPolicy`) — Execution policy:
 
-| Value   | Behavior                                                     |
-| ------- | ------------------------------------------------------------ |
-| `ask`   | Run a binary JP can vouch for, and prompt for any other.     |
-|         | The default for every plugin.                                |
-| `allow` | Run without prompting.                                       |
-| `deny`  | Never run. JP exits with an error if the plugin is invoked.  |
+| Value   | Behavior                                                    |
+| ------- | ----------------------------------------------------------- |
+| `ask`   | Run a binary JP can vouch for, and prompt for any other.    |
+|         | The default for every plugin.                               |
+| `allow` | Run without prompting.                                      |
+| `deny`  | Never run. JP exits with an error if the plugin is invoked. |
 
 The `run` policy applies at every execution point, wherever the binary came
 from.
@@ -186,8 +186,8 @@ its init config to configure its HTTP listener.
 No config decides whether a plugin is installed:
 
 - **Official plugins install on first use.** Typing an official command whose
-  plugin is missing downloads it, checks it against the registry's checksum,
-  and runs it ([RFD 072]).
+  plugin is missing downloads it, checks it against the registry's checksum, and
+  runs it ([RFD 072]).
   `jp plugin update` updates it the same way when the registry publishes a new
   binary.
 - **Third-party plugins install only when asked.** `jp plugin install <name>`
@@ -283,8 +283,8 @@ admit it.
 
 Approvals are user-global, not per workspace.
 An approval answers whether the binary may run as the user, and a binary has the
-same reach in every workspace; a plugin that serves several workspaces
-([RFD 114]) reaches all of them at once.
+same reach in every workspace; a plugin that serves several workspaces ([RFD
+114]) reaches all of them at once.
 Refusing a plugin in one workspace is config's job: `run = "deny"` in that
 workspace's config.
 
@@ -313,11 +313,11 @@ This means a user can set `run = "allow"` globally and override it to `run =
 
 ### Plugin Management Without a Workspace
 
-Plugin management commands (`jp plugin list`, `install`, `uninstall`,
-`update`, `approve`, and `revoke`) need no workspace.
+Plugin management commands (`jp plugin list`, `install`, `uninstall`, `update`,
+`approve`, and `revoke`) need no workspace.
 They work from any directory, including outside of any JP workspace.
-This is intentional: plugin binaries and approvals are user-global (installed
-to `$XDG_DATA_HOME/jp/plugins/`), not workspace-local, so requiring `jp init`
+This is intentional: plugin binaries and approvals are user-global (installed to
+`$XDG_DATA_HOME/jp/plugins/`), not workspace-local, so requiring `jp init`
 before installing a plugin would be unnecessary friction.
 
 The trade-off is that management commands only see the user-global config layer.
@@ -575,12 +575,12 @@ protocol as the future validation layer.
 - [x] **Phase 5: Explicit installs**
 
   - [x] Remove `plugins.auto_install` and `plugins.command.<name>.install`
-        ([RFD 072] Phase 5).
-  - [x] Make `ask` the default `run` policy for every plugin, answered without a
-        prompt by a matching registry checksum for an official binary ([RFD
-        072] Phase 6).
-  - [x] Record an approval for `jp plugin install`, and an `installed` record
-        for every binary JP writes ([RFD 072] Phase 6).
+            ([RFD 072] Phase 5).
+  - [x] Make `ask` the default `run` policy for every plugin, answered
+            without a prompt by a matching registry checksum for an official
+            binary ([RFD 072] Phase 6).
+  - [x] Record an approval for `jp plugin install`, and an `installed`
+            record for every binary JP writes ([RFD 072] Phase 6).
 
 ## References
 

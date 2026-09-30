@@ -1969,6 +1969,79 @@ fn test_from_parts_reads_unattended_as_allow() {
     assert_eq!(config.conversation.tools.defaults.run, RunMode::Allow);
 }
 
+/// `plugins.auto_install` and `plugins.command.<name>.install` were removed.
+/// A conversation stored before that still carries them, in its base config and
+/// its config deltas.
+/// It loads, and the plugin settings stored beside them survive: dropping the
+/// whole entry would silently lift a stored `deny`.
+#[test]
+fn test_from_parts_drops_removed_plugin_install_keys_and_keeps_the_rest() {
+    use jp_config::plugins::command::{CommandPluginConfig, PartialCommandPluginConfig, RunPolicy};
+
+    let mut base = jp_config::AppConfig::new_test();
+    base.plugins
+        .command
+        .insert("serve-web".to_owned(), CommandPluginConfig {
+            run: Some(RunPolicy::Deny),
+            checksum: None,
+            options: None,
+        });
+
+    let mut delta = PartialAppConfig::empty();
+    delta
+        .plugins
+        .command
+        .insert("ticket".to_owned(), PartialCommandPluginConfig {
+            run: Some(RunPolicy::Allow),
+            ..PartialCommandPluginConfig::default()
+        });
+
+    let mut stream = ConversationStream::new_test()
+        .with_base_config(base.into())
+        .with_config_delta(delta);
+    stream.start_turn(ChatRequest::from("hello"));
+
+    let (base_config, events) = stream.to_parts().unwrap();
+
+    // Written the way a conversation stored before the removal spells it.
+    let base_config = serde_json::to_string(&base_config)
+        .unwrap()
+        .replace(
+            "\"shutdown_timeout_secs\":",
+            "\"auto_install\":true,\"shutdown_timeout_secs\":",
+        )
+        .replace("\"run\":\"deny\"", "\"install\":true,\"run\":\"deny\"");
+    let events = serde_json::to_string(&events)
+        .unwrap()
+        .replace("\"run\":\"allow\"", "\"install\":false,\"run\":\"allow\"");
+
+    assert!(base_config.contains("\"auto_install\":true"));
+    assert!(base_config.contains("\"install\":true,\"run\":\"deny\""));
+    assert!(events.contains("\"install\":false,\"run\":\"allow\""));
+
+    // The config types refuse unknown keys, so loading goes through recovery.
+    assert!(serde_json::from_str::<PartialAppConfig>(&base_config).is_err());
+
+    let result = ConversationStream::from_parts(
+        serde_json::from_str(&base_config).unwrap(),
+        serde_json::from_str(&events).unwrap(),
+        &PartialAppConfig::empty(),
+    )
+    .unwrap();
+
+    let config = result.config().unwrap();
+    assert_eq!(
+        config.plugins.command.get("serve-web").unwrap().run,
+        Some(RunPolicy::Deny),
+        "the stored deny survives the dropped `install` beside it"
+    );
+    assert_eq!(
+        config.plugins.command.get("ticket").unwrap().run,
+        Some(RunPolicy::Allow),
+        "a config delta's plugin entry survives too"
+    );
+}
+
 #[test]
 fn test_from_parts_tolerates_legacy_compaction_bounds_in_base_config() {
     // A conversation written before `last` was renamed and before `@N` stopped

@@ -414,8 +414,8 @@ They would share one `run` policy, one pinned checksum, one set of options, and
 one approval, so approving one would approve the other.
 The host names both paths and runs neither.
 Renaming one resolves it, because the manifest, not the file name, decides what
-a plugin handles; when one is a copy JP installed, `jp plugin uninstall`
-removes it.
+a plugin handles; when one is a copy JP installed, `jp plugin uninstall` removes
+it.
 Paths that resolve to the same file, such as two symlinks into one package
 store, are one binary.
 
@@ -483,10 +483,9 @@ Each plugin is listed under its claimed command path with its manifest's
 description, in a "Plugins:" section after the built-in commands.
 A binary without a valid manifest is listed under the manifest fields its
 approval recorded, or by its file name when it has no approval.
-Official commands whose plugin is not installed yet are listed from the
-registry cache, so they read as part of `jp` from the first run; `jp -h`
-fetches the registry when there is no cache, unless `JP_NO_PLUGIN_DOWNLOAD` is
-set.
+Official commands whose plugin is not installed yet are listed from the registry
+cache, so they read as part of `jp` from the first run; `jp -h` fetches the
+registry when there is no cache, unless `JP_NO_PLUGIN_DOWNLOAD` is set.
 `jp <plugin> -h` goes through ordinary admission, prompting where the policy is
 `ask`, and shows the `help` from a fresh `describe`.
 
@@ -499,8 +498,7 @@ When the user runs `jp serve -h` and `serve` is a group:
 
 1. JP reads the group's `description` and `suggests` list from the registry.
 2. Checks for local plugins whose manifest claims a path under `["serve", ...]`.
-3. Checks the registry for plugins under the same prefix that are not
-   installed.
+3. Checks the registry for plugins under the same prefix that are not installed.
 4. Merges everything into the help output:
 
 <!-- end list -->
@@ -952,8 +950,8 @@ The `type` field identifies the entry's kind:
 |                 | prints help and exits with code 2.                     |
 
 Future plugin types (e.g. `"wasm"` from [RFD 016]) will use additional values.
-JP ignores an entry with an unrecognized `type`, or one that does not parse,
-and reads the rest of the registry.
+JP ignores an entry with an unrecognized `type`, or one that does not parse, and
+reads the rest of the registry.
 
 **`id`** (required) — Stable identifier used for binary naming, config keys,
 and install paths.
@@ -970,10 +968,10 @@ install`.
 **`requires`** — Command paths (registry keys) of plugins that must be
 installed for this one to work.
 When JP installs a plugin, it first installs all required dependencies.
-An official plugin may require only official ones, so installing it on first
-use never brings third-party code with it.
-`jp plugin install` lists a third-party plugin's third-party dependencies in
-the same confirmation, and installs none of them if the user declines.
+An official plugin may require only official ones, so installing it on first use
+never brings third-party code with it.
+`jp plugin install` lists a third-party plugin's third-party dependencies in the
+same confirmation, and installs none of them if the user declines.
 
 **`suggests`** — Command paths (registry keys) of plugins that extend this one.
 Used for help aggregation: `jp serve -h` shows suggested sub-plugins as
@@ -1013,8 +1011,8 @@ checksum ([RFD 077]) says which binary to run.
 A download that fails is reported and the others still run; the command then
 exits non-zero, naming the plugins it could not update.
 Third-party plugins are never updated automatically.
-Updating is left to `jp plugin update` rather than done before a plugin runs,
-so running an installed plugin costs no request on a slow network.
+Updating is left to `jp plugin update` rather than done before a plugin runs, so
+running an installed plugin costs no request on a slow network.
 
 ### Plugin Trust and Configuration
 
@@ -1029,14 +1027,14 @@ In summary:
   or `deny` (never run).
   `ask` is the default for every plugin.
 - Under `ask`, two things answer without a prompt.
-  An official binary whose SHA-256 matches its registry entry is verified by
-  the registry.
+  An official binary whose SHA-256 matches its registry entry is verified by the
+  registry.
   Any other binary needs an approval: `jp plugin install` records one, as do
   answering `Y` at the prompt and running `jp plugin approve <path>`.
   An approval holds the binary's path and SHA-256 in a user-local approval
   store, which never enters config or a conversation.
-  `jp plugin revoke <name>` removes it, and `jp plugin uninstall <name>`
-  removes it with the binary JP installed.
+  `jp plugin revoke <name>` removes it, and `jp plugin uninstall <name>` removes
+  it with the binary JP installed.
 - A `checksum` field pins the binary to a specific hash.
   JP refuses to run a binary whose checksum doesn't match the pinned value.
 - An `options` field passes opaque configuration to the plugin via the `init`
@@ -1143,8 +1141,8 @@ a native executable by, and data appended at the end breaks macOS code signing,
 which expects `__LINKEDIT` to cover the end of the file.
 A named section needs a parser for each executable format, and has no equivalent
 in a script.
-A marker anywhere in the file works for all of them, at the cost of reading
-each plugin binary to find it.
+A marker anywhere in the file works for all of them, at the cost of reading each
+plugin binary to find it.
 
 ### Wasm plugin model ([RFD 016])
 
@@ -1215,8 +1213,8 @@ commands for coarse-grained extensions.
   A third-party binary can replace an official command, which is how a user
   swaps in a web server of their own for `jp serve web`; the same rule lets
   anything that can write to a directory on `$PATH` try it.
-  The admission prompt is the guard: it marks the binary as third-party,
-  names the official command it replaces, and shows the binary's path.
+  The admission prompt is the guard: it marks the binary as third-party, names
+  the official command it replaces, and shows the binary's path.
   Config that sets `run = "allow"` for that plugin's name skips the prompt, as
   it does for any plugin.
 
@@ -1309,11 +1307,11 @@ commands for coarse-grained extensions.
   - Route by manifest claims and official registry entries under the rules
         above; a binary without a valid manifest claims nothing.
   - Fetch the registry when nothing claims a command and the cache is
-        missing or more than a day old, and for `jp -h` when there is no
-        cache; honor `JP_NO_PLUGIN_DOWNLOAD`.
+        missing or more than a day old, and for `jp -h` when there is no cache;
+        honor `JP_NO_PLUGIN_DOWNLOAD`.
   - Install official plugins on first use and third-party ones only through
-        `jp plugin install`, which asks first; remove `plugins.auto_install`
-        and `plugins.command.<name>.install` ([RFD 077]).
+        `jp plugin install`, which asks first; remove `plugins.auto_install` and
+        `plugins.command.<name>.install` ([RFD 077]).
   - Hint at `jp plugin install` for a command a third-party registry entry
         names.
   - Run the `jp plugin` management commands without a workspace.
