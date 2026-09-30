@@ -503,13 +503,12 @@ impl ToolPrompter {
                     self.prompt_backend
                         .text(&text, shown_default.as_deref(), &mut writer)?;
 
-                // A prompt answers an accepted default with the text it showed;
-                // the tool gets back the default it offered.
+                // An accepted default carries the text the prompt showed; the
+                // tool gets back the default it offered. Typed text is the
+                // answer as typed, even when it matches what was shown.
                 let answer = match default_str {
-                    Some(default) if shown_default.as_deref() == Some(answer.as_str()) => {
-                        default.to_owned()
-                    }
-                    _ => answer,
+                    Some(default) if answer.is_default => default.to_owned(),
+                    _ => answer.value,
                 };
 
                 Ok(QuestionResult {

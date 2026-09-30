@@ -3,6 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use inquire::TextAnswer;
 use jp_editor::MockEditorBackend;
 use jp_inquire::{ReplyOutcome, prompt::MockPromptBackend};
 use jp_printer::{OutputFormat, SharedBuffer};
@@ -628,7 +629,7 @@ impl PromptBackend for RecordingBackend {
         message: &str,
         default: Option<&str>,
         writer: &mut dyn io::Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<TextAnswer, InquireError> {
         self.record(Shown::Text {
             message: message.to_owned(),
             default: default.map(str::to_owned),
@@ -740,7 +741,7 @@ fn an_accepted_text_default_is_the_default_the_tool_offered() {
     // A prompt answers with the default it showed when the user accepts it,
     // and what it showed has the default's control characters removed.
     let (prompter, backend) =
-        recording_prompter(MockPromptBackend::new().with_text_responses(["v1.2"]));
+        recording_prompter(MockPromptBackend::new().with_accepted_text_default());
     let question = jp_tool::Question::text("tag", "Tag?")
         .unwrap()
         .with_default("v1.2\x07");
@@ -752,6 +753,21 @@ fn an_accepted_text_default_is_the_default_the_tool_offered() {
         default: Some("v1.2".into()),
     }]);
     assert_eq!(result.answer, json!("v1.2\x07"));
+}
+
+#[test]
+fn typing_the_shown_default_answers_with_what_was_typed() {
+    // The default shows as `main`, and the user types `main` rather than
+    // pressing Enter. That is their answer, not the default with its line
+    // break.
+    let prompt = MockPromptBackend::new().with_text_responses(["main"]);
+    let question = jp_tool::Question::text("branch", "Branch?")
+        .unwrap()
+        .with_default("main\n");
+
+    let result = prompter(prompt).prompt_question(&question).unwrap();
+
+    assert_eq!(result.answer, json!("main"));
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, io::Write};
 
-use inquire::InquireError;
+use inquire::{InquireError, TextAnswer};
 use parking_lot::Mutex;
 
 use crate::{InlineOption, InlineReply, ReplyEditMode, ReplyOutcome, inline_select::InlineSelect};
@@ -46,12 +46,15 @@ pub trait PromptBackend: Send + Sync {
     ) -> Result<ReplyOutcome, InquireError>;
 
     /// Display a single-line text input prompt.
+    ///
+    /// The answer says whether it is `default`, taken by submitting an empty
+    /// input, as opposed to text the user typed, which can be the same string.
     fn text(
         &self,
         message: &str,
         default: Option<&str>,
         writer: &mut dyn Write,
-    ) -> Result<String, InquireError>;
+    ) -> Result<TextAnswer, InquireError>;
 
     /// Display a selection menu, returning the index of the chosen option.
     fn select(
@@ -102,7 +105,7 @@ impl<P: PromptBackend + ?Sized> PromptBackend for &P {
         message: &str,
         default: Option<&str>,
         writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<TextAnswer, InquireError> {
         (*self).text(message, default, writer)
     }
 
@@ -177,12 +180,12 @@ impl PromptBackend for TerminalPromptBackend {
         message: &str,
         default: Option<&str>,
         writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<TextAnswer, InquireError> {
         let mut prompt = inquire::Text::new(message);
         if let Some(s) = default {
             prompt = prompt.with_default(s);
         }
-        prompt.prompt_with_writer(writer)
+        prompt.raw_prompt_with_writer(writer)
     }
 
     fn select(
@@ -218,7 +221,8 @@ impl PromptBackend for TerminalPromptBackend {
 pub struct MockPromptBackend {
     inline_responses: Mutex<VecDeque<char>>,
     reply_outcomes: Mutex<VecDeque<ReplyOutcome>>,
-    text_responses: Mutex<VecDeque<String>>,
+    /// Typed answers, or `None` for one that accepts the shown default.
+    text_responses: Mutex<VecDeque<Option<String>>>,
     select_responses: Mutex<VecDeque<usize>>,
     password_responses: Mutex<VecDeque<String>>,
 }
@@ -246,13 +250,21 @@ impl MockPromptBackend {
         self
     }
 
-    /// Add responses to the inline select menu.
+    /// Script the answers `text` returns, in order, each typed by the user.
     #[must_use]
     pub fn with_text_responses(
         self,
         responses: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
-        *self.text_responses.lock() = responses.into_iter().map(Into::into).collect();
+        *self.text_responses.lock() = responses.into_iter().map(|r| Some(r.into())).collect();
+        self
+    }
+
+    /// Queue a `text` answer that submits the empty input, taking the default
+    /// the prompt was given, after any already scripted.
+    #[must_use]
+    pub fn with_accepted_text_default(self) -> Self {
+        self.text_responses.lock().push_back(None);
         self
     }
 
@@ -309,16 +321,30 @@ impl PromptBackend for MockPromptBackend {
             .ok_or(InquireError::OperationCanceled)
     }
 
+    /// Answers the way the terminal prompt would: an accepted default is the
+    /// empty string when there is no default.
     fn text(
         &self,
         _message: &str,
-        _default: Option<&str>,
+        default: Option<&str>,
         _writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
-        self.text_responses
+    ) -> Result<TextAnswer, InquireError> {
+        let response = self
+            .text_responses
             .lock()
             .pop_front()
-            .ok_or(InquireError::OperationCanceled)
+            .ok_or(InquireError::OperationCanceled)?;
+
+        Ok(match response {
+            Some(value) => TextAnswer {
+                value,
+                is_default: false,
+            },
+            None => TextAnswer {
+                value: default.unwrap_or_default().to_owned(),
+                is_default: default.is_some(),
+            },
+        })
     }
 
     fn select(

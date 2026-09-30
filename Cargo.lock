@@ -2034,7 +2034,7 @@ dependencies = [
 [[package]]
 name = "inquire"
 version = "0.9.1"
-source = "git+https://github.com/JeanMertz/inquire?branch=merged#93ecb2750bc244b2af69b4294d6809957ec7adf0"
+source = "git+https://github.com/JeanMertz/inquire?branch=merged#0b680682388aabd4deeba3f2e0d2f5672037a891"
 dependencies = [
  "bitflags 2.11.1",
  "crossterm",

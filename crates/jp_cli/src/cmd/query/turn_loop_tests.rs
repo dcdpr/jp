@@ -14,7 +14,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use camino_tempfile::tempdir;
 use futures::{StreamExt as _, stream};
 use indexmap::IndexMap;
-use inquire::InquireError;
+use inquire::{InquireError, TextAnswer};
 use jp_config::{
     AppConfig, Config as _, PartialAppConfig,
     assistant::{
@@ -1898,7 +1898,7 @@ impl PromptBackend for DelayedPromptBackend {
         message: &str,
         default: Option<&str>,
         writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<TextAnswer, InquireError> {
         self.started.notify_one();
         std::thread::sleep(self.delay);
         self.inner.text(message, default, writer)
@@ -6181,7 +6181,7 @@ impl PromptBackend for ObservingPromptBackend {
         message: &str,
         default: Option<&str>,
         writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<TextAnswer, InquireError> {
         self.observe();
         self.inner.text(message, default, writer)
     }
