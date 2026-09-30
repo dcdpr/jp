@@ -41,4 +41,35 @@ Tracking ticket for [RFD 072].
   messages through the host printer by channel and format instead of writing raw
   text to stdout.
 
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-09-28T21:04:06Z
+
+Phases 5 and 6 are implemented; every phase of RFD 072 is now checked.
+Along the way, RFD 077 Phase 4 (`unattended` → `allow`) and Phase 5 (explicit
+installs) landed too.
+
+Before `just rfd-promote 072` to Implemented: RFD 077 is still in Discussion,
+and 072 is `Required by` it, not the reverse, so nothing gates the promotion.
+RFD 077 Phase 3 still has one open bullet (show the plugin kind in `jp plugin
+list`).
+
+-----
+
+- **From**: jp
+- **Date**: 2026-09-30T08:35:40Z
+- **Re**: #1
+
+RFD 077 Phase 3's last bullet is done too: `jp plugin list` shows each registry
+entry's type (`command` or `command group`), and the registry reads entries one
+at a time, so an entry of an unknown type is skipped instead of failing the
+whole registry.
+
+Running an installed plugin no longer reaches the network: official plugins
+update through `jp plugin update`, and the manifest cache is gone.
+RFD 072's registry section describes when JP fetches.
+
 [RFD 072]: ../rfd/072-command-plugin-system.md

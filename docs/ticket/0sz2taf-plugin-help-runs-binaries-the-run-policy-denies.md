@@ -1,6 +1,6 @@
 # Plugin help runs binaries the run policy denies
 
-- **Status**: Todo
+- **Status**: Done
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-28
@@ -47,3 +47,42 @@ protocol message.
   `jp -h` lists it and the marker is absent.
 - The same binary under `ask` with no approval: `jp <plugin> -h`
   non-interactively fails with the approval error and the marker is absent.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-09-28T20:16:24Z
+
+Partly fixed by RFD 072 Phase 5 (manifest routing):
+
+- `jp -h` now reads plugin manifests from the binaries and spawns nothing
+  (`cmd/plugin/help.rs`).
+- `jp <plugin> -h` routes first and runs the same admission as a normal run
+  (`admit` in `dispatch.rs`: deny, pinned checksum, `$PATH` run policy) before
+  sending `describe`.
+
+Left for RFD 072 Phase 6: the admission order RFD 077 now describes (`ask`
+default for every plugin, registry-checksum vouching), and the marker-file tests
+under "Verifying" — no test yet proves an unapproved binary is not executed by
+`jp <plugin> -h`.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-09-28T21:03:39Z
+
+Fixed by RFD 072 Phase 6.
+
+- `jp -h` reads manifests from the binaries (and, for a binary without one, what
+  its approval recorded) and spawns nothing, whatever the `run` policy says.
+- `jp <plugin> -h` goes through admission (`admission::admit`, in RFD 077's
+  order: deny, pinned checksum, `allow`, then registry checksum or approval
+  under `ask`) before `describe` is sent.
+
+`dispatch::tests::plugin_help_does_not_run_an_unapproved_binary` is the
+"Verifying" check: a script that writes a marker when run, invoked as `jp titles
+-h` without a terminal, is refused with the approval error and the marker is
+absent; once approved, it answers.
+The test fails if `describe` is moved ahead of admission.
