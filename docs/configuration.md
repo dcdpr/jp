@@ -487,9 +487,63 @@ $ jp config fmt --check
 Checked configuration file: /home/you/project/.jp/config.toml
 ```
 
+## Terminal Escape Sequences
+
+An **escape sequence** is a run of bytes a terminal acts on instead of printing.
+Many only set colors or bold text.
+Others move the cursor to rewrite a line you already read, clear the screen,
+retitle the window, or write to your clipboard.
+
+Text JP shows but did not write can contain them: a log you paste into a
+message, a tool's colored diff, or a web page a tool fetched.
+The `style.sanitize` option decides what JP does with them:
+
+| Value             | Effect                                                    |
+| ----------------- | --------------------------------------------------------- |
+| `strip` (default) | Remove everything that does more than style text.         |
+| `visualize`       | Like `strip`, and show a `␛` where something was removed. |
+| `off`             | Show content exactly as written.                          |
+
+```toml
+[style]
+sanitize = "visualize"
+```
+
+You can also write `true` for `strip` and `false` for `off`.
+
+What `strip` keeps depends on where the text comes from.
+Your own messages, tool results, and the output of a custom `style.parameters`
+command keep their colors and other styling, except styling that hides text.
+Styling they leave open ends with them, so it cannot color what JP writes next.
+The assistant's replies and reasoning, and the tool calls it makes, are shown
+with no escape sequences at all, since the assistant styles text with markdown.
+So are conversation titles in `jp conversation ls`, `show`, and `grep`, and the
+lines `grep` finds.
+
+Control characters are removed too, except line feeds and tabs.
+That includes the carriage return, so a tool's progress line that redraws itself
+shows every redraw side by side.
+
+Only what JP shows is filtered.
+Conversations are stored exactly as written and reach the assistant unchanged,
+so you can still ask about the escape sequences in a log you pasted.
+The `json` and `json-pretty` formats of `jp conversation ls`, `show`, and `grep`
+report titles and matched lines as stored.
+
+Some protections apply under every setting:
+
+- The window title JP sets, and the targets of links it writes, never contain
+  control characters.
+- A question a tool asks you is shown as plain text.
+- Styling left open by a message or tool result ends with it.
+- Plain-text and JSON output never contain escape sequences.
+
+See [RFD 096] for the design.
+
 [RFD 038]: ./rfd/038-config-reset-keywords.md
 [RFD 054]: ./rfd/054-split-conversation-config-and-events.md
 [RFD 079]: ./rfd/079-config-sources-and-load-order.md
+[RFD 096]: ./rfd/096-terminal-output-sanitization-for-untrusted-content.md
 [environment variables]: #environment-variables
 [progressive complexity]: https://benefuture.miraheze.org/wiki/Progressive_complexity
 [progressive disclosure]: https://en.wikipedia.org/wiki/Progressive_disclosure

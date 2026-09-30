@@ -28,6 +28,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Config Delta](#config-delta)
     - [Conversation](#conversation)
     - [Conversation Event](#conversation-event)
+    - [Display Sanitization](#display-sanitization)
     - [EditorBackend](#editorbackend)
     - [Event Overlay](#event-overlay)
     - [External Login](#external-login)
@@ -48,6 +49,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Summary](#summary)
     - [Thread](#thread)
     - [Tool Call](#tool-call)
+    - [Tracking Ticket](#tracking-ticket)
     - [Turn](#turn)
     - [User-Workspace Directory](#user-workspace-directory)
     - [Workspace](#workspace)
@@ -176,6 +178,31 @@ The variants are `TurnStart`, `ChatRequest`, `ChatResponse`, `ToolCallRequest`,
 Not every event is sent to LLM providers.
 `EventKind::is_provider_visible()` filters the stream down to the chat and
 tool-call events; turn markers and inquiries are internal.
+
+### Display Sanitization
+
+Filtering untrusted content on its way to the terminal, so escape sequences in
+it cannot rewrite the screen, retitle the window, or write the clipboard.
+Untrusted content is anything JP relays rather than writes: the user's messages,
+the assistant's output, tool output, and conversation titles.
+Stored conversations, and what the assistant receives, keep the original bytes.
+Implemented in `jp_term::sanitize`, where `ContentWriter` filters a stream of
+content, and configured by `style.sanitize` (`strip`, `visualize`, or `off`).
+See [RFD-096].
+
+What survives depends on the **content class** (`ContentClass`): user messages
+and tool output keep their styling, while the assistant's output and
+conversation titles keep no escape sequences at all.
+User messages and tool output are written in a **content span**: JP ends it with
+a styling reset where it stops writing the content, so their styling cannot run
+into what JP writes next.
+
+**Not the same as** the other two operations JP calls sanitize, which change
+data rather than how it is shown.
+Storage sanitization (`Workspace::sanitize`, [RFD-052]) checks the conversations
+on disk at startup and moves broken ones to the trash.
+Stream repair (`ConversationStream::sanitize`) fixes structural problems in an
+event stream, such as a tool call with no response.
 
 ### EditorBackend
 
@@ -472,6 +499,8 @@ See [RFD-031].
 
 [RFD-001]: ../rfd/001-jp-rfd-process.md
 [RFD-031]: ../rfd/031-durable-conversation-storage-with-workspace-projection.md
+[RFD-052]: ../rfd/052-workspace-data-store-sanitization.md
 [RFD-064]: ../rfd/064-non-destructive-conversation-compaction.md
 [RFD-087]: ../rfd/087-session-scoped-active-workspace.md
+[RFD-096]: ../rfd/096-terminal-output-sanitization-for-untrusted-content.md
 [`shlex::split`]: https://docs.rs/shlex

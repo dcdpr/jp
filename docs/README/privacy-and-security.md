@@ -23,6 +23,12 @@ jp conversation edit --local
   capability-based security — no filesystem, network, or environment access
   unless explicitly granted.
   No security theater.
+- **Terminal-safe output**: Before JP shows the assistant's messages and
+  reasoning, tool results, or conversation history, it removes escape sequences
+  that could move your cursor, clear your screen, retitle your window, or write
+  to your clipboard.
+  Colors in your own messages and in tool output are kept.
+  See [`style.sanitize`] to change this.
 - **Local conversations**: Store conversations outside your workspace (not
   tracked in git) for private or temporary work.
 - **Memory safety**: Written in Rust.
@@ -30,4 +36,5 @@ jp conversation edit --local
 
 [back to README]
 
+[`style.sanitize`]: ../configuration.md#terminal-escape-sequences
 [back to README]: ../../README.md

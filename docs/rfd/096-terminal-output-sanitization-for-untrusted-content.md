@@ -1,6 +1,6 @@
 # RFD 096: Terminal Output Sanitization for Untrusted Content
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-07
