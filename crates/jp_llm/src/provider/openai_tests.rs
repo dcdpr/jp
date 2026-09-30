@@ -977,8 +977,9 @@ mod map_model {
     use chrono::{TimeZone as _, Utc};
 
     use super::super::{
-        EXPLICIT_PROMPT_CACHING, ModelResponse, PERSISTED_REASONING, REASONING_PRO_MODE,
-        STREAMING_UNSUPPORTED, TEMP_REQUIRES_NO_REASONING, map_model,
+        EXPLICIT_PROMPT_CACHING, MODEL_OVERRIDES, ModelResponse, PERSISTED_REASONING,
+        REASONING_PRO_MODE, STREAMING_UNSUPPORTED, TEMP_REQUIRES_NO_REASONING, is_api_only,
+        map_model, subscription_models,
     };
     use crate::model::{ModelDeprecation, ReasoningDetails};
 
@@ -989,6 +990,45 @@ mod map_model {
             _created: Utc.with_ymd_and_hms(2026, 4, 23, 0, 0, 0).unwrap(),
             _owned_by: "openai".to_owned(),
         }
+    }
+
+    /// No endpoint enumerates a plan's models, so this is exactly what a
+    /// subscription credential lists.
+    #[test]
+    fn subscription_lists_the_models_the_catalog_marks_as_served() {
+        assert_eq!(subscription_models().collect::<Vec<_>>(), vec![
+            "gpt-6-astra",
+            "gpt-6-sol",
+            "gpt-6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.5",
+            "gpt-5.3-codex-spark",
+        ]);
+    }
+
+    #[test]
+    fn model_override_ids_are_unique() {
+        assert_eq!(MODEL_OVERRIDES.duplicate_id(), None);
+    }
+
+    /// An alias resolves to its entry but keeps the id the caller named.
+    #[test]
+    fn an_alias_reports_the_requested_id() {
+        let details = map_model(model("gpt-5.6")).unwrap();
+
+        assert_eq!(details.id.name.to_string(), "gpt-5.6");
+        assert_eq!(details.display_name.as_deref(), Some("GPT-5.6 Sol"));
+    }
+
+    /// Only a model the catalog marks API-only is refused; an unknown one may
+    /// be served by a plan newer than this binary.
+    #[test]
+    fn only_cataloged_api_only_models_are_api_only() {
+        assert!(is_api_only("gpt-5.5-pro"));
+        assert!(!is_api_only("gpt-6-luna"));
+        assert!(!is_api_only("gpt-9-unreleased"));
     }
 
     #[test]

@@ -1,3 +1,5 @@
+pub(crate) mod catalog;
+
 use chrono::NaiveDate;
 use jp_config::model::{
     id::ModelIdConfig,

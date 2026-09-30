@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, sync::LazyLock, time::Duration};
 
 use async_stream::stream;
 use async_trait::async_trait;
@@ -33,7 +33,10 @@ use crate::{
         looks_like_quota_error, parse_retry_delay,
     },
     event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction},
-    model::{ModelDeprecation, ModelDetails, ReasoningDetails, ReasoningMode},
+    model::{
+        ModelDeprecation, ModelDetails, ReasoningDetails, ReasoningMode,
+        catalog::{Catalog, Entry},
+    },
     query::ChatQuery,
 };
 
@@ -471,9 +474,50 @@ fn create_request(
 
 /// Map a Gemini model to a `ModelDetails`.
 ///
-/// A model absent from this table still gets its limits from the API, so an
-/// entry is only needed for the reasoning ladder, which the API does not
-/// report.
+/// Limits and the display name come from the API.
+/// The rest comes from [`MODEL_OVERRIDES`] when the model is listed there, and
+/// is unknown otherwise.
+fn map_model(model: types::Model) -> ModelDetails {
+    let name = model.base_model_id.as_str();
+    let Ok(id) = ModelIdConfig::try_from((PROVIDER, name)) else {
+        return ModelDetails::empty((PROVIDER, "unknown").try_into().unwrap());
+    };
+
+    let mut details = model_overrides(name).cloned().unwrap_or_else(|| {
+        trace!(
+            name,
+            display_name = model.display_name,
+            "Missing model details. Falling back to generic model details."
+        );
+
+        ModelDetails::empty(id.clone())
+    });
+
+    // Reported under the id the API named, which may be an alias.
+    details.id = id;
+    details.display_name = Some(model.display_name);
+    details.context_window = Some(model.input_token_limit);
+    details.max_output_tokens = Some(model.output_token_limit);
+
+    // The API reports whether the model can think at all, but not its effort
+    // levels, so any ladder still comes from the catalog.
+    details.reasoning = apply_thinking_support(details.reasoning, model.thinking);
+
+    details
+}
+
+/// Look up the details for `id`, under its canonical id or an alias.
+///
+/// `None` for a model absent from [`MODEL_OVERRIDES`].
+fn model_overrides(id: &str) -> Option<&'static ModelDetails> {
+    MODEL_OVERRIDES.get(id)
+}
+
+/// The Gemini facts the API does not report: the reasoning ladder, knowledge
+/// cutoff, deprecation, and structured output support.
+///
+/// Display names and token limits are left unset here; `map_model` takes them
+/// from the API.
 ///
 /// Note that `/v1beta/models` lists models that `generateContent` no longer
 /// serves, so being listed is not evidence a model is callable.
@@ -485,67 +529,67 @@ fn create_request(
 /// See: <https://ai.google.dev/gemini-api/docs/models> See:
 /// <https://ai.google.dev/gemini-api/docs/deprecations> See:
 /// <https://ai.google.dev/gemini-api/docs/thinking#levels-budgets>
-#[expect(clippy::too_many_lines)]
-fn map_model(model: types::Model) -> ModelDetails {
-    let name = model.base_model_id.as_str();
-    let display_name = Some(model.display_name);
-    let context_window = Some(model.input_token_limit);
-    let max_output_tokens = Some(model.output_token_limit);
-    let Ok(id) = (PROVIDER, model.base_model_id.as_str()).try_into() else {
-        return ModelDetails::empty((PROVIDER, "unknown").try_into().unwrap());
-    };
+static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
+    let date = |year, month, day| NaiveDate::from_ymd_opt(year, month, day).unwrap();
+    let id = |name: &str| ModelIdConfig::try_from((PROVIDER, name)).unwrap();
 
-    // Whether the API reports the model as able to think at all. It does not
-    // report effort levels, so any ladder still comes from the table below.
-    let thinks = model.thinking;
-
-    let mut details = match name {
-        "gemini-pro-latest" | "gemini-3.1-pro-preview" | "gemini-3.1-pro-preview-customtools" => {
-            ModelDetails {
-                id,
-                display_name,
-                context_window,
-                max_output_tokens,
+    Catalog::new(vec![
+        Entry {
+            aliases: &[
+                "gemini-3.1-pro-preview",
+                "gemini-3.1-pro-preview-customtools",
+            ],
+            value: ModelDetails {
+                id: id("gemini-pro-latest"),
+                display_name: None,
+                context_window: None,
+                max_output_tokens: None,
                 reasoning: Some(
                     ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
                 ),
-                knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
+                knowledge_cutoff: Some(date(2025, 1, 1)),
                 deprecated: Some(ModelDeprecation::Active),
                 structured_output: None,
                 prefill: None,
                 subscription: None,
                 features: vec![],
-            }
-        }
-        "gemini-flash-latest" | "gemini-3-flash-preview" => ModelDetails {
-            id,
-            display_name,
-            context_window,
-            max_output_tokens,
-            reasoning: Some(
-                ReasoningDetails::leveled(true, true, true, true, false, false).always_on(),
-            ),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            structured_output: None,
-            prefill: None,
-            subscription: None,
-            features: vec![],
+            },
         },
-        "gemini-3.8-flash" => ModelDetails {
-            id,
-            display_name,
-            context_window,
-            max_output_tokens,
-            reasoning: Some(
-                ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
-            ),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 3, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            structured_output: Some(true),
-            prefill: None,
-            subscription: None,
-            features: vec![],
+        Entry {
+            aliases: &["gemini-3-flash-preview"],
+            value: ModelDetails {
+                id: id("gemini-flash-latest"),
+                display_name: None,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: Some(
+                    ReasoningDetails::leveled(true, true, true, true, false, false).always_on(),
+                ),
+                knowledge_cutoff: Some(date(2025, 1, 1)),
+                deprecated: Some(ModelDeprecation::Active),
+                structured_output: None,
+                prefill: None,
+                subscription: None,
+                features: vec![],
+            },
+        },
+        Entry {
+            aliases: &[],
+            value: ModelDetails {
+                id: id("gemini-3.8-flash"),
+                display_name: None,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: Some(
+                    ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
+                ),
+                knowledge_cutoff: Some(date(2026, 3, 1)),
+                deprecated: Some(ModelDeprecation::Active),
+                structured_output: Some(true),
+                prefill: None,
+                subscription: None,
+                features: vec![],
+            },
         },
         // Closed to new users rather than retired: `generateContent` answers 404
         // "no longer available to new users" for a key that never had access,
@@ -556,86 +600,65 @@ fn map_model(model: types::Model) -> ModelDetails {
         // The entry earns its place because this is a budget-era model. Without
         // it the catch-all infers a thinking *level*, which this generation does
         // not accept.
-        "gemini-2.5-flash" => ModelDetails {
-            id,
-            display_name,
-            context_window,
-            max_output_tokens,
-            reasoning: Some(ReasoningDetails::budgetted(0, Some(24576))),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: gemini-3.6-flash",
-                Some(NaiveDate::from_ymd_opt(2026, 10, 16).unwrap()),
-            )),
-            structured_output: None,
-            prefill: None,
-            subscription: None,
-            features: vec![],
-        },
-        "gemini-flash-lite-latest" | "gemini-2.5-flash-lite" => ModelDetails {
-            id,
-            display_name,
-            context_window,
-            max_output_tokens,
-            reasoning: Some(ReasoningDetails::budgetted(512, Some(24576))),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: gemini-3.1-flash-lite",
-                Some(NaiveDate::from_ymd_opt(2026, 10, 16).unwrap()),
-            )),
-            structured_output: None,
-            prefill: None,
-            subscription: None,
-            features: vec![],
-        },
-        "gemini-2.5-pro" => ModelDetails {
-            id,
-            display_name,
-            context_window,
-            max_output_tokens,
-            reasoning: Some(ReasoningDetails::budgetted(512, Some(24576))),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: gemini-3.1-pro-preview",
-                Some(NaiveDate::from_ymd_opt(2026, 10, 16).unwrap()),
-            )),
-            structured_output: None,
-            prefill: None,
-            subscription: None,
-            features: vec![],
-        },
-        id => {
-            trace!(
-                name,
-                display_name = display_name
-                    .clone()
-                    .unwrap_or_else(|| "<unknown>".to_owned()),
-                id,
-                "Missing model details. Falling back to generic model details."
-            );
-
-            ModelDetails {
-                id: (PROVIDER, model.base_model_id.as_str())
-                    .try_into()
-                    .unwrap_or((PROVIDER, "unknown").try_into().unwrap()),
-                display_name,
-                context_window,
-                max_output_tokens,
-                reasoning: None,
-                knowledge_cutoff: None,
-                deprecated: None,
+        Entry {
+            aliases: &[],
+            value: ModelDetails {
+                id: id("gemini-2.5-flash"),
+                display_name: None,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: Some(ReasoningDetails::budgetted(0, Some(24576))),
+                knowledge_cutoff: Some(date(2025, 1, 1)),
+                deprecated: Some(ModelDeprecation::deprecated(
+                    &"recommended replacement: gemini-3.6-flash",
+                    Some(date(2026, 10, 16)),
+                )),
                 structured_output: None,
                 prefill: None,
                 subscription: None,
                 features: vec![],
-            }
-        }
-    };
-
-    details.reasoning = apply_thinking_support(details.reasoning, thinks);
-
-    details
-}
+            },
+        },
+        Entry {
+            aliases: &["gemini-2.5-flash-lite"],
+            value: ModelDetails {
+                id: id("gemini-flash-lite-latest"),
+                display_name: None,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: Some(ReasoningDetails::budgetted(512, Some(24576))),
+                knowledge_cutoff: Some(date(2025, 1, 1)),
+                deprecated: Some(ModelDeprecation::deprecated(
+                    &"recommended replacement: gemini-3.1-flash-lite",
+                    Some(date(2026, 10, 16)),
+                )),
+                structured_output: None,
+                prefill: None,
+                subscription: None,
+                features: vec![],
+            },
+        },
+        Entry {
+            aliases: &[],
+            value: ModelDetails {
+                id: id("gemini-2.5-pro"),
+                display_name: None,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: Some(ReasoningDetails::budgetted(512, Some(24576))),
+                knowledge_cutoff: Some(date(2025, 1, 1)),
+                deprecated: Some(ModelDeprecation::deprecated(
+                    &"recommended replacement: gemini-3.1-pro-preview",
+                    Some(date(2026, 10, 16)),
+                )),
+                structured_output: None,
+                prefill: None,
+                subscription: None,
+                features: vec![],
+            },
+        },
+    ])
+});
 
 /// Map a reasoning effort onto the nearest thinking level, without consulting a
 /// ladder.

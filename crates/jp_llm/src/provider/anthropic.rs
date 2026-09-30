@@ -4,7 +4,7 @@ mod http;
 pub mod oauth;
 pub mod resolve;
 
-use std::{env, mem, ops::RangeInclusive, time::Duration};
+use std::{env, mem, ops::RangeInclusive, sync::LazyLock, time::Duration};
 
 use async_anthropic::{
     Client,
@@ -51,7 +51,10 @@ use crate::{
     },
     event::{Event, EventMatcher, EventPart, EventPatch, FinishReason, PatchAction, ToolCallPart},
     event_builder::EventBuilder,
-    model::{ModelDeprecation, ModelDetails, ReasoningDetails, ReasoningMode},
+    model::{
+        ModelDeprecation, ModelDetails, ReasoningDetails, ReasoningMode,
+        catalog::{Catalog, Cataloged, Entry},
+    },
     query::{ChatQuery, QueryContext, QueryStream, ToolExecution},
     stream::{EventStream, chain::find_merge_point, with_tool_call_keepalive},
 };
@@ -2329,9 +2332,12 @@ fn adaptive_effort(
 ///
 /// Everything else (token limits, reasoning mode and effort ladder, structured
 /// output, feature flags) is derived from the API, so a newly released model
-/// only needs an entry here when one of these four differs from the defaults.
+/// only needs an entry here when one of these facts differs from the defaults.
 #[derive(Debug, Clone)]
 struct ModelOverrides {
+    /// The model's canonical id.
+    id: &'static str,
+
     /// Training data cutoff.
     ///
     /// See: <https://support.claude.com/en/articles/8114494>
@@ -2351,9 +2357,12 @@ struct ModelOverrides {
     always_on: bool,
 }
 
-impl Default for ModelOverrides {
-    fn default() -> Self {
+impl ModelOverrides {
+    /// Overrides for `id` that change nothing: no known cutoff, active, and
+    /// every flag off.
+    fn new(id: &'static str) -> Self {
         Self {
+            id,
             knowledge_cutoff: None,
             deprecated: ModelDeprecation::Active,
             prefill: false,
@@ -2362,82 +2371,130 @@ impl Default for ModelOverrides {
     }
 }
 
+impl Cataloged for ModelOverrides {
+    fn catalog_id(&self) -> &str {
+        self.id
+    }
+}
+
 /// Look up the facts the capabilities API cannot supply.
 ///
-/// Returns `None` for a model absent from this table, leaving its cutoff and
-/// deprecation status unknown rather than asserting defaults for a model this
-/// binary predates.
-#[expect(clippy::match_same_arms)]
-fn model_overrides(id: &str) -> Option<ModelOverrides> {
+/// Returns `None` for a model absent from [`MODEL_OVERRIDES`], leaving its
+/// cutoff and deprecation status unknown rather than asserting defaults for a
+/// model this binary predates.
+fn model_overrides(id: &str) -> Option<&'static ModelOverrides> {
+    MODEL_OVERRIDES.get(id)
+}
+
+/// The facts the capabilities API cannot supply, per model.
+static MODEL_OVERRIDES: LazyLock<Catalog<ModelOverrides>> = LazyLock::new(|| {
     let cutoff = |year, month| NaiveDate::from_ymd_opt(year, month, 1);
 
-    Some(match id {
-        "claude-fable-5-1" => ModelOverrides {
-            knowledge_cutoff: cutoff(2026, 6),
-            always_on: true,
-            ..Default::default()
+    Catalog::new(vec![
+        Entry {
+            aliases: &[],
+            value: ModelOverrides {
+                knowledge_cutoff: cutoff(2026, 6),
+                always_on: true,
+                ..ModelOverrides::new("claude-fable-5-1")
+            },
         },
-        "claude-fable-5" => ModelOverrides {
-            knowledge_cutoff: cutoff(2026, 1),
-            always_on: true,
-            ..Default::default()
+        Entry {
+            aliases: &[],
+            value: ModelOverrides {
+                knowledge_cutoff: cutoff(2026, 1),
+                always_on: true,
+                ..ModelOverrides::new("claude-fable-5")
+            },
         },
-        "claude-opus-5-5" => ModelOverrides {
-            knowledge_cutoff: cutoff(2026, 6),
-            always_on: true,
-            ..Default::default()
+        Entry {
+            aliases: &[],
+            value: ModelOverrides {
+                knowledge_cutoff: cutoff(2026, 6),
+                always_on: true,
+                ..ModelOverrides::new("claude-opus-5-5")
+            },
         },
-        "claude-opus-5" => ModelOverrides {
-            knowledge_cutoff: cutoff(2026, 5),
-            ..Default::default()
+        Entry {
+            aliases: &[],
+            value: ModelOverrides {
+                knowledge_cutoff: cutoff(2026, 5),
+                ..ModelOverrides::new("claude-opus-5")
+            },
         },
-        "claude-sonnet-5" => ModelOverrides {
-            knowledge_cutoff: cutoff(2026, 1),
-            ..Default::default()
+        Entry {
+            aliases: &[],
+            value: ModelOverrides {
+                knowledge_cutoff: cutoff(2026, 1),
+                ..ModelOverrides::new("claude-sonnet-5")
+            },
         },
-        "claude-opus-4-8" => ModelOverrides {
-            knowledge_cutoff: cutoff(2026, 1),
-            ..Default::default()
+        Entry {
+            aliases: &[],
+            value: ModelOverrides {
+                knowledge_cutoff: cutoff(2026, 1),
+                ..ModelOverrides::new("claude-opus-4-8")
+            },
         },
-        "claude-opus-4-7" | "claude-opus-4-7-20260416" => ModelOverrides {
-            knowledge_cutoff: cutoff(2026, 1),
-            ..Default::default()
+        Entry {
+            aliases: &["claude-opus-4-7-20260416"],
+            value: ModelOverrides {
+                knowledge_cutoff: cutoff(2026, 1),
+                ..ModelOverrides::new("claude-opus-4-7")
+            },
         },
-        "claude-sonnet-4-6" => ModelOverrides {
-            knowledge_cutoff: cutoff(2025, 8),
-            ..Default::default()
+        Entry {
+            aliases: &[],
+            value: ModelOverrides {
+                knowledge_cutoff: cutoff(2025, 8),
+                ..ModelOverrides::new("claude-sonnet-4-6")
+            },
         },
-        "claude-opus-4-6" | "claude-opus-4-6-20260205" => ModelOverrides {
-            knowledge_cutoff: cutoff(2025, 8),
-            ..Default::default()
+        Entry {
+            aliases: &["claude-opus-4-6-20260205"],
+            value: ModelOverrides {
+                knowledge_cutoff: cutoff(2025, 8),
+                ..ModelOverrides::new("claude-opus-4-6")
+            },
         },
-        "claude-opus-4-5" | "claude-opus-4-5-20251101" => ModelOverrides {
-            knowledge_cutoff: cutoff(2025, 8),
-            prefill: true,
-            ..Default::default()
+        Entry {
+            aliases: &["claude-opus-4-5-20251101"],
+            value: ModelOverrides {
+                knowledge_cutoff: cutoff(2025, 8),
+                prefill: true,
+                ..ModelOverrides::new("claude-opus-4-5")
+            },
         },
-        "claude-haiku-4-5" | "claude-haiku-4-5-20251001" => ModelOverrides {
-            knowledge_cutoff: cutoff(2025, 7),
-            prefill: true,
-            ..Default::default()
+        Entry {
+            aliases: &["claude-haiku-4-5-20251001"],
+            value: ModelOverrides {
+                knowledge_cutoff: cutoff(2025, 7),
+                prefill: true,
+                ..ModelOverrides::new("claude-haiku-4-5")
+            },
         },
-        "claude-sonnet-4-5" | "claude-sonnet-4-5-20250929" => ModelOverrides {
-            knowledge_cutoff: cutoff(2025, 7),
-            prefill: true,
-            ..Default::default()
+        Entry {
+            aliases: &["claude-sonnet-4-5-20250929"],
+            value: ModelOverrides {
+                knowledge_cutoff: cutoff(2025, 7),
+                prefill: true,
+                ..ModelOverrides::new("claude-sonnet-4-5")
+            },
         },
-        "claude-opus-4-1" | "claude-opus-4-1-20250805" => ModelOverrides {
-            knowledge_cutoff: cutoff(2025, 3),
-            deprecated: ModelDeprecation::deprecated(
-                &"recommended replacement: claude-opus-5",
-                NaiveDate::from_ymd_opt(2026, 8, 5),
-            ),
-            prefill: true,
-            ..Default::default()
+        Entry {
+            aliases: &["claude-opus-4-1-20250805"],
+            value: ModelOverrides {
+                knowledge_cutoff: cutoff(2025, 3),
+                deprecated: ModelDeprecation::deprecated(
+                    &"recommended replacement: claude-opus-5",
+                    NaiveDate::from_ymd_opt(2026, 8, 5),
+                ),
+                prefill: true,
+                ..ModelOverrides::new("claude-opus-4-1")
+            },
         },
-        _ => return None,
-    })
-}
+    ])
+});
 
 /// Derive the provider feature flags from the reported capabilities.
 ///
@@ -2470,9 +2527,6 @@ fn map_model(model: types::Model) -> Result<ModelDetails> {
         );
     }
 
-    let known = overrides.is_some();
-    let overrides = overrides.unwrap_or_default();
-
     // A `0` token limit means "unspecified", so treat it as unknown and let the
     // request fall back to its default rather than capping at zero.
     let context_window = (model.max_input_tokens != 0).then_some(model.max_input_tokens);
@@ -2482,7 +2536,7 @@ fn map_model(model: types::Model) -> Result<ModelDetails> {
     let features = derive_features(&model.capabilities);
 
     let mut reasoning = derive_reasoning(&model.capabilities);
-    if overrides.always_on {
+    if overrides.is_some_and(|o| o.always_on) {
         reasoning = reasoning.map(ReasoningDetails::always_on);
     }
 
@@ -2492,12 +2546,12 @@ fn map_model(model: types::Model) -> Result<ModelDetails> {
         context_window,
         max_output_tokens,
         reasoning,
-        knowledge_cutoff: overrides.knowledge_cutoff,
-        deprecated: known.then_some(overrides.deprecated),
+        knowledge_cutoff: overrides.and_then(|o| o.knowledge_cutoff),
+        deprecated: overrides.map(|o| o.deprecated.clone()),
         structured_output,
         // Only a model in the table has a known answer; the API reports nothing
         // about prefill.
-        prefill: known.then_some(overrides.prefill),
+        prefill: overrides.map(|o| o.prefill),
         // The HTTP model catalog does not report subscription availability.
         subscription: None,
         features,
