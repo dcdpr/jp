@@ -1286,7 +1286,7 @@ mod create_request {
         AppConfig,
         model::{
             id::{ModelIdConfig, ModelIdOrAliasConfig, ProviderId},
-            parameters::ReasoningConfig,
+            parameters::{CustomReasoningConfig, ReasoningConfig, ReasoningEffort},
         },
         providers::llm::LlmProviderConfig,
     };
@@ -1497,6 +1497,66 @@ mod create_request {
         assert!(
             request.contains(r#""top_p":0.25"#),
             "top_p dropped: {request}"
+        );
+    }
+
+    /// The `reasoning` object sent to `model` for an explicit `effort`.
+    fn reasoning_for_effort(model: &str, effort: ReasoningEffort) -> Value {
+        let ts = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+
+        let mut config = AppConfig::new_test();
+        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Openai,
+            name: model.parse().unwrap(),
+        });
+        config.assistant.model.parameters.reasoning =
+            Some(ReasoningConfig::Custom(CustomReasoningConfig {
+                effort,
+                exclude: false,
+            }));
+
+        let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
+        stream.extend([
+            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(ChatRequest::from("A question"), ts),
+        ]);
+
+        let thread = ThreadBuilder::new().with_events(stream).build().unwrap();
+
+        // Dummy API key env var, mirroring the VCR harness.
+        let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
+        let mut providers = LlmProviderConfig::default();
+        providers.openai.api_key_env = env.into();
+
+        let details = map_model(ModelResponse {
+            id: model.to_owned(),
+            _object: "model".to_owned(),
+            _created: Utc.with_ymd_and_hms(2026, 9, 30, 0, 0, 0).unwrap(),
+            _owned_by: "openai".to_owned(),
+        })
+        .unwrap();
+
+        build_request_value(
+            ProviderId::Openai,
+            &providers,
+            &details,
+            ChatQuery::from(thread),
+        )
+        .unwrap()["reasoning"]
+            .clone()
+    }
+
+    /// GPT-6.1 Sol rejects `minimal` and `none`, so an explicit `xlow` or
+    /// `none` effort is sent as `low`, its lowest level.
+    #[test]
+    fn sol_6_1_clamps_efforts_below_low_to_low() {
+        assert_eq!(
+            reasoning_for_effort("gpt-6.1-sol", ReasoningEffort::Xlow)["effort"],
+            json!("low")
+        );
+        assert_eq!(
+            reasoning_for_effort("gpt-6.1-sol", ReasoningEffort::None)["effort"],
+            json!("low")
         );
     }
 }

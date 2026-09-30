@@ -1,5 +1,7 @@
 pub(crate) mod catalog;
 
+use std::cmp::Reverse;
+
 use chrono::NaiveDate;
 use jp_config::model::{
     id::ModelIdConfig,
@@ -197,14 +199,14 @@ impl ModelDetails {
             Some(ReasoningDetails::Supported {
                 mode:
                     ReasoningMode::Leveled {
-                        xlow: _,
+                        xlow,
                         low,
                         medium,
                         high,
                         xhigh,
                         max,
                     },
-                ..
+                can_disable,
             }) => match config {
                 // Off, so disabled.
                 Some(ReasoningConfig::Off) => None,
@@ -228,8 +230,31 @@ impl ModelDetails {
                     exclude: false,
                 }),
 
-                // Custom configuration, so use it.
-                Some(ReasoningConfig::Custom(custom)) => Some(custom),
+                // Custom configuration, resolved against the model's ladder so
+                // the provider is never sent a level it rejects.
+                Some(ReasoningConfig::Custom(custom)) => {
+                    let requested = custom
+                        .effort
+                        .abs_to_rel(self.max_output_tokens)
+                        .unwrap_or(custom.effort);
+                    let effort = nearest_level(
+                        requested,
+                        [xlow, low, medium, high, xhigh, max],
+                        can_disable,
+                    );
+
+                    if effort != requested {
+                        warn!(
+                            id = %self.id,
+                            ?requested,
+                            ?effort,
+                            "Model does not support the requested reasoning effort; clamping to \
+                             the nearest supported level."
+                        );
+                    }
+
+                    Some(CustomReasoningConfig { effort, ..custom })
+                }
             },
 
             // Adaptive
@@ -251,6 +276,53 @@ impl ModelDetails {
             },
         }
     }
+}
+
+/// Resolve `requested` to an effort a leveled model accepts.
+///
+/// `ladder` flags the supported levels from `xlow` up to `max`.
+/// A supported level passes through, and so does `none` when reasoning can be
+/// disabled.
+/// Any other level moves to the nearest supported one, rounding up when two are
+/// equally near; `none` on a model that cannot disable reasoning becomes its
+/// lowest level.
+///
+/// `auto` and unresolved absolute efforts pass through for the provider to map,
+/// as does everything when the ladder is empty.
+fn nearest_level(
+    requested: ReasoningEffort,
+    ladder: [bool; 6],
+    can_disable: bool,
+) -> ReasoningEffort {
+    const LEVELS: [ReasoningEffort; 6] = [
+        ReasoningEffort::Xlow,
+        ReasoningEffort::Low,
+        ReasoningEffort::Medium,
+        ReasoningEffort::High,
+        ReasoningEffort::XHigh,
+        ReasoningEffort::Max,
+    ];
+
+    // Steps up from `none`, which sits one below the lowest level.
+    let step: usize = match requested {
+        ReasoningEffort::Auto | ReasoningEffort::Absolute(_) => return requested,
+        ReasoningEffort::None if can_disable => return requested,
+        ReasoningEffort::None => 0,
+        ReasoningEffort::Xlow => 1,
+        ReasoningEffort::Low => 2,
+        ReasoningEffort::Medium => 3,
+        ReasoningEffort::High => 4,
+        ReasoningEffort::XHigh => 5,
+        ReasoningEffort::Max => 6,
+    };
+
+    LEVELS
+        .into_iter()
+        .zip(ladder)
+        .enumerate()
+        .filter(|(_, (_, supported))| *supported)
+        .min_by_key(|(index, _)| (step.abs_diff(index + 1), Reverse(*index)))
+        .map_or(requested, |(_, (level, _))| level)
 }
 
 /// The deprecation status of a model.

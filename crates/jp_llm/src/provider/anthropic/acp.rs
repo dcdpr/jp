@@ -18,7 +18,12 @@ use serde_json::from_slice;
 use tokio::{io::AsyncReadExt as _, process::Command, time::timeout};
 use tracing::warn;
 
-use crate::{credential::AccountIdentity, error::StreamError, model::ModelDetails};
+use super::{BETWEEN_TOOLS_THINKING, model_overrides};
+use crate::{
+    credential::AccountIdentity,
+    error::StreamError,
+    model::{ModelDetails, ReasoningDetails},
+};
 
 mod cassette;
 mod options;
@@ -346,6 +351,11 @@ fn subscription_identity(output: &[u8]) -> Result<Option<AccountIdentity>, Error
 
 /// Describe the selected model without an API-key-authenticated lookup.
 /// Availability is determined by Claude Code when it receives the request.
+///
+/// Claude Code reports no model capabilities, so reasoning support stays
+/// unknown unless the override table marks the model as always thinking.
+/// Such a model rejects `thinking: disabled`, which is what an unknown model is
+/// sent when reasoning is off.
 pub(super) fn model_details(name: &Name) -> ModelDetails {
     let mut model = ModelDetails::empty(ModelIdConfig {
         provider: ProviderId::Anthropic,
@@ -354,6 +364,19 @@ pub(super) fn model_details(name: &Name) -> ModelDetails {
     model.subscription = Some(true);
     model.prefill = Some(false);
     model.structured_output = Some(true);
+
+    if let Some(overrides) = model_overrides(name) {
+        // An always-on model thinks adaptively, the only mode it has. The
+        // effort ladder is not reported, so both upper levels are assumed, as
+        // for a model whose support is unknown.
+        if overrides.always_on {
+            model.reasoning = Some(ReasoningDetails::adaptive(true, true).always_on());
+        }
+        if overrides.between_tools {
+            model.features.push(BETWEEN_TOOLS_THINKING);
+        }
+    }
+
     model
 }
 

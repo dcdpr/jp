@@ -1460,7 +1460,9 @@ fn create_request(
     let supports_reasoning = model
         .reasoning
         .is_none_or(|v| !matches!(v, ReasoningDetails::Unsupported));
-    let mut reasoning = match model.custom_reasoning_config(parameters.reasoning) {
+    let custom_reasoning = model.custom_reasoning_config(parameters.reasoning);
+    let reasoning_enabled = custom_reasoning.is_some();
+    let mut reasoning = match custom_reasoning {
         Some(r) => Some(convert_reasoning(r, model)),
         // Explicitly disable reasoning for models that support it when the
         // user has turned it off. Sending `null` lets the model use its
@@ -1490,9 +1492,6 @@ fn create_request(
         }
         None => None,
     };
-    let reasoning_enabled = model
-        .custom_reasoning_config(parameters.reasoning)
-        .is_some();
 
     if reasoning_enabled && let Some(r) = reasoning.as_mut() {
         r.mode = reasoning_mode;
