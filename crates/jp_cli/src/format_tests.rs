@@ -5,6 +5,16 @@ use jp_term::table::{Details, details};
 
 use super::*;
 
+#[test]
+fn sanitize_mode_follows_the_style_setting() {
+    assert_eq!(sanitize_mode(Sanitization::Strip), SanitizeMode::Strip);
+    assert_eq!(
+        sanitize_mode(Sanitization::Visualize),
+        SanitizeMode::Visualize
+    );
+    assert_eq!(sanitize_mode(Sanitization::Off), SanitizeMode::Off);
+}
+
 /// Values are listed beneath their key rather than comma-separated, because a
 /// value may contain a comma itself.
 #[test]

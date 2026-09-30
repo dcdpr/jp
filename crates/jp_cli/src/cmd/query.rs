@@ -419,7 +419,7 @@ impl Query {
             staged,
         } = self.acquire_lock(ctx, handle, start_new).await?;
 
-        let result = self.run_locked(ctx, &lock, query, fresh, staged).await;
+        let result = Box::pin(self.run_locked(ctx, &lock, query, fresh, staged)).await;
 
         // A run that never started a turn wrote nothing, so a directory the
         // editor created to compose in is all that is left of the conversation.

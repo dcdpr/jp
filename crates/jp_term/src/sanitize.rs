@@ -8,6 +8,9 @@
 //! [`ContentWriter`] filters such content on its way to the terminal, keeping
 //! what its [`ContentClass`] allows and rendering the rest the way the
 //! [`SanitizeMode`] says.
+//! [`sanitize_str`] runs the same filter over text that is already whole.
+//! [`sanitize_decoded`] filters text again after a markdown parser has turned
+//! character references such as `&#27;` into the characters they name.
 //! [`visible_sgr`] is the writer's SGR parsing and conceal removal on their
 //! own, for a filter that applies a policy of its own.
 //! [`strip_controls`] removes control characters from text that is only ever
@@ -17,7 +20,10 @@
 //! This is unrelated to `Workspace::sanitize` (storage) and
 //! `ConversationStream::sanitize` (stream repair).
 
-use std::fmt::{self, Write as _};
+use std::{
+    borrow::Cow,
+    fmt::{self, Write as _},
+};
 
 use vte::{Params, Parser, Perform};
 
@@ -51,13 +57,21 @@ pub enum ContentClass {
     /// model styles text.
     /// There is no content span, so [`ContentWriter::finish`] writes no reset.
     ModelOutput,
+
+    /// Messages the user wrote, echoed and replayed.
+    ///
+    /// SGR styling is kept, so a pasted colored log looks like the log.
+    /// The content span closes on the message's formatted output rather than in
+    /// [`ContentWriter::finish`], which writes no reset: a reset in the
+    /// markdown source could change how the message parses.
+    UserMessage,
 }
 
 impl ContentClass {
     /// Whether SGR sequences survive the filter.
     const fn keeps_styling(self) -> bool {
         match self {
-            Self::ToolOutput => true,
+            Self::ToolOutput | Self::UserMessage => true,
             Self::ModelOutput => false,
         }
     }
@@ -66,7 +80,7 @@ impl ContentClass {
     const fn has_span(self) -> bool {
         match self {
             Self::ToolOutput => true,
-            Self::ModelOutput => false,
+            Self::ModelOutput | Self::UserMessage => false,
         }
     }
 }
@@ -107,9 +121,10 @@ pub enum SanitizeMode {
 /// A write's output reaches the wrapped writer before the write returns; only
 /// the bytes of a sequence still in progress are held back.
 ///
-/// Constructing a writer for a class with a content span opens the span, and
+/// For tool output, constructing a writer opens the content span, and
 /// [`finish`] closes it with `\x1b[0m` in every mode, so styling the content
 /// opened ends with the content.
+/// A user message's span is closed by the caller, on the formatted message.
 ///
 /// [`finish`]: Self::finish
 pub struct ContentWriter<W: fmt::Write> {
@@ -156,16 +171,33 @@ impl<W: fmt::Write> ContentWriter<W> {
     ///
     /// Propagates any error from the wrapped writer.
     pub fn finish(&mut self) -> fmt::Result {
-        if self.sink.mode != SanitizeMode::Off {
-            self.sink.settle();
-            self.parser = Parser::new();
-        }
+        self.settle();
 
         if self.sink.class.has_span() {
             self.sink.buffer.push_str(RESET);
         }
 
         self.flush()
+    }
+
+    /// The writer being filtered into.
+    ///
+    /// A caller filtering into a buffer takes each write's output from here as
+    /// it goes.
+    /// A sequence a write cut short stays held for the next write.
+    pub const fn get_mut(&mut self) -> &mut W {
+        &mut self.output
+    }
+
+    /// Resolve a sequence the content left unfinished as dropped, and start the
+    /// parser over.
+    fn settle(&mut self) {
+        if self.sink.mode == SanitizeMode::Off {
+            return;
+        }
+
+        self.sink.settle();
+        self.parser = Parser::new();
     }
 
     /// Feed one `ESC` to the parser, recording that a sequence starts there.
@@ -388,6 +420,69 @@ pub fn strip_controls(text: &str, keep: &[char]) -> String {
     text.chars()
         .filter(|c| !c.is_control() || keep.contains(c))
         .collect()
+}
+
+/// `text`, whole, filtered as `class` content under `mode`.
+///
+/// A [`ContentWriter`] written once and finished: a sequence `text` leaves
+/// unfinished is dropped, and tool output ends with the reset that closes its
+/// span.
+#[must_use]
+pub fn sanitize_str(text: &str, class: ContentClass, mode: SanitizeMode) -> String {
+    let mut writer = ContentWriter::new(String::new(), class, mode);
+
+    // Writing to a `String` is infallible.
+    let _ = writer.write_str(text);
+    let _ = writer.finish();
+
+    writer.output
+}
+
+/// Text a markdown parser decoded from character references, filtered again as
+/// `class` content under `mode`.
+///
+/// The parser turns a reference such as `&#27;` into the character it names
+/// after the source has been through a [`ContentWriter`], so a control
+/// character in decoded text is one the writer never saw.
+///
+/// - Model output loses every control character except `\n` and `\t`, each
+///   replaced by `␛` under [`SanitizeMode::Visualize`].
+///   Its source has already lost every escape sequence, so the text after a
+///   decoded `ESC` was never part of one: `&#27;[2J` shows as `[2J`.
+/// - User messages and tool output are filtered by the allowlist again, which
+///   keeps their styling.
+///   No reset is added: a span closes where the content ends, which a single
+///   piece of decoded text never is.
+/// - Under [`SanitizeMode::Off`], and for text whose only control characters
+///   are `\n` and `\t`, the text is returned as it is.
+#[must_use]
+pub fn sanitize_decoded(text: &str, class: ContentClass, mode: SanitizeMode) -> Cow<'_, str> {
+    let filtered = |c: char| c.is_control() && !matches!(c, '\n' | '\t');
+    if mode == SanitizeMode::Off || !text.chars().any(filtered) {
+        return Cow::Borrowed(text);
+    }
+
+    if !class.keeps_styling() {
+        let mut kept = String::with_capacity(text.len());
+        for c in text.chars() {
+            if !filtered(c) {
+                kept.push(c);
+            } else if mode == SanitizeMode::Visualize {
+                kept.push(MARKER);
+            }
+        }
+
+        return Cow::Owned(kept);
+    }
+
+    let mut writer = ContentWriter::new(String::new(), class, mode);
+
+    // Writing to a `String` is infallible.
+    let _ = writer.write_str(text);
+    writer.settle();
+    let _ = writer.flush();
+
+    Cow::Owned(writer.output)
 }
 
 /// Keeps the visible part of the SGR sequence a parse dispatches.

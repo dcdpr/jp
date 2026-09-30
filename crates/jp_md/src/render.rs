@@ -23,6 +23,7 @@
 //! [`writer`]: crate::writer
 
 use std::{
+    borrow::Cow,
     cmp::max,
     fmt::{self, Write},
 };
@@ -40,6 +41,7 @@ use jp_term::{
         STRIKETHROUGH_START, UNDERLINE_END, UNDERLINE_START,
     },
     background::DefaultBackground,
+    sanitize::{ContentClass, SanitizeMode, sanitize_decoded},
 };
 use syntect::highlighting::Theme;
 
@@ -94,6 +96,13 @@ pub struct RenderOptions<'a> {
 
     /// Visual indent (in spaces) applied to wrap-routed content.
     pub indent: usize,
+
+    /// Where the markdown comes from, and the sanitizer mode it is shown under.
+    ///
+    /// Decides how text the parser decoded from character references is
+    /// filtered before it is written.
+    /// `None` writes it as it is.
+    pub content: Option<(ContentClass, SanitizeMode)>,
 }
 
 /// Format a comrak AST as styled terminal output.
@@ -459,7 +468,8 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             self.writer.output(&fence_byte.to_string(), false)?;
         }
         if !info.is_empty() {
-            self.writer.output(info, false)?;
+            let shown = self.decoded(info);
+            self.writer.output(&shown, false)?;
         }
         self.writer.cr();
 
@@ -534,8 +544,21 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             return Ok(());
         }
 
-        self.writer.output(literal, true)?;
+        let shown = self.decoded(literal);
+        self.writer.output(&shown, true)?;
         Ok(())
+    }
+
+    /// `text` the parser decoded from character references, as the content's
+    /// policy lets it be shown.
+    ///
+    /// A reference such as `&#27;` only becomes a real `ESC` during parsing,
+    /// after the caller filtered the source.
+    fn decoded<'t>(&self, text: &'t str) -> Cow<'t, str> {
+        match self.options.content {
+            Some((class, mode)) => sanitize_decoded(text, class, mode),
+            None => Cow::Borrowed(text),
+        }
     }
 
     /// Format a hard line break.
@@ -780,7 +803,8 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
     ) -> Result<bool, fmt::Error> {
         if is_autolink(node, nl) {
             if entering {
-                let url = nl.url.strip_prefix("mailto:").unwrap_or(&nl.url);
+                let url = self.decoded(&nl.url);
+                let url = url.strip_prefix("mailto:").unwrap_or(&url);
                 self.writer.output("<", false)?;
                 self.writer.output(url, false)?;
                 self.writer.output(">", false)?;
@@ -790,10 +814,12 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             self.writer.output("[", false)?;
         } else {
             self.writer.output("](", false)?;
-            self.writer.output(&nl.url, false)?;
+            let url = self.decoded(&nl.url);
+            self.writer.output(&url, false)?;
             if !nl.title.is_empty() {
+                let title = self.decoded(&nl.title);
                 self.writer.output(" \"", false)?;
-                self.writer.output(&nl.title, false)?;
+                self.writer.output(&title, false)?;
                 self.writer.output("\"", false)?;
             }
             self.writer.output(")", false)?;
@@ -808,10 +834,12 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             self.writer.output("![", false)?;
         } else {
             self.writer.output("](", false)?;
-            self.writer.output(&nl.url, false)?;
+            let url = self.decoded(&nl.url);
+            self.writer.output(&url, false)?;
             if !nl.title.is_empty() {
+                let title = self.decoded(&nl.title);
                 self.writer.output(" \"", false)?;
-                self.writer.output(&nl.title, false)?;
+                self.writer.output(&title, false)?;
                 self.writer.output("\"", false)?;
             }
             self.writer.output(")", false)?;

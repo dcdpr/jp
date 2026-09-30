@@ -150,7 +150,7 @@ impl PromptBackend for TranscriptPromptBackend {
         _options: Vec<String>,
         _default: Option<usize>,
         _writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<usize, InquireError> {
         self.record(message);
         Err(InquireError::OperationCanceled)
     }

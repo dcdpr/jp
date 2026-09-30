@@ -322,6 +322,151 @@ fn visible_sgr_rejects_everything_but_sgr() {
 }
 
 #[test]
+fn user_messages_keep_their_styling_and_leave_closing_it_to_the_renderer() {
+    // The span of a user message closes on its formatted output: a reset in the
+    // markdown source could change how the message parses.
+    assert_eq!(
+        filter(ContentClass::UserMessage, SanitizeMode::Strip, &[
+            "\x1b[31mred\x1b[2J"
+        ]),
+        "\x1b[31mred"
+    );
+}
+
+#[test]
+fn user_messages_lose_everything_but_styling() {
+    assert_eq!(
+        filter(ContentClass::UserMessage, SanitizeMode::Strip, &[
+            "a\rb\x1b]0;title\x07c\x1b[1Ad\x1b[8me"
+        ]),
+        "abcde"
+    );
+}
+
+#[test]
+fn get_mut_hands_over_what_each_write_produced() {
+    // A caller filtering a stream takes each write's output as it goes, while a
+    // sequence the write cut short stays held for the next one.
+    let mut writer = ContentWriter::new(
+        String::new(),
+        ContentClass::ModelOutput,
+        SanitizeMode::Strip,
+    );
+
+    writer.write_str("abc\x1b[3").unwrap();
+    assert_eq!(std::mem::take(writer.get_mut()), "abc");
+
+    writer.write_str("1mdef").unwrap();
+    assert_eq!(std::mem::take(writer.get_mut()), "def");
+}
+
+#[test]
+fn sanitize_str_filters_text_in_one_piece() {
+    assert_eq!(
+        sanitize_str(
+            "a\x1b[31mb\x1b[",
+            ContentClass::ModelOutput,
+            SanitizeMode::Strip
+        ),
+        "ab"
+    );
+    assert_eq!(
+        sanitize_str(
+            "a\x1b[31mb\x1b[",
+            ContentClass::ToolOutput,
+            SanitizeMode::Strip
+        ),
+        "a\x1b[31mb\x1b[0m"
+    );
+    assert_eq!(
+        sanitize_str(
+            "a\x1b[2J",
+            ContentClass::ModelOutput,
+            SanitizeMode::Visualize
+        ),
+        "a\u{241b}"
+    );
+}
+
+#[test]
+fn decoded_model_output_loses_its_control_characters() {
+    // `&#27;[2J` decodes to a real `ESC` after the source filter has run. Only
+    // the control character goes; the rest was ordinary text all along.
+    assert_eq!(
+        sanitize_decoded(
+            "clear \x1b[2J, return\r, bell\x07, del\x7f, csi\u{9b}",
+            ContentClass::ModelOutput,
+            SanitizeMode::Strip
+        ),
+        "clear [2J, return, bell, del, csi"
+    );
+}
+
+#[test]
+fn decoded_model_output_keeps_line_feeds_and_tabs() {
+    assert_eq!(
+        sanitize_decoded("a\nb\tc", ContentClass::ModelOutput, SanitizeMode::Strip),
+        "a\nb\tc"
+    );
+}
+
+#[test]
+fn visualize_marks_each_control_character_decoded_model_output_lost() {
+    assert_eq!(
+        sanitize_decoded(
+            "clear \x1b[2J\x07",
+            ContentClass::ModelOutput,
+            SanitizeMode::Visualize
+        ),
+        "clear \u{241b}[2J\u{241b}"
+    );
+}
+
+#[test]
+fn decoded_user_message_text_is_filtered_by_the_allowlist_again() {
+    // A decoded `ESC` and a raw one the source filter kept are the same byte by
+    // now, so styling survives and everything else goes.
+    assert_eq!(
+        sanitize_decoded(
+            "\x1b[31mred\x1b[2J\x1b[8m",
+            ContentClass::UserMessage,
+            SanitizeMode::Strip
+        ),
+        "\x1b[31mred"
+    );
+}
+
+#[test]
+fn decoded_text_never_closes_a_span() {
+    // A span closes where the renderer stops writing the content, which a
+    // single text node inside it never is.
+    assert_eq!(
+        sanitize_decoded("\x1b[31mred", ContentClass::ToolOutput, SanitizeMode::Strip),
+        "\x1b[31mred"
+    );
+}
+
+#[test]
+fn decoded_text_with_nothing_to_filter_is_not_copied() {
+    assert!(matches!(
+        sanitize_decoded("plain", ContentClass::UserMessage, SanitizeMode::Strip),
+        Cow::Borrowed("plain")
+    ));
+    assert!(matches!(
+        sanitize_decoded("a\nb\tc", ContentClass::ModelOutput, SanitizeMode::Strip),
+        Cow::Borrowed("a\nb\tc")
+    ));
+}
+
+#[test]
+fn decoded_text_passes_through_under_off() {
+    assert_eq!(
+        sanitize_decoded("\x1b[2J", ContentClass::ModelOutput, SanitizeMode::Off),
+        "\x1b[2J"
+    );
+}
+
+#[test]
 fn strip_controls_removes_every_control_character() {
     // C0 (a line feed, a tab, a carriage return), DEL, and C1. Only the `ESC`
     // of an escape sequence is a control character, so the rest of it stays.

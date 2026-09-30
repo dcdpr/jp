@@ -15,6 +15,13 @@
 //! └────────┘               └───────────┘            └──────────┘
 //! ```
 //!
+//! Model output is filtered as `style.sanitize` asks before it reaches the
+//! buffer, and a user message before it is formatted.
+//! The formatter filters text it decodes from character references (`&#27;`)
+//! again.
+//! A user message keeps its styling and ends with a reset, so that styling
+//! stops where the message does.
+//!
 //! # Display Modes
 //!
 //! Reasoning content can be displayed in different modes:
@@ -29,6 +36,7 @@
 //! | `Timer`       | Show a running timer, erase when done    |
 
 use std::{
+    fmt::Write as _,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -48,8 +56,14 @@ use jp_md::{
     theme,
 };
 use jp_printer::{OutputWidth, PrintableExt as _, Printer, RegionStyle, StatusRegion};
-use jp_term::background::{BackgroundFill, DefaultBackground};
+use jp_term::{
+    ansi::RESET,
+    background::{BackgroundFill, DefaultBackground},
+    sanitize::{ContentClass, ContentWriter, SanitizeMode, sanitize_str},
+};
 use tracing::warn;
+
+use crate::format::sanitize_mode;
 
 /// The kind of content last pushed into the renderer.
 ///
@@ -161,6 +175,16 @@ pub struct ChatRenderer {
     /// formatter failed, leaves nothing to be spaced from.
     /// `None` until wired, in which case every region counts as drawn.
     tool_drawn: Option<Arc<AtomicBool>>,
+    /// How `style.sanitize` has untrusted content shown.
+    sanitize: SanitizeMode,
+    /// Filters reasoning text before it reaches the markdown buffer.
+    ///
+    /// Reasoning and message text interleave within a turn, so each has a
+    /// filter of its own: a sequence one of them leaves unfinished never joins
+    /// the other's text.
+    reasoning_filter: ContentWriter<String>,
+    /// Filters message text before it reaches the markdown buffer.
+    message_filter: ContentWriter<String>,
 }
 
 impl ChatRenderer {
@@ -172,6 +196,7 @@ impl ChatRenderer {
         // controller disabled, preserving the original static per-character
         // delay behavior.
         printer.set_max_latency(config.typewriter.max_latency.into());
+        let sanitize = sanitize_mode(config.sanitize);
         Self {
             buffer: Buffer::new(),
             formatter,
@@ -188,6 +213,9 @@ impl ChatRenderer {
             para_source: String::new(),
             para_emitted: 0,
             tool_drawn: None,
+            sanitize,
+            reasoning_filter: model_output_filter(sanitize),
+            message_filter: model_output_filter(sanitize),
         }
     }
 
@@ -218,10 +246,19 @@ impl ChatRenderer {
         self.flush_on_transition(ContentKind::Message);
         self.flush();
 
-        let formatted = self
+        let source = sanitize_str(content, ContentClass::UserMessage, self.sanitize);
+        let source = source.trim_end();
+        let options = TerminalOptions {
+            // The message is one block, with no separator after it.
+            suppress_trailing_separator: true,
+            content: Some((ContentClass::UserMessage, self.sanitize)),
+            ..TerminalOptions::default()
+        };
+        let mut formatted = self
             .formatter
-            .format_terminal(content.trim_end())
-            .unwrap_or_else(|_| content.trim_end().to_owned());
+            .format_terminal_with(source, &options)
+            .unwrap_or_else(|_| source.to_owned());
+        close_span(&mut formatted);
         self.print_framing(&formatted);
 
         self.last_content_kind = Some(ContentKind::Message);
@@ -364,17 +401,21 @@ impl ChatRenderer {
 
             ReasoningDisplayConfig::Full => {
                 self.flush_on_transition(ContentKind::Reasoning);
-                self.render_content(content);
+                let text = self.filter(ContentKind::Reasoning, content);
+                self.render_content(&text);
             }
 
             ReasoningDisplayConfig::Truncate(TruncateChars { characters }) => {
                 self.flush_on_transition(ContentKind::Reasoning);
 
-                if let Some(data) = self.truncated_reasoning(content, characters) {
+                // Filtered first, so an escape sequence neither spends the
+                // budget nor gets cut in half by it.
+                let text = self.filter(ContentKind::Reasoning, content);
+                if let Some(data) = self.truncated_reasoning(&text, characters) {
                     self.render_content(&data);
                 }
 
-                self.reasoning_chars_count += content.chars().count();
+                self.reasoning_chars_count += text.chars().count();
             }
 
             ReasoningDisplayConfig::Progress => {
@@ -448,7 +489,72 @@ impl ChatRenderer {
 
     fn render_message(&mut self, content: &str) {
         self.flush_on_transition(ContentKind::Message);
-        self.render_content(content);
+        let text = self.filter(ContentKind::Message, content);
+        self.render_content(&text);
+    }
+
+    /// `content` with what model output may not show removed.
+    ///
+    /// Each kind keeps its own filter across chunks, so a sequence split
+    /// between two chunks is recognized whole.
+    fn filter(&mut self, kind: ContentKind, content: &str) -> String {
+        let Some(filter) = self.model_filter(kind) else {
+            return content.to_owned();
+        };
+
+        // Writing to a `String` is infallible.
+        let _ = filter.write_str(content);
+        std::mem::take(filter.get_mut())
+    }
+
+    /// The filter model output of `kind` passes through, or `None` for tool
+    /// chrome, which is not model output.
+    fn model_filter(&mut self, kind: ContentKind) -> Option<&mut ContentWriter<String>> {
+        match kind {
+            ContentKind::Reasoning => Some(&mut self.reasoning_filter),
+            ContentKind::Message => Some(&mut self.message_filter),
+            ContentKind::ToolCall => None,
+        }
+    }
+
+    /// Resolve a sequence the current kind's filter still holds, ahead of the
+    /// end of its region.
+    ///
+    /// A sequence the stream cut short is dropped there rather than completed
+    /// by the next region's text.
+    /// Under `visualize` its `␛` stays in the region it started in, and a
+    /// truncated reasoning display spends budget on it like on any other text.
+    fn settle_filter(&mut self) {
+        let Some(kind) = self.last_content_kind else {
+            return;
+        };
+        let Some(filter) = self.model_filter(kind) else {
+            return;
+        };
+
+        // Writing to a `String` is infallible.
+        let _ = filter.finish();
+        let tail = std::mem::take(filter.get_mut());
+        if tail.is_empty() {
+            return;
+        }
+
+        let tail = match (kind, self.config.reasoning.display) {
+            (
+                ContentKind::Reasoning,
+                ReasoningDisplayConfig::Truncate(TruncateChars { characters }),
+            ) => {
+                let shown = self.truncated_reasoning(&tail, characters);
+                self.reasoning_chars_count += tail.chars().count();
+                let Some(shown) = shown else {
+                    return;
+                };
+                shown
+            }
+            _ => tail,
+        };
+
+        self.buffer.push(&tail);
     }
 
     fn render_content(&mut self, content: &str) {
@@ -681,6 +787,7 @@ impl ChatRenderer {
             indent,
             suppress_trailing_separator: false,
             force_trailing_separator: false,
+            content: Some((ContentClass::ModelOutput, self.sanitize)),
         }
     }
 
@@ -767,6 +874,8 @@ impl ChatRenderer {
     ///
     /// [`emit_pending_separator`]: Self::emit_pending_separator
     fn drain_buffer(&mut self) {
+        self.settle_filter();
+
         // Drain the buffer's end-of-region events through the same fixup +
         // render path as streaming.
         for raw_event in self.buffer.flush_events() {
@@ -825,11 +934,15 @@ impl ChatRenderer {
             return false;
         }
 
+        // A filter of its own, so a sequence split across chunks is judged per
+        // chunk; the render carries it over to the next one.
+        let shown = || sanitize_str(content, ContentClass::ModelOutput, self.sanitize);
+
         match self.config.reasoning.display {
             ReasoningDisplayConfig::Static => true,
-            ReasoningDisplayConfig::Full => !content.trim().is_empty(),
+            ReasoningDisplayConfig::Full => !shown().trim().is_empty(),
             ReasoningDisplayConfig::Truncate(TruncateChars { characters }) => self
-                .truncated_reasoning(content, characters)
+                .truncated_reasoning(&shown(), characters)
                 .is_some_and(|data| !data.trim().is_empty()),
             // `Summary` is unimplemented; `render_reasoning` panics on it.
             ReasoningDisplayConfig::Hidden
@@ -984,6 +1097,10 @@ impl ChatRenderer {
         // captured by the event builder, so it is safe to discard.
         self.para_source.clear();
         self.para_emitted = 0;
+        // A sequence the interrupted stream left unfinished is discarded with
+        // it, rather than completed by the next stream's text.
+        self.reasoning_filter = model_output_filter(self.sanitize);
+        self.message_filter = model_output_filter(self.sanitize);
     }
 
     /// Reset the renderer state, keeping the content region open.
@@ -1045,6 +1162,20 @@ fn build_role_header_line(
     } else {
         format!("{left}{dashes}{detail_part}")
     }
+}
+
+/// A fresh filter for model output shown under `mode`.
+fn model_output_filter(mode: SanitizeMode) -> ContentWriter<String> {
+    ContentWriter::new(String::new(), ContentClass::ModelOutput, mode)
+}
+
+/// Close a user message's content span on its formatted output.
+///
+/// The reset goes before the trailing line breaks: a line break written under a
+/// background the message left open paints the row below it.
+fn close_span(formatted: &mut String) {
+    let end = formatted.trim_end_matches('\n').len();
+    formatted.insert_str(end, RESET);
 }
 
 /// Prepend `indent` spaces to every line of `content`.

@@ -1117,7 +1117,7 @@ impl PromptBackend for HeldPromptBackend {
         _options: Vec<String>,
         _default: Option<usize>,
         _writer: &mut dyn std::io::Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<usize, InquireError> {
         panic!("unexpected prompt: {message}")
     }
 
