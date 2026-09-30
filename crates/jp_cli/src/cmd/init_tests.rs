@@ -69,7 +69,7 @@ fn suggests_a_current_ga_model_for_supported_providers() {
 
     assert_eq!(
         id(ProviderId::Anthropic).as_deref(),
-        Some("claude-sonnet-5")
+        Some("claude-sonnet-5-5")
     );
     // A GA endpoint, deliberately: a preview one can be renamed or pulled out
     // from under a workspace that was initialized with it.

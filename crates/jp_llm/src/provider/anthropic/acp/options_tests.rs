@@ -51,3 +51,14 @@ fn disabled_thinking_carries_nothing_else() {
         json!({"type": "disabled"})
     );
 }
+
+/// `between_tools` rejects every other field, `display` included.
+#[test]
+fn between_tools_thinking_carries_nothing_else() {
+    let thinking = Thinking::from(&ExtendedThinking::BetweenTools);
+
+    assert_eq!(
+        serde_json::to_value(thinking).unwrap(),
+        json!({"type": "between_tools"})
+    );
+}

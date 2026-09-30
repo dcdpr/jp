@@ -998,6 +998,7 @@ mod map_model {
     fn subscription_lists_the_models_the_catalog_marks_as_served() {
         assert_eq!(subscription_models().collect::<Vec<_>>(), vec![
             "gpt-6-astra",
+            "gpt-6.1-sol",
             "gpt-6-sol",
             "gpt-6-luna",
             "gpt-5.6-sol",
@@ -1039,6 +1040,31 @@ mod map_model {
         assert_eq!(details.context_window, Some(1_050_000));
         assert_eq!(details.max_output_tokens, Some(128_000));
         // `none` is rejected, so reasoning cannot be turned off.
+        assert_eq!(
+            details.reasoning,
+            Some(ReasoningDetails::leveled(false, true, true, true, true, true).always_on())
+        );
+        assert_eq!(
+            details.knowledge_cutoff,
+            chrono::NaiveDate::from_ymd_opt(2026, 4, 30)
+        );
+        assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+        assert_eq!(details.features, vec![
+            TEMP_REQUIRES_NO_REASONING,
+            REASONING_PRO_MODE,
+            PERSISTED_REASONING,
+            EXPLICIT_PROMPT_CACHING
+        ]);
+    }
+
+    #[test]
+    fn gpt_6_1_sol_uses_latest_metadata() {
+        let details = map_model(model("gpt-6.1-sol")).unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-6.1 Sol"));
+        assert_eq!(details.context_window, Some(1_050_000));
+        assert_eq!(details.max_output_tokens, Some(128_000));
+        // `none` and `minimal` are rejected, so reasoning cannot be turned off.
         assert_eq!(
             details.reasoning,
             Some(ReasoningDetails::leveled(false, true, true, true, true, true).always_on())

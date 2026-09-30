@@ -124,6 +124,11 @@ pub enum ExtendedThinking {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         display: Option<ThinkingDisplay>,
     },
+    /// No up-front thinking; the model still writes short progress updates
+    /// between tool calls, returned as `thinking` blocks.
+    ///
+    /// Takes no other field, and is rejected at `xhigh` or `max` effort.
+    BetweenTools,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Builder, PartialEq, Default)]

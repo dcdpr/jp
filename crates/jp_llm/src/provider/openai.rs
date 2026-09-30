@@ -1747,6 +1747,32 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
         Entry {
             aliases: &[],
             value: ModelDetails {
+                id: id("gpt-6.1-sol"),
+                display_name: Some("GPT-6.1 Sol".to_owned()),
+                context_window: Some(1_050_000),
+                max_output_tokens: Some(128_000),
+                // Reasoning.effort supports: low, medium, high, xhigh, max. Neither
+                // `none` nor `minimal` is accepted, so reasoning cannot be turned
+                // off; the lowest level stands in for a disable.
+                reasoning: Some(
+                    ReasoningDetails::leveled(false, true, true, true, true, true).always_on(),
+                ),
+                knowledge_cutoff: Some(date(2026, 4, 30)),
+                deprecated: Some(ModelDeprecation::Active),
+                structured_output: None,
+                prefill: None,
+                subscription: Some(true),
+                features: vec![
+                    TEMP_REQUIRES_NO_REASONING,
+                    REASONING_PRO_MODE,
+                    PERSISTED_REASONING,
+                    EXPLICIT_PROMPT_CACHING,
+                ],
+            },
+        },
+        Entry {
+            aliases: &[],
+            value: ModelDetails {
                 id: id("gpt-6-sol"),
                 display_name: Some("GPT-6 Sol".to_owned()),
                 context_window: Some(1_050_000),
