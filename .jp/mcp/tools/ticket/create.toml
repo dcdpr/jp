@@ -14,9 +14,10 @@ tool call header misaligns below 80 columns" is a ticket even if the fix is
 subtle; "how should tool output be bounded?" is an RFD even if the
 implementation is trivial.
 
-The ticket opens at status `Todo`, is numbered from a counter that never reuses
-an id, and is attributed to you (`jp`). The title becomes the filename slug, so
-keep it short and specific.
+The ticket opens at status `Todo`, draws an id no other checkout will hand out,
+and is attributed to you (`jp`). The title becomes the filename slug, so
+keep it short and specific: at most 60 characters, or the tool asks you for a
+shorter one before it files anything.
 """
 
 examples = """
@@ -33,6 +34,11 @@ File a chore with no description:
 ```
 """
 
+# A title past the limit is put back as a question rather than an error, so the
+# ticket is retitled without the body being sent a second time. The assistant
+# wrote the title, so the assistant shortens it.
+questions.shorter_title.target = "assistant"
+
 [conversation.tools.ticket_create.style]
 parameters = "just serve-tools {{context}} {{tool}}"
 inline_results = "full"
@@ -47,7 +53,7 @@ summary = "What kind of work the ticket describes."
 [conversation.tools.ticket_create.parameters.title]
 type = "string"
 required = true
-summary = "One-line summary of the work. Becomes the heading and the filename slug."
+summary = "One-line summary of the work, at most 60 characters. Becomes the heading and the filename slug."
 
 [conversation.tools.ticket_create.parameters.body]
 type = "string"
