@@ -27,6 +27,7 @@ mod update;
 
 use jp_printer::Printer;
 use tokio_util::sync::CancellationToken;
+use tracing::warn;
 
 use crate::{KeyValueOrPath, cmd};
 
@@ -77,27 +78,96 @@ impl PluginManagement {
             PluginCmd::Install(cmd) => cmd.run(printer, interactive).await,
             PluginCmd::Uninstall(cmd) => cmd.run(printer),
             PluginCmd::Update(cmd) => cmd.run(printer, cfg).await,
-            PluginCmd::Approve(cmd) => cmd.run(printer, cfg, &cancel_on_ctrl_c()),
+            PluginCmd::Approve(cmd) => cmd.run(printer, cfg, &cancel_on_shutdown_signal()),
             PluginCmd::Revoke(cmd) => cmd.run(printer),
         }
     }
 }
 
-/// A token the first Ctrl-C cancels.
+/// A token the first shutdown signal cancels: Ctrl-C, or SIGTERM (Ctrl-Break on
+/// Windows).
 ///
-/// `jp plugin` runs without the signal router, so Ctrl-C would otherwise end
+/// The same signals the signal router treats as a graceful shutdown.
+/// `jp plugin` runs without the router, so either signal would otherwise end
 /// `jp` at once, before it could stop a plugin it is running.
-/// Listening also takes the signal's default action away for the rest of the
+/// Listening also takes the signals' default action away for the rest of the
 /// process, so only a command that watches the token may ask for one.
-fn cancel_on_ctrl_c() -> CancellationToken {
+fn cancel_on_shutdown_signal() -> CancellationToken {
     let token = CancellationToken::new();
+    cancel_when(&token, shutdown_requested());
+    token
+}
+
+/// Cancel `token` once `request` completes.
+fn cancel_when(token: &CancellationToken, request: impl Future<Output = ()> + Send + 'static) {
     let cancel = token.clone();
 
     tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            cancel.cancel();
-        }
+        request.await;
+        cancel.cancel();
     });
-
-    token
 }
+
+/// Completes on the first Ctrl-C or SIGTERM.
+///
+/// SIGTERM is registered before this returns, so one sent while the future
+/// waits to be polled is not missed.
+#[cfg(unix)]
+fn shutdown_requested() -> impl Future<Output = ()> + Send + 'static {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let sigterm = signal(SignalKind::terminate());
+
+    async move {
+        let mut sigterm = match sigterm {
+            Ok(sigterm) => sigterm,
+            Err(error) => {
+                warn!(%error, "Cannot listen for SIGTERM; only Ctrl-C stops the plugin.");
+                return ctrl_c().await;
+            }
+        };
+
+        tokio::select! {
+            () = ctrl_c() => {}
+            Some(()) = sigterm.recv() => {}
+        }
+    }
+}
+
+/// Completes on the first Ctrl-C or Ctrl-Break.
+///
+/// Ctrl-Break is registered before this returns, so one sent while the future
+/// waits to be polled is not missed.
+#[cfg(windows)]
+fn shutdown_requested() -> impl Future<Output = ()> + Send + 'static {
+    use tokio::signal::windows::ctrl_break;
+
+    let ctrl_break = ctrl_break();
+
+    async move {
+        let mut ctrl_break = match ctrl_break {
+            Ok(ctrl_break) => ctrl_break,
+            Err(error) => {
+                warn!(%error, "Cannot listen for Ctrl-Break; only Ctrl-C stops the plugin.");
+                return ctrl_c().await;
+            }
+        };
+
+        tokio::select! {
+            () = ctrl_c() => {}
+            Some(()) = ctrl_break.recv() => {}
+        }
+    }
+}
+
+/// Completes on the first Ctrl-C, and never when Ctrl-C cannot be listened for.
+async fn ctrl_c() {
+    if let Err(error) = tokio::signal::ctrl_c().await {
+        warn!(%error, "Cannot listen for Ctrl-C.");
+        std::future::pending::<()>().await;
+    }
+}
+
+#[cfg(test)]
+#[path = "plugin_tests.rs"]
+mod tests;

@@ -445,13 +445,6 @@ pub(crate) async fn run_plugin(
         );
     });
 
-    // Send init.
-    {
-        let mut writer = stdin.lock().expect("stdin lock poisoned");
-        write_message(&mut *writer, &init)
-            .map_err(|e| cmd::Error::from(format!("failed to send init: {e}")))?;
-    }
-
     // Read on a thread of its own, so a turn awaiting the provider cannot stop
     // the host from noticing what the plugin says next.
     let (mut requests, reader_thread) = spawn_reader(stdout);
@@ -462,19 +455,27 @@ pub(crate) async fn run_plugin(
     let mut turns = JoinSet::new();
     let (titles, mut arrived_titles) = Titles::new();
 
-    let result = message_loop(
-        &mut requests,
-        &stdin,
-        ctx,
-        &mut config_json,
-        &shutdown_sent,
-        &composer,
-        &mut turns,
-        &RunningTurns::default(),
-        &titles,
-        &mut arrived_titles,
-    )
-    .await;
+    // Part of the result rather than returned early: a plugin that exits
+    // before reading `init` fails this write, and what it started still has to
+    // be stopped by the cleanup below.
+    let result = match send_init(&stdin, &init) {
+        Ok(()) => {
+            message_loop(
+                &mut requests,
+                &stdin,
+                ctx,
+                &mut config_json,
+                &shutdown_sent,
+                &composer,
+                &mut turns,
+                &RunningTurns::default(),
+                &titles,
+                &mut arrived_titles,
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
 
     // A plugin that asked a question the host answered with an error is still
     // waiting for the reply. Nothing here closes its stdin — this scope holds a
@@ -512,6 +513,13 @@ pub(crate) async fn run_plugin(
     drop(shutdown_handle);
 
     result
+}
+
+/// Send the plugin its `init` message.
+fn send_init(stdin: &Mutex<ChildStdin>, init: &HostToPlugin) -> Result<(), cmd::Error> {
+    let mut writer = stdin.lock().expect("stdin lock poisoned");
+    write_message(&mut *writer, init)
+        .map_err(|e| cmd::Error::from(format!("failed to send init: {e}")))
 }
 
 /// A spawned plugin process and its wired-up pipes.

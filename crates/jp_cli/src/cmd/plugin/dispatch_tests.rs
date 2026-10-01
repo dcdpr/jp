@@ -1889,6 +1889,73 @@ echo '{{"type":"exit","code":0}}'
     }
 }
 
+/// A plugin that closes its stdin, starts a worker, and exits without reading
+/// `init`: the host's write fails, and the worker is stopped all the same.
+///
+/// The argument is larger than any pipe buffer, so the write cannot complete
+/// into the buffer before the plugin exits, and fails with a broken pipe every
+/// time.
+///
+/// Unix only: on Windows a plugin is a `jp-*.exe`, which a test cannot write as
+/// a script.
+#[cfg(unix)]
+#[test]
+fn a_worker_dies_with_a_plugin_that_never_reads_init() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let tmp = tempdir().unwrap();
+    let script = tmp.path().join("jp-launcher");
+    let pid_file = tmp.path().join("worker.pid");
+
+    // Stdin is closed before the worker starts, so the worker does not inherit
+    // it and keep the host's write blocked.
+    fs::write(
+        &script,
+        format!("#!/bin/sh\nexec 0<&-\nsleep 600 &\necho $! > {pid_file}\n"),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let root = tmp.path().join("workspace");
+    let backend = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
+    let workspace = Workspace::in_memory(&root);
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        Some(backend),
+        tokio::runtime::Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    let args = ["x".repeat(1024 * 1024)];
+    let error = runtime
+        .block_on(run_plugin("launcher", &script, &args, &mut ctx))
+        .unwrap_err();
+
+    // Prefix only: the rest is the operating system's wording for a broken
+    // pipe.
+    let message = error.message.unwrap_or_default();
+    assert!(message.starts_with("failed to send init: "), "{message}");
+
+    let worker: u32 = fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+
+    // The killed worker is an orphan, reaped by init a moment later.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while is_process_alive(worker) {
+        assert!(Instant::now() < deadline, "the worker outlived its plugin");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
 #[test]
 fn a_describe_answer_is_compared_with_the_manifest_field_by_field() {
     let manifest = Manifest {
