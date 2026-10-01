@@ -45,7 +45,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, info, warn};
 
 use super::{
-    PendingStreamTrim, build_sections, build_thread,
+    PendingStreamTrim, TurnOutcome, build_sections, build_thread,
     interrupt::{
         InterruptAction, LoopAction, StreamingInterruptResult, TurnInterrupts,
         apply_streaming_interrupt, handle_llm_event, handle_streaming_interrupt, reply_edit_mode,
@@ -197,7 +197,7 @@ pub(super) async fn run_turn_loop(
     pending_trim: PendingStreamTrim,
     mut turn_interrupt: TurnInterrupt,
     mut interrupts: TurnInterrupts,
-) -> Result<(), Error> {
+) -> Result<TurnOutcome, Error> {
     // The turn-level interrupt handler (RFD 045) is the outermost handler scope
     // within the turn: it owns the gaps between phases (persistence, thread
     // building, response processing) and receives interrupts the inner
@@ -298,7 +298,7 @@ pub(super) async fn run_turn_loop(
             });
 
             if result == StreamingInterruptResult::Abort {
-                return Ok(());
+                return Ok(outcome(&turn_coordinator));
             }
         }
 
@@ -315,7 +315,7 @@ pub(super) async fn run_turn_loop(
                 });
             }
 
-            TurnPhase::Complete | TurnPhase::Aborted => return Ok(()),
+            TurnPhase::Complete | TurnPhase::Aborted => return Ok(outcome(&turn_coordinator)),
 
             TurnPhase::Streaming => {
                 // Restore structural invariants before each provider request.
@@ -488,7 +488,9 @@ pub(super) async fn run_turn_loop(
                                 StreamingInterruptResult::Continue
                                 | StreamingInterruptResult::PromptFailed => {}
                                 StreamingInterruptResult::Break => break,
-                                StreamingInterruptResult::Abort => return Ok(()),
+                                StreamingInterruptResult::Abort => {
+                                    return Ok(outcome(&turn_coordinator));
+                                }
                                 // The menu itself was cancelled with Ctrl-C:
                                 // partial content is committed and the turn is
                                 // complete; begin a graceful shutdown and end
@@ -518,7 +520,9 @@ pub(super) async fn run_turn_loop(
                                 StreamingInterruptResult::Continue
                                 | StreamingInterruptResult::PromptFailed => {}
                                 StreamingInterruptResult::Break => break,
-                                StreamingInterruptResult::Abort => return Ok(()),
+                                StreamingInterruptResult::Abort => {
+                                    return Ok(outcome(&turn_coordinator));
+                                }
                                 StreamingInterruptResult::Escalate => {
                                     signals.shutdown_token().cancel();
                                     return Err(cmd::Error::interrupted().into());
@@ -607,7 +611,7 @@ pub(super) async fn run_turn_loop(
                                                 | StreamingInterruptResult::PromptFailed
                                                 | StreamingInterruptResult::Break => break,
                                                 StreamingInterruptResult::Abort => {
-                                                    return Ok(());
+                                                    return Ok(outcome(&turn_coordinator));
                                                 }
                                                 StreamingInterruptResult::Escalate => {
                                                     signals.shutdown_token().cancel();
@@ -1044,7 +1048,19 @@ pub(super) async fn run_turn_loop(
         }
     }
 
-    Ok(())
+    Ok(outcome(&turn_coordinator))
+}
+
+/// Whether the turn loop got as far as appending its request.
+///
+/// A Ctrl-C between the model lookup and the loop's first phase ends the turn
+/// from `Idle`, before anything was appended.
+const fn outcome(turn_coordinator: &TurnCoordinator) -> TurnOutcome {
+    if turn_coordinator.has_started() {
+        TurnOutcome::Started
+    } else {
+        TurnOutcome::NotStarted
+    }
 }
 
 /// Take a client's interrupt at the top of the turn loop, where this is a

@@ -30,10 +30,7 @@ use jp_config::{
     },
     util::{build, list_configs_in_load_path},
 };
-use jp_conversation::{
-    ConversationId, ConversationStream,
-    event::{ChatRequest, ChatResponse},
-};
+use jp_conversation::{ConversationId, ConversationStream, event::ChatRequest};
 use jp_editor::{EditOutcome, EditorBackend};
 use jp_inquire::{
     InlineOption, InlineSelect, ReplyEditMode, ReplyOutcome,
@@ -55,7 +52,7 @@ use jp_printer::{OutputFormat, Printer};
 use jp_storage::backend::{FsStorageBackend, Projection};
 use jp_task::task::TitleGeneratorTask;
 use jp_workspace::{ConversationLock, LockResult, Workspace, session::Session};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tokio::{
     sync::mpsc::{self, error::TrySendError},
     task::JoinSet,
@@ -66,11 +63,11 @@ use super::registry;
 use crate::{
     Ctx, KeyValueOrPath, cmd,
     cmd::query::{
-        NewTitle, PendingStreamTrim, TurnInputs,
+        NewTitle, PendingStreamTrim, TurnInputs, TurnOutcome,
         interrupt::{
             Delivery, InterruptAction, TurnInterruptSender, TurnInterrupts, reply_edit_mode,
         },
-        resolve_new_title,
+        resolve_new_title, turn_structured_data,
     },
     config_pipeline::{ConfigPipeline, build_partial_over, config_search_roots},
     ctx::McpServerScope,
@@ -946,7 +943,7 @@ async fn run_query(
         author: config.user.name.clone(),
         schema: request.schema,
     };
-    let wants_data = chat_request.schema.is_some();
+    let schema = chat_request.schema.clone();
 
     // Registered before the turn starts, so an interrupt that arrives while it
     // is still being prepared is delivered rather than refused as "no turn is
@@ -1001,9 +998,11 @@ async fn run_query(
         // about the host, not content: the turn's output belongs to the
         // conversation, which is where whoever asked for it is reading.
         let reply = match outcome {
-            Ok(()) => {
-                info!(%conversation, "A delegated turn finished.");
-                lock.with_events(|events| completed(reply_id, conversation, events, wants_data))
+            Ok(outcome) => {
+                info!(%conversation, ?outcome, "A delegated turn finished.");
+                lock.with_events(|events| {
+                    completed(reply_id, conversation, events, outcome, schema.as_ref())
+                })
             }
             Err(error) => {
                 // The full chain, not the outermost label: `cmd::Error` renders as
@@ -1126,17 +1125,17 @@ fn query_expiry(
 
 /// The reply to a delegated turn that finished.
 ///
-/// With `wants_data`, it carries the structured response of the turn that just
-/// ran, and is an error when that turn produced none.
-/// Only the last turn is searched, so an earlier turn's data is never passed
-/// off as this one's.
+/// With a `schema`, it carries the structured response of the turn this query
+/// started, and is an error when there is none to give: the turn was stopped
+/// before it started, answered without structured data, or was cut short.
 fn completed(
     id: Option<String>,
     conversation: String,
     events: &ConversationStream,
-    wants_data: bool,
+    outcome: TurnOutcome,
+    schema: Option<&Map<String, Value>>,
 ) -> HostToPlugin {
-    if !wants_data {
+    if schema.is_none() {
         return HostToPlugin::QueryComplete(QueryCompleteResponse {
             id,
             conversation,
@@ -1144,26 +1143,13 @@ fn completed(
         });
     }
 
-    let data = events.iter_turns().next_back().and_then(|turn| {
-        turn.iter().rev().find_map(|entry| {
-            entry
-                .event
-                .as_chat_response()
-                .and_then(ChatResponse::as_structured_data)
-                .cloned()
-        })
-    });
-
-    match data {
-        Some(data) => HostToPlugin::QueryComplete(QueryCompleteResponse {
+    match turn_structured_data(events, outcome, schema) {
+        Ok(data) => HostToPlugin::QueryComplete(QueryCompleteResponse {
             id,
             conversation,
             data: Some(data),
         }),
-        None => query_error(
-            id,
-            format!("no structured data in the assistant's response on {conversation}"),
-        ),
+        Err(error) => query_error(id, format!("conversation {conversation}: {error}")),
     }
 }
 

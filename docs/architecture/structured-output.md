@@ -698,31 +698,26 @@ Just raw JSON in a code fence.
 
 ### Post-Turn Extraction
 
-After `run_turn_loop` completes, the caller extracts the structured result from
-the persisted conversation events:
+`TurnInputs::run` reports whether the turn got as far as appending its request
+(`TurnOutcome::Started`) or was stopped before it (`TurnOutcome::NotStarted`).
+Both `jp query --schema` and a plugin's `query` with a `schema` hand that outcome
+to `turn_structured_data`, which returns the structured response of the
+conversation's last turn, or a `StructuredDataError`:
+
+- `NotStarted`: the turn never ran, so the last turn belongs to an earlier
+  query and its data is not this one's answer.
+- `Missing`: the turn ran but produced no structured response.
+- `NotJson`: the response failed to parse and was recorded as its raw text in a
+  JSON string, while the schema's root `type` rules a string out. This is
+  usually a response cut off at the output token limit.
 
 ```rust
-// In Query::run, after handle_turn returns:
+let data = lock
+    .with_events(|events| turn_structured_data(events, outcome, schema.as_ref()))
+    .map_err(Error::StructuredData)?;
 
-if self.schema.is_some() {
-    let events = workspace
-        .get_events(&conversation_id)
-        .expect("conversation must exist");
-
-    let data = events
-        .iter()
-        .rev()
-        .find_map(|e| e.as_chat_response())
-        .and_then(|resp| resp.as_structured_data())
-        .cloned()
-        .ok_or(Error::MissingStructuredData)?;
-
-    result = Ok(Success::Json(data));
-}
+print_json(&ctx.printer, &data);
 ```
-
-For non-TTY output (piped), `Success::Json(data)` is formatted by the CLI output
-layer — either pretty-printed (text format) or compact (JSON format).
 
 -----
 

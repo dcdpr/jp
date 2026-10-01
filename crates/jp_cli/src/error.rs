@@ -5,7 +5,10 @@ use jp_conversation::ConversationId;
 use jp_mcp::server::http::EndpointError;
 use url::Url;
 
-use crate::{cmd, cmd::query::tool::executor::ExecutorError};
+use crate::{
+    cmd,
+    cmd::query::{StructuredDataError, tool::executor::ExecutorError},
+};
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
@@ -194,8 +197,8 @@ pub(crate) enum Error {
     #[error("Invalid schema: {0}")]
     Schema(String),
 
-    #[error("No structured data in the assistant's response")]
-    MissingStructuredData,
+    #[error("No structured output: {0}")]
+    StructuredData(StructuredDataError),
 
     #[error("Timed out waiting for lock on conversation {0}")]
     LockTimeout(ConversationId),

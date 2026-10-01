@@ -365,13 +365,15 @@ async fn an_interrupt_during_mcp_startup_stops_the_turn_before_it_runs() {
     signals.interrupt().await;
 
     let stream = lock.events().clone();
-    tokio::time::timeout(
+    let outcome = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         inputs.run(&lock, stream, interrupt),
     )
     .await
     .expect("the interrupt ends the wait; a hang here means it was never seen")
     .expect("stopping before the turn starts is not an error");
+
+    assert_eq!(outcome, TurnOutcome::NotStarted);
 
     assert!(
         lock.events().is_empty(),
@@ -452,13 +454,15 @@ async fn a_client_stop_during_mcp_startup_stops_the_turn_before_it_runs() {
 
     let interrupt = router.turn_interrupt();
     let stream = lock.events().clone();
-    tokio::time::timeout(
+    let outcome = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         inputs.run(&lock, stream, interrupt),
     )
     .await
     .expect("the stop ends the wait; a hang here means it was never seen")
     .expect("stopping before the turn starts is not an error");
+
+    assert_eq!(outcome, TurnOutcome::NotStarted);
 
     assert!(
         lock.events().is_empty(),
@@ -2755,6 +2759,69 @@ fn last_assistant_message_returns_none_when_only_reasoning_present() {
         .unwrap();
 
     assert_eq!(last_assistant_message(&stream), None);
+}
+
+/// A stream of one turn whose structured response is `data`.
+fn stream_with_structured(data: Value) -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("question");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::structured(data))
+        .build()
+        .unwrap();
+    stream
+}
+
+/// A schema whose root `type` is `kind`.
+fn schema_of_type(kind: &str) -> Map<String, Value> {
+    Map::from_iter([("type".to_owned(), Value::from(kind))])
+}
+
+/// A string is what a string schema asks for, so it is an answer and not a sign
+/// the response was cut short.
+#[test]
+fn turn_structured_data_keeps_a_string_a_string_schema_asks_for() {
+    let stream = stream_with_structured(Value::from("a summary"));
+
+    assert_eq!(
+        turn_structured_data(
+            &stream,
+            TurnOutcome::Started,
+            Some(&schema_of_type("string"))
+        ),
+        Ok(Value::from("a summary"))
+    );
+}
+
+#[test]
+fn turn_structured_data_refuses_a_string_an_object_schema_rules_out() {
+    let stream = stream_with_structured(Value::from(r#"{"summary": "sho"#));
+
+    assert_eq!(
+        turn_structured_data(
+            &stream,
+            TurnOutcome::Started,
+            Some(&schema_of_type("object"))
+        ),
+        Err(StructuredDataError::NotJson)
+    );
+}
+
+/// `jp query --schema` stopped before its turn started has no answer of its
+/// own, whatever the previous turn left behind.
+#[test]
+fn turn_structured_data_refuses_a_turn_that_did_not_start() {
+    let stream = stream_with_structured(serde_json::json!({"turn": 1}));
+
+    assert_eq!(
+        turn_structured_data(
+            &stream,
+            TurnOutcome::NotStarted,
+            Some(&schema_of_type("object"))
+        ),
+        Err(StructuredDataError::NotStarted)
+    );
 }
 
 /// Count the `TurnStart` events in a stream.

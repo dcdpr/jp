@@ -1,5 +1,5 @@
 use camino_tempfile::{Utf8TempDir, tempdir};
-use jp_conversation::{Conversation, ConversationId};
+use jp_conversation::{Conversation, ConversationId, event::ChatResponse};
 use jp_plugin::message::{
     ExitMessage, InterruptRequest, OptionalId, ReadEventsRequest, ReadyMessage,
 };
@@ -1616,6 +1616,11 @@ fn stream_of(responses: Vec<ChatResponse>) -> ConversationStream {
     stream
 }
 
+/// A schema asking for a JSON object.
+fn object_schema() -> Map<String, Value> {
+    Map::from_iter([("type".to_owned(), json!("object"))])
+}
+
 #[test]
 fn a_structured_query_replies_with_the_last_turns_data() {
     let events = stream_of(vec![
@@ -1624,7 +1629,13 @@ fn a_structured_query_replies_with_the_last_turns_data() {
     ]);
 
     assert_eq!(
-        completed(Some("q1".to_owned()), "123".to_owned(), &events, true),
+        completed(
+            Some("q1".to_owned()),
+            "123".to_owned(),
+            &events,
+            TurnOutcome::Started,
+            Some(&object_schema()),
+        ),
         HostToPlugin::QueryComplete(QueryCompleteResponse {
             id: Some("q1".to_owned()),
             conversation: "123".to_owned(),
@@ -1643,11 +1654,64 @@ fn a_structured_query_whose_turn_produced_no_data_fails() {
     ]);
 
     assert_eq!(
-        completed(Some("q1".to_owned()), "123".to_owned(), &events, true),
+        completed(
+            Some("q1".to_owned()),
+            "123".to_owned(),
+            &events,
+            TurnOutcome::Started,
+            Some(&object_schema()),
+        ),
         HostToPlugin::Error(ErrorResponse {
             id: Some("q1".to_owned()),
             request: Some("query".to_owned()),
-            message: "no structured data in the assistant's response on 123".to_owned(),
+            message: "conversation 123: no structured data in the assistant's response".to_owned(),
+        })
+    );
+}
+
+/// A client stop that lands while MCP servers start or the model is looked up
+/// ends the turn before its request is appended, leaving the previous turn's
+/// data last in the conversation.
+#[test]
+fn a_structured_query_stopped_before_its_turn_started_fails() {
+    let events = stream_of(vec![ChatResponse::structured(json!({"turn": 1}))]);
+
+    assert_eq!(
+        completed(
+            Some("q1".to_owned()),
+            "123".to_owned(),
+            &events,
+            TurnOutcome::NotStarted,
+            Some(&object_schema()),
+        ),
+        HostToPlugin::Error(ErrorResponse {
+            id: Some("q1".to_owned()),
+            request: Some("query".to_owned()),
+            message: "conversation 123: the turn was stopped before it started".to_owned(),
+        })
+    );
+}
+
+/// A response cut off at the output token limit mid-object is recorded as its
+/// raw text, which an object schema rules out as an answer.
+#[test]
+fn a_structured_query_whose_response_was_cut_short_fails() {
+    let events = stream_of(vec![ChatResponse::structured(json!(r#"{"summary": "sho"#))]);
+
+    assert_eq!(
+        completed(
+            Some("q1".to_owned()),
+            "123".to_owned(),
+            &events,
+            TurnOutcome::Started,
+            Some(&object_schema()),
+        ),
+        HostToPlugin::Error(ErrorResponse {
+            id: Some("q1".to_owned()),
+            request: Some("query".to_owned()),
+            message: "conversation 123: the assistant's structured response is not valid JSON; it \
+                      may have been cut off at the output token limit"
+                .to_owned(),
         })
     );
 }
@@ -1657,7 +1721,7 @@ fn a_query_without_a_schema_replies_without_data() {
     let events = stream_of(vec![ChatResponse::structured(json!({"turn": 1}))]);
 
     assert_eq!(
-        completed(None, "123".to_owned(), &events, false),
+        completed(None, "123".to_owned(), &events, TurnOutcome::Started, None),
         HostToPlugin::QueryComplete(QueryCompleteResponse {
             id: None,
             conversation: "123".to_owned(),

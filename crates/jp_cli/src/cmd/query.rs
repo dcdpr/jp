@@ -120,6 +120,7 @@ use jp_workspace::{
     ConversationHandle, ConversationLock, ConversationMut, Id as WorkspaceId, Workspace,
 };
 use minijinja::{Environment, UndefinedBehavior};
+use serde_json::{Map, Value};
 use strip_ansi_escapes::strip_str;
 use tool::{TerminalExecutorSource, ToolCoordinator};
 use tracing::{debug, info, trace, warn};
@@ -782,6 +783,10 @@ impl Query {
         setup.flush()?;
         drop(setup);
 
+        // The schema the provider was given, which is what the response is held
+        // to.
+        let schema = chat_request.schema.clone();
+
         let inputs = TurnInputs::collect(
             ctx,
             cfg.clone(),
@@ -814,26 +819,23 @@ impl Query {
             turn_result = Err(cmd::Error::from(Error::Workspace(error)));
         }
 
-        // Extract structured data from the conversation after the turn.
-        if self.schema.is_some() && turn_result.is_ok() {
-            let data = lock.events().iter().rev().find_map(|e| {
-                e.as_chat_response()
-                    .and_then(ChatResponse::as_structured_data)
-                    .cloned()
-            });
+        if self.schema.is_some()
+            && let Ok(outcome) = turn_result
+        {
+            let data = lock
+                .with_events(|events| turn_structured_data(events, outcome, schema.as_ref()))
+                .map_err(Error::StructuredData)?;
 
-            match data {
-                Some(data) => print_json(&ctx.printer, &data),
-                None => return Err(Error::MissingStructuredData.into()),
-            }
+            print_json(&ctx.printer, &data);
         }
 
-        // Clean up the query file, unless we got an error — on failure the
-        // file is the recovery copy of the request. The conversation
-        // directory may have been renamed mid-turn (e.g. a heading-derived
-        // title), so re-resolve the live directories rather than trusting the
-        // path captured before the turn ran.
-        if turn_result.is_ok() {
+        // Clean up the query file only once the request is in the conversation.
+        // After an error, or a turn stopped before it started, the file is the
+        // only copy of the request. The conversation directory may have been
+        // renamed mid-turn (e.g. a heading-derived title), so re-resolve the
+        // live directories rather than trusting the path captured before the
+        // turn ran.
+        if matches!(turn_result, Ok(TurnOutcome::Started)) {
             cleanup_query_message_file(
                 ctx.fs_backend.as_deref(),
                 &cid,
@@ -841,7 +843,7 @@ impl Query {
             );
         }
 
-        turn_result
+        turn_result.map(drop)
     }
 
     /// Resolve the positional query into the text to send.
@@ -1136,7 +1138,7 @@ impl Query {
         pending_trim: PendingStreamTrim,
         mut turn_interrupt: TurnInterrupt,
         mut interrupts: TurnInterrupts,
-    ) -> Result<()> {
+    ) -> Result<TurnOutcome> {
         let model_id = cfg.assistant.model.id.resolved();
 
         let provider: Arc<dyn jp_llm::Provider> = Arc::from(provider::get_provider(
@@ -1158,12 +1160,12 @@ impl Query {
                     notice.handled();
                 }
                 info!("Interrupted during model lookup; the turn did not start.");
-                return Ok(());
+                return Ok(TurnOutcome::NotStarted);
             }
 
             Some(action) = interrupts.next_stop() => {
                 info!(?action, "Stopped by a client during model lookup; the turn did not start.");
-                return Ok(());
+                return Ok(TurnOutcome::NotStarted);
             }
         };
 
@@ -1557,7 +1559,7 @@ impl TurnInputs {
         lock: &ConversationLock,
         stream: ConversationStream,
         mut turn_interrupt: TurnInterrupt,
-    ) -> Result<()> {
+    ) -> Result<TurnOutcome> {
         let cfg = &self.config;
         let mut interrupts = self.interrupts;
 
@@ -1599,7 +1601,7 @@ impl TurnInputs {
                     notice.handled();
                 }
                 info!("Interrupted while preparing; the turn did not start.");
-                return Ok(());
+                return Ok(TurnOutcome::NotStarted);
             }
 
             // A client's stop, for the same span: nothing has been appended, so
@@ -1607,7 +1609,7 @@ impl TurnInputs {
             // the turn to take once its own request is in place.
             Some(action) = interrupts.next_stop() => {
                 info!(?action, "Stopped by a client while preparing; the turn did not start.");
-                return Ok(());
+                return Ok(TurnOutcome::NotStarted);
             }
         };
 
@@ -1647,6 +1649,82 @@ impl TurnInputs {
         )
         .await
     }
+}
+
+/// Whether a turn that ended without an error got as far as starting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TurnOutcome {
+    /// The turn's request was appended to the conversation, so its last turn is
+    /// the one this run started.
+    Started,
+
+    /// The turn was stopped before its request was appended, and the
+    /// conversation's last turn is an earlier one.
+    NotStarted,
+}
+
+/// Why a turn has no structured response to hand back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum StructuredDataError {
+    #[error("the turn was stopped before it started")]
+    NotStarted,
+
+    #[error("no structured data in the assistant's response")]
+    Missing,
+
+    #[error(
+        "the assistant's structured response is not valid JSON; it may have been cut off at the \
+         output token limit"
+    )]
+    NotJson,
+}
+
+/// The structured response of the turn a run started.
+///
+/// Only the conversation's last turn is searched, and only when `outcome` says
+/// the run started it, so an earlier turn's data is never returned in its
+/// place.
+///
+/// A response that is not valid JSON is recorded as its raw text in a JSON
+/// string.
+/// When `schema` asks for something other than a string at its root, such a
+/// string is refused: it is a response cut short, most often by the output
+/// token limit, and not an answer.
+pub(crate) fn turn_structured_data(
+    events: &ConversationStream,
+    outcome: TurnOutcome,
+    schema: Option<&Map<String, Value>>,
+) -> std::result::Result<Value, StructuredDataError> {
+    if outcome == TurnOutcome::NotStarted {
+        return Err(StructuredDataError::NotStarted);
+    }
+
+    let data = events
+        .iter_turns()
+        .next_back()
+        .and_then(|turn| {
+            turn.iter().rev().find_map(|entry| {
+                entry
+                    .event
+                    .as_chat_response()
+                    .and_then(ChatResponse::as_structured_data)
+                    .cloned()
+            })
+        })
+        .ok_or(StructuredDataError::Missing)?;
+
+    // Only a root `type` naming something other than `string` rules a string
+    // out. A schema that says less than that takes the response at its word.
+    let admits_string = schema
+        .and_then(|schema| schema.get("type"))
+        .and_then(Value::as_str)
+        .is_none_or(|kind| kind == "string");
+
+    if data.is_string() && !admits_string {
+        return Err(StructuredDataError::NotJson);
+    }
+
+    Ok(data)
 }
 
 /// Return the most recent assistant message text in the stream.

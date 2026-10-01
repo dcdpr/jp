@@ -172,6 +172,12 @@ pub enum Action {
 pub struct TurnCoordinator {
     state: TurnPhase,
 
+    /// Whether [`Self::start_turn`] has appended the turn's request.
+    ///
+    /// Not read off `state`: an interrupt before the turn starts completes it
+    /// straight from `Idle`, so `Complete` alone does not say a turn ran.
+    started: bool,
+
     // Components
     event_builder: EventBuilder,
     view: TurnView,
@@ -219,6 +225,7 @@ impl TurnCoordinator {
 
         Self {
             state: TurnPhase::Idle,
+            started: false,
             event_builder: EventBuilder::new(),
             view,
             json_emitter,
@@ -246,6 +253,13 @@ impl TurnCoordinator {
         stream.start_turn(request);
 
         self.state = TurnPhase::Streaming;
+        self.started = true;
+    }
+
+    /// Whether [`Self::start_turn`] has run, so the stream's last turn is this
+    /// one.
+    pub const fn has_started(&self) -> bool {
+        self.started
     }
 
     /// Process one event from a Provider stream.

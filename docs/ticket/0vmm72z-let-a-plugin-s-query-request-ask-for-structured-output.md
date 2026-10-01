@@ -60,3 +60,27 @@ checked against the config tree, not exercised by a test):
 - `--no-tools`: no exact equivalent.
   `assistant.tool_choice=none` forbids tool calls, but the tools are still sent
   with the request.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-10-01T11:41:01Z
+
+Review follow-up (PR #1221):
+
+- A turn stopped before it starts (a client stop or Ctrl-C during MCP startup,
+  model lookup, or before the loop's first phase) returned `Ok(())`, so
+  `query_complete` handed back the previous turn's data.
+  `TurnInputs::run` returns a `TurnOutcome` (`Started` / `NotStarted`), and a
+  structured query on a turn that did not start is answered with an `error`.
+- A response that is not valid JSON is recorded as its raw text in a JSON
+  string, which `query_complete` passed off as `data`.
+  That string is refused when the schema's root `type` rules a string out (most
+  often a response cut off at the output token limit).
+
+Both go through `turn_structured_data` in `cmd::query`, which `jp query
+--schema` uses too.
+The CLI had both problems as well, and worse: it searched the whole stream
+rather than the last turn.
+A turn that did not start also no longer deletes the query draft, which is the
+only copy of a request that was never recorded.
