@@ -11,9 +11,9 @@ pub(crate) mod mcp_executor;
 pub(crate) mod pending;
 pub(crate) mod prompter;
 
-pub(crate) use coordinator::{ToolCallDecision, ToolCallState, ToolCoordinator};
+pub(crate) use coordinator::{Host, ToolCallState, ToolCoordinator, ToolEvent};
 pub(crate) use mcp_executor::TerminalExecutorSource;
-pub(crate) use pending::{PendingEntry, PendingTools, build_execution_plan};
+pub(crate) use pending::{PendingTools, build_execution_plan, unresponded_requests};
 pub(crate) use prompter::ToolPrompter;
 
 pub(crate) use crate::render::ToolRenderer;

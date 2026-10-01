@@ -1077,8 +1077,8 @@ fn a_tool_calls_region_does_not_outlive_the_reasoning_it_came_from() {
     });
     renderer.enter_tool_call();
 
-    // Stands in for `ToolCoordinator::resolve_tool_call_decision`, which names
-    // the region once the per-tool answer is known.
+    // Stands in for the tool coordinator, which names the region when a call's
+    // prompt opens.
     printer.set_prompt_background(Some(DefaultBackground {
         param: "48;5;236".into(),
         fill: BackgroundFill::Terminal,

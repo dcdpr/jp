@@ -538,6 +538,12 @@ impl TurnCoordinator {
         self.view.set_tool_separator(flag);
     }
 
+    /// Wire the view's drawn-chrome flag to the turn's `ToolRenderer`, so the
+    /// content after a tool call that drew nothing is not spaced from it.
+    pub fn set_tool_drawn(&mut self, flag: Arc<AtomicBool>) {
+        self.view.set_tool_drawn(flag);
+    }
+
     /// End the turn early: commit any partial assistant content to the stream
     /// and transition to `Complete` so the turn loop persists and exits.
     ///

@@ -39,7 +39,8 @@ use tokio::time::{Duration, timeout};
 
 use super::{PendingStreamTrim, ToolCoordinator, TurnInterrupts, run_turn_loop};
 use crate::{
-    access::approvals::ApprovalStore, cmd::query::tool::mcp_executor::TerminalExecutorSource,
+    access::approvals::ApprovalStore,
+    cmd::query::tool::{executor::mock::no_commands, mcp_executor::TerminalExecutorSource},
     signals::testing::detached_router,
 };
 
@@ -258,7 +259,7 @@ async fn assert_agent_fallback(next_execution: ToolExecution) {
         let definitions = vec![ToolDefinition { name: "http_tool".into(), docs: ToolDocs::default(), parameters: json!({"type":"object","properties":{}}) }];
         let count = Arc::new(AtomicUsize::new(0));
         let client = Client::default();
-        let (source, owner) = TerminalExecutorSource::start(BuiltinExecutors::new().register("http_tool", InquiringTool(count.clone())), &definitions, &config.conversation.tools, Arc::new(ApprovalStore::default()), InvocationContext::default(), &client, root.to_owned()).await.unwrap();
+        let (source, owner) = TerminalExecutorSource::start(BuiltinExecutors::new().register("http_tool", InquiringTool(count.clone())), no_commands(), &definitions, &config.conversation.tools, Arc::new(ApprovalStore::default()), InvocationContext::default(), &client, root.to_owned()).await.unwrap();
         let provider = Arc::new(SwitchingAgentProvider { first: AgentProvider { starts: AtomicUsize::new(0), storage, conversation: id, config: config.clone() }, starts: AtomicUsize::new(0), next_execution });
         let model = provider.model_details(&"test".parse().unwrap()).await.unwrap();
         let router = detached_router();
@@ -290,7 +291,7 @@ async fn agent_continuation_waits_for_host_recording_without_resubmission() {
         let definitions = vec![ToolDefinition { name: "http_tool".into(), docs: ToolDocs::default(), parameters: json!({"type":"object","properties":{}}) }];
         let count = Arc::new(AtomicUsize::new(0));
         let client = Client::default();
-        let (source, owner) = TerminalExecutorSource::start(BuiltinExecutors::new().register("http_tool", InquiringTool(count.clone())), &definitions, &config.conversation.tools, Arc::new(ApprovalStore::default()), InvocationContext::default(), &client, root.to_owned()).await.unwrap();
+        let (source, owner) = TerminalExecutorSource::start(BuiltinExecutors::new().register("http_tool", InquiringTool(count.clone())), no_commands(), &definitions, &config.conversation.tools, Arc::new(ApprovalStore::default()), InvocationContext::default(), &client, root.to_owned()).await.unwrap();
         let provider = Arc::new(AgentProvider { starts: AtomicUsize::new(0), storage, conversation: id, config: config.clone() });
         let model = provider.model_details(&"test".parse().unwrap()).await.unwrap();
         let router = detached_router();

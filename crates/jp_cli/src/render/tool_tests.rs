@@ -178,11 +178,9 @@ fn test_render_custom_result_after_approval() {
     let config = AppConfig::new_test().style;
     let renderer = ToolRenderer::new(ErrChannel::new(Arc::new(printer)), config);
 
-    let outcome = renderer.render_custom_result("ssh_run", Ok("custom-output".into()));
+    let content = renderer.render_custom_result("ssh_run", "custom-output".into());
 
-    assert!(matches!(outcome, RenderOutcome::Rendered {
-        content: Some(_)
-    }));
+    assert_eq!(content.as_deref(), Some("custom-output"));
     renderer.channel.flush();
     let output = strip_ansi(&err.lock());
     // Explicit assertion rather than a snapshot: the spacing contract is the
@@ -191,24 +189,6 @@ fn test_render_custom_result_after_approval() {
     // line, the custom output, and the trailing newline the lazy separator
     // later turns into the blank line before the next header.
     assert_eq!(output, "Calling tool ssh_run\n\ncustom-output\n");
-}
-
-#[test]
-fn test_render_custom_result_suppresses_a_failed_formatter() {
-    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
-    let renderer = ToolRenderer::new(
-        ErrChannel::new(Arc::new(printer)),
-        AppConfig::new_test().style,
-    );
-
-    let outcome = renderer.render_custom_result("ssh_run", Err("formatter exploded".into()));
-
-    assert!(
-        matches!(outcome, RenderOutcome::Suppressed { ref error } if error == "formatter exploded")
-    );
-    renderer.channel.flush();
-    // A broken formatter must not leave a header with nothing under it.
-    assert_eq!(strip_ansi(&err.lock()), "");
 }
 
 #[test]

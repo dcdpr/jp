@@ -49,13 +49,6 @@ pub(crate) enum ExecutorError {
     #[error("Missing answer to pending MCP inquiry")]
     MissingAnswer,
 
-    /// The service rejected execution with a tool diagnostic.
-    #[error("{message}")]
-    Rejected {
-        /// The diagnostic to report in place of a result.
-        message: String,
-    },
-
     /// The call was cancelled by the Host.
     #[error("Tool execution cancelled.")]
     Cancelled,
