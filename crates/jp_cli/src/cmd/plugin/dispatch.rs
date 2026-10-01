@@ -270,9 +270,12 @@ fn init_message(
         .plugins
         .command
         .get(name)
-        .and_then(|c| c.options.as_ref())
-        .and_then(Value::as_object)
-        .cloned()
+        .map(|c| {
+            c.options
+                .iter()
+                .map(|(k, v)| (k.clone(), v.0.clone()))
+                .collect()
+        })
         .unwrap_or_default();
 
     let storage = paths.storage.ok_or("workspace has no storage configured")?;

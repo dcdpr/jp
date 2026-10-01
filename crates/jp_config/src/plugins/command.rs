@@ -4,13 +4,17 @@
 //! pinning, and opaque options passed through to the plugin.
 
 use schematic::Config;
-use serde_json::Value;
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_opt, delta_opt_partial},
+    delta::{
+        PartialConfigDelta, delta_mergeable_value_map, delta_mergeable_value_map_at, delta_opt,
+        delta_opt_partial, path,
+    },
+    internal::merge::map_with_strategy,
     partial::{ToPartial, partial_opt_config, partial_opts},
     providers::mcp::{ChecksumConfig, PartialChecksumConfig},
+    types::{json_value::JsonValue, map::MergeableMap},
 };
 
 /// Execution policy for a command plugin.
@@ -83,7 +87,13 @@ pub struct CommandPluginConfig {
     /// JP does not validate these — they are forwarded as-is in the config
     /// section of the init message.
     /// The plugin is responsible for parsing and error reporting.
-    pub options: Option<Value>,
+    ///
+    /// Options merge key by key, recursing into nested tables, so a later layer
+    /// only replaces the options it names.
+    /// Declare the map as `{ value = { … }, strategy = "replace" }` to drop
+    /// the options earlier layers set instead.
+    #[setting(nested, merge = map_with_strategy)]
+    pub options: MergeableMap<JsonValue>,
 }
 
 impl AssignKeyValue for PartialCommandPluginConfig {
@@ -93,9 +103,7 @@ impl AssignKeyValue for PartialCommandPluginConfig {
             "install" => self.install = kv.try_some_bool()?,
             "run" => self.run = kv.try_some_from_str()?,
             _ if kv.p("checksum") => self.checksum.assign(kv)?,
-            _ if kv.p("options") => {
-                self.options = Some(kv.value.into_value());
-            }
+            _ if kv.p("options") => kv.assign_to_mergeable_entry(&mut self.options)?,
             _ => return missing_key(&kv),
         }
 
@@ -109,7 +117,21 @@ impl PartialConfigDelta for PartialCommandPluginConfig {
             install: delta_opt(self.install.as_ref(), next.install),
             run: delta_opt(self.run.as_ref(), next.run),
             checksum: delta_opt_partial(self.checksum.as_ref(), next.checksum),
-            options: delta_opt(self.options.as_ref(), next.options),
+            options: delta_mergeable_value_map(&self.options, next.options),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            install: delta_opt(self.install.as_ref(), next.install),
+            run: delta_opt(self.run.as_ref(), next.run),
+            checksum: delta_opt_partial(self.checksum.as_ref(), next.checksum),
+            options: delta_mergeable_value_map_at(
+                &path(prefix, "options"),
+                &self.options,
+                next.options,
+                unsets,
+            ),
         }
     }
 }
@@ -122,7 +144,12 @@ impl ToPartial for CommandPluginConfig {
             install: partial_opts(self.install.as_ref(), defaults.install),
             run: partial_opts(self.run.as_ref(), defaults.run),
             checksum: partial_opt_config(self.checksum.as_ref(), defaults.checksum),
-            options: partial_opts(self.options.as_ref(), defaults.options),
+            options: MergeableMap::Map(
+                self.options
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            ),
         }
     }
 }
