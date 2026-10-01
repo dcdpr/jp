@@ -913,6 +913,119 @@ fn handle_read_config_invalid_path() {
     assert!(matches!(resp, HostToPlugin::Error(_)));
 }
 
+/// A workspace whose `.jp/config.toml` names the assistant `name`.
+///
+/// The user-global config directory is pointed at an empty directory, so the
+/// configuration of whoever runs the tests stays out of the result.
+fn workspace_with_config(
+    name: &str,
+) -> (Workspace, Arc<FsStorageBackend>, Utf8TempDir, EnvVarGuard) {
+    let tmp = tempdir().unwrap();
+    let env = EnvVarGuard::set("JP_GLOBAL_CONFIG_DIR", tmp.path().join("global").as_str());
+
+    let fs = Arc::new(FsStorageBackend::new(&tmp.path().join(".jp")).unwrap());
+    write_workspace_config(&tmp, name);
+
+    let workspace = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
+    (workspace, fs, tmp, env)
+}
+
+fn write_workspace_config(tmp: &Utf8TempDir, name: &str) {
+    fs::write(
+        tmp.path().join(".jp/config.toml"),
+        format!(
+            "[assistant]\nname = \"{name}\"\nmodel.id = \
+             \"anthropic/test\"\n\n[conversation.tools.'*']\nrun = \"ask\"\n"
+        ),
+    )
+    .unwrap();
+}
+
+/// A long-running plugin polls with `reload` to see an edit made while it runs.
+#[test]
+#[serial(env_vars)]
+fn a_reload_reads_a_config_file_changed_since_startup() {
+    let (workspace, fs, tmp, _env) = workspace_with_config("before");
+
+    let first = reload_config(&[], &workspace, Some(&fs), tmp.path()).unwrap();
+    assert_eq!(first["assistant"]["name"], json!("before"));
+
+    write_workspace_config(&tmp, "after");
+
+    let second = reload_config(&[], &workspace, Some(&fs), tmp.path()).unwrap();
+    assert_eq!(second["assistant"]["name"], json!("after"));
+}
+
+/// The invocation's `--cfg` arguments still win over the files they are layered
+/// on, as they did when the plugin started.
+#[test]
+#[serial(env_vars)]
+fn a_reload_layers_the_invocation_cfg_arguments_over_the_files() {
+    let (workspace, fs, tmp, _env) = workspace_with_config("from-file");
+    let overrides = vec!["assistant.name=from-cfg".parse::<KeyValueOrPath>().unwrap()];
+
+    let config = reload_config(&overrides, &workspace, Some(&fs), tmp.path()).unwrap();
+
+    assert_eq!(config["assistant"]["name"], json!("from-cfg"));
+}
+
+/// A file saved halfway through an edit is reported, not read as empty.
+#[test]
+#[serial(env_vars)]
+fn a_reload_of_an_unparseable_config_file_is_an_error() {
+    let (workspace, fs, tmp, _env) = workspace_with_config("before");
+    fs::write(tmp.path().join(".jp/config.toml"), "[assistant\nname = ").unwrap();
+
+    let error = reload_config(&[], &workspace, Some(&fs), tmp.path()).unwrap_err();
+
+    assert!(
+        error.starts_with("failed to read the workspace configuration: "),
+        "{error}"
+    );
+}
+
+/// The options `init` carries are a plain map of option to value, and a plugin
+/// reading them again through `read_config` has to find the same shape.
+#[test]
+#[serial(env_vars)]
+fn read_config_returns_plugin_options_in_the_shape_init_sends() {
+    let (workspace, fs, tmp, _env) = workspace_with_config("jp");
+    let path = tmp.path().join(".jp/config.toml");
+    let mut toml = fs::read_to_string(&path).unwrap();
+    toml.push_str("\n[plugins.command.ticket.options]\ndir = \"docs/ticket\"\n");
+    fs::write(&path, toml).unwrap();
+
+    let config = reload_config(&[], &workspace, Some(&fs), tmp.path()).unwrap();
+
+    assert_eq!(
+        config["plugins"]["command"]["ticket"]["options"],
+        json!({"dir": "docs/ticket"})
+    );
+}
+
+/// Options declared with an explicit merge strategy are still just options to
+/// the plugin: the strategy steers how config layers combine, and is not part
+/// of what the plugin was configured with.
+#[test]
+#[serial(env_vars)]
+fn read_config_returns_plugin_options_without_their_merge_strategy() {
+    let (workspace, fs, tmp, _env) = workspace_with_config("jp");
+    let path = tmp.path().join(".jp/config.toml");
+    let mut toml = fs::read_to_string(&path).unwrap();
+    toml.push_str(
+        "\n[plugins.command.ticket]\noptions = { value = { dir = \"docs/ticket\" }, strategy = \
+         \"replace\" }\n",
+    );
+    fs::write(&path, toml).unwrap();
+
+    let config = reload_config(&[], &workspace, Some(&fs), tmp.path()).unwrap();
+
+    assert_eq!(
+        config["plugins"]["command"]["ticket"]["options"],
+        json!({"dir": "docs/ticket"})
+    );
+}
+
 /// An error whose `Display` says one thing and whose source says another.
 #[derive(Debug)]
 struct Layered {

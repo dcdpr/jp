@@ -27,7 +27,7 @@ use jp_config::{
         PluginsConfig,
         command::{CommandPluginConfig, RunPolicy},
     },
-    util::list_configs_in_load_path,
+    util::{build, list_configs_in_load_path},
 };
 use jp_conversation::{ConversationId, ConversationStream, event::ChatRequest};
 use jp_editor::{EditOutcome, EditorBackend};
@@ -68,7 +68,7 @@ use crate::{
         },
         resolve_new_title,
     },
-    config_pipeline::{build_partial_over, config_search_roots},
+    config_pipeline::{ConfigPipeline, build_partial_over, config_search_roots},
     ctx::McpServerScope,
     editor::{draft_query_text, draft_revision, report_editor_failure},
 };
@@ -263,8 +263,7 @@ fn init_message(
     log_level: u8,
     format: OutputFormat,
 ) -> Result<(HostToPlugin, Value), cmd::Error> {
-    let config_json = serde_json::to_value(config.as_ref().to_partial())
-        .map_err(|e| cmd::Error::from(format!("failed to serialize config: {e}")))?;
+    let config_json = config_value(config)?;
 
     let options: serde_json::Map<String, Value> = config
         .plugins
@@ -298,6 +297,43 @@ fn init_message(
     Ok((init, config_json))
 }
 
+/// The configuration as a plugin reads it, in `init` and from `read_config`.
+fn config_value(config: &AppConfig) -> Result<Value, String> {
+    serde_json::to_value(config.to_partial())
+        .map_err(|e| format!("failed to serialize config: {e}"))
+}
+
+/// Read the configuration again, the way this run read it at startup.
+///
+/// The files layer (every config file and its `extends` chain, plus the
+/// environment) is read from disk, and `overrides` is the invocation's `--cfg`
+/// list.
+/// No conversation layer: a plugin run has no conversation to take one from.
+fn reload_config(
+    overrides: &[KeyValueOrPath],
+    workspace: &Workspace,
+    fs: Option<&FsStorageBackend>,
+    cwd: &Utf8Path,
+) -> Result<Value, String> {
+    let pipeline = ConfigPipeline::new(overrides, Some(workspace), fs, || {
+        crate::load_base_partial(fs, cwd.to_owned())
+    })
+    .map_err(|error| format!("failed to read the workspace configuration: {error}"))?;
+
+    let mut partial = pipeline
+        .partial_without_conversation()
+        .map_err(|error| format!("failed to apply the configuration arguments: {error}"))?;
+
+    // Consumed while resolving which conversation a command targets, so it is
+    // not part of the configuration the run ended up with.
+    partial.conversation.default_id.take();
+
+    let config = build(partial)
+        .map_err(|error| format!("the resolved configuration is invalid: {error}"))?;
+
+    config_value(&config)
+}
+
 /// Run a plugin binary, handling the full protocol lifecycle.
 ///
 /// `binary` is the path to the plugin executable.
@@ -323,7 +359,7 @@ pub(crate) async fn run_plugin(
         user_storage: user_storage.as_deref(),
     };
 
-    let (init, config_json) = init_message(
+    let (init, mut config_json) = init_message(
         name,
         args,
         &ctx.workspace,
@@ -409,7 +445,7 @@ pub(crate) async fn run_plugin(
         &mut requests,
         &stdin,
         ctx,
-        &config_json,
+        &mut config_json,
         &shutdown_sent,
         &composer,
         &mut turns,
@@ -618,7 +654,7 @@ async fn message_loop(
     requests: &mut mpsc::Receiver<String>,
     stdin: &Arc<Mutex<ChildStdin>>,
     ctx: &mut Ctx,
-    config_json: &Value,
+    config_json: &mut Value,
     shutdown_sent: &AtomicBool,
     composer: &Composer,
     turns: &mut JoinSet<()>,
@@ -683,6 +719,31 @@ async fn message_loop(
                         drop(write_message(&mut *writer, &response));
                     });
                 }
+            }
+
+            // Answered here because reading the configuration again needs the
+            // context, which `handle_request` is not given.
+            PluginToHost::ReadConfig(request) if request.reload => {
+                let reloaded = reload_config(
+                    &crate::effective_cfg_overrides(&ctx.term.args),
+                    &ctx.workspace,
+                    ctx.fs_backend.as_deref(),
+                    ctx.exec.config_cwd(),
+                );
+
+                // A configuration that fails to load leaves the last good one
+                // in place, so a file saved halfway through an edit costs the
+                // plugin one error rather than every read until it is fixed.
+                let response = match reloaded {
+                    Ok(fresh) => {
+                        *config_json = fresh;
+                        handle_read_config(config_json, request.path, request.id)
+                    }
+                    Err(message) => action_failed(request.id, "read_config", message),
+                };
+
+                let mut writer = stdin.lock().expect("stdin lock poisoned");
+                write_message(&mut *writer, &response)?;
             }
 
             msg => {
@@ -1565,6 +1626,8 @@ fn handle_request(
             write_message(writer, &response)?;
         }
 
+        // A request with `reload` set is answered by the caller, which reads
+        // the configuration again first; this answers from what was last read.
         PluginToHost::ReadConfig(req) => {
             let response = handle_read_config(config_json, req.path, req.id);
             write_message(writer, &response)?;

@@ -1131,7 +1131,7 @@ pub(crate) fn resolve_config(
 /// `config set` persisting them), which reject reset keywords ([RFD 038]).
 ///
 /// [RFD 038]: https://jp.computer/rfd/038
-fn effective_cfg_overrides(globals: &Globals) -> Vec<KeyValueOrPath> {
+pub(crate) fn effective_cfg_overrides(globals: &Globals) -> Vec<KeyValueOrPath> {
     let mut overrides = Vec::with_capacity(globals.config.len() + 1);
     if globals.no_config {
         overrides.push(KeyValueOrPath::Keyword(CfgKeyword::None));

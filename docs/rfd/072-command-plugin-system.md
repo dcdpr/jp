@@ -550,6 +550,25 @@ The `path` syntax uses the same dot-separated keys as the `--cfg` CLI flag
 (e.g., `assistant.model`, `server.web.port`, `conversation.tools`).
 An invalid path returns an error.
 
+The host answers from the configuration it read at startup.
+A plugin that runs long enough to outlive a config edit sets `reload` to have
+the host read it again first:
+
+```json
+{
+  "type": "read_config",
+  "reload": true
+}
+```
+
+The host repeats its startup load: every config file and its `extends` chain,
+the environment, and the invocation's `--cfg` arguments.
+The fresh result answers this request and every later `read_config`, so a
+plugin polls and compares without knowing where configuration lives.
+A configuration that fails to load is reported as an `error`, and the last one
+that loaded stays in place.
+`reload` needs protocol 10.
+
 #### Workspace Mutations
 
 A plugin changes a workspace through task-level operations.
