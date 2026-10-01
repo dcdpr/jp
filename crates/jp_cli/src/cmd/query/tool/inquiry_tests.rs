@@ -214,6 +214,52 @@ async fn llm_backend_applies_its_assistant_config_to_the_request() {
     );
 }
 
+/// The question reaches the model framed as a question it answers directly.
+///
+/// The request carries the turn's tools and the history shows the tool being
+/// called, so the prompt has to rule out calling it again and ask for nothing
+/// but the answer.
+#[tokio::test]
+async fn llm_backend_asks_for_only_the_answer() {
+    let inquiry_id = tool_call_inquiry_id("call_prompt", "shorter_title", 1);
+    let (provider, requests) =
+        structured_provider(json!({ "answer": "Short title" })).capturing_requests();
+    let backend = LlmInquiryBackend::new(
+        test_inquiry_config(provider),
+        IndexMap::new(),
+        vec![],
+        vec![],
+        discard_notices(),
+    );
+
+    backend
+        .inquire(
+            test_events(),
+            &inquiry_id,
+            "ticket_create",
+            &Question::text("shorter_title", "Give a shorter title for: A long title").unwrap(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("the inquiry resolves");
+
+    let sent = requests.lock().expect("not poisoned");
+    let query = sent.first().expect("one request was sent");
+    let asked = query
+        .thread
+        .events
+        .iter()
+        .filter_map(|event| event.event.as_chat_request())
+        .next_back()
+        .expect("the question was asked");
+    assert_eq!(
+        asked.content,
+        "The tool `ticket_create` asked a question before it can continue.\n\nGive a shorter \
+         title for: A long title\n\nYou cannot call tools here. Reply with only the answer to \
+         this question, based on the conversation so far."
+    );
+}
+
 /// An inquiry that runs on another credential says so.
 ///
 /// The inquiry model can differ from the assistant's, so the turn's own stream
