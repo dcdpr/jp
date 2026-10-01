@@ -2361,6 +2361,7 @@ dependencies = [
  "jp_openrouter",
  "jp_plugin",
  "jp_printer",
+ "jp_process",
  "jp_storage",
  "jp_task",
  "jp_term",
