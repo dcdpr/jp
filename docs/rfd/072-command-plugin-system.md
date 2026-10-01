@@ -1,10 +1,9 @@
 # RFD 072: Command Plugin System
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-06
-- **Required by**: [RFD 077]
 - **Extended by**: [RFD 114]
 - **Summary**: Standalone command plugins communicate with JP via JSON-lines
   protocol to extend subcommands across languages.

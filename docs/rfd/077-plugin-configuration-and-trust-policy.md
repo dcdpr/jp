@@ -4,7 +4,6 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-07
-- **Requires**: [RFD 072]
 - **Summary**: Plugin configuration integration with AppConfig enabling trust
   policies, checksum pinning, execution policies, and per-plugin options.
 
