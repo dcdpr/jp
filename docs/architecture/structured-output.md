@@ -698,10 +698,14 @@ Just raw JSON in a code fence.
 
 ### Post-Turn Extraction
 
-`TurnInputs::run` reports whether the turn got as far as appending its request
-(`TurnOutcome::Started`) or was stopped before it (`TurnOutcome::NotStarted`).
-Both `jp query --schema` and a plugin's `query` with a `schema` hand that
-outcome to `turn_structured_data`, which returns the structured response of the
+Before the turn runs, the caller reads `last_request_id`: the id of the
+conversation's last `ChatRequest`, taken from the locked conversation rather
+than from the snapshot the turn is built from, which `--replay` has already
+trimmed.
+A turn stopped before it starts leaves that request last; one that starts
+appends a request with a fresh id.
+Both `jp query --schema` and a plugin's `query` with a `schema` hand that id to
+`turn_structured_data`, which returns the structured response of the
 conversation's last turn, or a `StructuredDataError`:
 
 - `NotStarted`: the turn never ran, so the last turn belongs to an earlier query
@@ -715,7 +719,7 @@ conversation's last turn, or a `StructuredDataError`:
 
 ```rust
 let data = lock
-    .with_events(|events| turn_structured_data(events, outcome, schema.as_ref()))
+    .with_events(|events| turn_structured_data(events, before.as_ref(), schema.as_ref()))
     .map_err(Error::StructuredData)?;
 
 print_json(&ctx.printer, &data);

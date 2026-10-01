@@ -17,7 +17,7 @@ use jp_config::{
 };
 use jp_conversation::{
     Conversation, ConversationId, ConversationStream,
-    event::{ChatRequest, ChatResponse},
+    event::{ChatRequest, ChatResponse, TurnStart},
 };
 use jp_inquire::prompt::MockPromptBackend;
 use jp_llm::{Provider, provider::mock::MockProvider};
@@ -365,15 +365,13 @@ async fn an_interrupt_during_mcp_startup_stops_the_turn_before_it_runs() {
     signals.interrupt().await;
 
     let stream = lock.events().clone();
-    let outcome = tokio::time::timeout(
+    tokio::time::timeout(
         std::time::Duration::from_secs(5),
         inputs.run(&lock, stream, interrupt),
     )
     .await
     .expect("the interrupt ends the wait; a hang here means it was never seen")
     .expect("stopping before the turn starts is not an error");
-
-    assert_eq!(outcome, TurnOutcome::NotStarted);
 
     assert!(
         lock.events().is_empty(),
@@ -454,15 +452,13 @@ async fn a_client_stop_during_mcp_startup_stops_the_turn_before_it_runs() {
 
     let interrupt = router.turn_interrupt();
     let stream = lock.events().clone();
-    let outcome = tokio::time::timeout(
+    tokio::time::timeout(
         std::time::Duration::from_secs(5),
         inputs.run(&lock, stream, interrupt),
     )
     .await
     .expect("the stop ends the wait; a hang here means it was never seen")
     .expect("stopping before the turn starts is not an error");
-
-    assert_eq!(outcome, TurnOutcome::NotStarted);
 
     assert!(
         lock.events().is_empty(),
@@ -2761,15 +2757,20 @@ fn last_assistant_message_returns_none_when_only_reasoning_present() {
     assert_eq!(last_assistant_message(&stream), None);
 }
 
-/// A stream of one turn whose structured response is `data`.
-fn stream_with_structured(data: Value) -> ConversationStream {
-    let mut stream = ConversationStream::new_test();
+/// Append a turn whose structured response is `data`.
+fn add_structured_turn(stream: &mut ConversationStream, data: Value) {
     stream.start_turn("question");
     stream
         .current_turn_mut()
         .add_chat_response(ChatResponse::structured(data))
         .build()
         .unwrap();
+}
+
+/// A stream of one turn whose structured response is `data`.
+fn stream_with_structured(data: Value) -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    add_structured_turn(&mut stream, data);
     stream
 }
 
@@ -2785,11 +2786,7 @@ fn turn_structured_data_keeps_a_string_a_string_schema_asks_for() {
     let stream = stream_with_structured(Value::from("a summary"));
 
     assert_eq!(
-        turn_structured_data(
-            &stream,
-            TurnOutcome::Started,
-            Some(&schema_of_type("string"))
-        ),
+        turn_structured_data(&stream, None, Some(&schema_of_type("string"))),
         Ok(Value::from("a summary"))
     );
 }
@@ -2799,11 +2796,7 @@ fn turn_structured_data_refuses_a_string_an_object_schema_rules_out() {
     let stream = stream_with_structured(Value::from(r#"{"summary": "sho"#));
 
     assert_eq!(
-        turn_structured_data(
-            &stream,
-            TurnOutcome::Started,
-            Some(&schema_of_type("object"))
-        ),
+        turn_structured_data(&stream, None, Some(&schema_of_type("object"))),
         Err(StructuredDataError::NotJson)
     );
 }
@@ -2813,14 +2806,48 @@ fn turn_structured_data_refuses_a_string_an_object_schema_rules_out() {
 #[test]
 fn turn_structured_data_refuses_a_turn_that_did_not_start() {
     let stream = stream_with_structured(serde_json::json!({"turn": 1}));
+    let before = last_request_id(&stream);
 
     assert_eq!(
-        turn_structured_data(
-            &stream,
-            TurnOutcome::NotStarted,
-            Some(&schema_of_type("object"))
-        ),
+        turn_structured_data(&stream, before.as_ref(), Some(&schema_of_type("object"))),
         Err(StructuredDataError::NotStarted)
+    );
+}
+
+/// Sanitizing the stream before the turn drops a trailing `TurnStart` that has
+/// nothing after it, which moves the last turn marker back to an earlier turn
+/// although this run appended nothing.
+#[test]
+fn turn_structured_data_refuses_a_turn_that_did_not_start_after_sanitizing() {
+    let mut stream = stream_with_structured(serde_json::json!({"turn": 1}));
+    stream.push_event(ConversationEvent::now(TurnStart));
+    let before = last_request_id(&stream);
+
+    stream.sanitize();
+
+    assert_eq!(
+        turn_structured_data(&stream, before.as_ref(), Some(&schema_of_type("object"))),
+        Err(StructuredDataError::NotStarted)
+    );
+}
+
+/// `--replay` swaps the last turn for a new one, so the conversation has as
+/// many turns as before, and the new turn's answer is still this run's.
+#[test]
+fn turn_structured_data_takes_a_replayed_turns_answer() {
+    let mut stream = stream_with_structured(serde_json::json!({"turn": 1}));
+    let before = last_request_id(&stream);
+
+    PendingStreamTrim {
+        replay_turn: true,
+        pop_request: false,
+    }
+    .apply(&mut stream);
+    add_structured_turn(&mut stream, serde_json::json!({"turn": 2}));
+
+    assert_eq!(
+        turn_structured_data(&stream, before.as_ref(), Some(&schema_of_type("object"))),
+        Ok(serde_json::json!({"turn": 2}))
     );
 }
 

@@ -30,7 +30,7 @@ use jp_config::{
     },
     util::{build, list_configs_in_load_path},
 };
-use jp_conversation::{ConversationId, ConversationStream, event::ChatRequest};
+use jp_conversation::{ConversationId, ConversationStream, EventId, event::ChatRequest};
 use jp_editor::{EditOutcome, EditorBackend};
 use jp_inquire::{
     InlineOption, InlineSelect, ReplyEditMode, ReplyOutcome,
@@ -63,11 +63,11 @@ use super::registry;
 use crate::{
     Ctx, KeyValueOrPath, cmd,
     cmd::query::{
-        NewTitle, PendingStreamTrim, TurnInputs, TurnOutcome,
+        NewTitle, PendingStreamTrim, TurnInputs,
         interrupt::{
             Delivery, InterruptAction, TurnInterruptSender, TurnInterrupts, reply_edit_mode,
         },
-        resolve_new_title, turn_structured_data,
+        last_request_id, resolve_new_title, turn_structured_data,
     },
     config_pipeline::{ConfigPipeline, build_partial_over, config_search_roots},
     ctx::McpServerScope,
@@ -974,6 +974,9 @@ async fn run_query(
     let title = resolve_title(&config, &lock, &stream, &chat_request)
         .map(|task| -> TitleFuture { Box::pin(generate_title(task, lock.id())) });
 
+    // The last request before this query, to tell its turn from earlier ones.
+    let before = lock.with_events(last_request_id);
+
     // Hand the turn to its own task. It owns everything it needs and the lock owns
     // itself, so nothing here is borrowed for the minutes a turn can take, which
     // is what keeps the message loop answering reads while it runs.
@@ -998,11 +1001,10 @@ async fn run_query(
         // about the host, not content: the turn's output belongs to the
         // conversation, which is where whoever asked for it is reading.
         let reply = match outcome {
-            Ok(outcome) => {
-                info!(%conversation, ?outcome, "A delegated turn finished.");
-                lock.with_events(|events| {
-                    completed(reply_id, conversation, events, outcome, schema.as_ref())
-                })
+            Ok(()) => {
+                info!(%conversation, "A delegated turn finished.");
+                let (before, schema) = (before.as_ref(), schema.as_ref());
+                lock.with_events(|events| completed(reply_id, conversation, events, before, schema))
             }
             Err(error) => {
                 // The full chain, not the outermost label: `cmd::Error` renders as
@@ -1128,11 +1130,12 @@ fn query_expiry(
 /// With a `schema`, it carries the structured response of the turn this query
 /// started, and is an error when there is none to give: the turn was stopped
 /// before it started, answered without structured data, or was cut short.
+/// `before` is the conversation's last request from before the query ran.
 fn completed(
     id: Option<String>,
     conversation: String,
     events: &ConversationStream,
-    outcome: TurnOutcome,
+    before: Option<&EventId>,
     schema: Option<&Map<String, Value>>,
 ) -> HostToPlugin {
     if schema.is_none() {
@@ -1143,7 +1146,7 @@ fn completed(
         });
     }
 
-    match turn_structured_data(events, outcome, schema) {
+    match turn_structured_data(events, before, schema) {
         Ok(data) => HostToPlugin::QueryComplete(QueryCompleteResponse {
             id,
             conversation,

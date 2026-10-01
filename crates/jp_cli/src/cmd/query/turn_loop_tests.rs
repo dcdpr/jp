@@ -595,11 +595,7 @@ async fn a_client_stop_ends_the_turn_mid_stream() {
         .await;
 
         stop_handle.await.unwrap();
-        assert_eq!(
-            result.unwrap(),
-            TurnOutcome::Started,
-            "a turn stopped mid-stream had already appended its request"
-        );
+        assert!(result.is_ok(), "the turn should complete: {result:?}");
 
         assert_eq!(
             provider.calls(),
@@ -1226,7 +1222,7 @@ async fn test_normal_completion_persists_content() {
     let printer = Arc::new(printer);
     let router = detached_router();
 
-    let outcome = run_turn_loop(
+    run_turn_loop(
         Arc::clone(&provider),
         &model,
         &config,
@@ -1246,9 +1242,8 @@ async fn test_normal_completion_persists_content() {
         router.turn_interrupt(),
         TurnInterrupts::none(),
     )
-    .await;
-
-    assert_eq!(outcome.unwrap(), TurnOutcome::Started);
+    .await
+    .unwrap();
 
     // Verify printer output contains the LLM response
     // Note: markdown renderer may escape special characters like '!' → '\!'
@@ -1279,10 +1274,10 @@ async fn test_normal_completion_persists_content() {
 ///
 /// The press is routed to the turn's handler before the loop runs, so the
 /// loop's first check finds it.
-/// The turn ends `Complete` all the same, which is why the outcome cannot be
-/// read off the phase.
+/// A caller asking whether the turn ran compares the stream's last request
+/// before and after, which only holds if this path appends nothing.
 #[tokio::test]
-async fn an_interrupt_before_the_first_phase_leaves_the_turn_not_started() {
+async fn an_interrupt_before_the_first_phase_appends_nothing() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
 
@@ -1317,7 +1312,7 @@ async fn an_interrupt_before_the_first_phase_leaves_the_turn_not_started() {
     .await
     .expect("the router delivers the press to the turn's handler");
 
-    let outcome = run_turn_loop(
+    run_turn_loop(
         Arc::clone(&provider),
         &model,
         &config,
@@ -1337,9 +1332,9 @@ async fn an_interrupt_before_the_first_phase_leaves_the_turn_not_started() {
         turn_interrupt,
         TurnInterrupts::none(),
     )
-    .await;
+    .await
+    .unwrap();
 
-    assert_eq!(outcome.unwrap(), TurnOutcome::NotStarted);
     assert!(
         lock.events().is_empty(),
         "the turn ended before its request was appended"

@@ -1602,16 +1602,21 @@ fn an_unparseable_expires_in_is_refused() {
     );
 }
 
+/// Append a turn that ends in `response`, the way a query's turn does.
+fn add_turn(stream: &mut ConversationStream, response: ChatResponse) {
+    stream.start_turn(ChatRequest::from("Summarize"));
+    stream
+        .current_turn_mut()
+        .add_chat_response(response)
+        .build()
+        .unwrap();
+}
+
 /// A stream of one turn per entry in `responses`, each ending in that response.
 fn stream_of(responses: Vec<ChatResponse>) -> ConversationStream {
     let mut stream = ConversationStream::new_test();
     for response in responses {
-        stream.start_turn(ChatRequest::from("Summarize"));
-        stream
-            .current_turn_mut()
-            .add_chat_response(response)
-            .build()
-            .unwrap();
+        add_turn(&mut stream, response);
     }
     stream
 }
@@ -1623,17 +1628,16 @@ fn object_schema() -> Map<String, Value> {
 
 #[test]
 fn a_structured_query_replies_with_the_last_turns_data() {
-    let events = stream_of(vec![
-        ChatResponse::structured(json!({"turn": 1})),
-        ChatResponse::structured(json!({"turn": 2})),
-    ]);
+    let mut events = stream_of(vec![ChatResponse::structured(json!({"turn": 1}))]);
+    let before = last_request_id(&events);
+    add_turn(&mut events, ChatResponse::structured(json!({"turn": 2})));
 
     assert_eq!(
         completed(
             Some("q1".to_owned()),
             "123".to_owned(),
             &events,
-            TurnOutcome::Started,
+            before.as_ref(),
             Some(&object_schema()),
         ),
         HostToPlugin::QueryComplete(QueryCompleteResponse {
@@ -1648,17 +1652,16 @@ fn a_structured_query_replies_with_the_last_turns_data() {
 /// be handed back in its place.
 #[test]
 fn a_structured_query_whose_turn_produced_no_data_fails() {
-    let events = stream_of(vec![
-        ChatResponse::structured(json!({"turn": 1})),
-        ChatResponse::message("I would rather not."),
-    ]);
+    let mut events = stream_of(vec![ChatResponse::structured(json!({"turn": 1}))]);
+    let before = last_request_id(&events);
+    add_turn(&mut events, ChatResponse::message("I would rather not."));
 
     assert_eq!(
         completed(
             Some("q1".to_owned()),
             "123".to_owned(),
             &events,
-            TurnOutcome::Started,
+            before.as_ref(),
             Some(&object_schema()),
         ),
         HostToPlugin::Error(ErrorResponse {
@@ -1675,13 +1678,14 @@ fn a_structured_query_whose_turn_produced_no_data_fails() {
 #[test]
 fn a_structured_query_stopped_before_its_turn_started_fails() {
     let events = stream_of(vec![ChatResponse::structured(json!({"turn": 1}))]);
+    let before = last_request_id(&events);
 
     assert_eq!(
         completed(
             Some("q1".to_owned()),
             "123".to_owned(),
             &events,
-            TurnOutcome::NotStarted,
+            before.as_ref(),
             Some(&object_schema()),
         ),
         HostToPlugin::Error(ErrorResponse {
@@ -1696,6 +1700,7 @@ fn a_structured_query_stopped_before_its_turn_started_fails() {
 /// raw text, which an object schema rules out as an answer.
 #[test]
 fn a_structured_query_whose_response_was_cut_short_fails() {
+    // The query created the conversation, so there was no request before it.
     let events = stream_of(vec![ChatResponse::structured(json!(r#"{"summary": "sho"#))]);
 
     assert_eq!(
@@ -1703,7 +1708,7 @@ fn a_structured_query_whose_response_was_cut_short_fails() {
             Some("q1".to_owned()),
             "123".to_owned(),
             &events,
-            TurnOutcome::Started,
+            None,
             Some(&object_schema()),
         ),
         HostToPlugin::Error(ErrorResponse {
@@ -1721,7 +1726,7 @@ fn a_query_without_a_schema_replies_without_data() {
     let events = stream_of(vec![ChatResponse::structured(json!({"turn": 1}))]);
 
     assert_eq!(
-        completed(None, "123".to_owned(), &events, TurnOutcome::Started, None),
+        completed(None, "123".to_owned(), &events, None, None),
         HostToPlugin::QueryComplete(QueryCompleteResponse {
             id: None,
             conversation: "123".to_owned(),

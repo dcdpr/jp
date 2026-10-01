@@ -84,3 +84,24 @@ The CLI had both problems as well, and worse: it searched the whole stream
 rather than the last turn.
 A turn that did not start also no longer deletes the query draft, which is the
 only copy of a request that was never recorded.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-10-01T12:30:53Z
+- **Re**: #2
+
+Review follow-up (PR #1221, second round): `TurnOutcome` and the coordinator's
+`started` flag are gone, and `TurnInputs::run`, `Query::run_turn`, and
+`run_turn_loop` return `Result<()>` again.
+
+Callers read `last_request_id` (the id of the conversation's last `ChatRequest`)
+from the lock before the turn runs, and `turn_structured_data` takes that id: if
+the last request is unchanged, the turn did not start.
+The same comparison gates deleting the query draft in `jp query`.
+
+The marker is the last request, not the last `TurnStart`: sanitizing the stream
+before the turn can drop a trailing empty `TurnStart` or insert one into a
+stream that has none, but never adds or removes a request.
+`turn_structured_data_refuses_a_turn_that_did_not_start_after_sanitizing` fails
+against a `TurnStart`-based check.

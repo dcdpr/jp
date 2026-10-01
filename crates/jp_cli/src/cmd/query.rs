@@ -97,7 +97,7 @@ use jp_config::{
     style::reasoning::ReasoningDisplayConfig,
 };
 use jp_conversation::{
-    Conversation, ConversationEvent, ConversationId, ConversationStream, Labels,
+    Conversation, ConversationEvent, ConversationId, ConversationStream, EventId, Labels,
     event::{ChatRequest, ChatResponse},
     stream::{ApplyDelta, ResetDelta},
     thread::{Thread, ThreadBuilder},
@@ -787,6 +787,11 @@ impl Query {
         // to.
         let schema = chat_request.schema.clone();
 
+        // Read from the lock, not from `stream`: a `--replay` snapshot already
+        // has its last request trimmed, and a turn stopped before it starts
+        // leaves that request in place.
+        let before = lock.with_events(last_request_id);
+
         let inputs = TurnInputs::collect(
             ctx,
             cfg.clone(),
@@ -819,11 +824,11 @@ impl Query {
             turn_result = Err(cmd::Error::from(Error::Workspace(error)));
         }
 
-        if self.schema.is_some()
-            && let Ok(outcome) = turn_result
-        {
+        if self.schema.is_some() && turn_result.is_ok() {
             let data = lock
-                .with_events(|events| turn_structured_data(events, outcome, schema.as_ref()))
+                .with_events(|events| {
+                    turn_structured_data(events, before.as_ref(), schema.as_ref())
+                })
                 .map_err(Error::StructuredData)?;
 
             print_json(&ctx.printer, &data);
@@ -835,7 +840,7 @@ impl Query {
         // renamed mid-turn (e.g. a heading-derived title), so re-resolve the
         // live directories rather than trusting the path captured before the
         // turn ran.
-        if matches!(turn_result, Ok(TurnOutcome::Started)) {
+        if turn_result.is_ok() && lock.with_events(last_request_id) != before {
             cleanup_query_message_file(
                 ctx.fs_backend.as_deref(),
                 &cid,
@@ -843,7 +848,7 @@ impl Query {
             );
         }
 
-        turn_result.map(drop)
+        turn_result
     }
 
     /// Resolve the positional query into the text to send.
@@ -1138,7 +1143,7 @@ impl Query {
         pending_trim: PendingStreamTrim,
         mut turn_interrupt: TurnInterrupt,
         mut interrupts: TurnInterrupts,
-    ) -> Result<TurnOutcome> {
+    ) -> Result<()> {
         let model_id = cfg.assistant.model.id.resolved();
 
         let provider: Arc<dyn jp_llm::Provider> = Arc::from(provider::get_provider(
@@ -1160,12 +1165,12 @@ impl Query {
                     notice.handled();
                 }
                 info!("Interrupted during model lookup; the turn did not start.");
-                return Ok(TurnOutcome::NotStarted);
+                return Ok(());
             }
 
             Some(action) = interrupts.next_stop() => {
                 info!(?action, "Stopped by a client during model lookup; the turn did not start.");
-                return Ok(TurnOutcome::NotStarted);
+                return Ok(());
             }
         };
 
@@ -1559,7 +1564,7 @@ impl TurnInputs {
         lock: &ConversationLock,
         stream: ConversationStream,
         mut turn_interrupt: TurnInterrupt,
-    ) -> Result<TurnOutcome> {
+    ) -> Result<()> {
         let cfg = &self.config;
         let mut interrupts = self.interrupts;
 
@@ -1601,7 +1606,7 @@ impl TurnInputs {
                     notice.handled();
                 }
                 info!("Interrupted while preparing; the turn did not start.");
-                return Ok(TurnOutcome::NotStarted);
+                return Ok(());
             }
 
             // A client's stop, for the same span: nothing has been appended, so
@@ -1609,7 +1614,7 @@ impl TurnInputs {
             // the turn to take once its own request is in place.
             Some(action) = interrupts.next_stop() => {
                 info!(?action, "Stopped by a client while preparing; the turn did not start.");
-                return Ok(TurnOutcome::NotStarted);
+                return Ok(());
             }
         };
 
@@ -1651,16 +1656,20 @@ impl TurnInputs {
     }
 }
 
-/// Whether a turn that ended without an error got as far as starting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TurnOutcome {
-    /// The turn's request was appended to the conversation, so its last turn is
-    /// the one this run started.
-    Started,
-
-    /// The turn was stopped before its request was appended, and the
-    /// conversation's last turn is an earlier one.
-    NotStarted,
+/// The id of the conversation's last [`ChatRequest`], if it has one.
+///
+/// Taken before a turn runs and compared after it, this says whether the run
+/// appended a request: a turn stopped before it started leaves the stream's
+/// requests as they were, and one that started appends a request with an id the
+/// stream has never handed out.
+/// Sanitizing the stream before the turn can add or remove a `TurnStart`, but
+/// never a request, so the comparison holds across it.
+pub(crate) fn last_request_id(events: &ConversationStream) -> Option<EventId> {
+    events
+        .iter()
+        .rev()
+        .find(|entry| entry.event.is_chat_request())
+        .map(|entry| entry.event_id.clone())
 }
 
 /// Why a turn has no structured response to hand back.
@@ -1681,9 +1690,11 @@ pub(crate) enum StructuredDataError {
 
 /// The structured response of the turn a run started.
 ///
-/// Only the conversation's last turn is searched, and only when `outcome` says
-/// the run started it, so an earlier turn's data is never returned in its
-/// place.
+/// `before` is the [`last_request_id`] from before the run.
+/// When it is still the last request, the run appended nothing and there is no
+/// answer of its own to give.
+/// Otherwise only the conversation's last turn is searched, so an earlier
+/// turn's data is never returned in its place.
 ///
 /// A response that is not valid JSON is recorded as its raw text in a JSON
 /// string.
@@ -1692,10 +1703,10 @@ pub(crate) enum StructuredDataError {
 /// token limit, and not an answer.
 pub(crate) fn turn_structured_data(
     events: &ConversationStream,
-    outcome: TurnOutcome,
+    before: Option<&EventId>,
     schema: Option<&Map<String, Value>>,
 ) -> std::result::Result<Value, StructuredDataError> {
-    if outcome == TurnOutcome::NotStarted {
+    if last_request_id(events).as_ref() == before {
         return Err(StructuredDataError::NotStarted);
     }
 
