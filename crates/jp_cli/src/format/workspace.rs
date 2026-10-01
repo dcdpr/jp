@@ -3,10 +3,13 @@ use std::fmt;
 use camino::Utf8Path;
 use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
-use jp_conversation::ConversationId;
+use jp_config::style::Sanitization;
+use jp_conversation::{ConversationId, Title};
 use jp_term::table::{DetailItem, DetailRow, Details, details};
 use jp_workspace::Id;
 use serde_json::json;
+
+use super::DerivedText;
 
 /// Details view for `jp w show`, mirroring the conversation [`DetailsFmt`].
 ///
@@ -34,7 +37,7 @@ pub struct DetailsFmt {
     pub conversations: Option<usize>,
 
     /// The session's active conversation in this workspace, with its title.
-    pub active_conversation: Option<(ConversationId, Option<String>)>,
+    pub active_conversation: Option<(ConversationId, Option<Title>)>,
 
     /// Pretty-print the output.
     pub pretty: bool,
@@ -83,7 +86,7 @@ impl DetailsFmt {
     #[must_use]
     pub fn with_active_conversation(
         self,
-        active_conversation: Option<(ConversationId, Option<String>)>,
+        active_conversation: Option<(ConversationId, Option<Title>)>,
     ) -> Self {
         Self {
             active_conversation,
@@ -168,8 +171,11 @@ impl DetailsFmt {
         }
 
         if let Some((id, title)) = &self.active_conversation {
+            // No config is loaded to read `style.sanitize` from, so the title
+            // is shown the way the default asks.
+            let derived = DerivedText::new(self.pretty, Sanitization::default());
             let value = match title {
-                Some(title) => format!("{id}: {title}"),
+                Some(title) => format!("{id}: {}", derived.title(title)),
                 None => id.to_string(),
             };
             rows.push(self.scalar("Active Conversation", value));

@@ -31,7 +31,7 @@ fn setup(title: &str, format: OutputFormat) -> (Ctx, SharedBuffer, ConversationH
     )
     .unwrap();
     let conversation = Conversation {
-        title: Some(title.to_owned()),
+        title: Some(title.into()),
         ..Default::default()
     };
     ctx.workspace

@@ -175,7 +175,7 @@ impl Fork {
 
             if let Some(title) = &self.title {
                 conv.update_metadata(|m| {
-                    m.title = Some(title.clone());
+                    m.title = Some(title.clone().into());
                 });
             }
 

@@ -42,7 +42,7 @@ pub use compaction::{
     ByteSize, Compaction, CompactionRange, PolicySpec, RangeBound, ReasoningPolicy, SummaryOverlap,
     SummaryPolicy, SummarySource, ToolCallPolicy, resolve_range,
 };
-pub use conversation::{Conversation, ConversationId};
+pub use conversation::{Conversation, ConversationId, Title};
 pub use error::Error;
 pub use event::{ConversationEvent, EventKind};
 pub use event_id::EventId;

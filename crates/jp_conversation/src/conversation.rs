@@ -17,7 +17,7 @@ use crate::error::{Error, Result};
 pub struct Conversation {
     /// The optional title of the conversation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
+    pub title: Option<Title>,
 
     /// The last time the conversation was activated.
     #[serde(
@@ -106,7 +106,7 @@ impl Default for Conversation {
 impl Conversation {
     /// Creates a new conversation with the given title.
     #[must_use]
-    pub fn new(title: impl Into<String>) -> Self {
+    pub fn new(title: impl Into<Title>) -> Self {
         Self {
             title: Some(title.into()),
             ..Default::default()
@@ -131,6 +131,50 @@ impl Conversation {
     #[must_use]
     pub const fn is_pinned(&self) -> bool {
         self.pinned_at.is_some()
+    }
+}
+
+/// A conversation's title, as it is stored.
+///
+/// A title is written by the model that generated it or by a user, and can hold
+/// control characters and escape sequences a terminal acts on.
+/// It deliberately has no `Display`, and does not dereference to `str`, so a
+/// title cannot be formatted into terminal output by accident: a caller either
+/// filters it for display or asks for [`raw`] text by name.
+///
+/// Stored and serialized as a bare string.
+///
+/// [`raw`]: Self::raw
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Title(String);
+
+impl Title {
+    /// The title exactly as stored.
+    ///
+    /// For storage, machine-readable output, and the model; text shown on a
+    /// terminal has to be filtered first.
+    #[must_use]
+    pub fn raw(&self) -> &str {
+        &self.0
+    }
+
+    /// The title exactly as stored, owned.
+    #[must_use]
+    pub fn into_raw(self) -> String {
+        self.0
+    }
+}
+
+impl From<String> for Title {
+    fn from(title: String) -> Self {
+        Self(title)
+    }
+}
+
+impl From<&str> for Title {
+    fn from(title: &str) -> Self {
+        Self(title.to_owned())
     }
 }
 

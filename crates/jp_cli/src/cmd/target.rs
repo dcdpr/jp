@@ -23,7 +23,8 @@ use std::{
 
 use inquire::InquireError;
 use jp_config::conversation::DefaultConversationId;
-use jp_conversation::ConversationId;
+use jp_conversation::{ConversationId, Title};
+use jp_term::sanitize::strip_controls;
 use jp_workspace::{ConversationHandle, Workspace, session::Session};
 
 use crate::{
@@ -901,7 +902,7 @@ fn build_picker_items(
 struct PickerRow {
     id: ConversationId,
     time_str: String,
-    title: Option<String>,
+    title: Option<Title>,
 }
 
 /// Format a conversation's reference timestamp as a relative duration.
@@ -927,8 +928,12 @@ fn format_relative(when: Option<chrono::DateTime<chrono::Utc>>) -> String {
 /// present; `{id} {time_str}` when only time is present; `{id}` alone
 /// otherwise.
 /// The time column is padded to `time_width` so titles align across rows.
+///
+/// A picker row is redrawn in place as the cursor moves, so a title keeps no
+/// control character there, whatever `style.sanitize` says.
 fn format_picker_label(row: &PickerRow, time_width: usize) -> String {
-    match (row.time_str.is_empty(), row.title.as_deref()) {
+    let title = row.title.as_ref().map(|t| strip_controls(t.raw(), &[]));
+    match (row.time_str.is_empty(), title) {
         (false, Some(title)) => format!(
             "{}  {:<width$}  {}",
             row.id,

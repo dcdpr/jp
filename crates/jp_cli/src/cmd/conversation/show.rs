@@ -6,7 +6,7 @@ use crate::{
     cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
     ctx::Ctx,
     format::{
-        DerivedText, attachment_detail_item, compaction_detail_item, conversation::DetailsFmt,
+        attachment_detail_item, compaction_detail_item, conversation::DetailsFmt,
         label_detail_items,
     },
     output::{print_details, print_json},
@@ -28,10 +28,7 @@ impl Show {
 
         // Only a terminal is shown the filtered title, so the JSON payload
         // keeps the stored one.
-        let derived = DerivedText::new(
-            ctx.printer.pretty_printing_enabled(),
-            ctx.config().style.sanitize,
-        );
+        let derived = ctx.derived_text();
 
         for handle in handles {
             let id = handle.id();
@@ -58,7 +55,7 @@ impl Show {
                 .with_last_message_at(events.last().map(|v| v.event.timestamp))
                 .with_event_count(events.len())
                 .with_turn_count(events.iter_turns().len())
-                .with_title(conversation.title.as_deref().map(|t| derived.show(t)))
+                .with_title(conversation.title.as_ref().map(|t| derived.title(t)))
                 .with_last_activated_at(Some(conversation.last_activated_at))
                 .with_pinned_flag(conversation.is_pinned())
                 .with_local_flag(local)

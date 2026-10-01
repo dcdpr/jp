@@ -6,7 +6,7 @@ use std::borrow::Cow;
 
 use indexmap::IndexSet;
 use jp_config::{style::Sanitization, types::color::Color};
-use jp_conversation::{ByteSize, Compaction, Labels, ToolCallPolicy};
+use jp_conversation::{ByteSize, Compaction, Labels, Title, ToolCallPolicy};
 use jp_term::{
     sanitize::{ContentClass, SanitizeMode, sanitize_str},
     table::DetailItem,
@@ -264,6 +264,11 @@ impl DerivedText {
             Some(mode) => Cow::Owned(sanitize_str(text, ContentClass::DerivedString, mode)),
             None => Cow::Borrowed(text),
         }
+    }
+
+    /// `title` as it is shown.
+    pub(crate) fn title(self, title: &Title) -> Cow<'_, str> {
+        self.show(title.raw())
     }
 }
 

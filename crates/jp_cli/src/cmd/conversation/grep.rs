@@ -2,7 +2,7 @@ use std::{borrow::Cow, collections::HashSet, fmt::Write as _, num::NonZeroUsize,
 
 use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
-use jp_conversation::ConversationId;
+use jp_conversation::{ConversationId, Title};
 use jp_term::{
     osc::hyperlink,
     width::{
@@ -410,7 +410,9 @@ impl Grep {
             }
         };
 
-        group.title = title_for(ctx, &handle);
+        // Searched and reported as stored; a terminal is shown it through
+        // `shown_groups`.
+        group.title = title_for(ctx, &handle).map(Title::into_raw);
 
         // Counts down as matches are taken, so `--max-matches` applies across
         // the whole conversation rather than per scope.
@@ -530,8 +532,7 @@ impl Grep {
     fn render_hits(&self, groups: &[ConversationHits], matcher: &Matcher, ctx: &Ctx) {
         let pretty = ctx.printer.pretty_printing_enabled();
         let columns = ctx.term.width.map(usize::from);
-        let derived = DerivedText::new(pretty, ctx.config().style.sanitize);
-        let groups = &shown_groups(groups, matcher, derived);
+        let groups = &shown_groups(groups, matcher, ctx.derived_text());
 
         // Following `grep`, `--` group separators belong to context output. They
         // delimit blocks of surrounding lines; with no `--context` there are no
@@ -567,10 +568,7 @@ impl Grep {
     /// Print the matched and context lines with no coordinates and no
     /// separators, for piping content into another tool.
     fn render_plain_text(groups: &[ConversationHits], ctx: &Ctx) {
-        let derived = DerivedText::new(
-            ctx.printer.pretty_printing_enabled(),
-            ctx.config().style.sanitize,
-        );
+        let derived = ctx.derived_text();
 
         // Verbatim, like every unbudgeted output path: trailing whitespace can
         // be the match itself, and machine output must not edit the text. Only

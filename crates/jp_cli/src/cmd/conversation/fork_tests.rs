@@ -9,7 +9,7 @@ use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::{AppConfig, PartialAppConfig};
 use jp_conversation::{
     Conversation, ConversationEvent, ConversationId, ConversationStream, Labels, OverlayAction,
-    OverlayMatcher, OverlayPatch,
+    OverlayMatcher, OverlayPatch, Title,
     event::{ChatRequest, ChatResponse, TurnStart},
 };
 use jp_printer::{OutputFormat, Printer};
@@ -822,7 +822,7 @@ fn test_conversation_fork() {
                 range: TurnSelection::default(),
                 compact: CompactFlag::default(),
                 no_turns: false,
-                title: Some("my custom title".to_owned()),
+                title: Some("my custom title".into()),
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -841,8 +841,14 @@ fn test_conversation_fork() {
                 convs.sort_by_key(|v| v.0);
                 assert_eq!(source_id, convs[0].0);
 
-                assert_eq!(convs[0].1.title.as_deref(), Some("original title"));
-                assert_eq!(convs[1].1.title.as_deref(), Some("my custom title"));
+                assert_eq!(
+                    convs[0].1.title.as_ref().map(Title::raw),
+                    Some("original title")
+                );
+                assert_eq!(
+                    convs[1].1.title.as_ref().map(Title::raw),
+                    Some("my custom title")
+                );
             },
         }),
         ("labels are inherited", TestCase {
@@ -1431,7 +1437,7 @@ fn fork_targets_correct_source() {
         range: TurnSelection::default(),
         compact: CompactFlag::default(),
         no_turns: false,
-        title: Some("forked-from-b".to_owned()),
+        title: Some("forked-from-b".into()),
     };
     let handle_b = ctx.workspace.acquire_conversation(&id_b).unwrap();
     tokio::runtime::Runtime::new()
@@ -1454,7 +1460,10 @@ fn fork_targets_correct_source() {
         .unwrap();
 
     // Title comes from the --title flag, not from the source.
-    assert_eq!(fork_conv.title.as_deref(), Some("forked-from-b"));
+    assert_eq!(
+        fork_conv.title.as_ref().map(Title::raw),
+        Some("forked-from-b")
+    );
 
     // The fork should carry B's content, not A's.
     let fork_handle = ctx.workspace.acquire_conversation(fork_id).unwrap();

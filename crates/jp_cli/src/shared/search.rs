@@ -15,7 +15,7 @@ use std::{
     },
 };
 
-use jp_conversation::{ConversationId, EventKind, event::ChatResponse};
+use jp_conversation::{ConversationId, EventKind, Title, event::ChatResponse};
 use jp_workspace::ConversationHandle;
 use rayon::prelude::*;
 use regex::RegexBuilder;
@@ -137,7 +137,7 @@ pub(crate) fn event_lines(kind: &EventKind) -> Vec<Cow<'_, str>> {
 }
 
 /// Read the conversation's title from its metadata.
-pub(crate) fn title_for(ctx: &Ctx, handle: &ConversationHandle) -> Option<String> {
+pub(crate) fn title_for(ctx: &Ctx, handle: &ConversationHandle) -> Option<Title> {
     ctx.workspace
         .metadata(handle)
         .ok()
@@ -497,7 +497,7 @@ fn id_matches(ctx: &Ctx, id: ConversationId, matcher: &Matcher) -> bool {
     };
 
     if let Some(title) = title_for(ctx, &handle)
-        && matcher.is_match(&title)
+        && matcher.is_match(title.raw())
     {
         return true;
     }

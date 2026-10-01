@@ -8,7 +8,7 @@
 //! the verb.
 
 use crossterm::style::Stylize as _;
-use jp_conversation::ConversationId;
+use jp_conversation::{ConversationId, Title};
 use jp_inquire::prompt::TerminalPromptBackend;
 use jp_printer::Printer;
 use jp_workspace::ConversationHandle;
@@ -207,7 +207,7 @@ impl Label {
             if ctx.printer.format().is_json() {
                 print_json(
                     &ctx.printer,
-                    &report.json(&applied.changes, id, title.as_deref()),
+                    &report.json(&applied.changes, id, title.as_ref().map(Title::raw)),
                 );
                 continue;
             }
@@ -216,7 +216,8 @@ impl Label {
             // script reads, so they go to stdout whether or not the chrome
             // collapsed.
             if !collapse {
-                let target = conversation_target(id, title.as_deref());
+                let shown = title.as_ref().map(|title| ctx.derived_text().title(title));
+                let target = conversation_target(id, shown.as_deref());
                 report.print_chrome(&ctx.printer, &applied.changes, &target);
             }
 

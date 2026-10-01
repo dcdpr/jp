@@ -27,7 +27,7 @@ use jp_config::{
     plugins::{PluginsConfig, command::RunPolicy},
     util::{build, list_configs_in_load_path},
 };
-use jp_conversation::{ConversationId, ConversationStream, EventId, event::ChatRequest};
+use jp_conversation::{ConversationId, ConversationStream, EventId, Title, event::ChatRequest};
 use jp_editor::{EditOutcome, EditorBackend};
 use jp_inquire::{
     ReplyEditMode, ReplyOutcome,
@@ -1079,7 +1079,11 @@ fn lock_for_query(
         let config = new_conversation_config(ctx, &request.cfg)?;
 
         let conversation = jp_conversation::Conversation {
-            title: request.title.clone().filter(|t| !t.trim().is_empty()),
+            title: request
+                .title
+                .as_deref()
+                .filter(|t| !t.trim().is_empty())
+                .map(Title::from),
             expires_at,
             ..jp_conversation::Conversation::default()
         };
@@ -1407,14 +1411,16 @@ fn resolve_title(
 }
 
 /// A title request in flight, yielding `None` when it produced nothing usable.
-type TitleFuture = Pin<Box<dyn Future<Output = Option<String>> + Send>>;
+type TitleFuture = Pin<Box<dyn Future<Output = Option<Title>> + Send>>;
 
 /// Ask the title model for a name, reporting a failure rather than returning
 /// it: a conversation without a generated title is still a working one.
-async fn generate_title(task: TitleGeneratorTask, conversation: ConversationId) -> Option<String> {
+async fn generate_title(task: TitleGeneratorTask, conversation: ConversationId) -> Option<Title> {
     match task.generate().await {
         Ok(Some(title)) => {
-            debug!(%conversation, %title, "Generated a conversation title.");
+            // Debug-formatted: logs can reach a terminal, and a title is the
+            // model's text.
+            debug!(%conversation, title = ?title.raw(), "Generated a conversation title.");
             Some(title)
         }
         Ok(None) => {
@@ -1439,7 +1445,7 @@ async fn generate_title(task: TitleGeneratorTask, conversation: ConversationId) 
 async fn beside_title<T>(
     turn: impl Future<Output = T>,
     title: Option<TitleFuture>,
-    write: impl FnOnce(String),
+    write: impl FnOnce(Title),
 ) -> (T, Option<TitleFuture>) {
     let Some(mut title) = title else {
         return (turn.await, None);
@@ -1468,7 +1474,7 @@ async fn beside_title<T>(
 ///
 /// A title can arrive after the turn it was generated for, by which time the
 /// user may have renamed the conversation themselves.
-fn write_title(lock: &ConversationLock, title: String) {
+fn write_title(lock: &ConversationLock, title: Title) {
     if lock.metadata().title.is_some() {
         debug!(conversation = %lock.id(), "Already titled; dropping the generated title.");
         return;
@@ -1485,7 +1491,7 @@ fn write_title(lock: &ConversationLock, title: String) {
 /// loop.
 struct ArrivedTitle {
     conversation: ConversationId,
-    title: String,
+    title: Title,
 }
 
 /// Titles that finished after their turn had let go of the conversation.
@@ -1500,7 +1506,7 @@ struct ArrivedTitle {
 /// be set aside for a turn that has already released the lock.
 #[derive(Clone)]
 struct Titles {
-    waiting: Arc<Mutex<HashMap<ConversationId, String>>>,
+    waiting: Arc<Mutex<HashMap<ConversationId, Title>>>,
     arrived: mpsc::UnboundedSender<ArrivedTitle>,
 }
 
@@ -1931,8 +1937,10 @@ fn handle_set_title(
 
     let title = req
         .title
-        .map(|title| title.trim().to_owned())
-        .filter(|title| !title.is_empty());
+        .as_deref()
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map(Title::from);
 
     let mut conv = lock.into_mut();
     conv.update_metadata(|meta| meta.title = title);
@@ -2003,7 +2011,7 @@ fn draft_path(
     });
 
     Some(
-        fs.build_conversation_dir(id, title.as_deref(), true)
+        fs.build_conversation_dir(id, title.as_ref().map(Title::raw), true)
             .join(crate::editor::QUERY_FILENAME),
     )
 }
@@ -2257,7 +2265,7 @@ fn handle_list_conversations(workspace: &Workspace, req_id: Option<String>) -> H
         .conversations()
         .map(|(id, meta)| ConversationSummary {
             id: id.to_string(),
-            title: meta.title.clone(),
+            title: meta.title.clone().map(Title::into_raw),
             last_activated_at: meta.last_activated_at,
             pinned_at: meta.pinned_at,
             events_count: meta.events_count,
@@ -2327,7 +2335,8 @@ fn handle_read_events(
     let title = workspace
         .metadata(&handle)
         .ok()
-        .and_then(|meta| meta.title.clone());
+        .and_then(|meta| meta.title.clone())
+        .map(Title::into_raw);
 
     HostToPlugin::Events(EventsResponse {
         id: req_id,

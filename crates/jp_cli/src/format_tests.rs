@@ -33,6 +33,20 @@ fn derived_text_is_filtered_for_pretty_output_only() {
     );
 }
 
+#[test]
+fn a_title_is_shown_like_any_derived_string() {
+    let title = Title::from("Evil\x1b[2J title");
+
+    assert_eq!(
+        DerivedText::new(true, Sanitization::Strip).title(&title),
+        "Evil title"
+    );
+    assert_eq!(
+        DerivedText::new(false, Sanitization::Strip).title(&title),
+        "Evil\x1b[2J title"
+    );
+}
+
 /// Values are listed beneath their key rather than comma-separated, because a
 /// value may contain a comma itself.
 #[test]

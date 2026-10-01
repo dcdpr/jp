@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationEvent, ConversationId, event::ChatRequest};
-use jp_printer::{OutputFormat, Printer};
+use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_workspace::{
     LockResult, Workspace,
     session::{Session, SessionId, SessionSource},
@@ -65,6 +65,61 @@ fn setup(id: ConversationId) -> Ctx {
     // Pin "now" to a specific point so we can assert on the bump.
     ctx.set_now(Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap());
     ctx
+}
+
+/// A context holding one conversation titled `title`, printing pretty output to
+/// the returned buffer.
+fn setup_titled(id: ConversationId, title: &str) -> (Ctx, SharedBuffer) {
+    let mut workspace = Workspace::in_memory("/tmp/jp-cli-use-test");
+    workspace.create_conversation_with_id(
+        id,
+        Conversation {
+            title: Some(title.into()),
+            ..Default::default()
+        },
+        Arc::new(AppConfig::new_test()),
+    );
+
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+    let ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        Some(test_session()),
+        printer,
+    );
+
+    (ctx, out)
+}
+
+#[test]
+fn the_switch_notice_shows_the_title_without_its_escapes() {
+    // A title is shown the way `style.sanitize` asks: no erase, and none of the
+    // title's own styling, only the yellow JP gives it.
+    let id = make_id(3000);
+    let (mut ctx, out) = setup_titled(id, "Evil\x1b[2J \x1b[31mtitle");
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+
+    let cmd = Use {
+        target: PositionalIds::from_targets(vec![]),
+        grep: None,
+        range: CreationRange::default(),
+    };
+    cmd.run(&mut ctx, vec![handle]).unwrap();
+    ctx.printer.flush();
+
+    assert_eq!(
+        *out.lock(),
+        format!(
+            "Switched active conversation from {} to {}: {}\n",
+            "(none)".grey(),
+            id.to_string().bold().yellow(),
+            "Evil title".yellow()
+        )
+    );
 }
 
 /// Without contention, `Use::run` bumps the conversation's `last_activated_at`

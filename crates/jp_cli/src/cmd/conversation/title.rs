@@ -1,12 +1,13 @@
 //! LLM-driven conversation title generation.
 
 use jp_config::{AppConfig, PartialAppConfig};
-use jp_conversation::ConversationStream;
+use jp_conversation::{ConversationStream, Title as ConversationTitle};
 use jp_llm::{
     event::NoticeSink,
     provider,
     title::{self, TitleRequest},
 };
+use jp_term::sanitize::strip_controls;
 use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
@@ -100,14 +101,15 @@ impl Title {
                 vec![],
             )
             .await?;
-            for candidate in candidates {
-                ctx.printer.println(candidate);
+            let derived = ctx.derived_text();
+            for candidate in &candidates {
+                ctx.printer.println(&*derived.title(candidate));
             }
             return Ok(());
         }
 
         let title = select(ctx, &cfg, events, self.count, self.model.is_some()).await?;
-        ctx.printer.println(title.clone());
+        ctx.printer.println(&*ctx.derived_text().title(&title));
         conv.update_metadata(|m| m.title = Some(title));
 
         Ok(())
@@ -142,8 +144,8 @@ pub(super) async fn select(
     events: ConversationStream,
     count: usize,
     override_model: bool,
-) -> Result<String> {
-    let mut rejected: Vec<String> = vec![];
+) -> Result<ConversationTitle> {
+    let mut rejected: Vec<ConversationTitle> = vec![];
     let notices = notice_sink(&ctx.printer);
 
     loop {
@@ -166,24 +168,38 @@ pub(super) async fn select(
 
         // Discarded candidates stay selectable: a user who asked for more may
         // still prefer one of the earlier suggestions.
-        let mut choices = candidates.clone();
-        choices.extend(rejected.iter().cloned());
-        choices.push(MORE.to_owned());
-        choices.push(MANUAL.to_owned());
+        let mut titles = candidates.clone();
+        titles.extend(rejected.iter().cloned());
 
         let mut writer = ctx.printer.prompt_writer();
-        let choice =
-            inquire::Select::new("Conversation Title", choices).prompt_with_writer(&mut writer)?;
+        let index = inquire::Select::new("Conversation Title", picker_rows(&titles))
+            .raw_prompt_with_writer(&mut writer)?
+            .index;
 
-        match choice.as_str() {
-            MORE => rejected.extend(candidates),
-            MANUAL => {
+        // The rows are the titles in order, then the two actions, so the index
+        // names the title as the model wrote it.
+        match index.checked_sub(titles.len()) {
+            None => return Ok(titles.swap_remove(index)),
+            Some(0) => rejected.extend(candidates),
+            Some(_) => {
                 let title = inquire::Text::new("Title").prompt_with_writer(&mut writer)?;
-                return Ok(title.trim().to_owned());
+                return Ok(title.trim().into());
             }
-            _ => return Ok(choice),
         }
     }
+}
+
+/// The title picker's rows: each title as one line of plain text, then the
+/// action that generates more and the one that takes a hand-written title.
+///
+/// A picker row is redrawn in place as the cursor moves, so a title keeps no
+/// control character there, whatever `style.sanitize` says.
+fn picker_rows(titles: &[ConversationTitle]) -> Vec<String> {
+    titles
+        .iter()
+        .map(|title| strip_controls(title.raw(), &[]))
+        .chain([MORE.to_owned(), MANUAL.to_owned()])
+        .collect()
 }
 
 /// Generate `count` candidate titles for a conversation.
@@ -205,8 +221,8 @@ async fn generate(
     events: ConversationStream,
     count: usize,
     override_model: bool,
-    rejected: Vec<String>,
-) -> Result<Vec<String>> {
+    rejected: Vec<ConversationTitle>,
+) -> Result<Vec<ConversationTitle>> {
     let override_id = override_model.then(|| cfg.assistant.model.id.clone());
     let model = title::resolve_model(cfg, override_id.as_ref());
     let model_id = model.id.resolved().clone();
@@ -218,7 +234,10 @@ async fn generate(
         events,
         model,
         count,
-        rejected,
+        rejected: rejected
+            .into_iter()
+            .map(ConversationTitle::into_raw)
+            .collect(),
         max_response_bytes: cfg.assistant.request.max_response_bytes.bytes(),
         notices: notices.clone(),
     })
@@ -231,7 +250,7 @@ async fn generate(
         });
     }
 
-    Ok(titles)
+    Ok(titles.into_iter().map(ConversationTitle::from).collect())
 }
 
 #[cfg(test)]

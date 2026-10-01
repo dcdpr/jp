@@ -746,7 +746,7 @@ fn import_runs_only_on_first_establishment() {
 /// Write a valid `metadata.json` carrying `title`, with the given mtime.
 fn write_meta(conv_dir: &Utf8Path, title: Option<&str>, mtime_secs: u64) {
     let conv = Conversation {
-        title: title.map(str::to_owned),
+        title: title.map(Title::from),
         ..Default::default()
     };
     fs::write(
@@ -859,7 +859,7 @@ fn metadata_resolves_by_newer_mtime() {
 
     let conv = storage.load_conversation_metadata(&id).unwrap();
     assert_eq!(
-        conv.title.as_deref(),
+        conv.title.as_ref().map(Title::raw),
         Some("user title"),
         "newer metadata wins"
     );
@@ -895,7 +895,7 @@ fn metadata_tie_prefers_user_local() {
 
     let conv = storage.load_conversation_metadata(&id).unwrap();
     assert_eq!(
-        conv.title.as_deref(),
+        conv.title.as_ref().map(Title::raw),
         Some("user title"),
         "equal mtimes resolve to the durable user-local copy"
     );
@@ -1531,7 +1531,7 @@ fn metadata_and_stream_resolve_independently() {
 
     let conv = storage.load_conversation_metadata(&id).unwrap();
     assert_eq!(
-        conv.title.as_deref(),
+        conv.title.as_ref().map(Title::raw),
         Some("workspace title"),
         "metadata comes from the newer-metadata root"
     );
@@ -1575,7 +1575,7 @@ fn dual_write_renames_in_both_roots_without_clobbering() {
             .persist_conversation(
                 &id,
                 &Conversation {
-                    title: Some(title.to_owned()),
+                    title: Some(title.into()),
                     ..Default::default()
                 },
                 &ConversationStream::new_test(),
@@ -1626,7 +1626,7 @@ fn find_user_local_conversation_dir_tracks_rename() {
         .persist_conversation(
             &id,
             &Conversation {
-                title: Some("heading title".to_owned()),
+                title: Some("heading title".into()),
                 ..Default::default()
             },
             &ConversationStream::new_test(),

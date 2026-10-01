@@ -6,6 +6,7 @@ use std::{
 use async_trait::async_trait;
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
+use inquire::TextAnswer;
 use jp_config::{
     AppConfig,
     conversation::tool::{ToolConfig, ToolSource, style::PartialDisplayStyleConfig},
@@ -1107,7 +1108,7 @@ impl PromptBackend for HeldPromptBackend {
         message: &str,
         _default: Option<&str>,
         _writer: &mut dyn std::io::Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<TextAnswer, InquireError> {
         panic!("unexpected prompt: {message}")
     }
 

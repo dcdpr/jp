@@ -16,8 +16,11 @@ use jp_workspace::{Workspace, session::Session};
 use tokio::runtime::{Handle, Runtime};
 
 use crate::{
-    Globals, Result, bootstrap::ExecutionContext, config_pipeline::ConfigResetEvents,
-    format::sanitize_mode, signals::SignalRouter,
+    Globals, Result,
+    bootstrap::ExecutionContext,
+    config_pipeline::ConfigResetEvents,
+    format::{DerivedText, sanitize_mode},
+    signals::SignalRouter,
 };
 
 /// Context for the CLI application
@@ -228,6 +231,14 @@ impl Ctx {
         self.printer
             .set_sanitize_mode(sanitize_mode(config.style.sanitize));
         std::mem::replace(&mut self.config, config)
+    }
+
+    /// How this run shows strings derived from conversations, such as titles.
+    pub(crate) fn derived_text(&self) -> DerivedText {
+        DerivedText::new(
+            self.printer.pretty_printing_enabled(),
+            self.config.style.sanitize,
+        )
     }
 
     /// Get a runtime handle.

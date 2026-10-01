@@ -97,7 +97,7 @@ use jp_config::{
     style::reasoning::ReasoningDisplayConfig,
 };
 use jp_conversation::{
-    Conversation, ConversationEvent, ConversationId, ConversationStream, EventId, Labels,
+    Conversation, ConversationEvent, ConversationId, ConversationStream, EventId, Labels, Title,
     event::{ChatRequest, ChatResponse},
     stream::{ApplyDelta, ResetDelta},
     thread::{Thread, ThreadBuilder},
@@ -528,7 +528,7 @@ impl Query {
 
         // Show conversation identity in the terminal title.
         if ctx.term.is_tty {
-            set_terminal_title(lock.id(), conv_title.as_deref());
+            set_terminal_title(lock.id(), conv_title.as_ref().map(Title::raw));
         }
 
         let cid = lock.id();
@@ -544,7 +544,7 @@ impl Query {
             || {
                 ctx.workspace
                     .root()
-                    .join(cid.to_dirname(stored_title.as_deref()))
+                    .join(cid.to_dirname(stored_title.as_ref().map(Title::raw)))
             },
             // The query draft is a transient editor scratch file, so it is
             // written to durable user-local storage (`user = true`) and never
@@ -552,7 +552,7 @@ impl Query {
             |fs| {
                 fs.find_user_local_conversation_dir(&cid)
                     .unwrap_or_else(|| {
-                        fs.build_conversation_dir(&cid, stored_title.as_deref(), true)
+                        fs.build_conversation_dir(&cid, stored_title.as_ref().map(Title::raw), true)
                     })
             },
         );
@@ -756,7 +756,7 @@ impl Query {
                     debug!("Using leading markdown heading as conversation title");
                     setup.update_metadata(|m| m.title = Some(title.clone()));
                     if ctx.term.is_tty {
-                        jp_term::osc::set_title(format!("{cid}: {title}"));
+                        jp_term::osc::set_title(format!("{cid}: {}", title.raw()));
                     }
                 }
                 NewTitle::Generate => {
@@ -1880,7 +1880,7 @@ enum QuerySource {
 #[derive(Debug, PartialEq)]
 pub(crate) enum NewTitle {
     /// Use this text, taken verbatim from a leading markdown heading.
-    FromHeading(String),
+    FromHeading(Title),
 
     /// Generate a title in the background via the LLM.
     Generate,
@@ -1901,7 +1901,7 @@ pub(crate) fn resolve_new_title(
     content: &str,
 ) -> NewTitle {
     if from_heading && let Some(title) = jp_md::heading::leading_heading(content) {
-        return NewTitle::FromHeading(title);
+        return NewTitle::FromHeading(title.into());
     }
 
     if generate_auto {
@@ -1921,12 +1921,12 @@ pub(crate) fn resolve_new_title(
 /// - Neither keeps `current`, whether that came from a fork inheriting the
 ///   source's title, a resumed conversation, or a new one with none.
 fn resolve_title_override(
-    current: Option<String>,
+    current: Option<Title>,
     title: Option<&str>,
     no_title: bool,
-) -> Option<String> {
+) -> Option<Title> {
     if let Some(title) = title {
-        return Some(title.to_owned());
+        return Some(title.into());
     }
 
     if no_title {
@@ -3001,6 +3001,8 @@ fn mount_partial_rule(rule_path: &str, write: bool) -> PartialFsRuleConfig {
 }
 
 /// Set the terminal title to show the active conversation.
+///
+/// `set_title` removes any control character from the title it writes.
 fn set_terminal_title(id: ConversationId, title: Option<&str>) {
     let display = match title {
         Some(t) => format!("{id}: {t}"),

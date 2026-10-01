@@ -273,7 +273,7 @@ impl Edit {
                 // A bare `--title` asks for a generated one; `conversation
                 // title` owns that path and its flags.
                 let title = if let Some(title) = new_title {
-                    title.clone()
+                    title.as_str().into()
                 } else {
                     let cfg = ctx.config();
                     let events = conv.events().clone();

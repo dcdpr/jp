@@ -21,7 +21,7 @@ use crate::{
     cmd::Error as CmdError,
     ctx::Ctx,
     error::Result,
-    format::{conversation::DetailsFmt, label_detail_items},
+    format::{DerivedText, conversation::DetailsFmt, label_detail_items},
 };
 
 /// Confirmation-prompt preference shared by mutating commands.
@@ -175,7 +175,7 @@ pub(crate) fn confirm_conversation_action(
         id.to_string()
     };
 
-    let details = action_details(lock, active_id, pretty)
+    let details = action_details(lock, active_id, pretty, ctx.derived_text())
         .with_heading(format!("{} conversation {id_label}", action.progressive()));
 
     // `InlineSelect` splits at the last newline, printing everything before it
@@ -214,18 +214,22 @@ fn decide(answer: std::result::Result<char, InquireError>) -> Result<bool> {
     }
 }
 
-/// Build the details block shown above a confirmation prompt.
+/// Build the details block shown above a confirmation prompt, with the title
+/// shown the way `derived` shows it.
+///
+/// The block is the prompt's preamble, which the prompt widget writes itself.
 fn action_details(
     lock: &ConversationLock,
     active_id: Option<ConversationId>,
     pretty: bool,
+    derived: DerivedText,
 ) -> DetailsFmt {
     let id = lock.id();
     let meta = lock.metadata();
     let events = lock.events();
 
     DetailsFmt::new(id)
-        .with_title(meta.title.as_ref())
+        .with_title(meta.title.as_ref().map(|title| derived.title(title)))
         .with_event_count(events.len())
         .with_turn_count(events.iter_turns().len())
         .with_last_message_at(events.last().map(|v| v.event.timestamp))
