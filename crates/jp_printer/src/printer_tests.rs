@@ -118,6 +118,95 @@ fn test_pretty_true_preserves_ansi() {
 }
 
 #[test]
+fn pretty_output_keeps_what_jp_draws_with_and_drops_the_rest() {
+    // Whoever printed it, text cannot clear the screen or retitle the window;
+    // styling and a status line redrawn in place still work.
+    let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.print("\x1b[31mred\x1b[0m \x1b[2Jcleared");
+    printer.eprint("\r\x1b[Kstatus\x1b]0;title\x07");
+    printer.flush();
+
+    assert_eq!(*out.lock(), "\x1b[31mred\x1b[0m cleared");
+    assert_eq!(*err.lock(), "\r\x1b[Kstatus");
+}
+
+#[test]
+fn a_sequence_split_across_writes_is_dropped_whole() {
+    // `write!` reaches the worker one argument at a time.
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+
+    write!(printer.out_writer(), "a\x1b[{}Jb", 2).unwrap();
+    printer.flush();
+
+    assert_eq!(*out.lock(), "ab");
+}
+
+#[test]
+fn a_line_printed_for_a_prompt_is_filtered_too() {
+    // The line names what the question is about, such as a conversation's
+    // title.
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.prompt_println("Remove \x1b[2J\"evil\"?");
+    printer.flush();
+
+    assert_eq!(*out.lock(), "Remove \"evil\"?\n");
+}
+
+#[test]
+fn a_widget_draws_with_the_whole_terminal() {
+    // A widget moves its own cursor between frames.
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "\x1b[1A\x1b[2Kanswer").unwrap();
+    }
+    printer.flush();
+
+    assert_eq!(*out.lock(), "\x1b[1A\x1b[2Kanswer");
+}
+
+#[test]
+fn off_lets_pretty_output_through_as_written() {
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.set_sanitize_mode(SanitizeMode::Off);
+    printer.print("a\x1b[2Jb");
+    printer.flush();
+
+    assert_eq!(*out.lock(), "a\x1b[2Jb");
+}
+
+#[test]
+fn visualize_marks_what_pretty_output_lost() {
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.set_sanitize_mode(SanitizeMode::Visualize);
+    printer.print("a\x1b[2Jb");
+    printer.flush();
+
+    assert_eq!(*out.lock(), "a\u{241b}b");
+}
+
+#[test]
+fn typewriter_text_the_floor_drops_is_not_left_pending() {
+    // A device control string's payload counts as visible when the task is
+    // queued, and is never written. Left counted, it slows every task after it.
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.print("ab\x1bPpayload\x1b\\".typewriter(Duration::from_millis(1)));
+    printer.flush();
+
+    assert_eq!(*out.lock(), "ab");
+    assert_eq!(
+        printer.delay_control.pending_chars.load(Ordering::Relaxed),
+        0
+    );
+}
+
+#[test]
 fn test_pretty_false_strips_typewriter_ansi() {
     let (printer, out, _) = Printer::memory(OutputFormat::Text);
 

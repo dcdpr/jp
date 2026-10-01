@@ -1,6 +1,7 @@
 //! The printer module.
 
 use std::{
+    borrow::Cow,
     collections::VecDeque,
     fmt::{self, Write},
     io,
@@ -13,7 +14,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use jp_term::{background::DefaultBackground, shade::ShadedWriter};
+use jp_term::{
+    background::DefaultBackground,
+    sanitize::{OutputFloor, SanitizeMode},
+    shade::ShadedWriter,
+};
 use parking_lot::{Condvar, Mutex};
 use tracing::{debug, error};
 
@@ -164,6 +169,7 @@ impl Printer {
                     out: Sink::new(out, format),
                     err: Sink::new(err, format),
                     tty,
+                    floors: format.is_pretty().then(Floors::new),
                     rx,
                     delay_control,
                     regions: RegionStack::new(),
@@ -602,7 +608,7 @@ impl Printer {
         let writer = PrinterWriter {
             printer: self,
             target: self.prompt_target(),
-            origin: PrintOrigin::Prompt,
+            origin: PrintOrigin::Widget,
         };
         let suspension = self.begin_prompt_session();
 
@@ -706,6 +712,17 @@ impl Printer {
         self.delay_control
             .max_latency_nanos
             .store(nanos, Ordering::Relaxed);
+    }
+
+    /// Filter text bound for a terminal under `mode` from now on.
+    ///
+    /// Under a pretty format, every task except a widget's own drawing passes
+    /// an [`OutputFloor`] on its way out: it keeps the escape sequences JP's
+    /// output is made of and drops the rest the way `mode` says.
+    /// Tasks already queued are filtered under the mode they were queued under.
+    /// Defaults to [`SanitizeMode::Strip`].
+    pub fn set_sanitize_mode(&self, mode: SanitizeMode) {
+        self.send(Command::Sanitize(mode));
     }
 
     /// Signal that the current typewriter producer is done emitting.
@@ -1076,7 +1093,7 @@ impl fmt::Write for OwnedPrinterWriter {
             content: s.to_owned(),
             mode: PrintMode::Instant,
             target: self.target,
-            origin: PrintOrigin::Prompt,
+            origin: PrintOrigin::Widget,
         };
         self.tx.send(Command::Print(task)).map_err(|_| fmt::Error)
     }
@@ -1146,6 +1163,10 @@ struct Worker<O, E> {
     /// The TTY writer for interactive prompts (`/dev/tty`).
     tty: Option<Box<dyn io::Write + Send>>,
 
+    /// What each stream's text is filtered to on its way out, or `None` for a
+    /// format that is not pretty, whose sinks strip every escape sequence.
+    floors: Option<Floors>,
+
     /// The receiver for print commands.
     rx: Receiver<Command>,
 
@@ -1210,6 +1231,7 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
                     *self.delay_control.skip.lock() = false;
                     let _ = tx.send(());
                 }
+                Command::Sanitize(mode) => self.set_sanitize_mode(mode),
                 Command::Shutdown => break,
             }
         }
@@ -1228,7 +1250,7 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
     /// Only the prompt session's own writes reach a terminal someone else owns;
     /// everything else waits for it to come back.
     fn admit(&mut self, task: PrintTask) -> Option<PrintTask> {
-        if !self.regions.is_suspended() || task.origin == PrintOrigin::Prompt {
+        if !self.regions.is_suspended() || task.origin != PrintOrigin::Content {
             return Some(task);
         }
 
@@ -1283,9 +1305,44 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
                     // Nested FlushInstant: we're already draining, just signal.
                     let _ = tx.send(());
                 }
+                Command::Sanitize(mode) => self.set_sanitize_mode(mode),
                 Command::Shutdown => break,
             }
         }
+    }
+
+    /// Filter everything printed from now on under `mode`.
+    fn set_sanitize_mode(&mut self, mode: SanitizeMode) {
+        if let Some(floors) = &mut self.floors {
+            floors.set_mode(mode);
+        }
+    }
+
+    /// `task`'s content as its stream may receive it.
+    ///
+    /// A widget's own drawing goes out as written: it moves the cursor and
+    /// switches terminal modes on purpose.
+    fn shown<'t>(&mut self, task: &'t PrintTask) -> Cow<'t, str> {
+        match &mut self.floors {
+            Some(floors) if task.origin != PrintOrigin::Widget => {
+                Cow::Owned(floors.get(task.target).filter(&task.content))
+            }
+            _ => Cow::Borrowed(&task.content),
+        }
+    }
+
+    /// Release the pending-counter share of the visible characters filtering
+    /// took out of a typewriter task.
+    ///
+    /// The counter was raised by what the task carried when it was queued, and
+    /// writing it releases only what is written.
+    fn release_filtered(&self, task: &PrintTask, content: &str) {
+        if !matches!(task.mode, PrintMode::Typewriter(_)) {
+            return;
+        }
+
+        let removed = visible_char_count(&task.content).saturating_sub(visible_char_count(content));
+        release_pending(&self.delay_control, removed);
     }
 
     /// Process a print task instantly, ignoring typewriter delays.
@@ -1294,18 +1351,24 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
             return;
         }
 
+        let content = self.shown(task);
+        self.release_filtered(task, &content);
+        if content.is_empty() {
+            return;
+        }
+
         self.regions.erase(&mut self.err);
-        if self.write_task_instant(task) {
-            self.regions.set_content_open(!task.content.ends_with('\n'));
+        if self.write_task_instant(task, &content) {
+            self.regions.set_content_open(!content.ends_with('\n'));
         }
         self.regions.redraw(&mut self.err);
     }
 
-    /// Write a print task's content in one shot.
+    /// Write `content`, what is shown of a print task, in one shot.
     ///
     /// Returns whether the content reached a stream, which is what decides
     /// where the cursor now sits.
-    fn write_task_instant(&mut self, task: &PrintTask) -> bool {
+    fn write_task_instant(&mut self, task: &PrintTask, content: &str) -> bool {
         let writer: &mut dyn io::Write = match task.target {
             PrintTarget::Out => &mut self.out,
             PrintTarget::Err => &mut self.err,
@@ -1315,7 +1378,7 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
             },
         };
 
-        let _err = writer.write_all(task.content.as_bytes());
+        let _err = writer.write_all(content.as_bytes());
         let _err = writer.flush();
 
         // A typewriter task drained instantly still contributed to the
@@ -1323,7 +1386,7 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
         // bounded-latency controller doesn't stay biased toward an empty
         // queue.
         if matches!(task.mode, PrintMode::Typewriter(_)) {
-            let count = visible_char_count(&task.content);
+            let count = visible_char_count(content);
             release_pending(&self.delay_control, count);
         }
 
@@ -1343,24 +1406,26 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
             return;
         }
 
+        let content = self.shown(task);
+        self.release_filtered(task, &content);
+        if content.is_empty() {
+            return;
+        }
+
         self.regions.erase(&mut self.err);
-        if self.write_task(task) {
-            self.regions.set_content_open(!task.content.ends_with('\n'));
+        if self.write_task(task, &content) {
+            self.regions.set_content_open(!content.ends_with('\n'));
         }
         self.regions.redraw(&mut self.err);
     }
 
-    /// Write a print task's content, honoring its typewriter pacing.
+    /// Write `content`, what is shown of a print task, honoring the task's
+    /// typewriter pacing.
     ///
     /// Returns whether the content reached a stream, which is what decides
     /// where the cursor now sits.
-    fn write_task(&mut self, task: &PrintTask) -> bool {
-        let PrintTask {
-            content,
-            mode,
-            target,
-            ..
-        } = task;
+    fn write_task(&mut self, task: &PrintTask, content: &str) -> bool {
+        let PrintTask { mode, target, .. } = task;
 
         let writer: &mut dyn io::Write = match target {
             PrintTarget::Out => &mut self.out,
@@ -1424,6 +1489,46 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
         }
 
         true
+    }
+}
+
+/// One [`OutputFloor`] per stream, so a sequence one task leaves unfinished is
+/// completed by the next task on its own stream rather than on another.
+struct Floors {
+    /// Filters `out`.
+    out: OutputFloor,
+
+    /// Filters `err`.
+    err: OutputFloor,
+
+    /// Filters the TTY.
+    tty: OutputFloor,
+}
+
+impl Floors {
+    /// Floors that strip what they drop, until told otherwise.
+    fn new() -> Self {
+        Self {
+            out: OutputFloor::new(SanitizeMode::Strip),
+            err: OutputFloor::new(SanitizeMode::Strip),
+            tty: OutputFloor::new(SanitizeMode::Strip),
+        }
+    }
+
+    /// Filter every stream under `mode` from now on.
+    fn set_mode(&mut self, mode: SanitizeMode) {
+        self.out.set_mode(mode);
+        self.err.set_mode(mode);
+        self.tty.set_mode(mode);
+    }
+
+    /// The floor for `target`.
+    const fn get(&mut self, target: PrintTarget) -> &mut OutputFloor {
+        match target {
+            PrintTarget::Out => &mut self.out,
+            PrintTarget::Err => &mut self.err,
+            PrintTarget::Tty => &mut self.tty,
+        }
     }
 }
 
@@ -1563,19 +1668,26 @@ pub enum PrintTarget {
 
 /// Who a print task belongs to.
 ///
-/// While the terminal is handed to a widget, ordinary output waits and the
-/// widget's own writes go straight through: it is drawing the screen the user
-/// is answering on, and content landing in the middle of that is what the wait
-/// exists to prevent.
+/// While the terminal is handed to a widget, ordinary output waits and a prompt
+/// session's writes go straight through: the widget is drawing the screen the
+/// user is answering on, and content landing in the middle of that is what the
+/// wait exists to prevent.
+///
+/// Under a pretty format, everything but a widget's drawing passes an
+/// [`OutputFloor`] on its way out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PrintOrigin {
     /// Ordinary output: assistant responses, chrome, structured records.
     #[default]
     Content,
 
-    /// Part of a prompt session: the widget's own drawing, or a line written to
-    /// give its question the context it needs to be answerable.
+    /// A line written to give a question the context it needs to be answerable,
+    /// or a notice about the question itself.
     Prompt,
+
+    /// A widget's own drawing, which moves the cursor and switches terminal
+    /// modes as it redraws itself.
+    Widget,
 }
 
 #[derive(Debug, Clone)]
@@ -1591,7 +1703,7 @@ pub struct PrintTask {
     pub target: PrintTarget,
 
     /// Who the task belongs to, which decides whether it may land while a
-    /// widget owns the terminal.
+    /// widget owns the terminal, and whether its content is filtered.
     pub origin: PrintOrigin,
 }
 
@@ -1701,6 +1813,9 @@ pub(crate) enum Command {
     /// Other commands (`Flush`, `Shutdown`) encountered during the drain are
     /// still honored.
     FlushInstant(mpsc::Sender<()>),
+
+    /// Filter what reaches a terminal under this mode from now on.
+    Sanitize(SanitizeMode),
 
     /// Shutdown the printer.
     Shutdown,

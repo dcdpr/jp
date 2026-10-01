@@ -16,6 +16,9 @@
 //! own, for a filter that applies a policy of its own.
 //! [`strip_controls`] removes control characters from text that is only ever
 //! shown as plain text.
+//! [`OutputFloor`] is the least filtering any printed text gets: it keeps the
+//! sequences JP's own output is made of, whoever wrote the text, so a path that
+//! forgot to filter its content still cannot take over the terminal.
 //!
 //! Only what is displayed is filtered, never what is stored.
 //! This is unrelated to `Workspace::sanitize` (storage) and
@@ -35,6 +38,12 @@ const MARKER: char = '\u{241b}';
 
 /// SGR conceal, which hides text from the reader.
 const CONCEAL: u16 = 8;
+
+/// Erase from the cursor to the end of the line.
+const ERASE_TO_END: &str = "\x1b[K";
+
+/// The first parameter of an OSC 8 hyperlink.
+const HYPERLINK: &[u8] = b"8";
 
 /// CAN, which aborts a sequence in progress.
 const CAN: u8 = 0x18;
@@ -77,22 +86,51 @@ pub enum ContentClass {
 }
 
 impl ContentClass {
-    /// Whether SGR sequences survive the filter.
-    const fn keeps_styling(self) -> bool {
-        match self {
+    /// What the class's content may keep.
+    const fn policy(self) -> Policy {
+        let styling = match self {
             Self::ToolOutput | Self::UserMessage => true,
             Self::ModelOutput | Self::DerivedString => false,
-        }
-    }
+        };
 
-    /// Whether [`ContentWriter::finish`] closes a content span with a reset.
-    const fn has_span(self) -> bool {
-        match self {
-            Self::ToolOutput => true,
-            Self::ModelOutput | Self::UserMessage | Self::DerivedString => false,
+        Policy {
+            styling,
+            span: matches!(self, Self::ToolOutput),
+            erase_line: false,
+            carriage_return: false,
+            hyperlinks: false,
         }
     }
 }
+
+/// What a filter lets through, beyond printable text, `\n`, and `\t`.
+#[derive(Debug, Clone, Copy)]
+#[expect(clippy::struct_excessive_bools)]
+struct Policy {
+    /// SGR sequences, less conceal.
+    styling: bool,
+
+    /// Whether [`ContentWriter::finish`] closes a content span with a reset.
+    span: bool,
+
+    /// Erase to the end of the line (`\x1b[K`).
+    erase_line: bool,
+
+    /// `\r`.
+    carriage_return: bool,
+
+    /// OSC 8 hyperlinks, with control characters removed from their targets.
+    hyperlinks: bool,
+}
+
+/// What [`OutputFloor`] lets through: the sequences JP's own output uses.
+const FLOOR: Policy = Policy {
+    styling: true,
+    span: false,
+    erase_line: true,
+    carriage_return: true,
+    hyperlinks: true,
+};
 
 /// What [`ContentWriter`] does with a sequence its class does not allow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,11 +191,17 @@ impl<W: fmt::Write> ContentWriter<W> {
     /// under `mode`.
     #[must_use]
     pub fn new(output: W, class: ContentClass, mode: SanitizeMode) -> Self {
+        Self::with_policy(output, class.policy(), mode)
+    }
+
+    /// Wrap `output`, filtering everything written to it down to `policy` under
+    /// `mode`.
+    fn with_policy(output: W, policy: Policy, mode: SanitizeMode) -> Self {
         Self {
             output,
             parser: Parser::new(),
             sink: Sink {
-                class,
+                policy,
                 mode,
                 buffer: String::new(),
                 open: false,
@@ -182,7 +226,7 @@ impl<W: fmt::Write> ContentWriter<W> {
     pub fn finish(&mut self) -> fmt::Result {
         self.settle();
 
-        if self.sink.class.has_span() {
+        if self.sink.policy.span {
             self.sink.buffer.push_str(RESET);
         }
 
@@ -265,14 +309,14 @@ impl<W: fmt::Write> fmt::Write for ContentWriter<W> {
     }
 }
 
-/// Applies a content class's policy to what the parser recognizes.
+/// Applies a policy to what the parser recognizes.
 ///
 /// vte reports a sequence when it ends and says nothing when one starts, so the
 /// writer marks each `ESC` it feeds as the start of one, and the sink resolves
 /// it on the callback that ends it.
 struct Sink {
-    /// Decides whether styling survives.
-    class: ContentClass,
+    /// Decides which sequences survive.
+    policy: Policy,
 
     /// Decides what a dropped sequence leaves behind.
     mode: SanitizeMode,
@@ -348,6 +392,10 @@ impl Perform for Sink {
                 self.st_pending = false;
                 self.buffer.push(char::from(byte));
             }
+            b'\r' if self.policy.carriage_return => {
+                self.st_pending = false;
+                self.buffer.push('\r');
+            }
             // CAN and SUB abort the sequence in progress, and one marker covers
             // both.
             CAN | SUB if self.open => self.drop_sequence(),
@@ -361,7 +409,14 @@ impl Perform for Sink {
     }
 
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, action: char) {
-        if !is_sgr(intermediates, ignore, action) || !self.class.keeps_styling() {
+        if self.policy.erase_line && is_erase_to_end(params, intermediates, ignore, action) {
+            self.open = false;
+            self.st_pending = false;
+            self.buffer.push_str(ERASE_TO_END);
+            return;
+        }
+
+        if !is_sgr(intermediates, ignore, action) || !self.policy.styling {
             self.drop_sequence();
             return;
         }
@@ -389,8 +444,15 @@ impl Perform for Sink {
         self.drop_sequence();
     }
 
-    fn osc_dispatch(&mut self, _params: &[&[u8]], bell_terminated: bool) {
-        self.drop_sequence();
+    fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
+        if self.policy.hyperlinks && params.first() == Some(&HYPERLINK) {
+            self.open = false;
+            push_hyperlink(&mut self.buffer, params, bell_terminated);
+        } else {
+            self.drop_sequence();
+        }
+
+        // Ended by `ESC \`, the `\` is still to come, and belongs to this string.
         self.st_pending = !bell_terminated;
     }
 
@@ -490,7 +552,7 @@ pub fn sanitize_decoded(text: &str, class: ContentClass, mode: SanitizeMode) -> 
         return Cow::Borrowed(text);
     }
 
-    if !class.keeps_styling() {
+    if !class.policy().styling {
         let mut kept = String::with_capacity(text.len());
         for c in text.chars() {
             if !filtered(c) {
@@ -504,6 +566,60 @@ pub fn sanitize_decoded(text: &str, class: ContentClass, mode: SanitizeMode) -> 
     }
 
     Cow::Owned(sanitize_unclosed(text, class, mode))
+}
+
+/// The least filtering any text bound for a terminal gets: the sequences JP's
+/// own output is made of, and nothing else.
+///
+/// Printable text, `\n`, `\t`, and `\r` pass, as do SGR styling less conceal,
+/// erase to the end of the line (`\x1b[K`), and OSC 8 hyperlinks, whose targets
+/// lose their control characters.
+/// Every other sequence and control character is dropped the way the
+/// [`SanitizeMode`] says, as [`ContentWriter`] drops it.
+///
+/// The floor keeps text from moving the cursor off its line, clearing the
+/// screen, switching terminal modes, or reaching past the character grid to the
+/// window title or the clipboard.
+/// It does not replace filtering content by its [`ContentClass`]: it lets
+/// through styling model output should not carry, and a carriage return or an
+/// erase that rewrites the line it is on.
+///
+/// One floor filters one stream, so a sequence one call leaves unfinished is
+/// completed or dropped by the next.
+pub struct OutputFloor {
+    /// Filters into a buffer each call empties.
+    writer: ContentWriter<String>,
+}
+
+impl OutputFloor {
+    /// A floor that drops what it does not allow the way `mode` says.
+    #[must_use]
+    pub fn new(mode: SanitizeMode) -> Self {
+        Self {
+            writer: ContentWriter::with_policy(String::new(), FLOOR, mode),
+        }
+    }
+
+    /// Filter under `mode` from now on.
+    ///
+    /// A sequence still in progress is dropped first, under the mode it began
+    /// in; a marker that leaves behind comes out of the next call.
+    pub fn set_mode(&mut self, mode: SanitizeMode) {
+        self.writer.settle();
+        // Writing to a `String` is infallible.
+        let _ = self.writer.flush();
+        self.writer.sink.mode = mode;
+    }
+
+    /// `text` as a terminal may receive it.
+    ///
+    /// A sequence `text` ends in the middle of is held back, to be completed or
+    /// dropped by what the next call brings.
+    pub fn filter(&mut self, text: &str) -> String {
+        // Writing to a `String` is infallible.
+        let _ = self.writer.write_str(text);
+        std::mem::take(&mut self.writer.output)
+    }
 }
 
 /// Keeps the visible part of the SGR sequence a parse dispatches.
@@ -528,6 +644,27 @@ impl Perform for SgrProbe {
         push_sgr(&mut escape, &kept);
         self.visible = Some(escape);
     }
+}
+
+/// Whether a CSI dispatch erases from the cursor to the end of the line:
+/// `\x1b[K` or `\x1b[0K`.
+///
+/// Erasing the whole line or the part before the cursor is not one of them.
+fn is_erase_to_end(params: &Params, intermediates: &[u8], ignore: bool, action: char) -> bool {
+    action == 'K' && intermediates.is_empty() && !ignore && params.iter().all(|g| matches!(g, [0]))
+}
+
+/// Append the OSC 8 hyperlink `params` hold, ended the way it was, with every
+/// control character removed from it.
+fn push_hyperlink(out: &mut String, params: &[&[u8]], bell_terminated: bool) {
+    out.push_str("\x1b]");
+    for (index, param) in params.iter().enumerate() {
+        if index > 0 {
+            out.push(';');
+        }
+        out.push_str(&strip_controls(&String::from_utf8_lossy(param), &[]));
+    }
+    out.push_str(if bell_terminated { "\x07" } else { "\x1b\\" });
 }
 
 /// Whether a CSI dispatch is SGR.

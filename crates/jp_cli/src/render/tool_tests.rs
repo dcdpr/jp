@@ -102,6 +102,9 @@ fn create_sanitizing_renderer(sanitize: Sanitization) -> (ToolRenderer, SharedBu
     // No status region: `register` would otherwise start a ticking row.
     config.tool_call.preparing.show = false;
     config.sanitize = sanitize;
+    // A run sets the printer's floor from the same setting before any tool
+    // renders.
+    printer.set_sanitize_mode(sanitize_mode(sanitize));
     let renderer = ToolRenderer::new(ErrChannel::new(Arc::new(printer)), config);
     (renderer, err)
 }

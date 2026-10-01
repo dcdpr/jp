@@ -557,3 +557,95 @@ fn sanitize_unclosed_passes_everything_through_under_off() {
         "\x1b[2J\r"
     );
 }
+
+/// `chunks` through one floor under `mode`, the way the printer feeds a stream.
+fn floored(mode: SanitizeMode, chunks: &[&str]) -> String {
+    let mut floor = OutputFloor::new(mode);
+    chunks.iter().map(|chunk| floor.filter(chunk)).collect()
+}
+
+#[test]
+fn the_floor_keeps_what_jp_draws_with() {
+    // Styling, a background filled to the edge, a status line redrawn in place,
+    // and a link to a file.
+    let drawn = "\x1b[1;31mred\x1b[0m\x1b[48;5;236m\x1b[K\x1b[49m\n\r\x1b[Kstatus \
+                 \x1b]8;;file:///tmp/a\x07open\x1b]8;;\x07";
+
+    assert_eq!(floored(SanitizeMode::Strip, &[drawn]), drawn);
+}
+
+#[test]
+fn the_floor_drops_what_takes_over_the_terminal() {
+    // A screen clear, a cursor move, a whole-line erase, the alternate screen, a
+    // window title, a clipboard write, a device control string, conceal, and a
+    // bell.
+    let hostile = concat!(
+        "a\x1b[2J",
+        "b\x1b[1A",
+        "c\x1b[2K",
+        "d\x1b[?1049h",
+        "e\x1b]0;t\x07",
+        "f\x1b]52;c;eA==\x07",
+        "g\x1bPq\x1b\\",
+        "h\x1b[8m",
+        "i\x07",
+        "j",
+    );
+
+    assert_eq!(floored(SanitizeMode::Strip, &[hostile]), "abcdefghij");
+}
+
+#[test]
+fn the_floor_writes_an_erase_to_the_end_of_the_line_one_way() {
+    assert_eq!(floored(SanitizeMode::Strip, &["a\x1b[0Kb"]), "a\x1b[Kb");
+}
+
+#[test]
+fn the_floor_keeps_a_link_ended_by_st() {
+    let link = "\x1b]8;;http://x\x1b\\link\x1b]8;;\x1b\\";
+
+    assert_eq!(floored(SanitizeMode::Strip, &[link]), link);
+}
+
+#[test]
+fn a_link_target_loses_its_control_characters() {
+    // A terminal that reads 8-bit controls ends the link at U+009C and takes
+    // what follows as input.
+    assert_eq!(
+        floored(SanitizeMode::Strip, &[
+            "\x1b]8;;http://x/\u{9c}y\x07z\x1b]8;;\x07"
+        ]),
+        "\x1b]8;;http://x/y\x07z\x1b]8;;\x07"
+    );
+}
+
+#[test]
+fn the_floor_marks_what_it_drops_under_visualize() {
+    assert_eq!(
+        floored(SanitizeMode::Visualize, &["a\x1b[2Jb\x1b]0;t\x07c"]),
+        "a\u{241b}b\u{241b}c"
+    );
+}
+
+#[test]
+fn the_floor_lets_everything_through_under_off() {
+    assert_eq!(floored(SanitizeMode::Off, &["a\x1b[2Jb"]), "a\x1b[2Jb");
+}
+
+#[test]
+fn the_floor_recognizes_a_sequence_split_across_calls() {
+    // `write!` hands the printer its arguments one at a time.
+    assert_eq!(
+        floored(SanitizeMode::Strip, &["a\x1b[", "2", "Jb\x1b[3", "1mc"]),
+        "ab\x1b[31mc"
+    );
+}
+
+#[test]
+fn changing_the_floor_mode_drops_a_sequence_in_progress() {
+    let mut floor = OutputFloor::new(SanitizeMode::Strip);
+
+    assert_eq!(floor.filter("a\x1b["), "a");
+    floor.set_mode(SanitizeMode::Off);
+    assert_eq!(floor.filter("2Jb"), "2Jb");
+}

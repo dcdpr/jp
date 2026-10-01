@@ -196,7 +196,11 @@ impl ChatRenderer {
         // controller disabled, preserving the original static per-character
         // delay behavior.
         printer.set_max_latency(config.typewriter.max_latency.into());
+        // A turn renders under its own config, which can ask for a different
+        // `style.sanitize` than the one the run started with; the printer's
+        // floor follows it, or `off` could not show content as written.
         let sanitize = sanitize_mode(config.sanitize);
+        printer.set_sanitize_mode(sanitize);
         Self {
             buffer: Buffer::new(),
             formatter,
