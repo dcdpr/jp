@@ -115,8 +115,11 @@ pub(crate) trait Executor: Send + Sync {
     /// open, so the response the Host records for it is what the MCP caller
     /// receives once that response is acknowledged.
     ///
-    /// Returns `false` when there is nothing to hold, the service has not named
-    /// the call yet, or this executor has no service behind it.
+    /// A call whose MCP request has not reached the service yet is held too,
+    /// and its request is answered with that response when it arrives.
+    ///
+    /// Returns `false` when there is nothing to hold, because the invocation
+    /// already ended or this executor has no service behind it.
     /// The call is then torn down when its attempt is cancelled.
     fn hold_for_response(&self) -> bool {
         false

@@ -855,10 +855,10 @@ impl CallSlot {
         state: &mut PendingCall,
         review: &Review,
     ) -> Result<(), ExecutorError> {
-        state.phase = Phase::Finished;
         let Some(id) = *locked(&self.invocation) else {
-            return Ok(());
+            return self.deliver_unnamed(state, review).await;
         };
+        state.phase = Phase::Finished;
         // `false` means the call finished on its own first; its caller already
         // has that result.
         if !state.service.complete_call(id, approved(None, review)) {
@@ -868,6 +868,55 @@ impl CallSlot {
             return Ok(());
         }
         self.drain(state, review).await
+    }
+
+    /// Hand a held call the service has not named yet the content the Host
+    /// recorded for it.
+    ///
+    /// Its MCP request is still on its way, so it is answered at its first
+    /// barrier, and neither the argument formatter nor the tool runs.
+    /// The wait is bounded the way any wait for a call's first interaction is.
+    async fn deliver_unnamed(
+        &self,
+        state: &mut PendingCall,
+        review: &Review,
+    ) -> Result<(), ExecutorError> {
+        // Waiting for the request already failed, so nothing is coming.
+        if matches!(state.phase, Phase::Finished) {
+            return Ok(());
+        }
+        // A call JP submits that was settled before it was submitted has no
+        // caller waiting on a response.
+        if !state.submitted_elsewhere() && state.task.is_none() {
+            state.phase = Phase::Finished;
+            return Ok(());
+        }
+        loop {
+            let interaction = match state.next().await? {
+                Received::Interaction(interaction) => *interaction,
+                Received::Finished(_) => return Ok(()),
+            };
+            match interaction {
+                Interaction::RenderArguments { reply } => drop(reply.send(Ok(false))),
+                Interaction::Prepare { reply, .. } => {
+                    drop(reply.send(Ok(Admission::Complete {
+                        result: approved(None, review),
+                    })));
+                    return self.drain(state, review).await;
+                }
+                Interaction::Record { reply, .. } => {
+                    drop(reply.send(Ok(())));
+                    if state.submitted_elsewhere() {
+                        state.phase = Phase::Finished;
+                        return Ok(());
+                    }
+                    return self.drain(state, review).await;
+                }
+                _ => {
+                    return Err(ExecutorError::UnexpectedInteraction { phase: "recording" });
+                }
+            }
+        }
     }
 
     /// Answer the service's remaining barriers and check what it delivered.
@@ -1122,12 +1171,16 @@ impl Executor for ToolExecutor {
     }
 
     fn hold_for_response(&self) -> bool {
-        let Some(id) = *locked(&self.slot.invocation) else {
-            return false;
-        };
+        let invocation = *locked(&self.slot.invocation);
         // Set before pausing, so the cancellation that follows sees a held
         // call rather than one to tear down.
         self.slot.held.store(true, Ordering::Release);
+        let Some(id) = invocation else {
+            // Not named yet: its MCP request is still on its way, as when an
+            // agent submits it after JP learned of the call. The
+            // acknowledgement answers it at its first barrier.
+            return true;
+        };
         if self.service.pause_call(id) {
             return true;
         }

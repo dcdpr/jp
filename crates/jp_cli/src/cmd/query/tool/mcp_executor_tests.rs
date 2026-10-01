@@ -506,6 +506,73 @@ async fn a_held_call_delivers_the_recorded_response_to_its_agent() {
     fixture.shutdown().await;
 }
 
+/// A call settled before its agent submits it, as when a "no" remembered for
+/// its tool lands first, answers the agent's request with the recorded response
+/// once that request arrives.
+#[tokio::test]
+async fn a_call_held_before_its_agent_submits_it_delivers_the_recorded_response() {
+    let fixture = Fixture::inquiring("unattended").await;
+    fixture
+        .source
+        .set_execution(ToolExecution::Agent {
+            correlation_key: "test/agentId",
+        })
+        .unwrap();
+    let executor = fixture.executor(&json!({}));
+
+    // Nothing has arrived for the call, so preparing it waits for the agent.
+    let token = CancellationToken::new();
+    let preparing = executor.prepare(false, token.clone());
+    tokio::pin!(preparing);
+    assert!(
+        timeout(Duration::from_millis(50), &mut preparing)
+            .await
+            .is_err(),
+        "preparation finished before the agent submitted the call"
+    );
+
+    assert!(executor.hold_for_response(), "an unnamed call can be held");
+    token.cancel();
+    let result = preparing.await;
+    assert!(
+        matches!(result, ExecutorResult::Completed(_)),
+        "a held call reports its attempt as over, got {result:?}"
+    );
+
+    let mut params = CallToolRequestParams::new("example");
+    params.arguments = Some(Map::new());
+    params.meta = Some(Meta(Map::from_iter([(
+        "test/agentId".into(),
+        "call-1".into(),
+    )])));
+    let peer = fixture.source.peer.clone();
+    // Submitted after the acknowledgement has started, the order an agent's
+    // request takes when JP settles the call as soon as it is announced.
+    let agent = async {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        timeout(Duration::from_secs(5), peer.call_tool(params)).await
+    };
+    let (acknowledged, delivered) = tokio::join!(
+        fixture.acknowledge(recorded(Ok("Tool skipped by user (remembered)."))),
+        agent,
+    );
+    acknowledged.unwrap();
+
+    let delivered = delivered
+        .expect("the agent's call must finish")
+        .map(|result| serde_json::to_value(result).unwrap())
+        .map_err(|error| error.to_string());
+    assert_eq!(
+        delivered,
+        Ok(json!({
+            "content": [{"type": "text", "text": "Tool skipped by user (remembered)."}],
+            "isError": false,
+        }))
+    );
+    assert_eq!(fixture.attempts(), 0, "a settled call must not run");
+    fixture.shutdown().await;
+}
+
 #[tokio::test]
 async fn a_protocol_failure_is_reported_as_a_failure_not_as_tool_output() {
     // Executing before the call is released puts the adapter and the service
