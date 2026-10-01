@@ -517,18 +517,20 @@ command keep their colors and other styling, except styling that hides text.
 Styling they leave open ends with them, so it cannot color what JP writes next.
 The assistant's replies and reasoning, and the tool calls it makes, are shown
 with no escape sequences at all, since the assistant styles text with markdown.
-So are conversation titles, wherever JP shows them, and the lines `grep` finds.
-In a picker, such as `jp conversation use ?`, a title is always one line of
-plain text.
 
 Control characters are removed too, except line feeds and tabs.
 That includes the carriage return, so a tool's progress line that redraws itself
 shows every redraw side by side.
 
-Unless `style.sanitize` is `off`, anything else JP prints is held to what JP's
-own output does: styling, links, and redrawing the current line.
-Nothing it prints can move the cursor off that line, clear the screen, switch
-terminal modes, retitle the window, or write to your clipboard.
+Unless `style.sanitize` is `off`, anything else JP prints, such as conversation
+titles and the lines `grep` finds, is held to what JP's own output does: styling
+and links.
+Nothing it prints can move the cursor, return to the start of a line, clear the
+screen, switch terminal modes, retitle the window, or write to your clipboard.
+Styling it leaves open is closed when JP exits.
+Titles and matched lines keep any colors they were stored with, except in a
+picker, such as `jp conversation use ?`, which shows a title as one line of
+plain text.
 
 Only what JP shows is filtered.
 Conversations are stored exactly as written and reach the assistant unchanged,

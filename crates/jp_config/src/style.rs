@@ -50,9 +50,10 @@ pub struct StyleConfig {
     /// - `strip` or `true`: Remove everything that does more than style text.
     ///   Your messages and tool results keep their colors, bold, and other
     ///   styling that does not hide text.
-    ///   The assistant's replies, conversation titles, and search results from
-    ///   `jp conversation grep` lose theirs; the assistant's markdown is still
-    ///   rendered.
+    ///   The assistant's replies lose theirs; its markdown is still rendered.
+    ///   Conversation titles and search results from `jp conversation grep`
+    ///   keep their colors, but nothing that moves the cursor or clears the
+    ///   screen.
     /// - `visualize`: Like `strip`, and show a `␛` where something was
     ///   removed.
     /// - `off` or `false`: Show content exactly as written.
