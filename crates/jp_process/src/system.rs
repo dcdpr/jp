@@ -184,7 +184,7 @@ fn stop(
     child: &mut Child,
     group: bool,
     grace: Duration,
-    mut exited: bool,
+    exited: bool,
     streams_closed: &mpsc::Receiver<()>,
     open: &mut usize,
 ) -> io::Result<ExitStatus> {
@@ -194,6 +194,7 @@ fn stop(
 
         signal(child.id(), group, libc::SIGINT);
 
+        let mut exited = exited;
         let deadline = Instant::now() + grace;
         while Instant::now() < deadline {
             if !exited {
