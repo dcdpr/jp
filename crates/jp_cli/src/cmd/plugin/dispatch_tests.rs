@@ -1,9 +1,12 @@
 use camino_tempfile::{Utf8TempDir, tempdir};
+#[cfg(unix)]
 use chrono::Utc;
 use jp_conversation::{Conversation, ConversationId, event::ChatResponse};
+#[cfg(unix)]
+use jp_plugin::registry::ApprovedPlugin;
 use jp_plugin::{
     message::{ExitMessage, InterruptRequest, OptionalId, ReadEventsRequest, ReadyMessage},
-    registry::{ApprovedPlugin, PluginKind, RegistryPlugin},
+    registry::{PluginKind, RegistryPlugin},
 };
 use jp_storage::backend::{FsStorageBackend, PersistBackend as _};
 use relative_path::RelativePathBuf;
@@ -11,7 +14,9 @@ use serde_json::json;
 use serial_test::serial;
 
 use super::*;
-use crate::{Globals, editor::CUT_MARKER, env_testing::EnvVarGuard};
+#[cfg(unix)]
+use crate::Globals;
+use crate::{editor::CUT_MARKER, env_testing::EnvVarGuard};
 
 /// A workspace no request in these tests reaches into, so it needs no storage.
 fn bare_workspace() -> Workspace {
