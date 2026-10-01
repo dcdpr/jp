@@ -12,6 +12,8 @@
 //! These tests hold each collection to that, across every way one resolved
 //! snapshot can differ from another.
 
+use indexmap::IndexMap;
+use indoc::indoc;
 use schematic::PartialConfig as _;
 use test_log::test;
 
@@ -20,7 +22,11 @@ use crate::{
     assignment::{AssignKeyValue as _, KvAssignment},
     conversation::tool::access::{PartialAccessConfig, PartialEnvRuleConfig},
     delta::PartialConfigDelta as _,
-    types::vec::{MergeableVec, MergedVec, MergedVecStrategy},
+    types::{
+        json_value::JsonValue,
+        map::MergeableMap,
+        vec::{MergeableVec, MergedVec, MergedVecStrategy},
+    },
 };
 
 /// One environment-variable rule, named and granting read.
@@ -222,6 +228,120 @@ fn clearing_any_field_survives_a_fold() {
         vacuous.len(),
         crate::AppConfig::fields().len(),
     );
+}
+
+/// Fold a delta the way a conversation stream does: clear what it reports, then
+/// merge.
+fn fold_with_unsets(prev: &PartialAppConfig, next: PartialAppConfig) -> PartialAppConfig {
+    let mut unsets = Vec::new();
+    let delta = prev.delta_with_unsets(next, "", &mut unsets);
+
+    let mut folded = prev.clone();
+    for cleared in &unsets {
+        folded.unset(cleared).expect("a reported path is a field");
+    }
+    folded.merge(&(), delta).expect("folding cannot fail");
+    folded
+}
+
+/// Fold a delta that carries no unsets, so its values alone must say it.
+fn fold(prev: &PartialAppConfig, next: PartialAppConfig) -> PartialAppConfig {
+    let delta = prev.delta(next);
+
+    let mut folded = prev.clone();
+    folded.merge(&(), delta).expect("folding cannot fail");
+    folded
+}
+
+/// The entries of a JSON map, without the strategy wrapper a delta may add.
+fn entries(map: &MergeableMap<JsonValue>) -> IndexMap<String, JsonValue> {
+    map.clone().into_map()
+}
+
+fn parse(toml: &str) -> PartialAppConfig {
+    toml::from_str(toml).unwrap()
+}
+
+/// A JSON option deep-merges, so a nested key the new value drops comes back
+/// unless the delta clears the entry first.
+#[test]
+fn law_holds_for_a_nested_key_dropped_from_plugin_options() {
+    let prev = parse(indoc! {r#"
+        [plugins.command.serve.options.web]
+        port = 2000
+        host = "0.0.0.0"
+    "#});
+    let next = parse(indoc! {"
+        [plugins.command.serve.options.web]
+        port = 3000
+    "});
+
+    for (how, folded) in [
+        ("with unsets", fold_with_unsets(&prev, next.clone())),
+        ("without unsets", fold(&prev, next.clone())),
+    ] {
+        assert_eq!(
+            entries(&folded.plugins.command["serve"].options),
+            entries(&next.plugins.command["serve"].options),
+            "{how}"
+        );
+    }
+}
+
+#[test]
+fn law_holds_for_a_nested_key_dropped_from_template_values() {
+    let prev = parse(indoc! {r#"
+        [template.values.web]
+        port = 2000
+        host = "0.0.0.0"
+    "#});
+    let next = parse(indoc! {"
+        [template.values.web]
+        port = 3000
+    "});
+
+    for (how, folded) in [
+        ("with unsets", fold_with_unsets(&prev, next.clone())),
+        ("without unsets", fold(&prev, next.clone())),
+    ] {
+        assert_eq!(
+            entries(&folded.template.values),
+            entries(&next.template.values),
+            "{how}"
+        );
+    }
+}
+
+/// A changed value that merging does reach stays a plain entry, so a later
+/// workspace option still joins the conversation's.
+#[test]
+fn a_nested_key_added_to_plugin_options_is_not_a_replacement() {
+    let prev = parse(indoc! {"
+        [plugins.command.serve.options.web]
+        port = 2000
+    "});
+    let next = parse(indoc! {r#"
+        [plugins.command.serve.options.web]
+        port = 2000
+        host = "0.0.0.0"
+    "#});
+
+    let mut unsets = Vec::new();
+    let delta = prev.delta_with_unsets(next.clone(), "", &mut unsets);
+
+    assert!(unsets.is_empty(), "{unsets:?}");
+    for (how, options) in [
+        ("with unsets", &delta.plugins.command["serve"].options),
+        (
+            "without unsets",
+            &prev.delta(next).plugins.command["serve"].options,
+        ),
+    ] {
+        assert!(
+            matches!(options, MergeableMap::Map(_)),
+            "{how}: {options:?}"
+        );
+    }
 }
 
 #[test]

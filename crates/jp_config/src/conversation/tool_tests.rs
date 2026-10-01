@@ -1055,6 +1055,54 @@ fn a_map_strategy_means_the_same_through_cfg_as_through_toml() {
     }
 }
 
+/// A conversation delta that drops a nested option key keeps it dropped.
+///
+/// Options deep-merge, so carrying the new value as a plain entry would put the
+/// dropped key back on the fold.
+#[test]
+fn a_delta_dropping_a_nested_tool_option_folds_back_without_it() {
+    let prev: PartialToolsConfig = toml::from_str(
+        r#"
+        [cargo_check.options.web]
+        port = 2000
+        host = "0.0.0.0"
+        "#,
+    )
+    .unwrap();
+    let next: PartialToolsConfig = toml::from_str(
+        r"
+        [cargo_check.options.web]
+        port = 3000
+        ",
+    )
+    .unwrap();
+    let expected = next.tools["cargo_check"].options.clone().into_map();
+
+    let mut unsets = Vec::new();
+    let delta = prev.delta_with_unsets(next.clone(), "", &mut unsets);
+    let mut with_unsets = prev.clone();
+    for path in &unsets {
+        with_unsets
+            .assign(KvAssignment::unset(path))
+            .expect("a reported path is a field");
+    }
+    with_unsets.merge(&(), delta).unwrap();
+
+    let mut without_unsets = prev.clone();
+    without_unsets.merge(&(), prev.delta(next)).unwrap();
+
+    for (how, folded) in [
+        ("with unsets", with_unsets),
+        ("without unsets", without_unsets),
+    ] {
+        assert_eq!(
+            folded.tools["cargo_check"].options.clone().into_map(),
+            expected,
+            "{how}"
+        );
+    }
+}
+
 /// Every field of a parameter is reachable by its own path.
 ///
 /// A delta reports a field cleared inside a surviving parameter by path, and
