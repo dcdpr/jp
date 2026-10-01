@@ -405,13 +405,144 @@ async fn cancellation_before_release_does_not_execute() {
     let ExecutorResult::Completed(response) = result else {
         panic!("expected a cancelled response, got {result:?}")
     };
-    assert_eq!(response.result, Err("Tool execution cancelled.".into()));
     assert_eq!(fixture.attempts(), 0);
 
     fixture
         .acknowledge(Review::unchanged(response))
         .await
         .unwrap();
+    fixture.shutdown().await;
+}
+
+/// Swap the reply the service is parked on for one the test holds, and return
+/// its receiving end.
+///
+/// What the Host sends on it can then be read back exactly, rather than
+/// inferred from whether the service raced to act on it.
+/// The service's own reply is dropped, so it ends the call on its side.
+async fn intercept<T>(
+    fixture: &Fixture,
+    swap: impl FnOnce(Phase, Reply<T>) -> Phase,
+) -> oneshot::Receiver<HostReply<T>> {
+    let slot = locked(&fixture.source.calls).by_id["call-1"].clone();
+    let mut state = slot.state.lock().await;
+    let (sender, receiver) = oneshot::channel();
+    let parked = mem::replace(&mut state.phase, Phase::Finished);
+    state.phase = swap(parked, sender);
+    receiver
+}
+
+/// A release step cancelled before it ran sends nothing.
+///
+/// The service would start the tool as soon as the release reached it, on
+/// another thread, before a cancellation noticed afterwards could stop it.
+#[tokio::test]
+async fn a_release_cancelled_before_it_runs_is_not_sent() {
+    let fixture = Fixture::inquiring("unattended").await;
+    let executor = fixture.executor(&json!({}));
+    assert!(matches!(
+        executor.prepare(false, CancellationToken::new()).await,
+        ExecutorResult::AwaitingAdmission
+    ));
+    assert!(matches!(
+        executor.approve(CancellationToken::new()).await,
+        ExecutorResult::AwaitingRelease
+    ));
+    let mut sent = intercept(&fixture, |parked, reply| {
+        assert!(matches!(parked, Phase::Release(_)), "{}", parked.name());
+        Phase::Release(reply)
+    })
+    .await;
+
+    let token = CancellationToken::new();
+    token.cancel();
+    let result = executor.execute(&IndexMap::new(), token, None).await;
+
+    let ExecutorResult::Completed(response) = result else {
+        panic!("expected a cancelled response, got {result:?}")
+    };
+    assert_eq!(response.result, Err("Tool execution cancelled.".into()));
+    assert!(
+        matches!(sent.try_recv(), Err(oneshot::error::TryRecvError::Closed)),
+        "the cancelled step released the call"
+    );
+    fixture.shutdown().await;
+}
+
+/// An answer step cancelled before it ran does not send the answer, which would
+/// run the tool again.
+#[tokio::test]
+async fn an_answer_cancelled_before_it_runs_is_not_sent() {
+    let fixture = Fixture::inquiring("unattended").await;
+    let executor = fixture.executor(&json!({}));
+    assert!(matches!(
+        executor.prepare(false, CancellationToken::new()).await,
+        ExecutorResult::AwaitingAdmission
+    ));
+    assert!(matches!(
+        executor.approve(CancellationToken::new()).await,
+        ExecutorResult::AwaitingRelease
+    ));
+    let first = executor
+        .execute(&IndexMap::new(), CancellationToken::new(), None)
+        .await;
+    assert!(matches!(first, ExecutorResult::NeedsInput { .. }));
+    let mut sent = intercept(&fixture, |parked, reply| {
+        let Phase::Input { id, .. } = parked else {
+            panic!(
+                "expected the call parked on its question, got {}",
+                parked.name()
+            )
+        };
+        Phase::Input { id, reply }
+    })
+    .await;
+
+    let token = CancellationToken::new();
+    token.cancel();
+    let answers = IndexMap::from_iter([("confirm".into(), json!(true))]);
+    let result = executor.execute(&answers, token, None).await;
+
+    let ExecutorResult::Completed(response) = result else {
+        panic!("expected a cancelled response, got {result:?}")
+    };
+    assert_eq!(response.result, Err("Tool execution cancelled.".into()));
+    assert!(
+        matches!(sent.try_recv(), Err(oneshot::error::TryRecvError::Closed)),
+        "the cancelled step sent the answer"
+    );
+    assert_eq!(fixture.attempts(), 1);
+    fixture.shutdown().await;
+}
+
+/// An approval step cancelled before it ran does not admit the call, which
+/// would start a formatter held back until admission.
+#[tokio::test]
+async fn an_admission_cancelled_before_it_runs_is_not_sent() {
+    let fixture = Fixture::inquiring("unattended").await;
+    let executor = fixture.executor(&json!({}));
+    assert!(matches!(
+        executor.prepare(false, CancellationToken::new()).await,
+        ExecutorResult::AwaitingAdmission
+    ));
+    let mut sent = intercept(&fixture, |parked, reply| {
+        assert!(matches!(parked, Phase::Admission(_)), "{}", parked.name());
+        Phase::Admission(reply)
+    })
+    .await;
+
+    let token = CancellationToken::new();
+    token.cancel();
+    let result = executor.approve(token).await;
+
+    let ExecutorResult::Completed(response) = result else {
+        panic!("expected a cancelled response, got {result:?}")
+    };
+    assert_eq!(response.result, Err("Tool execution cancelled.".into()));
+    assert!(
+        matches!(sent.try_recv(), Err(oneshot::error::TryRecvError::Closed)),
+        "the cancelled step admitted the call"
+    );
     fixture.shutdown().await;
 }
 

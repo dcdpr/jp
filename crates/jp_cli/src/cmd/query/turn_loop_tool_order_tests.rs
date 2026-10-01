@@ -530,6 +530,57 @@ impl Provider for StallingInquiryProvider {
     }
 }
 
+/// A provider whose first response requests `call` to `tool` and then fails
+/// with a retryable error, once the call's question has reached the assistant.
+///
+/// The question is the second request, which tells `asked` and never answers.
+/// Every later request, the retried response, ends the turn with a message.
+struct FailingWhileAskedProvider {
+    call: &'static str,
+    asked: Arc<Notify>,
+    requests: AtomicUsize,
+}
+
+#[async_trait]
+impl Provider for FailingWhileAskedProvider {
+    async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
+        let mut model = inquiry_mock_model();
+        model.id.name = name.clone();
+        Ok(model)
+    }
+
+    async fn models(&self) -> Result<Vec<ModelDetails>, LlmError> {
+        Ok(vec![inquiry_mock_model()])
+    }
+
+    async fn chat_completion_stream(
+        &self,
+        _model: &ModelDetails,
+        _query: ChatQuery,
+    ) -> Result<EventStream, LlmError> {
+        match self.requests.fetch_add(1, Ordering::SeqCst) {
+            0 => {
+                let calls = call_events(&[(self.call, "tool")]);
+                let asked = Arc::clone(&self.asked);
+                let failure = stream::once(async move {
+                    asked.notified().await;
+                    Err(StreamError::transient("connection reset"))
+                });
+                let calls = stream::iter(calls.into_iter().flatten().map(Ok));
+                Ok(Box::pin(calls.chain(failure)))
+            }
+            1 => {
+                self.asked.notify_one();
+                Ok(Box::pin(stream::pending()))
+            }
+            _ => {
+                let events = final_message_events("Done.");
+                Ok(Box::pin(stream::iter(events.into_iter().map(Ok))))
+            }
+        }
+    }
+}
+
 /// What one turn left behind.
 struct Turn {
     /// How the turn ended.
@@ -1106,6 +1157,55 @@ async fn a_restart_while_a_call_is_being_prepared_prepares_it_again() {
             provider.call_index.load(Ordering::SeqCst),
             2,
             "the turn continued after the restarted call"
+        );
+    })
+    .await
+    .unwrap();
+}
+
+/// A response that fails mid-stream while a call's formatter question is with
+/// the assistant is requested again, and the question is recorded as withdrawn
+/// rather than dropped as an unanswered request.
+#[tokio::test]
+async fn a_retried_response_withdraws_an_open_formatter_question() {
+    timeout(Duration::from_secs(10), async {
+        let mut config = described_tool(&json!({
+            "run": "unattended",
+            "questions": {"confirm": {"target": "assistant"}},
+        }));
+        // Keep the retry backoff out of the test's runtime.
+        config.assistant.request.base_backoff_ms = 1;
+        let runs = Arc::new(AtomicUsize::new(0));
+        let source = StagedExecutor::source({
+            let runs = Arc::clone(&runs);
+            move |request, _| {
+                StagedExecutor::new(request, false, &runs)
+                    .asking(Question::boolean("confirm", "Continue?").unwrap())
+            }
+        });
+        let provider = Arc::new(FailingWhileAskedProvider {
+            call: "call_1",
+            asked: Arc::new(Notify::new()),
+            requests: AtomicUsize::new(0),
+        });
+        let turn = Scenario::new(&config, source, provider.clone(), &[])
+            .run()
+            .await;
+
+        turn.result.unwrap();
+        assert_eq!(turn.inquiries, vec![InquiryResponse::Cancelled {
+            id: InquiryId::new("call_1.confirm.1"),
+            reason: CancellationReason::Withdrawn,
+        }]);
+        assert_eq!(turn.responses, vec![ToolCallResponse {
+            id: "call_1".into(),
+            result: Err("Tool call was interrupted.".into()),
+        }]);
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            provider.requests.load(Ordering::SeqCst),
+            3,
+            "the failed response was requested again"
         );
     })
     .await

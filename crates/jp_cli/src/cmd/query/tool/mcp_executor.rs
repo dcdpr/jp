@@ -1234,6 +1234,12 @@ impl Executor for ToolExecutor {
 
     async fn approve(&self, cancellation: CancellationToken) -> ExecutorResult {
         let mut state = self.slot.state.lock().await;
+        // Checked before the admission is sent: admitting the call can start
+        // its argument formatter, which a later check could not stop in time.
+        if cancellation.is_cancelled() {
+            let released = state.released;
+            return self.settle_failure(&mut state, ExecutorError::Cancelled, released);
+        }
         let Phase::Admission(reply) = mem::replace(&mut state.phase, Phase::Finished) else {
             return ExecutorResult::Failed(ExecutorError::OutOfOrder {
                 operation: "be approved",
@@ -1258,6 +1264,12 @@ impl Executor for ToolExecutor {
         stderr: Option<StderrSink>,
     ) -> ExecutorResult {
         let mut state = self.slot.state.lock().await;
+        // Checked before anything is sent: a release or an answer starts the
+        // tool, which a later check could not stop in time.
+        if cancellation.is_cancelled() {
+            let released = state.released;
+            return self.settle_failure(&mut state, ExecutorError::Cancelled, released);
+        }
         *locked(&self.slot.stderr) = stderr;
         let replied = match mem::replace(&mut state.phase, Phase::Finished) {
             Phase::Release(reply) => reply

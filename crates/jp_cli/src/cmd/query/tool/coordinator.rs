@@ -708,7 +708,6 @@ impl ToolCoordinator {
     }
 
     /// Cancel the work in flight for the calls being handled.
-    #[allow(dead_code)]
     pub fn cancel(&self) {
         if let Some(batch) = &self.batch {
             batch.cancellation.cancel();
@@ -719,10 +718,22 @@ impl ToolCoordinator {
     ///
     /// Their requests get their responses elsewhere, as when a response that
     /// failed mid-stream is requested again.
-    pub(crate) fn abandon(&mut self) {
-        if let Some(batch) = self.batch.take() {
-            batch.cancellation.cancel();
+    /// A question still open is recorded on `conv` as withdrawn: whatever would
+    /// have answered it reports to a batch that no longer exists.
+    pub(crate) fn abandon(&mut self, conv: &ConversationMut) {
+        let Some(mut batch) = self.batch.take() else {
+            return;
+        };
+        for call in &mut batch.calls {
+            if let Some(open) = call.question.take() {
+                Self::record_inquiry_cancelled(
+                    conv,
+                    &open.inquiry_id,
+                    CancellationReason::Withdrawn,
+                );
+            }
         }
+        batch.cancellation.cancel();
     }
 
     /// Prepares a single executor for a tool call request.
@@ -2202,7 +2213,7 @@ impl Drop for ToolCoordinator {
     /// Stop the calls of a turn that ended before they did, such as one the
     /// user aborted while a response was streaming.
     fn drop(&mut self) {
-        self.abandon();
+        self.cancel();
     }
 }
 

@@ -196,8 +196,60 @@ fn event_keeps_waiting_indicator(event: &StreamingLoopEvent) -> bool {
 /// - LLM streaming fails with a non-retryable error
 /// - Tool execution fails critically
 /// - Workspace persistence fails
-#[expect(clippy::too_many_lines, clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub(super) async fn run_turn_loop(
+    provider: Arc<dyn Provider>,
+    model: &ModelDetails,
+    cfg: &AppConfig,
+    signals: &SignalRouter,
+    root: &Utf8Path,
+    invocation: InvocationContext,
+    interactive: bool,
+    attachments: &[Attachment],
+    lock: &ConversationLock,
+    tool_choice: ToolChoice,
+    tools: &[ToolDefinition],
+    printer: Arc<Printer>,
+    prompt_backend: Arc<dyn PromptBackend>,
+    mut tool_coordinator: ToolCoordinator,
+    chat_request: ChatRequest,
+    pending_trim: PendingStreamTrim,
+    turn_interrupt: TurnInterrupt,
+    interrupts: TurnInterrupts,
+) -> Result<(), Error> {
+    let result = drive_turn(
+        provider,
+        model,
+        cfg,
+        signals,
+        root,
+        invocation,
+        interactive,
+        attachments,
+        lock,
+        tool_choice,
+        tools,
+        printer,
+        prompt_backend,
+        &mut tool_coordinator,
+        chat_request,
+        pending_trim,
+        turn_interrupt,
+        interrupts,
+    )
+    .await;
+
+    // However the turn ended, a question a call still had open is recorded as
+    // withdrawn. Left unanswered, the next load would drop it as unpaired, and
+    // the conversation would lose the record that it was asked.
+    tool_coordinator.abandon(&lock.as_mut());
+    result
+}
+
+/// The body of [`run_turn_loop`], which settles the coordinator's open
+/// questions once this returns.
+#[expect(clippy::too_many_lines, clippy::too_many_arguments)]
+async fn drive_turn(
     provider: Arc<dyn Provider>,
     model: &ModelDetails,
     cfg: &AppConfig,
@@ -211,7 +263,7 @@ pub(super) async fn run_turn_loop(
     tools: &[ToolDefinition],
     printer: Arc<Printer>,
     prompt_backend: Arc<dyn PromptBackend>,
-    mut tool_coordinator: ToolCoordinator,
+    tool_coordinator: &mut ToolCoordinator,
     chat_request: ChatRequest,
     pending_trim: PendingStreamTrim,
     mut turn_interrupt: TurnInterrupt,
@@ -334,8 +386,10 @@ pub(super) async fn run_turn_loop(
             TurnPhase::Streaming => {
                 // Calls from a response that failed mid-stream are answered by
                 // the synthetic responses below, and requested again by the
-                // next one if the assistant still wants them.
-                tool_coordinator.abandon();
+                // next one if the assistant still wants them. Their open
+                // questions are withdrawn first, so the sanitize below has a
+                // pair to keep rather than an orphan to drop.
+                tool_coordinator.abandon(&lock.as_mut());
 
                 // Restore structural invariants before each provider request.
                 // Specifically: any `ToolCallRequest` without a matching
@@ -950,7 +1004,7 @@ pub(super) async fn run_turn_loop(
                         signals.shutdown_token().cancel();
                         commit_tool_responses(
                             execution_result,
-                            &mut tool_coordinator,
+                            tool_coordinator,
                             &mut turn_coordinator,
                             &mut conv,
                         )
@@ -967,7 +1021,7 @@ pub(super) async fn run_turn_loop(
                     ExecutionOutcome::Stopped => {
                         commit_tool_responses(
                             execution_result,
-                            &mut tool_coordinator,
+                            tool_coordinator,
                             &mut turn_coordinator,
                             &mut conv,
                         )
@@ -984,7 +1038,7 @@ pub(super) async fn run_turn_loop(
                     ExecutionOutcome::Completed => {
                         if commit_tool_responses(
                             execution_result,
-                            &mut tool_coordinator,
+                            tool_coordinator,
                             &mut turn_coordinator,
                             &mut conv,
                         )
