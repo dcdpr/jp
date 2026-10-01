@@ -16,6 +16,8 @@
 //! See: `docs/rfd/072-command-plugin-system.md`, "Shutdown".
 
 use std::process::Child;
+#[cfg(unix)]
+use std::{io, mem};
 
 use tracing::debug;
 
@@ -49,6 +51,52 @@ impl ProcessTree {
     /// The pid of the process JP spawned.
     pub(crate) fn pid(&self) -> u32 {
         self.pid
+    }
+
+    /// Wait for the spawned process to exit, kill whatever it left running, and
+    /// reap it.
+    ///
+    /// The process is reaped last: until then its pid, and with it the process
+    /// group id, cannot be reused, so the kill cannot reach an unrelated group.
+    #[cfg(unix)]
+    pub(crate) fn finish(&self, child: &mut Child) {
+        self.wait_exited();
+        self.terminate();
+        drop(child.wait());
+    }
+
+    /// Wait for the spawned process to exit, kill whatever it left running, and
+    /// reap it.
+    ///
+    /// A job is addressed by its handle rather than an id, so the order does
+    /// not matter here.
+    #[cfg(windows)]
+    pub(crate) fn finish(&self, child: &mut Child) {
+        drop(child.wait());
+        self.terminate();
+    }
+
+    /// Block until the spawned process has exited, leaving it unreaped.
+    #[cfg(unix)]
+    fn wait_exited(&self) {
+        loop {
+            // SAFETY: an all-zero `siginfo_t` is a valid value for `waitid` to
+            // overwrite. `WNOWAIT` leaves the process waitable, so `Child::wait`
+            // still reaps it afterwards.
+            let waited = unsafe {
+                let mut info: libc::siginfo_t = mem::zeroed();
+                libc::waitid(
+                    libc::P_PID,
+                    libc::id_t::from(self.pid),
+                    &raw mut info,
+                    libc::WEXITED | libc::WNOWAIT,
+                )
+            };
+
+            if waited == 0 || io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                return;
+            }
+        }
     }
 
     /// Kill every process in the tree that is still running.

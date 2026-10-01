@@ -1821,6 +1821,69 @@ echo '{{"type":"describe","protocol":1,"name":"titles","version":"0.1.0","descri
     assert!(marker.exists(), "the approved binary answered describe");
 }
 
+/// A plugin that starts a worker, answers `init`, sends `exit`, and exits on
+/// its own: the worker is stopped with it, not left running once `jp` returns.
+///
+/// Unix only: on Windows a plugin is a `jp-*.exe`, which a test cannot write as
+/// a script.
+/// `process_tree::tests` covers the tree on every platform.
+#[cfg(unix)]
+#[test]
+fn a_worker_dies_with_a_plugin_that_exits_on_its_own() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let tmp = tempdir().unwrap();
+    let script = tmp.path().join("jp-server");
+    let pid_file = tmp.path().join("worker.pid");
+    fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+sleep 600 &
+echo $! > {pid_file}
+read -r msg
+echo '{{"type":"ready","protocol":1}}'
+echo '{{"type":"exit","code":0}}'
+"#
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let root = tmp.path().join("workspace");
+    let backend = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
+    let workspace = Workspace::in_memory(&root);
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        Some(backend),
+        tokio::runtime::Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    runtime
+        .block_on(run_plugin("server", &script, &[], &mut ctx))
+        .unwrap();
+
+    let worker: u32 = fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+
+    // The killed worker is an orphan, reaped by init a moment later.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while is_process_alive(worker) {
+        assert!(Instant::now() < deadline, "the worker outlived its plugin");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
 #[test]
 fn a_describe_answer_is_compared_with_the_manifest_field_by_field() {
     let manifest = Manifest {

@@ -496,12 +496,10 @@ pub(crate) async fn run_plugin(
     // interrupt ladder is for.
     while turns.join_next().await.is_some() {}
 
-    // Always clean up, even on error.
-    drop(child.wait());
-
-    // What the plugin started and left running goes with it: a worker holding
+    // Always clean up, even on error. What the plugin started and left running
+    // goes with it, whether or not the plugin had to be killed: a worker holding
     // the plugin's stderr would otherwise keep the join below waiting.
-    tree.terminate();
+    tree.finish(&mut child);
 
     // Bounded, because the pipe closes when its last holder does, not when the
     // plugin does. A descendant that left the plugin's process group survives
@@ -2551,8 +2549,29 @@ fn describe_plugin(binary: &Utf8Path, cancel: &CancellationToken) -> Option<Desc
         command.process_group(0);
     }
 
+    // Suspended until it is in its job, as for a run, so nothing it starts
+    // escapes the job.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+
+        use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+        command.creation_flags(CREATE_SUSPENDED);
+    }
+
     let mut child = command.spawn().ok()?;
     let tree = Arc::new(ProcessTree::new(&child));
+
+    #[cfg(windows)]
+    {
+        use super::process_tree::resume_suspended;
+
+        if resume_suspended(child.id()).is_err() {
+            tree.terminate();
+            drop(child.wait());
+            return None;
+        }
+    }
 
     // The read below blocks, so a cancellation is acted on from a thread of
     // its own: killing the tree closes the plugin's stdout, which ends the
