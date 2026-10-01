@@ -563,8 +563,8 @@ the host read it again first:
 
 The host repeats its startup load: every config file and its `extends` chain,
 the environment, and the invocation's `--cfg` arguments.
-The fresh result answers this request and every later `read_config`, so a
-plugin polls and compares without knowing where configuration lives.
+The fresh result answers this request and every later `read_config`, so a plugin
+polls and compares without knowing where configuration lives.
 A configuration that fails to load is reported as an `error`, and the last one
 that loaded stays in place.
 `reload` needs protocol 10.
