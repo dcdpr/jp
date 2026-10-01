@@ -43,7 +43,7 @@ const REQUIRED_PROTOCOL: u32 = 9;
 /// Where this plugin attaches to `jp`, readable from the binary without running
 /// it.
 ///
-/// `protocol` has to match [`REQUIRED_PROTOCOL`].
+/// `protocol` has to match `REQUIRED_PROTOCOL`.
 pub static MANIFEST: &str = jp_plugin::manifest!(
     protocol: 9,
     description: "Web UI for browsing conversations and continuing them",

@@ -300,7 +300,7 @@ const REQUIRED_PROTOCOL: u32 = 2;
 /// Where this plugin attaches to `jp`, readable from the binary without running
 /// it.
 ///
-/// `protocol` has to match [`REQUIRED_PROTOCOL`].
+/// `protocol` has to match `REQUIRED_PROTOCOL`.
 pub static MANIFEST: &str = jp_plugin::manifest!(
     protocol: 2,
     description: "Track work items as markdown files",

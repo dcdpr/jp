@@ -39,7 +39,7 @@ const REQUIRED_PROTOCOL: u32 = 1;
 /// Where this plugin attaches to `jp`, readable from the binary without running
 /// it.
 ///
-/// `protocol` has to match [`REQUIRED_PROTOCOL`].
+/// `protocol` has to match `REQUIRED_PROTOCOL`.
 pub static MANIFEST: &str = jp_plugin::manifest!(
     protocol: 1,
     description: "Open the current workspace in the JP macOS app",
