@@ -1299,7 +1299,14 @@ plugins: PluginsConfig
             value: string
           |: null
         install: bool | null
-        options: unknown | null
+        options: MergeableMap_JsonValue
+          |:
+            *: unknown
+          |: MergedMap_JsonValue
+            discard_when_merged?: bool
+            strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
+            value?:
+              *: unknown
         run: "ask" | "unattended" | "deny" | null
     |: MergedMap_CommandPluginConfig
       discard_when_merged?: bool
@@ -1312,7 +1319,14 @@ plugins: PluginsConfig
               value: string
             |: null
           install: bool | null
-          options: unknown | null
+          options: MergeableMap_JsonValue
+            |:
+              *: unknown
+            |: MergedMap_JsonValue
+              discard_when_merged?: bool
+              strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
+              value?:
+                *: unknown
           run: "ask" | "unattended" | "deny" | null
   shutdown_timeout_secs?: int
 providers: ProviderConfig

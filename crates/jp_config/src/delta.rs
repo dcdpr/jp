@@ -268,18 +268,64 @@ fn replace_with<T>(next: MergeableMap<T>) -> MergeableMap<T> {
 }
 
 /// Calculate the delta between two strategy-carrying maps of plain values,
-/// reporting the keys it drops.
+/// reporting what merging cannot reach.
 ///
 /// Mirrors [`delta_mergeable_map_at`] for a map whose values carry no partial
-/// of their own, so an entry is compared and carried whole rather than diffed,
-/// and only a dropped key has a path to report.
-pub fn delta_mergeable_value_map_at<T: Clone + PartialEq>(
+/// of their own, so an entry is compared and carried whole rather than diffed.
+/// A dropped key reports its path, and so does a changed entry whose own merge
+/// would not land on the new value: a JSON object deep-merges, so a nested key
+/// the new value drops would otherwise come back.
+pub fn delta_mergeable_value_map_at<T>(
     prefix: &str,
     prev: &MergeableMap<T>,
     next: MergeableMap<T>,
     unsets: &mut Vec<String>,
-) -> MergeableMap<T> {
+) -> MergeableMap<T>
+where
+    T: Clone + PartialEq + PartialConfig<Context = ()>,
+{
     if report_dropped_keys(prefix, prev, &next, unsets) {
+        return replace_with(next);
+    }
+
+    next.into_iter()
+        .filter(|(key, next)| {
+            let Some(prev) = prev.get(key) else {
+                return true;
+            };
+
+            if prev == next {
+                return false;
+            }
+
+            if !merge_reaches(prev, next) {
+                unsets.push(path(prefix, key));
+            }
+
+            true
+        })
+        .collect()
+}
+
+/// Calculate the delta between two strategy-carrying maps of plain values.
+///
+/// Mirrors [`delta_mergeable_map`] for a map whose values carry no partial of
+/// their own, so an entry is compared and carried whole rather than diffed.
+/// The map is stated as a replacement when a key is dropped, or when a changed
+/// entry's own merge would not land on the new value.
+pub fn delta_mergeable_value_map<T>(
+    prev: &MergeableMap<T>,
+    next: MergeableMap<T>,
+) -> MergeableMap<T>
+where
+    T: Clone + PartialEq + PartialConfig<Context = ()>,
+{
+    let unreachable = prev.iter().any(|(key, prev)| {
+        next.get(key)
+            .is_none_or(|next| prev != next && !merge_reaches(prev, next))
+    });
+
+    if unreachable {
         return replace_with(next);
     }
 
@@ -288,21 +334,16 @@ pub fn delta_mergeable_value_map_at<T: Clone + PartialEq>(
         .collect()
 }
 
-/// Calculate the delta between two strategy-carrying maps of plain values.
+/// Whether merging `next` onto `prev` lands exactly on `next`.
 ///
-/// Mirrors [`delta_mergeable_map`] for a map whose values carry no partial of
-/// their own, so an entry is compared and carried whole rather than diffed.
-pub fn delta_mergeable_value_map<T: Clone + PartialEq>(
-    prev: &MergeableMap<T>,
-    next: MergeableMap<T>,
-) -> MergeableMap<T> {
-    if prev.keys().any(|key| !next.contains_key(key)) {
-        return replace_with(next);
-    }
-
-    next.into_iter()
-        .filter(|(key, next)| !prev.get(key).is_some_and(|prev| prev == next))
-        .collect()
+/// A failed merge counts as not reaching it, so the caller falls back to
+/// clearing or replacing.
+fn merge_reaches<T>(prev: &T, next: &T) -> bool
+where
+    T: Clone + PartialEq + PartialConfig<Context = ()>,
+{
+    let mut merged = prev.clone();
+    merged.merge(&(), next.clone()).is_ok() && &merged == next
 }
 
 /// Calculate the delta between two optional values, reporting a cleared field.
