@@ -27,6 +27,7 @@
 //! told to keep allocation stacks for.
 
 use camino::Utf8Path;
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use jp_tool::Outcome;
 
 use crate::{
@@ -43,7 +44,6 @@ use crate::{
     util::{
         ToolResult, error,
         paths::{self, Shortening, shorten},
-        runner::{DuctProcessRunner, ProcessRunner},
     },
 };
 
@@ -81,7 +81,7 @@ pub(crate) async fn debug_app_profile(ctx: &Context, t: &Tool) -> ToolResult {
                 &ctx.root,
                 &Session::dir(&ctx.root, &Slot::for_context(ctx)?),
                 &tiers,
-                &DuctProcessRunner,
+                &SystemProcessRunner,
                 &capture::RealSpawner,
             )
         }

@@ -25,6 +25,7 @@
 //! [data]: super::steps
 
 use camino::Utf8Path;
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use jp_tool::Outcome;
 use serde_json::Value;
 
@@ -42,7 +43,6 @@ use crate::{
         diff::text_diff,
         error,
         paths::{self, Shortening, shorten},
-        runner::{DuctProcessRunner, ProcessRunner},
     },
 };
 
@@ -79,7 +79,7 @@ pub(crate) async fn debug_app_drive(ctx: &Context, t: &Tool) -> ToolResult {
     }
 
     let dir = Session::dir(&ctx.root, &Slot::for_context(ctx)?);
-    run(&ctx.root, &dir, &steps, &opts, reads, &DuctProcessRunner)
+    run(&ctx.root, &dir, &steps, &opts, reads, &SystemProcessRunner)
 }
 
 /// Render the preview shown before execution.

@@ -1,9 +1,9 @@
 use camino_tempfile::tempdir;
+use jp_process::MockProcessRunner;
 use jp_tool::{Action, Context};
 use pretty_assertions::assert_eq;
 
 use super::*;
-use crate::util::runner::MockProcessRunner;
 
 #[test]
 fn test_cargo_expand_success() {

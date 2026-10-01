@@ -1,8 +1,8 @@
 use camino::Utf8PathBuf;
+use jp_process::MockProcessRunner;
 use pretty_assertions::assert_eq;
 
 use super::*;
-use crate::util::runner::MockProcessRunner;
 
 fn spec() -> RunSpec {
     RunSpec {

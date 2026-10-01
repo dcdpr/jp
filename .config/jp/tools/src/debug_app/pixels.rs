@@ -24,6 +24,7 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use jp_tool::Outcome;
 use serde::Deserialize;
 
@@ -34,10 +35,7 @@ use crate::{
         screenshot::{self, Window},
         session::{Session, Slot},
     },
-    util::{
-        ToolResult, error,
-        runner::{DuctProcessRunner, ProcessRunner},
-    },
+    util::{ToolResult, error},
 };
 
 /// Which way a scan runs.
@@ -144,7 +142,7 @@ pub(crate) async fn debug_app_pixels(ctx: &Context, t: &Tool) -> ToolResult {
         .map_or(0, |since| since.as_millis());
 
     let dir = Session::dir(&ctx.root, &Slot::for_context(ctx)?);
-    run(&ctx.root, &dir, millis, &args, &DuctProcessRunner)
+    run(&ctx.root, &dir, millis, &args, &SystemProcessRunner)
 }
 
 fn format_preview(args: &Args) -> String {

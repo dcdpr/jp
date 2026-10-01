@@ -1,15 +1,13 @@
 use std::fmt::Write;
 
 use camino::Utf8Path;
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use serde_json::{Map, Value};
 
 use super::diff_filter::{
     add_slice_markers, grep_diff, slice_diff, truncate_diff, validate_line_range,
 };
-use crate::util::{
-    OneOrMany, ToolResult, error,
-    runner::{DuctProcessRunner, ProcessRunner},
-};
+use crate::util::{OneOrMany, ToolResult, error};
 
 /// Maximum lines of diff output before truncation kicks in.
 const MAX_LINES: usize = 500;
@@ -50,7 +48,7 @@ pub(crate) async fn git_diff_commit(
         context,
         start_line,
         end_line,
-        &DuctProcessRunner,
+        &SystemProcessRunner,
         &env,
     )
 }

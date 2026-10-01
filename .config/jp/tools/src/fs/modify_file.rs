@@ -12,6 +12,7 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use fancy_regex::RegexBuilder;
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use jp_tool::{Capability, Outcome, Question};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -24,7 +25,6 @@ use crate::{
         OneOrMany, ToolResult,
         diff::{colored_diff, text_diff, unified_diff},
         error, fail,
-        runner::{DuctProcessRunner, ProcessRunner},
     },
 };
 
@@ -47,7 +47,7 @@ pub(crate) async fn fs_modify_file(
         replace_using_regex,
         replace_all,
         case_sensitive,
-        &DuctProcessRunner,
+        &SystemProcessRunner,
     )
 }
 

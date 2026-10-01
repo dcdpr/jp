@@ -10,15 +10,13 @@ use std::{collections::HashMap, fmt::Write};
 
 use camino::Utf8Path;
 use chrono::{FixedOffset, TimeZone};
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use serde_json::{Map, Value};
 
 use super::env_from_options;
 use crate::{
     Result,
-    util::{
-        ToolResult, error,
-        runner::{DuctProcessRunner, ProcessRunner},
-    },
+    util::{ToolResult, error},
 };
 
 /// Upper bound on the requested line range.
@@ -81,7 +79,7 @@ pub(crate) async fn git_blame(
         end_line,
         revision.as_deref(),
         ignore_whitespace.unwrap_or(false),
-        &DuctProcessRunner,
+        &SystemProcessRunner,
         &env,
     )
 }
