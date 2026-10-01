@@ -119,16 +119,31 @@ fn test_pretty_true_preserves_ansi() {
 
 #[test]
 fn pretty_output_keeps_what_jp_draws_with_and_drops_the_rest() {
-    // Whoever printed it, text cannot clear the screen or retitle the window;
-    // styling and a status line redrawn in place still work.
+    // Whoever printed it, text cannot clear the screen, retitle the window, or
+    // return to the start of the row; styling and a background filled to the
+    // edge still work.
     let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
 
     printer.print("\x1b[31mred\x1b[0m \x1b[2Jcleared");
-    printer.eprint("\r\x1b[Kstatus\x1b]0;title\x07");
+    printer.eprint("\x1b[48;5;236mstatus\x1b[K\x1b[49m\r\x1b]0;title\x07");
     printer.flush();
 
     assert_eq!(*out.lock(), "\x1b[31mred\x1b[0m cleared");
-    assert_eq!(*err.lock(), "\r\x1b[Kstatus");
+    assert_eq!(*err.lock(), "\x1b[48;5;236mstatus\x1b[K\x1b[49m");
+}
+
+#[test]
+fn styling_left_open_is_closed_when_the_printer_shuts_down() {
+    // A stored title or matched line can open a color and never close it.
+    // Left open, it would color the shell prompt after JP exits.
+    let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.print("\x1b[41mred");
+    printer.eprint("\x1b[31mclosed\x1b[0m");
+    printer.shutdown();
+
+    assert_eq!(*out.lock(), "\x1b[41mred\x1b[0m");
+    assert_eq!(*err.lock(), "\x1b[31mclosed\x1b[0m");
 }
 
 #[test]
@@ -299,29 +314,6 @@ fn json_eprint_wraps_each_fragment_as_a_record() {
     printer.flush();
 
     assert_eq!(*err.lock(), "{\"message\":\".\"}\n{\"message\":\".\"}\n");
-}
-
-#[test]
-fn erase_line_writes_the_escape_on_a_text_format() {
-    let (printer, _, err) = Printer::memory(OutputFormat::TextPretty);
-
-    printer.erase_line();
-    printer.flush();
-
-    assert_eq!(*err.lock(), "\r\x1b[K");
-}
-
-// A cursor escape is neither a record nor part of one, so emitting it into an
-// NDJSON stream leaves the stream unparseable for the sake of a repaint no
-// JSON consumer can see.
-#[test]
-fn erase_line_is_silent_in_json() {
-    let (printer, _, err) = Printer::memory(OutputFormat::Json);
-
-    printer.erase_line();
-    printer.flush();
-
-    assert_eq!(*err.lock(), "");
 }
 
 #[test]
@@ -1332,7 +1324,6 @@ fn silenced_chrome_drops_writer_output() {
     let printer = printer.with_chrome(Chrome::Silenced);
 
     writeln!(printer.err_writer(), "waiting 3s").unwrap();
-    printer.erase_line();
     printer.flush();
 
     assert_eq!(*err.lock(), "");

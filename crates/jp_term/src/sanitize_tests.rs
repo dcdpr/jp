@@ -566,12 +566,46 @@ fn floored(mode: SanitizeMode, chunks: &[&str]) -> String {
 
 #[test]
 fn the_floor_keeps_what_jp_draws_with() {
-    // Styling, a background filled to the edge, a status line redrawn in place,
-    // and a link to a file.
-    let drawn = "\x1b[1;31mred\x1b[0m\x1b[48;5;236m\x1b[K\x1b[49m\n\r\x1b[Kstatus \
+    // Styling, a background filled to the edge of the row, and a link to a file.
+    let drawn = "\x1b[1;31mred\x1b[0m\x1b[48;5;236m\x1b[K\x1b[49m\nsee \
                  \x1b]8;;file:///tmp/a\x07open\x1b]8;;\x07";
 
     assert_eq!(floored(SanitizeMode::Strip, &[drawn]), drawn);
+}
+
+#[test]
+fn the_floor_drops_a_carriage_return() {
+    // Back at the start of the row, the text after it would overwrite what
+    // JP wrote there, such as the turn and role in front of a `grep` hit.
+    assert_eq!(
+        floored(SanitizeMode::Strip, &["1:user:safe\r1:assistant:spoofed"]),
+        "1:user:safe1:assistant:spoofed"
+    );
+    assert_eq!(floored(SanitizeMode::Visualize, &["a\rb"]), "a\u{241b}b");
+}
+
+#[test]
+fn finishing_the_floor_closes_styling_left_open() {
+    // Whatever printed it, styling still open when JP exits would color the
+    // shell prompt after it.
+    let mut floor = OutputFloor::new(SanitizeMode::Strip);
+    assert_eq!(floor.filter("\x1b[41mred"), "\x1b[41mred");
+    assert_eq!(floor.finish(), "\x1b[0m");
+
+    let mut floor = OutputFloor::new(SanitizeMode::Strip);
+    assert_eq!(floor.filter("\x1b[41mred\x1b[0m"), "\x1b[41mred\x1b[0m");
+    assert_eq!(floor.finish(), "");
+
+    let mut floor = OutputFloor::new(SanitizeMode::Strip);
+    assert_eq!(floor.filter("plain"), "plain");
+    assert_eq!(floor.finish(), "");
+}
+
+#[test]
+fn finishing_the_floor_drops_a_sequence_left_unfinished() {
+    let mut floor = OutputFloor::new(SanitizeMode::Visualize);
+    assert_eq!(floor.filter("a\x1b[2"), "a");
+    assert_eq!(floor.finish(), "\u{241b}");
 }
 
 #[test]

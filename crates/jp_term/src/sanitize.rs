@@ -97,7 +97,6 @@ impl ContentClass {
             styling,
             span: matches!(self, Self::ToolOutput),
             erase_line: false,
-            carriage_return: false,
             hyperlinks: false,
         }
     }
@@ -116,9 +115,6 @@ struct Policy {
     /// Erase to the end of the line (`\x1b[K`).
     erase_line: bool,
 
-    /// `\r`.
-    carriage_return: bool,
-
     /// OSC 8 hyperlinks, with control characters removed from their targets.
     hyperlinks: bool,
 }
@@ -128,7 +124,6 @@ const FLOOR: Policy = Policy {
     styling: true,
     span: false,
     erase_line: true,
-    carriage_return: true,
     hyperlinks: true,
 };
 
@@ -206,6 +201,7 @@ impl<W: fmt::Write> ContentWriter<W> {
                 buffer: String::new(),
                 open: false,
                 st_pending: false,
+                styled: false,
             },
         }
     }
@@ -337,6 +333,10 @@ struct Sink {
     /// That terminator belongs to the dropped string and earns no marker of its
     /// own.
     st_pending: bool,
+
+    /// Whether styling let through since the last full reset may still be in
+    /// effect.
+    styled: bool,
 }
 
 impl Sink {
@@ -392,10 +392,6 @@ impl Perform for Sink {
                 self.st_pending = false;
                 self.buffer.push(char::from(byte));
             }
-            b'\r' if self.policy.carriage_return => {
-                self.st_pending = false;
-                self.buffer.push('\r');
-            }
             // CAN and SUB abort the sequence in progress, and one marker covers
             // both.
             CAN | SUB if self.open => self.drop_sequence(),
@@ -429,6 +425,9 @@ impl Perform for Sink {
             self.mark();
         }
         if !kept.is_empty() {
+            // Counted as closed only by a sequence that does nothing but reset;
+            // anything else may leave some attribute on.
+            self.styled = kept.iter().any(|group| *group != [0]);
             push_sgr(&mut self.buffer, &kept);
         }
     }
@@ -571,18 +570,20 @@ pub fn sanitize_decoded(text: &str, class: ContentClass, mode: SanitizeMode) -> 
 /// The least filtering any text bound for a terminal gets: the sequences JP's
 /// own output is made of, and nothing else.
 ///
-/// Printable text, `\n`, `\t`, and `\r` pass, as do SGR styling less conceal,
-/// erase to the end of the line (`\x1b[K`), and OSC 8 hyperlinks, whose targets
-/// lose their control characters.
+/// Printable text, `\n`, and `\t` pass, as do SGR styling less conceal, erase
+/// to the end of the line (`\x1b[K`), and OSC 8 hyperlinks, whose targets lose
+/// their control characters.
 /// Every other sequence and control character is dropped the way the
-/// [`SanitizeMode`] says, as [`ContentWriter`] drops it.
+/// [`SanitizeMode`] says, as [`ContentWriter`] drops it, `\r` included.
 ///
-/// The floor keeps text from moving the cursor off its line, clearing the
-/// screen, switching terminal modes, or reaching past the character grid to the
-/// window title or the clipboard.
+/// The floor keeps text from moving the cursor, clearing the screen or a line,
+/// switching terminal modes, or reaching past the character grid to the window
+/// title or the clipboard.
+/// An erase to the end of the line can only paint the rest of the row in the
+/// current background: without `\r` the cursor never moves back over text
+/// already written.
 /// It does not replace filtering content by its [`ContentClass`]: it lets
-/// through styling model output should not carry, and a carriage return or an
-/// erase that rewrites the line it is on.
+/// through styling that model output should not carry.
 ///
 /// One floor filters one stream, so a sequence one call leaves unfinished is
 /// completed or dropped by the next.
@@ -618,6 +619,24 @@ impl OutputFloor {
     pub fn filter(&mut self, text: &str) -> String {
         // Writing to a `String` is infallible.
         let _ = self.writer.write_str(text);
+        std::mem::take(&mut self.writer.output)
+    }
+
+    /// End the stream: drop a sequence left unfinished, and close with
+    /// `\x1b[0m` any styling still in effect.
+    ///
+    /// Under [`SanitizeMode::Off`] text is not parsed, so nothing is dropped or
+    /// closed.
+    pub fn finish(&mut self) -> String {
+        self.writer.settle();
+
+        if self.writer.sink.styled {
+            self.writer.sink.styled = false;
+            self.writer.sink.buffer.push_str(RESET);
+        }
+
+        // Writing to a `String` is infallible.
+        let _ = self.writer.flush();
         std::mem::take(&mut self.writer.output)
     }
 }

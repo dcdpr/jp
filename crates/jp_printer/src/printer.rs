@@ -504,21 +504,6 @@ impl Printer {
         }
     }
 
-    /// Erase the current line on the chrome channel.
-    ///
-    /// For chrome that repaints in place: status lines, progress counters, the
-    /// retry notice.
-    /// A no-op whenever [`Self::chrome_repaints`] is false: under a JSON format
-    /// `\r\x1b[K` is neither a record nor part of one, and would break `2>&1 |
-    /// jq` to redraw something a JSON consumer cannot see.
-    pub fn erase_line(&self) {
-        if !self.chrome_repaints() {
-            return;
-        }
-
-        let _ = write!(self.err_writer(), "\r\x1b[K");
-    }
-
     /// Wrap a print task's content in an NDJSON envelope.
     ///
     /// ANSI escapes are stripped before serialization.
@@ -1243,6 +1228,34 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
         // than the output.
         self.drain_held();
         self.regions.erase(&mut self.err);
+        self.finish_floors();
+    }
+
+    /// Close what each stream's floor left open: styling still in effect would
+    /// color whatever the terminal shows after JP exits.
+    fn finish_floors(&mut self) {
+        let Some(floors) = &mut self.floors else {
+            return;
+        };
+
+        for target in [PrintTarget::Out, PrintTarget::Err, PrintTarget::Tty] {
+            let tail = floors.get(target).finish();
+            if tail.is_empty() {
+                continue;
+            }
+
+            let writer: &mut dyn io::Write = match target {
+                PrintTarget::Out => &mut self.out,
+                PrintTarget::Err => &mut self.err,
+                PrintTarget::Tty => match self.tty.as_mut() {
+                    Some(tty) => tty.as_mut(),
+                    None => continue,
+                },
+            };
+
+            let _err = writer.write_all(tail.as_bytes());
+            let _err = writer.flush();
+        }
     }
 
     /// Decide whether `task` may be written now, holding it back if not.
