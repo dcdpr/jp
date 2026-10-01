@@ -536,9 +536,11 @@ impl From<crate::error::Error> for Error {
             .into(),
             MissingEditor => [("message", "Missing editor".to_owned())].into(),
             Schema(error) => [("message", "Invalid schema".to_owned()), ("error", error)].into(),
-            MissingStructuredData => {
-                [("message", "No structured data in response".to_owned())].into()
-            }
+            StructuredData(error) => [
+                ("message", "No structured output".to_owned()),
+                ("error", error.to_string()),
+            ]
+            .into(),
             LockTimeout(id) => [
                 (
                     "message",

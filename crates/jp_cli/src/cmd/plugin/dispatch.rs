@@ -20,6 +20,7 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::NamedUtf8TempFile;
+use chrono::{DateTime, TimeDelta, Utc};
 use jp_config::{
     AppConfig,
     interrupt::{StreamingInterruptAction, ToolInterruptAction},
@@ -29,7 +30,7 @@ use jp_config::{
     },
     util::{build, list_configs_in_load_path},
 };
-use jp_conversation::{ConversationId, ConversationStream, event::ChatRequest};
+use jp_conversation::{ConversationId, ConversationStream, EventId, event::ChatRequest};
 use jp_editor::{EditOutcome, EditorBackend};
 use jp_inquire::{
     InlineOption, InlineSelect, ReplyEditMode, ReplyOutcome,
@@ -51,7 +52,7 @@ use jp_printer::{OutputFormat, Printer};
 use jp_storage::backend::{FsStorageBackend, Projection};
 use jp_task::task::TitleGeneratorTask;
 use jp_workspace::{ConversationLock, LockResult, Workspace, session::Session};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tokio::{
     sync::mpsc::{self, error::TrySendError},
     task::JoinSet,
@@ -66,7 +67,7 @@ use crate::{
         interrupt::{
             Delivery, InterruptAction, TurnInterruptSender, TurnInterrupts, reply_edit_mode,
         },
-        resolve_new_title,
+        last_request_id, resolve_new_title, turn_structured_data,
     },
     config_pipeline::{ConfigPipeline, build_partial_over, config_search_roots},
     ctx::McpServerScope,
@@ -877,8 +878,13 @@ async fn run_query(
         return failed("query content is empty".to_owned());
     }
 
+    let expires_at = match query_expiry(&request, ctx.now()) {
+        Ok(expires_at) => expires_at,
+        Err(error) => return failed(error),
+    };
+
     let new = request.new;
-    let lock = match lock_for_query(ctx, &request) {
+    let lock = match lock_for_query(ctx, &request, expires_at) {
         Ok(lock) => lock,
         Err(error) => return failed(error),
     };
@@ -935,8 +941,9 @@ async fn run_query(
     let chat_request = ChatRequest {
         content: request.content,
         author: config.user.name.clone(),
-        ..ChatRequest::default()
+        schema: request.schema,
     };
+    let schema = chat_request.schema.clone();
 
     // Registered before the turn starts, so an interrupt that arrives while it
     // is still being prepared is delivered rather than refused as "no turn is
@@ -967,6 +974,9 @@ async fn run_query(
     let title = resolve_title(&config, &lock, &stream, &chat_request)
         .map(|task| -> TitleFuture { Box::pin(generate_title(task, lock.id())) });
 
+    // The last request before this query, to tell its turn from earlier ones.
+    let before = lock.with_events(last_request_id);
+
     // Hand the turn to its own task. It owns everything it needs and the lock owns
     // itself, so nothing here is borrowed for the minutes a turn can take, which
     // is what keeps the message loop answering reads while it runs.
@@ -993,10 +1003,8 @@ async fn run_query(
         let reply = match outcome {
             Ok(()) => {
                 info!(%conversation, "A delegated turn finished.");
-                HostToPlugin::QueryComplete(QueryCompleteResponse {
-                    id: reply_id,
-                    conversation,
-                })
+                let (before, schema) = (before.as_ref(), schema.as_ref());
+                lock.with_events(|events| completed(reply_id, conversation, events, before, schema))
             }
             Err(error) => {
                 // The full chain, not the outermost label: `cmd::Error` renders as
@@ -1035,7 +1043,11 @@ async fn run_query(
 /// The lock comes before anything else a turn needs: it is the turn's proof of
 /// exclusive access, and it owns what it needs, which is what lets the turn run
 /// away from the message loop.
-fn lock_for_query(ctx: &mut Ctx, request: &QueryRequest) -> Result<ConversationLock, String> {
+fn lock_for_query(
+    ctx: &mut Ctx,
+    request: &QueryRequest,
+    expires_at: Option<DateTime<Utc>>,
+) -> Result<ConversationLock, String> {
     if request.new {
         // Resolved before the conversation exists, so a name that does not resolve
         // leaves nothing behind to clean up.
@@ -1043,6 +1055,7 @@ fn lock_for_query(ctx: &mut Ctx, request: &QueryRequest) -> Result<ConversationL
 
         let conversation = jp_conversation::Conversation {
             title: request.title.clone().filter(|t| !t.trim().is_empty()),
+            expires_at,
             ..jp_conversation::Conversation::default()
         };
 
@@ -1082,6 +1095,64 @@ fn lock_for_query(ctx: &mut Ctx, request: &QueryRequest) -> Result<ConversationL
             Err("another process is working on this conversation".to_owned())
         }
         Err(error) => Err(format!("failed to lock the conversation: {error}")),
+    }
+}
+
+/// When the conversation a query creates expires, if it asked to be temporary.
+///
+/// An existing conversation keeps the expiry it has, so asking for one without
+/// `new` is refused rather than ignored.
+fn query_expiry(
+    request: &QueryRequest,
+    now: DateTime<Utc>,
+) -> Result<Option<DateTime<Utc>>, String> {
+    let Some(expires_in) = request.expires_in.as_deref() else {
+        return Ok(None);
+    };
+
+    if !request.new {
+        return Err("`expires_in` applies only to a conversation the query creates".to_owned());
+    }
+
+    let invalid = |reason: String| format!("invalid `expires_in` {expires_in:?}: {reason}");
+
+    let duration =
+        humantime::parse_duration(expires_in).map_err(|error| invalid(error.to_string()))?;
+    let duration = TimeDelta::from_std(duration).map_err(|error| invalid(error.to_string()))?;
+
+    now.checked_add_signed(duration)
+        .map(Some)
+        .ok_or_else(|| invalid("out of range".to_owned()))
+}
+
+/// The reply to a delegated turn that finished.
+///
+/// With a `schema`, it carries the structured response of the turn this query
+/// started, and is an error when there is none to give: the turn was stopped
+/// before it started, answered without structured data, or was cut short.
+/// `before` is the conversation's last request from before the query ran.
+fn completed(
+    id: Option<String>,
+    conversation: String,
+    events: &ConversationStream,
+    before: Option<&EventId>,
+    schema: Option<&Map<String, Value>>,
+) -> HostToPlugin {
+    if schema.is_none() {
+        return HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id,
+            conversation,
+            data: None,
+        });
+    }
+
+    match turn_structured_data(events, before, schema) {
+        Ok(data) => HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id,
+            conversation,
+            data: Some(data),
+        }),
+        Err(error) => query_error(id, format!("conversation {conversation}: {error}")),
     }
 }
 

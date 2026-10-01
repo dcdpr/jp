@@ -1,5 +1,5 @@
 use camino_tempfile::{Utf8TempDir, tempdir};
-use jp_conversation::{Conversation, ConversationId};
+use jp_conversation::{Conversation, ConversationId, event::ChatResponse};
 use jp_plugin::message::{
     ExitMessage, InterruptRequest, OptionalId, ReadEventsRequest, ReadyMessage,
 };
@@ -1546,6 +1546,193 @@ fn list_configs_reports_the_user_global_root() {
         namespace: "skill".to_owned(),
         name: "rfd".to_owned(),
     }]);
+}
+
+/// A `query` asking for `new` and, optionally, an expiry.
+fn expiring_query(new: bool, expires_in: Option<&str>) -> QueryRequest {
+    QueryRequest {
+        id: None,
+        conversation: String::new(),
+        content: "Summarize".to_owned(),
+        new,
+        title: None,
+        cfg: vec![],
+        schema: None,
+        expires_in: expires_in.map(str::to_owned),
+    }
+}
+
+fn at(secs: i64) -> DateTime<Utc> {
+    DateTime::<Utc>::UNIX_EPOCH + TimeDelta::seconds(secs)
+}
+
+#[test]
+fn a_query_without_expires_in_creates_a_lasting_conversation() {
+    assert_eq!(
+        query_expiry(&expiring_query(true, None), at(1_700_000_000)),
+        Ok(None)
+    );
+}
+
+#[test]
+fn expires_in_counts_from_when_the_conversation_is_created() {
+    assert_eq!(
+        query_expiry(&expiring_query(true, Some("5m")), at(1_700_000_000)),
+        Ok(Some(at(1_700_000_300)))
+    );
+}
+
+/// `jp query --tmp` requires `--new`, and silently keeping a conversation the
+/// plugin asked to be temporary is the failure a refusal avoids.
+#[test]
+fn expires_in_on_an_existing_conversation_is_refused() {
+    assert_eq!(
+        query_expiry(&expiring_query(false, Some("5m")), at(1_700_000_000)),
+        Err("`expires_in` applies only to a conversation the query creates".to_owned())
+    );
+}
+
+#[test]
+fn an_unparseable_expires_in_is_refused() {
+    let error = query_expiry(&expiring_query(true, Some("soon")), at(1_700_000_000)).unwrap_err();
+
+    assert!(
+        error.starts_with(r#"invalid `expires_in` "soon": "#),
+        "the message names the field and the value: {error}"
+    );
+}
+
+/// Append a turn that ends in `response`, the way a query's turn does.
+fn add_turn(stream: &mut ConversationStream, response: ChatResponse) {
+    stream.start_turn(ChatRequest::from("Summarize"));
+    stream
+        .current_turn_mut()
+        .add_chat_response(response)
+        .build()
+        .unwrap();
+}
+
+/// A stream of one turn per entry in `responses`, each ending in that response.
+fn stream_of(responses: Vec<ChatResponse>) -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    for response in responses {
+        add_turn(&mut stream, response);
+    }
+    stream
+}
+
+/// A schema asking for a JSON object.
+fn object_schema() -> Map<String, Value> {
+    Map::from_iter([("type".to_owned(), json!("object"))])
+}
+
+#[test]
+fn a_structured_query_replies_with_the_last_turns_data() {
+    let mut events = stream_of(vec![ChatResponse::structured(json!({"turn": 1}))]);
+    let before = last_request_id(&events);
+    add_turn(&mut events, ChatResponse::structured(json!({"turn": 2})));
+
+    assert_eq!(
+        completed(
+            Some("q1".to_owned()),
+            "123".to_owned(),
+            &events,
+            before.as_ref(),
+            Some(&object_schema()),
+        ),
+        HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id: Some("q1".to_owned()),
+            conversation: "123".to_owned(),
+            data: Some(json!({"turn": 2})),
+        })
+    );
+}
+
+/// The turn that just ran answered in prose, so an earlier turn's data must not
+/// be handed back in its place.
+#[test]
+fn a_structured_query_whose_turn_produced_no_data_fails() {
+    let mut events = stream_of(vec![ChatResponse::structured(json!({"turn": 1}))]);
+    let before = last_request_id(&events);
+    add_turn(&mut events, ChatResponse::message("I would rather not."));
+
+    assert_eq!(
+        completed(
+            Some("q1".to_owned()),
+            "123".to_owned(),
+            &events,
+            before.as_ref(),
+            Some(&object_schema()),
+        ),
+        HostToPlugin::Error(ErrorResponse {
+            id: Some("q1".to_owned()),
+            request: Some("query".to_owned()),
+            message: "conversation 123: no structured data in the assistant's response".to_owned(),
+        })
+    );
+}
+
+/// A client stop that lands while MCP servers start or the model is looked up
+/// ends the turn before its request is appended, leaving the previous turn's
+/// data last in the conversation.
+#[test]
+fn a_structured_query_stopped_before_its_turn_started_fails() {
+    let events = stream_of(vec![ChatResponse::structured(json!({"turn": 1}))]);
+    let before = last_request_id(&events);
+
+    assert_eq!(
+        completed(
+            Some("q1".to_owned()),
+            "123".to_owned(),
+            &events,
+            before.as_ref(),
+            Some(&object_schema()),
+        ),
+        HostToPlugin::Error(ErrorResponse {
+            id: Some("q1".to_owned()),
+            request: Some("query".to_owned()),
+            message: "conversation 123: the turn was stopped before it started".to_owned(),
+        })
+    );
+}
+
+/// A response cut off at the output token limit mid-object is recorded as its
+/// raw text, which an object schema rules out as an answer.
+#[test]
+fn a_structured_query_whose_response_was_cut_short_fails() {
+    // The query created the conversation, so there was no request before it.
+    let events = stream_of(vec![ChatResponse::structured(json!(r#"{"summary": "sho"#))]);
+
+    assert_eq!(
+        completed(
+            Some("q1".to_owned()),
+            "123".to_owned(),
+            &events,
+            None,
+            Some(&object_schema()),
+        ),
+        HostToPlugin::Error(ErrorResponse {
+            id: Some("q1".to_owned()),
+            request: Some("query".to_owned()),
+            message: "conversation 123: the assistant's structured response is not valid JSON; it \
+                      may have been cut off at the output token limit"
+                .to_owned(),
+        })
+    );
+}
+
+#[test]
+fn a_query_without_a_schema_replies_without_data() {
+    let events = stream_of(vec![ChatResponse::structured(json!({"turn": 1}))]);
+
+    assert_eq!(
+        completed(None, "123".to_owned(), &events, None, None),
+        HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id: None,
+            conversation: "123".to_owned(),
+            data: None,
+        })
+    );
 }
 
 #[test]

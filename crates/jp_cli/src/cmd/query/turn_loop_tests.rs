@@ -1269,6 +1269,78 @@ async fn test_normal_completion_persists_content() {
     );
 }
 
+/// A Ctrl-C that lands after the model lookup but before the loop's first phase
+/// ends the turn from `Idle`, without appending its request.
+///
+/// The press is routed to the turn's handler before the loop runs, so the
+/// loop's first check finds it.
+/// A caller asking whether the turn ran compares the stream's last request
+/// before and after, which only holds if this path appends nothing.
+#[tokio::test]
+async fn an_interrupt_before_the_first_phase_appends_nothing() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+
+    let config = AppConfig::new_test();
+    let mut workspace = Workspace::in_memory(root);
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_message("never asked"));
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let (router, signals) = test_router();
+
+    // Registered first, so the press is delivered to it rather than escalated
+    // past an empty handler stack.
+    let turn_interrupt = router.turn_interrupt();
+    signals.interrupt().await;
+
+    // Sending only queues the press for the router's task. Without waiting for
+    // it to be routed, the loop's first check finds nothing and the press lands
+    // mid-stream instead, which is a different path.
+    timeout(Duration::from_secs(5), async {
+        while !turn_interrupt.has_pending() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the router delivers the press to the turn's handler");
+
+    run_turn_loop(
+        Arc::clone(&provider),
+        &model,
+        &config,
+        &router,
+        Utf8Path::new("/tmp"),
+        InvocationContext::default(),
+        false, // interactive
+        &[],
+        &lock,
+        ToolChoice::Auto,
+        &[],
+        Arc::new(printer),
+        Arc::new(MockPromptBackend::new()),
+        ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+        ChatRequest::from("Hello"),
+        PendingStreamTrim::default(),
+        turn_interrupt,
+        TurnInterrupts::none(),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        lock.events().is_empty(),
+        "the turn ended before its request was appended"
+    );
+}
+
 /// Regression: a provider stream that ends without a terminal `Finished` event
 /// (a dropped or stalled connection) must surface as an error rather than
 /// hanging the loop forever on the signal/tick sources.

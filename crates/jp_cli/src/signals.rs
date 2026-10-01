@@ -233,6 +233,12 @@ impl TurnInterrupt {
     pub fn try_recv(&mut self) -> Option<InterruptNotice> {
         self.rx.try_recv().ok()
     }
+
+    /// Whether a press has been routed here and not yet taken.
+    #[cfg(test)]
+    pub(crate) fn has_pending(&self) -> bool {
+        !self.rx.is_empty()
+    }
 }
 
 /// A delivered Ctrl-C press, handed to the notified handler's event loop.
