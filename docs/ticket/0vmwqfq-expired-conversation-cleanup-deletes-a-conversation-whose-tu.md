@@ -1,6 +1,6 @@
 # Expired-conversation cleanup deletes a conversation whose turn is still running
 
-- **Status**: Todo
+- **Status**: Done
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-10-01
@@ -44,3 +44,26 @@ Lock an expired conversation through the workspace, run
 conversation is still on disk.
 The existing `test_remove_ephemeral_conversations`
 (`crates/jp_workspace/src/lib_tests.rs:704`) has the fixture.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-10-01T10:45:24Z
+
+Fixed in `remove_ephemeral_conversations`: each expired conversation's lock is
+taken through the workspace's `LockBackend` for the removal itself, and a
+conversation whose lock is held is kept.
+Taking the lock rather than checking `is_conversation_locked` closes the window
+between the check and the delete, and covers every backend rather than only the
+filesystem one.
+
+Exposed by T-0vmm72z on the same branch: `expires_in` on a plugin `query`
+creates an expiring conversation that no session has active.
+Before it, only `jp conversation edit --tmp` on a conversation a plugin turn was
+running on could reach this.
+
+Test: `an_expired_conversation_is_kept_while_its_lock_is_held` keeps a locked
+expired conversation, then removes it once released, so the lock is shown to be
+what kept it.

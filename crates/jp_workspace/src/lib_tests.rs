@@ -802,6 +802,56 @@ fn test_remove_ephemeral_conversations() {
     );
 }
 
+/// A conversation is locked for the length of its turn, and one created with an
+/// expiry by a plugin is active in no session, so the lock is all that stands
+/// between a running turn and cleanup deleting its conversation.
+#[test]
+fn an_expired_conversation_is_kept_while_its_lock_is_held() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage = root.join("storage");
+
+    let fs = FsStorageBackend::new(&storage).unwrap();
+    let mut ws = workspace_with_fs(&root, &fs);
+
+    let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
+    ws.create_conversation_with_id(
+        id,
+        Conversation {
+            expires_at: Some(Utc::now() - chrono::Duration::hours(1)),
+            ..Default::default()
+        },
+        Arc::new(AppConfig::new_test()),
+    );
+
+    let handle = ws.acquire_conversation(&id).unwrap();
+    let LockResult::Acquired(lock) = ws.lock_conversation(handle, None).unwrap() else {
+        panic!("the conversation starts unlocked");
+    };
+    {
+        let mut conv = lock.as_mut();
+        conv.update_metadata(|_| {});
+        conv.flush().unwrap();
+    }
+
+    ws.remove_ephemeral_conversations(&[]);
+
+    let fs_check = FsStorageBackend::new(&storage).unwrap();
+    assert!(
+        fs_check.find_conversation_dir(&id).is_some(),
+        "a locked conversation must survive cleanup"
+    );
+
+    // Released, the same conversation is removed: the lock is what kept it.
+    drop(lock);
+    ws.remove_ephemeral_conversations(&[]);
+
+    assert!(
+        fs_check.find_conversation_dir(&id).is_none(),
+        "an unlocked expired conversation is removed"
+    );
+}
+
 /// Verify that `NullLockBackend` (used for `--no-persist`) allows multiple
 /// locks on the same conversation without blocking.
 #[test]

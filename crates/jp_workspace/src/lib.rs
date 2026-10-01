@@ -495,6 +495,10 @@ impl Workspace {
     /// is in the past, then removes them through the persist backend.
     /// If persistence is disabled (`NullPersistBackend`), the removes are
     /// no-ops.
+    ///
+    /// A conversation whose lock is held is kept: a turn is running on it.
+    /// The lock is taken for the removal itself, so no turn can start on the
+    /// conversation between the check and the delete.
     pub fn remove_ephemeral_conversations(&mut self, skip: &[ConversationId]) {
         let expired = self
             .loader
@@ -504,6 +508,22 @@ impl Workspace {
             if skip.contains(&id) {
                 continue;
             }
+
+            // Held until the end of this iteration, after the remove. Lock
+            // files live outside the conversation directory, so deleting the
+            // conversation does not delete the lock out from under the guard.
+            let _guard = match self.locker.try_lock(&id.to_string(), None) {
+                Ok(Some(guard)) => guard,
+                Ok(None) => {
+                    debug!(%id, "Keeping expired conversation: a turn holds its lock.");
+                    continue;
+                }
+                Err(e) => {
+                    warn!(%id, %e, "Keeping expired conversation: failed to lock it.");
+                    continue;
+                }
+            };
+
             if let Err(e) = self.persist.remove(&id) {
                 warn!(%id, %e, "Failed to remove ephemeral conversation.");
             }
