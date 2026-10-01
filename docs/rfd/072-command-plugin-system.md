@@ -601,8 +601,8 @@ as already locked, and a message meant for the running turn goes through
 
 A `query` carrying a `schema` asks for structured output, as `jp query --schema`
 does, and its `query_complete` carries the parsed response in `data`.
-One with `new` can also set `expires_in` (`5m`, `1h`), making the conversation it
-creates temporary, as `jp query --tmp` does.
+One with `new` can also set `expires_in` (`5m`, `1h`), making the conversation
+it creates temporary, as `jp query --tmp` does.
 Both need protocol 11.
 
 What happens to a running turn when the plugin exits is described under
