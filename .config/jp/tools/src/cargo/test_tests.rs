@@ -344,7 +344,7 @@ fn test_rustflags_reaches_cargo() {
 #[test]
 fn insta_workspace_root_names_the_checkout_under_test() {
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
-    let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
+    let runner = MockProcessRunner::success(stdout);
     let _result = cargo_test_impl(
         Utf8Path::new("/work/jp.git/bookworm-tool-def"),
         "-W warnings",
@@ -358,8 +358,7 @@ fn insta_workspace_root_names_the_checkout_under_test() {
     .unwrap();
 
     assert_eq!(
-        runner
-            .captured_env()
+        captured_env(&runner)
             .iter()
             .find(|(k, _)| k == "INSTA_WORKSPACE_ROOT")
             .map(|(_, v)| v.as_str()),
