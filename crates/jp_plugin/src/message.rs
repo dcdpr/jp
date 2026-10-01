@@ -5,7 +5,7 @@
 
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
 /// Well-known JP directory paths.
@@ -672,7 +672,14 @@ pub struct QueryCompleteResponse {
 
     /// The assistant's structured response, present when the request carried a
     /// `schema`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ///
+    /// A response of `null` arrives as `Some(Value::Null)`; only an absent
+    /// field reads as `None`.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub data: Option<Value>,
 }
 
@@ -996,6 +1003,13 @@ pub struct ExitMessage {
     /// Omit for successful exits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+}
+
+/// Wrap a field that is present on the wire, including `null`, in `Some`.
+///
+/// Only called when the key exists; `default` covers its absence.
+fn present<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, D::Error> {
+    Value::deserialize(deserializer).map(Some)
 }
 
 fn default_channel() -> String {

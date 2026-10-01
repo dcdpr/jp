@@ -400,6 +400,34 @@ fn a_plain_query_writes_neither_schema_nor_expires_in() {
     );
 }
 
+/// A schema that admits `null`, such as `{"type": ["string", "null"]}`, makes
+/// `null` a valid answer, and it has to stay distinct from a reply carrying no
+/// answer at all.
+#[test]
+fn a_null_answer_survives_the_round_trip() {
+    let msg = HostToPlugin::QueryComplete(QueryCompleteResponse {
+        id: None,
+        conversation: "123".to_owned(),
+        data: Some(Value::Null),
+    });
+
+    let json = serde_json::to_string(&msg).unwrap();
+    assert_eq!(
+        json,
+        r#"{"type":"query_complete","conversation":"123","data":null}"#
+    );
+    assert_eq!(from_str::<HostToPlugin>(&json).unwrap(), msg);
+
+    assert_eq!(
+        from_str::<HostToPlugin>(r#"{"type":"query_complete","conversation":"123"}"#).unwrap(),
+        HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id: None,
+            conversation: "123".to_owned(),
+            data: None,
+        })
+    );
+}
+
 #[test]
 fn query_complete_carries_data_only_when_there_is_some() {
     let without = HostToPlugin::QueryComplete(QueryCompleteResponse {
