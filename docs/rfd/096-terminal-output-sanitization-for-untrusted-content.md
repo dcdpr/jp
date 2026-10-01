@@ -348,10 +348,10 @@ The floor keeps what JP's own output is made of, and drops everything else:
 
 What it drops follows `style.sanitize` like the content policy: removed under
 `strip`, marked with `␛` under `visualize`, and passed through under `off`.
-The mode is the one the run renders under: set when the run's context is
-built, when a long-running host swaps configs, and by each turn's chat renderer,
-so a conversation rendered with its own `style.sanitize` gets the floor that
-setting asks for.
+The mode is the one the run renders under: set when the run's context is built,
+when a long-running host swaps configs, and by each turn's chat renderer, so a
+conversation rendered with its own `style.sanitize` gets the floor that setting
+asks for.
 
 Two writes bypass it.
 A prompt widget's own drawing (`PrintOrigin::Widget`) moves the cursor and
