@@ -18,6 +18,8 @@
 //!   commas, holding this one's stdout and stderr open, and leave it running.
 //! - `tick:MS`: for `MS` milliseconds, print `tick PID` to stderr every 20
 //!   milliseconds, and exit as soon as stderr can no longer be written.
+//! - `spin:MS`: as `tick`, but print `\rspin PID` with no newline, as a
+//!   progress meter does.
 //! - `sleep:MS`: sleep `MS` milliseconds.
 //! - `exit:CODE`: exit with `CODE`.
 
@@ -80,7 +82,14 @@ fn main() {
                 }
             }
             "pid" => line(&mut io::stderr(), &format!("pid {}", process::id())),
-            "tick" => tick(Duration::from_millis(value.parse().unwrap_or(0))),
+            "tick" => repeat(
+                Duration::from_millis(value.parse().unwrap_or(0)),
+                &format!("tick {}\n", process::id()),
+            ),
+            "spin" => repeat(
+                Duration::from_millis(value.parse().unwrap_or(0)),
+                &format!("\rspin {}", process::id()),
+            ),
             "sleep" => thread::sleep(Duration::from_millis(value.parse().unwrap_or(0))),
             "exit" => exit(value.parse().unwrap_or(0)),
             _ => {}
@@ -95,14 +104,14 @@ extern "C" fn exit_interrupted(_signal: libc::c_int) {
     unsafe { libc::_exit(42) }
 }
 
-/// Print `tick PID` to stderr every 20 milliseconds for `duration`.
+/// Print `text` to stderr every 20 milliseconds for `duration`.
 ///
 /// Exits once a write fails: nobody is reading anymore.
-fn tick(duration: Duration) {
+fn repeat(duration: Duration, text: &str) {
     let deadline = Instant::now() + duration;
     let mut stderr = io::stderr();
     while Instant::now() < deadline {
-        if writeln!(stderr, "tick {}", process::id())
+        if write!(stderr, "{text}")
             .and_then(|()| stderr.flush())
             .is_err()
         {

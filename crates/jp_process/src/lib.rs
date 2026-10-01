@@ -60,7 +60,12 @@ pub struct ProcessSpec {
     /// Otherwise it shares this process's group, and a Ctrl-C reaches both.
     ///
     /// A process leading its own group that [`Watch`] stops is stopped with
-    /// every process in the group, so what it started does not outlive it.
+    /// every process in the group, so what it started does not outlive it: the
+    /// whole group is interrupted, and whatever is still running when
+    /// [`Watch::grace`] runs out is killed, even once the process itself has
+    /// exited.
+    /// The grace ends early once the process has exited and nothing holds its
+    /// output open.
     ///
     /// Unix only; elsewhere the process always shares the console.
     pub own_process_group: bool,
