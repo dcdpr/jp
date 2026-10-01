@@ -28,6 +28,11 @@ use crate::{
 /// Directory holding the ticket files, relative to the workspace root.
 pub const DEFAULT_DIR: &str = "docs/ticket";
 
+/// Longest slug a ticket filename carries; a title beyond this is cut.
+///
+/// Slugs are ASCII, so this is both a byte count and a character count.
+pub const MAX_SLUG_SIZE: usize = 60;
+
 /// Start of the id time range: `2026-08-10T00:00:00Z`, the day the ticket
 /// system went live.
 const EPOCH_SECS: u64 = 1_786_320_000;
@@ -733,7 +738,7 @@ fn slug(title: &str) -> String {
 
     // Every pushed character is ASCII, so a byte index is a character index.
     let slug = slug.trim_matches('-');
-    let cut = slug.len().min(60);
+    let cut = slug.len().min(MAX_SLUG_SIZE);
 
     match slug[..cut].trim_end_matches('-') {
         "" => "untitled".to_owned(),
