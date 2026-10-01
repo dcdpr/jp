@@ -700,16 +700,18 @@ Just raw JSON in a code fence.
 
 `TurnInputs::run` reports whether the turn got as far as appending its request
 (`TurnOutcome::Started`) or was stopped before it (`TurnOutcome::NotStarted`).
-Both `jp query --schema` and a plugin's `query` with a `schema` hand that outcome
-to `turn_structured_data`, which returns the structured response of the
+Both `jp query --schema` and a plugin's `query` with a `schema` hand that
+outcome to `turn_structured_data`, which returns the structured response of the
 conversation's last turn, or a `StructuredDataError`:
 
-- `NotStarted`: the turn never ran, so the last turn belongs to an earlier
-  query and its data is not this one's answer.
+- `NotStarted`: the turn never ran, so the last turn belongs to an earlier query
+  and its data is not this one's answer.
 - `Missing`: the turn ran but produced no structured response.
 - `NotJson`: the response failed to parse and was recorded as its raw text in a
-  JSON string, while the schema's root `type` rules a string out. This is
-  usually a response cut off at the output token limit.
+  JSON string, while the schema's root `type` rules a string out.
+  This is usually a response cut off at the output token limit.
+
+<!-- end list -->
 
 ```rust
 let data = lock
