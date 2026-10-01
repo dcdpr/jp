@@ -5,6 +5,8 @@ use jp_config::{
     model::id::{
         ModelIdConfig, Name, PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId,
     },
+    plugins::command::{CommandPluginConfig, PartialCommandPluginConfig, RunPolicy},
+    types::map::MergeableMap,
 };
 use serde_json::{Map, Value};
 
@@ -1976,15 +1978,13 @@ fn test_from_parts_reads_unattended_as_allow() {
 /// whole entry would silently lift a stored `deny`.
 #[test]
 fn test_from_parts_drops_removed_plugin_install_keys_and_keeps_the_rest() {
-    use jp_config::plugins::command::{CommandPluginConfig, PartialCommandPluginConfig, RunPolicy};
-
     let mut base = jp_config::AppConfig::new_test();
     base.plugins
         .command
         .insert("serve-web".to_owned(), CommandPluginConfig {
             run: Some(RunPolicy::Deny),
             checksum: None,
-            options: None,
+            options: MergeableMap::default(),
         });
 
     let mut delta = PartialAppConfig::empty();
