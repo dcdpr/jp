@@ -507,11 +507,33 @@ fn spawn_plugin(
         cmd.process_group(0);
     }
 
+    // Started suspended, so it cannot start anything before `ProcessTree`
+    // has put it in a job: a process created before the assignment would not
+    // be in the job, and would survive killing it.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+
+        use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+        cmd.creation_flags(CREATE_SUSPENDED);
+    }
+
     let mut child = cmd
         .spawn()
         .map_err(|e| cmd::Error::from(format!("failed to spawn plugin: {e}")))?;
 
     let tree = ProcessTree::adopt(&child);
+
+    // Resumed whether or not it made it into the job: a plugin left suspended
+    // never answers `init`, and the host would wait on it forever.
+    #[cfg(windows)]
+    {
+        if let Err(error) = resume_suspended(child.id()) {
+            drop(child.kill());
+            drop(child.wait());
+            return Err(cmd::Error::from(format!("failed to start plugin: {error}")));
+        }
+    }
 
     let child_stdin = child.stdin.take().expect("stdin piped");
     let stdout = child.stdout.take().expect("stdout piped");
@@ -2255,8 +2277,8 @@ fn is_process_alive(pid: u32) -> bool {
 ///
 /// On Unix this is the process group the plugin leads, which requires it to
 /// have been spawned with `process_group(0)`.
-/// On Windows it is a job object the plugin is assigned to right after spawn; a
-/// process the plugin starts before the assignment lands is not covered.
+/// On Windows it is a job object, which requires the plugin to have been
+/// spawned suspended and not resumed until it is in the job.
 ///
 /// A descendant that deliberately leaves the group or job is not covered
 /// either.
@@ -2345,7 +2367,8 @@ unsafe impl Sync for Job {}
 impl Job {
     /// Create an anonymous job and put `child` in it.
     ///
-    /// Processes `child` starts from then on join the job too.
+    /// Processes `child` starts from then on join the job too; any it started
+    /// before do not.
     fn assign(child: &Child) -> Option<Self> {
         use std::{os::windows::io::AsRawHandle as _, ptr};
 
@@ -2392,6 +2415,70 @@ impl Drop for Job {
             CloseHandle(self.0);
         }
     }
+}
+
+/// Resume the only thread of a process created with `CREATE_SUSPENDED`.
+///
+/// `std::process::Child` does not expose the primary thread handle, so the
+/// thread is found through a snapshot of the system's threads.
+/// A suspended process that has not run yet has exactly one.
+#[cfg(windows)]
+fn resume_suspended(pid: u32) -> io::Result<()> {
+    use std::mem;
+
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
+        System::{
+            Diagnostics::ToolHelp::{
+                CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First,
+                Thread32Next,
+            },
+            Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME},
+        },
+    };
+
+    // SAFETY: every handle is checked before use and closed once; `entry` is
+    // a plain C struct whose size field is set as the API requires.
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error());
+        }
+
+        let mut entry = THREADENTRY32 {
+            dwSize: u32::try_from(mem::size_of::<THREADENTRY32>()).unwrap_or(u32::MAX),
+            ..THREADENTRY32::default()
+        };
+
+        let mut thread_id = None;
+        let mut more = Thread32First(snapshot, &raw mut entry) != 0;
+        while more {
+            if entry.th32OwnerProcessID == pid {
+                thread_id = Some(entry.th32ThreadID);
+                break;
+            }
+            more = Thread32Next(snapshot, &raw mut entry) != 0;
+        }
+        CloseHandle(snapshot);
+
+        let thread_id =
+            thread_id.ok_or_else(|| io::Error::other("the plugin has no thread to resume"))?;
+
+        let thread = OpenThread(THREAD_SUSPEND_RESUME, 0, thread_id);
+        if thread.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+
+        let previous = ResumeThread(thread);
+        let error = io::Error::last_os_error();
+        CloseHandle(thread);
+
+        if previous == u32::MAX {
+            return Err(error);
+        }
+    }
+
+    Ok(())
 }
 
 /// Terminate a single process by PID.
