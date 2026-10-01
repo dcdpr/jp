@@ -359,3 +359,66 @@ fn conversation_summary_defaults_pinned_at_when_absent() {
         pinned_summary(None)
     );
 }
+
+#[test]
+fn a_structured_temporary_query_reads_from_json() {
+    let json = r#"{"type":"query","id":"q1","content":"Summarize","new":true,"schema":{"type":"object"},"expires_in":"5m"}"#;
+
+    assert_eq!(
+        from_str::<PluginToHost>(json).unwrap(),
+        PluginToHost::Query(QueryRequest {
+            id: Some("q1".to_owned()),
+            conversation: String::new(),
+            content: "Summarize".to_owned(),
+            new: true,
+            title: None,
+            cfg: vec![],
+            schema: Some(Map::from_iter([("type".to_owned(), json!("object"))])),
+            expires_in: Some("5m".to_owned()),
+        })
+    );
+}
+
+/// A plugin that asks for neither sends the same bytes it sent before the
+/// fields existed, so an older host still reads it.
+#[test]
+fn a_plain_query_writes_neither_schema_nor_expires_in() {
+    let msg = PluginToHost::Query(QueryRequest {
+        id: None,
+        conversation: "123".to_owned(),
+        content: "hi".to_owned(),
+        new: false,
+        title: None,
+        cfg: vec![],
+        schema: None,
+        expires_in: None,
+    });
+
+    assert_eq!(
+        serde_json::to_string(&msg).unwrap(),
+        r#"{"type":"query","conversation":"123","content":"hi"}"#
+    );
+}
+
+#[test]
+fn query_complete_carries_data_only_when_there_is_some() {
+    let without = HostToPlugin::QueryComplete(QueryCompleteResponse {
+        id: None,
+        conversation: "123".to_owned(),
+        data: None,
+    });
+    let with = HostToPlugin::QueryComplete(QueryCompleteResponse {
+        id: None,
+        conversation: "123".to_owned(),
+        data: Some(json!({"summary": "short"})),
+    });
+
+    assert_eq!(
+        serde_json::to_string(&without).unwrap(),
+        r#"{"type":"query_complete","conversation":"123"}"#
+    );
+    assert_eq!(
+        serde_json::to_string(&with).unwrap(),
+        r#"{"type":"query_complete","conversation":"123","data":{"summary":"short"}}"#
+    );
+}

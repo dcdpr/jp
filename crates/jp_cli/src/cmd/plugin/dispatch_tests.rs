@@ -1548,6 +1548,124 @@ fn list_configs_reports_the_user_global_root() {
     }]);
 }
 
+/// A `query` asking for `new` and, optionally, an expiry.
+fn expiring_query(new: bool, expires_in: Option<&str>) -> QueryRequest {
+    QueryRequest {
+        id: None,
+        conversation: String::new(),
+        content: "Summarize".to_owned(),
+        new,
+        title: None,
+        cfg: vec![],
+        schema: None,
+        expires_in: expires_in.map(str::to_owned),
+    }
+}
+
+fn at(secs: i64) -> DateTime<Utc> {
+    DateTime::<Utc>::UNIX_EPOCH + TimeDelta::seconds(secs)
+}
+
+#[test]
+fn a_query_without_expires_in_creates_a_lasting_conversation() {
+    assert_eq!(
+        query_expiry(&expiring_query(true, None), at(1_700_000_000)),
+        Ok(None)
+    );
+}
+
+#[test]
+fn expires_in_counts_from_when_the_conversation_is_created() {
+    assert_eq!(
+        query_expiry(&expiring_query(true, Some("5m")), at(1_700_000_000)),
+        Ok(Some(at(1_700_000_300)))
+    );
+}
+
+/// `jp query --tmp` requires `--new`, and silently keeping a conversation the
+/// plugin asked to be temporary is the failure a refusal avoids.
+#[test]
+fn expires_in_on_an_existing_conversation_is_refused() {
+    assert_eq!(
+        query_expiry(&expiring_query(false, Some("5m")), at(1_700_000_000)),
+        Err("`expires_in` applies only to a conversation the query creates".to_owned())
+    );
+}
+
+#[test]
+fn an_unparseable_expires_in_is_refused() {
+    let error = query_expiry(&expiring_query(true, Some("soon")), at(1_700_000_000)).unwrap_err();
+
+    assert!(
+        error.starts_with(r#"invalid `expires_in` "soon": "#),
+        "the message names the field and the value: {error}"
+    );
+}
+
+/// A stream of one turn per entry in `responses`, each ending in that response.
+fn stream_of(responses: Vec<ChatResponse>) -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    for response in responses {
+        stream.start_turn(ChatRequest::from("Summarize"));
+        stream
+            .current_turn_mut()
+            .add_chat_response(response)
+            .build()
+            .unwrap();
+    }
+    stream
+}
+
+#[test]
+fn a_structured_query_replies_with_the_last_turns_data() {
+    let events = stream_of(vec![
+        ChatResponse::structured(json!({"turn": 1})),
+        ChatResponse::structured(json!({"turn": 2})),
+    ]);
+
+    assert_eq!(
+        completed(Some("q1".to_owned()), "123".to_owned(), &events, true),
+        HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id: Some("q1".to_owned()),
+            conversation: "123".to_owned(),
+            data: Some(json!({"turn": 2})),
+        })
+    );
+}
+
+/// The turn that just ran answered in prose, so an earlier turn's data must not
+/// be handed back in its place.
+#[test]
+fn a_structured_query_whose_turn_produced_no_data_fails() {
+    let events = stream_of(vec![
+        ChatResponse::structured(json!({"turn": 1})),
+        ChatResponse::message("I would rather not."),
+    ]);
+
+    assert_eq!(
+        completed(Some("q1".to_owned()), "123".to_owned(), &events, true),
+        HostToPlugin::Error(ErrorResponse {
+            id: Some("q1".to_owned()),
+            request: Some("query".to_owned()),
+            message: "no structured data in the assistant's response on 123".to_owned(),
+        })
+    );
+}
+
+#[test]
+fn a_query_without_a_schema_replies_without_data() {
+    let events = stream_of(vec![ChatResponse::structured(json!({"turn": 1}))]);
+
+    assert_eq!(
+        completed(None, "123".to_owned(), &events, false),
+        HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id: None,
+            conversation: "123".to_owned(),
+            data: None,
+        })
+    );
+}
+
 #[test]
 fn find_plugin_binary_nonexistent() {
     let result = find_plugin_binary(&["__jp_test_nonexistent_plugin_42__"]);

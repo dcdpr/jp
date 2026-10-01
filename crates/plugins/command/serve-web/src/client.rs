@@ -165,6 +165,8 @@ impl PluginClient {
             id: Some(id.clone()),
             conversation: conversation.to_owned(),
             content: content.to_owned(),
+            schema: None,
+            expires_in: None,
         });
 
         match self.request_within(&id, &msg, None).await? {
@@ -210,6 +212,8 @@ impl PluginClient {
             new: true,
             title,
             cfg,
+            schema: None,
+            expires_in: None,
         });
 
         // Both waiters before the request goes out. Registering the second one

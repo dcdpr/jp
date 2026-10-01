@@ -101,6 +101,7 @@ async fn two_replies_to_one_request_reach_both_waiters() {
         HostToPlugin::QueryComplete(QueryCompleteResponse {
             id: Some("7".to_owned()),
             conversation: "jp-c1".to_owned(),
+            data: None,
         }),
     );
 
@@ -137,6 +138,7 @@ async fn a_single_reply_still_clears_its_request() {
         HostToPlugin::QueryComplete(QueryCompleteResponse {
             id: Some("3".to_owned()),
             conversation: "jp-c1".to_owned(),
+            data: None,
         }),
     );
 

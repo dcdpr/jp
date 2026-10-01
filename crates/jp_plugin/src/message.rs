@@ -533,6 +533,26 @@ pub struct QueryRequest {
     /// `jp q --cfg` does.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cfg: Vec<String>,
+
+    /// A JSON Schema the assistant's response has to match.
+    ///
+    /// The provider is asked for structured output, as `jp query --schema`
+    /// does, and [`HostToPlugin::QueryComplete`] carries the parsed response in
+    /// `data`.
+    /// A turn that ends without one is reported as an error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<Map<String, Value>>,
+
+    /// Make a conversation created by this request temporary, expiring this
+    /// long after it is created.
+    ///
+    /// Takes a duration the way `jp query --tmp` does, e.g. `5m` or `1h`; `0s`
+    /// expires it at once.
+    /// An expired conversation is removed by the next `jp` run that finds it
+    /// and no session has it active.
+    /// Requires `new`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_in: Option<String>,
 }
 
 /// Ask the host to change what a running turn is doing.
@@ -649,6 +669,11 @@ pub struct QueryCompleteResponse {
 
     /// The conversation the turn ran on.
     pub conversation: String,
+
+    /// The assistant's structured response, present when the request carried a
+    /// `schema`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
 }
 
 /// The conversation a `query` with `new` created.

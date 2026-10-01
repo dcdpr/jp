@@ -20,6 +20,7 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::NamedUtf8TempFile;
+use chrono::{DateTime, TimeDelta, Utc};
 use jp_config::{
     AppConfig,
     interrupt::{StreamingInterruptAction, ToolInterruptAction},
@@ -29,7 +30,10 @@ use jp_config::{
     },
     util::{build, list_configs_in_load_path},
 };
-use jp_conversation::{ConversationId, ConversationStream, event::ChatRequest};
+use jp_conversation::{
+    ConversationId, ConversationStream,
+    event::{ChatRequest, ChatResponse},
+};
 use jp_editor::{EditOutcome, EditorBackend};
 use jp_inquire::{
     InlineOption, InlineSelect, ReplyEditMode, ReplyOutcome,
@@ -877,8 +881,13 @@ async fn run_query(
         return failed("query content is empty".to_owned());
     }
 
+    let expires_at = match query_expiry(&request, ctx.now()) {
+        Ok(expires_at) => expires_at,
+        Err(error) => return failed(error),
+    };
+
     let new = request.new;
-    let lock = match lock_for_query(ctx, &request) {
+    let lock = match lock_for_query(ctx, &request, expires_at) {
         Ok(lock) => lock,
         Err(error) => return failed(error),
     };
@@ -935,8 +944,9 @@ async fn run_query(
     let chat_request = ChatRequest {
         content: request.content,
         author: config.user.name.clone(),
-        ..ChatRequest::default()
+        schema: request.schema,
     };
+    let wants_data = chat_request.schema.is_some();
 
     // Registered before the turn starts, so an interrupt that arrives while it
     // is still being prepared is delivered rather than refused as "no turn is
@@ -993,10 +1003,7 @@ async fn run_query(
         let reply = match outcome {
             Ok(()) => {
                 info!(%conversation, "A delegated turn finished.");
-                HostToPlugin::QueryComplete(QueryCompleteResponse {
-                    id: reply_id,
-                    conversation,
-                })
+                lock.with_events(|events| completed(reply_id, conversation, events, wants_data))
             }
             Err(error) => {
                 // The full chain, not the outermost label: `cmd::Error` renders as
@@ -1035,7 +1042,11 @@ async fn run_query(
 /// The lock comes before anything else a turn needs: it is the turn's proof of
 /// exclusive access, and it owns what it needs, which is what lets the turn run
 /// away from the message loop.
-fn lock_for_query(ctx: &mut Ctx, request: &QueryRequest) -> Result<ConversationLock, String> {
+fn lock_for_query(
+    ctx: &mut Ctx,
+    request: &QueryRequest,
+    expires_at: Option<DateTime<Utc>>,
+) -> Result<ConversationLock, String> {
     if request.new {
         // Resolved before the conversation exists, so a name that does not resolve
         // leaves nothing behind to clean up.
@@ -1043,6 +1054,7 @@ fn lock_for_query(ctx: &mut Ctx, request: &QueryRequest) -> Result<ConversationL
 
         let conversation = jp_conversation::Conversation {
             title: request.title.clone().filter(|t| !t.trim().is_empty()),
+            expires_at,
             ..jp_conversation::Conversation::default()
         };
 
@@ -1082,6 +1094,76 @@ fn lock_for_query(ctx: &mut Ctx, request: &QueryRequest) -> Result<ConversationL
             Err("another process is working on this conversation".to_owned())
         }
         Err(error) => Err(format!("failed to lock the conversation: {error}")),
+    }
+}
+
+/// When the conversation a query creates expires, if it asked to be temporary.
+///
+/// An existing conversation keeps the expiry it has, so asking for one without
+/// `new` is refused rather than ignored.
+fn query_expiry(
+    request: &QueryRequest,
+    now: DateTime<Utc>,
+) -> Result<Option<DateTime<Utc>>, String> {
+    let Some(expires_in) = request.expires_in.as_deref() else {
+        return Ok(None);
+    };
+
+    if !request.new {
+        return Err("`expires_in` applies only to a conversation the query creates".to_owned());
+    }
+
+    let invalid = |reason: String| format!("invalid `expires_in` {expires_in:?}: {reason}");
+
+    let duration =
+        humantime::parse_duration(expires_in).map_err(|error| invalid(error.to_string()))?;
+    let duration = TimeDelta::from_std(duration).map_err(|error| invalid(error.to_string()))?;
+
+    now.checked_add_signed(duration)
+        .map(Some)
+        .ok_or_else(|| invalid("out of range".to_owned()))
+}
+
+/// The reply to a delegated turn that finished.
+///
+/// With `wants_data`, it carries the structured response of the turn that just
+/// ran, and is an error when that turn produced none.
+/// Only the last turn is searched, so an earlier turn's data is never passed
+/// off as this one's.
+fn completed(
+    id: Option<String>,
+    conversation: String,
+    events: &ConversationStream,
+    wants_data: bool,
+) -> HostToPlugin {
+    if !wants_data {
+        return HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id,
+            conversation,
+            data: None,
+        });
+    }
+
+    let data = events.iter_turns().next_back().and_then(|turn| {
+        turn.iter().rev().find_map(|entry| {
+            entry
+                .event
+                .as_chat_response()
+                .and_then(ChatResponse::as_structured_data)
+                .cloned()
+        })
+    });
+
+    match data {
+        Some(data) => HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id,
+            conversation,
+            data: Some(data),
+        }),
+        None => query_error(
+            id,
+            format!("no structured data in the assistant's response on {conversation}"),
+        ),
     }
 }
 
