@@ -126,6 +126,23 @@ fn test_inquiry_response_cancelled_missing_reason_is_unknown() {
     });
 }
 
+/// A question withdrawn because its call was settled first is recorded under
+/// its own tag, and reads back as the same reason.
+#[test]
+fn test_inquiry_response_withdrawn_round_trips() {
+    let json = json!({
+        "outcome": "cancelled",
+        "id": "call_1.confirm.1",
+        "reason": "withdrawn",
+    });
+    let response: InquiryResponse = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(response, InquiryResponse::Cancelled {
+        id: InquiryId::new("call_1.confirm.1"),
+        reason: CancellationReason::Withdrawn,
+    });
+    assert_eq!(serde_json::to_value(&response).unwrap(), json);
+}
+
 #[test]
 fn test_inquiry_response_unknown_reason_round_trips() {
     let json = json!({
