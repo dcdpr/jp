@@ -414,6 +414,10 @@ pub enum CancellationReason {
     /// and refused to route to the inquiry backend.
     AssistantRoutingDenied,
 
+    /// The call the question belongs to was settled before the question was
+    /// answered, so nobody needs the answer anymore.
+    Withdrawn,
+
     /// A reason this build cannot interpret: a tag named by a newer JP, or a
     /// `cancelled` event whose `reason` was missing or not a string (recorded
     /// with the sentinel tag `unspecified`).
@@ -435,6 +439,7 @@ impl CancellationReason {
             Self::BackendError => "backend_error",
             Self::NoPromptBackend => "no_prompt_backend",
             Self::AssistantRoutingDenied => "assistant_routing_denied",
+            Self::Withdrawn => "withdrawn",
             Self::Unknown(tag) => tag,
         }
     }
@@ -447,6 +452,7 @@ impl CancellationReason {
             "backend_error" => Self::BackendError,
             "no_prompt_backend" => Self::NoPromptBackend,
             "assistant_routing_denied" => Self::AssistantRoutingDenied,
+            "withdrawn" => Self::Withdrawn,
             other => Self::Unknown(other.to_owned()),
         }
     }
