@@ -196,6 +196,9 @@ conversation titles keep no escape sequences at all.
 User messages and tool output are written in a **content span**: JP ends it with
 a styling reset where it stops writing the content, so their styling cannot run
 into what JP writes next.
+Beneath every class sits the **output floor** (`OutputFloor`): the printer holds
+everything it writes to the sequences JP's own output uses, whatever filtered it
+before.
 
 **Not the same as** the other two operations JP calls sanitize, which change
 data rather than how it is shown.

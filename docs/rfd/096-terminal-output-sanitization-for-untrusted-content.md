@@ -19,6 +19,10 @@ and terminal-state-changing sequences are neutralized everywhere.
 Stored data remains byte-for-byte verbatim.
 Content that may carry styling is written in a content span that JP closes with
 a styling reset, so it cannot bleed into JP's own output.
+Beneath the per-class policy, the printer holds everything it writes to the
+sequences JP's own output is made of, so a path that forgets to filter its
+content still cannot take over the terminal, and conversation titles are a type
+that cannot be printed without a decision about filtering it.
 
 ## Motivation
 
@@ -324,6 +328,62 @@ Concretely:
    text question shows its stripped default but returns the original default
    when the user accepts it unchanged.
 
+### Output floor
+
+The per-class policy only protects the paths that apply it.
+A command that prints a conversation title, or a line of a tool result, without
+going through a `ContentWriter` writes whatever the bytes say.
+The *output floor* is the least filtering every printed byte gets, whoever
+printed it.
+
+Under a pretty format the printer worker passes each print task through an
+`OutputFloor` (`jp_term::sanitize`) on its way to its stream, one floor per
+stream so a sequence split between two tasks is recognized whole.
+The floor keeps what JP's own output is made of, and drops everything else:
+
+- printable text, `\n`, `\t`, and `\r`;
+- SGR (`CSI … m`), less conceal;
+- erase to the end of the line (`\x1b[K`);
+- OSC 8 hyperlinks, with control characters removed from the target.
+
+What it drops follows `style.sanitize` like the content policy: removed under
+`strip`, marked with `␛` under `visualize`, and passed through under `off`.
+The mode is the one the run renders under: set when the run's context is
+built, when a long-running host swaps configs, and by each turn's chat renderer,
+so a conversation rendered with its own `style.sanitize` gets the floor that
+setting asks for.
+
+Two writes bypass it.
+A prompt widget's own drawing (`PrintOrigin::Widget`) moves the cursor and
+switches terminal modes on purpose, so whatever text a caller hands a widget
+(picker rows, a confirmation's preamble) has to be filtered by that caller.
+Status-region frames are written by the worker itself, under [RFD 091]'s
+stricter filter.
+
+The floor does not replace the per-class policy: it cannot tell content from
+chrome (see Placement), so it lets through everything chrome needs, including
+styling model output must not carry and the `\r` and erase that rewrite the
+current line.
+It bounds what a forgotten path can do to restyling text and rewriting its own
+line.
+
+### Stored strings are typed
+
+The floor bounds a forgotten path; a type makes forgetting visible.
+A conversation's title is `jp_conversation::Title`, stored and serialized as a
+bare string, with no `Display` and no dereference to `str`.
+Code reaches its text either through `raw()`, named for what it is and used for
+storage, machine-readable output, plugins, and the macOS app, or through
+`jp_cli`'s derived-text filter (`DerivedText::title`), which shows it the way
+`jp conversation ls` shows titles.
+A picker row is redrawn in place, so a title in a picker is always one line of
+plain text, whatever `style.sanitize` says.
+
+A new display site that formats a title does not compile until it picks one of
+the two.
+Only titles are typed; `jp conversation grep` hit lines and a message's author
+name are still strings, and the floor is what bounds them.
+
 ### OSC embedding hardening
 
 Independent of the configurable sanitizer, `jp_term::osc` escapes the dynamic
@@ -359,7 +419,8 @@ control characters — and ships even when `sanitize = "off"`.
 - **Non-pretty output.** The `out`/`err` sinks already strip *all* ANSI via
   `AnsiStripper` for non-pretty formats; that behavior stays.
 - **Chrome.** JP's own styling and widgets, and the controls the
-  reedline/inquire prompts draw, are untouched.
+  reedline/inquire prompts draw, look the same: the floor keeps everything
+  chrome is made of, and a widget's drawing bypasses it.
   Tool-supplied strings shown inside a prompt are content (see Placement).
 
 ## Drawbacks
@@ -387,13 +448,23 @@ control characters — and ships even when `sanitize = "off"`.
   background color.
   Blocking that requires tracking color state against the theme, which is not
   worth the complexity now (see Risks).
+- The output floor parses everything printed in a pretty format a second time.
+- What the floor allows, a forgotten path can still do: restyle text, rewrite
+  its own line with `\r` or an erase, or show a link whose text misrepresents
+  its target.
 
 ## Alternatives
 
 - **Strip all escape sequences from content.** Simplest and safest, but breaks
   legitimate colored tool output — an explicit requirement.
-- **Sanitize at the printer sink.** Rejected: trusted chrome and untrusted
-  content are indistinguishable there.
+- **Sanitize at the printer sink.** Rejected as the place for the per-class
+  policy: trusted chrome and untrusted content are indistinguishable there.
+  Kept as a floor beneath it, which needs no such distinction because it only
+  drops what chrome never uses (see Output floor).
+- **Filter titles once, on load.** The loaded title also feeds storage, JSON
+  output, plugins, and the macOS app, so a filtered copy and a stored copy would
+  share a type, and "remember to filter" would become "remember which copy".
+  The live query path renders before anything is loaded at all.
 - **One policy for every content class.** Keeping SGR in model output too means
   closing a span at every kind transition, reasoning-budget cut, and closing
   fence of a streamed response, and a reset fed through markdown turns a closing
@@ -522,9 +593,17 @@ control characters — and ships even when `sanitize = "off"`.
 8. **Docs**: `docs/configuration.md` entry; note in the security section of the
    README docs; ubiquitous-language entry disambiguating display sanitization
    from storage sanitization ([RFD 052]) and stream repair.
+9. **Output floor**: `jp_term::sanitize::OutputFloor`, one per stream in the
+   printer worker under a pretty format; `PrintOrigin::Widget` for a widget's
+   own drawing, which bypasses it; the mode set from `style.sanitize` by the
+   run's context, a config swap, and each chat renderer.
+10. **Typed titles**: `jp_conversation::Title`, and every display site moved to
+    `DerivedText::title` or, in a picker, one plain line.
 
 Steps 1–3 and 7 merge ahead of the config knob (step 2 after step 1); 4–6 land
 together behind the default.
+Steps 9 and 10 came out of review of the first eight: they keep a command
+written later from bringing the problem back.
 
 ## References
 
