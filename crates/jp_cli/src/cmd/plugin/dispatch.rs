@@ -344,14 +344,16 @@ pub(crate) async fn run_plugin(
 
     let PluginProcess {
         mut child,
+        tree,
         stdin,
         stdout,
         stderr_handle,
     } = spawn_plugin(binary, paths.child_cwd)?;
+    let tree = Arc::new(tree);
 
     // Shutdown thread: sends `Shutdown` directly to the plugin's stdin when
     // an interrupt or a graceful shutdown request arrives. If the plugin
-    // doesn't exit within the grace period, sends SIGKILL.
+    // doesn't exit within the grace period, kills its process tree.
     //
     // The guard drops when this function returns; the thread then sees the
     // notification channel close and exits.
@@ -360,7 +362,7 @@ pub(crate) async fn run_plugin(
     let shutdown_sent = Arc::new(AtomicBool::new(false));
     let shutdown_writer = stdin.clone();
     let shutdown_flag = shutdown_sent.clone();
-    let child_id = child.id();
+    let shutdown_tree = Arc::clone(&tree);
     let shutdown_handle = thread::spawn(move || {
         let interrupted = futures::executor::block_on(async {
             tokio::select! {
@@ -383,7 +385,7 @@ pub(crate) async fn run_plugin(
         stop_plugin(
             &shutdown_writer,
             &shutdown_flag,
-            child_id,
+            &shutdown_tree,
             Duration::from_secs(5),
         );
     });
@@ -428,7 +430,7 @@ pub(crate) async fn run_plugin(
     // Short grace: unlike an interrupt, there is no work in flight worth letting
     // finish.
     if result.is_err() {
-        stop_plugin(&stdin, &shutdown_sent, child_id, Duration::from_secs(1));
+        stop_plugin(&stdin, &shutdown_sent, &tree, Duration::from_secs(1));
     }
 
     // After the plugin is dealt with, before the child is reaped: a turn writes
@@ -441,7 +443,14 @@ pub(crate) async fn run_plugin(
 
     // Always clean up, even on error.
     drop(child.wait());
-    drop(stderr_handle.join());
+
+    // Bounded, because the pipe closes when its last holder does, not when the
+    // plugin does. A descendant that left the plugin's process group survives
+    // the kill and would otherwise keep `jp` from exiting for as long as it
+    // runs.
+    if !join_within(stderr_handle, Duration::from_secs(1)) {
+        debug!("Plugin stderr is still held open by a descendant; not waiting for it.");
+    }
     drop(reader_thread);
     drop(shutdown_handle);
 
@@ -451,6 +460,9 @@ pub(crate) async fn run_plugin(
 /// A spawned plugin process and its wired-up pipes.
 struct PluginProcess {
     child: Child,
+
+    /// The plugin and everything it starts, for killing together.
+    tree: ProcessTree,
 
     /// Shared, because the shutdown thread writes to it as well as the message
     /// loop.
@@ -486,15 +498,42 @@ fn spawn_plugin(
     // Prevent the child from receiving SIGINT/SIGTERM directly. The host
     // sends `Shutdown` over the protocol instead, giving the plugin a
     // chance to exit gracefully.
+    //
+    // The group is also what `ProcessTree` kills: the child leads it, and
+    // everything it starts joins it.
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt as _;
         cmd.process_group(0);
     }
 
+    // Started suspended, so it cannot start anything before `ProcessTree`
+    // has put it in a job: a process created before the assignment would not
+    // be in the job, and would survive killing it.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+
+        use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+        cmd.creation_flags(CREATE_SUSPENDED);
+    }
+
     let mut child = cmd
         .spawn()
         .map_err(|e| cmd::Error::from(format!("failed to spawn plugin: {e}")))?;
+
+    let tree = ProcessTree::adopt(&child);
+
+    // Resumed whether or not it made it into the job: a plugin left suspended
+    // never answers `init`, and the host would wait on it forever.
+    #[cfg(windows)]
+    {
+        if let Err(error) = resume_suspended(child.id()) {
+            drop(child.kill());
+            drop(child.wait());
+            return Err(cmd::Error::from(format!("failed to start plugin: {error}")));
+        }
+    }
 
     let child_stdin = child.stdin.take().expect("stdin piped");
     let stdout = child.stdout.take().expect("stdout piped");
@@ -515,6 +554,7 @@ fn spawn_plugin(
 
     Ok(PluginProcess {
         child,
+        tree,
         stdin: Arc::new(Mutex::new(child_stdin)),
         stdout,
         stderr_handle,
@@ -524,7 +564,7 @@ fn spawn_plugin(
 /// Ask a plugin to stop, and make sure it does.
 ///
 /// Sends `Shutdown` over the protocol, gives the plugin `grace` to act on it,
-/// and kills it if it doesn't.
+/// and kills it and everything it started if it doesn't.
 /// `sent` records the request having been made, so the two callers don't both
 /// make it.
 /// It does not record the request arriving: a write to a plugin that has
@@ -532,7 +572,7 @@ fn spawn_plugin(
 ///
 /// Killing rather than closing stdin: the handle is shared, so no single holder
 /// can produce the EOF that would let a reading plugin notice on its own.
-fn stop_plugin(stdin: &Mutex<impl Write>, sent: &AtomicBool, child_id: u32, grace: Duration) {
+fn stop_plugin(stdin: &Mutex<impl Write>, sent: &AtomicBool, tree: &ProcessTree, grace: Duration) {
     if !sent.swap(true, Ordering::AcqRel)
         && let Ok(mut writer) = stdin.lock()
     {
@@ -544,12 +584,28 @@ fn stop_plugin(stdin: &Mutex<impl Write>, sent: &AtomicBool, child_id: u32, grac
     let deadline = Instant::now() + grace;
     while Instant::now() < deadline {
         thread::sleep(Duration::from_millis(50));
-        if !is_process_alive(child_id) {
+        if !is_process_alive(tree.pid) {
             return;
         }
     }
 
-    kill_child(child_id);
+    tree.kill();
+}
+
+/// Wait up to `limit` for a thread to finish, leaving it running if it doesn't.
+///
+/// Returns whether it finished.
+fn join_within(handle: JoinHandle<()>, limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    while !handle.is_finished() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    drop(handle.join());
+    true
 }
 
 /// The host's output format, in the protocol's vocabulary.
@@ -2217,23 +2273,217 @@ fn is_process_alive(pid: u32) -> bool {
     }
 }
 
-/// Send SIGKILL to a child process by PID.
+/// A plugin process and every process it starts, killed as one.
 ///
-/// Used as a last resort when the plugin doesn't exit within the grace period
-/// after receiving `Shutdown`.
-#[cfg(unix)]
-fn kill_child(pid: u32) {
-    // SAFETY: We're sending a signal to a process we spawned.
-    unsafe {
-        libc::kill(libc::pid_t::from(pid.cast_signed()), libc::SIGKILL);
-    }
-    debug!(pid, "Sent SIGKILL to plugin after grace period.");
+/// On Unix this is the process group the plugin leads, which requires it to
+/// have been spawned with `process_group(0)`.
+/// On Windows it is a job object, which requires the plugin to have been
+/// spawned suspended and not resumed until it is in the job.
+///
+/// A descendant that deliberately leaves the group or job is not covered
+/// either.
+struct ProcessTree {
+    /// The plugin's own PID, which on Unix is also its process group ID.
+    pid: u32,
+
+    /// `None` when the job could not be created or assigned, in which case only
+    /// the plugin process itself is killed.
+    #[cfg(windows)]
+    job: Option<Job>,
 }
 
-/// Terminate a child process by PID.
+impl ProcessTree {
+    /// Take ownership of the tree rooted at a freshly spawned plugin.
+    #[cfg(unix)]
+    fn adopt(child: &Child) -> Self {
+        Self { pid: child.id() }
+    }
+
+    /// Take ownership of the tree rooted at a freshly spawned plugin.
+    #[cfg(windows)]
+    fn adopt(child: &Child) -> Self {
+        let job = Job::assign(child);
+        if job.is_none() {
+            warn!("Could not put the plugin in a job object; only it will be killed on shutdown.");
+        }
+
+        Self {
+            pid: child.id(),
+            job,
+        }
+    }
+
+    /// Kill the plugin and everything still in its tree.
+    ///
+    /// Used as a last resort when the plugin doesn't exit within the grace
+    /// period after receiving `Shutdown`.
+    #[cfg(unix)]
+    fn kill(&self) {
+        // A negative PID addresses the whole process group.
+        //
+        // SAFETY: the group is led by a process we spawned.
+        unsafe {
+            libc::kill(-libc::pid_t::from(self.pid.cast_signed()), libc::SIGKILL);
+        }
+        debug!(
+            pid = self.pid,
+            "Sent SIGKILL to the plugin's process group after grace period."
+        );
+    }
+
+    /// Kill the plugin and everything still in its tree.
+    ///
+    /// Used as a last resort when the plugin doesn't exit within the grace
+    /// period after receiving `Shutdown`.
+    #[cfg(windows)]
+    fn kill(&self) {
+        match &self.job {
+            Some(job) => {
+                job.terminate();
+                debug!(
+                    pid = self.pid,
+                    "Terminated the plugin's job object after grace period."
+                );
+            }
+            None => kill_child(self.pid),
+        }
+    }
+}
+
+/// A job object handle, closed on drop.
+#[cfg(windows)]
+struct Job(windows_sys::Win32::Foundation::HANDLE);
+
+// SAFETY: a job handle names a kernel object, and the job functions used here
+// may be called on it from any thread.
+#[cfg(windows)]
+unsafe impl Send for Job {}
+
+// SAFETY: as for `Send`; the handle is never mutated after creation.
+#[cfg(windows)]
+unsafe impl Sync for Job {}
+
+#[cfg(windows)]
+impl Job {
+    /// Create an anonymous job and put `child` in it.
+    ///
+    /// Processes `child` starts from then on join the job too; any it started
+    /// before do not.
+    fn assign(child: &Child) -> Option<Self> {
+        use std::{os::windows::io::AsRawHandle as _, ptr};
+
+        use windows_sys::Win32::{
+            Foundation::CloseHandle,
+            System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW},
+        };
+
+        // SAFETY: both handles are valid for the duration of the calls; the
+        // process handle is borrowed from `child`, which outlives them.
+        unsafe {
+            let job = CreateJobObjectW(ptr::null(), ptr::null());
+            if job.is_null() {
+                return None;
+            }
+
+            if AssignProcessToJobObject(job, child.as_raw_handle().cast()) == 0 {
+                CloseHandle(job);
+                return None;
+            }
+
+            Some(Self(job))
+        }
+    }
+
+    /// Terminate every process in the job.
+    fn terminate(&self) {
+        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+
+        // SAFETY: the handle is open until `self` drops.
+        unsafe {
+            TerminateJobObject(self.0, 1);
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for Job {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+
+        // SAFETY: the handle was opened by `Job::assign` and is closed once.
+        unsafe {
+            CloseHandle(self.0);
+        }
+    }
+}
+
+/// Resume the only thread of a process created with `CREATE_SUSPENDED`.
 ///
-/// Used as a last resort when the plugin doesn't exit within the grace period
-/// after receiving `Shutdown`.
+/// `std::process::Child` does not expose the primary thread handle, so the
+/// thread is found through a snapshot of the system's threads.
+/// A suspended process that has not run yet has exactly one.
+#[cfg(windows)]
+fn resume_suspended(pid: u32) -> io::Result<()> {
+    use std::mem;
+
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
+        System::{
+            Diagnostics::ToolHelp::{
+                CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First,
+                Thread32Next,
+            },
+            Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME},
+        },
+    };
+
+    // SAFETY: every handle is checked before use and closed once; `entry` is
+    // a plain C struct whose size field is set as the API requires.
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error());
+        }
+
+        let mut entry = THREADENTRY32 {
+            dwSize: u32::try_from(mem::size_of::<THREADENTRY32>()).unwrap_or(u32::MAX),
+            ..THREADENTRY32::default()
+        };
+
+        let mut thread_id = None;
+        let mut more = Thread32First(snapshot, &raw mut entry) != 0;
+        while more {
+            if entry.th32OwnerProcessID == pid {
+                thread_id = Some(entry.th32ThreadID);
+                break;
+            }
+            more = Thread32Next(snapshot, &raw mut entry) != 0;
+        }
+        CloseHandle(snapshot);
+
+        let thread_id =
+            thread_id.ok_or_else(|| io::Error::other("the plugin has no thread to resume"))?;
+
+        let thread = OpenThread(THREAD_SUSPEND_RESUME, 0, thread_id);
+        if thread.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+
+        let previous = ResumeThread(thread);
+        let error = io::Error::last_os_error();
+        CloseHandle(thread);
+
+        if previous == u32::MAX {
+            return Err(error);
+        }
+    }
+
+    Ok(())
+}
+
+/// Terminate a single process by PID.
+///
+/// The fallback for a plugin that could not be put in a job object.
 #[cfg(windows)]
 fn kill_child(pid: u32) {
     use windows_sys::Win32::{
