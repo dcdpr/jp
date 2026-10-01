@@ -15,13 +15,14 @@ use inquire::InquireError;
 use jp_conversation::ConversationId;
 use jp_inquire::{InlineOption, InlineSelect};
 use jp_storage::backend::Projection;
+use jp_term::sanitize::strip_controls;
 use jp_workspace::ConversationLock;
 
 use crate::{
     cmd::Error as CmdError,
     ctx::Ctx,
     error::Result,
-    format::{DerivedText, conversation::DetailsFmt, label_detail_items},
+    format::{conversation::DetailsFmt, label_detail_items},
 };
 
 /// Confirmation-prompt preference shared by mutating commands.
@@ -175,7 +176,7 @@ pub(crate) fn confirm_conversation_action(
         id.to_string()
     };
 
-    let details = action_details(lock, active_id, pretty, ctx.derived_text())
+    let details = action_details(lock, active_id, pretty)
         .with_heading(format!("{} conversation {id_label}", action.progressive()));
 
     // `InlineSelect` splits at the last newline, printing everything before it
@@ -214,22 +215,25 @@ fn decide(answer: std::result::Result<char, InquireError>) -> Result<bool> {
     }
 }
 
-/// Build the details block shown above a confirmation prompt, with the title
-/// shown the way `derived` shows it.
+/// Build the details block shown above a confirmation prompt.
 ///
-/// The block is the prompt's preamble, which the prompt widget writes itself.
+/// The block is the prompt's preamble, which the prompt widget writes itself,
+/// so a title keeps no control character there, whatever `style.sanitize` says.
 fn action_details(
     lock: &ConversationLock,
     active_id: Option<ConversationId>,
     pretty: bool,
-    derived: DerivedText,
 ) -> DetailsFmt {
     let id = lock.id();
     let meta = lock.metadata();
     let events = lock.events();
 
     DetailsFmt::new(id)
-        .with_title(meta.title.as_ref().map(|title| derived.title(title)))
+        .with_title(
+            meta.title
+                .as_deref()
+                .map(|title| strip_controls(title, &[])),
+        )
         .with_event_count(events.len())
         .with_turn_count(events.iter_turns().len())
         .with_last_message_at(events.last().map(|v| v.event.timestamp))

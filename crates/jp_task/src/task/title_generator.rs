@@ -2,7 +2,7 @@ use std::error::Error;
 
 use async_trait::async_trait;
 use jp_config::{AppConfig, model::ModelConfig, providers::llm::LlmProviderConfig};
-use jp_conversation::{ConversationId, ConversationStream, Title};
+use jp_conversation::{ConversationId, ConversationStream};
 use jp_llm::{
     event::NoticeSink,
     provider,
@@ -20,7 +20,7 @@ pub struct TitleGeneratorTask {
     pub model: ModelConfig,
     pub providers: LlmProviderConfig,
     pub events: ConversationStream,
-    pub title: Option<Title>,
+    pub title: Option<String>,
     /// Output ceiling for the title request, from
     /// `assistant.request.max_response_bytes`.
     /// `None` leaves the response unbounded.
@@ -67,7 +67,7 @@ impl TitleGeneratorTask {
     /// For a caller that already holds the conversation lock and can write the
     /// title itself.
     /// Returns `None` when the model answered without a usable title.
-    pub async fn generate(mut self) -> Result<Option<Title>, Box<dyn Error + Send + Sync>> {
+    pub async fn generate(mut self) -> Result<Option<String>, Box<dyn Error + Send + Sync>> {
         self.update_title().await?;
         Ok(self.title)
     }
@@ -90,7 +90,7 @@ impl TitleGeneratorTask {
         .await?;
 
         trace!(?titles, "Received conversation titles.");
-        self.title = titles.into_iter().next().map(Title::from);
+        self.title = titles.into_iter().next();
         if self.title.is_none() {
             warn!(
                 conversation_id = %self.conversation_id,
@@ -164,9 +164,7 @@ impl Task for TitleGeneratorTask {
         if self.is_tty
             && let Some(title) = &self.title
         {
-            // `set_title` removes the control characters a model can put in a
-            // title.
-            let display = format!("{}: {}", self.conversation_id, title.raw());
+            let display = format!("{}: {title}", self.conversation_id);
             jp_term::osc::set_title(display);
         }
 

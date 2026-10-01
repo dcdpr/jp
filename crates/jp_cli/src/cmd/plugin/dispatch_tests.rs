@@ -487,7 +487,7 @@ fn set_title_names_a_conversation() {
 
     let handle = ws.acquire_conversation(&id).unwrap();
     assert_eq!(
-        ws.metadata(&handle).unwrap().title.as_ref().map(Title::raw),
+        ws.metadata(&handle).unwrap().title.as_deref(),
         Some("Tool call header misaligns"),
         "the title is stored trimmed"
     );
@@ -1424,7 +1424,7 @@ async fn a_reply_the_turn_never_read_is_refused() {
 /// would be refused as already-locked for as long as the title model took.
 #[tokio::test]
 async fn a_turn_does_not_wait_for_its_title() {
-    let written = Arc::new(Mutex::new(Vec::<Title>::new()));
+    let written = Arc::new(Mutex::new(Vec::<String>::new()));
 
     let (outcome, outstanding) = tokio::time::timeout(
         Duration::from_secs(5),
@@ -1446,7 +1446,7 @@ async fn a_turn_does_not_wait_for_its_title() {
 /// lock, and nothing is left outstanding.
 #[tokio::test]
 async fn a_title_that_arrives_first_is_written_by_the_turn() {
-    let written = Arc::new(Mutex::new(Vec::<Title>::new()));
+    let written = Arc::new(Mutex::new(Vec::<String>::new()));
     let (finish, finished) = tokio::sync::oneshot::channel::<()>();
 
     let turn = async move {
@@ -1455,7 +1455,7 @@ async fn a_title_that_arrives_first_is_written_by_the_turn() {
     };
     let title: TitleFuture = Box::pin(async move {
         finish.send(()).unwrap();
-        Some("Rust or Python".into())
+        Some("Rust or Python".to_owned())
     });
 
     let (outcome, outstanding) = beside_title(turn, Some(title), |title| {
@@ -1465,7 +1465,7 @@ async fn a_title_that_arrives_first_is_written_by_the_turn() {
 
     assert_eq!(outcome, "answered");
     assert!(outstanding.is_none());
-    assert_eq!(*written.lock().unwrap(), [Title::from("Rust or Python")]);
+    assert_eq!(*written.lock().unwrap(), ["Rust or Python"]);
 }
 
 /// A title that finishes after its turn, while the next turn on the same
@@ -1486,12 +1486,12 @@ fn a_late_title_waits_for_a_busy_conversation() {
 
     titles.offer(&ws, ArrivedTitle {
         conversation: id,
-        title: "Rust or Python".into(),
+        title: "Rust or Python".to_owned(),
     });
     assert_eq!(title_of(&ws), None, "the busy conversation is left alone");
 
     titles.release(next_turn);
-    assert_eq!(title_of(&ws), Some("Rust or Python".into()));
+    assert_eq!(title_of(&ws).as_deref(), Some("Rust or Python"));
 }
 
 /// A generated title never replaces one the user set while the model worked.
@@ -1508,12 +1508,12 @@ fn a_late_title_does_not_replace_a_chosen_one() {
 
     titles.offer(&ws, ArrivedTitle {
         conversation: id,
-        title: "Generated".into(),
+        title: "Generated".to_owned(),
     });
 
     let handle = ws.acquire_conversation(&id).unwrap();
     assert_eq!(
-        ws.metadata(&handle).unwrap().title.as_ref().map(Title::raw),
+        ws.metadata(&handle).unwrap().title.as_deref(),
         Some("Chosen")
     );
 }

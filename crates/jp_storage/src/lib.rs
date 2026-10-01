@@ -15,7 +15,7 @@ use std::{fs, io, time::SystemTime};
 use camino::{Utf8DirEntry, Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, NaiveDateTime, Utc};
 pub use error::Error;
-use jp_conversation::{Conversation, ConversationId, ConversationStream, Title};
+use jp_conversation::{Conversation, ConversationId, ConversationStream};
 pub use load::LoadError;
 use relative_path::RelativePath;
 use tracing::{trace, warn};
@@ -220,12 +220,7 @@ impl Storage {
                 // Import an external (workspace-only) conversation into
                 // user-local before its first durable write, so any
                 // non-managed files in the committed copy survive.
-                import_external_copy(
-                    id,
-                    metadata.title.as_ref().map(Title::raw),
-                    &workspace_dir,
-                    &user_dir,
-                )?;
+                import_external_copy(id, metadata.title.as_deref(), &workspace_dir, &user_dir)?;
                 // The durable user-local copy always holds the resolved base
                 // config; the idempotent write skips it when unchanged.
                 Self::persist_conversation_to(&user_dir, id, metadata, events)?;
@@ -271,7 +266,7 @@ impl Storage {
         metadata: &Conversation,
         events: &ConversationStream,
     ) -> Result<()> {
-        let dir_name = id.to_dirname(metadata.title.as_ref().map(Title::raw));
+        let dir_name = id.to_dirname(metadata.title.as_deref());
         let conv_dir = conversations_dir.join(&dir_name);
 
         // Bring any existing copy to the current directory name (e.g. after a
@@ -1172,7 +1167,7 @@ impl Storage {
         let dir = self
             .root
             .join(CONVERSATIONS_DIR)
-            .join(id.to_dirname(conversation.title.as_ref().map(Title::raw)));
+            .join(id.to_dirname(conversation.title.as_deref()));
         fs::create_dir_all(&dir).unwrap();
         write_json(&dir.join(METADATA_FILE), conversation).unwrap();
 

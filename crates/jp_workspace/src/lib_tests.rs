@@ -9,7 +9,6 @@ use jp_config::{
     model::id::{ModelIdOrAliasConfig, PartialModelIdOrAliasConfig, ProviderId},
     util::build,
 };
-use jp_conversation::Title;
 use jp_storage::{
     backend::{FsStorageBackend, NullLockBackend, NullPersistBackend, PersistBackend as _},
     value::read_json,
@@ -929,7 +928,7 @@ fn lock_refreshes_a_conversation_read_before_acquisition() {
         seed.create_conversation_with_id(id, Conversation::default(), config.clone());
         let h = seed.acquire_conversation(&id).unwrap();
         let mut conv = seed.test_lock(h).into_mut();
-        conv.update_metadata(|meta| meta.title = Some("before".into()));
+        conv.update_metadata(|meta| meta.title = Some("before".to_owned()));
         conv.flush().unwrap();
     }
 
@@ -940,7 +939,7 @@ fn lock_refreshes_a_conversation_read_before_acquisition() {
     // The reads a command performs before it starts waiting for the lock.
     assert_eq!(ws.events(&handle).unwrap().len(), 0);
     assert_eq!(
-        ws.metadata(&handle).unwrap().title.as_ref().map(Title::raw),
+        ws.metadata(&handle).unwrap().title.as_deref(),
         Some("before")
     );
 
@@ -951,7 +950,7 @@ fn lock_refreshes_a_conversation_read_before_acquisition() {
         let h = other.acquire_conversation(&id).unwrap();
         let mut conv = other.test_lock(h).into_mut();
         conv.update_events(|events| events.start_turn("try again"));
-        conv.update_metadata(|meta| meta.title = Some("after".into()));
+        conv.update_metadata(|meta| meta.title = Some("after".to_owned()));
         conv.flush().unwrap();
     }
 
@@ -964,10 +963,7 @@ fn lock_refreshes_a_conversation_read_before_acquisition() {
         2,
         "the lock sees the turn written while it waited"
     );
-    assert_eq!(
-        lock.metadata().title.as_ref().map(Title::raw),
-        Some("after")
-    );
+    assert_eq!(lock.metadata().title.as_deref(), Some("after"));
 }
 
 /// Regression: the projection decides whether a write creates or drops the
@@ -1031,7 +1027,7 @@ fn lock_reads_the_projection_from_the_store_after_a_wait() {
     );
 
     let mut conv = lock.into_mut();
-    conv.update_metadata(|meta| meta.title = Some("after".into()));
+    conv.update_metadata(|meta| meta.title = Some("after".to_owned()));
     conv.flush().unwrap();
 
     assert!(

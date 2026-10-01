@@ -8,7 +8,7 @@ use std::sync::Arc;
 use camino_tempfile::tempdir;
 use chrono::{TimeZone as _, Utc};
 use jp_config::PartialAppConfig;
-use jp_conversation::{Conversation, ConversationId, ConversationStream, Title};
+use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::backend::{
     ConversationFilter, FsStorageBackend, InMemoryStorageBackend, LoadBackend, LockBackend,
     NullLockBackend, PersistBackend, Projection, SessionBackend,
@@ -61,7 +61,7 @@ with_backends!(write_then_load_metadata, |b| {
     b.write(&id, &meta, &events, Projection::Projected).unwrap();
 
     let loaded = b.load_conversation_metadata(&id).unwrap();
-    assert_eq!(loaded.title.as_ref().map(Title::raw), Some("hello"));
+    assert_eq!(loaded.title.as_deref(), Some("hello"));
 });
 
 with_backends!(write_then_load_stream, |b| {

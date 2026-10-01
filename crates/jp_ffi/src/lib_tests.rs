@@ -58,7 +58,7 @@ impl Drop for EnvGuard {
 /// A workspace on disk holding one conversation with a fixed ID and title.
 fn workspace_with_one_conversation() -> (Utf8TempDir, EnvGuard, Utf8PathBuf) {
     workspace_holding(&Conversation {
-        title: Some("Reading list".into()),
+        title: Some("Reading list".to_owned()),
         last_activated_at: datetime!(2024-09-02 12:30:00 Z),
         ..Conversation::default()
     })
@@ -243,7 +243,7 @@ fn conversations_returns_the_index_as_json() {
 #[serial(env_vars)]
 fn conversations_keeps_sub_second_timestamp_precision() {
     let (_tmp, _guard, root) = workspace_holding(&Conversation {
-        title: Some("Reading list".into()),
+        title: Some("Reading list".to_owned()),
         last_activated_at: datetime!(2024-09-02 12:30:00 Z) + Duration::microseconds(123_456),
         ..Conversation::default()
     });
@@ -263,7 +263,7 @@ fn conversations_keeps_sub_second_timestamp_precision() {
 #[serial(env_vars)]
 fn conversations_report_when_a_conversation_was_pinned() {
     let (_tmp, _guard, root) = workspace_holding(&Conversation {
-        title: Some("Reading list".into()),
+        title: Some("Reading list".to_owned()),
         last_activated_at: datetime!(2024-09-02 12:30:00 Z),
         pinned_at: Some(datetime!(2024-09-03 08:00:00 Z)),
         ..Conversation::default()
@@ -338,7 +338,7 @@ fn conversations_are_ordered_by_activity() {
         fs.write_test_conversation(
             &ConversationId::try_from_deciseconds(id).unwrap(),
             &Conversation {
-                title: Some(format!("conversation {day}").into()),
+                title: Some(format!("conversation {day}")),
                 last_activated_at,
                 ..Conversation::default()
             },
@@ -589,7 +589,7 @@ fn a_read_sees_a_conversation_created_since_the_handle_was_opened() {
         fs.write_test_conversation(
             &ConversationId::try_from(datetime!(2024-09-05 00:00:00 Z)).unwrap(),
             &Conversation {
-                title: Some("Started elsewhere".into()),
+                title: Some("Started elsewhere".to_owned()),
                 last_activated_at: datetime!(2024-09-05 12:00:00 Z),
                 ..Conversation::default()
             },

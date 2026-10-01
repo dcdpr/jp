@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
-use jp_conversation::{ConversationId, Title};
+use jp_conversation::ConversationId;
 use jp_printer::Printer;
 use jp_term::table::Details;
 use jp_workspace::{Id, Workspace, roots, session_store::WorkspaceSelection};
@@ -359,7 +359,7 @@ fn render(
 /// The union conversation count, and the session's active conversation there.
 struct ConversationStats {
     count: usize,
-    active: Option<(ConversationId, Option<Title>)>,
+    active: Option<(ConversationId, Option<String>)>,
 }
 
 /// Union the conversation IDs across the user-local durable store and every

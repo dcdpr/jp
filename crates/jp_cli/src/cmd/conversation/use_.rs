@@ -1,5 +1,5 @@
 use crossterm::style::Stylize as _;
-use jp_conversation::{ConversationId, Title};
+use jp_conversation::ConversationId;
 use jp_workspace::{ConversationHandle, LockResult};
 use tracing::{debug, warn};
 
@@ -141,9 +141,8 @@ impl Use {
             |id| id.to_string().bold().grey().to_string(),
         );
         let to = id.to_string().bold().yellow();
-        let derived = ctx.derived_text();
         let title_suffix = conversation_title(ctx, id)
-            .map(|t| format!(": {}", derived.title(&t).into_owned().yellow()))
+            .map(|t| format!(": {}", t.yellow()))
             .unwrap_or_default();
 
         ctx.printer.println(format!(
@@ -312,7 +311,7 @@ fn source_ids(
         .collect()
 }
 
-fn conversation_title(ctx: &Ctx, id: ConversationId) -> Option<Title> {
+fn conversation_title(ctx: &Ctx, id: ConversationId) -> Option<String> {
     let h = ctx.workspace.acquire_conversation(&id).ok()?;
     ctx.workspace.metadata(&h).ok()?.title.clone()
 }

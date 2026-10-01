@@ -487,7 +487,7 @@ fn picker_row(id_secs: u64, time_str: &str, title: Option<&str>) -> PickerRow {
     PickerRow {
         id,
         time_str: time_str.to_string(),
-        title: title.map(Title::from),
+        title: title.map(str::to_owned),
     }
 }
 

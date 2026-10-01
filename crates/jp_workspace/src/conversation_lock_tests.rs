@@ -7,7 +7,7 @@ use std::{
 };
 
 use camino::Utf8Path;
-use jp_conversation::{Conversation, ConversationId, ConversationStream, Title};
+use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::backend::{NoopLockGuard, NullPersistBackend, PersistBackend, Projection};
 use parking_lot::RwLock;
 
@@ -250,10 +250,10 @@ fn update_metadata_forwards_return_value() {
     let lock = test_lock_no_writer();
     let conv = lock.as_mut();
     let title = conv.update_metadata(|m| {
-        m.title = Some("hello".into());
+        m.title = Some("hello".to_string());
         m.title.clone()
     });
-    assert_eq!(title, Some("hello".into()));
+    assert_eq!(title, Some("hello".to_string()));
 }
 
 #[test]
@@ -279,10 +279,7 @@ fn flush_writes_when_dirty() {
     conv.update_metadata(|m| m.title = Some("flushed".into()));
     conv.flush().unwrap();
     assert_eq!(mock.writes().len(), 1);
-    assert_eq!(
-        mock.writes()[0].1.title.as_ref().map(Title::raw),
-        Some("flushed")
-    );
+    assert_eq!(mock.writes()[0].1.title.as_deref(), Some("flushed"));
 }
 
 #[test]
@@ -312,10 +309,7 @@ fn drop_persists_dirty_conv() {
     conv.update_metadata(|m| m.title = Some("dropped".into()));
     drop(conv);
     assert_eq!(mock.writes().len(), 1);
-    assert_eq!(
-        mock.writes()[0].1.title.as_ref().map(Title::raw),
-        Some("dropped")
-    );
+    assert_eq!(mock.writes()[0].1.title.as_deref(), Some("dropped"));
 }
 
 #[test]
@@ -370,10 +364,7 @@ fn flush_writes_even_when_dropping_would_discard() {
     drop(conv);
 
     assert_eq!(mock.writes().len(), 1);
-    assert_eq!(
-        mock.writes()[0].1.title.as_ref().map(Title::raw),
-        Some("committed")
-    );
+    assert_eq!(mock.writes()[0].1.title.as_deref(), Some("committed"));
 }
 
 #[test]
@@ -389,10 +380,7 @@ fn metadata_read_reflects_mutations() {
     let lock = test_lock_no_writer();
     let conv = lock.as_mut();
     conv.update_metadata(|m| m.title = Some("updated".into()));
-    assert_eq!(
-        conv.metadata().title.as_ref().map(Title::raw),
-        Some("updated")
-    );
+    assert_eq!(conv.metadata().title.as_deref(), Some("updated"));
 }
 
 #[test]
@@ -411,10 +399,7 @@ fn as_mut_mutations_visible_through_lock() {
         let conv = lock.as_mut();
         conv.update_metadata(|m| m.title = Some("visible".into()));
     }
-    assert_eq!(
-        lock.metadata().title.as_ref().map(Title::raw),
-        Some("visible")
-    );
+    assert_eq!(lock.metadata().title.as_deref(), Some("visible"));
 }
 
 #[test]
@@ -431,12 +416,9 @@ fn update_metadata_and_flush_persists_before_it_returns() {
         })
         .expect("the write succeeds");
 
-    assert_eq!(returned, Some("written".into()));
+    assert_eq!(returned, Some("written".to_owned()));
     assert_eq!(mock.writes().len(), 1);
-    assert_eq!(
-        mock.writes()[0].1.title.as_ref().map(Title::raw),
-        Some("written")
-    );
+    assert_eq!(mock.writes()[0].1.title.as_deref(), Some("written"));
 }
 
 #[test]
@@ -666,12 +648,6 @@ fn multiple_as_mut_each_persist_independently() {
     } // persist #2
 
     assert_eq!(mock.writes().len(), 2);
-    assert_eq!(
-        mock.writes()[0].1.title.as_ref().map(Title::raw),
-        Some("first")
-    );
-    assert_eq!(
-        mock.writes()[1].1.title.as_ref().map(Title::raw),
-        Some("second")
-    );
+    assert_eq!(mock.writes()[0].1.title.as_deref(), Some("first"));
+    assert_eq!(mock.writes()[1].1.title.as_deref(), Some("second"));
 }

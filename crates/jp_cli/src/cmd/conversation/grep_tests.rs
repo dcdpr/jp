@@ -2822,9 +2822,9 @@ fn a_terminal_shows_hits_without_their_escapes() {
 }
 
 #[test]
-fn a_terminal_highlights_the_match_where_it_is_shown() {
-    // The match follows a sequence the terminal isn't shown, so it sits earlier
-    // in the shown text than in the stored one.
+fn a_terminal_highlights_a_match_beside_stored_styling() {
+    // The stored line opens its own red before the match and closes it after.
+    // The highlight still lands on the match itself.
     let id = make_id(17_100);
     let (mut ctx, out) = setup_pretty(
         vec![(
@@ -2849,9 +2849,9 @@ fn a_terminal_highlights_the_match_where_it_is_shown() {
 
 #[test]
 fn a_terminal_shows_the_heading_title_without_its_escapes() {
-    // The heading cuts a long title to the columns beside the stats, counting
-    // every character it is given: an escape left in spends columns the
-    // terminal never shows, and can be cut in half.
+    // The heading cuts a long title to the columns beside the stats. An escape
+    // in it spends no columns and is not cut in half, and the printer drops it
+    // on the way out.
     let id = make_id(17_200);
     let conv = Conversation {
         title: Some("Deploy\x1b[2J plan for the quarter".into()),

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, TimeZone as _, Utc};
 use clap::Parser as _;
-use jp_config::{AppConfig, style::Sanitization};
+use jp_config::AppConfig;
 use jp_conversation::{Conversation, Labels};
 use jp_printer::{OutputFormat, Printer};
 use jp_workspace::{ConversationLock, LockResult, Workspace};
@@ -113,15 +113,10 @@ fn lock_for(workspace: &Workspace, id: ConversationId) -> ConversationLock {
     lock
 }
 
-/// Titles shown as stored, the way a format other than pretty shows them.
-fn as_stored() -> DerivedText {
-    DerivedText::new(false, Sanitization::Strip)
-}
-
 /// A conversation with every row the prompt can show, on fixed values.
 fn titled_conversation() -> Conversation {
     Conversation {
-        title: Some("Rework the config pipeline".into()),
+        title: Some("Rework the config pipeline".to_owned()),
         pinned_at: Some(Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap()),
         labels: Labels::from_iter([("crate", vec!["jp_config"])]),
         last_activated_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap(),
@@ -138,8 +133,8 @@ fn details_show_the_title_as_a_row_beneath_the_heading() {
     let workspace = workspace_with(id, titled_conversation());
     let lock = lock_for(&workspace, id);
 
-    let details = action_details(&lock, Some(id), false, as_stored())
-        .with_heading("Removing conversation jp-c10000");
+    let details =
+        action_details(&lock, Some(id), false).with_heading("Removing conversation jp-c10000");
 
     assert_eq!(
         details.to_string(),
@@ -151,27 +146,24 @@ fn details_show_the_title_as_a_row_beneath_the_heading() {
 
 /// The block is written by the prompt widget, which draws without the printer's
 /// filter, so the title is filtered on its way in.
+/// The `ESC` that opens each sequence goes, and what follows it is left as
+/// plain text.
 #[test]
-fn details_show_a_title_without_its_escapes() {
+fn details_show_a_title_as_plain_text() {
     let id = make_id(1000);
     let workspace = workspace_with(id, Conversation {
-        title: Some("Rework\x1b[2J the\x1b[31m config pipeline".into()),
+        title: Some("Rework\x1b[2J the\r config".to_owned()),
         ..titled_conversation()
     });
     let lock = lock_for(&workspace, id);
 
-    let details = action_details(
-        &lock,
-        Some(id),
-        false,
-        DerivedText::new(true, Sanitization::Strip),
-    )
-    .with_heading("Removing conversation jp-c10000");
+    let details =
+        action_details(&lock, Some(id), false).with_heading("Removing conversation jp-c10000");
 
     assert_eq!(
         details.to_string(),
-        "Removing conversation jp-c10000\n\n             ID  jp-c10000\n          Title  Rework \
-         the config pipeline\n Last Activated  Currently Active\n         Pinned  Yes\n          \
+        "Removing conversation jp-c10000\n\n             ID  jp-c10000\n          Title  \
+         Rework[2J the config\n Last Activated  Currently Active\n         Pinned  Yes\n          \
          Local  No\n         Labels\n                 1. crate\n                     jp_config"
     );
 }
@@ -190,7 +182,7 @@ fn a_conversation_the_session_did_not_activate_is_not_currently_active() {
     let lock = lock_for(&workspace, id);
 
     for active_id in [None, Some(elsewhere)] {
-        let details = action_details(&lock, active_id, false, as_stored());
+        let details = action_details(&lock, active_id, false);
 
         assert!(
             !details.to_string().contains("Currently Active"),
@@ -211,7 +203,7 @@ fn the_session_active_conversation_reports_itself_as_active() {
     let workspace = workspace_with(id, titled_conversation());
     let lock = lock_for(&workspace, id);
 
-    let details = action_details(&lock, Some(id), false, as_stored());
+    let details = action_details(&lock, Some(id), false);
 
     assert!(
         details
@@ -232,7 +224,7 @@ fn details_report_an_unpinned_conversation_as_unpinned() {
     });
     let lock = lock_for(&workspace, id);
 
-    let rendered = action_details(&lock, None, false, as_stored()).to_string();
+    let rendered = action_details(&lock, None, false).to_string();
     assert!(
         rendered.contains(" Pinned  No"),
         "expected an explicit `Pinned  No` row, got:\n{rendered}"

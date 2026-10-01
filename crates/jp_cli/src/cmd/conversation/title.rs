@@ -1,7 +1,7 @@
 //! LLM-driven conversation title generation.
 
 use jp_config::{AppConfig, PartialAppConfig};
-use jp_conversation::{ConversationStream, Title as ConversationTitle};
+use jp_conversation::ConversationStream;
 use jp_llm::{
     event::NoticeSink,
     provider,
@@ -101,15 +101,14 @@ impl Title {
                 vec![],
             )
             .await?;
-            let derived = ctx.derived_text();
-            for candidate in &candidates {
-                ctx.printer.println(&*derived.title(candidate));
+            for candidate in candidates {
+                ctx.printer.println(candidate);
             }
             return Ok(());
         }
 
         let title = select(ctx, &cfg, events, self.count, self.model.is_some()).await?;
-        ctx.printer.println(&*ctx.derived_text().title(&title));
+        ctx.printer.println(title.clone());
         conv.update_metadata(|m| m.title = Some(title));
 
         Ok(())
@@ -144,8 +143,8 @@ pub(super) async fn select(
     events: ConversationStream,
     count: usize,
     override_model: bool,
-) -> Result<ConversationTitle> {
-    let mut rejected: Vec<ConversationTitle> = vec![];
+) -> Result<String> {
+    let mut rejected: Vec<String> = vec![];
     let notices = notice_sink(&ctx.printer);
 
     loop {
@@ -183,7 +182,7 @@ pub(super) async fn select(
             Some(0) => rejected.extend(candidates),
             Some(_) => {
                 let title = inquire::Text::new("Title").prompt_with_writer(&mut writer)?;
-                return Ok(title.trim().into());
+                return Ok(title.trim().to_owned());
             }
         }
     }
@@ -194,10 +193,10 @@ pub(super) async fn select(
 ///
 /// A picker row is redrawn in place as the cursor moves, so a title keeps no
 /// control character there, whatever `style.sanitize` says.
-fn picker_rows(titles: &[ConversationTitle]) -> Vec<String> {
+fn picker_rows(titles: &[String]) -> Vec<String> {
     titles
         .iter()
-        .map(|title| strip_controls(title.raw(), &[]))
+        .map(|title| strip_controls(title, &[]))
         .chain([MORE.to_owned(), MANUAL.to_owned()])
         .collect()
 }
@@ -221,8 +220,8 @@ async fn generate(
     events: ConversationStream,
     count: usize,
     override_model: bool,
-    rejected: Vec<ConversationTitle>,
-) -> Result<Vec<ConversationTitle>> {
+    rejected: Vec<String>,
+) -> Result<Vec<String>> {
     let override_id = override_model.then(|| cfg.assistant.model.id.clone());
     let model = title::resolve_model(cfg, override_id.as_ref());
     let model_id = model.id.resolved().clone();
@@ -234,10 +233,7 @@ async fn generate(
         events,
         model,
         count,
-        rejected: rejected
-            .into_iter()
-            .map(ConversationTitle::into_raw)
-            .collect(),
+        rejected,
         max_response_bytes: cfg.assistant.request.max_response_bytes.bytes(),
         notices: notices.clone(),
     })
@@ -250,7 +246,7 @@ async fn generate(
         });
     }
 
-    Ok(titles.into_iter().map(ConversationTitle::from).collect())
+    Ok(titles)
 }
 
 #[cfg(test)]

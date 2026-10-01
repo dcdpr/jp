@@ -499,28 +499,6 @@ fn visible_sgr_rebuilds_the_sequence_from_its_parameters() {
 }
 
 #[test]
-fn derived_strings_drop_their_styling_and_need_no_reset() {
-    // A title or a grep hit is laid out against a column budget, and JP styles
-    // it itself.
-    assert_eq!(
-        sanitize_str(
-            "\x1b[31mDeploy\x1b[0m\x1b[2J plan",
-            ContentClass::DerivedString,
-            SanitizeMode::Strip
-        ),
-        "Deploy plan"
-    );
-    assert_eq!(
-        sanitize_str(
-            "Deploy\x1b[2J plan",
-            ContentClass::DerivedString,
-            SanitizeMode::Visualize
-        ),
-        "Deploy\u{241b} plan"
-    );
-}
-
-#[test]
 fn sanitize_unclosed_leaves_closing_the_span_to_the_caller() {
     // A truncated tool result shows its first lines, and the reset belongs after
     // them rather than at the end of the part that is cut.

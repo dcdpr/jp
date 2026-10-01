@@ -31,7 +31,7 @@ use std::{
 };
 
 use camino::Utf8Path;
-use jp_conversation::{ConversationId, Title};
+use jp_conversation::ConversationId;
 use jp_plugin::message::ConversationSummary;
 use jp_workspace::Workspace;
 use parking_lot::Mutex;
@@ -143,7 +143,7 @@ pub unsafe extern "C" fn jp_workspace_conversations(
                 .conversations()
                 .map(|(id, metadata)| ConversationSummary {
                     id: id.as_deciseconds().to_string(),
-                    title: metadata.title.clone().map(Title::into_raw),
+                    title: metadata.title.clone(),
                     last_activated_at: metadata.last_activated_at,
                     pinned_at: metadata.pinned_at,
                     events_count: metadata.events_count,

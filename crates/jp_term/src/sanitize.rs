@@ -75,14 +75,6 @@ pub enum ContentClass {
     /// [`ContentWriter::finish`], which writes no reset: a reset in the
     /// markdown source could change how the message parses.
     UserMessage,
-
-    /// Strings JP lays out from conversation data: conversation titles, and the
-    /// lines `jp conversation grep` shows.
-    ///
-    /// SGR is dropped: the text is fit to a column budget, and JP styles it
-    /// itself.
-    /// There is no content span, so [`ContentWriter::finish`] writes no reset.
-    DerivedString,
 }
 
 impl ContentClass {
@@ -90,7 +82,7 @@ impl ContentClass {
     const fn policy(self) -> Policy {
         let styling = match self {
             Self::ToolOutput | Self::UserMessage => true,
-            Self::ModelOutput | Self::DerivedString => false,
+            Self::ModelOutput => false,
         };
 
         Policy {
@@ -534,8 +526,8 @@ pub fn sanitize_unclosed(text: &str, class: ContentClass, mode: SanitizeMode) ->
 /// after the source has been through a [`ContentWriter`], so a control
 /// character in decoded text is one the writer never saw.
 ///
-/// - Model output and derived strings lose every control character except `\n`
-///   and `\t`, each replaced by `␛` under [`SanitizeMode::Visualize`].
+/// - Model output loses every control character except `\n` and `\t`, each
+///   replaced by `␛` under [`SanitizeMode::Visualize`].
 ///   Its source has already lost every escape sequence, so the text after a
 ///   decoded `ESC` was never part of one: `&#27;[2J` shows as `[2J`.
 /// - User messages and tool output are filtered by the allowlist again, which

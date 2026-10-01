@@ -59,15 +59,3 @@ fn an_unknown_field_is_ignored() {
 
     assert!(conv.labels.contains("crate", "jp_config"));
 }
-
-/// A title is stored as a bare string, and comes back as stored, control
-/// characters and all.
-#[test]
-fn a_title_round_trips_as_a_bare_string() {
-    let json = r#"{"title":"Fix\u001b[2J it","last_activated_at":"2023-01-01 00:00:00.0"}"#;
-
-    let conv: Conversation = serde_json::from_str(json).unwrap();
-
-    assert_eq!(conv.title.as_ref().map(Title::raw), Some("Fix\x1b[2J it"));
-    assert_eq!(serde_json::to_string(&conv).unwrap(), json);
-}

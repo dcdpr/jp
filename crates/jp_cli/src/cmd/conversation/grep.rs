@@ -1,8 +1,8 @@
-use std::{borrow::Cow, collections::HashSet, fmt::Write as _, num::NonZeroUsize, ops::Range};
+use std::{collections::HashSet, fmt::Write as _, num::NonZeroUsize, ops::Range};
 
 use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
-use jp_conversation::{ConversationId, Title};
+use jp_conversation::ConversationId;
 use jp_term::{
     osc::hyperlink,
     width::{
@@ -21,7 +21,6 @@ use crate::{
         label::{self, LabelSelector},
     },
     ctx::Ctx,
-    format::DerivedText,
     output::print_json,
     shared::search::{
         ConcreteScope, Coverage, Matcher, event_lines, event_scope, label_lines, title_for,
@@ -280,7 +279,7 @@ impl Grep {
             return Err(Self::render_empty(ctx));
         }
 
-        self.render(&groups, &matcher, ctx);
+        self.render(&groups, ctx);
         Ok(())
     }
 
@@ -410,9 +409,7 @@ impl Grep {
             }
         };
 
-        // Searched and reported as stored; a terminal is shown it through
-        // `shown_groups`.
-        group.title = title_for(ctx, &handle).map(Title::into_raw);
+        group.title = title_for(ctx, &handle);
 
         // Counts down as matches are taken, so `--max-matches` applies across
         // the whole conversation rather than per scope.
@@ -503,13 +500,13 @@ impl Grep {
         self.qualify(group, &coverage)
     }
 
-    fn render(&self, groups: &[ConversationHits], matcher: &Matcher, ctx: &Ctx) {
+    fn render(&self, groups: &[ConversationHits], ctx: &Ctx) {
         match self.output {
             OutputKind::Ids => Self::render_ids(groups, ctx),
             OutputKind::Count => Self::render_count(groups, ctx),
             OutputKind::Text => Self::render_plain_text(groups, ctx),
             OutputKind::Hits if ctx.printer.format().is_json() => Self::render_json(groups, ctx),
-            OutputKind::Hits => self.render_hits(groups, matcher, ctx),
+            OutputKind::Hits => self.render_hits(groups, ctx),
         }
     }
 
@@ -529,10 +526,9 @@ impl Grep {
         }
     }
 
-    fn render_hits(&self, groups: &[ConversationHits], matcher: &Matcher, ctx: &Ctx) {
+    fn render_hits(&self, groups: &[ConversationHits], ctx: &Ctx) {
         let pretty = ctx.printer.pretty_printing_enabled();
         let columns = ctx.term.width.map(usize::from);
-        let groups = &shown_groups(groups, matcher, ctx.derived_text());
 
         // Following `grep`, `--` group separators belong to context output. They
         // delimit blocks of surrounding lines; with no `--context` there are no
@@ -568,15 +564,12 @@ impl Grep {
     /// Print the matched and context lines with no coordinates and no
     /// separators, for piping content into another tool.
     fn render_plain_text(groups: &[ConversationHits], ctx: &Ctx) {
-        let derived = ctx.derived_text();
-
         // Verbatim, like every unbudgeted output path: trailing whitespace can
-        // be the match itself, and machine output must not edit the text. Only
-        // a terminal is shown it filtered.
-        let lines: Vec<Cow<'_, str>> = groups
+        // be the match itself, and machine output must not edit the text.
+        let lines: Vec<&str> = groups
             .iter()
             .flat_map(|group| group.hits.iter())
-            .map(|hit| derived.show(&hit.text))
+            .map(|hit| hit.text.as_str())
             .collect();
 
         if ctx.printer.format().is_json() {
@@ -1236,46 +1229,6 @@ fn highlight(row: &Row, spans: &[Range<usize>]) -> String {
 
     out.push_str(&text[cursor..]);
     out
-}
-
-/// `groups` with their titles and hit text shown through `derived`.
-///
-/// A match is found again in text that filtering changed, so its highlight
-/// lands on what matched rather than on where it sat among the bytes that were
-/// removed.
-fn shown_groups(
-    groups: &[ConversationHits],
-    matcher: &Matcher,
-    derived: DerivedText,
-) -> Vec<ConversationHits> {
-    let shown_hit = |hit: &Hit| {
-        let text = derived.show(&hit.text);
-        let spans = if hit.is_match && text != hit.text {
-            matcher.find_spans(&text)
-        } else {
-            hit.spans.clone()
-        };
-
-        Hit {
-            turn: hit.turn,
-            scope: hit.scope,
-            timestamp: hit.timestamp,
-            text: text.into_owned(),
-            spans,
-            is_match: hit.is_match,
-            group_break: hit.group_break,
-        }
-    };
-
-    groups
-        .iter()
-        .map(|group| ConversationHits {
-            id: group.id,
-            title: group.title.as_deref().map(|t| derived.show(t).into_owned()),
-            turn_count: group.turn_count,
-            hits: group.hits.iter().map(shown_hit).collect(),
-        })
-        .collect()
 }
 
 /// Render one row of a hit's text, styled for a match or dimmed for a context

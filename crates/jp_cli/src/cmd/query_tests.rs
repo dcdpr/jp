@@ -16,7 +16,7 @@ use jp_config::{
     util::build,
 };
 use jp_conversation::{
-    Conversation, ConversationId, ConversationStream, Title,
+    Conversation, ConversationId, ConversationStream,
     event::{ChatRequest, ChatResponse, TurnStart},
 };
 use jp_inquire::prompt::MockPromptBackend;
@@ -2110,7 +2110,7 @@ fn cleanup_any_removes_a_replaced_draft() {
 fn resolve_new_title_uses_leading_heading() {
     assert_eq!(
         resolve_new_title(true, true, "# Fix the parser\n\nbody text"),
-        NewTitle::FromHeading("Fix the parser".into())
+        NewTitle::FromHeading("Fix the parser".to_owned())
     );
 }
 
@@ -2120,7 +2120,7 @@ fn resolve_new_title_heading_wins_when_generation_disabled() {
     // with LLM generation turned off.
     assert_eq!(
         resolve_new_title(true, false, "# Title"),
-        NewTitle::FromHeading("Title".into())
+        NewTitle::FromHeading("Title".to_owned())
     );
 }
 
@@ -2157,7 +2157,7 @@ fn resolve_title_override_no_title_clears_inherited_title() {
     // `fork_conversation`, and `--no-title` is supposed to leave
     // the run with no title at all.
     assert_eq!(
-        resolve_title_override(Some("inherited".into()), None, true),
+        resolve_title_override(Some("inherited".to_owned()), None, true),
         None
     );
 }
@@ -2168,7 +2168,7 @@ fn resolve_title_override_no_title_clears_resumed_title() {
     // `metadata.title` ends up as, regardless of whether the
     // conversation is new, forked, or resumed.
     assert_eq!(
-        resolve_title_override(Some("existing".into()), None, true),
+        resolve_title_override(Some("existing".to_owned()), None, true),
         None
     );
 }
@@ -2176,16 +2176,16 @@ fn resolve_title_override_no_title_clears_resumed_title() {
 #[test]
 fn resolve_title_override_title_overwrites_existing_title() {
     assert_eq!(
-        resolve_title_override(Some("old".into()), Some("new"), false),
-        Some("new".into())
+        resolve_title_override(Some("old".to_owned()), Some("new"), false),
+        Some("new".to_owned())
     );
 }
 
 #[test]
 fn resolve_title_override_neither_flag_keeps_the_stored_title() {
     assert_eq!(
-        resolve_title_override(Some("keep".into()), None, false),
-        Some("keep".into())
+        resolve_title_override(Some("keep".to_owned()), None, false),
+        Some("keep".to_owned())
     );
     assert_eq!(resolve_title_override(None, None, false), None);
 }
@@ -3485,7 +3485,7 @@ fn run_renaming_query_keeps_the_composed_draft() {
     ctx.workspace.create_conversation_with_id(
         id,
         Conversation {
-            title: Some("Old".into()),
+            title: Some("Old".to_owned()),
             ..Conversation::default().with_last_activated_at(ctx.now())
         },
         ctx.config(),
@@ -3522,7 +3522,7 @@ fn run_renaming_query_keeps_the_composed_draft() {
     // having been quietly dropped.
     let storage = FsStorageBackend::new(&tmp.path().join(".jp")).unwrap();
     let metadata = storage.load_conversation_metadata(&id).unwrap();
-    assert_eq!(metadata.title.as_ref().map(Title::raw), Some("New"));
+    assert_eq!(metadata.title.as_deref(), Some("New"));
 }
 
 // The other side of the deferral for `--tmp`: a query that does go ahead stores
@@ -3617,7 +3617,7 @@ fn run_titled_query_stores_the_title_before_the_turn() {
 
     let storage = FsStorageBackend::new(&storage_dir).unwrap();
     let metadata = storage.load_conversation_metadata(&ids[0]).unwrap();
-    assert_eq!(metadata.title.as_ref().map(Title::raw), Some("a title"));
+    assert_eq!(metadata.title.as_deref(), Some("a title"));
 
     assert_eq!(
         ctx.workspace.session_active_conversation(&session),
