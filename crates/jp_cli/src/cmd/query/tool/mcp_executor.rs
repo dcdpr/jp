@@ -33,11 +33,12 @@ use jp_mcp::{
         http::{Endpoint, EndpointError},
         result::from_mcp,
         service::{
-            AccessPolicyError, Admission, ConfiguredTool, Formatted, HostReply, HostRequest,
-            InputAnswer, Interaction, InvocationId, Progress, ReleaseDecision, Service,
+            AccessPolicyError, Admission, ConfiguredTool, HostReply, HostRequest, InputAnswer,
+            Interaction, InvocationId, Progress, ReleaseDecision, Service,
         },
     },
 };
+use jp_process::ProcessRunner;
 use jp_tool::{
     ContentBlock, InputRequest, InvocationContext, Question, QuestionId, ToolDefinition, ToolResult,
 };
@@ -310,6 +311,7 @@ impl TerminalExecutorSource {
     #[cfg(test)]
     pub(crate) async fn start(
         builtins: BuiltinExecutors,
+        runner: Arc<dyn ProcessRunner>,
         definitions: &[ToolDefinition],
         tools: &ToolsConfig,
         approvals: Arc<ApprovalStore>,
@@ -319,6 +321,7 @@ impl TerminalExecutorSource {
     ) -> Result<(Self, ExecutionOwner), EndpointError> {
         Self::start_with_metadata(
             builtins,
+            runner,
             definitions,
             tools,
             approvals,
@@ -335,8 +338,11 @@ impl TerminalExecutorSource {
     /// `metadata` is advertised on every tool's MCP description, for a caller
     /// that reads vendor hints there.
     /// It changes no execution policy.
+    /// `runner` runs local commands: `local` tools, and every tool's argument
+    /// formatter.
     pub(crate) async fn start_with_metadata(
         builtins: BuiltinExecutors,
+        runner: Arc<dyn ProcessRunner>,
         definitions: &[ToolDefinition],
         tools: &ToolsConfig,
         approvals: Arc<ApprovalStore>,
@@ -364,8 +370,14 @@ impl TerminalExecutorSource {
                 })
             })
             .collect();
-        let (service, host) =
-            Service::new(configured, upstream.clone(), builtins, root, invocation)?;
+        let (service, host) = Service::new(
+            configured,
+            upstream.clone(),
+            builtins,
+            runner,
+            root,
+            invocation,
+        )?;
         let progress = service.subscribe_progress();
         let endpoint = Endpoint::start(service).await?;
         let client = endpoint.connect().await?;
@@ -554,12 +566,12 @@ impl ExecutorSource for TerminalExecutorSource {
         // would strand that invocation and submit a duplicate call.
         if let Some(slot) = locked(&self.calls).restarting(&request.id) {
             return Some(Box::new(ToolExecutor {
-                arguments: slot.request.arguments.clone(),
+                arguments: SyncMutex::new(slot.request.arguments.clone()),
                 config,
                 peer: self.peer.clone(),
                 service: self.service.clone(),
                 slot,
-                formatted: None,
+                formatted: SyncMutex::new(None),
             }));
         }
 
@@ -577,6 +589,7 @@ impl ExecutorSource for TerminalExecutorSource {
                 receiver,
                 task: None,
                 phase: Phase::Idle,
+                released: false,
                 execution,
                 service: self.service.clone(),
                 invocation: None,
@@ -586,12 +599,12 @@ impl ExecutorSource for TerminalExecutorSource {
         // An agent's MCP request may already be waiting on this route.
         self.dispatch.registered.notify_one();
         Some(Box::new(ToolExecutor {
-            arguments: slot.request.arguments.clone(),
+            arguments: SyncMutex::new(slot.request.arguments.clone()),
             config,
             peer: self.peer.clone(),
             service: self.service.clone(),
             slot,
-            formatted: None,
+            formatted: SyncMutex::new(None),
         }))
     }
 
@@ -672,6 +685,11 @@ struct PendingCall {
     task: Option<JoinHandle<Result<jp_mcp::CallToolResult, McpCallError>>>,
 
     phase: Phase,
+
+    /// Whether the service has been told to run the tool.
+    ///
+    /// A failure before that means nothing ran; after it, the tool may have.
+    released: bool,
 
     /// Who submits this call's MCP request, fixed when the call was created.
     execution: ToolExecution,
@@ -837,10 +855,10 @@ impl CallSlot {
         state: &mut PendingCall,
         review: &Review,
     ) -> Result<(), ExecutorError> {
-        state.phase = Phase::Finished;
         let Some(id) = *locked(&self.invocation) else {
-            return Ok(());
+            return self.deliver_unnamed(state, review).await;
         };
+        state.phase = Phase::Finished;
         // `false` means the call finished on its own first; its caller already
         // has that result.
         if !state.service.complete_call(id, approved(None, review)) {
@@ -850,6 +868,55 @@ impl CallSlot {
             return Ok(());
         }
         self.drain(state, review).await
+    }
+
+    /// Hand a held call the service has not named yet the content the Host
+    /// recorded for it.
+    ///
+    /// Its MCP request is still on its way, so it is answered at its first
+    /// barrier, and neither the argument formatter nor the tool runs.
+    /// The wait is bounded the way any wait for a call's first interaction is.
+    async fn deliver_unnamed(
+        &self,
+        state: &mut PendingCall,
+        review: &Review,
+    ) -> Result<(), ExecutorError> {
+        // Waiting for the request already failed, so nothing is coming.
+        if matches!(state.phase, Phase::Finished) {
+            return Ok(());
+        }
+        // A call JP submits that was settled before it was submitted has no
+        // caller waiting on a response.
+        if !state.submitted_elsewhere() && state.task.is_none() {
+            state.phase = Phase::Finished;
+            return Ok(());
+        }
+        loop {
+            let interaction = match state.next().await? {
+                Received::Interaction(interaction) => *interaction,
+                Received::Finished(_) => return Ok(()),
+            };
+            match interaction {
+                Interaction::RenderArguments { reply } => drop(reply.send(Ok(false))),
+                Interaction::Prepare { reply, .. } => {
+                    drop(reply.send(Ok(Admission::Complete {
+                        result: approved(None, review),
+                    })));
+                    return self.drain(state, review).await;
+                }
+                Interaction::Record { reply, .. } => {
+                    drop(reply.send(Ok(())));
+                    if state.submitted_elsewhere() {
+                        state.phase = Phase::Finished;
+                        return Ok(());
+                    }
+                    return self.drain(state, review).await;
+                }
+                _ => {
+                    return Err(ExecutorError::UnexpectedInteraction { phase: "recording" });
+                }
+            }
+        }
     }
 
     /// Answer the service's remaining barriers and check what it delivered.
@@ -894,12 +961,15 @@ impl CallSlot {
 /// Represents one logical MCP call, including its pending Host interactions.
 pub(crate) struct ToolExecutor {
     /// The arguments to execute with, which Host editing may replace.
-    arguments: Map<String, Value>,
+    arguments: SyncMutex<Map<String, Value>>,
     config: ToolConfigWithDefaults,
     peer: Peer<RoleClient>,
     service: Arc<Service>,
     slot: Arc<CallSlot>,
-    formatted: Option<Formatted>,
+
+    /// The argument formatter's description of the call, once the service has
+    /// sent one.
+    formatted: SyncMutex<Option<String>>,
 }
 
 impl ToolExecutor {
@@ -945,6 +1015,101 @@ impl ToolExecutor {
         }
         ExecutorResult::Failed(error)
     }
+
+    /// Wait for the next thing the call needs from the Host, and park it there.
+    ///
+    /// Runs until the service asks for something only the Host can give, or the
+    /// MCP call returns.
+    /// `render_arguments` answers the service's question whether the
+    /// formatter's description is wanted, which it only asks before admission.
+    async fn next_step(
+        &self,
+        state: &mut PendingCall,
+        render_arguments: bool,
+        cancellation: &CancellationToken,
+    ) -> ExecutorResult {
+        let id = &self.slot.request.id;
+        let attempt = async {
+            loop {
+                let interaction = match state.next().await? {
+                    Received::Interaction(interaction) => *interaction,
+                    Received::Finished(result) => {
+                        return Ok(ExecutorResult::Completed(response(id, &result)));
+                    }
+                };
+                // Remember the service's name for this call while a reply is in
+                // hand: a later restart has to resume this invocation rather
+                // than start another.
+                if let Some(invocation) = state.invocation {
+                    *locked(&self.slot.invocation) = Some(invocation);
+                }
+                return Ok(match interaction {
+                    Interaction::RenderArguments { reply } => {
+                        drop(reply.send(Ok(render_arguments)));
+                        continue;
+                    }
+                    Interaction::Prepare {
+                        arguments,
+                        formatted_arguments,
+                        reply,
+                        ..
+                    } => {
+                        *locked(&self.arguments) = arguments;
+                        *locked(&self.formatted) = formatted_arguments;
+                        state.phase = Phase::Admission(reply);
+                        ExecutorResult::AwaitingAdmission
+                    }
+                    Interaction::Release {
+                        arguments,
+                        formatted_arguments,
+                        reply,
+                    } => {
+                        *locked(&self.arguments) = arguments;
+                        *locked(&self.formatted) = formatted_arguments;
+                        state.phase = Phase::Release(reply);
+                        ExecutorResult::AwaitingRelease
+                    }
+                    Interaction::Input {
+                        request,
+                        supporting,
+                        answers,
+                        reply,
+                    } => {
+                        let question = question(request, &supporting);
+                        state.phase = Phase::Input {
+                            id: question.id.clone(),
+                            reply,
+                        };
+                        ExecutorResult::NeedsInput {
+                            source: InquirySource::tool(&self.slot.request.name),
+                            question,
+                            accumulated_answers: answers,
+                        }
+                    }
+                    Interaction::Review { result, reply, .. } => {
+                        let offered = response(id, &result);
+                        state.phase = Phase::Review {
+                            offered: result,
+                            reply,
+                        };
+                        ExecutorResult::Completed(offered)
+                    }
+                    Interaction::Record { recording, reply } => {
+                        let response = response(id, &recording.result);
+                        state.phase = Phase::Record(reply);
+                        ExecutorResult::Completed(response)
+                    }
+                });
+            }
+        };
+        let result = tokio::select! {
+            biased;
+            () = cancellation.cancelled() => Err(ExecutorError::Cancelled),
+            result = attempt => result,
+        };
+        let released = state.released;
+        result.unwrap_or_else(|error| self.settle_failure(state, error, released))
+    }
 }
 
 #[async_trait]
@@ -957,12 +1122,12 @@ impl Executor for ToolExecutor {
         &self.slot.request.name
     }
 
-    fn arguments(&self) -> &Map<String, Value> {
-        &self.arguments
+    fn arguments(&self) -> Map<String, Value> {
+        locked(&self.arguments).clone()
     }
 
-    fn formatted_arguments(&self) -> Option<&Formatted> {
-        self.formatted.as_ref()
+    fn formatted_arguments(&self) -> Option<String> {
+        locked(&self.formatted).clone()
     }
 
     fn needs_permission(&self) -> bool {
@@ -979,13 +1144,13 @@ impl Executor for ToolExecutor {
             tool_name: self.slot.request.name.clone(),
             tool_source: self.config.source().clone(),
             run_mode,
-            arguments: self.arguments.clone().into(),
+            arguments: self.arguments().into(),
         })
     }
 
-    fn set_arguments(&mut self, args: Value) {
+    fn set_arguments(&self, args: Value) {
         if let Value::Object(arguments) = args {
-            self.arguments = arguments;
+            *locked(&self.arguments) = arguments;
         }
     }
 
@@ -1006,12 +1171,16 @@ impl Executor for ToolExecutor {
     }
 
     fn hold_for_response(&self) -> bool {
-        let Some(id) = *locked(&self.slot.invocation) else {
-            return false;
-        };
+        let invocation = *locked(&self.slot.invocation);
         // Set before pausing, so the cancellation that follows sees a held
         // call rather than one to tear down.
         self.slot.held.store(true, Ordering::Release);
+        let Some(id) = invocation else {
+            // Not named yet: its MCP request is still on its way, as when an
+            // agent submits it after JP learned of the call. The
+            // acknowledgement answers it at its first barrier.
+            return true;
+        };
         if self.service.pause_call(id) {
             return true;
         }
@@ -1020,9 +1189,10 @@ impl Executor for ToolExecutor {
     }
 
     async fn prepare(
-        &mut self,
+        &self,
         render_arguments: bool,
-    ) -> Result<Option<ToolCallResponse>, ExecutorError> {
+        cancellation: CancellationToken,
+    ) -> ExecutorResult {
         let mut state = self.slot.state.lock().await;
         let restarting = self.slot.restarting.swap(false, Ordering::AcqRel);
 
@@ -1031,13 +1201,16 @@ impl Executor for ToolExecutor {
             // has since abandoned. Drop it and ask the service for a fresh
             // preparation cycle on the same invocation.
             state.phase = Phase::Idle;
-            let id = state.invocation.ok_or(ExecutorError::OutOfOrder {
-                operation: "be restarted",
-                phase: "not yet submitted",
-            })?;
+            state.released = false;
+            let Some(id) = state.invocation else {
+                return ExecutorResult::Failed(ExecutorError::OutOfOrder {
+                    operation: "be restarted",
+                    phase: "not yet submitted",
+                });
+            };
             self.service.resume_call(id);
         } else if !matches!(state.phase, Phase::Idle) {
-            return Err(ExecutorError::OutOfOrder {
+            return ExecutorResult::Failed(ExecutorError::OutOfOrder {
                 operation: "be submitted",
                 phase: state.phase.name(),
             });
@@ -1047,7 +1220,7 @@ impl Executor for ToolExecutor {
         // its own; only a first Host-submitted call issues one here.
         if !restarting && state.execution == ToolExecution::Caller {
             let mut params = CallToolRequestParams::new(self.slot.request.name.clone());
-            params.arguments = Some(self.arguments.clone());
+            params.arguments = Some(self.arguments());
             params.meta = Some(Meta(Map::from_iter([(
                 CORRELATION_KEY.into(),
                 self.slot.key.0.clone().into(),
@@ -1055,84 +1228,33 @@ impl Executor for ToolExecutor {
             let peer = self.peer.clone();
             state.task = Some(tokio::spawn(async move { peer.call_tool(params).await }));
         }
-        loop {
-            match state.next().await? {
-                Received::Interaction(interaction) => match *interaction {
-                    Interaction::RenderArguments { reply } => {
-                        drop(reply.send(Ok(render_arguments)));
-                    }
-                    Interaction::Prepare {
-                        arguments,
-                        formatted_arguments,
-                        reply,
-                        ..
-                    } => {
-                        self.arguments = arguments;
-                        self.formatted = formatted_arguments;
-                        state.phase = Phase::Admission(reply);
-                        // Remember the service's name for this call while a
-                        // reply is in hand: a later restart has to resume this
-                        // invocation rather than start another.
-                        if let Some(id) = state.invocation {
-                            *locked(&self.slot.invocation) = Some(id);
-                        }
-                        return Ok(None);
-                    }
-                    Interaction::Record { recording, reply } => {
-                        let response = response(&self.slot.request.id, &recording.result);
-                        state.phase = Phase::Record(reply);
-                        return Ok(Some(response));
-                    }
-                    _ => {
-                        return Err(ExecutorError::UnexpectedInteraction { phase: "preparing" });
-                    }
-                },
-                Received::Finished(result) => {
-                    return Ok(Some(response(&self.slot.request.id, &result)));
-                }
-            }
-        }
+        self.next_step(&mut state, render_arguments, &cancellation)
+            .await
     }
 
-    async fn approve(&mut self) -> Result<(), ExecutorError> {
+    async fn approve(&self, cancellation: CancellationToken) -> ExecutorResult {
         let mut state = self.slot.state.lock().await;
+        // Checked before the admission is sent: admitting the call can start
+        // its argument formatter, which a later check could not stop in time.
+        if cancellation.is_cancelled() {
+            let released = state.released;
+            return self.settle_failure(&mut state, ExecutorError::Cancelled, released);
+        }
         let Phase::Admission(reply) = mem::replace(&mut state.phase, Phase::Finished) else {
-            state.phase = Phase::Finished;
-            return Err(ExecutorError::OutOfOrder {
+            return ExecutorResult::Failed(ExecutorError::OutOfOrder {
                 operation: "be approved",
                 phase: "not awaiting admission",
             });
         };
-        reply
-            .send(Ok(Admission::Run {
-                arguments: self.arguments.clone(),
-            }))
-            .map_err(|_| ExecutorError::ReplyExpired {
+        let admission = Admission::Run {
+            arguments: self.arguments(),
+        };
+        if reply.send(Ok(admission)).is_err() {
+            return ExecutorResult::Failed(ExecutorError::ReplyExpired {
                 operation: "approval",
-            })?;
-        match state.next().await? {
-            Received::Interaction(interaction) => match *interaction {
-                Interaction::Release {
-                    arguments,
-                    formatted_arguments,
-                    reply,
-                } => {
-                    self.arguments = arguments;
-                    self.formatted = formatted_arguments;
-                    state.phase = Phase::Release(reply);
-                    Ok(())
-                }
-                _ => Err(ExecutorError::UnexpectedInteraction { phase: "approving" }),
-            },
-            // Validating the approved arguments can fail the call outright,
-            // which arrives as the MCP response rather than another barrier.
-            Received::Finished(result) if result.is_error() => Err(ExecutorError::Rejected {
-                message: result.to_text(),
-            }),
-            Received::Finished(_) => {
-                Err(ExecutorError::UnexpectedInteraction { phase: "approving" })
-            }
+            });
         }
+        self.next_step(&mut state, false, &cancellation).await
     }
 
     async fn execute(
@@ -1142,91 +1264,53 @@ impl Executor for ToolExecutor {
         stderr: Option<StderrSink>,
     ) -> ExecutorResult {
         let mut state = self.slot.state.lock().await;
+        // Checked before anything is sent: a release or an answer starts the
+        // tool, which a later check could not stop in time.
+        if cancellation.is_cancelled() {
+            let released = state.released;
+            return self.settle_failure(&mut state, ExecutorError::Cancelled, released);
+        }
         *locked(&self.slot.stderr) = stderr;
-        // Whether the service was told to run the tool. A failure before that
-        // point means nothing ran; after it, the tool may have.
-        let mut released = false;
-        let attempt = async {
-            match mem::replace(&mut state.phase, Phase::Finished) {
-                Phase::Release(reply) => {
-                    reply.send(Ok(ReleaseDecision::Execute)).map_err(|_| {
-                        ExecutorError::ReplyExpired {
-                            operation: "release",
-                        }
-                    })?;
-                    released = true;
-                }
-                Phase::Input { id, reply } => {
-                    let answer = answers
-                        .get(id.as_str())
-                        .ok_or(ExecutorError::MissingAnswer)?
-                        .clone();
-                    reply.send(Ok(InputAnswer::Answer(answer))).map_err(|_| {
-                        ExecutorError::ReplyExpired {
-                            operation: "inquiry",
-                        }
-                    })?;
-                    released = true;
-                }
-                phase => {
-                    let name = phase.name();
-                    state.phase = phase;
-                    return Err(ExecutorError::OutOfOrder {
-                        operation: "execute",
-                        phase: name,
-                    });
-                }
-            }
-            let id = &self.slot.request.id;
-            match state.next().await? {
-                Received::Interaction(interaction) => match *interaction {
-                    Interaction::Input {
-                        request,
-                        supporting,
-                        answers,
-                        reply,
-                    } => {
-                        let question = question(request, &supporting);
-                        state.phase = Phase::Input {
-                            id: question.id.clone(),
-                            reply,
-                        };
-                        Ok(ExecutorResult::NeedsInput {
-                            tool_id: id.clone(),
-                            tool_name: self.slot.request.name.clone(),
-                            source: InquirySource::tool(&self.slot.request.name),
-                            question,
-                            accumulated_answers: answers,
-                        })
-                    }
-                    Interaction::Review { result, reply, .. } => {
-                        let offered = response(id, &result);
-                        state.phase = Phase::Review {
-                            offered: result,
-                            reply,
-                        };
-                        Ok(ExecutorResult::Completed(offered))
-                    }
-                    Interaction::Record { recording, reply } => {
-                        let response = response(id, &recording.result);
-                        state.phase = Phase::Record(reply);
-                        Ok(ExecutorResult::Completed(response))
-                    }
-                    _ => Err(ExecutorError::UnexpectedInteraction { phase: "executing" }),
-                },
-                Received::Finished(result) => Ok(ExecutorResult::Completed(response(id, &result))),
+        let replied = match mem::replace(&mut state.phase, Phase::Finished) {
+            Phase::Release(reply) => reply
+                .send(Ok(ReleaseDecision::Execute))
+                .map(|()| {
+                    // From here the tool may run, so a failure no longer
+                    // means nothing ran.
+                    state.released = true;
+                })
+                .map_err(|_| ExecutorError::ReplyExpired {
+                    operation: "release",
+                }),
+            Phase::Input { id, reply } => match answers.get(id.as_str()) {
+                Some(answer) => reply
+                    .send(Ok(InputAnswer::Answer(answer.clone())))
+                    .map_err(|_| ExecutorError::ReplyExpired {
+                        operation: "inquiry",
+                    }),
+                None => Err(ExecutorError::MissingAnswer),
+            },
+            phase => {
+                let name = phase.name();
+                state.phase = phase;
+                Err(ExecutorError::OutOfOrder {
+                    operation: "execute",
+                    phase: name,
+                })
             }
         };
-        let result = tokio::select! {
-            biased;
-            () = cancellation.cancelled() => Err(ExecutorError::Cancelled),
-            result = attempt => result,
+        let result = match replied {
+            Ok(()) => self.next_step(&mut state, false, &cancellation).await,
+            Err(error) => {
+                let released = state.released;
+                self.settle_failure(&mut state, error, released)
+            }
         };
         // The service reports an outcome only once the attempt's process has
         // exited and its stderr has been drained, so the sink has nothing left
         // to receive. A question's next attempt brings its own.
         *locked(&self.slot.stderr) = None;
-        result.unwrap_or_else(|error| self.settle_failure(&mut state, error, released))
+        result
     }
 }
 

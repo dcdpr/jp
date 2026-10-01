@@ -5,45 +5,6 @@
 use indexmap::IndexMap;
 use serde_json::Value;
 
-/// The reserved question-id segment used for a tool's permission prompt.
-const PERMISSION_QUESTION_ID: &str = "__permission__";
-
-/// Turn-cache key for a tool's remembered permission decision.
-///
-/// Format `"<tool_name>.__permission__"`, stable across invocations of the same
-/// tool within a turn.
-/// Deliberately a distinct type from the stream-correlation inquiry ID, which
-/// identifies a persisted inquiry uniquely per attempt; the two must never be
-/// used interchangeably.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PermissionCacheKey(String);
-
-impl PermissionCacheKey {
-    /// Builds the permission-decision key for `tool_name`.
-    #[must_use]
-    pub fn new(tool_name: &str) -> Self {
-        Self(format!("{tool_name}.{PERMISSION_QUESTION_ID}"))
-    }
-}
-
-/// Turn-cache key for a remembered tool-question answer.
-///
-/// Format `"<tool_name>.<question_id>"`, stable across invocations of the same
-/// tool within a turn.
-/// Deliberately a distinct type from the stream-correlation inquiry ID, which
-/// identifies a persisted inquiry uniquely per attempt; the two must never be
-/// used interchangeably.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ToolAnswerCacheKey(String);
-
-impl ToolAnswerCacheKey {
-    /// Builds the answer key for `tool_name`'s `question_id`.
-    #[must_use]
-    pub fn new(tool_name: &str, question_id: &str) -> Self {
-        Self(format!("{tool_name}.{question_id}"))
-    }
-}
-
 /// State that is persisted for the duration of a turn.
 ///
 /// A turn is one or more request-response cycle(s) between the user and the
@@ -62,18 +23,17 @@ impl ToolAnswerCacheKey {
 /// `ToolCallRequest`.
 #[derive(Debug, Default)]
 pub struct TurnState {
-    /// Tool-question answers remembered for the duration of the turn.
+    /// What the user asked to remember for the rest of the turn, per tool name.
     ///
-    /// Written when a user answers a tool question with "remember for this
-    /// turn", and read to auto-answer the same question on a later tool call
-    /// within the turn.
-    pub remembered_tool_answers: IndexMap<ToolAnswerCacheKey, Value>,
+    /// It applies to every later call to that tool, not only the call it was
+    /// given for.
+    pub tools: IndexMap<String, ToolMemory>,
 
-    /// Tool-permission decisions remembered for the duration of the turn.
+    /// What the turn keeps per tool call id.
     ///
-    /// Gated by the permission prompt's `persist` flag.
-    /// `true` runs the tool without prompting again; `false` skips it.
-    pub remembered_permission_decisions: IndexMap<PermissionCacheKey, bool>,
+    /// Lives as long as the turn rather than the call's executor, so a call
+    /// prepared again after a restart continues its own count.
+    pub calls: IndexMap<String, CallMemory>,
 
     /// The number of times we've tried a request to the assistant.
     ///
@@ -81,15 +41,67 @@ pub struct TurnState {
     /// Every retry increments this counter, until a maximum number of retries
     /// is reached, after which the turn ends in an error.
     pub request_count: usize,
+}
 
-    /// Per-`(tool_call_id, question_id)` attempt counter for minting unique
-    /// three-segment inquiry IDs within the turn.
+/// What the user asked to remember about one tool for the rest of the turn.
+#[derive(Debug, Default)]
+pub struct ToolMemory {
+    /// A permission decision given with "remember for this turn".
     ///
-    /// In-memory only; a fresh `TurnState` (built per turn) resets it.
-    pub inquiry_attempts: IndexMap<(String, String), usize>,
+    /// `true` runs later calls without asking; `false` skips them.
+    pub permission: Option<bool>,
+
+    /// Answers given with "remember for this turn", keyed by question id.
+    ///
+    /// Never holds the answer to a secret question.
+    pub answers: IndexMap<String, Value>,
+}
+
+/// What the turn keeps about one tool call.
+#[derive(Debug, Default)]
+pub struct CallMemory {
+    /// How many times each question has been recorded for this call, keyed by
+    /// question id.
+    ///
+    /// Numbers the call's inquiry ids, so each recorded question is unique
+    /// within the turn.
+    pub inquiry_attempts: IndexMap<String, usize>,
 }
 
 impl TurnState {
+    /// The permission decision remembered for `tool_name`, if any.
+    #[must_use]
+    pub fn remembered_permission(&self, tool_name: &str) -> Option<bool> {
+        self.tools.get(tool_name)?.permission
+    }
+
+    /// Remember `run` as the permission decision for every later call to
+    /// `tool_name` this turn.
+    pub fn remember_permission(&mut self, tool_name: &str, run: bool) {
+        self.tools
+            .entry(tool_name.to_owned())
+            .or_default()
+            .permission = Some(run);
+    }
+
+    /// The answer remembered for `tool_name`'s question `question_id`, if any.
+    #[must_use]
+    pub fn remembered_answer(&self, tool_name: &str, question_id: &str) -> Option<&Value> {
+        self.tools.get(tool_name)?.answers.get(question_id)
+    }
+
+    /// Remember `answer` for `tool_name`'s question `question_id` for the rest
+    /// of the turn.
+    ///
+    /// The caller keeps secret answers out of this.
+    pub fn remember_answer(&mut self, tool_name: &str, question_id: &str, answer: Value) {
+        self.tools
+            .entry(tool_name.to_owned())
+            .or_default()
+            .answers
+            .insert(question_id.to_owned(), answer);
+    }
+
     /// Allocate the next 1-indexed attempt for a `(tool_call_id, question_id)`
     /// pair within this turn.
     ///
@@ -97,8 +109,11 @@ impl TurnState {
     /// key returns the next integer.
     pub fn next_inquiry_attempt(&mut self, tool_call_id: &str, question_id: &str) -> usize {
         let attempt = self
+            .calls
+            .entry(tool_call_id.to_owned())
+            .or_default()
             .inquiry_attempts
-            .entry((tool_call_id.to_owned(), question_id.to_owned()))
+            .entry(question_id.to_owned())
             .or_insert(0);
         *attempt += 1;
         *attempt

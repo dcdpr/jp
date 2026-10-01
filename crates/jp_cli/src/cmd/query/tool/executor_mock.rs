@@ -1,17 +1,61 @@
 //! Executors that return a scripted result instead of running anything.
 
-use std::{collections::HashMap, sync::Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::ToolConfigWithDefaults;
 use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
 use jp_mcp::server::StderrSink;
-use jp_tool::{ToolDefinition, ToolDocs};
+use jp_process::{ExitCode, MockProcessRunner, ProcessOutput, ProcessRunner};
+use jp_tool::{Outcome, Question, ToolDefinition, ToolDocs};
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::{Executor, ExecutorResult, ExecutorSource, PermissionInfo};
+
+/// A runner for a service whose tools run no local command.
+///
+/// Running one returns an error naming it.
+pub(crate) fn no_commands() -> Arc<dyn ProcessRunner> {
+    Arc::new(MockProcessRunner::never_called())
+}
+
+/// The `style.parameters` of a formatter that asks the tool's `confirm`
+/// question, and describes the call as `confirm = <answer>` once it has one.
+///
+/// Pair it with [`asking_formatter_runner`], which plays the formatter.
+/// The template is rendered for real, so the answer reaches the formatter the
+/// way it reaches any command: through `{{tool.answers.confirm}}`.
+pub(crate) fn asking_formatter() -> Value {
+    json!({"program": "formatter", "args": ["{{tool.answers.confirm}}"], "shell": false})
+}
+
+/// Plays the formatter [`asking_formatter`] configures.
+///
+/// An unanswered question renders as `null`, which the formatter meets by
+/// asking `question`, in the wire format a real tool prints.
+pub(crate) fn asking_formatter_runner(question: &str) -> Arc<dyn ProcessRunner> {
+    let asking = serde_json::to_string(&Outcome::NeedsInput {
+        question: Question::boolean("confirm", question).unwrap(),
+    })
+    .unwrap();
+
+    Arc::new(MockProcessRunner::responding(move |spec| {
+        let stdout = match spec.args.as_slice() {
+            [answer] if answer != "null" => format!("confirm = {answer}"),
+            _ => asking.clone(),
+        };
+        Ok(ProcessOutput {
+            stdout,
+            stderr: String::new(),
+            status: ExitCode::success(),
+        })
+    }))
+}
 
 /// A mock executor for testing that returns pre-configured results.
 ///
@@ -83,15 +127,15 @@ impl Executor for MockExecutor {
         &self.tool_name
     }
 
-    fn arguments(&self) -> &Map<String, Value> {
-        &self.arguments
+    fn arguments(&self) -> Map<String, Value> {
+        self.arguments.clone()
     }
 
     fn permission_info(&self) -> Option<PermissionInfo> {
         self.permission_info.clone()
     }
 
-    fn set_arguments(&mut self, _args: Value) {
+    fn set_arguments(&self, _args: Value) {
         // Arguments don't affect the pre-configured result.
     }
 

@@ -5,7 +5,6 @@ use jp_conversation::{
 use serde_json::Map;
 
 use super::*;
-use crate::cmd::query::tool::executor::mock::MockExecutor;
 
 fn req(id: &str, name: &str) -> ToolCallRequest {
     ToolCallRequest {
@@ -22,8 +21,8 @@ fn resp(id: &str, content: &str) -> ToolCallResponse {
     }
 }
 
-fn approved_executor(id: &str, name: &str) -> Box<dyn Executor> {
-    Box::new(MockExecutor::completed(id, name, "done"))
+fn settled(id: &str) -> Review {
+    Review::unchanged(resp(id, "done"))
 }
 
 #[test]
@@ -51,9 +50,9 @@ fn plan_items_are_in_document_order() {
         .unwrap();
 
     let mut pending = PendingTools::new();
-    pending.insert_approved("a".into(), approved_executor("a", "tool_a"));
-    pending.insert_resolved("b".into(), resp("b", "skipped"));
-    pending.insert_approved("c".into(), approved_executor("c", "tool_c"));
+    pending.insert("a".into(), settled("a"));
+    pending.insert("b".into(), Review::unchanged(resp("b", "skipped")));
+    pending.insert("c".into(), settled("c"));
 
     let plan = build_execution_plan(&stream, &mut pending);
     let (items, orphaned) = plan.into_parts();
@@ -66,9 +65,7 @@ fn plan_items_are_in_document_order() {
     assert_eq!(items[1].index, 1);
     assert_eq!(items[2].request.id, "c");
     assert_eq!(items[2].index, 2);
-    assert!(matches!(items[0].work, PendingEntry::Approved(_)));
-    assert!(matches!(items[1].work, PendingEntry::Resolved(_)));
-    assert!(matches!(items[2].work, PendingEntry::Approved(_)));
+    assert_eq!(items[1].review.response, resp("b", "skipped"));
 }
 
 /// Already-responded requests are skipped — this is what makes the
@@ -89,7 +86,7 @@ fn responded_requests_are_skipped() {
         .unwrap();
 
     let mut pending = PendingTools::new();
-    pending.insert_approved("pending".into(), approved_executor("pending", "tool"));
+    pending.insert("pending".into(), settled("pending"));
 
     let plan = build_execution_plan(&stream, &mut pending);
     let (items, orphaned) = plan.into_parts();
@@ -118,8 +115,8 @@ fn orphan_index_matches_stream_position() {
         .unwrap();
 
     let mut pending = PendingTools::new();
-    pending.insert_approved("a".into(), approved_executor("a", "tool_a"));
-    pending.insert_approved("b".into(), approved_executor("b", "tool_b"));
+    pending.insert("a".into(), settled("a"));
+    pending.insert("b".into(), settled("b"));
     // No entry for `orphan` — it falls through to the orphaned vec.
 
     let plan = build_execution_plan(&stream, &mut pending);
@@ -187,7 +184,7 @@ fn previous_turn_requests_are_ignored() {
         .unwrap();
 
     let mut pending = PendingTools::new();
-    pending.insert_approved("new".into(), approved_executor("new", "tool"));
+    pending.insert("new".into(), settled("new"));
     // Note: no entry for old_unresponded — it shouldn't matter; we don't
     // walk into the previous turn.
 
@@ -213,7 +210,7 @@ fn build_consumes_pending_entries() {
         .unwrap();
 
     let mut pending = PendingTools::new();
-    pending.insert_approved("only".into(), approved_executor("only", "tool"));
+    pending.insert("only".into(), settled("only"));
     assert_eq!(pending.len(), 1);
 
     let _plan = build_execution_plan(&stream, &mut pending);
@@ -237,8 +234,8 @@ fn non_tool_events_are_ignored() {
         .unwrap();
 
     let mut pending = PendingTools::new();
-    pending.insert_approved("a".into(), approved_executor("a", "tool_a"));
-    pending.insert_approved("b".into(), approved_executor("b", "tool_b"));
+    pending.insert("a".into(), settled("a"));
+    pending.insert("b".into(), settled("b"));
 
     let plan = build_execution_plan(&stream, &mut pending);
     let (items, orphaned) = plan.into_parts();
