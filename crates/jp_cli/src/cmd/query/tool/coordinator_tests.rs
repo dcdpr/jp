@@ -1,3 +1,8 @@
+use std::{
+    io,
+    time::{Duration, Instant},
+};
+
 use async_trait::async_trait;
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
@@ -12,11 +17,14 @@ use jp_inquire::{
 };
 use jp_mcp::{Client, server::builtin::BuiltinExecutors};
 use jp_printer::{ErrChannel, OutputFormat, Printer};
-use jp_process::MockProcessRunner;
+use jp_process::{
+    Ended, ExitCode, Finished, MockProcessRunner, ProcessOutput, ProcessRunner, ProcessSpec, Watch,
+};
 use jp_tool::{InvocationContext, ToolDefinition, ToolDocs};
 use jp_workspace::{ConversationLock, Workspace};
 use schematic::Config as _;
 use serde_json::json;
+use tokio::sync::Notify;
 
 use super::*;
 use crate::{
@@ -800,6 +808,155 @@ async fn remembered_denial_does_not_run_http_argument_formatter() {
         .acknowledge_reviews(vec![Review::unchanged(response)])
         .await
         .unwrap();
+    owner.shutdown().await.unwrap();
+}
+
+/// An argument formatter that describes the call whose argument is `first` at
+/// once, and holds any other call's description until it is told to stop.
+struct StallingFormatter {
+    /// Told when a held description starts.
+    started: Arc<Notify>,
+
+    /// Told when a held description is stopped.
+    stopped: Arc<Notify>,
+}
+
+impl ProcessRunner for StallingFormatter {
+    fn execute(&self, spec: &ProcessSpec, watch: &Watch) -> io::Result<Finished> {
+        let described = |stdout: &str, ended| Finished {
+            output: ProcessOutput {
+                stdout: stdout.to_owned(),
+                stderr: String::new(),
+                status: ExitCode::success(),
+            },
+            ended,
+        };
+        if spec.args == ["first"] {
+            return Ok(described("first", Ended::Exited));
+        }
+
+        self.started.notify_one();
+        // Long enough that a test which has to wait it out fails its own
+        // timeout first.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while Instant::now() < deadline {
+            if watch
+                .cancellation
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
+            {
+                self.stopped.notify_one();
+                return Ok(described("", Ended::Cancelled));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        Ok(described("second", Ended::Exited))
+    }
+}
+
+/// A "no" remembered while a later call's formatter is still describing it
+/// stops that formatter, and the later call's recorded skip is acknowledged
+/// without waiting for the formatter to finish on its own.
+#[tokio::test]
+async fn a_remembered_no_stops_a_later_calls_formatter() {
+    let root = Utf8TempDir::new().unwrap();
+    let mut config = AppConfig::new_test();
+    let partial = serde_json::from_value(json!({
+        "source": "builtin", "run": "ask", "format": "unattended",
+        "style": {"parameters": {
+            "program": "formatter", "args": ["{{tool.arguments.n}}"], "shell": false,
+        }},
+    }))
+    .unwrap();
+    config.conversation.tools.insert(
+        "example".into(),
+        ToolConfig::from_partial(partial, vec![]).unwrap(),
+    );
+    let definitions = vec![ToolDefinition {
+        name: "example".into(),
+        docs: ToolDocs::default(),
+        parameters: json!({"type":"object","properties":{"n":{"type":"string"}}}),
+    }];
+    let started = Arc::new(Notify::new());
+    let stopped = Arc::new(Notify::new());
+    let (source, owner) = TerminalExecutorSource::start(
+        BuiltinExecutors::new(),
+        Arc::new(StallingFormatter {
+            started: Arc::clone(&started),
+            stopped: Arc::clone(&stopped),
+        }),
+        &definitions,
+        &config.conversation.tools,
+        Arc::new(ApprovalStore::default()),
+        InvocationContext::default(),
+        &Client::default(),
+        root.path().to_owned(),
+    )
+    .await
+    .unwrap();
+    let mut coordinator = ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source));
+
+    // The first call's prompt is answered only once the second call's
+    // formatter is running, so the "no" lands while it is.
+    let (answer, answers) = std::sync::mpsc::channel();
+    tokio::spawn(async move {
+        started.notified().await;
+        answer.send('N').unwrap();
+    });
+    let requests = ["first", "second"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, n)| ToolCallRequest {
+            id: format!("call-{index}"),
+            name: "example".into(),
+            arguments: json!({"n": n}).as_object().unwrap().clone(),
+        })
+        .collect();
+    let printer = Arc::new(Printer::sink());
+    let (_workspace, lock) = test_lock();
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        drive(
+            &mut coordinator,
+            requests,
+            Arc::new(HeldPromptBackend {
+                answers: std::sync::Mutex::new(answers),
+            }),
+            Arc::new(MockInquiryBackend::new(HashMap::new())),
+            &mut TurnState::default(),
+            &lock.as_mut(),
+            &printer,
+        ),
+    )
+    .await
+    .expect("the calls were never settled");
+
+    let responses: Vec<_> = result
+        .reviews
+        .values()
+        .map(|review| review.response.clone())
+        .collect();
+    assert_eq!(responses, vec![
+        ToolCallResponse {
+            id: "call-0".into(),
+            result: Ok("Tool skipped by user.".into()),
+        },
+        ToolCallResponse {
+            id: "call-1".into(),
+            result: Ok("Tool skipped by user (remembered).".into()),
+        },
+    ]);
+
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        coordinator.acknowledge_reviews(result.reviews.into_values().collect()),
+    )
+    .await
+    .expect("acknowledging waited for the formatter")
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(10), stopped.notified())
+        .await
+        .expect("the second call's formatter was never stopped");
     owner.shutdown().await.unwrap();
 }
 

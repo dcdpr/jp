@@ -59,6 +59,9 @@ pub struct ProcessSpec {
     /// decides what stops it.
     /// Otherwise it shares this process's group, and a Ctrl-C reaches both.
     ///
+    /// A process leading its own group that [`Watch`] stops is stopped with
+    /// every process in the group, so what it started does not outlive it.
+    ///
     /// Unix only; elsewhere the process always shares the console.
     pub own_process_group: bool,
 }

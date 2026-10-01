@@ -327,6 +327,9 @@ struct Call {
     /// What the call is waiting for.
     wait: Wait,
 
+    /// Stops the executor step in flight, if one is.
+    step: Option<CancellationToken>,
+
     /// Whether the call has been approved, or settled without running.
     decided: bool,
 
@@ -905,6 +908,7 @@ impl ToolCoordinator {
                     answers: IndexMap::new(),
                     stderr: None,
                     wait: Wait::Step,
+                    step: None,
                     decided: false,
                     announced: false,
                     released: false,
@@ -1155,6 +1159,7 @@ impl ToolCoordinator {
     fn dispatch(&mut self, batch: &mut Batch, event: ToolEvent, host: &mut Host<'_>) {
         match event {
             ToolEvent::Step { call, result } => {
+                batch.calls[call].step = None;
                 // A call settled while its step was in flight has its response;
                 // whatever the step reached, acknowledging the call releases it.
                 if matches!(batch.calls[call].wait, Wait::Done) {
@@ -1520,6 +1525,7 @@ impl ToolCoordinator {
         let answers = call.answers.clone();
         let stderr = call.stderr.clone();
         let token = batch.cancellation.child_token();
+        call.step = Some(token.clone());
         let events = batch.events.clone();
         tokio::spawn(async move {
             let result = match step {
@@ -1801,6 +1807,16 @@ impl ToolCoordinator {
     ) {
         batch.prompts.retain(|prompt| prompt.call() != index);
         let call = &mut batch.calls[index];
+        // A call can be settled while a step is still running for it, as when a
+        // "no" remembered for its tool lands while its formatter describes it.
+        // The step holds the call until it finishes, which would keep the
+        // recorded response from being acknowledged, so it is stopped. Held
+        // first, so the service delivers the recorded response to the call's
+        // MCP caller rather than a cancellation.
+        if let Some(step) = call.step.take() {
+            call.executor.hold_for_response();
+            step.cancel();
+        }
         if let Some(open) = call.question.take() {
             if let Some(inquiry) = &open.inquiry {
                 inquiry.cancel();

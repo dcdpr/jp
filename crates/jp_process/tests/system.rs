@@ -218,6 +218,93 @@ fn a_stopped_process_does_not_wait_for_what_it_started() {
     assert_eq!(finished.ended, Ended::Stopped);
 }
 
+/// Cancel a run of the probe with `steps` at the first line it prints to
+/// stderr.
+///
+/// Returns every stderr line passed on, which keeps growing for as long as the
+/// runner is still reading.
+fn cancel_at_first_stderr_line(steps: &[&str], own_process_group: bool) -> Arc<Mutex<Vec<String>>> {
+    let cancellation = CancellationToken::new();
+    let cancel = cancellation.clone();
+    let lines = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&lines);
+
+    let finished = SystemProcessRunner
+        .execute(
+            &ProcessSpec {
+                own_process_group,
+                ..probe(steps, &here())
+            },
+            &Watch {
+                stderr_lines: Some(Arc::new(move |line: &str| {
+                    sink.lock().unwrap().push(line.to_owned());
+                    cancel.cancel();
+                })),
+                cancellation: Some(cancellation),
+                ..Watch::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(finished.ended, Ended::Cancelled);
+    lines
+}
+
+/// The id of the process that printed `line`, as `tick PID` or `pid PID`.
+#[cfg(unix)]
+fn pid_in(line: &str) -> libc::pid_t {
+    line.split_whitespace()
+        .nth(1)
+        .and_then(|pid| pid.parse().ok())
+        .unwrap_or_else(|| panic!("no pid in {line:?}"))
+}
+
+/// Whether `pid` is gone within five seconds.
+#[cfg(unix)]
+fn exits(pid: libc::pid_t) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        // SAFETY: signal 0 delivers nothing; it only checks the process exists.
+        let alive = unsafe { libc::kill(pid, 0) } == 0
+            || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH);
+        if !alive {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    false
+}
+
+/// A cancelled run stops reading what a process it started keeps printing:
+/// nothing more reaches the line sink, and the process fails its next write.
+#[test]
+fn a_cancelled_run_stops_reading_what_it_started() {
+    let lines = cancel_at_first_stderr_line(&["spawn:tick:30000", "sleep:30000"], false);
+
+    // One line can still be on its way when the run returns.
+    thread::sleep(Duration::from_millis(100));
+    let seen = lines.lock().unwrap().len();
+    thread::sleep(Duration::from_millis(500));
+    assert_eq!(lines.lock().unwrap().len(), seen, "still reading");
+
+    #[cfg(unix)]
+    {
+        let pid = pid_in(&lines.lock().unwrap()[0]);
+        assert!(exits(pid), "the ticking process outlived the run");
+    }
+}
+
+/// A process leading its own group is stopped with what it started, even when
+/// that never writes again.
+#[cfg(unix)]
+#[test]
+fn a_cancelled_group_is_stopped_whole() {
+    let lines = cancel_at_first_stderr_line(&["spawn:pid,sleep:30000", "sleep:30000"], true);
+
+    let pid = pid_in(&lines.lock().unwrap()[0]);
+    assert!(exits(pid), "the started process outlived its group");
+}
+
 /// A process asked to stop with a grace period is interrupted first, as Ctrl-C
 /// would, and gets to exit on its own.
 #[cfg(unix)]

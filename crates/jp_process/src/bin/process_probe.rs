@@ -9,19 +9,24 @@
 //! - `env:NAME`: print the variable's value, or `<unset>`.
 //! - `cwd`: print the working directory.
 //! - `group`: print the process id, then the process group id (unix only).
+//! - `pid`: print `pid PID` to stderr.
 //! - `ignore-interrupt`: ignore Ctrl-C from here on (unix only).
 //! - `interrupt-exits`: exit with code 42 on Ctrl-C from here on (unix only).
 //! - `hold:MS`: start a copy of this program that sleeps `MS` milliseconds
 //!   holding this one's stdout and stderr open, and leave it running.
+//! - `spawn:STEPS`: start a copy of this program running `STEPS`, separated by
+//!   commas, holding this one's stdout and stderr open, and leave it running.
+//! - `tick:MS`: for `MS` milliseconds, print `tick PID` to stderr every 20
+//!   milliseconds, and exit as soon as stderr can no longer be written.
 //! - `sleep:MS`: sleep `MS` milliseconds.
 //! - `exit:CODE`: exit with `CODE`.
 
 use std::{
     env,
     io::{self, Read as _, Write},
-    process::{Command, exit},
+    process::{self, Command, exit},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 fn main() {
@@ -69,6 +74,13 @@ fn main() {
                     drop(Command::new(program).arg(format!("sleep:{value}")).spawn());
                 }
             }
+            "spawn" => {
+                if let Ok(program) = env::current_exe() {
+                    drop(Command::new(program).args(value.split(',')).spawn());
+                }
+            }
+            "pid" => line(&mut io::stderr(), &format!("pid {}", process::id())),
+            "tick" => tick(Duration::from_millis(value.parse().unwrap_or(0))),
             "sleep" => thread::sleep(Duration::from_millis(value.parse().unwrap_or(0))),
             "exit" => exit(value.parse().unwrap_or(0)),
             _ => {}
@@ -81,6 +93,23 @@ fn main() {
 extern "C" fn exit_interrupted(_signal: libc::c_int) {
     // SAFETY: `_exit` is async-signal-safe, and runs no destructors.
     unsafe { libc::_exit(42) }
+}
+
+/// Print `tick PID` to stderr every 20 milliseconds for `duration`.
+///
+/// Exits once a write fails: nobody is reading anymore.
+fn tick(duration: Duration) {
+    let deadline = Instant::now() + duration;
+    let mut stderr = io::stderr();
+    while Instant::now() < deadline {
+        if writeln!(stderr, "tick {}", process::id())
+            .and_then(|()| stderr.flush())
+            .is_err()
+        {
+            exit(0);
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// Write `text` and a newline, flushed, so a reader sees it straight away.

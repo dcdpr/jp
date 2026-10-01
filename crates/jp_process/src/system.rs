@@ -57,12 +57,14 @@ impl ProcessRunner for SystemProcessRunner {
         }
 
         let stopped = Arc::new(AtomicBool::new(false));
+        let abandoned = Arc::new(AtomicBool::new(false));
         let (done, streams_closed) = mpsc::channel();
         let stdout = read(
             child.stdout.take(),
             None,
             watch.stop_when.clone(),
             &stopped,
+            &abandoned,
             done.clone(),
         );
         let stderr = read(
@@ -70,6 +72,7 @@ impl ProcessRunner for SystemProcessRunner {
             watch.stderr_lines.clone(),
             watch.stop_when.clone(),
             &stopped,
+            &abandoned,
             done,
         );
 
@@ -79,8 +82,17 @@ impl ProcessRunner for SystemProcessRunner {
             let _ = streams_closed.recv();
             (child.wait()?, Ended::Exited)
         } else {
-            supervise(&mut child, watch, &stopped, &streams_closed)?
+            supervise(
+                &mut child,
+                watch,
+                spec.own_process_group,
+                &stopped,
+                &streams_closed,
+            )?
         };
+        // A run that ended early can leave its streams open to a process it
+        // started. Nothing read from them after this belongs to the run.
+        abandoned.store(true, Ordering::Release);
 
         Ok(Finished {
             output: ProcessOutput {
@@ -98,6 +110,7 @@ impl ProcessRunner for SystemProcessRunner {
 fn supervise(
     child: &mut Child,
     watch: &Watch,
+    group: bool,
     stopped: &AtomicBool,
     streams_closed: &mpsc::Receiver<()>,
 ) -> io::Result<(ExitStatus, Ended)> {
@@ -141,7 +154,7 @@ fn supervise(
         // started, which is not this runner's to stop.
         let status = match status {
             Some(status) => status,
-            None => stop(child, watch.grace)?,
+            None => stop(child, group, watch.grace)?,
         };
         return Ok((status, ended));
     }
@@ -149,12 +162,18 @@ fn supervise(
 
 /// Stop `child`, giving it `grace` to exit after an interrupt before killing
 /// it.
-fn stop(child: &mut Child, grace: Duration) -> io::Result<ExitStatus> {
+///
+/// With `group`, the child leads a process group of its own, and every process
+/// in that group is signalled with it: a command run through a shell or a build
+/// tool is usually not the process doing the work.
+/// Once the child has exited within its grace, the group is left alone, since
+/// its id is no longer this runner's to signal.
+fn stop(child: &mut Child, group: bool, grace: Duration) -> io::Result<ExitStatus> {
     #[cfg(unix)]
     if !grace.is_zero() {
         use std::time::Instant;
 
-        interrupt(child.id());
+        signal(child.id(), group, libc::SIGINT);
 
         let deadline = Instant::now() + grace;
         while Instant::now() < deadline {
@@ -165,27 +184,35 @@ fn stop(child: &mut Child, grace: Duration) -> io::Result<ExitStatus> {
         }
     }
 
-    // Windows has no interrupt to send, so there is nothing to wait for.
+    // Windows has no interrupt to send, so there is nothing to wait for, and
+    // no process group to stop.
     #[cfg(not(unix))]
-    let _ = grace;
+    let _ = (group, grace);
+
+    #[cfg(unix)]
+    if group {
+        signal(child.id(), true, libc::SIGKILL);
+    }
 
     // Fails only for a process that already exited, which `wait` reports.
     drop(child.kill());
     child.wait()
 }
 
-/// Send `pid` the signal a Ctrl-C at the terminal would.
+/// Send `signal` to `pid`, or with `group`, to every process in the group it
+/// leads.
 #[cfg(unix)]
-fn interrupt(pid: u32) {
+fn signal(pid: u32, group: bool, signal: libc::c_int) {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return;
     };
+    let target = if group { -pid } else { pid };
 
     // SAFETY: `kill` takes plain integers and touches no memory. `pid` is a
-    // child this process has not yet waited for, so the id cannot have been
-    // reused by another process.
+    // child this process has not yet waited for, so neither it nor the group
+    // it leads can have been reused by another process.
     unsafe {
-        libc::kill(pid, libc::SIGINT);
+        libc::kill(target, signal);
     }
 }
 
@@ -198,11 +225,16 @@ fn interrupt(pid: u32) {
 /// The thread is left to finish on its own: a process the runner stopped can
 /// leave its streams open to one it started, which would otherwise hold the
 /// caller until that one exits too.
+/// Once `abandoned` is set, the next read ends the thread without collecting or
+/// passing on what it read, and closes the pipe, so a process still writing to
+/// it fails its next write.
+/// A process that never writes again keeps the thread waiting until it exits.
 fn read(
     pipe: Option<impl Read + Send + 'static>,
     lines: Option<LineSink>,
     stop_when: Option<LineMatch>,
     stopped: &Arc<AtomicBool>,
+    abandoned: &Arc<AtomicBool>,
     done: Sender<()>,
 ) -> Arc<Mutex<Vec<u8>>> {
     let buffer = Arc::new(Mutex::new(Vec::new()));
@@ -213,18 +245,23 @@ fn read(
 
     let collected = Arc::clone(&buffer);
     let stopped = Arc::clone(stopped);
+    let abandoned = Arc::clone(abandoned);
+    let abandoned = move || abandoned.load(Ordering::Acquire);
     thread::spawn(move || {
         let mut reader = BufReader::new(pipe);
         if lines.is_none() && stop_when.is_none() {
             let mut chunk = [0; 8192];
             while let Ok(read @ 1..) = reader.read(&mut chunk) {
+                if abandoned() {
+                    break;
+                }
                 lock(&collected).extend_from_slice(&chunk[..read]);
             }
         } else {
             let mut line = Vec::new();
             loop {
                 line.clear();
-                if !matches!(reader.read_until(b'\n', &mut line), Ok(1..)) {
+                if !matches!(reader.read_until(b'\n', &mut line), Ok(1..)) || abandoned() {
                     break;
                 }
                 lock(&collected).extend_from_slice(&line);
