@@ -318,18 +318,30 @@ fn reload_config(
     let pipeline = ConfigPipeline::new(overrides, Some(workspace), fs, || {
         crate::load_base_partial(fs, cwd.to_owned())
     })
-    .map_err(|error| format!("failed to read the workspace configuration: {error}"))?;
+    .map_err(|error| {
+        format!(
+            "failed to read the workspace configuration: {}",
+            error_chain(&error)
+        )
+    })?;
 
-    let mut partial = pipeline
-        .partial_without_conversation()
-        .map_err(|error| format!("failed to apply the configuration arguments: {error}"))?;
+    let mut partial = pipeline.partial_without_conversation().map_err(|error| {
+        format!(
+            "failed to apply the configuration arguments: {}",
+            error_chain(&error)
+        )
+    })?;
 
     // Consumed while resolving which conversation a command targets, so it is
     // not part of the configuration the run ended up with.
     partial.conversation.default_id.take();
 
-    let config = build(partial)
-        .map_err(|error| format!("the resolved configuration is invalid: {error}"))?;
+    let config = build(partial).map_err(|error| {
+        format!(
+            "the resolved configuration is invalid: {}",
+            error_chain(&error)
+        )
+    })?;
 
     config_value(&config)
 }
@@ -1067,7 +1079,12 @@ fn conversation_config(
 fn new_conversation_config(ctx: &Ctx, cfg: &[String]) -> Result<Arc<AppConfig>, String> {
     let base =
         crate::load_base_partial(ctx.fs_backend.as_deref(), ctx.exec.config_cwd().to_owned())
-            .map_err(|error| format!("failed to read the workspace configuration: {error}"))?;
+            .map_err(|error| {
+                format!(
+                    "failed to read the workspace configuration: {}",
+                    error_chain(&error)
+                )
+            })?;
 
     let args = cfg
         .iter()

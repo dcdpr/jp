@@ -978,9 +978,13 @@ fn a_reload_of_an_unparseable_config_file_is_an_error() {
 
     let error = reload_config(&[], &workspace, Some(&fs), tmp.path()).unwrap_err();
 
-    assert!(
-        error.starts_with("failed to read the workspace configuration: "),
-        "{error}"
+    // The parser's diagnostic says what is wrong and where in the file. It
+    // sits below a bare `Configuration error`, which on its own tells the
+    // plugin nothing to pass on.
+    assert_eq!(
+        error,
+        "failed to read the workspace configuration: Configuration error: TOML parse error at \
+         line 1, column 11\n  |\n1 | [assistant\n  |           ^\nunclosed table, expected `]`\n"
     );
 }
 
