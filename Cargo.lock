@@ -2698,6 +2698,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "jp_process"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "libc",
+ "tokio-util",
+]
+
+[[package]]
 name = "jp_pty"
 version = "0.1.0"
 dependencies = [
