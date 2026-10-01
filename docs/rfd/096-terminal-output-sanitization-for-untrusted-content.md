@@ -20,8 +20,8 @@ Stored data remains byte-for-byte verbatim.
 Content that may carry styling is written in a content span that JP closes with
 a styling reset, so it cannot bleed into JP's own output.
 Beneath the per-class policy, the printer holds everything it writes to the
-sequences JP's own output is made of, so text a command prints without
-filtering it, such as a conversation title, cannot take over the terminal.
+sequences JP's own output is made of, so text a command prints without filtering
+it, such as a conversation title, cannot take over the terminal.
 
 ## Motivation
 
@@ -381,8 +381,8 @@ budget on escape bytes nor leaves half a sequence to swallow the text after it.
 
 A prompt widget's drawing bypasses the floor, so the three places that hand a
 title to a widget (the conversation picker, the `jp conversation title` picker,
-and the details shown before `rm` or `archive` asks for confirmation) show it
-as one line of plain text, with every control character removed, whatever
+and the details shown before `rm` or `archive` asks for confirmation) show it as
+one line of plain text, with every control character removed, whatever
 `style.sanitize` says.
 
 ### OSC embedding hardening
@@ -468,8 +468,8 @@ control characters — and ships even when `sanitize = "off"`.
   output, plugins, and the macOS app, so a filtered copy and a stored copy would
   share a type, and "remember to filter" would become "remember which copy".
   The live query path renders before anything is loaded at all.
-- **Filter derived strings by class at each command.** `ls`, `show`, `grep`,
-  and every notice that names a conversation would each filter what they print.
+- **Filter derived strings by class at each command.** `ls`, `show`, `grep`, and
+  every notice that names a conversation would each filter what they print.
   Every new command has to remember to, and the floor already gives the safety
   guarantee in one place; what the class adds is dropping a title's colors.
 - **A type for stored titles.** A `Title` with no `Display` makes forgetting a
@@ -602,9 +602,9 @@ control characters — and ships even when `sanitize = "off"`.
    from storage sanitization ([RFD 052]) and stream repair.
 9. **Output floor**: `jp_term::sanitize::OutputFloor`, one per stream in the
    printer worker under a pretty format, dropping `\r` and closing open styling
-   at shutdown; `PrintOrigin::Widget` for a widget's own drawing, which
-   bypasses it; the mode set from `style.sanitize` by the run's context, a
-   config swap, and each chat renderer.
+   at shutdown; `PrintOrigin::Widget` for a widget's own drawing, which bypasses
+   it; the mode set from `style.sanitize` by the run's context, a config swap,
+   and each chat renderer.
 10. **Derived strings**: `jp_term::width` cuts and wraps around escape
     sequences; titles and grep hits are printed as stored; the pickers and the
     confirmation details show a title as one plain line.
