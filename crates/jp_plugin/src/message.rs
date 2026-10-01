@@ -787,6 +787,19 @@ pub struct ReadConfigRequest {
     /// Optional dot-separated path to narrow the config response.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+
+    /// Read the configuration again before answering.
+    ///
+    /// The host repeats the load it ran at startup: every config file and its
+    /// `extends` chain, the environment, and the invocation's `--cfg`
+    /// arguments.
+    /// The fresh result answers this request and every later one, so a plugin
+    /// that runs for a long time can poll for changes without knowing where
+    /// configuration lives.
+    ///
+    /// Without it, the answer is the configuration as last read.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reload: bool,
 }
 
 /// Ask the host to collect text from the user.

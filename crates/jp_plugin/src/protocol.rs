@@ -18,7 +18,8 @@ use crate::message::{ExitMessage, ReadyMessage};
 /// | 7       | `interrupt`, for stopping a turn the host is running.           |
 /// | 8       | `lock` on `events`, saying whether a turn is running.           |
 /// | 9       | `action` on `interrupt`, and an answer when it carries an `id`. |
-pub const PROTOCOL_VERSION: u32 = 9;
+/// | 10      | `reload` on `read_config`, reading the configuration again.     |
+pub const PROTOCOL_VERSION: u32 = 10;
 
 /// Answer a host's `init`, refusing it when it is too old to serve this plugin.
 ///

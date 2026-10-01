@@ -286,10 +286,38 @@ fn plugin_read_config_with_path() {
     let msg = PluginToHost::ReadConfig(ReadConfigRequest {
         id: None,
         path: Some("assistant.model".to_owned()),
+        reload: false,
     });
     let json = serde_json::to_string(&msg).unwrap();
     let parsed: PluginToHost = from_str(&json).unwrap();
     assert_eq!(msg, parsed);
+}
+
+#[test]
+fn plugin_read_config_reload_is_omitted_unless_set() {
+    let plain = PluginToHost::ReadConfig(ReadConfigRequest {
+        id: None,
+        path: None,
+        reload: false,
+    });
+    assert_eq!(
+        serde_json::to_string(&plain).unwrap(),
+        r#"{"type":"read_config"}"#
+    );
+
+    let reload = PluginToHost::ReadConfig(ReadConfigRequest {
+        id: None,
+        path: None,
+        reload: true,
+    });
+    assert_eq!(
+        serde_json::to_string(&reload).unwrap(),
+        r#"{"type":"read_config","reload":true}"#
+    );
+    assert_eq!(
+        from_str::<PluginToHost>(r#"{"type":"read_config","reload":true}"#).unwrap(),
+        reload
+    );
 }
 
 /// A summary with fixed timestamps, so the expected JSON below is a literal.
