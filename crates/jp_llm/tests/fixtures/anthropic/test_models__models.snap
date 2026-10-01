@@ -265,6 +265,7 @@ expression: v
             "interleaved-thinking",
             "context-editing",
             "adaptive-thinking",
+            "sampling-parameters",
         ],
     },
     ModelDetails {
@@ -309,6 +310,7 @@ expression: v
             "interleaved-thinking",
             "context-editing",
             "adaptive-thinking",
+            "sampling-parameters",
         ],
     },
     ModelDetails {
@@ -352,6 +354,7 @@ expression: v
         features: [
             "interleaved-thinking",
             "context-editing",
+            "sampling-parameters",
         ],
     },
     ModelDetails {
@@ -395,6 +398,7 @@ expression: v
         features: [
             "interleaved-thinking",
             "context-editing",
+            "sampling-parameters",
         ],
     },
     ModelDetails {
@@ -438,6 +442,7 @@ expression: v
         features: [
             "interleaved-thinking",
             "context-editing",
+            "sampling-parameters",
         ],
     },
 ]

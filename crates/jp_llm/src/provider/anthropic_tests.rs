@@ -1179,6 +1179,72 @@ fn test_sonnet_5_5_forced_tool_soft_forces_with_reasoning_off() {
     );
 }
 
+/// A request for `id`, as `map_model` reports it, with `temperature`, `top_p`,
+/// and `top_k` all configured.
+fn sampling_request(id: &str) -> types::CreateMessagesRequest {
+    let model = map_model(adaptive_api_model(id, id, true, true)).unwrap();
+
+    let mut events = ConversationStream::new_test().with_turn("test");
+    events.add_config_delta(
+        serde_json::from_value::<jp_config::PartialAppConfig>(json!({
+            "assistant": {"model": {"parameters": {
+                "temperature": 0.5,
+                "top_p": 0.75,
+                "top_k": 10,
+            }}}
+        }))
+        .unwrap(),
+    );
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+
+    let beta = BetaFeatures(vec![]);
+    create_request(&model, query, true, &beta, false).unwrap().0
+}
+
+/// Claude 4.7 and later answer any non-default sampling parameter with a 400,
+/// so configured values are dropped rather than sent.
+#[test]
+fn test_sampling_parameters_dropped_for_models_that_reject_them() {
+    for id in ["claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-4-7"] {
+        let request = sampling_request(id);
+
+        assert_eq!(request.temperature, None, "{id}");
+        assert_eq!(request.top_p, None, "{id}");
+        assert_eq!(request.top_k, None, "{id}");
+    }
+}
+
+/// A model this binary does not know is newer than it, and every model since
+/// Claude 4.7 rejects sampling parameters.
+#[test]
+fn test_sampling_parameters_dropped_for_unknown_models() {
+    let request = sampling_request("claude-unreleased-9");
+
+    assert_eq!(request.temperature, None);
+    assert_eq!(request.top_p, None);
+    assert_eq!(request.top_k, None);
+}
+
+#[test]
+fn test_sampling_parameters_sent_to_models_that_accept_them() {
+    let request = sampling_request("claude-sonnet-4-6");
+
+    assert_eq!(request.temperature, Some(0.5));
+    assert_eq!(request.top_p, Some(0.75));
+    assert_eq!(request.top_k, Some(10));
+}
+
 /// Verify the `map_model` arm for Claude Fable 5.1 produces the expected
 /// `ModelDetails`, including the `thinking-always-on` capability that stops JP
 /// from sending `thinking: disabled` and from hard-forcing a `tool_choice`,
