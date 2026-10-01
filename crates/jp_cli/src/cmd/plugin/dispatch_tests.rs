@@ -827,7 +827,8 @@ async fn a_failing_exit_carries_its_code_and_reason() {
     assert_eq!(error.message.as_deref(), Some("no such ticket"));
 }
 
-/// A plugin that ignores `Shutdown` is killed rather than waited on forever.
+/// A plugin that ignores `Shutdown` is killed rather than waited on forever,
+/// and so is every process it started.
 ///
 /// The host holds the only handles to the plugin's stdin — this scope and the
 /// shutdown thread — so a plugin blocked on a read never sees EOF and never
@@ -835,29 +836,43 @@ async fn a_failing_exit_carries_its_code_and_reason() {
 /// Waiting on one is a wait with no end, and it takes the error that caused it
 /// down with it.
 ///
-/// The child here is `sleep`, which is exactly that plugin: it reads nothing
-/// and exits on nothing short of a signal.
+/// The plugin here is a shell script running a worker, which is exactly that
+/// plugin: it reads nothing and exits on nothing short of a signal.
+/// The worker inherits the plugin's stderr, so if it outlived the plugin it
+/// would also keep the host's stderr reader from finishing.
 #[cfg(unix)]
 #[test]
-fn stop_plugin_kills_a_plugin_that_will_not_go() {
-    use std::{process::Stdio, sync::mpsc};
+fn stop_plugin_kills_a_plugin_and_its_workers() {
+    use std::{os::unix::fs::PermissionsExt as _, sync::mpsc};
 
-    let mut child = std::process::Command::new("sleep")
-        .arg("60")
-        .stdin(Stdio::piped())
-        .spawn()
-        .expect("sleep is available");
+    let dir = tempdir().unwrap();
+    let script = dir.path().join("jp-worker");
+    fs::write(&script, "#!/bin/sh\nsleep 600 &\necho \"$!\"\nwait\n").unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
 
-    let id = child.id();
-    let stdin = Mutex::new(child.stdin.take().expect("stdin piped"));
-    let sent = AtomicBool::new(false);
+    let PluginProcess {
+        mut child,
+        tree,
+        stdin,
+        stdout,
+        stderr_handle,
+    } = spawn_plugin(&script, None).unwrap();
+
+    let mut line = String::new();
+    BufReader::new(stdout).read_line(&mut line).unwrap();
+    let worker: u32 = line
+        .trim()
+        .parse()
+        .expect("the script prints its worker's PID");
+    let plugin = tree.pid;
 
     // On its own thread with a deadline: if `stop_plugin` ever goes back to
     // waiting indefinitely, this fails rather than hanging the suite — which is
     // the failure mode being guarded against.
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        stop_plugin(&stdin, &sent, id, Duration::from_millis(200));
+        let sent = AtomicBool::new(false);
+        stop_plugin(&stdin, &sent, &tree, Duration::from_millis(200));
         let _ = tx.send(());
     });
 
@@ -869,9 +884,45 @@ fn stop_plugin_kills_a_plugin_that_will_not_go() {
         "the child is reaped, so it is no longer running"
     );
     assert!(
-        !is_process_alive(id),
+        !is_process_alive(plugin),
         "a plugin that ignored the request is gone"
     );
+
+    // Polled: the worker is reaped by init once its parent is gone, and until
+    // then it still answers to its PID.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while is_process_alive(worker) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        !is_process_alive(worker),
+        "the plugin's worker is killed with it"
+    );
+
+    assert!(
+        join_within(stderr_handle, Duration::from_secs(5)),
+        "nothing is left holding the plugin's stderr open"
+    );
+}
+
+/// A thread that never finishes is left behind rather than waited on.
+#[test]
+fn join_within_gives_up_on_a_thread_that_does_not_finish() {
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let blocked = thread::spawn(move || {
+        let _ = held.recv();
+    });
+
+    assert!(!join_within(blocked, Duration::from_millis(50)));
+
+    drop(release);
+}
+
+#[test]
+fn join_within_joins_a_thread_that_finishes() {
+    let finished = thread::spawn(|| {});
+
+    assert!(join_within(finished, Duration::from_secs(5)));
 }
 
 #[test]
