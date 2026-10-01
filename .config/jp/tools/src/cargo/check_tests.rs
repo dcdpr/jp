@@ -1,12 +1,9 @@
-use std::{io, sync::Mutex};
-
-use camino::Utf8Path;
 use camino_tempfile::{Utf8TempDir, tempdir};
+use jp_process::{ExitCode, MockProcessRunner, ProcessOutput, ProcessSpec};
 use jp_tool::{Action, Context, Outcome};
 use pretty_assertions::assert_eq;
 
 use super::*;
-use crate::util::runner::{ExitCode, MockProcessRunner, ProcessOutput, RunnerOpts};
 
 fn ctx() -> (Utf8TempDir, Context) {
     let dir = tempdir().unwrap();
@@ -339,24 +336,19 @@ fn clippy_gets_no_profile_flag_unless_configured() {
 /// Sibling git worktrees share a target directory, and mtime-based freshness
 /// lets one checkout serve the other's stale artifacts; content checksums are
 /// what prevent that.
-/// `MockProcessRunner` validates args but ignores the environment, so nothing
-/// else here would notice the variable going missing.
 #[test]
 fn checksum_freshness_reaches_cargo() {
     let (_dir, ctx) = ctx();
 
-    let runner: CallCapturingRunner = MockProcessRunner::builder()
+    let runner = MockProcessRunner::builder()
         .expect("cargo")
         .returns_success("")
         .expect("comfort")
-        .returns_success("")
-        .into();
+        .returns_success("");
 
     cargo_check_impl(&ctx.root, "-W warnings", None, None, true, &runner).unwrap();
 
-    let call = runner
-        .call_with_arg("clippy")
-        .expect("the clippy pass must have run");
+    let call = call_with_arg(&runner, "clippy").expect("the clippy pass must have run");
 
     assert_eq!(
         call.env
@@ -372,18 +364,15 @@ fn checksum_freshness_reaches_cargo() {
 fn checksum_freshness_is_absent_unless_opted_into() {
     let (_dir, ctx) = ctx();
 
-    let runner: CallCapturingRunner = MockProcessRunner::builder()
+    let runner = MockProcessRunner::builder()
         .expect("cargo")
         .returns_success("")
         .expect("comfort")
-        .returns_success("")
-        .into();
+        .returns_success("");
 
     cargo_check_impl(&ctx.root, "-W warnings", None, None, false, &runner).unwrap();
 
-    let call = runner
-        .call_with_arg("clippy")
-        .expect("the clippy pass must have run");
+    let call = call_with_arg(&runner, "clippy").expect("the clippy pass must have run");
 
     assert!(
         !call
@@ -394,63 +383,13 @@ fn checksum_freshness_is_absent_unless_opted_into() {
     );
 }
 
-/// One recorded subprocess invocation.
-struct CapturedCall {
-    args: Vec<String>,
-    env: Vec<(String, String)>,
-}
-
-/// A runner that records every call's args and environment.
+/// The first command `runner` ran whose first argument is `arg`.
 ///
-/// `EnvCapturingRunner` in `cargo/test_tests.rs` keeps only the most recent
-/// call's environment; `cargo_check` makes two, so the clippy pass has to be
-/// picked out rather than assumed to be last.
-struct CallCapturingRunner {
-    inner: MockProcessRunner,
-    calls: Mutex<Vec<CapturedCall>>,
-}
-
-impl From<MockProcessRunner> for CallCapturingRunner {
-    fn from(inner: MockProcessRunner) -> Self {
-        Self {
-            inner,
-            calls: Mutex::new(Vec::new()),
-        }
-    }
-}
-
-impl CallCapturingRunner {
-    /// The first recorded call whose first argument is `arg`.
-    fn call_with_arg(&self, arg: &str) -> Option<CapturedCall> {
-        self.calls
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|call| call.args.first().is_some_and(|first| first == arg))
-            .map(|call| CapturedCall {
-                args: call.args.clone(),
-                env: call.env.clone(),
-            })
-    }
-}
-
-impl ProcessRunner for CallCapturingRunner {
-    fn run_with_opts(
-        &self,
-        program: &str,
-        args: &[&str],
-        working_dir: &Utf8Path,
-        opts: &RunnerOpts<'_>,
-    ) -> Result<ProcessOutput, io::Error> {
-        self.calls.lock().unwrap().push(CapturedCall {
-            args: args.iter().map(|a| (*a).to_owned()).collect(),
-            env: opts
-                .env
-                .iter()
-                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
-                .collect(),
-        });
-
-        self.inner.run_with_opts(program, args, working_dir, opts)
-    }
+/// `cargo_check` runs cargo twice, so the clippy pass has to be picked out
+/// rather than assumed to be last.
+fn call_with_arg(runner: &MockProcessRunner, arg: &str) -> Option<ProcessSpec> {
+    runner
+        .calls()
+        .into_iter()
+        .find(|call| call.args.first().is_some_and(|first| first == arg))
 }

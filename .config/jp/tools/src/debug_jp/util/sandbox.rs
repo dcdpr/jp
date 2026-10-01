@@ -29,12 +29,10 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use reflink_copy::reflink_or_copy;
 
-use crate::{
-    Error,
-    util::runner::{DuctProcessRunner, ProcessRunner},
-};
+use crate::Error;
 
 /// Options controlling sandbox construction.
 #[derive(Debug, Clone, Copy)]
@@ -134,7 +132,7 @@ impl Sandbox {
 
 impl Drop for Sandbox {
     fn drop(&mut self) {
-        let runner = DuctProcessRunner;
+        let runner = SystemProcessRunner;
         remove_worktree(&runner, &self.root, &self.worktree);
 
         if let Err(error) = fs::remove_dir_all(&self.user_data)

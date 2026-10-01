@@ -1,13 +1,13 @@
 use std::fs;
 
 use camino::Utf8Path;
+use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 use serde::Deserialize;
 
 use crate::util::{
     OneOrMany, ToolResult,
     diff::{text_diff, unified_diff},
     error,
-    runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
 };
 
 /// Lockfile read before and after the update to report what actually changed.
@@ -60,7 +60,7 @@ impl PackageSpec {
 }
 
 pub(crate) async fn cargo_update(root: &Utf8Path, packages: OneOrMany<PackageSpec>) -> ToolResult {
-    cargo_update_impl(root, &packages, &DuctProcessRunner)
+    cargo_update_impl(root, &packages, &SystemProcessRunner)
 }
 
 fn cargo_update_impl<R: ProcessRunner>(

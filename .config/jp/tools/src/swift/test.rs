@@ -1,13 +1,11 @@
+use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 use jp_tool::Context;
 
 use super::{
     PROJECT_PATH, SCHEME, prepare,
     report::{outcome, unit_bundle_filter},
 };
-use crate::util::{
-    ToolResult, error,
-    runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
-};
+use crate::util::{ToolResult, error};
 
 /// The `SwiftPM` package holding the accessibility driver.
 const DRIVE_PACKAGE: &str = "apps/macos/Tools/jpdrive";
@@ -68,7 +66,7 @@ pub(crate) async fn swift_test(
         ctx,
         testname.as_deref(),
         target.as_deref(),
-        &DuctProcessRunner,
+        &SystemProcessRunner,
     )
 }
 

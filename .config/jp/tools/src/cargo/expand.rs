@@ -1,11 +1,8 @@
 use camino::Utf8Path;
+use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 
 use super::MAX_DIAGNOSTIC_BYTES;
-use crate::util::{
-    ToolResult,
-    runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
-    truncate,
-};
+use crate::util::{ToolResult, truncate};
 
 /// Cap for expanded source.
 ///
@@ -28,7 +25,7 @@ pub(crate) async fn cargo_expand(
         &item,
         package,
         checksum_freshness,
-        &DuctProcessRunner,
+        &SystemProcessRunner,
     )
 }
 

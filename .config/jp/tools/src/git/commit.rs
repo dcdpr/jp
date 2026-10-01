@@ -1,13 +1,9 @@
 use camino::Utf8Path;
+use jp_process::{ProcessRunner, SystemProcessRunner};
 use serde_json::{Map, Value};
 
-use crate::{
-    to_simple_xml_with_root,
-    util::{
-        ToolResult,
-        runner::{DuctProcessRunner, ProcessRunner},
-    },
-};
+use super::Reported;
+use crate::{to_simple_xml_with_root, util::ToolResult};
 
 pub(crate) async fn git_commit(
     root: &Utf8Path,
@@ -15,7 +11,7 @@ pub(crate) async fn git_commit(
     options: &Map<String, Value>,
 ) -> ToolResult {
     let env = super::env_from_options(options);
-    git_commit_impl(root, &message, &DuctProcessRunner, &env)
+    git_commit_impl(root, &message, &SystemProcessRunner, &env)
 }
 
 fn git_commit_impl<R: ProcessRunner>(
@@ -31,7 +27,7 @@ fn git_commit_impl<R: ProcessRunner>(
         env,
     )?;
 
-    to_simple_xml_with_root(&output, "git_commit").map(Into::into)
+    to_simple_xml_with_root(&Reported::from(&output), "git_commit").map(Into::into)
 }
 
 #[cfg(test)]

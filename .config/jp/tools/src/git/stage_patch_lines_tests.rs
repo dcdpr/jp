@@ -1,7 +1,7 @@
+use jp_process::MockProcessRunner;
 use serde_json::json;
 
 use super::*;
-use crate::util::runner::MockProcessRunner;
 
 #[test]
 fn parse_hunk_header_simple() {

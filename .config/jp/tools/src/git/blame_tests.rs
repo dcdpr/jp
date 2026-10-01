@@ -1,7 +1,7 @@
 use camino_tempfile::tempdir;
+use jp_process::MockProcessRunner;
 
 use super::*;
-use crate::util::runner::MockProcessRunner;
 
 const SHA_ALICE: &str = "abc1234567890abcdef1234567890abcdef12345";
 const SHA_BOB: &str = "def5678901234567890abcdef1234567890abcde";

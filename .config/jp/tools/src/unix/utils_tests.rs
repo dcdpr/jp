@@ -3,12 +3,12 @@ use std::path::Path;
 use assert_matches::assert_matches;
 use camino::Utf8Path;
 use camino_tempfile::tempdir;
+use jp_process::MockProcessRunner;
+#[cfg(unix)]
+use jp_process::{ExitCode, ProcessOutput};
 use jp_tool::{Action, Outcome};
 
 use super::*;
-use crate::util::runner::MockProcessRunner;
-#[cfg(unix)]
-use crate::util::runner::{ExitCode, ProcessOutput};
 
 fn ctx() -> (camino_tempfile::Utf8TempDir, Context) {
     let dir = tempdir().unwrap();
