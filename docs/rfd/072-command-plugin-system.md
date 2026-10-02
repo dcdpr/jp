@@ -487,6 +487,8 @@ The plugin answers with one `tool_outcome`, then `exit`:
 
 `outcome` has the shape a local tool prints on stdout: `success`, `error`, or
 `needs_input`.
+The call is finished by the `exit`: an outcome not followed by `exit` fails the
+call, as a plugin that answered and then crashed has not finished it.
 A question ends the attempt.
 JP runs the plugin again once it has an answer, with the answers so far in
 `tool.answers`.

@@ -77,6 +77,19 @@ fn an_exit_without_an_outcome_is_a_failure() {
     );
 }
 
+/// A plugin that answers and then dies before `exit`, a panic during teardown
+/// or a failed write, did not finish the call.
+/// Its outcome is not reported as the call's result.
+#[test]
+fn an_outcome_without_an_exit_is_a_failure() {
+    let stdout = printed(&[json!({"type": "ready", "protocol": 12}), outcome("ok")]);
+
+    assert_eq!(
+        parse_plugin_output(&stdout),
+        Err("answered the tool call, then exited without sending `exit`".to_owned())
+    );
+}
+
 #[test]
 fn no_output_at_all_is_a_failure() {
     assert_eq!(

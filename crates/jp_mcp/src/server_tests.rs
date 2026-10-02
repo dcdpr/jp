@@ -1060,6 +1060,39 @@ async fn command_tool_failing_exit_reports_the_plugin_reason() {
     );
 }
 
+/// A plugin that sends a successful outcome and then crashes has not finished
+/// the call; the model is told it failed, not that it succeeded.
+#[tokio::test]
+async fn command_tool_that_crashes_after_answering_fails() {
+    let runner = Arc::new(MockProcessRunner::responding(|_| {
+        Ok(ProcessOutput {
+            stdout: format!(
+                "{}\n",
+                json!({"type": "tool_outcome", "outcome": {"type": "success", "content": "ok"}})
+            ),
+            stderr: "thread 'main' panicked".to_owned(),
+            status: ExitCode::from(Some(101)),
+        })
+    }));
+    let fixture = Fixture::new(
+        "ticket_create",
+        json!({"source": "command.ticket.create"}),
+        schema([]),
+    )
+    .with_plugin("ticket", json!({}))
+    .with_runner(runner);
+
+    let error = execute(&fixture.execution("call-1", json!({})), &Answers::new())
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "Command plugin `ticket` failed: answered the tool call, then exited without sending \
+         `exit`"
+    );
+}
+
 #[tokio::test]
 async fn command_tool_whose_binary_cannot_start_fails() {
     let fixture = Fixture::new(
