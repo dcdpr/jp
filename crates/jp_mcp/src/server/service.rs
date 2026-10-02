@@ -29,7 +29,8 @@ use tokio::sync::{Notify, broadcast, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    Answers, CommandResult, Execution, ExecutionOutcome, InvocationContext, StderrSink,
+    Answers, CommandPlugins, CommandResult, Execution, ExecutionOutcome, InvocationContext,
+    StderrSink,
     builtin::BuiltinExecutors,
     execute,
     result::{ResultError, to_mcp},
@@ -382,6 +383,7 @@ struct Inner {
     upstream: Client,
     builtins: BuiltinExecutors,
     runner: Arc<dyn ProcessRunner>,
+    command_plugins: CommandPlugins,
     root: Utf8PathBuf,
     invocation: InvocationContext,
     host: mpsc::Sender<HostRequest>,
@@ -432,14 +434,17 @@ impl Service {
     /// service.
     ///
     /// No tool code is run.
-    /// `runner` runs local commands: `local` tools, and every tool's argument
-    /// formatter.
+    /// `runner` runs every subprocess: `local` tools, command plugin binaries,
+    /// and argument formatters.
+    /// `command_plugins` names the plugins admitted for this turn; a call to
+    /// any other plugin fails as unavailable.
     /// The returned receiver is the private Host interface.
     pub fn new(
         tools: Vec<ConfiguredTool>,
         upstream: Client,
         builtins: BuiltinExecutors,
         runner: Arc<dyn ProcessRunner>,
+        command_plugins: CommandPlugins,
         root: Utf8PathBuf,
         invocation: InvocationContext,
     ) -> Result<(Self, HostReceiver), ServiceError> {
@@ -462,6 +467,7 @@ impl Service {
                     upstream,
                     builtins,
                     runner,
+                    command_plugins,
                     root,
                     invocation,
                     host,
@@ -747,15 +753,15 @@ async fn run_call(
     validate_arguments(&tool, &mut arguments)?;
     // A skipped or hidden call shows nothing, so its formatter is a command
     // that would run for output nobody reads.
-    let formats = matches!(tool.config.style().parameters, ParametersStyle::Custom(_))
+    let formats = has_formatter(&tool)
         && tool.config.run() != RunMode::Skip
         && !tool.config.style().hidden
         && ask(inner, call, |reply| Interaction::RenderArguments { reply }).await?;
     // What the formatter's questions were answered with. The tool runs with the
     // same answers, so the call that executes is the one that was described.
     let mut answers = Answers::new();
-    // `format = "ask"` holds a user-configured command back until the Host has
-    // admitted the call.
+    // `format = "ask"` holds a formatter back until the Host has admitted the
+    // call: it is a program, which should not run unprompted.
     let mut formatted_arguments = None;
     if formats && tool.config.format() == FormatMode::Allow {
         match describe(inner, call, &tool, &arguments, &mut answers, cancellation).await? {
@@ -841,6 +847,19 @@ async fn run_call(
         ),
     };
     deliver_result(inner, call, &tool, arguments, output, executed).await
+}
+
+/// Whether `tool` has an argument formatter to run: a configured command, or,
+/// for `style.parameters = "tool"`, the tool itself.
+///
+/// A tool only describes itself when JP runs it as a subprocess, which is where
+/// the action reaches it; the configuration refuses `tool` anywhere else.
+fn has_formatter(tool: &ConfiguredTool) -> bool {
+    match tool.config.style().parameters {
+        ParametersStyle::Custom(_) => true,
+        ParametersStyle::Tool => tool.config.source().is_subprocess(),
+        _ => false,
+    }
 }
 
 /// Have the tool's argument formatter describe the call, asking the Host for
@@ -1029,6 +1048,7 @@ async fn attempt(
         invocation: &inner.invocation,
         builtins: &inner.builtins,
         runner: &inner.runner,
+        command_plugins: &inner.command_plugins,
         upstream: &inner.upstream,
         cancellation: cancellation.clone(),
         stderr: Some(stderr),

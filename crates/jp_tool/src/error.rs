@@ -30,6 +30,17 @@ pub enum Error {
     #[error("Failed to run tool from MCP client")]
     McpRunToolError(#[source] Box<dyn std::error::Error + Send + Sync>),
 
+    /// A tool served by a command plugin, when the plugin cannot be started: it
+    /// is not installed, its run policy forbids it, or nothing here can run
+    /// plugins at all.
+    #[error("Command plugin `{plugin}` cannot be run from here: {reason}")]
+    CommandPluginUnavailable { plugin: String, reason: String },
+
+    /// A command plugin started, then failed to answer the tool call: it exited
+    /// with an error, broke the protocol, or ended without an outcome.
+    #[error("Command plugin `{plugin}` failed: {message}")]
+    CommandPluginFailed { plugin: String, message: String },
+
     #[error("Failed to spawn command: {command}")]
     SpawnError {
         command: String,

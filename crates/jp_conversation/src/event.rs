@@ -27,11 +27,12 @@ pub use self::{
 pub const CACHE_BREAKPOINT_KEY: &str = "cache_breakpoint";
 
 /// Key used in `ConversationEvent::metadata` to store base64-encoded rendered
-/// output from a custom tool argument formatter.
+/// output from a tool argument formatter.
 ///
-/// When a tool uses `ParametersStyle::Custom`, the formatter's output is
-/// captured at execution time and stored here so that conversation replay can
-/// reproduce the display without re-running the formatter.
+/// When a tool's parameters style runs a formatter (a configured command, or
+/// the tool itself), the formatter's output is captured at execution time and
+/// stored here so that conversation replay can reproduce the display without
+/// re-running the formatter.
 pub const RENDERED_ARGUMENTS_KEY: &str = "rendered_arguments";
 
 /// A single event in a conversation.

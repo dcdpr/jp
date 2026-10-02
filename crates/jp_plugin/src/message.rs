@@ -47,7 +47,10 @@ pub struct PathsInfo {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostToPlugin {
     /// Sent immediately after spawning the plugin.
-    Init(InitMessage),
+    ///
+    /// Boxed: it is sent once per run and is several times larger than any
+    /// other message.
+    Init(Box<InitMessage>),
 
     /// Response to `list_conversations`.
     Conversations(ConversationsResponse),
@@ -151,6 +154,9 @@ pub enum PluginToHost {
     /// Respond with plugin metadata.
     Describe(DescribeResponse),
 
+    /// Answer the tool call `init` carried.
+    ToolOutcome(ToolOutcomeMessage),
+
     /// Signal that the plugin is done.
     Exit(ExitMessage),
 }
@@ -180,9 +186,12 @@ impl PluginToHost {
             Self::Interrupt(m) => m.id.as_deref(),
 
             // Not requests: nothing is waiting on an answer to any of these.
-            Self::Ready(_) | Self::Print(_) | Self::Log(_) | Self::Describe(_) | Self::Exit(_) => {
-                None
-            }
+            Self::Ready(_)
+            | Self::Print(_)
+            | Self::Log(_)
+            | Self::Describe(_)
+            | Self::ToolOutcome(_)
+            | Self::Exit(_) => None,
         }
     }
 }
@@ -323,6 +332,62 @@ pub struct InitMessage {
     /// nothing a plugin has to refuse to run without.
     #[serde(default)]
     pub output_format: OutputFormat,
+
+    /// A tool call to answer, in place of running a command.
+    ///
+    /// Set when the assistant calls a tool whose source is
+    /// `plugin.command.<plugin>`.
+    /// The plugin answers with [`PluginToHost::ToolOutcome`], then `exit`, and
+    /// `args` is empty.
+    /// `options` carries the plugin's options as the query resolved them,
+    /// including conversation config and `--cfg` overrides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<ToolCall>,
+}
+
+/// One attempt of a tool call the host routes to a plugin.
+///
+/// A tool that asks a question ends its attempt with a `needs_input` outcome.
+/// The host runs the plugin again once the answer arrives, with the answers so
+/// far in `answers`; the plugin is not kept running in between.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolCall {
+    /// What the call asks for: running the tool, or describing the call.
+    #[serde(default)]
+    pub action: ToolAction,
+
+    /// The name the plugin knows the tool by.
+    pub name: String,
+
+    /// The arguments the assistant supplied, coerced to the tool's schema.
+    #[serde(default)]
+    pub arguments: Map<String, Value>,
+
+    /// Answers to questions earlier attempts asked, keyed by question id.
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub answers: Map<String, Value>,
+
+    /// The tool's own `conversation.tools.<name>.options`.
+    ///
+    /// Distinct from [`InitMessage::options`], which belong to the plugin and
+    /// are shared by every tool it serves.
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub options: Map<String, Value>,
+
+    /// The tool's compiled access grants, which the plugin must enforce.
+    ///
+    /// The same policy, in the same shape, that a local tool's command reads
+    /// from `context.access`.
+    /// Absent when the tool has no policy, which means unrestricted but
+    /// workspace-confined filesystem access.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access: Option<Value>,
+
+    /// The conversation the call belongs to, in the form JP prints.
+    ///
+    /// Empty for a call with no conversation behind it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub conversation: String,
 }
 
 /// Workspace metadata included in the `init` message.
@@ -1019,6 +1084,30 @@ impl DescribeResponse {
             repository: None,
         })
     }
+}
+
+/// What a tool call asks the plugin to do.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolAction {
+    /// Run the tool.
+    #[default]
+    Run,
+
+    /// Describe the call for the user, without running it.
+    ///
+    /// Sent for a tool configured with `style.parameters = "tool"`.
+    /// The plugin answers with a `success` outcome whose content is shown
+    /// verbatim above the call, and must not act on the arguments.
+    FormatArguments,
+}
+
+/// The result of the tool call `init` carried.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolOutcomeMessage {
+    /// What a local tool prints on stdout: a `success`, `error`, or
+    /// `needs_input` outcome, in the shape `jp_tool::Outcome` serializes to.
+    pub outcome: Value,
 }
 
 /// The plugin is done and wants JP to exit with this code.

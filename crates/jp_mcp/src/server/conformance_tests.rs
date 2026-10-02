@@ -29,7 +29,7 @@ use super::Endpoint;
 use crate::{
     Client, Content,
     server::{
-        InvocationContext,
+        CommandPlugins, InvocationContext,
         builtin::{BuiltinExecutors, BuiltinTool},
         service::{
             Admission, ConfiguredTool, HostError, HostReceiver, HostRequest, InputAnswer,
@@ -326,6 +326,7 @@ async fn fixture_reporting_every(
         upstream,
         builtins,
         runner,
+        CommandPlugins::default(),
         root.path().to_owned(),
         InvocationContext {
             workspace_id: "workspace-1".into(),

@@ -10,6 +10,7 @@
 pub mod command;
 
 use schematic::Config;
+use serde_json::{Map, Value};
 
 use crate::{
     FillDefaults,
@@ -38,6 +39,24 @@ pub struct PluginsConfig {
     /// them instead.
     #[setting(nested, merge = map_with_strategy)]
     pub command: MergeableMap<CommandPluginConfig>,
+}
+
+impl PluginsConfig {
+    /// The `options` the command plugin `name` is configured with, empty when
+    /// it has none.
+    #[must_use]
+    pub fn command_options(&self, name: &str) -> Map<String, Value> {
+        self.command
+            .get(name)
+            .map(|plugin| {
+                plugin
+                    .options
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.0.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
 }
 
 impl AssignKeyValue for PartialPluginsConfig {
