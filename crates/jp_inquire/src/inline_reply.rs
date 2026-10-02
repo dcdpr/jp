@@ -1,6 +1,6 @@
 //! Inline reply widget: a rich, multi-line editable prompt for short replies.
 //!
-//! [`InlineReply`] is built on the vendored `reedline` line editor.
+//! [`InlineReply`] is built on a patched fork of the `reedline` line editor.
 //! It accepts a typed reply inline, supports multi-line input (`Shift+Enter` /
 //! `Alt+Enter`), and offers a `Ctrl+X` escape hatch that asks the caller to
 //! open the configured external editor.

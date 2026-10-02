@@ -674,8 +674,8 @@ impl Printer {
     /// available, falling back to `out`.
     /// Unlike `prompt_writer`, the returned writer owns a clone of the
     /// printer's command channel, so it is `'static` and `Send` and can be
-    /// handed to components that need to own their output stream (e.g. the
-    /// vendored line editor).
+    /// handed to components that need to own their output stream (e.g. a line
+    /// editor).
     /// Writes still flow through the printer's serialized worker, so they stay
     /// ordered with the printer's other output.
     #[must_use]

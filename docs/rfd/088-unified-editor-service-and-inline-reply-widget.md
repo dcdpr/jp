@@ -1,13 +1,14 @@
 # RFD 088: Unified Editor Service and Inline Reply Widget
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-08
 - **Extends**: [RFD 048]
 - **Extended by**: [RFD 092], [RFD 093]
-- **Summary**: Unify editor invocation through EditorBackend trait; add vendored
-  reedline-based InlineReply widget for interrupt menu replies.
+- **Summary**: Unify editor invocation through EditorBackend trait; add an
+  InlineReply widget, built on a patched reedline fork, for interrupt menu
+  replies.
 
 ## Summary
 
@@ -15,7 +16,7 @@ Consolidate JP's four independent editor-invocation paths onto a single
 `EditorBackend` trait — with `edit_text` (string in/out) and `edit_file`
 (path-based) methods — that fully respects `EditorConfig`, and replace the
 interrupt-menu reply prompt with a richer inline editing widget, built on a
-vendored copy of [reedline], that accepts short replies inline, supports
+patched fork of [reedline], that accepts short replies inline, supports
 multi-line input, and escalates to the configured editor on demand.
 A per-context `compose_in_editor` setting (`false`/`true`/`"always"`/`"never"`)
 chooses where composition happens, from inline-only to editor-only.
@@ -136,7 +137,7 @@ text — the JSON arguments, the skip-reason placeholder, the tool result — wi
 Because `InlineReply` needs only a tty, the permission-menu options `r` ("Skip
 and reply") and `e` ("Edit arguments") are no longer gated on a configured
 editor; they appear whenever a prompt can be shown, and only the `Ctrl+X` escape
-requires `editor.command`.
+requires `editor.cmd`.
 The result-delivery confirmation is un-gated the same way: "Edit result first"
 (`e`) appears whenever a tty is present, and `ResultMode::Edit` prompts on any
 tty rather than requiring an editor.
@@ -302,21 +303,25 @@ effect its non-zero exit path has today.
 
 #### `InlineReply` widget in `jp_inquire`
 
-A new widget alongside `InlineSelect`, built on a vendored copy of [reedline]
-(see [Terminal ownership](#terminal-ownership-and-the-vendored-reedline) below):
+A new widget alongside `InlineSelect`, built on a patched fork of [reedline]
+(see [Terminal ownership](#terminal-ownership-and-the-reedline-fork) below):
 
 ```rust
 pub struct InlineReply {
     message: String,
     initial_text: String,
     help_message: Option<String>,
+    edit_mode: ReplyEditMode,
+    editor_escape: bool,
 }
 
 impl InlineReply {
     pub fn new(message: impl Into<String>) -> Self;
     pub fn with_initial_text(self, text: impl Into<String>) -> Self;
     pub fn with_help_message(self, msg: impl Into<String>) -> Self;
-    pub fn prompt(&self, writer: &mut dyn Write) -> Result<ReplyOutcome, InquireError>;
+    pub fn with_edit_mode(self, mode: ReplyEditMode) -> Self;
+    pub fn with_editor_escape(self, enabled: bool) -> Self;
+    pub fn prompt(&self, output: Box<dyn Write + Send>) -> Result<ReplyOutcome, InquireError>;
 }
 
 pub enum ReplyOutcome {
@@ -371,7 +376,7 @@ It signals intent via `OpenEditor`; the caller (the `InterruptHandler`, or
 `ToolPrompter`) owns the editor decision.
 This keeps `jp_inquire` free of editor concerns.
 
-#### Terminal ownership and the vendored reedline
+#### Terminal ownership and the reedline fork
 
 RFD 048 (Four-Channel Output Model, Implemented) requires interactive prompts to
 render on `/dev/tty`, so they survive `jp query | jq` and `jp query 2> err.txt`.
@@ -393,19 +398,19 @@ Reedline does not meet this against the published crate:
 Closing the output gap needs an upstream reedline change; closing the cursor
 probe needs an upstream *crossterm* change (or for reedline to stop calling
 `position()`) — two upstreams, one foundational.
-Rather than gate this RFD on them, JP **vendors reedline** at
-`crates/contrib/reedline` and carries two local patches, both reachable now that
-the call sites are ours:
+Rather than gate this RFD on them, JP depends on a **fork of reedline**
+(`JeanMertz/reedline`, branch `changes`, a git dependency in the workspace
+`Cargo.toml`) that carries two patches:
 
 1. Type-erase the painter writer (`W = BufWriter<Box<dyn Write + Send>>`) and
    add `Reedline::with_output(...)`, pointed at the same `/dev/tty` writer
-   `Printer` uses for its `Tty` target (`Printer::prompt_writer()`).
+   `Printer` uses for its `Tty` target (`Printer::owned_prompt_writer()`).
 2. Replace reedline's two `cursor::position()` calls with a helper that writes
    the `ESC[6n` query to that tty writer and reads the reply back through the
    (already `/dev/tty`) event source.
 
-The `with_output` patch is clean and should be upstreamed, shrinking the
-standing local delta to the cursor-probe change.
+The `with_output` patch is clean and should be upstreamed, shrinking the fork's
+delta to the cursor-probe change.
 The widget drains `Printer` before taking over the terminal and restores after,
 as `InlineSelect` does today.
 
@@ -423,15 +428,19 @@ pub trait PromptBackend: Send + Sync {
         initial_text: &str,
         edit_mode: ReplyEditMode,
         editor_escape: bool, // `false` unwires the `Ctrl+X` editor escape
-        writer: &mut dyn Write,
+        help: Option<&str>,  // shown after the widget's own key hints
+        output: Box<dyn Write + Send>,
     ) -> Result<ReplyOutcome, InquireError>;
 }
 ```
 
 Like the other `PromptBackend` methods, `inline_reply` is **writer-aware**: the
-`jp_cli` call site passes `printer.prompt_writer()` (the `/dev/tty` target), and
-`TerminalPromptBackend` feeds that writer to the vendored reedline's
+`jp_cli` call site passes `printer.owned_prompt_writer()` (the `/dev/tty`
+target), and `TerminalPromptBackend` feeds that writer to the fork's
 `with_output`.
+The writer is owned rather than borrowed, because reedline owns its output for
+the duration of the prompt; it still writes through the printer's serialized
+worker, so prompt output stays ordered with everything else the printer writes.
 `jp_inquire` stays writer-agnostic and gains no `jp_printer` dependency — the
 RFD 048 writer-passing boundary is preserved.
 
@@ -625,7 +634,7 @@ edit_mode = "emacs" # "emacs" | "vi"
 
 - **`editor.inline.edit_mode`** — selects reedline's edit mode for the inline
   widget: the *editing style* of the inline buffer, orthogonal to which external
-  editor `Ctrl+X` opens (that is `editor.command`).
+  editor `Ctrl+X` opens (that is `editor.cmd`).
 
 **Cancel / empty behavior matrix.** Defined for every context, including the
 menu-less configured-action paths, so nothing is left to implementation:
@@ -659,21 +668,18 @@ Two terms enter the glossary:
 
 ## Drawbacks
 
-- **Vendored reedline.** JP carries a patched copy of reedline at
-  `crates/contrib/reedline` (see [Terminal
-  ownership](#terminal-ownership-and-the-vendored-reedline)), a maintenance line
-  item: tracking upstream releases and rebasing the two local patches (Lehman's
-  Law).
-  The `with_output` patch is intended for upstream, to shrink the standing delta
+- **Forked reedline.** JP depends on a patched fork of reedline (see [Terminal
+  ownership](#terminal-ownership-and-the-reedline-fork)), a maintenance line
+  item: tracking upstream releases and rebasing the two patches onto them
+  (Lehman's Law).
+  The `with_output` patch is intended for upstream, to shrink the fork's delta
   to the cursor-probe change.
-  The vendored crate pulls in `nu-ansi-term`, `unicode-segmentation`, and
-  `unicode-width`; `crossterm`, `serde`, and `strip-ansi-escapes` are already in
-  the tree.
+  The fork pulls in `nu-ansi-term`, `unicode-segmentation`, and `unicode-width`;
+  `crossterm`, `serde`, and `strip-ansi-escapes` are already in the tree.
 - **Writer threading into reedline.** `PromptBackend::inline_reply` stays
-  writer-aware like its siblings (`&mut dyn Write`), but the vendored reedline
-  wants to own its output.
-  The `with_output` patch is shaped to render to the borrowed
-  `Printer::prompt_writer()` the call site passes, so `jp_inquire` never depends
+  writer-aware like its siblings, but takes an owned writer (`Box<dyn Write +
+  Send>`) where they take `&mut dyn Write`, because reedline owns its output.
+  `Printer::owned_prompt_writer()` supplies one, so `jp_inquire` never depends
   on `jp_printer` and the RFD 048 writer-passing boundary is preserved.
 - **More code in `jp_editor`.** Replacing the `open-editor` one-liner with a
   duct-based tempfile dance is 50–80 LOC of real terminal-process plumbing
@@ -722,17 +728,17 @@ config-shape work.
 ### Alt 4: build a custom inline editor on raw crossterm
 
 Hand-roll a multi-line editor in `jp_inquire`, writing through
-`Printer::prompt_writer()` directly (which would satisfy RFD 048 without any
-vendoring).
+`Printer::prompt_writer()` directly (which would satisfy RFD 048 without a
+fork).
 **Rejected.** Reedline (used by nushell) has solved the expensive, quirky parts
 — unicode width, line wrapping, multi-line cursor navigation, bracketed paste,
 kitty-protocol disambiguation, resize, undo, kill-ring, and pluggable emacs/vi
 edit modes.
 A naive clone would hit those head-first.
-Vendoring and patching reedline's two I/O seams (output writer, cursor probe) is
-a far smaller and safer investment than reimplementing that surface.
-The `/dev/tty` requirement does not force a hand-roll, because the vendored copy
-renders through `Printer`'s tty writer.
+Forking and patching reedline's two I/O seams (output writer, cursor probe) is a
+far smaller and safer investment than reimplementing that surface.
+The `/dev/tty` requirement does not force a hand-roll, because the fork renders
+through `Printer`'s tty writer.
 
 ## Non-Goals
 
@@ -755,15 +761,15 @@ renders through `Printer`'s tty writer.
 
 ## Risks and Open Questions
 
-- **Vendored-reedline / `Printer` coordination.** The vendored reedline renders
-  through `Printer::prompt_writer()` (the `/dev/tty` target), but JP's `Printer`
+- **Reedline fork / `Printer` coordination.** The fork renders through
+  `Printer::owned_prompt_writer()` (the `/dev/tty` target), but JP's `Printer`
   still synchronizes streamed output, tool renderings, and prompt output through
   a shared queue.
   The widget must drain `Printer` before taking over the terminal and restore
   cleanly after, as `InlineSelect` does today via `Printer::flush_instant()` /
   `Printer::prompt_writer()`.
   Validate during implementation.
-- **Vendored-reedline patch surface.** The cursor-probe patch (rerouting
+- **Reedline fork patch surface.** The cursor-probe patch (rerouting
   `cursor::position()` to the tty writer) has no upstream equivalent yet; verify
   it behaves under `| jq` and `2> err.txt`, and that `terminal::size()` reads
   the tty fd rather than stdout.
@@ -811,11 +817,10 @@ Estimated diff: ~300 LOC.
 
 ### Phase 2: `InlineReply` widget
 
-- Vendor reedline at `crates/contrib/reedline`; apply the two I/O patches
-  (type-erased painter writer + `with_output`; tty-routed cursor probe).
-- Implement `InlineReply` on the vendored reedline with the keybindings and
-  `ReplyOutcome` enum described above, rendering through
-  `Printer::prompt_writer()`.
+- Fork reedline and apply the two I/O patches (type-erased painter writer +
+  `with_output`; tty-routed cursor probe).
+- Implement `InlineReply` on the fork with the keybindings and `ReplyOutcome`
+  enum described above, rendering through `Printer::owned_prompt_writer()`.
 - Wire `editor.inline.edit_mode` to reedline's `Emacs`/`Vi` modes, registering
   the custom bindings into each keymap.
 - Implement a minimal `Prompt` impl that matches JP's prompt-line style.
@@ -836,7 +841,7 @@ Estimated diff: ~250 LOC.
 - Migrate the `ToolPrompter` argument, skip-reasoning, and result edits to
   `InlineReply` (seeded text + `Ctrl+X` escape).
   Un-gate all three editor-dependence points so only the escape needs
-  `editor.command`: `permission_options` (`r`/`e`), the `e` option in
+  `editor.cmd`: `permission_options` (`r`/`e`), the `e` option in
   `prompt_result_confirmation`, and the `prompter.has_editor()` term in
   `coordinator.rs`'s `can_prompt` gate (so `ResultMode::Edit` prompts on any
   tty).
@@ -873,10 +878,11 @@ Reviewable independently after Phase 3.
 - [RFD 045]: Layered Interrupt Handler Stack — the Ctrl+C escalation direction
   the inline reply hooks into
 - [RFD 048]: Four-Channel Output Model — the `/dev/tty` requirement the
-  vendored reedline must satisfy
+  reedline fork must satisfy
 - [RFD 080]: Editor as a Config Source — orthogonal concern; resolves *which*
   editor config wins, not *how* the editor is invoked
-- [reedline] — line-editor crate, vendored at `crates/contrib/reedline`
+- [reedline] — line-editor crate; JP uses a patched fork (`JeanMertz/reedline`,
+  branch `changes`)
 - `crates/jp_editor/src/lib.rs` — current `EditorBackend` trait
 - `crates/jp_inquire/src/prompt.rs` — current `PromptBackend` trait, including
   the `text_input` method to be removed

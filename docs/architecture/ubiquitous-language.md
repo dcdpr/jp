@@ -224,8 +224,8 @@ It renders on the `/dev/tty` prompt writer and accepts inline typing, with a
 `Ctrl+X` escape to the configured editor (the `EditorBackend`) for longer edits.
 Submitting produces a `ReplyOutcome`; the call site decides what an empty
 submission or a `Ctrl+C` cancel means.
-Built on the vendored reedline at `crates/contrib/reedline`; the inline buffer's
-editing style is set by `editor.inline.edit_mode`.
+Built on a patched fork of reedline; the inline buffer's editing style is set by
+`editor.inline.edit_mode`.
 
 ### Inquiry
 
