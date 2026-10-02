@@ -103,6 +103,7 @@ libc = { version = "0.2", default-features = false }
 linkme = { version = "0.3", default-features = false }
 maud = { version = "0.27", default-features = false }
 minijinja = { version = "2", default-features = false }
+nu-ansi-term = { version = "0.50", default-features = false } # reedline's styling type
 object = { version = "0.39" }
 # Pinned to a rev rather than a branch: a branch dependency follows its HEAD on
 # `cargo update`. Carries the `LocalModel` model-details fields on top of 0.3.4,

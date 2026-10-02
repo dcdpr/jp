@@ -63,8 +63,9 @@ pub struct StyleConfig {
     ///
     /// Some protections apply whatever this is set to: window titles and links
     /// never contain control characters, tool questions are shown as plain
-    /// text, styling left open by a message or tool result ends with it, and
-    /// plain-text and JSON output never contain escape sequences.
+    /// text, a tool result you edit before it is sent shows its control
+    /// characters as `?`, styling left open by a message or tool result ends
+    /// with it, and plain-text and JSON output never contain escape sequences.
     #[setting(default, schema_union_with = boolean_shorthand)]
     pub sanitize: Sanitization,
 

@@ -543,6 +543,8 @@ Some protections apply under every setting:
 - The window title JP sets, and the targets of links it writes, never contain
   control characters.
 - A question a tool asks you is shown as plain text.
+- When you edit a tool result before it is sent, its control characters show as
+  `?`; the result keeps them.
 - Styling left open by a message or tool result ends with it.
 - Plain-text and JSON output never contain escape sequences.
 

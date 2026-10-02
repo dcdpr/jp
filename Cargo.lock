@@ -2541,6 +2541,8 @@ version = "0.1.0"
 dependencies = [
  "crossterm",
  "inquire",
+ "jp_pty",
+ "nu-ansi-term",
  "parking_lot",
  "reedline",
 ]

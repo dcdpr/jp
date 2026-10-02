@@ -14,8 +14,21 @@ version.workspace = true
 [dependencies]
 crossterm = { workspace = true }
 inquire = { workspace = true, features = ["crossterm"] }
+nu-ansi-term = { workspace = true }
 parking_lot = { workspace = true }
 reedline = { workspace = true }
 
+[dev-dependencies]
+# A terminal to draw into, so the reply widget is asserted against what a
+# terminal shows rather than the bytes it was sent.
+jp_pty = { workspace = true }
+
 [lints]
 workspace = true
+
+# A fixture the pty tests spawn, with no tests of its own. The integration tests
+# still get it built, and reach it through `CARGO_BIN_EXE_inline_reply_probe`.
+[[bin]]
+name = "inline_reply_probe"
+path = "src/bin/inline_reply_probe.rs"
+test = false

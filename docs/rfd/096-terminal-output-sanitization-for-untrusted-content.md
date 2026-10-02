@@ -359,6 +359,9 @@ Two writes bypass it.
 A prompt widget's own drawing (`PrintOrigin::Widget`) moves the cursor and
 switches terminal modes on purpose, so whatever text a caller hands a widget
 (picker rows, a confirmation's preamble) has to be filtered by that caller.
+The inline reply widget filters the buffer it draws itself: a tool result edited
+before it is sent shows each control character as `?`, and submitting it
+unchanged returns the result as it was.
 Status-region frames are written by the worker itself, under [RFD 091]'s
 stricter filter.
 
