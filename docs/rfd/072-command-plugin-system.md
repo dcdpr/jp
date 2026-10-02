@@ -465,9 +465,9 @@ and no `args`:
 }
 ```
 
-`config` and `options` are the query's resolved configuration, not the
-workspace root's: nested `.jp.toml` files, conversation config, and `--cfg`
-overrides all reach the plugin.
+`config` and `options` are the query's resolved configuration, not the workspace
+root's: nested `.jp.toml` files, conversation config, and `--cfg` overrides all
+reach the plugin.
 `tool.options` is the tool's own `conversation.tools.<name>.options`.
 
 `tool.action` is `run`, or `format_arguments` for a tool styled
@@ -475,8 +475,8 @@ overrides all reach the plugin.
 A `format_arguments` call asks the plugin to describe the call for the user
 without acting on it; the content of its `success` outcome is shown verbatim
 above the call.
-It runs under the same admission, options, and access policy as the run, and
-the tool's `format` setting decides whether it runs before or after the user
+It runs under the same admission, options, and access policy as the run, and the
+tool's `format` setting decides whether it runs before or after the user
 approves the call, as for a formatter command.
 
 The plugin answers with one `tool_outcome`, then `exit`:
@@ -501,16 +501,17 @@ does a `local` tool's command.
 Tool calls need protocol 12.
 
 A plugin tool runs under the same rules as a `local` tool.
-The tool's `run`, `result`, and `format` settings decide whether a call is
-asked about, edited, or skipped, exactly as for any other source.
+The tool's `run`, `result`, and `format` settings decide whether a call is asked
+about, edited, or skipped, exactly as for any other source.
 Its `access` grants, including those inherited from
 `conversation.tools.'*'.access` and added by `--mount`, are compiled by the host
-and sent as `tool.access`; the plugin enforces them, as a local tool binary does.
+and sent as `tool.access`; the plugin enforces them, as a local tool binary
+does.
 
 The plugin binary itself is admitted under `plugins.command.<plugin>.run`, the
 same way `jp <plugin>` admits it.
-Admission happens once per plugin when the turn starts, before any tool runs,
-so the user is never asked about a binary in the middle of a tool call.
+Admission happens once per plugin when the turn starts, before any tool runs, so
+the user is never asked about a binary in the middle of a tool call.
 Answering "run this time" admits the binary for that turn.
 Without a terminal, a binary that would be asked about is refused, as `jp
 <plugin>` refuses it.
