@@ -4,7 +4,7 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
-- **Extended by**: [RFD 100][tickets]
+- **Extended by**: [RFD 100][tickets], [RFD 116](116-shareable-rfd-ticket-and-site-tooling.md)
 - **Summary**: Establishes a lightweight Request for Discussion process for
   proposing and tracking design decisions with clear lifecycle states.
 
