@@ -421,6 +421,110 @@ it.
 Paths that resolve to the same file, such as two symlinks into one package
 store, are one binary.
 
+#### Tool Calls
+
+A plugin can serve tools to the assistant.
+The tool names the plugin as its source:
+
+```toml
+[conversation.tools.ticket_create]
+source = "command.ticket.create"
+summary = "File a work item as a ticket."
+
+[conversation.tools.ticket_create.parameters.title]
+type = "string"
+required = true
+```
+
+`command.<plugin>` uses the configured tool name; `command.<plugin>.<tool>`
+names the tool the plugin knows it by.
+Parameters come from configuration, as they do for a `local` tool.
+
+For each attempt, JP starts the plugin and sends an `init` that carries a `tool`
+and no `args`:
+
+```json
+{
+  "type": "init",
+  "version": 12,
+  "workspace": { "root": "/path/to/project", "storage": "/path/to/project/.jp", "id": "a1b2c" },
+  "config": {},
+  "options": { "dir": "packages/foo/tickets" },
+  "args": [],
+  "log_level": 0,
+  "output_format": "text",
+  "tool": {
+    "action": "run",
+    "name": "create",
+    "arguments": { "title": "Fix the header" },
+    "answers": {},
+    "options": {},
+    "access": { "fs": [], "net": [], "env": [{ "name": "AWS_*", "read": false }] },
+    "conversation": "jp-c17000000000"
+  }
+}
+```
+
+`config` and `options` are the query's resolved configuration, not the
+workspace root's: nested `.jp.toml` files, conversation config, and `--cfg`
+overrides all reach the plugin.
+`tool.options` is the tool's own `conversation.tools.<name>.options`.
+
+`tool.action` is `run`, or `format_arguments` for a tool styled
+`style.parameters = "tool"`.
+A `format_arguments` call asks the plugin to describe the call for the user
+without acting on it; the content of its `success` outcome is shown verbatim
+above the call.
+It runs under the same admission, options, and access policy as the run, and
+the tool's `format` setting decides whether it runs before or after the user
+approves the call, as for a formatter command.
+
+The plugin answers with one `tool_outcome`, then `exit`:
+
+```json
+{ "type": "tool_outcome", "outcome": { "type": "success", "content": "Created T-0abc123" } }
+```
+
+`outcome` has the shape a local tool prints on stdout: `success`, `error`, or
+`needs_input`.
+A question ends the attempt.
+JP runs the plugin again once it has an answer, with the answers so far in
+`tool.answers`.
+
+A tool call runs once, like a `local` tool's command.
+The plugin's stdin carries the `init` and is then closed, so a request the
+plugin sends during a tool call gets no answer: everything it needs is in
+`init`, and the turn owns the terminal.
+`print` output is dropped; the result is the outcome.
+A cancelled call kills the plugin, and on Unix every process it started, as it
+does a `local` tool's command.
+Tool calls need protocol 12.
+
+A plugin tool runs under the same rules as a `local` tool.
+The tool's `run`, `result`, and `format` settings decide whether a call is
+asked about, edited, or skipped, exactly as for any other source.
+Its `access` grants, including those inherited from
+`conversation.tools.'*'.access` and added by `--mount`, are compiled by the host
+and sent as `tool.access`; the plugin enforces them, as a local tool binary does.
+
+The plugin binary itself is admitted under `plugins.command.<plugin>.run`, the
+same way `jp <plugin>` admits it.
+Admission happens once per plugin when the turn starts, before any tool runs,
+so the user is never asked about a binary in the middle of a tool call.
+Answering "run this time" admits the binary for that turn.
+Without a terminal, a binary that would be asked about is refused, as `jp
+<plugin>` refuses it.
+Nothing is installed at turn start: an official plugin that is missing is
+refused, and `jp plugin install` or one `jp <plugin>` run fetches it.
+
+Admission decides on the binary's contents.
+Before each call the host hashes the binary again, and refuses the call if it
+changed since the turn started.
+
+A plugin that is not admitted has its tools left out of the turn, and the turn
+names them and the reason on stderr; naming one of them with `--tool` fails the
+query instead.
+
 #### Plugin Self-Description
 
 An admitted plugin describes itself in full over the protocol.

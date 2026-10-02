@@ -49,11 +49,12 @@ fn init_message(root: &str, args: &[&str]) -> String {
         args: args.iter().map(|a| (*a).to_owned()).collect(),
         log_level: 0,
         output_format: OutputFormat::default(),
+        tool: None,
     };
 
     format!(
         "{}\n",
-        serde_json::to_string(&HostToPlugin::Init(init)).unwrap()
+        serde_json::to_string(&HostToPlugin::Init(Box::new(init))).unwrap()
     )
 }
 

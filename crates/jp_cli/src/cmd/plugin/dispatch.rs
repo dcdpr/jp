@@ -273,21 +273,11 @@ fn init_message(
 ) -> Result<(HostToPlugin, Value), cmd::Error> {
     let config_json = config_value(config)?;
 
-    let options: serde_json::Map<String, Value> = config
-        .plugins
-        .command
-        .get(name)
-        .map(|c| {
-            c.options
-                .iter()
-                .map(|(k, v)| (k.clone(), v.0.clone()))
-                .collect()
-        })
-        .unwrap_or_default();
+    let options = plugin_options(&config.plugins, name);
 
     let storage = paths.storage.ok_or("workspace has no storage configured")?;
 
-    let init = HostToPlugin::Init(InitMessage {
+    let init = HostToPlugin::Init(Box::new(InitMessage {
         version: PROTOCOL_VERSION,
         workspace: WorkspaceInfo {
             root: workspace.root().to_owned(),
@@ -300,9 +290,28 @@ fn init_message(
         args: args.to_vec(),
         log_level,
         output_format: output_format(format),
-    });
+        tool: None,
+    }));
 
     Ok((init, config_json))
+}
+
+/// The `options` a plugin is configured with under `plugins.command.<name>`,
+/// empty when it has none.
+pub(super) fn plugin_options(
+    plugins: &PluginsConfig,
+    name: &str,
+) -> serde_json::Map<String, Value> {
+    plugins
+        .command
+        .get(name)
+        .map(|c| {
+            c.options
+                .iter()
+                .map(|(k, v)| (k.clone(), v.0.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The configuration as a plugin reads it, in `init` and from `read_config`.
@@ -691,7 +700,7 @@ fn output_format(format: OutputFormat) -> PluginOutputFormat {
 
 /// The JP directories a plugin is told about, so it needs no platform logic of
 /// its own.
-fn well_known_paths(user_storage_path: Option<&Utf8Path>) -> PathsInfo {
+pub(crate) fn well_known_paths(user_storage_path: Option<&Utf8Path>) -> PathsInfo {
     let home = std::env::home_dir().and_then(|p| camino::Utf8PathBuf::from_path_buf(p).ok());
 
     PathsInfo {
@@ -1833,6 +1842,12 @@ fn handle_request(
 
         PluginToHost::Describe(_) => {
             debug!("Ignoring describe in message loop.");
+        }
+
+        // Only meaningful when `init` carried a tool call, which a command run
+        // never does.
+        PluginToHost::ToolOutcome(_) => {
+            debug!("Ignoring a tool outcome from a plugin running a command.");
         }
 
         // Answered by the caller, before the lock this runs under is taken.

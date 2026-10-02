@@ -83,6 +83,8 @@ pub struct DisplayStyleConfig {
     /// - `json`: Show as JSON.
     /// - `function_call`: Show as a function call (e.g. `tool_name(arg=val)`).
     /// - `off`: Do not show parameters.
+    /// - `tool`: Ask the tool itself to format them.
+    ///   Only local and command plugin tools support it.
     /// - `<command>`: Use a custom command to format the parameters.
     #[setting(default)]
     pub parameters: ParametersStyle,
@@ -543,6 +545,7 @@ mod strings {
     named_unit_variant!(json);
     named_unit_variant!(function_call);
     named_unit_variant!(off);
+    named_unit_variant!(tool);
 }
 
 /// How to display the link to the file containing the tool call results.
@@ -567,6 +570,16 @@ pub enum ParametersStyle {
     #[schema(literal = "off")]
     Off,
 
+    /// The tool formats its own arguments.
+    ///
+    /// A local tool's command, or a command plugin, is run with the action
+    /// `format_arguments` instead of `run`, and what it answers is shown
+    /// verbatim.
+    /// Only local and command plugin tools support it.
+    #[serde(with = "strings::tool")]
+    #[schema(literal = "tool")]
+    Tool,
+
     /// A custom command to format how the tool call parameters are displayed in
     /// the terminal.
     ///
@@ -577,6 +590,15 @@ pub enum ParametersStyle {
 }
 
 impl ParametersStyle {
+    /// Whether a formatter runs to produce what is shown: a configured command,
+    /// or the tool itself.
+    ///
+    /// The other styles are rendered by JP from the arguments alone.
+    #[must_use]
+    pub const fn runs_formatter(&self) -> bool {
+        matches!(self, Self::Custom(_) | Self::Tool)
+    }
+
     /// Return the custom command if this is a custom style.
     #[must_use]
     pub fn into_custom(self) -> Option<CommandConfigOrString> {
@@ -595,6 +617,7 @@ impl FromStr for ParametersStyle {
             "off" => Self::Off,
             "json" => Self::Json,
             "function_call" => Self::FunctionCall,
+            "tool" => Self::Tool,
             _ => Self::Custom(CommandConfigOrString::String(s.to_owned())),
         })
     }

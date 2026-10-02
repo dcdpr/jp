@@ -292,6 +292,45 @@ pub(crate) fn route<'a>(
     })
 }
 
+/// A plugin found by its name, for a tool whose source names it.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Named<'a> {
+    /// The binary.
+    pub plugin: &'a LocalPlugin,
+
+    /// The official registry entry whose `id` is the plugin's name, when it is
+    /// one.
+    pub official: Option<&'a RegistryPlugin>,
+}
+
+/// Find the plugin named `name`, the way a tool's `command.<name>` source names
+/// it.
+///
+/// A name, not a command path: a tool reaches a plugin by its identity, which
+/// keys its configuration and its approval, whatever command it claims.
+/// Returns `None` when no binary on this machine has that name.
+///
+/// # Errors
+///
+/// [`RouteError::SameName`] when two binaries share it.
+pub(crate) fn by_name<'a>(
+    name: &str,
+    local: &'a [LocalPlugin],
+    registry: Option<&'a Registry>,
+) -> Result<Option<Named<'a>>, RouteError> {
+    check_unique_name(local, name)?;
+
+    let Some(plugin) = local.iter().find(|plugin| plugin.name == name) else {
+        return Ok(None);
+    };
+
+    let official = official_entries(registry)
+        .into_values()
+        .find(|entry| entry.kind.is_command() && entry.id == name);
+
+    Ok(Some(Named { plugin, official }))
+}
+
 /// The registry's official entries, by key.
 ///
 /// Only these claim commands; a third-party entry is a catalog entry.
