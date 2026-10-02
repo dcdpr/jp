@@ -15,11 +15,17 @@
 //!
 //! See: `docs/rfd/072-command-plugin-system.md`, "Shutdown".
 
-use std::process::Child;
+#[cfg(windows)]
+use std::sync::Arc;
 #[cfg(unix)]
 use std::{io, mem};
+use std::{
+    process::Child,
+    sync::Mutex,
+    thread::{self, JoinHandle},
+};
 
-use tracing::debug;
+use tracing::{debug, warn};
 
 #[cfg(windows)]
 pub(crate) use self::job::resume_suspended;
@@ -28,23 +34,70 @@ pub(crate) use self::job::resume_suspended;
 pub(crate) struct ProcessTree {
     pid: u32,
 
+    /// The thread that kills what is left of the tree once the spawned process
+    /// exits.
+    ///
+    /// `None` once `finish` has joined it, or when it could not be started.
+    watcher: Mutex<Option<JoinHandle<()>>>,
+
     #[cfg(windows)]
-    job: Option<job::Job>,
+    job: Option<Arc<job::Job>>,
 }
 
 impl ProcessTree {
     /// Take ownership of the tree `child` leads.
     ///
+    /// What is left of the tree is killed as soon as `child` exits, before
+    /// `finish` is called, so a worker that holds one of the plugin's pipes
+    /// cannot keep it open after the plugin is gone.
+    ///
     /// On Unix, `child` must have been spawned as the leader of its own process
     /// group.
     /// On Windows, it must have been spawned suspended, and be resumed only
     /// after this returns.
+    /// On both, `child` must be reaped through `finish` and nothing else.
+    #[cfg(unix)]
     pub(crate) fn new(child: &Child) -> Self {
+        let pid = child.id();
+
+        Self {
+            pid,
+            watcher: Mutex::new(watch(move || kill_group_on_exit(pid))),
+        }
+    }
+
+    /// Take ownership of the tree `child` leads.
+    ///
+    /// What is left of the tree is killed as soon as `child` exits, before
+    /// `finish` is called, so a worker that holds one of the plugin's pipes
+    /// cannot keep it open after the plugin is gone.
+    ///
+    /// On Unix, `child` must have been spawned as the leader of its own process
+    /// group.
+    /// On Windows, it must have been spawned suspended, and be resumed only
+    /// after this returns.
+    /// On both, `child` must be reaped through `finish` and nothing else.
+    #[cfg(windows)]
+    pub(crate) fn new(child: &Child) -> Self {
+        let job = job::Job::assign(child).map(Arc::new);
+
+        // Without a job there is nothing to kill but the plugin, which has
+        // already exited by the time the watcher would act.
+        let watcher = job.as_ref().and_then(|job| {
+            let process = job::ExitWaiter::new(child)?;
+            let job = Arc::clone(job);
+
+            watch(move || {
+                if process.wait() {
+                    job.terminate();
+                }
+            })
+        });
+
         Self {
             pid: child.id(),
-
-            #[cfg(windows)]
-            job: job::Job::assign(child),
+            watcher: Mutex::new(watcher),
+            job,
         }
     }
 
@@ -56,59 +109,41 @@ impl ProcessTree {
     /// Wait for the spawned process to exit, kill whatever it left running, and
     /// reap it.
     ///
-    /// The process is reaped last: until then its pid, and with it the process
-    /// group id, cannot be reused, so the kill cannot reach an unrelated group.
-    #[cfg(unix)]
+    /// On Unix the process is reaped last: until then its pid, and with it the
+    /// process group id, cannot be reused, so the kill cannot reach an
+    /// unrelated group.
     pub(crate) fn finish(&self, child: &mut Child) {
-        self.wait_exited();
-        self.terminate();
-        drop(child.wait());
-    }
-
-    /// Wait for the spawned process to exit, kill whatever it left running, and
-    /// reap it.
-    ///
-    /// A job is addressed by its handle rather than an id, so the order does
-    /// not matter here.
-    #[cfg(windows)]
-    pub(crate) fn finish(&self, child: &mut Child) {
-        drop(child.wait());
-        self.terminate();
-    }
-
-    /// Block until the spawned process has exited, leaving it unreaped.
-    #[cfg(unix)]
-    fn wait_exited(&self) {
-        loop {
-            // SAFETY: an all-zero `siginfo_t` is a valid value for `waitid` to
-            // overwrite. `WNOWAIT` leaves the process waitable, so `Child::wait`
-            // still reaps it afterwards.
-            let waited = unsafe {
-                let mut info: libc::siginfo_t = mem::zeroed();
-                libc::waitid(
-                    libc::P_PID,
-                    libc::id_t::from(self.pid),
-                    &raw mut info,
-                    libc::WEXITED | libc::WNOWAIT,
-                )
-            };
-
-            if waited == 0 || io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
-                return;
-            }
+        let watcher = self.watcher.lock().expect("watcher lock poisoned").take();
+        match watcher {
+            Some(watcher) => drop(watcher.join()),
+            // Nothing watched for the exit, so it is waited for here.
+            None => self.terminate_after_exit(child),
         }
+
+        drop(child.wait());
+    }
+
+    /// Wait for the spawned process to exit, then kill what is left of its
+    /// group, leaving it unreaped.
+    #[cfg(unix)]
+    fn terminate_after_exit(&self, _child: &mut Child) {
+        kill_group_on_exit(self.pid);
+    }
+
+    /// Wait for the spawned process to exit, then kill what is left of its job.
+    ///
+    /// A job is addressed by its handle rather than an id, so reaping first
+    /// does not matter here.
+    #[cfg(windows)]
+    fn terminate_after_exit(&self, child: &mut Child) {
+        drop(child.wait());
+        self.terminate();
     }
 
     /// Kill every process in the tree that is still running.
     #[cfg(unix)]
     pub(crate) fn terminate(&self) {
-        let group = -libc::pid_t::from(self.pid.cast_signed());
-
-        // SAFETY: `kill` has no memory-safety preconditions. The group is the
-        // one the spawn created for the plugin; its id stays reserved while the
-        // plugin, or any process in the group, has not been reaped.
-        let sent = unsafe { libc::kill(group, libc::SIGKILL) } == 0;
-        debug!(pid = self.pid, sent, "Killed the plugin's process group.");
+        kill_group(self.pid);
     }
 
     /// Kill every process in the tree that is still running.
@@ -130,13 +165,77 @@ impl ProcessTree {
     }
 }
 
+/// Start the thread that cleans up after the plugin once it exits.
+///
+/// `None` when the thread could not be started, in which case `finish` does the
+/// same work once it is called.
+fn watch(cleanup: impl FnOnce() + Send + 'static) -> Option<JoinHandle<()>> {
+    thread::Builder::new()
+        .name("plugin-watcher".to_owned())
+        .spawn(cleanup)
+        .inspect_err(|error| warn!(%error, "Could not watch the plugin for exiting."))
+        .ok()
+}
+
+/// Block until `pid` has exited, then kill what is left of its process group.
+///
+/// `pid` is left unreaped, so the group id stays reserved for the kill.
+/// If `pid` cannot be waited on, most likely because it was already reaped, the
+/// group id may belong to someone else by now, and nothing is killed.
+#[cfg(unix)]
+fn kill_group_on_exit(pid: u32) {
+    loop {
+        // SAFETY: an all-zero `siginfo_t` is a valid value for `waitid` to
+        // overwrite. `WNOWAIT` leaves the process waitable, so `Child::wait`
+        // still reaps it afterwards.
+        let waited = unsafe {
+            let mut info: libc::siginfo_t = mem::zeroed();
+            libc::waitid(
+                libc::P_PID,
+                libc::id_t::from(pid),
+                &raw mut info,
+                libc::WEXITED | libc::WNOWAIT,
+            )
+        };
+
+        if waited == 0 {
+            break;
+        }
+
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            debug!(%error, pid, "Could not wait on the plugin; not killing its group.");
+            return;
+        }
+    }
+
+    kill_group(pid);
+}
+
+/// Kill every process in the group `pid` leads.
+#[cfg(unix)]
+fn kill_group(pid: u32) {
+    let group = -libc::pid_t::from(pid.cast_signed());
+
+    // SAFETY: `kill` has no memory-safety preconditions. The group is the one
+    // the spawn created for the plugin; its id stays reserved while the plugin,
+    // or any process in the group, has not been reaped.
+    let sent = unsafe { libc::kill(group, libc::SIGKILL) } == 0;
+    debug!(pid, sent, "Killed the plugin's process group.");
+}
+
 #[cfg(windows)]
 mod job {
-    use std::{io, mem, os::windows::io::AsRawHandle as _, process::Child, ptr};
+    use std::{
+        io, mem,
+        os::windows::io::{AsHandle as _, AsRawHandle as _, OwnedHandle},
+        process::Child,
+        ptr,
+    };
 
-    use tracing::warn;
+    use tracing::{debug, warn};
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE},
+        Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0},
         System::{
             Diagnostics::ToolHelp::{
                 CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First,
@@ -144,11 +243,44 @@ mod job {
             },
             JobObjects::{AssignProcessToJobObject, CreateJobObjectW, TerminateJobObject},
             Threading::{
-                OpenProcess, OpenThread, PROCESS_TERMINATE, ResumeThread, THREAD_SUSPEND_RESUME,
-                TerminateProcess,
+                INFINITE, OpenProcess, OpenThread, PROCESS_TERMINATE, ResumeThread,
+                THREAD_SUSPEND_RESUME, TerminateProcess, WaitForSingleObject,
             },
         },
     };
+
+    /// A handle to the plugin process of its own, to wait on from another
+    /// thread while the `Child` stays with its owner.
+    pub(super) struct ExitWaiter(OwnedHandle);
+
+    impl ExitWaiter {
+        pub(super) fn new(child: &Child) -> Option<Self> {
+            child
+                .as_handle()
+                .try_clone_to_owned()
+                .inspect_err(|error| warn!(%error, "Could not watch the plugin for exiting."))
+                .ok()
+                .map(Self)
+        }
+
+        /// Block until the process has exited.
+        ///
+        /// Returns `false` when it could not be waited on, in which case it may
+        /// still be running.
+        pub(super) fn wait(&self) -> bool {
+            // SAFETY: the handle is open for as long as `self` is.
+            let waited = unsafe { WaitForSingleObject(self.0.as_raw_handle(), INFINITE) };
+            if waited != WAIT_OBJECT_0 {
+                debug!(
+                    waited,
+                    "Could not wait on the plugin; not terminating its job."
+                );
+                return false;
+            }
+
+            true
+        }
+    }
 
     /// An owned job object handle, closed on drop.
     pub(super) struct Job(HANDLE);

@@ -2575,7 +2575,7 @@ fn describe_plugin(binary: &Utf8Path, cancel: &CancellationToken) -> Option<Desc
 
         if resume_suspended(child.id()).is_err() {
             tree.terminate();
-            drop(child.wait());
+            tree.finish(&mut child);
             return None;
         }
     }
@@ -2608,7 +2608,7 @@ fn describe_plugin(binary: &Utf8Path, cancel: &CancellationToken) -> Option<Desc
     drop(watcher.join());
 
     tree.terminate();
-    drop(child.wait());
+    tree.finish(&mut child);
 
     answer
 }
