@@ -44,8 +44,8 @@ pub enum RunPolicy {
 /// value = "abc123..."
 ///
 /// [plugins.command.serve-web.options]
-/// web.port = 2000
-/// web.host = "0.0.0.0"
+/// bind = "0.0.0.0"
+/// port = 2000
 /// ```
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]

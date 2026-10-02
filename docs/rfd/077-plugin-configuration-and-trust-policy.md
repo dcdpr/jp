@@ -104,8 +104,8 @@ run = "allow"                     # execution policy
 
 #### `plugins.shutdown_timeout_secs`
 
-The grace period between sending `Shutdown` over the protocol and sending
-SIGKILL to the child process.
+The grace period between sending `Shutdown` over the protocol and killing the
+plugin and everything it started.
 Applies to all command plugins.
 
 #### Per-Plugin Configuration
@@ -121,8 +121,8 @@ algorithm = "sha256"
 value = "e3b0c44298fc1c149afbf4c8996fb924..."
 
 [plugins.command.serve-web.options]
-web.port = 3141
-web.host = "127.0.0.1"
+bind = "127.0.0.1"
+port = 3141
 ```
 
 **`run`** (`RunPolicy`) — Execution policy:
@@ -171,14 +171,16 @@ tells the user which config key to update.
 This makes it easy to intentionally accept a new binary after reviewing the
 change.
 
-**`options`** (`Option<serde_json::Value>`) — An opaque JSON value passed to
-the plugin in the `config` field of the `init` message.
+**`options`** — A table of opaque values passed to the plugin in the `options`
+field of the `init` message.
 JP does not validate the contents — the plugin is responsible for parsing and
 error reporting.
+Options merge key by key across config layers, recursing into nested tables, so
+a later layer only replaces the options it names.
 This follows the same pattern as tool options ([RFD 042]).
 
-Example: the `serve` plugin reads `options.web.port` and `options.web.host` from
-its init config to configure its HTTP listener.
+Example: the `serve-web` plugin reads `options.bind` and `options.port` from
+`init` to configure its HTTP listener.
 
 ### Installing
 
