@@ -1,6 +1,6 @@
 # RFD 077: Plugin Configuration and Trust Policy
 
-- **Status**: Discussion
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-07
