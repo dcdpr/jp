@@ -620,6 +620,42 @@ fn the_floor_keeps_a_link_ended_by_st() {
 }
 
 #[test]
+fn a_link_left_open_is_closed_before_its_line_break() {
+    // A line cut to fit the terminal keeps a link's opener and loses its
+    // closer. Left open, every row after it links to the same target.
+    assert_eq!(
+        floored(SanitizeMode::Strip, &["see \x1b]8;;http://x\x07link\nnext"]),
+        "see \x1b]8;;http://x\x07link\x1b]8;;\x07\nnext"
+    );
+}
+
+#[test]
+fn finishing_the_floor_closes_a_link_left_open() {
+    // The link closes ahead of the styling reset, and both before the shell
+    // prompt that follows JP.
+    let mut floor = OutputFloor::new(SanitizeMode::Strip);
+    assert_eq!(
+        floor.filter("\x1b[31m\x1b]8;;http://x\x07red"),
+        "\x1b[31m\x1b]8;;http://x\x07red"
+    );
+    assert_eq!(floor.finish(), "\x1b]8;;\x07\x1b[0m");
+}
+
+#[test]
+fn a_closed_link_is_left_as_it_is() {
+    // JP's own links close on the line they open on, with either terminator,
+    // and with a `;` in the target.
+    let links = concat!(
+        "\x1b]8;;http://x/a;b\x07one\x1b]8;;\x07\n",
+        "\x1b]8;id=1;http://y\x1b\\two\x1b]8;;\x1b\\\n",
+    );
+
+    let mut floor = OutputFloor::new(SanitizeMode::Strip);
+    assert_eq!(floor.filter(links), links);
+    assert_eq!(floor.finish(), "");
+}
+
+#[test]
 fn a_link_target_loses_its_control_characters() {
     // A terminal that reads 8-bit controls ends the link at U+009C and takes
     // what follows as input.

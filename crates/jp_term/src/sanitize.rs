@@ -45,6 +45,9 @@ const ERASE_TO_END: &str = "\x1b[K";
 /// The first parameter of an OSC 8 hyperlink.
 const HYPERLINK: &[u8] = b"8";
 
+/// The OSC 8 sequence that ends a hyperlink.
+const HYPERLINK_END: &str = "\x1b]8;;\x07";
+
 /// CAN, which aborts a sequence in progress.
 const CAN: u8 = 0x18;
 
@@ -194,6 +197,7 @@ impl<W: fmt::Write> ContentWriter<W> {
                 open: false,
                 st_pending: false,
                 styled: false,
+                linked: false,
             },
         }
     }
@@ -329,6 +333,9 @@ struct Sink {
     /// Whether styling let through since the last full reset may still be in
     /// effect.
     styled: bool,
+
+    /// Whether a hyperlink let through has not been ended yet.
+    linked: bool,
 }
 
 impl Sink {
@@ -382,6 +389,15 @@ impl Perform for Sink {
         match byte {
             b'\n' | b'\t' => {
                 self.st_pending = false;
+
+                // A link ends with the line it is on: a line cut to fit the
+                // terminal can keep a link's start and lose its end, and the
+                // terminal would link every line after it.
+                if byte == b'\n' && self.linked {
+                    self.linked = false;
+                    self.buffer.push_str(HYPERLINK_END);
+                }
+
                 self.buffer.push(char::from(byte));
             }
             // CAN and SUB abort the sequence in progress, and one marker covers
@@ -438,6 +454,9 @@ impl Perform for Sink {
     fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
         if self.policy.hyperlinks && params.first() == Some(&HYPERLINK) {
             self.open = false;
+            // A link starts with a target and ends with an empty one. A target
+            // holding a `;` reaches here split across several parameters.
+            self.linked = params.iter().skip(2).any(|part| !part.is_empty());
             push_hyperlink(&mut self.buffer, params, bell_terminated);
         } else {
             self.drop_sequence();
@@ -565,6 +584,7 @@ pub fn sanitize_decoded(text: &str, class: ContentClass, mode: SanitizeMode) -> 
 /// Printable text, `\n`, and `\t` pass, as do SGR styling less conceal, erase
 /// to the end of the line (`\x1b[K`), and OSC 8 hyperlinks, whose targets lose
 /// their control characters.
+/// A hyperlink still open at a line break is ended there.
 /// Every other sequence and control character is dropped the way the
 /// [`SanitizeMode`] says, as [`ContentWriter`] drops it, `\r` included.
 ///
@@ -614,13 +634,18 @@ impl OutputFloor {
         std::mem::take(&mut self.writer.output)
     }
 
-    /// End the stream: drop a sequence left unfinished, and close with
-    /// `\x1b[0m` any styling still in effect.
+    /// End the stream: drop a sequence left unfinished, end a hyperlink still
+    /// open, and close with `\x1b[0m` any styling still in effect.
     ///
     /// Under [`SanitizeMode::Off`] text is not parsed, so nothing is dropped or
     /// closed.
     pub fn finish(&mut self) -> String {
         self.writer.settle();
+
+        if self.writer.sink.linked {
+            self.writer.sink.linked = false;
+            self.writer.sink.buffer.push_str(HYPERLINK_END);
+        }
 
         if self.writer.sink.styled {
             self.writer.sink.styled = false;

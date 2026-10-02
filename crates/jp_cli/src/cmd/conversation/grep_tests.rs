@@ -2882,6 +2882,39 @@ fn a_terminal_shows_the_heading_title_without_its_escapes() {
 }
 
 #[test]
+fn a_window_that_cuts_a_link_ends_it_with_the_row() {
+    // The window keeps the link's start and cuts its end. Left open, the link
+    // would run on into every row and the shell prompt after it.
+    let id = make_id(17_250);
+    let (mut ctx, out) = setup_pretty(
+        vec![(
+            id,
+            turn(vec![ConversationEvent::new(
+                ChatRequest::from(
+                    "chi-mark \x1b]8;;http://example.com\x07read the full build log \
+                     here\x1b]8;;\x07 end",
+                ),
+                ts(),
+            )]),
+        )],
+        30,
+    );
+
+    grep("chi-mark").run(&mut ctx, vec![]).unwrap();
+    ctx.printer.flush();
+    let raw = out.lock().clone();
+
+    assert_eq!(
+        raw.lines().nth(1),
+        Some(
+            "  \x1b[38;5;10m1\x1b[39m:\x1b[2muser\x1b[0m:\x1b[38;5;9m\x1b[1mchi-mark\x1b[0m \
+             \x1b]8;;http://example.com\x07read the fu\u{2026}\x1b]8;;\x07"
+        ),
+        "raw: {raw:?}"
+    );
+}
+
+#[test]
 fn output_text_in_a_terminal_drops_escapes() {
     let id = make_id(17_300);
     let (mut ctx, out) = setup_pretty(

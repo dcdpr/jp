@@ -147,6 +147,17 @@ fn styling_left_open_is_closed_when_the_printer_shuts_down() {
 }
 
 #[test]
+fn a_link_left_open_is_ended_when_the_printer_shuts_down() {
+    // Left open, the shell prompt after JP would link to the stored target.
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.print("\x1b]8;;http://x\x07link");
+    printer.shutdown();
+
+    assert_eq!(*out.lock(), "\x1b]8;;http://x\x07link\x1b]8;;\x07");
+}
+
+#[test]
 fn a_sequence_split_across_writes_is_dropped_whole() {
     // `write!` reaches the worker one argument at a time.
     let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
