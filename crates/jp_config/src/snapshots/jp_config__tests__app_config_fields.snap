@@ -86,7 +86,6 @@ expression: "AppConfig::fields()"
     "providers.llm.anthropic.beta_headers",
     "providers.llm.anthropic.chain_on_max_tokens",
     "providers.llm.anthropic.subscription_flow",
-    "plugins.auto_install",
     "plugins.command",
     "plugins.shutdown_timeout_secs",
     "loader.reset",

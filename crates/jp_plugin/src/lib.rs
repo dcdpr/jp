@@ -6,10 +6,12 @@
 //!
 //! See: `docs/rfd/072-command-plugin-system.md`
 
+pub mod manifest;
 pub mod message;
 mod protocol;
 pub mod registry;
 
+pub use manifest::{Manifest, ManifestError};
 pub use message::{HostToPlugin, PluginToHost};
 pub use protocol::{Error, PROTOCOL_VERSION, ready};
 

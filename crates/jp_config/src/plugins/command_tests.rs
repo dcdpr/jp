@@ -12,17 +12,24 @@ fn run_policy_default_is_ask() {
 
 #[test]
 fn run_policy_roundtrip() {
-    let json = serde_json::to_string(&RunPolicy::Unattended).unwrap();
-    assert_eq!(json, "\"unattended\"");
+    let json = serde_json::to_string(&RunPolicy::Allow).unwrap();
+    assert_eq!(json, "\"allow\"");
     let parsed: RunPolicy = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed, RunPolicy::Unattended);
+    assert_eq!(parsed, RunPolicy::Allow);
+}
+
+/// `unattended` is the retired spelling of `allow`, and plugin config written
+/// before the rename keeps working.
+#[test]
+fn unattended_reads_as_allow() {
+    let partial: PartialCommandPluginConfig = toml::from_str(r#"run = "unattended""#).unwrap();
+    assert_eq!(partial.run, Some(RunPolicy::Allow));
 }
 
 #[test]
 fn command_plugin_config_from_toml() {
     let toml = indoc! {r#"
-        install = true
-        run = "unattended"
+        run = "allow"
 
         [checksum]
         algorithm = "sha256"
@@ -34,8 +41,7 @@ fn command_plugin_config_from_toml() {
     "#};
 
     let partial: PartialCommandPluginConfig = toml::from_str(toml).unwrap();
-    assert_eq!(partial.install, Some(true));
-    assert_eq!(partial.run, Some(RunPolicy::Unattended));
+    assert_eq!(partial.run, Some(RunPolicy::Allow));
     assert!(partial.checksum.is_some());
 
     let opts = partial.options;
@@ -117,7 +123,6 @@ fn command_plugin_config_minimal() {
     let toml = "run = \"deny\"\n";
     let partial: PartialCommandPluginConfig = toml::from_str(toml).unwrap();
     assert_eq!(partial.run, Some(RunPolicy::Deny));
-    assert!(partial.install.is_none());
     assert!(partial.checksum.is_none());
     assert!(partial.options.is_empty());
 }

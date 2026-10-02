@@ -3,12 +3,12 @@
 A command plugin that serves JP conversations over HTTP, and lets you continue
 them from a browser.
 
-Run it with `jp serve-web`.
+Run it with `jp serve web`.
 The server is read-write: it renders the transcript, takes a message from a
 composer, and asks the host to run the turn.
 
 ```sh
-jp serve-web --bind 127.0.0.1 --port 3000
+jp serve web --bind 127.0.0.1 --port 3000
 ```
 
 ## What it does and does not own
@@ -34,9 +34,10 @@ with the first.
 
 ## Protocol
 
-Needs protocol 9 (`REQUIRED_PROTOCOL`).
-The host refuses an older pairing at the handshake rather than failing later, so
-a stale `jp` alongside a fresh plugin is an error message and not a mystery.
+Needs protocol 9 (`REQUIRED_PROTOCOL`), which its manifest states too.
+The host refuses an older pairing before spawning the plugin rather than failing
+later, so a stale `jp` alongside a fresh plugin is an error message and not a
+mystery.
 
 | Message                | Direction | Used for                                           |
 | ---------------------- | --------- | -------------------------------------------------- |

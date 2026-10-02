@@ -1131,12 +1131,12 @@ impl Executor for ToolExecutor {
     }
 
     fn needs_permission(&self) -> bool {
-        !matches!(self.config.run(), RunMode::Unattended | RunMode::Skip)
+        !matches!(self.config.run(), RunMode::Allow | RunMode::Skip)
     }
 
     fn permission_info(&self) -> Option<PermissionInfo> {
         let run_mode = self.config.run();
-        if matches!(run_mode, RunMode::Unattended | RunMode::Skip) {
+        if matches!(run_mode, RunMode::Allow | RunMode::Skip) {
             return None;
         }
         Some(PermissionInfo {

@@ -1,7 +1,12 @@
 use camino_tempfile::{Utf8TempDir, tempdir};
+#[cfg(unix)]
+use chrono::Utc;
 use jp_conversation::{Conversation, ConversationId, event::ChatResponse};
-use jp_plugin::message::{
-    ExitMessage, InterruptRequest, OptionalId, ReadEventsRequest, ReadyMessage,
+#[cfg(unix)]
+use jp_plugin::registry::ApprovedPlugin;
+use jp_plugin::{
+    message::{ExitMessage, InterruptRequest, OptionalId, ReadEventsRequest, ReadyMessage},
+    registry::{PluginKind, RegistryPlugin},
 };
 use jp_storage::backend::{FsStorageBackend, PersistBackend as _};
 use relative_path::RelativePathBuf;
@@ -9,6 +14,8 @@ use serde_json::json;
 use serial_test::serial;
 
 use super::*;
+#[cfg(unix)]
+use crate::Globals;
 use crate::{editor::CUT_MARKER, env_testing::EnvVarGuard};
 
 /// A workspace no request in these tests reaches into, so it needs no storage.
@@ -866,7 +873,7 @@ fn stop_plugin_kills_a_plugin_and_its_workers() {
     let mut line = String::new();
     BufReader::new(stdout).read_line(&mut line).unwrap();
     assert_eq!(line, "ready\n");
-    let plugin = tree.pid;
+    let plugin = tree.pid();
 
     // On its own thread with a deadline: if `stop_plugin` ever goes back to
     // waiting indefinitely, this fails rather than hanging the suite — which is
@@ -881,10 +888,10 @@ fn stop_plugin_kills_a_plugin_and_its_workers() {
     rx.recv_timeout(Duration::from_secs(10))
         .expect("stop_plugin returned rather than waiting forever");
 
-    assert!(
-        child.wait().is_ok(),
-        "the child is reaped, so it is no longer running"
-    );
+    // Killed, not finished: left alone, the child runs for a minute and exits
+    // successfully.
+    let status = child.wait().unwrap();
+    assert!(!status.success(), "the plugin was killed: {status:?}");
     assert!(
         !is_process_alive(plugin),
         "a plugin that ignored the request is gone"
@@ -933,7 +940,7 @@ fn stop_plugin_kills_a_plugin_and_its_workers() {
     let mut line = String::new();
     BufReader::new(stdout).read_line(&mut line).unwrap();
     assert_eq!(line, "ready\r\n");
-    let plugin = tree.pid;
+    let plugin = tree.pid();
 
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
@@ -1735,8 +1742,608 @@ fn a_query_without_a_schema_replies_without_data() {
     );
 }
 
+/// `jp <plugin> -h` without a terminal: a binary nobody approved is refused
+/// before it runs, and once approved it answers.
+///
+/// The script writes a marker whenever it runs, so its absence proves it was
+/// never spawned, `describe` included.
+///
+/// Unix only: on Windows a plugin is a `jp-*.exe`, which a test cannot write as
+/// a script.
+#[cfg(unix)]
 #[test]
-fn find_plugin_binary_nonexistent() {
-    let result = find_plugin_binary(&["__jp_test_nonexistent_plugin_42__"]);
-    assert!(result.is_none());
+#[serial(env_vars)]
+fn plugin_help_does_not_run_an_unapproved_binary() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let tmp = tempdir().unwrap();
+    let bin = tmp.path().join("bin");
+    let data = tmp.path().join("data");
+    let marker = tmp.path().join("ran");
+    fs::create_dir_all(&bin).unwrap();
+
+    let script = bin.join("jp-titles");
+    fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+# jp-plugin/v1 {{"protocol":1,"description":"Titles","command":["titles"]}}
+: > {marker}
+read -r msg
+echo '{{"type":"describe","protocol":1,"name":"titles","version":"0.1.0","description":"Titles","command":["titles"],"help":"Usage: jp titles"}}'
+"#
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let _path = EnvVarGuard::set("PATH", bin.as_str());
+    let _data = EnvVarGuard::set("JP_USER_DATA_DIR", data.as_str());
+    let _offline = EnvVarGuard::set("JP_NO_PLUGIN_DOWNLOAD", "1");
+
+    let workspace = Workspace::in_memory(tmp.path().join("workspace"));
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        None,
+        tokio::runtime::Runtime::new().unwrap(),
+        Globals {
+            no_interactive: true,
+            ..Globals::default()
+        },
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+    let args = ["titles".to_owned(), "-h".to_owned()];
+
+    let error = runtime.block_on(run_external(&args, &mut ctx)).unwrap_err();
+    assert_eq!(
+        error.message.as_deref(),
+        Some(
+            format!(
+                "plugin `titles` at {script} is not approved. Approve it with `jp plugin approve \
+                 {script}`, or set plugins.command.titles.run = \"allow\" in config."
+            )
+            .as_str()
+        )
+    );
+    assert!(!marker.exists(), "the unapproved binary was never run");
+
+    ApprovalStore::load()
+        .record("titles", ApprovedPlugin {
+            path: script.canonicalize_utf8().unwrap(),
+            sha256: registry::sha256_file(&script).unwrap(),
+            approved_at: Utc::now(),
+            installed: false,
+            manifest: None,
+        })
+        .unwrap();
+
+    runtime.block_on(run_external(&args, &mut ctx)).unwrap();
+    assert!(marker.exists(), "the approved binary answered describe");
+}
+
+/// A plugin that starts a worker, answers `init`, sends `exit`, and exits on
+/// its own: the worker is stopped with it, not left running once `jp` returns.
+///
+/// Unix only: on Windows a plugin is a `jp-*.exe`, which a test cannot write as
+/// a script.
+/// `process_tree::tests` covers the tree on every platform.
+#[cfg(unix)]
+#[test]
+fn a_worker_dies_with_a_plugin_that_exits_on_its_own() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let tmp = tempdir().unwrap();
+    let script = tmp.path().join("jp-server");
+    let pid_file = tmp.path().join("worker.pid");
+    fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+sleep 600 &
+echo $! > {pid_file}
+read -r msg
+echo '{{"type":"ready","protocol":1}}'
+echo '{{"type":"exit","code":0}}'
+"#
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let root = tmp.path().join("workspace");
+    let backend = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
+    let workspace = Workspace::in_memory(&root);
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        Some(backend),
+        tokio::runtime::Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    runtime
+        .block_on(run_plugin("server", &script, &[], &mut ctx))
+        .unwrap();
+
+    let worker: u32 = fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+
+    // The killed worker is an orphan, reaped by init a moment later.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while is_process_alive(worker) {
+        assert!(Instant::now() < deadline, "the worker outlived its plugin");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// A plugin that closes its stdin, starts a worker, and exits without reading
+/// `init`: the host's write fails, and the worker is stopped all the same.
+///
+/// The argument is larger than any pipe buffer, so the write cannot complete
+/// into the buffer before the plugin exits, and fails with a broken pipe every
+/// time.
+///
+/// Unix only: on Windows a plugin is a `jp-*.exe`, which a test cannot write as
+/// a script.
+#[cfg(unix)]
+#[test]
+fn a_worker_dies_with_a_plugin_that_never_reads_init() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let tmp = tempdir().unwrap();
+    let script = tmp.path().join("jp-launcher");
+    let pid_file = tmp.path().join("worker.pid");
+
+    // Stdin is closed before the worker starts, so the worker does not inherit
+    // it and keep the host's write blocked.
+    fs::write(
+        &script,
+        format!("#!/bin/sh\nexec 0<&-\nsleep 600 &\necho $! > {pid_file}\n"),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let root = tmp.path().join("workspace");
+    let backend = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
+    let workspace = Workspace::in_memory(&root);
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        Some(backend),
+        tokio::runtime::Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    let args = ["x".repeat(1024 * 1024)];
+    let error = runtime
+        .block_on(run_plugin("launcher", &script, &args, &mut ctx))
+        .unwrap_err();
+
+    // Prefix only: the rest is the operating system's wording for a broken
+    // pipe.
+    let message = error.message.unwrap_or_default();
+    assert!(message.starts_with("failed to send init: "), "{message}");
+
+    let worker: u32 = fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+
+    // The killed worker is an orphan, reaped by init a moment later.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while is_process_alive(worker) {
+        assert!(Instant::now() < deadline, "the worker outlived its plugin");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// A plugin that ignores `Shutdown` is killed once
+/// `plugins.shutdown_timeout_secs` has passed, not after a fixed grace period.
+///
+/// With the timeout at zero the kill follows the request at once; at the
+/// default of five seconds the run would take at least that long to end.
+///
+/// Unix only: on Windows a plugin is a `jp-*.exe`, which a test cannot write as
+/// a script.
+#[cfg(unix)]
+#[test]
+fn a_plugin_ignoring_shutdown_is_killed_after_the_configured_grace() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let tmp = tempdir().unwrap();
+    let script = tmp.path().join("jp-stubborn");
+    let started = tmp.path().join("started");
+
+    // Never reads stdin again, so the `Shutdown` it is sent goes unanswered.
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nread -r msg\necho '{{\"type\":\"ready\",\"protocol\":1}}'\n: > \
+             {started}\nsleep 600\n"
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut config = AppConfig::new_test();
+    config.plugins.shutdown_timeout_secs = 0;
+
+    let root = tmp.path().join("workspace");
+    let backend = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
+    let workspace = Workspace::in_memory(&root);
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        Some(backend),
+        tokio::runtime::Runtime::new().unwrap(),
+        Globals::default(),
+        config,
+        None,
+        printer,
+    );
+
+    // Requested once the plugin is running, the way a SIGTERM would be.
+    let shutdown = ctx.signals.shutdown_token();
+    let requested = Arc::new(Mutex::new(None));
+    {
+        let requested = Arc::clone(&requested);
+        thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !started.exists() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(20));
+            }
+            *requested.lock().unwrap() = Some(Instant::now());
+            shutdown.cancel();
+        });
+    }
+
+    runtime
+        .block_on(run_plugin("stubborn", &script, &[], &mut ctx))
+        .unwrap();
+
+    let requested = requested.lock().unwrap().expect("shutdown was requested");
+    let took = requested.elapsed();
+    assert!(
+        took < Duration::from_secs(3),
+        "killed {took:?} after shutdown was requested"
+    );
+}
+
+#[test]
+fn a_describe_answer_is_compared_with_the_manifest_field_by_field() {
+    let manifest = Manifest {
+        protocol: 1,
+        description: "Titles".to_owned(),
+        command: vec!["titles".to_owned()],
+    };
+
+    assert!(manifest_differences(&manifest, &manifest).is_empty());
+    assert_eq!(
+        manifest_differences(&manifest, &Manifest {
+            protocol: 2,
+            command: vec!["other".to_owned()],
+            ..manifest.clone()
+        }),
+        ["protocol", "command"]
+    );
+}
+
+/// A script plugin whose `describe` answer claims another command than its
+/// manifest: the host refuses the answer rather than choosing between them.
+///
+/// Unix only: on Windows a plugin is a `jp-*.exe`, which a test cannot write as
+/// a script.
+/// `a_describe_answer_is_compared_with_the_manifest_field_by_field` covers the
+/// comparison on every platform.
+#[cfg(unix)]
+#[test]
+fn a_describe_answer_that_disagrees_with_the_manifest_is_refused() {
+    use crate::cmd::plugin::discovery::{Location, ManifestState, read_manifest};
+
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("jp-titles");
+    fs::write(
+        &path,
+        r#"#!/bin/sh
+# jp-plugin/v1 {"protocol":1,"description":"Titles","command":["titles"]}
+read -r msg
+echo '{"type":"describe","protocol":1,"name":"titles","version":"0.1.0","description":"Titles","command":["other"],"help":"Usage"}'
+"#,
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let plugin = LocalPlugin {
+        name: "titles".to_owned(),
+        manifest: read_manifest(&path),
+        path: path.clone(),
+        location: Location::Path,
+    };
+    assert!(matches!(plugin.manifest, ManifestState::Valid(_)));
+
+    let error = describe(&plugin, &CancellationToken::new()).unwrap_err();
+
+    assert_eq!(
+        error.message.as_deref(),
+        Some(
+            format!(
+                "the plugin `titles` at {path} describes itself differently from its manifest \
+                 (command), so it does not run"
+            )
+            .as_str()
+        )
+    );
+}
+
+/// A plugin that starts a worker, answers `describe`, and then keeps running:
+/// asking it to describe itself returns, and takes the worker with it.
+///
+/// Unix only: on Windows a plugin is a `jp-*.exe`, which a test cannot write as
+/// a script.
+/// `process_tree::tests` covers the tree on every platform.
+#[cfg(unix)]
+#[test]
+fn describing_a_plugin_stops_everything_it_started() {
+    use std::{os::unix::fs::PermissionsExt as _, sync::mpsc};
+
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("jp-titles");
+    let pid_file = tmp.path().join("worker.pid");
+    fs::write(
+        &path,
+        format!(
+            r#"#!/bin/sh
+sleep 60 &
+echo $! > {pid_file}
+read -r msg
+echo '{{"type":"describe","protocol":1,"name":"titles","version":"0.1.0","description":"Titles","command":["titles"],"help":"Usage"}}'
+sleep 60
+"#
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+
+    // On a thread, so a describe that waits on the plugin fails the test
+    // instead of hanging it.
+    let (tx, rx) = mpsc::channel();
+    let binary = path.clone();
+    thread::spawn(move || drop(tx.send(describe_plugin(&binary, &CancellationToken::new()))));
+
+    let answer = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("describe returned rather than waiting on the plugin");
+    assert_eq!(answer.map(|a| a.name).as_deref(), Some("titles"));
+
+    let worker: u32 = fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+
+    // The killed worker is an orphan, reaped by init a moment later.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while is_process_alive(worker) {
+        assert!(Instant::now() < deadline, "the worker outlived describe");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// A plugin that starts a worker and never answers: cancelling the describe, as
+/// Ctrl-C does, stops it and the worker, and reports the call as interrupted.
+///
+/// Unix only: on Windows a plugin is a `jp-*.exe`, which a test cannot write as
+/// a script.
+#[cfg(unix)]
+#[test]
+fn a_cancelled_describe_stops_everything_the_plugin_started() {
+    use std::{os::unix::fs::PermissionsExt as _, sync::mpsc};
+
+    use crate::cmd::plugin::discovery::{Location, ManifestState};
+
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("jp-slow");
+    let pid_file = tmp.path().join("worker.pid");
+    fs::write(
+        &path,
+        format!("#!/bin/sh\nsleep 60 &\necho $! > {pid_file}\nsleep 60\n"),
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let plugin = LocalPlugin {
+        name: "slow".to_owned(),
+        path,
+        location: Location::Path,
+        manifest: ManifestState::Missing,
+    };
+
+    let cancel = CancellationToken::new();
+    let (tx, rx) = mpsc::channel();
+    {
+        let cancel = cancel.clone();
+        thread::spawn(move || {
+            let result = describe(&plugin, &cancel).map_err(|e| (e.code.get(), e.message));
+            drop(tx.send(result));
+        });
+    }
+
+    // Cancelled once the plugin is running, and before it could answer.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let worker: u32 = loop {
+        if let Ok(pid) = fs::read_to_string(&pid_file)
+            && let Ok(pid) = pid.trim().parse()
+        {
+            break pid;
+        }
+        assert!(Instant::now() < deadline, "the plugin never started");
+        thread::sleep(Duration::from_millis(20));
+    };
+    cancel.cancel();
+
+    let result = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("describe returned rather than waiting on the plugin");
+    assert_eq!(result.unwrap_err(), (130, Some("Interrupted".to_owned())));
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while is_process_alive(worker) {
+        assert!(Instant::now() < deadline, "the worker outlived the cancel");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// A registry with the official `serve` group and nothing under it.
+fn serve_group() -> Registry {
+    Registry {
+        version: 1,
+        plugins: [("serve".to_owned(), RegistryPlugin {
+            id: "serve".to_owned(),
+            description: "JP server components".to_owned(),
+            official: true,
+            repository: None,
+            kind: PluginKind::CommandGroup { suggests: vec![] },
+        })]
+        .into_iter()
+        .collect(),
+    }
+}
+
+fn needs(line: &str, registry: &Registry) -> bool {
+    let args: Vec<String> = line.split(' ').map(ToOwned::to_owned).collect();
+    let route = routing::route(&args, &[], Some(registry));
+    needs_registry(&args, &route)
+}
+
+/// A command published under a group after the cache was written routes to the
+/// group, which knows nothing of it: only a fresh registry can.
+#[test]
+fn an_unknown_command_under_a_group_needs_the_registry() {
+    let registry = serve_group();
+
+    assert!(needs("serve http-api", &registry));
+    assert!(needs("serve http-api --port 1", &registry));
+}
+
+/// The group itself, and its help, are answered from the cache.
+#[test]
+fn a_group_or_its_help_does_not_need_the_registry() {
+    let registry = serve_group();
+
+    assert!(!needs("serve", &registry));
+    assert!(!needs("serve -h", &registry));
+    assert!(!needs("serve --help", &registry));
+}
+
+#[test]
+fn a_command_nothing_claims_needs_the_registry() {
+    assert!(needs("frobnicate", &serve_group()));
+}
+
+/// Running a plugin installed on this machine never reaches the network.
+#[test]
+fn a_command_an_installed_plugin_claims_does_not_need_the_registry() {
+    use crate::cmd::plugin::discovery::{Location, ManifestState};
+
+    let local = [LocalPlugin {
+        name: "webui".to_owned(),
+        path: "/bin/jp-webui".into(),
+        location: Location::Path,
+        manifest: ManifestState::Valid(Manifest {
+            protocol: 1,
+            description: "Web UI".to_owned(),
+            command: vec!["serve".to_owned(), "web".to_owned()],
+        }),
+    }];
+    let args = vec!["serve".to_owned(), "web".to_owned()];
+    let registry = serve_group();
+
+    let route = routing::route(&args, &local, Some(&registry));
+
+    assert!(!needs_registry(&args, &route));
+}
+
+/// A third-party command entry, which claims nothing and only feeds hints.
+fn third_party(id: &str) -> RegistryPlugin {
+    RegistryPlugin {
+        id: id.to_owned(),
+        description: format!("{id} plugin"),
+        official: false,
+        repository: Some(format!("https://example.com/{id}")),
+        kind: PluginKind::default(),
+    }
+}
+
+/// The group's route, and the third-party entry its error names, for `line`.
+fn group_hint(line: &str, registry: &Registry) -> (usize, Option<String>) {
+    let args: Vec<String> = line.split(' ').map(ToOwned::to_owned).collect();
+    let Ok(Route::Group { consumed, .. }) = routing::route(&args, &[], Some(registry)) else {
+        panic!("`{line}` should route to the group");
+    };
+
+    let hint = third_party_below(&args, consumed, Some(registry)).map(|(key, _)| key.to_owned());
+    (consumed, hint)
+}
+
+/// A third-party command under an official group is named in the error, the way
+/// one at the root is, and still claims nothing: the command routes to the
+/// group.
+#[test]
+fn a_third_party_command_under_a_group_is_named() {
+    let mut registry = serve_group();
+    registry
+        .plugins
+        .insert("serve metrics".to_owned(), third_party("metrics"));
+
+    assert_eq!(
+        group_hint("serve metrics", &registry),
+        (1, Some("serve metrics".to_owned()))
+    );
+    assert_eq!(group_hint("serve http-api", &registry), (1, None));
+}
+
+/// An entry at or above the group's own path is not what was typed.
+#[test]
+fn a_third_party_entry_above_the_group_is_not_named() {
+    let mut registry = serve_group();
+    let group = registry.plugins.remove("serve").unwrap();
+    registry.plugins.insert("tools serve".to_owned(), group);
+    registry
+        .plugins
+        .insert("tools".to_owned(), third_party("tools"));
+
+    assert_eq!(group_hint("tools serve web", &registry), (2, None));
+}
+
+#[test]
+fn the_third_party_hint_says_where_the_plugin_comes_from() {
+    assert_eq!(
+        third_party_hint("serve metrics", &third_party("metrics")),
+        "\n  `jp serve metrics` is provided by the third-party plugin `metrics` \
+         (https://example.com/metrics).\n  Install it with `jp plugin install metrics`."
+    );
 }

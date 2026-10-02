@@ -4,7 +4,7 @@
 //! the plugin sends `exit` or the process terminates.
 
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap},
     fmt::Write as _,
     fs,
     io::{self, BufRead, BufReader, Write},
@@ -24,21 +24,18 @@ use chrono::{DateTime, TimeDelta, Utc};
 use jp_config::{
     AppConfig,
     interrupt::{StreamingInterruptAction, ToolInterruptAction},
-    plugins::{
-        PluginsConfig,
-        command::{CommandPluginConfig, RunPolicy},
-    },
+    plugins::{PluginsConfig, command::RunPolicy},
     util::{build, list_configs_in_load_path},
 };
 use jp_conversation::{ConversationId, ConversationStream, EventId, event::ChatRequest};
 use jp_editor::{EditOutcome, EditorBackend};
 use jp_inquire::{
-    InlineOption, InlineSelect, ReplyEditMode, ReplyOutcome,
+    ReplyEditMode, ReplyOutcome,
     prompt::{PromptBackend, TerminalPromptBackend},
 };
 use jp_llm::event::NoticeSink;
 use jp_plugin::{
-    PROTOCOL_VERSION,
+    Manifest, PROTOCOL_VERSION,
     message::{
         ComposeMode, ComposeOption, ComposeRequest, ComposeResponse, ConfigEntry, ConfigResponse,
         ConfigsResponse, ConversationSummary, ConversationsResponse, CreatedResponse,
@@ -47,6 +44,7 @@ use jp_plugin::{
         OutputFormat as PluginOutputFormat, PathsInfo, PluginToHost, QueryCompleteResponse,
         QueryRequest, SetTitleRequest, WorkspaceInfo, WriteDraftRequest,
     },
+    registry::{Registry, RegistryPlugin},
 };
 use jp_printer::{OutputFormat, Printer};
 use jp_storage::backend::{FsStorageBackend, Projection};
@@ -57,9 +55,18 @@ use tokio::{
     sync::mpsc::{self, error::TrySendError},
     task::JoinSet,
 };
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 
-use super::registry;
+use super::{
+    admission::{Official, admit},
+    approvals::ApprovalStore,
+    discovery::{self, LocalPlugin},
+    help, install, output,
+    process_tree::ProcessTree,
+    registry::{self, Refresh},
+    routing::{self, Route, RouteError},
+};
 use crate::{
     Ctx, KeyValueOrPath, cmd,
     cmd::query::{
@@ -391,6 +398,9 @@ pub(crate) async fn run_plugin(
         interactive: ctx.term.interactive,
     };
 
+    // How long a plugin asked to shut down has to exit before it is killed.
+    let grace = Duration::from_secs(config.plugins.shutdown_timeout_secs.into());
+
     let PluginProcess {
         mut child,
         tree,
@@ -398,11 +408,10 @@ pub(crate) async fn run_plugin(
         stdout,
         stderr_handle,
     } = spawn_plugin(binary, paths.child_cwd)?;
-    let tree = Arc::new(tree);
 
     // Shutdown thread: sends `Shutdown` directly to the plugin's stdin when
-    // an interrupt or a graceful shutdown request arrives. If the plugin
-    // doesn't exit within the grace period, kills its process tree.
+    // an interrupt or a graceful shutdown request arrives. After the grace
+    // period, kills the plugin's process tree.
     //
     // The guard drops when this function returns; the thread then sees the
     // notification channel close and exits.
@@ -431,20 +440,8 @@ pub(crate) async fn run_plugin(
             return;
         }
 
-        stop_plugin(
-            &shutdown_writer,
-            &shutdown_flag,
-            &shutdown_tree,
-            Duration::from_secs(5),
-        );
+        stop_plugin(&shutdown_writer, &shutdown_flag, &shutdown_tree, grace);
     });
-
-    // Send init.
-    {
-        let mut writer = stdin.lock().expect("stdin lock poisoned");
-        write_message(&mut *writer, &init)
-            .map_err(|e| cmd::Error::from(format!("failed to send init: {e}")))?;
-    }
 
     // Read on a thread of its own, so a turn awaiting the provider cannot stop
     // the host from noticing what the plugin says next.
@@ -456,19 +453,27 @@ pub(crate) async fn run_plugin(
     let mut turns = JoinSet::new();
     let (titles, mut arrived_titles) = Titles::new();
 
-    let result = message_loop(
-        &mut requests,
-        &stdin,
-        ctx,
-        &mut config_json,
-        &shutdown_sent,
-        &composer,
-        &mut turns,
-        &RunningTurns::default(),
-        &titles,
-        &mut arrived_titles,
-    )
-    .await;
+    // Part of the result rather than returned early: a plugin that exits
+    // before reading `init` fails this write, and what it started still has to
+    // be stopped by the cleanup below.
+    let result = match send_init(&stdin, &init) {
+        Ok(()) => {
+            message_loop(
+                &mut requests,
+                &stdin,
+                ctx,
+                &mut config_json,
+                &shutdown_sent,
+                &composer,
+                &mut turns,
+                &RunningTurns::default(),
+                &titles,
+                &mut arrived_titles,
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
 
     // A plugin that asked a question the host answered with an error is still
     // waiting for the reply. Nothing here closes its stdin — this scope holds a
@@ -476,10 +481,11 @@ pub(crate) async fn run_plugin(
     // anything first is a wait for a process that has no reason to exit, and the
     // error above never reaches the caller.
     //
-    // Short grace: unlike an interrupt, there is no work in flight worth letting
-    // finish.
+    // At most a second: unlike an interrupt, there is no work in flight worth
+    // letting finish.
     if result.is_err() {
-        stop_plugin(&stdin, &shutdown_sent, &tree, Duration::from_secs(1));
+        let grace = grace.min(Duration::from_secs(1));
+        stop_plugin(&stdin, &shutdown_sent, &tree, grace);
     }
 
     // After the plugin is dealt with, before the child is reaped: a turn writes
@@ -490,8 +496,10 @@ pub(crate) async fn run_plugin(
     // interrupt ladder is for.
     while turns.join_next().await.is_some() {}
 
-    // Always clean up, even on error.
-    drop(child.wait());
+    // Always clean up, even on error. What the plugin started and left running
+    // goes with it, whether or not the plugin had to be killed: a worker holding
+    // the plugin's stderr would otherwise keep the join below waiting.
+    tree.finish(&mut child);
 
     // Bounded, because the pipe closes when its last holder does, not when the
     // plugin does. A descendant that left the plugin's process group survives
@@ -506,12 +514,21 @@ pub(crate) async fn run_plugin(
     result
 }
 
+/// Send the plugin its `init` message.
+fn send_init(stdin: &Mutex<ChildStdin>, init: &HostToPlugin) -> Result<(), cmd::Error> {
+    let mut writer = stdin.lock().expect("stdin lock poisoned");
+    write_message(&mut *writer, init)
+        .map_err(|e| cmd::Error::from(format!("failed to send init: {e}")))
+}
+
 /// A spawned plugin process and its wired-up pipes.
 struct PluginProcess {
     child: Child,
 
-    /// The plugin and everything it starts, for killing together.
-    tree: ProcessTree,
+    /// The plugin and everything it starts.
+    ///
+    /// Shared, because the shutdown thread terminates it as well as the run.
+    tree: Arc<ProcessTree>,
 
     /// Shared, because the shutdown thread writes to it as well as the message
     /// loop.
@@ -570,13 +587,14 @@ fn spawn_plugin(
     let mut child = cmd
         .spawn()
         .map_err(|e| cmd::Error::from(format!("failed to spawn plugin: {e}")))?;
-
-    let tree = ProcessTree::adopt(&child);
+    let tree = Arc::new(ProcessTree::new(&child));
 
     // Resumed whether or not it made it into the job: a plugin left suspended
     // never answers `init`, and the host would wait on it forever.
     #[cfg(windows)]
     {
+        use super::process_tree::resume_suspended;
+
         if let Err(error) = resume_suspended(child.id()) {
             drop(child.kill());
             drop(child.wait());
@@ -610,10 +628,11 @@ fn spawn_plugin(
     })
 }
 
-/// Ask a plugin to stop, and make sure it does.
+/// Ask a plugin to stop, and make sure it and everything it started does.
 ///
 /// Sends `Shutdown` over the protocol, gives the plugin `grace` to act on it,
-/// and kills it and everything it started if it doesn't.
+/// and then kills its process tree: the plugin itself if it did not exit, and
+/// whatever it started either way.
 /// `sent` records the request having been made, so the two callers don't both
 /// make it.
 /// It does not record the request arriving: a write to a plugin that has
@@ -633,12 +652,12 @@ fn stop_plugin(stdin: &Mutex<impl Write>, sent: &AtomicBool, tree: &ProcessTree,
     let deadline = Instant::now() + grace;
     while Instant::now() < deadline {
         thread::sleep(Duration::from_millis(50));
-        if !is_process_alive(tree.pid) {
-            return;
+        if !is_process_alive(tree.pid()) {
+            break;
         }
     }
 
-    tree.kill();
+    tree.terminate();
 }
 
 /// Wait up to `limit` for a thread to finish, leaving it running if it doesn't.
@@ -775,6 +794,12 @@ async fn message_loop(
                     write_message(&mut *writer, &response)
                         .map_err(|e| cmd::Error::from(format!("failed to answer a query: {e}")))?;
                 }
+            }
+
+            // Written through the printer, which the context holds and the
+            // generic arm below does not.
+            PluginToHost::Print(print) => {
+                output::print(&ctx.printer, &print, &ctx.config().style.markdown);
             }
 
             // Answered once the turn has acted on it, which can be well after
@@ -1802,15 +1827,6 @@ fn handle_request(
             write_message(writer, &response)?;
         }
 
-        PluginToHost::Print(print) => {
-            // In Phase 1, write to stdout directly. Full printer
-            // integration comes later when we thread through &Printer.
-            let stdout = std::io::stdout();
-            let mut handle = stdout.lock();
-            drop(handle.write_all(print.text.as_bytes()));
-            drop(handle.flush());
-        }
-
         PluginToHost::Log(log) => {
             emit_log(&log);
         }
@@ -1820,7 +1836,10 @@ fn handle_request(
         }
 
         // Answered by the caller, before the lock this runs under is taken.
-        PluginToHost::Compose(_) | PluginToHost::Query(_) | PluginToHost::Interrupt(_) => {
+        PluginToHost::Compose(_)
+        | PluginToHost::Query(_)
+        | PluginToHost::Interrupt(_)
+        | PluginToHost::Print(_) => {
             unreachable!("answered before the lock")
         }
 
@@ -2424,478 +2443,88 @@ fn is_process_alive(pid: u32) -> bool {
     }
 }
 
-/// A plugin process and every process it starts, killed as one.
+/// Refuse a plugin its configuration denies.
 ///
-/// On Unix this is the process group the plugin leads, which requires it to
-/// have been spawned with `process_group(0)`.
-/// On Windows it is a job object, which requires the plugin to have been
-/// spawned suspended and not resumed until it is in the job.
-///
-/// A descendant that deliberately leaves the group or job is not covered
-/// either.
-struct ProcessTree {
-    /// The plugin's own PID, which on Unix is also its process group ID.
-    pid: u32,
-
-    /// `None` when the job could not be created or assigned, in which case only
-    /// the plugin process itself is killed.
-    #[cfg(windows)]
-    job: Option<Job>,
-}
-
-impl ProcessTree {
-    /// Take ownership of the tree rooted at a freshly spawned plugin.
-    #[cfg(unix)]
-    fn adopt(child: &Child) -> Self {
-        Self { pid: child.id() }
-    }
-
-    /// Take ownership of the tree rooted at a freshly spawned plugin.
-    #[cfg(windows)]
-    fn adopt(child: &Child) -> Self {
-        let job = Job::assign(child);
-        if job.is_none() {
-            warn!("Could not put the plugin in a job object; only it will be killed on shutdown.");
-        }
-
-        Self {
-            pid: child.id(),
-            job,
-        }
-    }
-
-    /// Kill the plugin and everything still in its tree.
-    ///
-    /// Used as a last resort when the plugin doesn't exit within the grace
-    /// period after receiving `Shutdown`.
-    #[cfg(unix)]
-    fn kill(&self) {
-        // A negative PID addresses the whole process group.
-        //
-        // SAFETY: the group is led by a process we spawned.
-        unsafe {
-            libc::kill(-libc::pid_t::from(self.pid.cast_signed()), libc::SIGKILL);
-        }
-        debug!(
-            pid = self.pid,
-            "Sent SIGKILL to the plugin's process group after grace period."
-        );
-    }
-
-    /// Kill the plugin and everything still in its tree.
-    ///
-    /// Used as a last resort when the plugin doesn't exit within the grace
-    /// period after receiving `Shutdown`.
-    #[cfg(windows)]
-    fn kill(&self) {
-        match &self.job {
-            Some(job) => {
-                job.terminate();
-                debug!(
-                    pid = self.pid,
-                    "Terminated the plugin's job object after grace period."
-                );
-            }
-            None => kill_child(self.pid),
-        }
-    }
-}
-
-/// A job object handle, closed on drop.
-#[cfg(windows)]
-struct Job(windows_sys::Win32::Foundation::HANDLE);
-
-// SAFETY: a job handle names a kernel object, and the job functions used here
-// may be called on it from any thread.
-#[cfg(windows)]
-unsafe impl Send for Job {}
-
-// SAFETY: as for `Send`; the handle is never mutated after creation.
-#[cfg(windows)]
-unsafe impl Sync for Job {}
-
-#[cfg(windows)]
-impl Job {
-    /// Create an anonymous job and put `child` in it.
-    ///
-    /// Processes `child` starts from then on join the job too; any it started
-    /// before do not.
-    fn assign(child: &Child) -> Option<Self> {
-        use std::{os::windows::io::AsRawHandle as _, ptr};
-
-        use windows_sys::Win32::{
-            Foundation::CloseHandle,
-            System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW},
-        };
-
-        // SAFETY: both handles are valid for the duration of the calls; the
-        // process handle is borrowed from `child`, which outlives them.
-        unsafe {
-            let job = CreateJobObjectW(ptr::null(), ptr::null());
-            if job.is_null() {
-                return None;
-            }
-
-            if AssignProcessToJobObject(job, child.as_raw_handle().cast()) == 0 {
-                CloseHandle(job);
-                return None;
-            }
-
-            Some(Self(job))
-        }
-    }
-
-    /// Terminate every process in the job.
-    fn terminate(&self) {
-        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
-
-        // SAFETY: the handle is open until `self` drops.
-        unsafe {
-            TerminateJobObject(self.0, 1);
-        }
-    }
-}
-
-#[cfg(windows)]
-impl Drop for Job {
-    fn drop(&mut self) {
-        use windows_sys::Win32::Foundation::CloseHandle;
-
-        // SAFETY: the handle was opened by `Job::assign` and is closed once.
-        unsafe {
-            CloseHandle(self.0);
-        }
-    }
-}
-
-/// Resume the only thread of a process created with `CREATE_SUSPENDED`.
-///
-/// `std::process::Child` does not expose the primary thread handle, so the
-/// thread is found through a snapshot of the system's threads.
-/// A suspended process that has not run yet has exactly one.
-#[cfg(windows)]
-fn resume_suspended(pid: u32) -> io::Result<()> {
-    use std::mem;
-
-    use windows_sys::Win32::{
-        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
-        System::{
-            Diagnostics::ToolHelp::{
-                CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First,
-                Thread32Next,
-            },
-            Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME},
-        },
-    };
-
-    // SAFETY: every handle is checked before use and closed once; `entry` is
-    // a plain C struct whose size field is set as the API requires.
-    unsafe {
-        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-        if snapshot == INVALID_HANDLE_VALUE {
-            return Err(io::Error::last_os_error());
-        }
-
-        let mut entry = THREADENTRY32 {
-            dwSize: u32::try_from(mem::size_of::<THREADENTRY32>()).unwrap_or(u32::MAX),
-            ..THREADENTRY32::default()
-        };
-
-        let mut thread_id = None;
-        let mut more = Thread32First(snapshot, &raw mut entry) != 0;
-        while more {
-            if entry.th32OwnerProcessID == pid {
-                thread_id = Some(entry.th32ThreadID);
-                break;
-            }
-            more = Thread32Next(snapshot, &raw mut entry) != 0;
-        }
-        CloseHandle(snapshot);
-
-        let thread_id =
-            thread_id.ok_or_else(|| io::Error::other("the plugin has no thread to resume"))?;
-
-        let thread = OpenThread(THREAD_SUSPEND_RESUME, 0, thread_id);
-        if thread.is_null() {
-            return Err(io::Error::last_os_error());
-        }
-
-        let previous = ResumeThread(thread);
-        let error = io::Error::last_os_error();
-        CloseHandle(thread);
-
-        if previous == u32::MAX {
-            return Err(error);
-        }
-    }
-
-    Ok(())
-}
-
-/// Terminate a single process by PID.
-///
-/// The fallback for a plugin that could not be put in a job object.
-#[cfg(windows)]
-fn kill_child(pid: u32) {
-    use windows_sys::Win32::{
-        Foundation::CloseHandle,
-        System::Threading::{OpenProcess, PROCESS_TERMINATE, TerminateProcess},
-    };
-
-    // SAFETY: We're terminating a process we spawned.
-    unsafe {
-        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
-        if !handle.is_null() {
-            TerminateProcess(handle, 1);
-            CloseHandle(handle);
-        }
-    }
-    debug!(pid, "Sent TerminateProcess to plugin after grace period.");
-}
-
-/// Search `$PATH` for a plugin binary matching the given subcommand segments.
-///
-/// For `["serve"]`, looks for `jp-serve`.
-/// For `["conversation", "export"]`, looks for `jp-conversation-export`.
-pub(crate) fn find_plugin_binary(segments: &[&str]) -> Option<Utf8PathBuf> {
-    let name = format!("jp-{}", segments.join("-"));
-    which::which(&name)
-        .ok()
-        .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
-}
-
-/// Find any existing plugin binary without downloading or prompting.
-///
-/// Checks the install directory first, then `$PATH`.
-/// Used for non-mutating operations like help requests.
-pub(crate) fn find_any_plugin_binary(name: &str) -> Option<Utf8PathBuf> {
-    if let Some(path) = registry::find_installed(name) {
-        return Some(path);
-    }
-    let segments: Vec<&str> = name.split('-').collect();
-    find_plugin_binary(&segments)
-}
-
-/// Resolve a plugin binary through multiple sources:
-///
-/// 1. User-local install directory (previously installed plugins)
-/// 2. Plugin registry (auto-install if official, prompt if third-party)
-/// 3. `$PATH` (with approval check for unapproved plugins)
-///
-/// The `plugins_config` drives installation and execution policy.
-/// Per-plugin settings override the defaults from the registry (official vs
-/// third-party).
-pub(crate) async fn resolve_plugin_binary(
-    name: &str,
-    plugins_config: &PluginsConfig,
-    interactive: bool,
-    printer: &Printer,
-) -> Result<Option<Utf8PathBuf>, cmd::Error> {
-    let plugin_cfg = plugins_config.command.get(name);
-
-    // Explicit deny in config.
-    if plugin_cfg.is_some_and(|c| c.run == Some(RunPolicy::Deny)) {
+/// Checked before anything else, including downloading an official plugin:
+/// there is no point fetching a binary this run will not start.
+fn check_not_denied(name: &str, plugins_config: &PluginsConfig) -> Result<(), cmd::Error> {
+    if plugins_config
+        .command
+        .get(name)
+        .is_some_and(|c| c.run == Some(RunPolicy::Deny))
+    {
         return Err(cmd::Error::from(format!(
             "plugin `{name}` is denied by configuration (plugins.command.{name}.run = \"deny\")"
         )));
     }
 
-    // 1. Already installed locally.
-    if let Some(path) = registry::find_installed(name) {
-        debug!(name, %path, "Found installed plugin.");
-        verify_checksum(name, &path, plugin_cfg)?;
-        return Ok(Some(path));
-    }
-
-    // 2. Check registry.
-    if let Some(path) = try_registry_install(name, plugins_config, interactive, printer).await? {
-        return Ok(Some(path));
-    }
-
-    // 3. Check $PATH with run policy.
-    let segments: Vec<&str> = name.split('-').collect();
-    if let Some(path) = find_plugin_binary(&segments) {
-        check_run_policy(name, &path, plugin_cfg, interactive, printer)?;
-        return Ok(Some(path));
-    }
-
-    Ok(None)
-}
-
-/// Verify a binary's checksum against the config-pinned value, if any.
-fn verify_checksum(
-    name: &str,
-    binary_path: &Utf8Path,
-    plugin_cfg: Option<&CommandPluginConfig>,
-) -> Result<(), cmd::Error> {
-    let Some(checksum) = plugin_cfg.and_then(|c| c.checksum.as_ref()) else {
-        return Ok(());
-    };
-
-    let actual = registry::sha256_file(binary_path)?;
-    if actual != checksum.value {
-        return Err(cmd::Error::from(format!(
-            "plugin `{name}` binary checksum mismatch.\nexpected: {}\nactual:   {actual}\nThe \
-             binary at {binary_path} has changed since it was pinned. Update \
-             plugins.command.{name}.checksum.value in your config to accept the new binary.",
-            checksum.value,
-        )));
-    }
-
     Ok(())
 }
 
-/// Try to install a plugin from the cached registry.
-async fn try_registry_install(
-    name: &str,
-    plugins_config: &PluginsConfig,
-    interactive: bool,
-    printer: &Printer,
-) -> Result<Option<Utf8PathBuf>, cmd::Error> {
-    let Some(reg) = registry::load_cached() else {
-        return Ok(None);
-    };
+/// Ask an admitted plugin to describe itself, and check the answer against the
+/// binary's manifest.
+///
+/// The manifest and the answer come from one binary, so a difference is an
+/// error, not a choice between the two.
+/// For a binary without a manifest there is nothing to compare, and the caller
+/// decides what the answer is worth.
+///
+/// Cancelling `cancel` stops the plugin and everything it started, and the call
+/// fails as interrupted.
+///
+/// # Errors
+///
+/// Fails when the plugin gives no answer, an answer whose manifest fields are
+/// unusable, or one that disagrees with its manifest, and when `cancel` is
+/// cancelled before it answers.
+pub(crate) fn describe(
+    plugin: &LocalPlugin,
+    cancel: &CancellationToken,
+) -> Result<DescribeResponse, cmd::Error> {
+    let name = &plugin.name;
+    let path = &plugin.path;
 
-    // Find the registry entry whose `id` matches the requested name.
-    // In Phase 5, this will use the command path (registry key) for
-    // multi-segment routing. For now, we match on `id`.
-    let Some(plugin) = reg.plugins.values().find(|p| p.id == name) else {
-        return Ok(None);
-    };
-
-    // Only handle command plugins.
-    let jp_plugin::registry::PluginKind::Command { ref binaries, .. } = plugin.kind else {
-        return Ok(None);
-    };
-
-    let target = registry::current_target();
-    let Some(binary_info) = binaries.get(&target) else {
-        return Ok(None);
-    };
-
-    let id = &plugin.id;
-    let plugin_cfg = plugins_config.command.get(id);
-
-    // Check if auto-install is allowed.
-    let auto_install = plugin_cfg
-        .and_then(|c| c.install)
-        .unwrap_or(plugins_config.auto_install);
-
-    if !auto_install && !plugin.official {
-        return Ok(None);
+    let answer = describe_plugin(path, cancel);
+    if cancel.is_cancelled() {
+        return Err(cmd::Error::interrupted());
     }
 
-    // Determine run policy: config > registry default.
-    let run_policy = plugin_cfg
-        .and_then(|c| c.run)
-        .unwrap_or(if plugin.official {
-            RunPolicy::Unattended
-        } else {
-            RunPolicy::Ask
-        });
+    let answer =
+        answer.ok_or_else(|| format!("the plugin `{name}` at {path} did not describe itself"))?;
 
-    match run_policy {
-        RunPolicy::Deny => {
-            return Err(cmd::Error::from(format!(
-                "plugin `{id}` is denied by configuration"
-            )));
+    answer
+        .manifest
+        .check()
+        .map_err(|e| format!("the plugin `{name}` at {path} describes itself unusably: {e}"))?;
+
+    if let Some(manifest) = plugin.manifest.valid() {
+        let differs = manifest_differences(manifest, &answer.manifest);
+        if !differs.is_empty() {
+            return Err(format!(
+                "the plugin `{name}` at {path} describes itself differently from its manifest \
+                 ({}), so it does not run",
+                differs.join(", ")
+            )
+            .into());
         }
-        RunPolicy::Ask => {
-            if !interactive {
-                return Err(cmd::Error::from(format!(
-                    "plugin `{id}` requires approval. Run `jp plugin install {id}` first, or set \
-                     plugins.command.{id}.run = \"unattended\" in config."
-                )));
-            }
-
-            printer.prompt_println(format!("  \u{2192} Plugin `{id}` found in registry."));
-            let options = vec![
-                InlineOption::new('y', "install and run"),
-                InlineOption::new('n', "cancel"),
-            ];
-            let answer = InlineSelect::new("Install and run it?", options)
-                .prompt(&mut printer.prompt_writer())
-                .map_err(|e| cmd::Error::from(format!("prompt failed: {e}")))?;
-
-            if answer != 'y' {
-                return Err(cmd::Error::from("plugin execution cancelled"));
-            }
-        }
-        RunPolicy::Unattended => {}
     }
 
-    printer.eprintln(format!("  \u{2192} Installing jp-{id} for {target}..."));
-    let client = reqwest::Client::new();
-    let data = registry::download_and_verify(&client, binary_info).await?;
-
-    let path = registry::install_binary(id, &data)?;
-    printer.eprintln(format!("  \u{2192} Installed to {path}"));
-
-    // Verify against pinned checksum if configured.
-    verify_checksum(id, &path, plugin_cfg)?;
-
-    Ok(Some(path))
+    Ok(answer)
 }
 
-/// Check run policy for a `$PATH`-discovered plugin.
-fn check_run_policy(
-    name: &str,
-    binary_path: &Utf8Path,
-    plugin_cfg: Option<&CommandPluginConfig>,
-    interactive: bool,
-    printer: &Printer,
-) -> Result<(), cmd::Error> {
-    // Verify pinned checksum first.
-    verify_checksum(name, binary_path, plugin_cfg)?;
-
-    let run_policy = plugin_cfg.and_then(|c| c.run).unwrap_or(RunPolicy::Ask);
-
-    match run_policy {
-        RunPolicy::Unattended => Ok(()),
-        RunPolicy::Deny => Err(cmd::Error::from(format!(
-            "plugin `{name}` is denied by configuration"
-        ))),
-        RunPolicy::Ask => {
-            if !interactive {
-                return Err(cmd::Error::from(format!(
-                    "plugin `jp-{name}` found on $PATH but requires approval. Set \
-                     plugins.command.{name}.run = \"unattended\" in config, or run `jp {name}` in \
-                     a terminal."
-                )));
-            }
-
-            // Check existing permanent approvals.
-            if let Some(approvals) = registry::load_approvals()
-                && let Some(approved) = approvals.approved.get(name)
-                && approved.path == binary_path
-                && registry::sha256_file(binary_path).is_ok_and(|sha| sha == approved.sha256)
-            {
-                debug!(name, %binary_path, "Plugin previously approved.");
-                return Ok(());
-            }
-
-            printer.prompt_println(format!(
-                "  \u{2192} Found jp-{name} on $PATH ({binary_path})"
-            ));
-            let options = vec![
-                InlineOption::new('y', "run this time"),
-                InlineOption::new('Y', "run and remember permanently"),
-                InlineOption::new('n', "deny"),
-            ];
-            let answer = InlineSelect::new("Run it?", options)
-                .prompt(&mut printer.prompt_writer())
-                .map_err(|e| cmd::Error::from(format!("prompt failed: {e}")))?;
-
-            match answer {
-                'y' => Ok(()),
-                'Y' => {
-                    registry::save_approval(name, binary_path)?;
-                    Ok(())
-                }
-                _ => Err(cmd::Error::from("plugin execution denied")),
-            }
-        }
+/// The fields in which two manifests differ, by name.
+fn manifest_differences(a: &Manifest, b: &Manifest) -> Vec<&'static str> {
+    let mut differs = Vec::new();
+    if a.protocol != b.protocol {
+        differs.push("protocol");
     }
+    if a.description != b.description {
+        differs.push("description");
+    }
+    if a.command != b.command {
+        differs.push("command");
+    }
+    differs
 }
 
 /// Send a `Describe` request to a plugin and return its metadata.
@@ -2903,185 +2532,459 @@ fn check_run_policy(
 /// Spawns the binary, sends `{"type":"describe"}`, reads one response line, and
 /// returns the parsed [`DescribeResponse`].
 /// Returns `None` if the plugin doesn't support describe or fails to respond.
-pub(crate) fn describe_plugin(binary: &Utf8Path) -> Option<DescribeResponse> {
-    let mut child = Command::new(binary)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-
-    let mut child_stdin = child.stdin.take()?;
-    let child_stdout = child.stdout.take()?;
-
-    // Send describe request.
-    let json = serde_json::to_string(&HostToPlugin::Describe).ok()?;
-    writeln!(child_stdin, "{json}").ok()?;
-    child_stdin.flush().ok()?;
-    drop(child_stdin); // Signal no more messages.
-
-    // Read one line response.
-    let mut reader = BufReader::new(child_stdout);
-    let mut line = String::new();
-    reader.read_line(&mut line).ok()?;
-
-    drop(child.wait());
-
-    if line.trim().is_empty() {
+///
+/// The plugin and everything it started are killed once the answer is read, or
+/// once reading it failed: the plugin has nothing left to do, and one that
+/// keeps running would otherwise be waited on forever.
+/// They are killed as well when `cancel` is cancelled before the answer comes,
+/// which ends the read, and `None` is returned.
+fn describe_plugin(binary: &Utf8Path, cancel: &CancellationToken) -> Option<DescribeResponse> {
+    if cancel.is_cancelled() {
         return None;
     }
 
-    let msg: PluginToHost = serde_json::from_str(line.trim()).ok()?;
-    match msg {
-        PluginToHost::Describe(resp) => Some(resp),
+    let mut command = Command::new(binary);
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+
+    // Its own group, as for a run, so the group is what `ProcessTree` kills.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        command.process_group(0);
+    }
+
+    // Suspended until it is in its job, as for a run, so nothing it starts
+    // escapes the job.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+
+        use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+        command.creation_flags(CREATE_SUSPENDED);
+    }
+
+    let mut child = command.spawn().ok()?;
+    let tree = Arc::new(ProcessTree::new(&child));
+
+    #[cfg(windows)]
+    {
+        use super::process_tree::resume_suspended;
+
+        if resume_suspended(child.id()).is_err() {
+            tree.terminate();
+            drop(child.wait());
+            return None;
+        }
+    }
+
+    // The read below blocks, so a cancellation is acted on from a thread of
+    // its own: killing the tree closes the plugin's stdout, which ends the
+    // read.
+    let done = CancellationToken::new();
+    let watcher = {
+        let (tree, cancel, done) = (Arc::clone(&tree), cancel.clone(), done.clone());
+        thread::spawn(move || {
+            let cancelled = futures::executor::block_on(async {
+                tokio::select! {
+                    () = cancel.cancelled() => true,
+                    () = done.cancelled() => false,
+                }
+            });
+
+            if cancelled {
+                tree.terminate();
+            }
+        })
+    };
+
+    let answer = read_describe(&mut child);
+
+    // Joined before the child is reaped, so nothing signals the group once its
+    // id can be reused.
+    done.cancel();
+    drop(watcher.join());
+
+    tree.terminate();
+    drop(child.wait());
+
+    answer
+}
+
+/// Ask a spawned plugin to describe itself, and read its one-line answer.
+fn read_describe(child: &mut Child) -> Option<DescribeResponse> {
+    let mut stdin = child.stdin.take()?;
+    let stdout = child.stdout.take()?;
+
+    let json = serde_json::to_string(&HostToPlugin::Describe).ok()?;
+    writeln!(stdin, "{json}").ok()?;
+    stdin.flush().ok()?;
+
+    // Closed, so a plugin reading for more messages sees the end of them.
+    drop(stdin);
+
+    let mut line = String::new();
+    BufReader::new(stdout).read_line(&mut line).ok()?;
+
+    match serde_json::from_str(line.trim()).ok()? {
+        PluginToHost::Describe(answer) => Some(answer),
         _ => None,
     }
 }
 
-/// Discover plugin binaries on `$PATH` and in the user-local install directory.
+/// The registry to route with.
 ///
-/// Returns `(subcommand_name, binary_path)` pairs, sorted by name.
-/// For a binary named `jp-serve`, the subcommand name is `serve`.
-/// Installed plugins take priority over `$PATH` duplicates.
-pub(crate) fn discover_plugins() -> Vec<(String, Utf8PathBuf)> {
-    let path_var = std::env::var_os("PATH").unwrap_or_default();
-    let mut seen = HashSet::new();
-    let mut plugins = Vec::new();
+/// The cached copy, refreshed first only when nothing installed claims the
+/// command and the cache is missing or stale: an official command published
+/// since the cache was written would otherwise be reported as unknown.
+/// Running a command a plugin on this machine claims never reaches the network.
+async fn registry_for(args: &[String], local: &[LocalPlugin]) -> Option<Registry> {
+    let cached = registry::load_cached();
+    let route = routing::route(args, local, cached.as_ref());
 
-    // Scan install directory first so installed plugins take priority.
-    if let Some(bin_dir) = registry::bin_dir() {
-        scan_dir_for_plugins(&bin_dir, &mut seen, &mut plugins);
+    if needs_registry(args, &route)
+        && let Some(fresh) = registry::refresh(Refresh::WhenStale).await
+    {
+        return Some(fresh);
     }
 
-    for dir in std::env::split_paths(&path_var) {
-        let Some(dir) = Utf8Path::from_path(&dir) else {
-            continue;
-        };
-
-        scan_dir_for_plugins(dir, &mut seen, &mut plugins);
-    }
-
-    plugins.sort_by(|a, b| a.0.cmp(&b.0));
-    plugins
+    cached
 }
 
-fn scan_dir_for_plugins(
-    dir: &Utf8Path,
-    seen: &mut HashSet<String>,
-    plugins: &mut Vec<(String, Utf8PathBuf)>,
-) {
-    let Ok(entries) = dir.read_dir_utf8() else {
-        return;
+/// Whether routing `args` against the cached registry leaves the command to
+/// something only the registry can supply.
+///
+/// A command group answers for itself and its help, but a command under it that
+/// the cache does not list may have been published since the cache was written.
+fn needs_registry(args: &[String], route: &Result<Route<'_>, RouteError>) -> bool {
+    match route {
+        Ok(Route::NotFound | Route::ThirdParty { .. } | Route::Official { binary: None, .. }) => {
+            true
+        }
+        Ok(Route::Group { consumed, .. }) => {
+            let rest = &args[*consumed..];
+            !rest.is_empty() && !is_help(rest)
+        }
+        _ => false,
+    }
+}
+
+/// The plugin binaries on this machine, with the manifests their approvals
+/// recorded filled in for those whose file carries none.
+pub(crate) fn local_plugins(approvals: &ApprovalStore) -> Vec<LocalPlugin> {
+    let mut local = discovery::discover();
+    approvals.apply_recorded(&mut local);
+    local
+}
+
+/// Install the official plugin the arguments route to, when it is not installed
+/// yet.
+///
+/// Returns the plugin binaries on this machine afterwards, for routing again:
+/// the rules that decide between claims apply to a new binary like to any
+/// other.
+/// An installed official plugin is left as it is; `jp plugin update` updates
+/// it.
+async fn install_missing_official(
+    args: &[String],
+    local: Vec<LocalPlugin>,
+    registry: Option<&Registry>,
+    plugins_config: &PluginsConfig,
+    approvals: &mut ApprovalStore,
+    printer: &Printer,
+) -> Result<Vec<LocalPlugin>, cmd::Error> {
+    let (
+        Some(reg),
+        Ok(Route::Official {
+            key,
+            entry,
+            binary: None,
+            ..
+        }),
+    ) = (registry, routing::route(args, &local, registry))
+    else {
+        return Ok(local);
     };
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let Some(subcommand) = name.strip_prefix("jp-") else {
-            continue;
-        };
 
-        // On Windows, strip the .exe extension.
-        #[cfg(windows)]
-        let subcommand = subcommand.strip_suffix(".exe").unwrap_or(subcommand);
+    let id = &entry.id;
+    check_not_denied(id, plugins_config)?;
 
-        // On Unix, skip non-executable files.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            let Ok(meta) = entry.metadata() else {
-                continue;
-            };
-            if meta.permissions().mode() & 0o111 == 0 {
-                continue;
-            }
-        }
-
-        if seen.insert(subcommand.to_owned()) {
-            plugins.push((subcommand.to_owned(), entry.into_path()));
-        }
+    if registry::downloads_disabled() {
+        return Err(format!(
+            "`jp {key}` is provided by the official plugin `{id}`, which is not installed, and \
+             JP_NO_PLUGIN_DOWNLOAD is set. Install it with `jp plugin install {id}`."
+        )
+        .into());
     }
+
+    install::install_official(reg, key, approvals, printer).await?;
+    Ok(local_plugins(approvals))
 }
 
-/// Show a plugin's help text via the `Describe` protocol.
-pub(crate) fn show_plugin_help(binary: &Utf8Path) -> cmd::Output {
-    match describe_plugin(binary) {
-        Some(desc) => {
-            let mut out = std::io::stdout().lock();
-            if let Some(help) = &desc.help {
-                drop(writeln!(out, "{help}"));
-            } else {
-                drop(writeln!(out, "{}: {}", desc.name, desc.description));
-            }
-            Ok(())
-        }
-        None => Err(cmd::Error::from("plugin does not support describe")),
-    }
+/// Whether the arguments after the command ask for nothing but its help.
+fn is_help(rest: &[String]) -> bool {
+    !rest.is_empty() && rest.iter().all(|a| a == "-h" || a == "--help")
 }
 
-/// Produce a clap-formatted error for an unknown subcommand.
+/// Show a plugin's help, from a fresh `describe`, and the commands other
+/// plugins add under it.
 ///
-/// Uses `Command::error()` to get clap's standard error chrome (colored
-/// `error:` prefix, usage line, help hint).
-/// The message includes our plugin-specific context.
-/// Returns exit code 2 (clap's convention for usage errors) with no message,
-/// since the output was already written.
-fn unknown_subcommand_error(name: &str) -> cmd::Error {
+/// `cancel` stops the plugin if it is cancelled before the plugin answers.
+fn show_help(
+    plugin: &LocalPlugin,
+    path: &[String],
+    local: &[LocalPlugin],
+    registry: Option<&Registry>,
+    cancel: &CancellationToken,
+) -> cmd::Output {
+    let describe = describe(plugin, cancel)?;
+
+    let mut out = std::io::stdout().lock();
+    drop(writeln!(out, "{}", describe.help.trim_end()));
+
+    let children = help::children(path, local, registry);
+    if !children.is_empty() {
+        drop(write!(
+            out,
+            "\n{}",
+            help::render_listing("Plugins:", &children)
+        ));
+    }
+
+    Ok(())
+}
+
+/// Answer a command group, which has no binary of its own.
+///
+/// `jp <group> -h` shows its help; a bare `jp <group>` shows it too and exits
+/// with code 2, as a built-in group does; anything else names a command no
+/// installed plugin provides, and the third-party plugin that does when the
+/// registry lists one.
+///
+/// `consumed` is how many of `args` name the group.
+fn run_group(
+    args: &[String],
+    consumed: usize,
+    entry: &RegistryPlugin,
+    local: &[LocalPlugin],
+    registry: Option<&Registry>,
+) -> cmd::Output {
+    let (path, rest) = args.split_at(consumed);
+    let text = help::render_group(
+        path,
+        &entry.description,
+        &help::children(path, local, registry),
+    );
+
+    if is_help(rest) {
+        drop(write!(std::io::stdout().lock(), "{text}"));
+        return Ok(());
+    }
+
+    if rest.is_empty() {
+        drop(write!(std::io::stderr().lock(), "{text}"));
+        return Err(cmd::Error::from(2u8));
+    }
+
+    let mut message = format!("unrecognized subcommand '{}'\n", rest[0]);
+    match third_party_below(args, consumed, registry) {
+        Some((key, entry)) => message.push_str(&third_party_hint(key, entry)),
+        None => {
+            let _ = write!(
+                message,
+                "\n  No plugin provides `jp {} {}`. Run `jp {} -h` to see what does.",
+                path.join(" "),
+                rest[0],
+                path.join(" "),
+            );
+        }
+    }
+
+    Err(usage_error(message))
+}
+
+/// The third-party registry entry that names a command below the group `args`
+/// routed to, when there is one.
+///
+/// `consumed` is how many of `args` name the group.
+/// An entry for the group's own path, or for a shorter one, is not what the
+/// user typed, so it is not returned.
+fn third_party_below<'a>(
+    args: &[String],
+    consumed: usize,
+    registry: Option<&'a Registry>,
+) -> Option<(&'a str, &'a RegistryPlugin)> {
+    match routing::third_party_hint(args, registry) {
+        Route::ThirdParty { key, entry } if routing::segments(key).len() > consumed => {
+            Some((key, entry))
+        }
+        _ => None,
+    }
+}
+
+/// The lines saying which third-party plugin provides `jp {key}`, and how to
+/// install it.
+fn third_party_hint(key: &str, entry: &RegistryPlugin) -> String {
+    let from = entry
+        .repository
+        .as_deref()
+        .map(|repository| format!(" ({repository})"))
+        .unwrap_or_default();
+
+    format!(
+        "\n  `jp {key}` is provided by the third-party plugin `{}`{from}.\n  Install it with `jp \
+         plugin install {}`.",
+        entry.id, entry.id,
+    )
+}
+
+/// The error for a command nothing handles.
+///
+/// Names the third-party plugin that provides it when the registry lists one,
+/// and a binary that carries the command's name but no usable manifest.
+fn unknown_subcommand_error(
+    args: &[String],
+    local: &[LocalPlugin],
+    third_party: Option<(&str, &RegistryPlugin)>,
+) -> cmd::Error {
+    let name = args.first().map_or("", String::as_str);
+    let mut message = format!("unrecognized subcommand '{name}'\n");
+
+    if let Some((key, entry)) = third_party {
+        message.push_str(&third_party_hint(key, entry));
+        return usage_error(message);
+    }
+
+    let unusable: Vec<_> = local
+        .iter()
+        .filter(|plugin| plugin.name == name)
+        .filter_map(|plugin| Some((plugin, plugin.manifest.problem()?)))
+        .collect();
+
+    if unusable.is_empty() {
+        message.push_str("\n  No built-in command or plugin handles it.");
+    }
+
+    for (plugin, problem) in unusable {
+        let _ = write!(
+            message,
+            "\n  `jp-{name}` at {} has {problem}, so it handles no command.",
+            plugin.path,
+        );
+    }
+
+    usage_error(message)
+}
+
+/// Print a clap-formatted usage error, and exit with clap's code for one.
+///
+/// Uses `Command::error()` for clap's standard error chrome (colored `error:`
+/// prefix, usage line, help hint), so an unknown plugin command reads like an
+/// unknown built-in one.
+fn usage_error(message: String) -> cmd::Error {
     use clap::CommandFactory as _;
 
-    let mut cmd = crate::Cli::command();
-    let err = cmd.error(
-        clap::error::ErrorKind::InvalidSubcommand,
-        format!(
-            "unrecognized subcommand '{name}'\n\n  No built-in command, registry plugin, or \
-             `jp-{name}` binary found on $PATH."
-        ),
-    );
+    let err = crate::Cli::command().error(clap::error::ErrorKind::InvalidSubcommand, message);
     drop(err.print());
     cmd::Error::from(2u8)
 }
 
 /// Dispatch an external plugin subcommand.
 ///
-/// Resolves the plugin binary, then runs the protocol loop.
+/// Routes the arguments to a plugin by the commands the plugins on this machine
+/// and the official registry entries claim, installs an official plugin typed
+/// for the first time, admits the binary, and runs the protocol loop.
 /// Called from `Commands::run()` after the normal startup flow.
 pub(crate) async fn run_external(args: &[String], ctx: &mut Ctx) -> cmd::Output {
-    let (subcommand, plugin_args) = args
-        .split_first()
-        .ok_or("no subcommand provided for plugin dispatch")?;
-
-    // A bare `jp <plugin> --help` is answered from the plugin's self-description,
-    // without downloading or approving anything.
-    //
-    // Help for something *within* the plugin (`jp <plugin> add --help`) is the
-    // plugin's own to render, and only it knows its subcommands, so that goes
-    // through normal dispatch below.
-    let bare_help =
-        !plugin_args.is_empty() && plugin_args.iter().all(|a| a == "-h" || a == "--help");
-    if bare_help {
-        let binary = find_any_plugin_binary(subcommand).ok_or_else(|| {
-            cmd::Error::from(format!(
-                "plugin `{subcommand}` not found. No installed plugin or `jp-{subcommand}` binary \
-                 found on $PATH.",
-            ))
-        })?;
-        return show_plugin_help(&binary);
-    }
-
     let config = ctx.config();
-    let Some(binary) = resolve_plugin_binary(
-        subcommand,
+    let interactive = ctx.term.interactive;
+    let mut approvals = ApprovalStore::load();
+
+    let local = local_plugins(&approvals);
+    let registry = registry_for(args, &local).await;
+    let local = install_missing_official(
+        args,
+        local,
+        registry.as_ref(),
         &config.plugins,
-        ctx.term.interactive,
+        &mut approvals,
         &ctx.printer,
     )
-    .await?
-    else {
-        return Err(unknown_subcommand_error(subcommand));
+    .await?;
+
+    let route = routing::route(args, &local, registry.as_ref())
+        .map_err(|error| cmd::Error::from(error.to_string()))?;
+
+    let (plugin, consumed, official) = match route {
+        Route::NotFound => return Err(unknown_subcommand_error(args, &local, None)),
+        Route::ThirdParty { key, entry } => {
+            return Err(unknown_subcommand_error(args, &local, Some((key, entry))));
+        }
+        Route::Group {
+            entry, consumed, ..
+        } => {
+            return run_group(args, consumed, entry, &local, registry.as_ref());
+        }
+        Route::Local {
+            plugin,
+            consumed,
+            replaces,
+        } => (plugin, consumed, Official {
+            official: false,
+            sha256: None,
+            replaces,
+        }),
+        Route::Official {
+            entry,
+            binary: Some(plugin),
+            consumed,
+            ..
+        } => (plugin, consumed, Official {
+            official: true,
+            sha256: registry::release(entry).map(|release| release.sha256.as_str()),
+            replaces: None,
+        }),
+        Route::Official {
+            entry,
+            binary: None,
+            ..
+        } => {
+            return Err(format!(
+                "`jp-{}` was installed, but no binary for it was found afterwards",
+                entry.id
+            )
+            .into());
+        }
     };
 
-    debug!(%binary, subcommand, "Dispatching to plugin.");
+    admit(
+        plugin,
+        official,
+        &config.plugins,
+        &mut approvals,
+        interactive,
+        &ctx.printer,
+    )?;
 
-    run_plugin(subcommand, &binary, plugin_args, ctx).await?;
-    Ok(())
+    let rest = &args[consumed..];
+    if is_help(rest) {
+        // A Ctrl-C with no handler pushed cancels the shutdown token, which
+        // stops the plugin rather than leaving it running once `jp` exits.
+        let cancel = ctx.signals.shutdown_token();
+        return show_help(
+            plugin,
+            &args[..consumed],
+            &local,
+            registry.as_ref(),
+            &cancel,
+        );
+    }
+
+    let (name, binary) = (plugin.name.clone(), plugin.path.clone());
+    debug!(%binary, name, "Dispatching to plugin.");
+    run_plugin(&name, &binary, rest, ctx).await
 }
 
 #[cfg(test)]

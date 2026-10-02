@@ -463,6 +463,41 @@ impl Printer {
         self.send(Command::Print(task));
     }
 
+    /// Print a line reporting an error to the error stream.
+    ///
+    /// An error is not chrome: it reaches stderr whether or not the chrome
+    /// channel is silenced.
+    /// Under [`OutputFormat::Json`] it becomes one `{"message":"..."}` record,
+    /// the same shape [`Self::eprintln`] writes.
+    pub fn error_println<P: Printable>(&self, p: P) {
+        let mut task = p.into_task();
+        if self.format.is_json() {
+            task = self.wrap_json(task);
+        }
+
+        self.send_error(task);
+    }
+
+    /// Print a pre-formatted line reporting an error, without JSON wrapping.
+    ///
+    /// For an error that is already a JSON record of its own.
+    /// Like [`Self::error_println`], it reaches stderr whether or not the
+    /// chrome channel is silenced.
+    pub fn error_println_raw<P: Printable>(&self, p: P) {
+        self.send_error(p.into_task());
+    }
+
+    /// Send an error line to stderr, past the chrome filter.
+    fn send_error(&self, mut task: PrintTask) {
+        task.content.push('\n');
+        task.target = PrintTarget::Err;
+
+        self.track_pending(&task);
+        if let Err(command) = self.tx.send(Command::Print(task)) {
+            error!(?command, "Failed to send command");
+        }
+    }
+
     /// Erase the current line on the chrome channel.
     ///
     /// For chrome that repaints in place: status lines, progress counters, the

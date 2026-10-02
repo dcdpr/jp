@@ -3991,11 +3991,11 @@ _install-ticket *args:
 
 # Build the `jp-serve-web` command plugin into JP's plugin directory.
 #
-# Not `cargo install`, unlike the other plugins. `jp` resolves a plugin by
-# checking its own plugin directory first and returning immediately, and
-# `serve-web` is an official registry plugin, so anything the registry put there
-# shadows a build in `~/.cargo/bin` forever. Writing the local build to the same
-# place is what lets a checkout win.
+# Not `cargo install`, unlike the other plugins. `serve-web` is an official
+# registry plugin, so `jp` may already have installed a released build into its
+# plugin directory, and a second `jp-serve-web` in `~/.cargo/bin` would share its
+# name: `jp` refuses to run either of two binaries with one name. Writing the
+# local build over the installed one is what lets a checkout win.
 #
 # Deliberately ignores `JP_NO_INSTALL`: that variable exists to stop recipes from
 # rebuilding `jp` itself, and this recipe's only job is to build the plugin.

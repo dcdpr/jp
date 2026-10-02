@@ -144,10 +144,10 @@ async fn apply_on_selects_rules_per_trigger() {
 }
 
 #[tokio::test]
-async fn unattended_commands_run_without_prompting() {
+async fn allowed_commands_run_without_prompting() {
     let (rules, tmp, printer, _err, prompts) = setup(
         r#"{
-            "greeting": { "value": { "cmd": "echo hello" }, "run": "unattended" }
+            "greeting": { "value": { "cmd": "echo hello" }, "run": "allow" }
         }"#,
     );
     let resolver =
@@ -174,7 +174,7 @@ async fn command_output_is_one_value_per_line() {
                         "shell": true
                     }
                 },
-                "run": "unattended"
+                "run": "allow"
             }
         }"#,
     );
@@ -194,7 +194,7 @@ async fn command_output_is_one_value_per_line() {
 #[tokio::test]
 async fn a_silent_command_produces_no_values() {
     let (rules, tmp, printer, _err, prompts) =
-        setup(r#"{ "quiet": { "value": { "cmd": "true" }, "run": "unattended" } }"#);
+        setup(r#"{ "quiet": { "value": { "cmd": "true" }, "run": "allow" } }"#);
     let resolver =
         Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
@@ -209,7 +209,7 @@ async fn a_silent_command_produces_no_values() {
 #[tokio::test]
 async fn a_failing_command_drops_its_key() {
     let (rules, tmp, printer, _err, prompts) =
-        setup(r#"{ "broken": { "value": { "cmd": "false" }, "run": "unattended" } }"#);
+        setup(r#"{ "broken": { "value": { "cmd": "false" }, "run": "allow" } }"#);
     let resolver =
         Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
@@ -226,7 +226,7 @@ async fn shell_commands_get_a_shell() {
                 "value": {
                     "cmd": { "program": "echo a b c | tr ' ' -", "args": [], "shell": true }
                 },
-                "run": "unattended"
+                "run": "allow"
             }
         }"#,
     );
@@ -243,7 +243,7 @@ async fn shell_commands_get_a_shell() {
 #[tokio::test]
 async fn a_label_command_is_reached_by_a_terminal_ctrl_c() {
     let (rules, tmp, printer, _err, prompts) =
-        setup(r#"{ "greeting": { "value": { "cmd": "echo hello" }, "run": "unattended" } }"#);
+        setup(r#"{ "greeting": { "value": { "cmd": "echo hello" }, "run": "allow" } }"#);
     let runner = Arc::new(MockProcessRunner::responding(|_| {
         Ok(ProcessOutput {
             stdout: "hello\n".to_owned(),
@@ -267,7 +267,7 @@ async fn a_label_command_is_reached_by_a_terminal_ctrl_c() {
 #[tokio::test]
 async fn a_failing_commands_stderr_is_in_the_error() {
     let (rules, tmp, printer, _err, prompts) =
-        setup(r#"{ "broken": { "value": { "cmd": "false" }, "run": "unattended" } }"#);
+        setup(r#"{ "broken": { "value": { "cmd": "false" }, "run": "allow" } }"#);
     let runner = Arc::new(
         MockProcessRunner::builder()
             .expect("false")
@@ -309,7 +309,7 @@ async fn automatic_application_drops_a_failing_command() {
     let (rules, tmp, printer, err, prompts) = setup(
         r#"{
             "ok": "kept",
-            "broken": { "value": { "cmd": "false" }, "run": "unattended" }
+            "broken": { "value": { "cmd": "false" }, "run": "allow" }
         }"#,
     );
     let resolver =
@@ -331,7 +331,7 @@ async fn automatic_application_drops_a_failing_command() {
 #[tokio::test]
 async fn alias_errors_on_a_failing_command() {
     let (rules, tmp, printer, _err, prompts) =
-        setup(r#"{ "broken": { "value": { "cmd": "false" }, "run": "unattended" } }"#);
+        setup(r#"{ "broken": { "value": { "cmd": "false" }, "run": "allow" } }"#);
     let resolver =
         Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 
@@ -443,7 +443,7 @@ async fn an_optional_failing_command_is_skipped_silently() {
     let (rules, tmp, printer, err, prompts) = setup(
         r#"{
             "ok": "kept",
-            "broken": { "value": { "cmd": "false" }, "run": "unattended", "optional": true }
+            "broken": { "value": { "cmd": "false" }, "run": "allow", "optional": true }
         }"#,
     );
     let resolver =
@@ -461,9 +461,8 @@ async fn an_optional_failing_command_is_skipped_silently() {
 /// rather than aborting the command.
 #[tokio::test]
 async fn an_optional_alias_failure_resolves_to_nothing() {
-    let (rules, tmp, printer, err, prompts) = setup(
-        r#"{ "broken": { "value": { "cmd": "false" }, "run": "unattended", "optional": true } }"#,
-    );
+    let (rules, tmp, printer, err, prompts) =
+        setup(r#"{ "broken": { "value": { "cmd": "false" }, "run": "allow", "optional": true } }"#);
     let resolver =
         Resolver::new(&rules, tmp.path(), false, &printer, &prompts).with_runner(commands());
 

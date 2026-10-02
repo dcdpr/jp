@@ -158,8 +158,8 @@ async fn native_service(upstream: &Client) -> (Service, HostReceiver) {
     let mut cfg = AppConfig::new_test();
     let partial: PartialToolConfig = serde_json::from_value(json!({
         "source": "mcp.upstream.native",
-        "run": "unattended",
-        "result": "unattended",
+        "run": "allow",
+        "result": "allow",
     }))
     .unwrap();
     cfg.conversation.tools.insert(
@@ -332,7 +332,7 @@ async fn native_upstream_result_survives_host_projection_and_http_delivery() {
         let mut cfg = AppConfig::new_test();
         let partial: PartialToolConfig = serde_json::from_value(json!({
             "source": "mcp.upstream.native",
-            "run": "unattended",
+            "run": "allow",
             "result": "ask",
         }))
         .unwrap();

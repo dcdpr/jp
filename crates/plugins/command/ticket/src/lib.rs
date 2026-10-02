@@ -297,6 +297,16 @@ pub fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String
 /// discovering it mid-prompt.
 const REQUIRED_PROTOCOL: u32 = 2;
 
+/// Where this plugin attaches to `jp`, readable from the binary without running
+/// it.
+///
+/// `protocol` has to match `REQUIRED_PROTOCOL`.
+pub static MANIFEST: &str = jp_plugin::manifest!(
+    protocol: 2,
+    description: "Track work items as markdown files",
+    command: ["ticket"],
+);
+
 fn handle_command(
     init: &InitMessage,
     stdin: &mut impl BufRead,
@@ -1639,18 +1649,14 @@ pub fn help_text() -> String {
 }
 
 fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Describe(DescribeResponse {
-            name: "ticket".to_owned(),
-            version: env!("CARGO_PKG_VERSION").to_owned(),
-            description: "Track work items as markdown files".to_owned(),
-            command: vec!["ticket".to_owned()],
-            author: Some("Jean Mertz <git@jeanmertz.com>".to_owned()),
-            help: Some(help_text()),
-            repository: Some("https://github.com/dcdpr/jp".to_owned()),
-        }),
-    )
+    let mut describe =
+        DescribeResponse::from_manifest(MANIFEST, "ticket", env!("CARGO_PKG_VERSION"), help_text())
+            .map_err(|e| format!("invalid embedded manifest: {e}"))?;
+
+    describe.author = Some("Jean Mertz <git@jeanmertz.com>".to_owned());
+    describe.repository = Some("https://github.com/dcdpr/jp".to_owned());
+
+    send(stdout, &PluginToHost::Describe(describe))
 }
 
 fn print(stdout: &mut impl Write, text: &str) -> Result<(), String> {

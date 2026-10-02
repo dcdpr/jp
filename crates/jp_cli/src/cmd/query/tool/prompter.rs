@@ -128,7 +128,7 @@ impl ToolPrompter {
     ///
     /// - Show an interactive prompt (Ask)
     /// - Edit the arguments inline (Edit)
-    /// - Return immediately (Unattended)
+    /// - Return immediately (Allow)
     ///
     /// # Returns
     ///
@@ -137,7 +137,7 @@ impl ToolPrompter {
     /// - `PermissionResult::Skip` if the user declined
     pub fn prompt_permission(&self, info: &PermissionInfo) -> Result<PermissionResult, Error> {
         match info.run_mode {
-            RunMode::Unattended => Ok(PermissionResult::Run {
+            RunMode::Allow => Ok(PermissionResult::Run {
                 arguments: info.arguments.clone(),
                 persist: false,
             }),

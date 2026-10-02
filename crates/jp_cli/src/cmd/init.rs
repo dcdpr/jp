@@ -269,7 +269,7 @@ impl Init {
         }
 
         Ok(if answer.starts_with("Yes") {
-            RunMode::Unattended
+            RunMode::Allow
         } else {
             RunMode::Ask
         })

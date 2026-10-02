@@ -40,12 +40,22 @@ use crate::{client::SharedWriter, log_layer::ProtocolLogLayer};
 /// conversation would end its turn and discard what was typed.
 const REQUIRED_PROTOCOL: u32 = 9;
 
+/// Where this plugin attaches to `jp`, readable from the binary without running
+/// it.
+///
+/// `protocol` has to match `REQUIRED_PROTOCOL`.
+pub static MANIFEST: &str = jp_plugin::manifest!(
+    protocol: 9,
+    description: "Web UI for browsing conversations and continuing them",
+    command: ["serve", "web"],
+);
+
 /// What a human running the binary directly is shown instead of a hung read on
 /// a protocol that is never going to speak.
 pub const HELP_TEXT: &str = "\
 Start the web interface for browsing JP conversations and continuing them.
 
-Usage: jp serve-web [OPTIONS]
+Usage: jp serve web [OPTIONS]
 
 Options:
   --bind <ADDR>    Address to bind to [default: 127.0.0.1]
@@ -206,18 +216,18 @@ fn run_server(
 }
 
 fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Describe(DescribeResponse {
-            name: "serve-web".to_owned(),
-            version: env!("CARGO_PKG_VERSION").to_owned(),
-            description: "Web UI for browsing conversations and continuing them".to_owned(),
-            command: vec!["serve".to_owned(), "web".to_owned()],
-            author: Some("Jean Mertz <git@jeanmertz.com>".to_owned()),
-            help: Some(HELP_TEXT.to_owned()),
-            repository: Some("https://github.com/dcdpr/jp".to_owned()),
-        }),
+    let mut describe = DescribeResponse::from_manifest(
+        MANIFEST,
+        "serve-web",
+        env!("CARGO_PKG_VERSION"),
+        HELP_TEXT,
     )
+    .map_err(|e| format!("invalid embedded manifest: {e}"))?;
+
+    describe.author = Some("Jean Mertz <git@jeanmertz.com>".to_owned());
+    describe.repository = Some("https://github.com/dcdpr/jp".to_owned());
+
+    send(stdout, &PluginToHost::Describe(describe))
 }
 
 fn read_message(stdin: &mut impl BufRead) -> Result<HostToPlugin, String> {
@@ -277,3 +287,7 @@ pub fn init_tracing() -> ProtocolLogHandle {
 
     handle
 }
+
+#[cfg(test)]
+#[path = "lib_tests.rs"]
+mod tests;

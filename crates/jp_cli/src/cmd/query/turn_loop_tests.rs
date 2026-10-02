@@ -695,14 +695,14 @@ async fn two_client_replies_during_a_tool_both_reach_the_conversation() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         config
             .conversation
             .tools
             .insert("slow_tool".to_string(), ToolConfig {
                 source: ToolSource::Local { tool: None },
                 command: None,
-                run: Some(RunMode::Unattended),
+                run: Some(RunMode::Allow),
                 format: None,
                 enable: None,
                 summary: None,
@@ -1939,14 +1939,14 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         config
             .conversation
             .tools
             .insert("slow_tool".to_string(), ToolConfig {
                 source: ToolSource::Local { tool: None },
                 command: None,
-                run: Some(RunMode::Unattended),
+                run: Some(RunMode::Allow),
                 format: None,
                 enable: None,
                 summary: None,
@@ -2084,7 +2084,7 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         // Skip the interrupt menu: Ctrl-C during tool execution cancels the
         // tools, records their cancellation responses, and ends the turn.
         config.interrupt.tool_call.action = ToolInterruptAction::Stop;
@@ -2094,7 +2094,7 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
             .insert("slow_tool".to_string(), ToolConfig {
                 source: ToolSource::Local { tool: None },
                 command: None,
-                run: Some(RunMode::Unattended),
+                run: Some(RunMode::Allow),
                 format: None,
                 enable: None,
                 summary: None,
@@ -2226,14 +2226,14 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         config
             .conversation
             .tools
             .insert("question_tool".to_string(), ToolConfig {
                 source: ToolSource::Local { tool: None },
                 command: None,
-                run: Some(RunMode::Unattended),
+                run: Some(RunMode::Allow),
                 format: None,
                 enable: None,
                 summary: None,
@@ -2566,14 +2566,14 @@ async fn test_tool_restart_on_interrupt() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         config
             .conversation
             .tools
             .insert("slow_tool".to_string(), ToolConfig {
                 source: ToolSource::Local { tool: None },
                 command: None,
-                run: Some(RunMode::Unattended),
+                run: Some(RunMode::Allow),
                 format: None,
                 enable: None,
                 summary: None,
@@ -2721,14 +2721,14 @@ async fn test_merged_stream_exits_after_tool_response() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         config
             .conversation
             .tools
             .insert("echo_tool".to_string(), ToolConfig {
                 source: ToolSource::Local { tool: None },
                 command: Some(CommandConfigOrString::String("echo hello".to_string())),
-                run: Some(RunMode::Unattended),
+                run: Some(RunMode::Allow),
                 format: None,
                 enable: None,
                 summary: None,
@@ -3246,24 +3246,24 @@ async fn test_permission_prompt_follows_interactive_not_is_tty() {
 
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
-async fn test_tool_call_with_run_mode_unattended() {
-    // Tests: LLM returns tool call → Unattended mode → tool runs without prompt
+async fn test_tool_call_with_run_mode_allow() {
+    // Tests: LLM returns tool call → Allow mode → tool runs without prompt
     // Uses MockExecutor to avoid shell commands.
     let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
         let root = tmp.path();
         let storage = root.join(".jp");
 
-        // Configure tool with run = Unattended (no prompt needed)
+        // Configure tool with run = Allow (no prompt needed)
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         config
             .conversation
             .tools
             .insert("mock_tool".to_string(), ToolConfig {
                 source: ToolSource::Local { tool: None },
                 command: None,
-                run: Some(RunMode::Unattended),
+                run: Some(RunMode::Allow),
                 format: None,
                 enable: None,
                 summary: None,
@@ -3304,7 +3304,7 @@ async fn test_tool_call_with_run_mode_unattended() {
         // No prompt responses needed - tool runs without asking
         let backend = MockPromptBackend::new();
 
-        // MockExecutor without permission_info (Unattended mode)
+        // MockExecutor without permission_info (Allow mode)
         let executor_source = TestExecutorSource::new().with_executor("mock_tool", |req| {
             // No permission_info = no prompt required
             Box::new(MockExecutor::completed(
@@ -3322,7 +3322,7 @@ async fn test_tool_call_with_run_mode_unattended() {
             &router,
             Utf8Path::new("/tmp"),
             InvocationContext::default(),
-            true, // interactive doesn't matter for Unattended
+            true, // interactive doesn't matter for Allow
             &[],
             &lock,
             ToolChoice::Auto,
@@ -3540,7 +3540,7 @@ async fn test_tool_call_with_run_mode_skip() {
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn test_multiple_tools_with_different_run_modes() {
-    // Tests: LLM returns 2 tool calls → one Ask (approved), one Unattended
+    // Tests: LLM returns 2 tool calls → one Ask (approved), one Allow
     // Both should complete successfully with proper handling.
     let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
@@ -3576,7 +3576,7 @@ async fn test_multiple_tools_with_different_run_modes() {
             .insert("tool_unattended".to_string(), ToolConfig {
                 source: ToolSource::Local { tool: None },
                 command: None,
-                run: Some(RunMode::Unattended),
+                run: Some(RunMode::Allow),
                 format: None,
                 enable: None,
                 summary: None,
@@ -3756,14 +3756,14 @@ async fn test_tool_call_returns_error() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         config
             .conversation
             .tools
             .insert("failing_tool".to_string(), ToolConfig {
                 source: ToolSource::Local { tool: None },
                 command: None,
-                run: Some(RunMode::Unattended),
+                run: Some(RunMode::Allow),
                 format: None,
                 enable: None,
                 summary: None,
@@ -5060,14 +5060,14 @@ async fn test_parallel_tool_calls_rendered_atomically() {
         });
 
         // Configure tools with FunctionCall style for readable output.
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         config
             .conversation
             .tools
             .insert("tool_a".to_string(), ToolConfig {
                 source: ToolSource::Local { tool: None },
                 command: None,
-                run: Some(RunMode::Unattended),
+                run: Some(RunMode::Allow),
                 format: None,
                 enable: None,
                 summary: None,
@@ -5087,7 +5087,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             .insert("tool_b".to_string(), ToolConfig {
                 source: ToolSource::Local { tool: None },
                 command: None,
-                run: Some(RunMode::Unattended),
+                run: Some(RunMode::Allow),
                 format: None,
                 enable: None,
                 summary: None,
@@ -5252,14 +5252,14 @@ async fn test_single_tool_call_rendered_with_args() {
 
         let mut config = AppConfig::new_test();
         config.style.tool_call.show = true;
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         config
             .conversation
             .tools
             .insert("fs_read_file".to_string(), ToolConfig {
                 source: ToolSource::Local { tool: None },
                 command: None,
-                run: Some(RunMode::Unattended),
+                run: Some(RunMode::Allow),
                 format: None,
                 enable: None,
                 summary: None,
@@ -5466,7 +5466,7 @@ fn talking_tool_config(names: &[&str]) -> AppConfig {
     config.style.tool_call.progress.delay_secs = 0;
     config.style.tool_call.progress.interval_ms = 10;
     config.style.tool_call.progress.stderr_rows = StderrRows::Fixed(RowCount { rows: 2 });
-    config.conversation.tools.defaults.run = RunMode::Unattended;
+    config.conversation.tools.defaults.run = RunMode::Allow;
 
     for name in names {
         config
@@ -5475,7 +5475,7 @@ fn talking_tool_config(names: &[&str]) -> AppConfig {
             .insert((*name).to_owned(), ToolConfig {
                 source: ToolSource::Local { tool: None },
                 command: None,
-                run: Some(RunMode::Unattended),
+                run: Some(RunMode::Allow),
                 format: None,
                 enable: None,
                 summary: None,
@@ -5970,7 +5970,7 @@ async fn a_tool_can_opt_out_of_the_progress_window() {
             .insert("quiet_tool".to_owned(), ToolConfig {
                 source: ToolSource::Local { tool: None },
                 command: None,
-                run: Some(RunMode::Unattended),
+                run: Some(RunMode::Allow),
                 format: None,
                 enable: None,
                 summary: None,
@@ -6516,7 +6516,7 @@ fn inquiry_tool_config(questions: &[&str]) -> ToolConfig {
     ToolConfig {
         source: ToolSource::Local { tool: None },
         command: None,
-        run: Some(RunMode::Unattended),
+        run: Some(RunMode::Allow),
         format: None,
         enable: None,
         summary: None,
@@ -6735,7 +6735,7 @@ async fn test_tool_with_single_inquiry() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         config.conversation.tools.insert(
             "inquiry_tool".to_string(),
             inquiry_tool_config(&["confirm"]),
@@ -6867,7 +6867,7 @@ async fn test_secret_question_without_tty_fails_tool() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         // Register the tool without a question config: the question targets
         // the user by default, and without a TTY it would fall back to the
         // inquiry backend — which the secret guard refuses.
@@ -6978,7 +6978,7 @@ async fn test_secret_question_with_assistant_target_fails_tool() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         // Route the secret question to the assistant — the guard refuses.
         config.conversation.tools.insert(
             "secret_tool".to_string(),
@@ -7078,7 +7078,7 @@ async fn test_secret_prompter_answer_is_redacted() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         // Register the tool without a question config: the question targets
         // the user and the TTY prompter answers it via the no-echo password
         // path.
@@ -7180,7 +7180,7 @@ async fn test_secret_static_answer_is_redacted() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         let mut tool_config = inquiry_tool_config(&[]);
         tool_config
             .questions
@@ -7287,7 +7287,7 @@ async fn test_static_answer_records_answered_inquiry() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         let mut tool_config = inquiry_tool_config(&[]);
         tool_config
             .questions
@@ -7401,7 +7401,7 @@ async fn test_remembered_answer_cache_hit_records_new_inquiry_pair() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         // No question config: the question targets the user and is answered
         // at the interactive prompter.
         config
@@ -7519,7 +7519,7 @@ async fn test_tool_with_multiple_inquiries() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         config.conversation.tools.insert(
             "multi_q_tool".to_string(),
             inquiry_tool_config(&["confirm", "reason"]),
@@ -7644,7 +7644,7 @@ async fn test_parallel_tools_one_with_inquiry() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         config.conversation.tools.insert(
             "inquiry_tool".to_string(),
             inquiry_tool_config(&["confirm"]),
@@ -7655,7 +7655,7 @@ async fn test_parallel_tools_one_with_inquiry() {
             .insert("normal_tool".to_string(), ToolConfig {
                 source: ToolSource::Local { tool: None },
                 command: None,
-                run: Some(RunMode::Unattended),
+                run: Some(RunMode::Allow),
                 format: None,
                 enable: None,
                 summary: None,
@@ -7791,7 +7791,7 @@ async fn test_parallel_tools_both_with_inquiries() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         config
             .conversation
             .tools
@@ -8067,7 +8067,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         // Only `ok_tool` is configured. `missing_tool` will trip
         // `prepare_one`'s "tool not available" path and become a
         // pre-resolved error response.
@@ -8077,7 +8077,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
             .insert("ok_tool".to_string(), ToolConfig {
                 source: ToolSource::Local { tool: None },
                 command: None,
-                run: Some(RunMode::Unattended),
+                run: Some(RunMode::Allow),
                 format: None,
                 enable: None,
                 summary: None,
@@ -8203,7 +8203,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
         let storage = root.join(".jp");
 
         let mut config = AppConfig::new_test();
-        config.conversation.tools.defaults.run = RunMode::Unattended;
+        config.conversation.tools.defaults.run = RunMode::Allow;
         config.conversation.tools.insert(
             "inquiry_tool".to_string(),
             inquiry_tool_config(&["confirm"]),
@@ -8499,14 +8499,14 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
 
     let mut config = AppConfig::new_test();
     config.style.tool_call.show = true;
-    config.conversation.tools.defaults.run = RunMode::Unattended;
+    config.conversation.tools.defaults.run = RunMode::Allow;
     config
         .conversation
         .tools
         .insert("mock_tool".to_string(), ToolConfig {
             source: ToolSource::Local { tool: None },
             command: None,
-            run: Some(RunMode::Unattended),
+            run: Some(RunMode::Allow),
             format: None,
             enable: None,
             summary: None,
@@ -8624,14 +8624,14 @@ async fn a_tool_that_does_not_join_reasoning_renders_unshaded_live() {
 
     let mut config = AppConfig::new_test();
     config.style.tool_call.show = true;
-    config.conversation.tools.defaults.run = RunMode::Unattended;
+    config.conversation.tools.defaults.run = RunMode::Allow;
     config
         .conversation
         .tools
         .insert("mock_tool".to_string(), ToolConfig {
             source: ToolSource::Local { tool: None },
             command: None,
-            run: Some(RunMode::Unattended),
+            run: Some(RunMode::Allow),
             format: None,
             enable: None,
             summary: None,
@@ -9050,7 +9050,7 @@ async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
         let root = tmp.path();
         let mut config = AppConfig::new_test();
         let partial: PartialToolConfig = serde_json::from_value(json!({
-            "source":"builtin", "run":"unattended", "style":{"hidden":true},
+            "source":"builtin", "run":"allow", "style":{"hidden":true},
             "questions":{"confirm":{"answer":true}}
         }))
         .unwrap();
@@ -9169,7 +9169,7 @@ async fn a_formatters_question_is_answered_before_the_call_runs() {
         let root = tmp.path();
         let mut config = AppConfig::new_test();
         let partial: PartialToolConfig = serde_json::from_value(json!({
-            "source": "builtin", "run": "unattended", "format": "unattended",
+            "source": "builtin", "run": "allow", "format": "allow",
             "questions": {"confirm": {"answer": true}},
             "style": {
                 "parameters": asking_formatter(),
@@ -9299,7 +9299,7 @@ async fn an_approval_prompt_shows_the_call_its_formatter_describes_with_the_answ
         let root = tmp.path();
         let mut config = AppConfig::new_test();
         let partial: PartialToolConfig = serde_json::from_value(json!({
-            "source": "builtin", "run": "ask", "format": "unattended",
+            "source": "builtin", "run": "ask", "format": "allow",
             "questions": {"confirm": {"answer": true}},
             "style": {
                 "parameters": asking_formatter(),

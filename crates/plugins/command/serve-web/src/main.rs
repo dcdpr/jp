@@ -18,7 +18,7 @@ fn main() {
         drop(writeln!(err));
         drop(writeln!(
             err,
-            "Note: this binary is a JP plugin. Run it via `jp serve-web`."
+            "Note: this binary is a JP plugin. Run it via `jp serve web`."
         ));
         std::process::exit(0);
     }

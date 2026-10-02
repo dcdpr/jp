@@ -12,8 +12,8 @@
 
 ## Summary
 
-A command plugin declares in its self-description whether it operates on one
-workspace or on several.
+A command plugin declares in its manifest whether it operates on one workspace
+or on several.
 A single-scope plugin gets today's behavior: the host bootstraps a workspace and
 every request is about it.
 A multi-scope plugin gets no bootstrapped workspace, enumerates workspaces with
@@ -76,14 +76,13 @@ about it.
 `jp -w foo serve web` configures the plugin from workspace `foo`; the plugin
 still addresses every workspace explicitly.
 
-### Scope is declared in `describe`, not at handshake
+### Scope is declared in the manifest, not at handshake
 
-`DescribeResponse` gains a scope field:
+The plugin manifest ([RFD 072]) gains a scope claim, and the `describe` answer
+carries it too:
 
 ```json
 {
-  "type": "describe",
-  "name": "serve-web",
   "command": [
     "serve",
     "web"
@@ -94,14 +93,17 @@ still addresses every workspace explicitly.
 
 `single` is the default and the wire default, so a plugin that says nothing
 behaves exactly as it does today.
+An older host must not ignore `multi`, since it would bootstrap a workspace and
+send it in `init`, so a plugin that declares it also requires the protocol
+version that introduced it.
 
 The declaration cannot live in `ready`.
 `ready` answers `init`, and by then the bootstrap has already run — possibly
 prompting the cwd-versus-active conflict, possibly opening the picker.
 A plugin declaring it wants no bootstrapped workspace has to say so before that
 happens.
-The host already consults `describe` for routing and help, which is why it is
-the right place.
+The host already reads the manifest for routing and help, before it runs
+anything, which is why it is the right place.
 
 The declaration feeds the existing bootstrap declaration mechanism:
 
@@ -146,29 +148,27 @@ cwd discovery:
 A `multi` plugin is admitted from the invocation's configuration and never
 receives a `WorkspaceCtx`, so nothing has to fabricate a root for it.
 
-### Admission before description
+### Admission after the manifest
 
-Answering `describe` means running the plugin, and admission — an explicit `run
-= "deny"`, a pinned checksum, approval of a `$PATH` binary — exists so a plugin
-the configuration refuses never runs.
-Admission reads `plugins.command`, which needs a configuration, which needs a
-bootstrap, and the bootstrap depends on the scope `describe` reports.
-The dispatch breaks that loop in a fixed order:
+Admission, meaning an explicit `run = "deny"`, a pinned checksum, or approval of
+a `$PATH` binary, exists so a plugin the configuration refuses never runs.
+It reads `plugins.command`, which needs a configuration, which needs a
+bootstrap, and the bootstrap depends on the declared scope.
+The manifest breaks that loop: the host reads the scope from the binary without
+running it, so the dispatch runs in a fixed order:
 
-1. Resolve the configuration-only level above: every step of the ladder that
-   asks nothing, and the cwd's workspace where it would prompt.
-2. Admit the binary under that configuration.
-   A plugin denied or unapproved here is not run at all.
-3. Send `describe` and read `workspace_scope`.
-4. For `multi`, send `init` with that configuration.
-5. For `single`, run the full workspace bootstrap, admit the binary again under
-   the selected workspace's configuration, then send `init`.
+1. Route the invocation to a binary and read its `workspace_scope`.
+   An official plugin that is not installed yet is downloaded first; that reads
+   no configuration and runs nothing ([RFD 077]).
+2. For `multi`, resolve the configuration-only level above, admit the binary
+   under that configuration, and send `init`.
+3. For `single`, run the full workspace bootstrap, admit the binary under the
+   selected workspace's configuration, and send `init`.
 
-The two configurations differ only when the bootstrap prompts.
-The one gap is a single-scope plugin the discovery configuration admits, where
-the bootstrap then prompts and the answer selects a workspace that denies it.
-It answers `describe` and nothing more: it receives no `init`, no workspace, and
-no request.
+A plugin is admitted once, under the configuration that governs its run, and
+nothing runs before it is admitted.
+A binary without a readable manifest takes its scope from the manifest fields
+its approval recorded ([RFD 072]).
 
 ### What `init` carries
 
@@ -423,8 +423,8 @@ declare nothing, resolve to `single`, and see an unchanged `init` and an
 unchanged request set.
 Shell-script plugins keep working with no workspace field anywhere.
 
-Admission is unchanged except where the bootstrap prompts: then a plugin the
-answered workspace denies has already answered `describe` before it is refused.
+Admission is unchanged: a single-scope plugin is admitted under the selected
+workspace's configuration.
 
 The one change a single-scope plugin sees is `last_root` on conversation
 entries, an additive response field, and `expected_last_root` on `query`, an
@@ -552,11 +552,6 @@ addressing if it lands.
   Whether that is a useful hint for highlighting a default or an inconsistency
   with "told nothing about the launch workspace" is worth a second look.
 
-- **Help and admission.** `jp <plugin> --help` and root help follow [RFD 072]'s
-  rule that admission precedes every spawn, `describe` included.
-  Until that lands, bare help answers from `describe` without the deny or
-  approval checks.
-
 ## Implementation Plan
 
 ### Phase 1: The last-root record
@@ -579,17 +574,16 @@ an edit in the wrong tree.
 
 ### Phase 2: Scope declaration
 
-- Add `workspace_scope` to `DescribeResponse`, defaulting to `single`.
+- Add `workspace_scope` to the manifest and the `describe` answer, defaulting to
+  `single`.
 - Derive the plugin dispatch's `WorkspaceRequirement` from it.
-- Admit under the discovery configuration before `describe`, and again under the
-  selected workspace's configuration for a single-scope plugin.
+- Admit once, under the configuration the declared scope resolves.
 - Make `init`'s workspace and config fields conditional on the declared scope.
 - Reject a plugin whose declaration and requests disagree.
 
-Depends on [RFD 113] Phase 1.
-Mergeable alone: with no plugin declaring `multi`, behavior is unchanged except
-where the bootstrap prompts, in which case a plugin the answered workspace
-denies has already answered `describe`.
+Depends on [RFD 113] Phase 1, and on [RFD 072] Phase 5, which introduces the
+manifest.
+Mergeable alone: with no plugin declaring `multi`, behavior is unchanged.
 
 ### Phase 3: `list_workspaces`
 
@@ -627,6 +621,8 @@ Depends on Phases 1 and 3.
   `StoragePresence`, which is why a checkout is addressable at all.
 - [RFD 073] — Layered storage backend; the load path each addressed workspace
   reads through.
+- [RFD 077] — Plugin configuration and trust policy; the admission a plugin
+  passes once its scope has chosen the configuration.
 - [RFD 099] — Native macOS app; the frontend whose window-per-workspace model
   wants the same capability through a different adapter.
 
@@ -634,6 +630,7 @@ Depends on Phases 1 and 3.
 [RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md
 [RFD 072]: 072-command-plugin-system.md
 [RFD 073]: 073-layered-storage-backend-for-workspaces.md
+[RFD 077]: 077-plugin-configuration-and-trust-policy.md
 [RFD 087]: 087-session-scoped-active-workspace.md
 [RFD 099]: 099-native-macos-app-for-browsing-conversations.md
 [RFD 113]: 113-context-decomposition-for-invocation-and-workspace-scope.md

@@ -1,7 +1,7 @@
 //! Command plugin configuration.
 //!
-//! Per-plugin settings that control installation, execution policy, checksum
-//! pinning, and opaque options passed through to the plugin.
+//! Per-plugin settings that control execution policy, checksum pinning, and
+//! opaque options passed through to the plugin.
 
 use schematic::Config;
 
@@ -18,23 +18,15 @@ use crate::{
 };
 
 /// Execution policy for a command plugin.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    schematic::ConfigEnum,
-)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Default, schematic::ConfigEnum)]
+#[config(rename_all = "snake_case", serde_as_string)]
 pub enum RunPolicy {
     /// Prompt the user before running (default for third-party plugins).
     #[default]
     Ask,
     /// Run without prompting (default for official registry plugins).
-    Unattended,
+    #[variant(deprecated_aliases("unattended"))]
+    Allow,
     /// Never run this plugin.
     Deny,
 }
@@ -44,33 +36,27 @@ pub enum RunPolicy {
 /// Example:
 ///
 /// ```toml
-/// [plugins.command.serve]
-/// install = true
-/// run = "unattended"
+/// [plugins.command.serve-web]
+/// run = "allow"
 ///
-/// [plugins.command.serve.checksum]
+/// [plugins.command.serve-web.checksum]
 /// algorithm = "sha256"
 /// value = "abc123..."
 ///
-/// [plugins.command.serve.options]
-/// web.port = 2000
-/// web.host = "0.0.0.0"
+/// [plugins.command.serve-web.options]
+/// bind = "0.0.0.0"
+/// port = 2000
 /// ```
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct CommandPluginConfig {
-    /// Whether to auto-install this plugin from the registry if it is missing.
-    ///
-    /// When `true`, JP will download and install the plugin binary from the
-    /// registry on first invocation.
-    /// Defaults to the global `plugins.auto_install` setting.
-    pub install: Option<bool>,
-
     /// Execution policy.
     ///
     /// - `ask`: prompt before running (default for third-party plugins)
-    /// - `unattended`: run without prompting
+    /// - `allow`: run without prompting
     /// - `deny`: never run this plugin
+    ///
+    /// `unattended` is accepted as a deprecated spelling of `allow`.
     pub run: Option<RunPolicy>,
 
     /// Pinned binary checksum.
@@ -100,7 +86,6 @@ impl AssignKeyValue for PartialCommandPluginConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
-            "install" => self.install = kv.try_some_bool()?,
             "run" => self.run = kv.try_some_from_str()?,
             _ if kv.p("checksum") => self.checksum.assign(kv)?,
             _ if kv.p("options") => kv.assign_to_mergeable_entry(&mut self.options)?,
@@ -114,7 +99,6 @@ impl AssignKeyValue for PartialCommandPluginConfig {
 impl PartialConfigDelta for PartialCommandPluginConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
-            install: delta_opt(self.install.as_ref(), next.install),
             run: delta_opt(self.run.as_ref(), next.run),
             checksum: delta_opt_partial(self.checksum.as_ref(), next.checksum),
             options: delta_mergeable_value_map(&self.options, next.options),
@@ -123,7 +107,6 @@ impl PartialConfigDelta for PartialCommandPluginConfig {
 
     fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
         Self {
-            install: delta_opt(self.install.as_ref(), next.install),
             run: delta_opt(self.run.as_ref(), next.run),
             checksum: delta_opt_partial(self.checksum.as_ref(), next.checksum),
             options: delta_mergeable_value_map_at(
@@ -141,7 +124,6 @@ impl ToPartial for CommandPluginConfig {
         let defaults = Self::Partial::default();
 
         Self::Partial {
-            install: partial_opts(self.install.as_ref(), defaults.install),
             run: partial_opts(self.run.as_ref(), defaults.run),
             checksum: partial_opt_config(self.checksum.as_ref(), defaults.checksum),
             options: MergeableMap::Map(

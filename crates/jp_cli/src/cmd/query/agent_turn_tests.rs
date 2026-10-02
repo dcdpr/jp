@@ -248,7 +248,7 @@ async fn assert_agent_fallback(next_execution: ToolExecution) {
         let root = temp.path();
         let mut config = AppConfig::new_test();
         config.assistant.request.max_retries = 0;
-        let partial: PartialToolConfig = serde_json::from_value(json!({"source":"builtin","run":"unattended","style":{"hidden":true},"questions":{"confirm":{"answer":true}}})).unwrap();
+        let partial: PartialToolConfig = serde_json::from_value(json!({"source":"builtin","run":"allow","style":{"hidden":true},"questions":{"confirm":{"answer":true}}})).unwrap();
         config.conversation.tools.insert("http_tool".into(), ToolConfig::from_partial(partial, vec![]).unwrap());
         let storage = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
         let mut workspace = Workspace::in_memory(root).with_backend(storage.clone());
@@ -280,7 +280,7 @@ async fn agent_continuation_waits_for_host_recording_without_resubmission() {
         let temp = tempdir().unwrap();
         let root = temp.path();
         let mut config = AppConfig::new_test();
-        let partial: PartialToolConfig = serde_json::from_value(json!({"source":"builtin","run":"unattended","style":{"hidden":true},"questions":{"confirm":{"answer":true}}})).unwrap();
+        let partial: PartialToolConfig = serde_json::from_value(json!({"source":"builtin","run":"allow","style":{"hidden":true},"questions":{"confirm":{"answer":true}}})).unwrap();
         config.conversation.tools.insert("http_tool".into(), ToolConfig::from_partial(partial, vec![]).unwrap());
         let storage = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
         let mut workspace = Workspace::in_memory(root).with_backend(storage.clone());

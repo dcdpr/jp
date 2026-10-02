@@ -73,7 +73,7 @@ impl<T: Transport<RoleClient>> Transport<RoleClient> for DeleteOnClose<T> {
 #[tokio::test]
 async fn a_client_can_close_its_session_before_the_listener_stops() {
     timeout(Duration::from_secs(5), async {
-        let mut fixture = Fixture::inquiring("unattended").await;
+        let mut fixture = Fixture::inquiring("allow").await;
 
         // Retire the fixture's own connection, leaving the endpoint running so
         // the session below is the only one outstanding.

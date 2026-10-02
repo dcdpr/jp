@@ -1,43 +1,90 @@
-use jp_printer::{Chrome, OutputFormat, Printer};
+use pretty_assertions::assert_eq;
 
 use super::*;
 
-#[test]
-fn reports_each_outdated_plugin() {
-    let (printer, _out, err) = Printer::memory(OutputFormat::Text);
-
-    report_updates(&printer, &["serve".to_owned(), "ticket".to_owned()]);
-    printer.flush();
-
-    assert_eq!(
-        *err.lock(),
-        "  \u{2192} serve: update available\n  \u{2192} ticket: update available\n"
-    );
+/// An official binary JP installed and nobody touched, with a newer release.
+fn installed_by_jp() -> Candidate<'static> {
+    Candidate {
+        official: true,
+        location: Location::InstallDir,
+        sha256: "old",
+        release_sha256: "new",
+        pinned: false,
+        approval: ApprovalMatch::Matches,
+        installed_by_jp: true,
+    }
 }
 
 #[test]
-fn reports_that_everything_is_current() {
-    let (printer, _out, err) = Printer::memory(OutputFormat::Text);
-
-    report_updates(&printer, &[]);
-    printer.flush();
-
-    assert_eq!(
-        *err.lock(),
-        "  \u{2192} All installed plugins are up to date.\n"
-    );
+fn the_binary_jp_installed_is_updated_to_a_new_release() {
+    assert_eq!(decide(&installed_by_jp()), Decision::Update);
 }
 
-// Registry status is chrome: a quiet run gets none of it, whether or not
-// anything is outdated.
 #[test]
-fn a_quiet_run_reports_nothing() {
-    let (printer, _out, err) = Printer::memory(OutputFormat::Text);
-    let printer = printer.with_chrome(Chrome::Silenced);
+fn the_current_release_is_left_as_it_is() {
+    let current = Candidate {
+        release_sha256: "old",
+        ..installed_by_jp()
+    };
 
-    report_updates(&printer, &["serve".to_owned()]);
-    report_updates(&printer, &[]);
-    printer.flush();
+    assert_eq!(decide(&current), Decision::Current);
+}
 
-    assert_eq!(*err.lock(), "");
+#[test]
+fn a_third_party_plugin_is_not_updated() {
+    let third_party = Candidate {
+        official: false,
+        ..installed_by_jp()
+    };
+
+    assert_eq!(decide(&third_party), Decision::Hold(Hold::ThirdParty));
+}
+
+#[test]
+fn a_pinned_binary_is_not_updated() {
+    let pinned = Candidate {
+        pinned: true,
+        ..installed_by_jp()
+    };
+
+    assert_eq!(decide(&pinned), Decision::Hold(Hold::Pinned));
+}
+
+/// A package manager's copy on `$PATH` belongs to the package manager.
+#[test]
+fn a_binary_jp_did_not_install_is_not_updated() {
+    let on_path = Candidate {
+        location: Location::Path,
+        ..installed_by_jp()
+    };
+    assert_eq!(decide(&on_path), Decision::Hold(Hold::NotInstalledByJp));
+
+    let approved = Candidate {
+        installed_by_jp: false,
+        ..installed_by_jp()
+    };
+    assert_eq!(decide(&approved), Decision::Hold(Hold::NotInstalledByJp));
+}
+
+/// A binary changed on this machine is someone's work, not a stale release.
+#[test]
+fn a_binary_changed_since_jp_installed_it_is_not_updated() {
+    let changed = Candidate {
+        approval: ApprovalMatch::Changed,
+        ..installed_by_jp()
+    };
+
+    assert_eq!(decide(&changed), Decision::Hold(Hold::Changed));
+}
+
+#[test]
+fn a_held_plugin_says_why() {
+    assert_eq!(
+        Hold::Pinned.reason("serve-web"),
+        "pinned by plugins.command.serve-web.checksum"
+    );
+    assert_eq!(
+        Hold::ThirdParty.reason("metrics"),
+        "third-party plugins are not updated automatically"
+    );
 }

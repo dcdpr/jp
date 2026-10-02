@@ -228,5 +228,18 @@ fn describes_itself_without_launching_anything() {
         panic!("expected a describe response, got {:?}", sent[0]);
     };
     assert_eq!(response.name, "gui");
-    assert_eq!(response.command, ["gui"]);
+    assert_eq!(response.manifest.command, ["gui"]);
+    assert_eq!(response.help, HELP_TEXT);
+}
+
+/// The host refuses a plugin before spawning it when the manifest asks for a
+/// newer protocol, so the manifest has to state the same need the handshake
+/// does.
+#[test]
+fn the_manifest_states_the_protocol_the_handshake_needs() {
+    let manifest = jp_plugin::manifest::find(MANIFEST.as_bytes())
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(manifest.protocol, REQUIRED_PROTOCOL);
 }

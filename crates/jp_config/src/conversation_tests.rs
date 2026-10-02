@@ -184,7 +184,7 @@ fn dedup_inherits_from_default_via_build() {
             id = "anthropic/test"
 
             [conversation.tools.'*']
-            run = "unattended"
+            run = "allow"
 
             [[conversation.attachments]]
             type = "file"
@@ -342,7 +342,7 @@ fn labels_survive_the_full_build() {
             id = "anthropic/test"
 
             [conversation.tools.'*']
-            run = "unattended"
+            run = "allow"
 
             [conversation.labels]
             team = "platform"
@@ -575,7 +575,7 @@ fn assign_values_onto_an_object_rule_keeps_its_policy() {
 
     let mut partial: PartialConversationConfig = toml::from_str(
         "[labels.stage]\nvalue = \"review\"\napply_on = { new = false, fork = true }\nrun = \
-         \"unattended\"\n",
+         \"allow\"\n",
     )
     .unwrap();
 
@@ -595,11 +595,7 @@ fn assign_values_onto_an_object_rule_keeps_its_policy() {
         assert_eq!(object.value, PartialLabelValue::List(expected));
         assert_eq!(object.apply_on.new, Some(false), "got: {key}={value}");
         assert_eq!(object.apply_on.fork, Some(true), "got: {key}={value}");
-        assert_eq!(
-            object.run,
-            Some(LabelRunMode::Unattended),
-            "got: {key}={value}"
-        );
+        assert_eq!(object.run, Some(LabelRunMode::Allow), "got: {key}={value}");
     }
 }
 

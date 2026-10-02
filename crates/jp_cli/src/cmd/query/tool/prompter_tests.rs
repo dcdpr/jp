@@ -350,9 +350,9 @@ fn skip_reasoning_cancel_returns_none() {
 // --- Permission prompts (`prompt_permission`) ----------------------------
 
 #[test]
-fn permission_unattended_returns_original_args() {
+fn permission_allow_returns_original_args() {
     let original = json!({"key": "original"});
-    let info = make_permission_info(RunMode::Unattended, original.clone());
+    let info = make_permission_info(RunMode::Allow, original.clone());
     let result = prompter(MockPromptBackend::new())
         .prompt_permission(&info)
         .unwrap();

@@ -8,10 +8,20 @@
 use std::collections::BTreeMap;
 
 use camino::Utf8PathBuf;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use tracing::{debug, warn};
+
+use crate::Manifest;
 
 /// The plugin registry, fetched from the JP registry server.
+///
+/// Entries are read one at a time: an entry of a kind this version does not
+/// know, or one that does not parse, is left out and logged, and the rest of
+/// the registry is still usable.
+/// An entry without a `type` is a `command`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(from = "RawRegistry")]
 pub struct Registry {
     /// Schema version.
     /// Currently `1`.
@@ -23,6 +33,52 @@ pub struct Registry {
     /// Each key corresponds to a `jp` subcommand.
     pub plugins: BTreeMap<String, RegistryPlugin>,
 }
+
+/// The registry as it arrives, before its entries are read.
+#[derive(Deserialize)]
+struct RawRegistry {
+    version: u32,
+    #[serde(default)]
+    plugins: BTreeMap<String, serde_json::Value>,
+}
+
+impl From<RawRegistry> for Registry {
+    fn from(raw: RawRegistry) -> Self {
+        let mut plugins = BTreeMap::new();
+
+        for (key, mut entry) in raw.plugins {
+            // A `type` that is not a string is left for parsing to reject.
+            if let Some(object) = entry.as_object_mut()
+                && let Some(kind) = object
+                    .entry("type")
+                    .or_insert_with(|| "command".into())
+                    .as_str()
+                && !KNOWN_KINDS.contains(&kind)
+            {
+                debug!(
+                    key,
+                    kind, "Registry entry of a kind this jp does not know; ignored."
+                );
+                continue;
+            }
+
+            match serde_json::from_value(entry) {
+                Ok(plugin) => {
+                    plugins.insert(key, plugin);
+                }
+                Err(error) => warn!(key, %error, "Malformed registry entry; ignored."),
+            }
+        }
+
+        Self {
+            version: raw.version,
+            plugins,
+        }
+    }
+}
+
+/// The `type` values [`PluginKind`] reads.
+const KNOWN_KINDS: [&str; 2] = ["command", "command_group"];
 
 /// A plugin entry in the registry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -142,16 +198,18 @@ pub struct RegistryBinary {
 
 /// Locally stored plugin approval records.
 ///
-/// Tracks which `$PATH`-discovered plugins the user has permanently approved.
+/// Remembers the user's answers to the `ask` prompt, and which binaries JP
+/// installed itself.
 /// Stored at `$XDG_DATA_HOME/jp/plugin-approvals.json`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct PluginApprovals {
-    /// Map of plugin name to approval info.
+    /// Approvals keyed by plugin name, the same key as
+    /// `plugins.command.<name>`.
     #[serde(default)]
     pub approved: BTreeMap<String, ApprovedPlugin>,
 }
 
-/// A permanently approved plugin binary.
+/// One approved plugin binary: that file, with those contents.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ApprovedPlugin {
     /// Absolute path to the approved binary.
@@ -159,6 +217,25 @@ pub struct ApprovedPlugin {
 
     /// SHA-256 hex digest of the binary at time of approval.
     pub sha256: String,
+
+    /// When the approval was recorded.
+    ///
+    /// An approval stored without one reads as the Unix epoch, rather than
+    /// making the whole store unreadable.
+    #[serde(default)]
+    pub approved_at: DateTime<Utc>,
+
+    /// Whether JP wrote this binary itself, from the registry.
+    ///
+    /// JP updates an official binary it installed, and leaves alone one that
+    /// was changed on this machine or approved by the user.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub installed: bool,
+
+    /// The manifest fields the binary's `describe` answer gave, for a binary
+    /// whose file carries no readable manifest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest: Option<Manifest>,
 }
 
 #[cfg(test)]

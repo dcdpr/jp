@@ -1,6 +1,6 @@
 # A plugin's background workers outlive a plugin that exits on its own
 
-- **Status**: Todo
+- **Status**: Done
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-10-01
@@ -57,3 +57,27 @@ period.
 A shell plugin that starts `sleep 600 &`, prints the worker's PID, sends `exit`
 with code 0, and exits.
 After `run_plugin` returns, the worker's PID no longer exists.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-10-01T12:40:45Z
+
+Fixed on the RFD 072 branch.
+`run_plugin` ends with `ProcessTree::finish`, which runs on every exit path,
+clean or killed.
+
+- Unix: `waitid(P_PID, pid, WEXITED | WNOWAIT)` waits for the plugin to exit and
+  leaves it a zombie, so its pid and the group id stay reserved.
+  Then the group is killed, then the plugin is reaped.
+- Windows: the job is terminated after the plugin exits.
+  A job is addressed by its handle, so the order does not matter there.
+
+`dispatch::tests::a_worker_dies_with_a_plugin_that_exits_on_its_own` is the
+"Verifying" check, through the real `run_plugin`: a script starts `sleep 600 &`,
+answers `init`, sends `exit` 0, and exits; the worker is gone afterwards.
+It fails when the kill is removed from `finish`.
+The ordering itself (kill before reap) is not testable deterministically, since
+the failure it prevents is a pid reuse race.

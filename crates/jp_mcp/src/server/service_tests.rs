@@ -91,7 +91,7 @@ fn service(
 /// A service whose `count` tool asks one question and then echoes its input.
 ///
 /// `run` and `result` are that tool's `run` and `result` settings, spelled as a
-/// user writes them: `unattended`, `ask`, `edit`, or `skip`.
+/// user writes them: `allow`, `ask`, `edit`, or `skip`.
 ///
 /// The counter records how many execution attempts actually ran, which is what
 /// separates "the call was denied" from "the call silently went nowhere".
@@ -205,7 +205,7 @@ async fn preparation_release_input_and_delivery_use_distinct_acknowledgements() 
 
 #[tokio::test]
 async fn restart_keeps_the_logical_call_open_and_replaces_old_replies() {
-    let (service, mut host, count) = fixture("ask", "unattended");
+    let (service, mut host, count) = fixture("ask", "allow");
     let call = service.start_call(request()).unwrap();
     let id = call.id();
     release(&mut host).await;
@@ -237,7 +237,7 @@ async fn restart_keeps_the_logical_call_open_and_replaces_old_replies() {
 
 #[tokio::test]
 async fn denied_call_never_executes() {
-    let (service, mut host, count) = fixture("ask", "unattended");
+    let (service, mut host, count) = fixture("ask", "allow");
     let call = service.start_call(request()).unwrap();
     let Interaction::Prepare { reply, .. } = next(&mut host).await.interaction else {
         panic!("expected preparation")
@@ -258,7 +258,7 @@ async fn denied_call_never_executes() {
 
 #[tokio::test]
 async fn invalid_edited_arguments_do_not_reach_execution() {
-    let (service, mut host, count) = fixture("edit", "unattended");
+    let (service, mut host, count) = fixture("edit", "allow");
     let call = service.start_call(request()).unwrap();
     let Interaction::Prepare { reply, .. } = next(&mut host).await.interaction else {
         panic!("expected preparation")
@@ -277,7 +277,7 @@ async fn invalid_edited_arguments_do_not_reach_execution() {
 
 #[tokio::test]
 async fn host_loss_fails_closed() {
-    let (service, host, count) = fixture("ask", "unattended");
+    let (service, host, count) = fixture("ask", "allow");
     drop(host);
     let call = service.start_call(request()).unwrap();
     assert!(matches!(
@@ -289,7 +289,7 @@ async fn host_loss_fails_closed() {
 
 #[tokio::test]
 async fn shutdown_cancels_pending_release_and_rejects_late_reply() {
-    let (service, mut host, count) = fixture("ask", "unattended");
+    let (service, mut host, count) = fixture("ask", "allow");
     let call = service.start_call(request()).unwrap();
     let Interaction::Prepare { reply, .. } = next(&mut host).await.interaction else {
         panic!("expected preparation")
@@ -316,7 +316,7 @@ async fn shutdown_cancels_pending_release_and_rejects_late_reply() {
 
 #[tokio::test]
 async fn invalid_answer_prevents_a_second_attempt() {
-    let (service, mut host, count) = fixture("ask", "unattended");
+    let (service, mut host, count) = fixture("ask", "allow");
     let call = service.start_call(request()).unwrap();
     release(&mut host).await;
     let Interaction::Input { reply, .. } = next(&mut host).await.interaction else {
@@ -330,7 +330,7 @@ async fn invalid_answer_prevents_a_second_attempt() {
 
 #[tokio::test]
 async fn failed_recording_prevents_result_delivery() {
-    let (service, mut host, count) = fixture("ask", "unattended");
+    let (service, mut host, count) = fixture("ask", "allow");
     let call = service.start_call(request()).unwrap();
     release(&mut host).await;
     let Interaction::Input { reply, .. } = next(&mut host).await.interaction else {
@@ -355,7 +355,7 @@ async fn failed_recording_prevents_result_delivery() {
 
 #[tokio::test]
 async fn current_call_cancellation_does_not_poison_later_calls() {
-    let (service, mut host, count) = fixture("ask", "unattended");
+    let (service, mut host, count) = fixture("ask", "allow");
     let first = service.start_call(request()).unwrap();
     release(&mut host).await;
     let Interaction::Input { reply: stale, .. } = next(&mut host).await.interaction else {
@@ -384,7 +384,7 @@ async fn current_call_cancellation_does_not_poison_later_calls() {
 
 #[tokio::test]
 async fn identical_calls_have_independent_answers_and_out_of_order_delivery() {
-    let (service, mut host, count) = fixture("ask", "unattended");
+    let (service, mut host, count) = fixture("ask", "allow");
     let first = service.start_call(request()).unwrap();
     release(&mut host).await;
     let first_input = next(&mut host).await;
@@ -438,7 +438,7 @@ async fn identical_calls_have_independent_answers_and_out_of_order_delivery() {
 
 #[tokio::test]
 async fn configured_skip_never_requests_execution_release() {
-    let (service, mut host, count) = fixture("skip", "unattended");
+    let (service, mut host, count) = fixture("skip", "allow");
     let call = service.start_call(request()).unwrap();
     let Interaction::Record { recording, reply } = next(&mut host).await.interaction else {
         panic!("skip must go directly to recording")
@@ -550,7 +550,7 @@ async fn local_inquiry_exits_and_runs_a_new_process_with_the_answer() {
 
 #[tokio::test]
 async fn wrong_argument_type_fails_before_host_approval() {
-    let (service, _host, count) = fixture("ask", "unattended");
+    let (service, _host, count) = fixture("ask", "allow");
     let mut input = request();
     input.arguments.insert("path".into(), json!(42));
     let call = service.start_call(input).unwrap();
@@ -589,7 +589,7 @@ async fn cancellation_drops_an_in_flight_builtin_attempt() {
     let entered = Arc::new(Notify::new());
     let dropped = Arc::new(AtomicUsize::new(0));
     let (service, mut host) = service(
-        json!({"source": "builtin", "run": "ask", "result": "unattended"}),
+        json!({"source": "builtin", "run": "ask", "result": "allow"}),
         "/tmp".into(),
         BuiltinExecutors::new().register("count", BlockedTool {
             entered: entered.clone(),
@@ -614,7 +614,7 @@ async fn a_completed_call_delivers_the_host_result_in_place_of_its_attempt() {
     let entered = Arc::new(Notify::new());
     let dropped = Arc::new(AtomicUsize::new(0));
     let (service, mut host) = service(
-        json!({"source": "builtin", "run": "ask", "result": "unattended"}),
+        json!({"source": "builtin", "run": "ask", "result": "allow"}),
         "/tmp".into(),
         BuiltinExecutors::new().register("count", BlockedTool {
             entered: entered.clone(),
@@ -645,7 +645,7 @@ async fn a_completed_call_delivers_the_host_result_in_place_of_its_attempt() {
 
 #[tokio::test]
 async fn completing_a_finished_call_is_refused() {
-    let (service, mut host, _count) = fixture("ask", "unattended");
+    let (service, mut host, _count) = fixture("ask", "allow");
     let call = service.start_call(request()).unwrap();
     let id = call.id();
     let Interaction::Prepare { reply, .. } = next(&mut host).await.interaction else {
@@ -676,7 +676,7 @@ async fn completing_a_finished_call_is_refused() {
 
 #[tokio::test]
 async fn dropping_result_receiver_does_not_cancel_or_reexecute() {
-    let (service, mut host, count) = fixture("ask", "unattended");
+    let (service, mut host, count) = fixture("ask", "allow");
     let call = service.start_call(request()).unwrap();
     release(&mut host).await;
     let Interaction::Input { reply, .. } = next(&mut host).await.interaction else {
@@ -768,8 +768,8 @@ async fn formatter_asks_for_visibility_and_waits_for_approval() {
 }
 
 #[tokio::test]
-async fn unattended_formatter_is_available_before_approval() {
-    let (service, mut host, runner) = formatter_fixture("unattended");
+async fn an_allowed_formatter_is_available_before_approval() {
+    let (service, mut host, runner) = formatter_fixture("allow");
     let call = service.start_call(request()).unwrap();
     let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
         panic!("expected visibility request")
@@ -801,7 +801,7 @@ async fn a_formatter_is_told_the_name_the_tool_runs_under() {
         json!({
             "source": "builtin.counter",
             "run": "ask",
-            "format": "unattended",
+            "format": "allow",
             "style": {"parameters": {
                 "program": "formatter",
                 "args": ["{{tool.name}}"],
@@ -832,7 +832,7 @@ async fn a_formatter_is_told_the_name_the_tool_runs_under() {
 
 #[tokio::test]
 async fn hidden_presentation_never_executes_formatter() {
-    let (service, mut host, runner) = formatter_fixture("unattended");
+    let (service, mut host, runner) = formatter_fixture("allow");
     let call = service.start_call(request()).unwrap();
     let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
         panic!("expected visibility request")
@@ -869,7 +869,7 @@ async fn a_failing_formatter_settles_the_call_without_running_it() {
         json!({
             "source": "builtin",
             "run": "ask",
-            "format": "unattended",
+            "format": "allow",
             "style": {"parameters": {"program": "formatter", "args": [], "shell": false}},
         }),
         "/tmp".into(),
@@ -919,7 +919,7 @@ async fn a_formatters_reported_failure_settles_the_call_with_its_message() {
         json!({
             "source": "builtin",
             "run": "ask",
-            "format": "unattended",
+            "format": "allow",
             "style": {"parameters": {"program": "formatter", "args": [], "shell": false}},
         }),
         "/tmp".into(),
@@ -975,7 +975,7 @@ fn asking_formatter_fixture(format: &str) -> (Service, HostReceiver, Arc<AtomicU
         json!({
             "source": "builtin",
             "run": "ask",
-            "result": "unattended",
+            "result": "allow",
             "format": format,
             "style": {"parameters": {
                 "program": "formatter",
@@ -1014,7 +1014,7 @@ async fn record(host: &mut HostReceiver, call: Call) -> ToolResult {
 /// The tool runs once, with that same answer, and asks nothing.
 #[tokio::test]
 async fn a_formatters_question_is_answered_before_the_call_is_prepared() {
-    let (service, mut host, count) = asking_formatter_fixture("unattended");
+    let (service, mut host, count) = asking_formatter_fixture("allow");
     let call = service.start_call(request()).unwrap();
     let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
         panic!("expected visibility request")
@@ -1102,7 +1102,7 @@ async fn a_formatter_held_until_admission_asks_before_release() {
 /// there: nothing is prepared, and the tool never runs.
 #[tokio::test]
 async fn a_settled_formatter_question_records_the_call_without_running_it() {
-    let (service, mut host, count) = asking_formatter_fixture("unattended");
+    let (service, mut host, count) = asking_formatter_fixture("allow");
     let call = service.start_call(request()).unwrap();
     let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
         panic!("expected visibility request")
@@ -1124,7 +1124,7 @@ async fn a_settled_formatter_question_records_the_call_without_running_it() {
 /// the new answer.
 #[tokio::test]
 async fn edited_arguments_ask_the_formatters_question_again() {
-    let (service, mut host, count) = asking_formatter_fixture("unattended");
+    let (service, mut host, count) = asking_formatter_fixture("allow");
     let call = service.start_call(request()).unwrap();
     let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
         panic!("expected visibility request")

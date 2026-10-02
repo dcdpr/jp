@@ -25,6 +25,16 @@ pub struct VariantArgs {
     /// these beside it, so a consumer can offer one and still accept all.
     pub aliases: Vec<syn::LitStr>,
 
+    /// Retired spellings `FromStr` still accepts, logging a warning when one is
+    /// used.
+    ///
+    /// Written as `#[variant(deprecated_aliases("unattended"))]`.
+    /// Unlike `aliases`, these stay out of the schema: a consumer should never
+    /// be offered a spelling that is on its way out.
+    /// The warning is logged once per spelling per process, since a value read
+    /// from many stored documents would otherwise repeat it for each one.
+    pub deprecated_aliases: Vec<syn::LitStr>,
+
     /// Keep this variant out of the schema and out of `variants()`.
     ///
     /// For a variant that works but is not offered: a provider backed by a
@@ -143,9 +153,27 @@ impl Variant<'_> {
         }
 
         let spellings = self.aliases();
+        let deprecated = self.args.deprecated_aliases.iter().map(|alias| {
+            quote! {
+                #alias => {
+                    static WARNED: std::sync::Once = std::sync::Once::new();
+                    WARNED.call_once(|| {
+                        schematic::tracing::warn!(
+                            deprecated = #alias,
+                            replacement = #value,
+                            "`{}` is a deprecated spelling of `{}`.",
+                            #alias,
+                            #value,
+                        );
+                    });
+                    Self::#name
+                }
+            }
+        });
 
         quote! {
             #value #(| #spellings)* => Self::#name,
+            #(#deprecated)*
         }
     }
 

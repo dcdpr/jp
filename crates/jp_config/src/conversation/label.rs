@@ -182,10 +182,11 @@ pub struct LabelObject {
     /// Whether to confirm before running a command-shaped `value`.
     ///
     /// - `ask`: Prompt before each run (the default).
-    /// - `unattended`: Run without prompting.
+    /// - `allow`: Run without prompting.
     /// - `deny`: Never run; the label is skipped.
     ///
     /// Ignored for literal values.
+    /// `unattended` is accepted as a deprecated spelling of `allow`.
     #[setting(default)]
     #[serde(default)]
     pub run: LabelRunMode,
@@ -282,15 +283,16 @@ impl Default for ApplyOn {
 }
 
 /// Whether to confirm before running a command-shaped label value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ConfigEnum)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ConfigEnum)]
+#[config(rename_all = "lowercase", serde_as_string)]
 pub enum LabelRunMode {
     /// Prompt before each run.
     #[default]
     Ask,
 
     /// Run without prompting.
-    Unattended,
+    #[variant(deprecated_aliases("unattended"))]
+    Allow,
 
     /// Never run; the label is skipped.
     Deny,

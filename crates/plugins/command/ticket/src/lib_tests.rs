@@ -1097,16 +1097,23 @@ fn describe_reports_the_subcommand_it_serves() {
     match messages.as_slice() {
         [PluginToHost::Describe(describe)] => {
             assert_eq!(describe.name, "ticket");
-            assert_eq!(describe.command, ["ticket"]);
-            assert!(
-                describe
-                    .help
-                    .as_ref()
-                    .is_some_and(|help| help.contains("add"))
-            );
+            assert_eq!(describe.manifest.command, ["ticket"]);
+            assert_eq!(describe.help, help_text());
         }
         other => panic!("expected a single describe, got {other:?}"),
     }
+}
+
+/// The host refuses a plugin before spawning it when the manifest asks for a
+/// newer protocol, so the manifest has to state the same need the handshake
+/// does.
+#[test]
+fn the_manifest_states_the_protocol_the_handshake_needs() {
+    let manifest = jp_plugin::manifest::find(MANIFEST.as_bytes())
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(manifest.protocol, REQUIRED_PROTOCOL);
 }
 
 #[test]

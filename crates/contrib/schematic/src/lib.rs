@@ -23,6 +23,9 @@ pub mod schema;
 
 #[doc(hidden)]
 pub use ::serde;
+// For the warning a deprecated enum spelling logs; see `ConfigEnum`.
+#[doc(hidden)]
+pub use ::tracing;
 #[cfg(feature = "config")]
 pub use config::*;
 pub use schematic_macros::*;

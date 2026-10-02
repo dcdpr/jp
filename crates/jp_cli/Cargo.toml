@@ -83,6 +83,7 @@ schemars = { workspace = true }
 schematic = { workspace = true, features = ["schema_serde", "renderer_template", "toml"] }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
+sha1 = { workspace = true }
 sha2 = { workspace = true }
 strip-ansi-escapes = { workspace = true }
 syntect = { workspace = true, features = ["regex-fancy", "default-themes", "default-syntaxes"] }

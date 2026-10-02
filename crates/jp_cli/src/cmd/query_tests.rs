@@ -1253,8 +1253,8 @@ fn test_builtin_config_merges_under_user_config() {
 /// Naming a tool after a built-in shadows it rather than replacing it: the
 /// user's `source` and `command` win, and every field they leave unset comes
 /// from the built-in's block.
-/// That includes `run = "unattended"`, so a shadowing local command runs
-/// without a confirmation prompt unless the user sets `run` themselves.
+/// That includes `run = "allow"`, so a shadowing local command runs without a
+/// confirmation prompt unless the user sets `run` themselves.
 /// RFD 083 calls this out as user-owned consequences, not a blocked
 /// configuration; this test pins it so the behavior cannot drift silently.
 #[test]
@@ -1283,7 +1283,7 @@ fn test_builtin_config_merges_under_a_shadowing_local_tool() {
     );
     assert_eq!(
         tool.run,
-        Some(RunMode::Unattended),
+        Some(RunMode::Allow),
         "an unset `run` comes from the built-in, not from the global default"
     );
     assert!(
