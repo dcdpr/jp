@@ -13,11 +13,13 @@
 use std::{io::Write as _, sync::Arc};
 
 use crossterm::style::Stylize as _;
+use inquire::InquireError;
 use jp_config::conversation::tool::{RunMode, ToolSource};
 use jp_conversation::event::SelectOption;
 use jp_editor::{EditOutcome, EditorBackend};
 use jp_inquire::{InlineOption, ReplyEditMode, ReplyOutcome, prompt::PromptBackend};
 use jp_printer::{Printer, PromptWriter};
+use jp_term::sanitize::strip_controls;
 use jp_tool::AnswerType;
 use serde_json::Value;
 
@@ -450,12 +452,19 @@ impl ToolPrompter {
     pub fn prompt_question(&self, question: &jp_tool::Question) -> Result<QuestionResult, Error> {
         let mut writer = self.printer.prompt_writer();
 
+        // A question is shown as plain text: this prompt is where the user
+        // approves what the tool does, so nothing in it may redraw or restyle
+        // the prompt. An answer always carries the tool's own text.
         if let Some(pre_amble) = &question.pre_amble {
-            writeln!(writer, "{pre_amble}")?;
+            writeln!(writer, "{}", strip_controls(pre_amble, &['\n', '\t']))?;
         }
 
+        let text = strip_controls(&question.text, &[]);
+
         match &question.answer_type {
-            AnswerType::Boolean => self.prompt_boolean_git_style(question, &mut writer),
+            AnswerType::Boolean => {
+                self.prompt_boolean_git_style(&text, question.default.as_ref(), &mut writer)
+            }
             AnswerType::Select { options } => {
                 let default_idx = question
                     .default
@@ -463,12 +472,23 @@ impl ToolPrompter {
                     .and_then(|v| v.as_str())
                     .and_then(|def| options.iter().position(|opt| opt == def));
 
-                let answer = self.prompt_backend.select(
-                    &question.text,
-                    options.clone(),
-                    default_idx,
-                    &mut writer,
-                )?;
+                let labels = options
+                    .iter()
+                    .map(|option| strip_controls(option, &[]))
+                    .collect();
+
+                let index = self
+                    .prompt_backend
+                    .select(&text, labels, default_idx, &mut writer)?;
+
+                // The labels are the options in order, so the chosen index
+                // names the option the tool offered.
+                let answer = options.get(index).cloned().ok_or_else(|| {
+                    InquireError::InvalidConfiguration(format!(
+                        "the prompt chose option {index} of {}",
+                        options.len()
+                    ))
+                })?;
 
                 Ok(QuestionResult {
                     answer: Value::String(answer),
@@ -477,10 +497,19 @@ impl ToolPrompter {
             }
             AnswerType::Text => {
                 let default_str = question.default.as_ref().and_then(|v| v.as_str());
+                let shown_default = default_str.map(|default| strip_controls(default, &[]));
 
-                let answer = self
-                    .prompt_backend
-                    .text(&question.text, default_str, &mut writer)?;
+                let answer =
+                    self.prompt_backend
+                        .text(&text, shown_default.as_deref(), &mut writer)?;
+
+                // An accepted default carries the text the prompt showed; the
+                // tool gets back the default it offered. Typed text is the
+                // answer as typed, even when it matches what was shown.
+                let answer = match default_str {
+                    Some(default) if answer.is_default => default.to_owned(),
+                    _ => answer.value,
+                };
 
                 Ok(QuestionResult {
                     answer: Value::String(answer),
@@ -488,7 +517,7 @@ impl ToolPrompter {
                 })
             }
             AnswerType::Secret => {
-                let answer = self.prompt_backend.password(&question.text, &mut writer)?;
+                let answer = self.prompt_backend.password(&text, &mut writer)?;
 
                 Ok(QuestionResult {
                     answer: Value::String(answer),
@@ -508,7 +537,8 @@ impl ToolPrompter {
     /// - `N` = no, and remember for this turn
     fn prompt_boolean_git_style(
         &self,
-        question: &jp_tool::Question,
+        text: &str,
+        default: Option<&Value>,
         writer: &mut PromptWriter<'_>,
     ) -> Result<QuestionResult, Error> {
         let options = vec![
@@ -518,15 +548,13 @@ impl ToolPrompter {
             InlineOption::new('N', "no, and remember for this turn"),
         ];
 
-        let default_char = question
-            .default
-            .as_ref()
+        let default_char = default
             .and_then(serde_json::Value::as_bool)
             .map(|b| if b { 'y' } else { 'n' });
 
-        let answer =
-            self.prompt_backend
-                .inline_select(&question.text, options, default_char, writer)?;
+        let answer = self
+            .prompt_backend
+            .inline_select(text, options, default_char, writer)?;
 
         match answer {
             'y' => Ok(QuestionResult {

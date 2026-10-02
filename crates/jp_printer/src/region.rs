@@ -29,7 +29,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use jp_term::width::{display_width, prefix_end_for_width};
+use jp_term::{
+    sanitize::visible_sgr,
+    width::{display_width, prefix_end_for_width},
+};
 use parking_lot::Mutex;
 
 use crate::printer::{Command, OutputFormat};
@@ -72,9 +75,6 @@ const LABEL_COLOURS: [u8; 10] = [36, 35, 32, 33, 34, 96, 95, 92, 93, 94];
 /// SGR reset, appended to a filtered line that left an attribute open so child
 /// styling cannot bleed into the region's own rows.
 const SGR_RESET: &str = "\x1b[0m";
-
-/// SGR conceal, which hides text from the reader and has no place in a preview.
-const CONCEAL: &str = "8";
 
 /// Lines a region's window buffer holds before evicting its oldest.
 ///
@@ -1233,57 +1233,6 @@ fn filter_line(line: &str) -> String {
     }
 
     out
-}
-
-/// The SGR sequence `escape` carries with a standalone conceal removed, or
-/// `None` when it is not an SGR sequence or has nothing left to say.
-///
-/// Parameters are walked rather than filtered, because `38`, `48` and `58`
-/// carry an operand group after them — `5;n` for an indexed colour, `2;r;g;b`
-/// for an RGB one — and a component that happens to be `8` is a colour value,
-/// not the conceal attribute.
-fn visible_sgr(escape: &str) -> Option<String> {
-    let body = escape.strip_prefix("\x1b[")?.strip_suffix('m')?;
-
-    // A bare `\x1b[m` is a reset, which is worth keeping as-is.
-    if body.is_empty() {
-        return Some(escape.to_owned());
-    }
-
-    let mut kept: Vec<&str> = Vec::new();
-    let mut params = body.split(';');
-
-    while let Some(param) = params.next() {
-        if matches!(param, "38" | "48" | "58") {
-            kept.push(param);
-
-            // How many operands follow is fixed by the colour space named next.
-            let Some(space) = params.next() else { continue };
-            kept.push(space);
-            let operands = match space {
-                "5" => 1,
-                "2" => 3,
-                _ => 0,
-            };
-
-            for _ in 0..operands {
-                let Some(operand) = params.next() else { break };
-                kept.push(operand);
-            }
-
-            continue;
-        }
-
-        if param != CONCEAL {
-            kept.push(param);
-        }
-    }
-
-    if kept.is_empty() {
-        return None;
-    }
-
-    Some(format!("\x1b[{}m", kept.join(";")))
 }
 
 /// Write a region frame, discarding I/O errors.

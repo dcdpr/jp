@@ -419,7 +419,7 @@ impl Query {
             staged,
         } = self.acquire_lock(ctx, handle, start_new).await?;
 
-        let result = self.run_locked(ctx, &lock, query, fresh, staged).await;
+        let result = Box::pin(self.run_locked(ctx, &lock, query, fresh, staged)).await;
 
         // A run that never started a turn wrote nothing, so a directory the
         // editor created to compose in is all that is left of the conversation.
@@ -3001,6 +3001,8 @@ fn mount_partial_rule(rule_path: &str, write: bool) -> PartialFsRuleConfig {
 }
 
 /// Set the terminal title to show the active conversation.
+///
+/// `set_title` removes any control character from the title it writes.
 fn set_terminal_title(id: ConversationId, title: Option<&str>) {
     let display = match title {
         Some(t) => format!("{id}: {t}"),

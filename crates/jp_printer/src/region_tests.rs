@@ -526,6 +526,14 @@ fn the_filter_removes_conceal_but_keeps_its_neighbours() {
     assert_eq!(filter_line("\x1b[8mhidden"), "hidden");
 }
 
+#[test]
+fn the_filter_reads_styling_the_way_a_terminal_does() {
+    // `m` behind a private marker sets a keyboard mode rather than styling,
+    // and `08` conceals as much as `8` does.
+    assert_eq!(filter_line("\x1b[>4;2mkeys"), "keys");
+    assert_eq!(filter_line("\x1b[08mhidden"), "hidden");
+}
+
 // --- Screen-level cases -----------------------------------------------------
 //
 // A byte assertion says what JP emitted. It cannot say what the terminal did

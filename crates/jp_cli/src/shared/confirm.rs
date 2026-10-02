@@ -15,6 +15,7 @@ use inquire::InquireError;
 use jp_conversation::ConversationId;
 use jp_inquire::{InlineOption, InlineSelect};
 use jp_storage::backend::Projection;
+use jp_term::sanitize::strip_controls;
 use jp_workspace::ConversationLock;
 
 use crate::{
@@ -215,6 +216,9 @@ fn decide(answer: std::result::Result<char, InquireError>) -> Result<bool> {
 }
 
 /// Build the details block shown above a confirmation prompt.
+///
+/// The block is the prompt's preamble, which the prompt widget writes itself,
+/// so a title keeps no control character there, whatever `style.sanitize` says.
 fn action_details(
     lock: &ConversationLock,
     active_id: Option<ConversationId>,
@@ -225,7 +229,11 @@ fn action_details(
     let events = lock.events();
 
     DetailsFmt::new(id)
-        .with_title(meta.title.as_ref())
+        .with_title(
+            meta.title
+                .as_deref()
+                .map(|title| strip_controls(title, &[])),
+        )
         .with_event_count(events.len())
         .with_turn_count(events.iter_turns().len())
         .with_last_message_at(events.last().map(|v| v.event.timestamp))

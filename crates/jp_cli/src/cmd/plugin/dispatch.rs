@@ -1414,7 +1414,9 @@ type TitleFuture = Pin<Box<dyn Future<Output = Option<String>> + Send>>;
 async fn generate_title(task: TitleGeneratorTask, conversation: ConversationId) -> Option<String> {
     match task.generate().await {
         Ok(Some(title)) => {
-            debug!(%conversation, %title, "Generated a conversation title.");
+            // Debug-formatted: logs reach the terminal without passing the
+            // printer, and a title is the model's text.
+            debug!(%conversation, ?title, "Generated a conversation title.");
             Some(title)
         }
         Ok(None) => {
