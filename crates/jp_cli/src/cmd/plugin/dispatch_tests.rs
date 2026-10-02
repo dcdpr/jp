@@ -1889,6 +1889,84 @@ echo '{{"type":"exit","code":0}}'
     }
 }
 
+/// A plugin that exits without sending `exit`, leaving behind a worker that
+/// holds its stdout: the run ends, and the worker is stopped.
+///
+/// The host reads the plugin's messages until its stdout closes, and the worker
+/// inherited it, so the messages end only once something kills the worker.
+///
+/// Unix only: on Windows a plugin is a `jp-*.exe`, which a test cannot write as
+/// a script.
+#[cfg(unix)]
+#[test]
+fn a_worker_holding_stdout_dies_with_a_plugin_that_exits_without_saying_so() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let tmp = tempdir().unwrap();
+    let script = tmp.path().join("jp-quitter");
+    let pid_file = tmp.path().join("worker.pid");
+    fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+read -r msg
+echo '{{"type":"ready","protocol":1}}'
+sleep 600 &
+echo $! > {pid_file}
+"#
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let root = tmp.path().join("workspace");
+    let backend = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
+    let workspace = Workspace::in_memory(&root);
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        Some(backend),
+        tokio::runtime::Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    // Bounded: a host that never notices the plugin exiting reads for as long
+    // as the worker runs.
+    let error = runtime
+        .block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                run_plugin("quitter", &script, &[], &mut ctx),
+            )
+            .await
+        })
+        .expect("the run ended once the plugin exited")
+        .unwrap_err();
+
+    assert_eq!(
+        error.message.as_deref(),
+        Some("plugin exited unexpectedly without sending exit message")
+    );
+
+    let worker: u32 = fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+
+    // The killed worker is an orphan, reaped by init a moment later.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while is_process_alive(worker) {
+        assert!(Instant::now() < deadline, "the worker outlived its plugin");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
 /// A plugin that closes its stdin, starts a worker, and exits without reading
 /// `init`: the host's write fails, and the worker is stopped all the same.
 ///
