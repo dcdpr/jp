@@ -24,10 +24,13 @@ fn plugin(name: &str) -> LocalPlugin {
     }
 }
 
+/// A binary whose SHA-256 is `aaa`, which is also what a SHA-256 pin is
+/// compared against.
 fn candidate(plugin: &LocalPlugin) -> Candidate<'_> {
     Candidate {
         plugin,
         sha256: "aaa",
+        pin_digest: Some("aaa"),
         official: false,
         official_sha256: None,
         replaces: None,
@@ -73,6 +76,88 @@ fn a_pinned_checksum_refuses_a_binary_that_does_not_match_it_even_under_allow() 
     );
 
     assert!(matches!(verdict, Verdict::Refuse(reason) if reason.contains("checksum mismatch")));
+}
+
+/// A pin with nothing to compare it against refuses rather than passes.
+#[test]
+fn a_pin_without_a_digest_refuses() {
+    let plugin = plugin("webui");
+    let unhashed = Candidate {
+        pin_digest: None,
+        ..candidate(&plugin)
+    };
+
+    let verdict = decide(
+        &unhashed,
+        Some(&config(Some(RunPolicy::Allow), Some("aaa"))),
+    );
+
+    assert!(matches!(verdict, Verdict::Refuse(reason) if reason.contains("checksum mismatch")));
+}
+
+/// A pin says which algorithm its value is in, and the binary is hashed with
+/// that algorithm before the two are compared.
+#[test]
+fn a_sha1_pin_is_compared_with_the_binarys_sha1() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("jp-webui");
+    std::fs::write(&path, "hello").unwrap();
+    let plugin = LocalPlugin {
+        path: path.clone(),
+        ..plugin("webui")
+    };
+
+    let pinned = |value: &str| {
+        let mut plugins = AppConfig::new_test().plugins;
+        plugins
+            .command
+            .insert("webui".to_owned(), CommandPluginConfig {
+                run: Some(RunPolicy::Allow),
+                checksum: Some(ChecksumConfig {
+                    algorithm: AlgorithmConfig::Sha1,
+                    value: value.to_owned(),
+                }),
+                options: MergeableMap::default(),
+            });
+        plugins
+    };
+
+    let mut approvals = ApprovalStore::load_from(Some(tmp.path().join("approvals.json")));
+    let (printer, _out, _err) = Printer::memory(jp_printer::OutputFormat::Text);
+
+    // The SHA-1 of "hello".
+    let matching = pinned("aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d");
+    assert_eq!(
+        admit(
+            &plugin,
+            Official::default(),
+            &matching,
+            &mut approvals,
+            false,
+            &printer
+        )
+        .map_err(|error| error.message.unwrap_or_default()),
+        Ok(())
+    );
+
+    let other = pinned("bbb");
+    assert_eq!(
+        admit(
+            &plugin,
+            Official::default(),
+            &other,
+            &mut approvals,
+            false,
+            &printer
+        )
+        .map_err(|error| error.message.unwrap_or_default()),
+        Err(format!(
+            "plugin `webui` binary checksum mismatch.\nexpected: bbb\nactual:   \
+             aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d\nThe binary at {path} has changed since it \
+             was pinned. Update plugins.command.webui.checksum.value in your config to accept the \
+             new binary."
+        ))
+    );
 }
 
 #[test]

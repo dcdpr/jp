@@ -11,6 +11,7 @@ use std::{
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::NamedUtf8TempFile;
 use jp_plugin::registry::{Registry, RegistryBinary, RegistryPlugin};
+use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use tracing::{debug, warn};
 
@@ -320,6 +321,13 @@ pub(crate) fn sha256_file(path: &Utf8Path) -> Result<String, cmd::Error> {
     let data =
         std::fs::read(path).map_err(|e| cmd::Error::from(format!("failed to read {path}: {e}")))?;
     Ok(sha256_hex(&data))
+}
+
+/// Compute the SHA-1 hex digest of a file.
+pub(crate) fn sha1_file(path: &Utf8Path) -> Result<String, cmd::Error> {
+    let data =
+        std::fs::read(path).map_err(|e| cmd::Error::from(format!("failed to read {path}: {e}")))?;
+    Ok(format!("{:x}", Sha1::digest(&data)))
 }
 
 /// Construct the target triple for the current platform.

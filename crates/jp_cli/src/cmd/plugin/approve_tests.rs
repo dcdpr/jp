@@ -4,7 +4,8 @@ use std::fs;
 use camino_tempfile::Utf8TempDir;
 use camino_tempfile::tempdir;
 use jp_config::{
-    plugins::command::PartialCommandPluginConfig, providers::mcp::PartialChecksumConfig,
+    plugins::command::PartialCommandPluginConfig,
+    providers::mcp::{AlgorithmConfig, PartialChecksumConfig},
 };
 use pretty_assertions::assert_eq;
 use serial_test::serial;
@@ -95,6 +96,29 @@ fn a_pin_the_binary_matches_lets_it_be_approved() {
         .map_err(|e| e.message.unwrap_or_default()),
         Ok(()),
         "nothing pinned"
+    );
+}
+
+/// A pin in SHA-1 is compared with the binary's SHA-1, not its SHA-256.
+#[test]
+fn a_sha1_pin_is_compared_with_the_binarys_sha1() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("jp-titles");
+    fs::write(&path, "hello").unwrap();
+    let sha256 = registry::sha256_file(&path).unwrap();
+
+    let mut config = pinned("aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d");
+    config
+        .plugins
+        .command
+        .get_mut("titles")
+        .and_then(|c| c.checksum.as_mut())
+        .unwrap()
+        .algorithm = Some(AlgorithmConfig::Sha1);
+
+    assert_eq!(
+        check_pin(&config, "titles", &path, &sha256).map_err(|e| e.message.unwrap_or_default()),
+        Ok(())
     );
 }
 

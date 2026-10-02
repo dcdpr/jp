@@ -11,9 +11,12 @@
 use camino::Utf8Path;
 use chrono::Utc;
 use crossterm::style::Stylize as _;
-use jp_config::plugins::{
-    PluginsConfig,
-    command::{CommandPluginConfig, RunPolicy},
+use jp_config::{
+    plugins::{
+        PluginsConfig,
+        command::{CommandPluginConfig, RunPolicy},
+    },
+    providers::mcp::AlgorithmConfig,
 };
 use jp_inquire::{InlineOption, InlineSelect};
 use jp_plugin::{PROTOCOL_VERSION, registry::ApprovedPlugin};
@@ -35,6 +38,12 @@ pub(crate) struct Candidate<'a> {
 
     /// The SHA-256 of its contents.
     pub sha256: &'a str,
+
+    /// The digest of its contents in the algorithm its pinned checksum uses,
+    /// when configuration pins one.
+    ///
+    /// A pinned checksum with no digest to compare against refuses the binary.
+    pub pin_digest: Option<&'a str>,
 
     /// Whether its name is an official plugin's.
     pub official: bool,
@@ -99,7 +108,12 @@ pub(crate) fn decide(candidate: &Candidate<'_>, config: Option<&CommandPluginCon
     }
 
     if let Some(pinned) = config.and_then(|c| c.checksum.as_ref())
-        && let Some(refusal) = pin_mismatch(name, path, &pinned.value, candidate.sha256)
+        && let Some(refusal) = pin_mismatch(
+            name,
+            path,
+            &pinned.value,
+            candidate.pin_digest.unwrap_or_default(),
+        )
     {
         return Verdict::Refuse(refusal);
     }
@@ -123,19 +137,36 @@ pub(crate) fn decide(candidate: &Candidate<'_>, config: Option<&CommandPluginCon
 
 /// Why a binary is refused, when its contents do not match the checksum pinned
 /// for it; `None` when they do.
+///
+/// `actual` is the binary's digest in the algorithm the pin uses.
 pub(crate) fn pin_mismatch(
     name: &str,
     path: &Utf8Path,
     pinned: &str,
-    sha256: &str,
+    actual: &str,
 ) -> Option<String> {
-    (pinned != sha256).then(|| {
+    (pinned != actual).then(|| {
         format!(
             "plugin `{name}` binary checksum mismatch.\nexpected: {pinned}\nactual:   \
-             {sha256}\nThe binary at {path} has changed since it was pinned. Update \
+             {actual}\nThe binary at {path} has changed since it was pinned. Update \
              plugins.command.{name}.checksum.value in your config to accept the new binary.",
         )
     })
+}
+
+/// The digest of the binary at `path` that a checksum pinned in `algorithm` is
+/// compared against.
+///
+/// `sha256` is the binary's SHA-256, which every caller has already computed.
+pub(crate) fn pin_digest(
+    path: &Utf8Path,
+    sha256: &str,
+    algorithm: AlgorithmConfig,
+) -> Result<String, cmd::Error> {
+    match algorithm {
+        AlgorithmConfig::Sha256 => Ok(sha256.to_owned()),
+        AlgorithmConfig::Sha1 => registry::sha1_file(path),
+    }
 }
 
 /// The lines the prompt shows above its question.
@@ -256,17 +287,24 @@ pub(crate) fn admit(
 ) -> cmd::Output {
     check_protocol(plugin)?;
 
+    let config = plugins_config.command.get(&plugin.name);
     let sha256 = registry::sha256_file(&plugin.path)?;
+    let pin_digest = config
+        .and_then(|c| c.checksum.as_ref())
+        .map(|pin| pin_digest(&plugin.path, &sha256, pin.algorithm))
+        .transpose()?;
+
     let candidate = Candidate {
         plugin,
         sha256: &sha256,
+        pin_digest: pin_digest.as_deref(),
         official: official.official,
         official_sha256: official.sha256,
         replaces: official.replaces,
         approval: approvals.check(&plugin.name, &plugin.path, &sha256),
     };
 
-    let reason = match decide(&candidate, plugins_config.command.get(&plugin.name)) {
+    let reason = match decide(&candidate, config) {
         Verdict::Run => {
             debug!(name = plugin.name, path = %plugin.path, "Plugin admitted.");
             return Ok(());

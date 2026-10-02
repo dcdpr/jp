@@ -8,7 +8,7 @@ use jp_printer::Printer;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    admission::pin_mismatch,
+    admission::{pin_digest, pin_mismatch},
     approvals::ApprovalStore,
     discovery::{self, LocalPlugin, Location, ManifestState},
     dispatch, registry,
@@ -132,19 +132,25 @@ fn check_not_denied(config: &PartialAppConfig, name: &str) -> cmd::Output {
 }
 
 /// Refuse to run a plugin to approve it when `config` pins its checksum to
-/// other contents than `sha256`.
+/// other contents than the binary at `path`, whose SHA-256 is `sha256`.
 ///
 /// The approval would be useless as well: admission checks the pin before it
 /// looks at approvals.
 fn check_pin(config: &PartialAppConfig, name: &str, path: &Utf8Path, sha256: &str) -> cmd::Output {
-    let pinned = config
+    let Some(pin) = config
         .plugins
         .command
         .get(name)
         .and_then(|c| c.checksum.as_ref())
-        .and_then(|c| c.value.as_deref());
+    else {
+        return Ok(());
+    };
+    let Some(pinned) = pin.value.as_deref() else {
+        return Ok(());
+    };
 
-    match pinned.and_then(|pinned| pin_mismatch(name, path, pinned, sha256)) {
+    let actual = pin_digest(path, sha256, pin.algorithm.unwrap_or_default())?;
+    match pin_mismatch(name, path, pinned, &actual) {
         Some(refusal) => Err(refusal.into()),
         None => Ok(()),
     }

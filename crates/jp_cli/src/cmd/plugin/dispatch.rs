@@ -398,6 +398,9 @@ pub(crate) async fn run_plugin(
         interactive: ctx.term.interactive,
     };
 
+    // How long a plugin asked to shut down has to exit before it is killed.
+    let grace = Duration::from_secs(config.plugins.shutdown_timeout_secs.into());
+
     let PluginProcess {
         mut child,
         tree,
@@ -437,12 +440,7 @@ pub(crate) async fn run_plugin(
             return;
         }
 
-        stop_plugin(
-            &shutdown_writer,
-            &shutdown_flag,
-            &shutdown_tree,
-            Duration::from_secs(5),
-        );
+        stop_plugin(&shutdown_writer, &shutdown_flag, &shutdown_tree, grace);
     });
 
     // Read on a thread of its own, so a turn awaiting the provider cannot stop
@@ -483,10 +481,11 @@ pub(crate) async fn run_plugin(
     // anything first is a wait for a process that has no reason to exit, and the
     // error above never reaches the caller.
     //
-    // Short grace: unlike an interrupt, there is no work in flight worth letting
-    // finish.
+    // At most a second: unlike an interrupt, there is no work in flight worth
+    // letting finish.
     if result.is_err() {
-        stop_plugin(&stdin, &shutdown_sent, &tree, Duration::from_secs(1));
+        let grace = grace.min(Duration::from_secs(1));
+        stop_plugin(&stdin, &shutdown_sent, &tree, grace);
     }
 
     // After the plugin is dealt with, before the child is reaped: a turn writes

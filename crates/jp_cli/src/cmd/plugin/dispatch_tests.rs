@@ -1956,6 +1956,80 @@ fn a_worker_dies_with_a_plugin_that_never_reads_init() {
     }
 }
 
+/// A plugin that ignores `Shutdown` is killed once
+/// `plugins.shutdown_timeout_secs` has passed, not after a fixed grace period.
+///
+/// With the timeout at zero the kill follows the request at once; at the
+/// default of five seconds the run would take at least that long to end.
+///
+/// Unix only: on Windows a plugin is a `jp-*.exe`, which a test cannot write as
+/// a script.
+#[cfg(unix)]
+#[test]
+fn a_plugin_ignoring_shutdown_is_killed_after_the_configured_grace() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let tmp = tempdir().unwrap();
+    let script = tmp.path().join("jp-stubborn");
+    let started = tmp.path().join("started");
+
+    // Never reads stdin again, so the `Shutdown` it is sent goes unanswered.
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nread -r msg\necho '{{\"type\":\"ready\",\"protocol\":1}}'\n: > \
+             {started}\nsleep 600\n"
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut config = AppConfig::new_test();
+    config.plugins.shutdown_timeout_secs = 0;
+
+    let root = tmp.path().join("workspace");
+    let backend = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
+    let workspace = Workspace::in_memory(&root);
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        Some(backend),
+        tokio::runtime::Runtime::new().unwrap(),
+        Globals::default(),
+        config,
+        None,
+        printer,
+    );
+
+    // Requested once the plugin is running, the way a SIGTERM would be.
+    let shutdown = ctx.signals.shutdown_token();
+    let requested = Arc::new(Mutex::new(None));
+    {
+        let requested = Arc::clone(&requested);
+        thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !started.exists() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(20));
+            }
+            *requested.lock().unwrap() = Some(Instant::now());
+            shutdown.cancel();
+        });
+    }
+
+    runtime
+        .block_on(run_plugin("stubborn", &script, &[], &mut ctx))
+        .unwrap();
+
+    let requested = requested.lock().unwrap().expect("shutdown was requested");
+    let took = requested.elapsed();
+    assert!(
+        took < Duration::from_secs(3),
+        "killed {took:?} after shutdown was requested"
+    );
+}
+
 #[test]
 fn a_describe_answer_is_compared_with_the_manifest_field_by_field() {
     let manifest = Manifest {
