@@ -63,17 +63,20 @@ The goal is a plugin system where:
 
 ### User Experience
 
-Plugins are invoked as JP subcommands and can hook into any level of the command
-hierarchy:
+Plugins are invoked as JP subcommands, at the root or under a command group a
+plugin or the registry provides:
 
 ```txt
 jp serve                        # runs jp-serve plugin
 jp serve web                    # runs jp-serve-web plugin
 jp export --format html         # runs jp-export plugin
 jp dashboard                    # runs jp-dashboard plugin
-jp conversation export --html   # runs jp-conversation-export plugin
-jp conversation stats           # runs jp-conversation-stats plugin
 ```
+
+No built-in command group accepts plugin children yet: `jp conversation export`
+is a built-in group's unknown subcommand, not a plugin.
+Opening a built-in group to plugins is future work (see
+[Non-Goals](#non-goals)).
 
 Each plugin declares the command path it provides in its manifest, a line of
 JSON embedded in the binary that the host reads without running it (see [Plugin
@@ -1172,6 +1175,10 @@ commands for coarse-grained extensions.
   Mutations](#workspace-mutations).
 - **Plugin-to-plugin communication**: Plugins communicate with JP, not with each
   other.
+- **Plugin children of built-in command groups**: `jp conversation export` as a
+  plugin.
+  Opening a built-in group needs it to accept unknown subcommands, and a rule
+  for its aliases so `jp c export` resolves too; a later RFD can do both.
 
 ## Risks and Open Questions
 
@@ -1280,8 +1287,7 @@ commands for coarse-grained extensions.
   Once manifests route, several sources can claim one path, and the host
       chooses by these rules:
 
-  1. A built-in command path wins; an unknown child of an extensible
-         built-in group can still resolve to a plugin.
+  1. A built-in command path wins.
   2. The longest claimed path wins, and the unmatched arguments go to that
          plugin: with plugins claiming `serve` and `serve web` both installed,
          `jp serve web` runs the second.
