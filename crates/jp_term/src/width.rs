@@ -162,11 +162,12 @@ pub fn wrap_ranges(s: &str, max_width: usize) -> Vec<Range<usize>> {
 
         // The widest word break the budget allows. The budget boundary itself
         // counts when the character there is whitespace, which is the case of a
-        // word ending exactly at the row edge.
+        // word ending exactly at the row edge. `end` never falls inside an
+        // escape sequence, so whitespace there is visible text.
         let word_break = if rest[end..].starts_with(char::is_whitespace) {
             Some(end)
         } else {
-            rest[..end].rfind(char::is_whitespace)
+            last_visible_whitespace(&rest[..end])
         };
 
         // Whitespace before the break belongs to the break, not to the row.
@@ -188,6 +189,18 @@ pub fn wrap_ranges(s: &str, max_width: usize) -> Vec<Range<usize>> {
     }
 
     rows
+}
+
+/// Byte offset of the last whitespace in `s` that is not part of an escape
+/// sequence.
+///
+/// Whitespace inside one, such as a window title's text, is the sequence's
+/// payload: breaking a row there would split the sequence.
+fn last_visible_whitespace(s: &str) -> Option<usize> {
+    units(s)
+        .filter(|unit| !unit.escape && unit.text.starts_with(char::is_whitespace))
+        .last()
+        .map(|unit| unit.offset)
 }
 
 /// Byte offset just past the first grapheme cluster of `s` that is not part of

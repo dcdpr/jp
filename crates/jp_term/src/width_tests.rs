@@ -472,6 +472,20 @@ fn wrap_ranges_does_not_count_escape_sequences() {
 }
 
 #[test]
+fn wrap_ranges_never_breaks_on_whitespace_inside_an_escape_sequence() {
+    // A window title's text is the sequence's payload, not a word to wrap on.
+    // Breaking there would split the sequence across two rows.
+    assert_eq!(wrapped("a\x1b]0;build status\x07bcdef", 3), [
+        "a\x1b]0;build status\x07bc",
+        "def"
+    ]);
+    assert_eq!(wrapped("aa bb\x1b]0;x y\x07cc", 5), [
+        "aa",
+        "bb\x1b]0;x y\x07cc"
+    ]);
+}
+
+#[test]
 fn wrap_ranges_puts_an_escape_on_the_row_of_the_cluster_after_it() {
     // A row holding nothing but an escape sequence would print as a blank line.
     assert_eq!(wrapped("\x1b[31m\u{65E5}\u{672C}", 1), [
