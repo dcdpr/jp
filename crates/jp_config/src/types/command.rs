@@ -194,32 +194,6 @@ impl CommandConfigOrString {
     }
 }
 
-/// Build a shell command line from a raw `program` and its discrete `args`.
-///
-/// `program` is used verbatim — it may itself be shell syntax (`&&`, `|`,
-/// redirects).
-/// The `args` are shell-quoted with [`shlex::try_join`] so multi-word arguments
-/// keep their boundaries instead of being word-split by the shell (`try_join`
-/// only fails on an interior NUL byte; a raw space-join is the fallback).
-///
-/// The caller wraps the result in its own shell invocation (`sh -c <line>`).
-#[must_use]
-pub fn shell_command_line(program: &str, args: &[String]) -> String {
-    if args.is_empty() {
-        return program.to_owned();
-    }
-
-    shlex::try_join(args.iter().map(String::as_str)).map_or_else(
-        |_| {
-            std::iter::once(program)
-                .chain(args.iter().map(String::as_str))
-                .collect::<Vec<_>>()
-                .join(" ")
-        },
-        |quoted| format!("{program} {quoted}"),
-    )
-}
-
 /// External command configuration.
 ///
 /// A user-facing description of a command JP should run: which program, with
@@ -251,22 +225,65 @@ pub struct CommandConfig {
     pub shell: bool,
 }
 
+impl CommandConfig {
+    /// The command line to hand to a shell: the program verbatim, followed by
+    /// its shell-quoted arguments.
+    ///
+    /// The program is never quoted, because with `shell` set it may itself be
+    /// shell syntax (`&&`, `|`, redirects).
+    /// The arguments are quoted with [`shlex::try_join`] so a multi-word
+    /// argument keeps its boundary instead of being word-split (`try_join` only
+    /// fails on an interior NUL byte; a raw space-join is the fallback).
+    ///
+    /// The result is execution input, not presentation: it is passed verbatim
+    /// to `sh -c`, so it carries no `/bin/sh -c` wrapper and must not gain
+    /// quoting, truncation, or any other decoration.
+    /// Format a command for a human with [`Display`].
+    ///
+    /// [`Display`]: fmt::Display
+    #[must_use]
+    pub fn shell_command_line(&self) -> String {
+        if self.args.is_empty() {
+            return self.program.clone();
+        }
+
+        shlex::try_join(self.args.iter().map(String::as_str)).map_or_else(
+            |_| {
+                std::iter::once(self.program.as_str())
+                    .chain(self.args.iter().map(String::as_str))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            },
+            |quoted| format!("{} {quoted}", self.program),
+        )
+    }
+}
+
+/// Renders as the command line a reader would type to run this command: the
+/// program followed by its shell-quoted arguments, wrapped in `sh -c '…'` when
+/// `shell` is set.
+///
+/// This is the form shown in prompts, error messages, and logs, and it names
+/// the shell rather than reproducing an exact invocation: each executor adds
+/// its own flags and operands around the command line.
+/// Code that needs the string to hand to `sh -c` calls [`shell_command_line`]
+/// instead, so this rendering can change without breaking execution.
+///
+/// [`shell_command_line`]: CommandConfig::shell_command_line
 impl fmt::Display for CommandConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.shell {
-            writeln!(f, "/bin/sh -c'")?;
+        let line = self.shell_command_line();
+
+        if !self.shell {
+            return write!(f, "{line}");
         }
 
-        write!(f, "{}", self.program)?;
-        for arg in &self.args {
-            write!(f, " {arg}")?;
+        // `try_quote` only fails on an interior NUL byte, which a shell could
+        // not carry anyway; showing the bare line beats showing nothing.
+        match shlex::try_quote(&line) {
+            Ok(quoted) => write!(f, "sh -c {quoted}"),
+            Err(_) => write!(f, "sh -c {line}"),
         }
-
-        if self.shell {
-            write!(f, "'")?;
-        }
-
-        Ok(())
     }
 }
 

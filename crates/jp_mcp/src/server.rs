@@ -21,11 +21,8 @@ use std::{fmt, sync::Arc};
 pub use builtin::BuiltinTool;
 use camino::Utf8Path;
 use indexmap::IndexMap;
-use jp_config::{
-    conversation::tool::{
-        CommandConfig, ToolConfigWithDefaults, ToolSource, style::ParametersStyle,
-    },
-    types::command::shell_command_line,
+use jp_config::conversation::tool::{
+    CommandConfig, ToolConfigWithDefaults, ToolSource, style::ParametersStyle,
 };
 use jp_process::{Ended, LineSink, ProcessRunner, ProcessSpec, Watch};
 use jp_tool::{
@@ -463,16 +460,18 @@ pub async fn run_tool_command(
             error: Box::new(error),
         })?;
 
-    let mut spec = if shell {
-        // `program` is shell syntax and used verbatim; `args` are shell-quoted
-        // so multi-word arguments keep their boundaries.
-        ProcessSpec::new(
-            "sh",
-            ["-c".to_owned(), shell_command_line(&program, &args)],
-            root,
-        )
+    let command = CommandConfig {
+        program,
+        args,
+        shell,
+    };
+
+    let mut spec = if command.shell {
+        // The rendered command line is shell syntax: the program verbatim, its
+        // arguments shell-quoted so multi-word ones keep their boundaries.
+        ProcessSpec::new("sh", ["-c".to_owned(), command.shell_command_line()], root)
     } else {
-        ProcessSpec::new(program, args, root)
+        ProcessSpec::new(command.program, command.args, root)
     };
     // A Ctrl-C at the terminal must not kill the tool: JP stops it through the
     // cancellation token, once the user has chosen what the interrupt means.

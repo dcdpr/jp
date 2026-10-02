@@ -73,23 +73,89 @@ fn test_command_config_string_empty_parses_to_empty_program() {
     });
 }
 
+fn command(program: &str, args: &[&str], shell: bool) -> CommandConfig {
+    CommandConfig {
+        program: program.to_owned(),
+        args: args.iter().map(|s| (*s).to_owned()).collect(),
+        shell,
+    }
+}
+
 #[test]
 fn shell_command_line_no_args_is_program_verbatim() {
     // The program is shell syntax and must pass through untouched.
-    assert_eq!(shell_command_line("foo | bar", &[]), "foo | bar");
+    assert_eq!(
+        command("foo | bar", &[], true).shell_command_line(),
+        "foo | bar"
+    );
 }
 
 #[test]
 fn shell_command_line_quotes_multiword_args() {
-    let line = shell_command_line("grep", &["foo bar".to_owned(), "file".to_owned()]);
-    assert_eq!(line, "grep 'foo bar' file");
+    let cmd = command("grep", &["foo bar", "file"], false);
+
+    assert_eq!(cmd.shell_command_line(), "grep 'foo bar' file");
 }
 
 #[test]
 fn shell_command_line_keeps_program_raw() {
     // Only the discrete args are quoted; the program stays verbatim.
-    let line = shell_command_line("a && b", &["c".to_owned()]);
-    assert_eq!(line, "a && b c");
+    assert_eq!(
+        command("a && b", &["c"], true).shell_command_line(),
+        "a && b c"
+    );
+}
+
+/// `sh -c` receives the command line on its own, so a wrapper added here would
+/// nest one shell inside another.
+#[test]
+fn shell_command_line_carries_no_shell_wrapper() {
+    let line = "git rev-parse --show-toplevel";
+
+    assert_eq!(command(line, &[], true).shell_command_line(), line);
+}
+
+/// A directly spawned command reads as the line the user configured.
+#[test]
+fn display_shows_the_command_line() {
+    assert_eq!(
+        command("code", &["--wait"], false).to_string(),
+        "code --wait"
+    );
+}
+
+/// A shell command names the shell that interprets it, so a reader can tell
+/// that `|`, `&&`, and `$(...)` in the line are live rather than literal.
+#[test]
+fn display_names_the_shell_for_a_shell_command() {
+    let cmd = command(r#"basename "$(git rev-parse --show-toplevel)""#, &[], true);
+
+    assert_eq!(
+        cmd.to_string(),
+        r#"sh -c 'basename "$(git rev-parse --show-toplevel)"'"#
+    );
+}
+
+/// The same text means different things with and without a shell, so the two
+/// must not render alike.
+#[test]
+fn display_distinguishes_a_shell_command_from_a_direct_one() {
+    let line = "foo | bar";
+
+    assert_ne!(
+        command(line, &[], true).to_string(),
+        command(line, &[], false).to_string()
+    );
+}
+
+/// A script containing single quotes stays one `sh -c` operand: the quoting
+/// switches to double quotes rather than terminating early and spilling the
+/// rest of the script into further operands.
+#[test]
+fn display_keeps_a_quoted_script_in_one_operand() {
+    let cmd = command("echo 'hi'", &[], true);
+
+    assert_eq!(cmd.to_string(), r#"sh -c "echo 'hi'""#);
 }
 
 /// Expanding a shorthand yields the same command it would have run.
