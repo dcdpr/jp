@@ -246,10 +246,13 @@ pub(super) fn init_line(init: InitMessage, plugin: &str) -> Result<String, ToolE
 
 /// Read what a plugin printed on stdout, returning the outcome it sent.
 ///
+/// The call is finished only by an `exit` after the outcome: a plugin that
+/// answers and then crashes before `exit` fails the call.
 /// The error is a sentence about the plugin, for
 /// [`ToolError::CommandPluginFailed`].
 pub(super) fn parse_plugin_output(stdout: &str) -> Result<Value, String> {
     let mut outcome = None;
+    let mut exited = false;
 
     for line in stdout
         .lines()
@@ -275,7 +278,10 @@ pub(super) fn parse_plugin_output(stdout: &str) -> Result<Value, String> {
                     .reason
                     .unwrap_or_else(|| format!("exited with code {}", exit.code)));
             }
-            PluginToHost::Exit(_) => break,
+            PluginToHost::Exit(_) => {
+                exited = true;
+                break;
+            }
 
             // A tool's result is its outcome, and its input closed after
             // `init`: printed output and requests have nowhere to go.
@@ -283,12 +289,14 @@ pub(super) fn parse_plugin_output(stdout: &str) -> Result<Value, String> {
         }
     }
 
-    outcome.ok_or_else(|| {
-        format!(
+    match outcome {
+        Some(outcome) if exited => Ok(outcome),
+        Some(_) => Err("answered the tool call, then exited without sending `exit`".to_owned()),
+        None => Err(format!(
             "exited without answering the tool call; it may predate `jp` protocol \
              {PROTOCOL_VERSION}"
-        )
-    })
+        )),
+    }
 }
 
 /// Forward each line of a plugin's stderr to tracing, and to `sink` when the

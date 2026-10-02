@@ -240,6 +240,31 @@ fn an_approved_plugin_is_admitted() {
     assert!(plugins.admitted.contains_key("ticket"));
 }
 
+/// The turn's baseline is the digest admission approved.
+/// A binary replaced after that is refused at its next call rather than trusted
+/// for the rest of the turn.
+#[test]
+fn the_turn_pins_the_approved_contents() {
+    let machine = Machine::new().with_plugin("ticket", "v1");
+    let mut approvals = machine.approvals();
+    machine.approve(&mut approvals, "ticket");
+    let approved = registry::sha256_file(&machine.path("ticket")).unwrap();
+
+    let plugins = machine.admit_with(&["ticket"], &turn_config(&[]), &mut approvals);
+    assert_eq!(plugins.admitted["ticket"].sha256, approved);
+
+    fs::write(machine.path("ticket"), "v2").unwrap();
+    let command_plugins = plugins.into_command_plugins(PluginInit::default());
+
+    assert_eq!(
+        command_plugins.verify("ticket").map(|p| p.binary.clone()),
+        Err(format!(
+            "{} changed since it was admitted at the start of this turn",
+            machine.path("ticket")
+        ))
+    );
+}
+
 #[test]
 fn a_denied_plugin_is_refused_even_when_approved() {
     let machine = Machine::new().with_plugin("ticket", "v1");

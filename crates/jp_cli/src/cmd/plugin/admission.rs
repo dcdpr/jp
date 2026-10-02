@@ -273,6 +273,9 @@ pub(crate) struct Official<'a> {
 /// Decide whether `plugin` may run, asking the user where the policy says to.
 ///
 /// Records an approval when the user answers `Y`.
+/// Returns the SHA-256 of the contents the decision was made on, read once
+/// before deciding: a binary replaced while the prompt is open is not the one
+/// that was admitted.
 ///
 /// # Errors
 ///
@@ -284,7 +287,7 @@ pub(crate) fn admit(
     approvals: &mut ApprovalStore,
     interactive: bool,
     printer: &Printer,
-) -> cmd::Output {
+) -> Result<String, cmd::Error> {
     check_protocol(plugin)?;
 
     let config = plugins_config.command.get(&plugin.name);
@@ -307,7 +310,7 @@ pub(crate) fn admit(
     let reason = match decide(&candidate, config) {
         Verdict::Run => {
             debug!(name = plugin.name, path = %plugin.path, "Plugin admitted.");
-            return Ok(());
+            return Ok(sha256);
         }
         Verdict::Refuse(reason) => return Err(reason.into()),
         Verdict::Ask(reason) => reason,
@@ -333,14 +336,17 @@ pub(crate) fn admit(
     .map_err(|e| cmd::Error::from(format!("prompt failed: {e}")))?;
 
     match answer {
-        'y' => Ok(()),
-        'Y' => approvals.record(&plugin.name, ApprovedPlugin {
-            path: plugin.path.clone(),
-            sha256,
-            approved_at: Utc::now(),
-            installed: false,
-            manifest: None,
-        }),
+        'y' => Ok(sha256),
+        'Y' => {
+            approvals.record(&plugin.name, ApprovedPlugin {
+                path: plugin.path.clone(),
+                sha256: sha256.clone(),
+                approved_at: Utc::now(),
+                installed: false,
+                manifest: None,
+            })?;
+            Ok(sha256)
+        }
         _ => Err("plugin execution denied".into()),
     }
 }

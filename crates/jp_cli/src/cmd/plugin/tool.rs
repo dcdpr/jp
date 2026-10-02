@@ -26,9 +26,7 @@ use jp_config::{
     conversation::tool::{ToolConfigWithDefaults, ToolSource, ToolsConfig},
     plugins::PluginsConfig,
 };
-use jp_mcp::server::{
-    AdmittedPlugin, CommandPlugins, PluginInit, command::sha256_file, is_offered,
-};
+use jp_mcp::server::{AdmittedPlugin, CommandPlugins, PluginInit, is_offered};
 use jp_plugin::registry::Registry;
 use jp_printer::{PrintableExt as _, Printer};
 use jp_tool::Error as ToolError;
@@ -181,7 +179,10 @@ fn admit_one(
         replaces: None,
     };
 
-    admit(
+    // The digest admission decided on, not a second read of the file: a binary
+    // replaced while the prompt was open must fail the per-call check, not
+    // become the turn's baseline.
+    let sha256 = admit(
         named.plugin,
         official,
         plugins_config,
@@ -191,12 +192,8 @@ fn admit_one(
     )
     .map_err(error_message)?;
 
-    let binary = named.plugin.path.clone();
-    // Hashed the way the tool service checks it before every call.
-    let sha256 = sha256_file(&binary).map_err(|error| format!("cannot read {binary}: {error}"))?;
-
     Ok(AdmittedPlugin {
-        binary,
+        binary: named.plugin.path.clone(),
         sha256,
         options: plugin_options(plugins_config, name),
     })
