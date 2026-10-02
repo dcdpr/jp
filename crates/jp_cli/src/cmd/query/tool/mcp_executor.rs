@@ -28,7 +28,7 @@ use jp_llm::query::ToolExecution;
 use jp_mcp::{
     Client,
     server::{
-        StderrSink,
+        CommandPlugins, StderrSink,
         builtin::BuiltinExecutors,
         http::{Endpoint, EndpointError},
         result::from_mcp,
@@ -322,6 +322,7 @@ impl TerminalExecutorSource {
         Self::start_with_metadata(
             builtins,
             runner,
+            CommandPlugins::default(),
             definitions,
             tools,
             approvals,
@@ -338,11 +339,13 @@ impl TerminalExecutorSource {
     /// `metadata` is advertised on every tool's MCP description, for a caller
     /// that reads vendor hints there.
     /// It changes no execution policy.
-    /// `runner` runs local commands: `local` tools, and every tool's argument
-    /// formatter.
+    /// `runner` runs every subprocess: `local` tools, argument formatters, and
+    /// the binaries of `command_plugins`, the plugins admitted for the tools
+    /// whose source is `command.<plugin>`.
     pub(crate) async fn start_with_metadata(
         builtins: BuiltinExecutors,
         runner: Arc<dyn ProcessRunner>,
+        command_plugins: CommandPlugins,
         definitions: &[ToolDefinition],
         tools: &ToolsConfig,
         approvals: Arc<ApprovalStore>,
@@ -375,6 +378,7 @@ impl TerminalExecutorSource {
             upstream.clone(),
             builtins,
             runner,
+            command_plugins,
             root,
             invocation,
         )?;

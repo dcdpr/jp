@@ -6,6 +6,7 @@
 //!   subcommands, which need no workspace
 //! - External plugin dispatch: routing an unknown subcommand to the plugin
 //!   whose manifest claims it, and spawning it
+//! - Tool calls served by plugins (`source = "command.<name>"`)
 //!
 //! See: `docs/rfd/072-command-plugin-system.md`
 
@@ -22,6 +23,7 @@ mod process_tree;
 pub(crate) mod registry;
 mod revoke;
 pub(crate) mod routing;
+pub(crate) mod tool;
 mod uninstall;
 mod update;
 

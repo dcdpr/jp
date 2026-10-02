@@ -226,7 +226,8 @@ impl Validator for ToolsConfig {
     /// Validate cross-field invariants on the tools configuration.
     fn validate(&self) -> Result<(), ConfigError> {
         reject_comma_in_tool_names(self)?;
-        reject_access_on_non_local_tools(self)
+        reject_access_on_non_local_tools(self)?;
+        reject_tool_formatter_on_non_subprocess_tools(self)
     }
 }
 
@@ -248,11 +249,11 @@ fn reject_comma_in_tool_names(tools: &ToolsConfig) -> Result<(), ConfigError> {
     Ok(())
 }
 
-/// Reject `access` declared on a tool whose finalized source is `builtin` or
-/// `mcp`.
+/// Reject `access` declared on a tool that does not run as a subprocess JP
+/// starts.
 ///
-/// `access` is the local-subprocess contract: it is serialized into the
-/// `Context` that local tool binaries self-check.
+/// `access` is the subprocess contract: it is compiled and handed to the local
+/// command or command plugin, which self-checks it.
 /// Builtin tools run in-process and MCP tools run on external servers, so
 /// neither consumes `access` — accepting it there would create false
 /// confidence in a security-relevant field.
@@ -267,15 +268,59 @@ fn reject_access_on_non_local_tools(tools: &ToolsConfig) -> Result<(), ConfigErr
             continue;
         }
         let kind = match tool.source {
-            ToolSource::Local { .. } => continue,
+            ToolSource::Local { .. } | ToolSource::Command { .. } => continue,
             ToolSource::Builtin { .. } => "builtin",
             ToolSource::Mcp { .. } => "mcp",
         };
         return Err(HandlerError::new(format!(
-            "conversation.tools.{name}: `access` is only supported on local tools, but '{name}' \
-             is a {kind} tool"
+            "conversation.tools.{name}: `access` is only supported on local and command plugin \
+             tools, but '{name}' is a {kind} tool"
         ))
         .into());
+    }
+    Ok(())
+}
+
+/// Reject `style.parameters = "tool"` where it would reach a tool that does not
+/// run as a subprocess JP starts.
+///
+/// The style asks the tool's command or plugin to format its own arguments.
+/// A builtin or MCP tool has neither, so the call would be announced with no
+/// arguments at all.
+///
+/// The `'*'` style reaches every tool that sets no style of its own, so it is
+/// rejected only when such a tool is a builtin or MCP one.
+fn reject_tool_formatter_on_non_subprocess_tools(tools: &ToolsConfig) -> Result<(), ConfigError> {
+    let kind = |source: &ToolSource| match source {
+        ToolSource::Local { .. } | ToolSource::Command { .. } => None,
+        ToolSource::Builtin { .. } => Some("builtin"),
+        ToolSource::Mcp { .. } => Some("mcp"),
+    };
+    let defaults_format = tools.defaults.style.parameters == style::ParametersStyle::Tool;
+
+    for (name, tool) in tools.tools.iter() {
+        let Some(kind) = kind(&tool.source) else {
+            continue;
+        };
+
+        match &tool.style {
+            Some(style) if style.parameters == style::ParametersStyle::Tool => {
+                return Err(HandlerError::new(format!(
+                    "conversation.tools.{name}: `style.parameters = \"tool\"` is only supported \
+                     on local and command plugin tools, but '{name}' is a {kind} tool"
+                ))
+                .into());
+            }
+            None if defaults_format => {
+                return Err(HandlerError::new(format!(
+                    "conversation.tools.'*'.style.parameters: `tool` is only supported on local \
+                     and command plugin tools, but '{name}' is a {kind} tool that inherits it; \
+                     set it on each tool instead"
+                ))
+                .into());
+            }
+            _ => {}
+        }
     }
     Ok(())
 }
@@ -304,19 +349,18 @@ pub struct ToolsDefaultsConfig {
     #[setting(required)]
     pub run: RunMode,
 
-    /// When to run a tool's custom argument formatter relative to the approval
-    /// prompt.
+    /// When to run a tool's argument formatter relative to the approval prompt.
     ///
-    /// Only affects [`style::ParametersStyle::Custom`] (a user-configured shell
-    /// command).
+    /// Only affects `style.parameters` set to a command or to `tool`, both of
+    /// which run a program to format the call.
     /// Built-in parameter styles (`json`, `function_call`, `off`) are pure
     /// transformations and always render before the prompt regardless of this
     /// field.
     ///
-    /// - `ask`: Defer the custom formatter until after approval (safe default
-    ///   — keeps an untrusted shell command from running unprompted).
-    /// - `allow`: Run the custom formatter ahead of the approval prompt so the
-    ///   user sees the rendered call before deciding.
+    /// - `ask`: Defer the formatter until after approval (safe default — keeps
+    ///   an untrusted program from running unprompted).
+    /// - `allow`: Run the formatter ahead of the approval prompt so the user
+    ///   sees the rendered call before deciding.
     ///
     /// If unset, derives from `run`: `ask`, `edit` and `skip` map to `ask`;
     /// `allow` maps to `allow`.
@@ -346,8 +390,8 @@ pub struct ToolsDefaultsConfig {
     #[setting(nested)]
     pub style: DisplayStyleConfig,
 
-    /// Resource access grants for every local tool that declares no `access` of
-    /// its own.
+    /// Resource access grants for every local and command plugin tool that
+    /// declares no `access` of its own.
     ///
     /// When absent, those tools keep unrestricted (but workspace-confined)
     /// access; declaring any rule here switches all of them to default-deny at
@@ -478,7 +522,10 @@ pub struct ToolConfig {
     ///
     /// - `builtin`: Use a built-in tool.
     /// - `local`: Use a locally defined tool (shell command).
-    /// - `mcp`: Use a tool from an MCP server.
+    /// - `mcp.<server>[.<tool>]`: Use a tool from an MCP server.
+    /// - `command.<plugin>[.<tool>]`: Use a tool served by a command plugin.
+    ///   The plugin receives `plugins.command.<plugin>.options` as this query
+    ///   resolved them.
     #[setting(required)]
     pub source: ToolSource,
 
@@ -553,11 +600,11 @@ pub struct ToolConfig {
     /// Overrides the global default.
     pub run: Option<RunMode>,
 
-    /// When to run the tool's custom argument formatter relative to the
-    /// approval prompt.
+    /// When to run the tool's argument formatter relative to the approval
+    /// prompt.
     ///
-    /// Only affects [`style::ParametersStyle::Custom`]; see
-    /// [`ToolsDefaultsConfig::format`] for details.
+    /// Only affects `style.parameters` set to a command or to `tool`; see
+    /// `conversation.tools.'*'.format` for details.
     ///
     /// Overrides the global default.
     /// If unset, derives from `run`: `ask`, `edit` and `skip` map to `ask`;
@@ -1071,6 +1118,22 @@ pub enum ToolSource {
         /// [`super::ConversationConfig::tools`] map.
         tool: Option<String>,
     },
+
+    /// Use a tool served by a command plugin.
+    ///
+    /// The host runs the plugin itself and hands it the plugin's options from
+    /// the query's resolved configuration, so the tool sees the same
+    /// `plugins.command.<plugin>.options` the query does.
+    Command {
+        /// The plugin serving the tool, as named under `plugins.command`.
+        plugin: String,
+
+        /// The name the plugin knows the tool by.
+        ///
+        /// If not specified, it is inferred from the key in the
+        /// [`super::ConversationConfig::tools`] map.
+        tool: Option<String>,
+    },
 }
 
 impl<'de> Deserialize<'de> for ToolSource {
@@ -1104,6 +1167,10 @@ impl Serialize for ToolSource {
                 }
                 s
             }
+            Self::Command { plugin, tool } => tool.as_ref().map_or_else(
+                || format!("command.{plugin}"),
+                |tool| format!("command.{plugin}.{tool}"),
+            ),
         };
         serializer.serialize_str(&s)
     }
@@ -1141,8 +1208,23 @@ impl FromStr for ToolSource {
 
                 Ok(Self::Mcp { server, tool })
             }
+            "command" => {
+                let rest = tool.unwrap_or_default();
+                let (plugin, tool) = match rest.split_once('.') {
+                    Some((plugin, tool)) => (plugin.to_owned(), Some(tool.to_owned())),
+                    None => (rest, None),
+                };
+
+                if plugin.is_empty() {
+                    return Err("A command plugin tool source must name the plugin: use \
+                                `command.<plugin>` or `command.<plugin>.<tool>`."
+                        .to_owned());
+                }
+
+                Ok(Self::Command { plugin, tool })
+            }
             _ => Err(format!(
-                "Unknown tool source: {source}, must be one of: builtin, local, mcp"
+                "Unknown tool source: {source}, must be one of: builtin, local, mcp, command"
             )),
         }
     }
@@ -1155,13 +1237,24 @@ impl ToolSource {
         matches!(self, Self::Mcp { .. })
     }
 
+    /// Return whether the tool runs as a subprocess JP starts: a local command
+    /// or a command plugin.
+    ///
+    /// These are the tools `access` grants apply to, because they receive the
+    /// compiled policy and enforce it.
+    #[must_use]
+    pub const fn is_subprocess(&self) -> bool {
+        matches!(self, Self::Local { .. } | Self::Command { .. })
+    }
+
     /// Return the custom name of the tool, if any.
     #[must_use]
     pub fn tool_name(&self) -> Option<&str> {
         match self {
-            Self::Builtin { tool } | Self::Local { tool } | Self::Mcp { tool, .. } => {
-                tool.as_deref()
-            }
+            Self::Builtin { tool }
+            | Self::Local { tool }
+            | Self::Mcp { tool, .. }
+            | Self::Command { tool, .. } => tool.as_deref(),
         }
     }
 }
@@ -1172,16 +1265,16 @@ impl schematic::Schematic for ToolSource {
     }
 
     fn build_schema(mut schema: schematic::SchemaBuilder) -> schematic::Schema {
-        // The three prefixes are the whole vocabulary, and `mcp` is the only
-        // one that requires a name after it. A bare string would accept
+        // The four prefixes are the whole vocabulary, and `mcp` and `command`
+        // require a name after them. A bare string would accept
         // `source = "nonsense"`, which `FromStr` rejects.
         let mut schema = schema.string(schematic::schema::StringType {
-            pattern: Some(r"^(builtin|local)(\..+)?$|^mcp\.[^.]+(\..+)?$".to_owned()),
+            pattern: Some(r"^(builtin|local)(\..+)?$|^(mcp|command)\.[^.]+(\..+)?$".to_owned()),
             ..schematic::schema::StringType::default()
         });
         schema.set_description(
-            "Where a tool comes from: `builtin[.<tool>]`, `local[.<tool>]`, or \
-             `mcp.<server>[.<tool>]`.",
+            "Where a tool comes from: `builtin[.<tool>]`, `local[.<tool>]`, \
+             `mcp.<server>[.<tool>]`, or `command.<plugin>[.<tool>]`.",
         );
         schema
     }
@@ -1365,8 +1458,9 @@ impl ToolConfigWithDefaults {
 
     /// Return the format mode of the tool.
     ///
-    /// Only affects [`style::ParametersStyle::Custom`] (a user-configured shell
-    /// command).
+    /// Only affects a parameters style that runs a formatter: a configured
+    /// command or the tool itself (see
+    /// [`style::ParametersStyle::runs_formatter`]).
     /// Built-in parameter styles (`json`, `function_call`, `off`) are pure
     /// transformations and always render before the approval prompt regardless
     /// of this value — see [`ToolsDefaultsConfig::format`] for the full
@@ -1442,14 +1536,14 @@ impl ToolConfigWithDefaults {
 
     /// Return the resource access grants that apply to the tool.
     ///
-    /// A tool declaring its own rules uses them whole; a local tool declaring
-    /// none inherits `conversation.tools.'*'.access`.
+    /// A tool declaring its own rules uses them whole; a local or command
+    /// plugin tool declaring none inherits `conversation.tools.'*'.access`.
     /// The two are never combined, and the block moves as a unit: a tool
     /// declaring only `fs` rules also drops the `'*'` block's `env` rules.
     ///
-    /// Builtin and MCP tools inherit nothing: access grants are the
-    /// local-subprocess contract, and a `'*'` block says nothing about tools
-    /// that cannot consume it.
+    /// Builtin and MCP tools inherit nothing: access grants are the subprocess
+    /// contract, and a `'*'` block says nothing about tools that cannot consume
+    /// it.
     /// Returns `None` when no scope applies, meaning unrestricted (but
     /// workspace-confined) access.
     #[must_use]
@@ -1458,7 +1552,7 @@ impl ToolConfigWithDefaults {
             return Some(access);
         }
 
-        if matches!(self.tool.source, ToolSource::Local { .. }) {
+        if self.tool.source.is_subprocess() {
             return self.defaults.access.as_ref().filter(|v| !v.is_empty());
         }
 

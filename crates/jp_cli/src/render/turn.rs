@@ -11,10 +11,7 @@ use std::{collections::HashMap, sync::Arc};
 use chrono::Utc;
 use jp_config::{
     PartialAppConfig,
-    conversation::tool::{
-        ToolConfigWithDefaults, ToolsConfig,
-        style::{DisplayStyleConfig, ParametersStyle},
-    },
+    conversation::tool::{ToolConfigWithDefaults, ToolsConfig, style::DisplayStyleConfig},
     model::id::PartialModelIdOrAliasConfig,
     style::{StyleConfig, reasoning::ReasoningDisplayConfig, typewriter::DelayDuration},
 };
@@ -209,10 +206,9 @@ impl TurnRenderer {
                         self.tool
                             .render_tool_call(&req.name, &req.arguments, &style.parameters);
 
-                        // Show stored custom-formatter output when replaying
-                        // a tool call that was originally rendered with a
-                        // Custom parameters style.
-                        if matches!(style.parameters, ParametersStyle::Custom(_))
+                        // Show stored formatter output when replaying a tool
+                        // call whose parameters style ran a formatter.
+                        if style.parameters.runs_formatter()
                             && let Some(rendered) = get_rendered_arguments(event_with_cfg.event)
                         {
                             self.tool.render_formatted_arguments(&rendered);

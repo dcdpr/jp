@@ -596,18 +596,17 @@ impl ToolCoordinator {
     /// user needs to see the rendered call to make an informed approval
     /// decision.
     ///
-    /// [`ParametersStyle::Custom`] renders whatever the execution service
-    /// produced.
+    /// A style that runs a formatter ([`ParametersStyle::runs_formatter`]: a
+    /// configured command, or the tool itself) renders whatever the execution
+    /// service produced.
     /// A formatter configured with `format = "ask"` has not run yet at this
     /// point, which is [`PreRender::Deferred`].
     fn pre_render_for_prompt(&self, executor: &dyn Executor, renderer: &ToolRenderer) -> PreRender {
         let name = executor.tool_name();
-        if matches!(self.parameter_style(name), ParametersStyle::Custom(_))
-            && executor.formatted_arguments().is_none()
-        {
-            // Running a user-configured shell command before the user okays
-            // the tool would be surprising, so `format = "ask"` holds the
-            // formatter back until admission. Built-in styles are pure and
+        if self.parameter_style(name).runs_formatter() && executor.formatted_arguments().is_none() {
+            // Running a program before the user okays the tool would be
+            // surprising, so `format = "ask"` holds the formatter back until
+            // admission. Built-in styles are pure and
             // have no side effects, so they always render before the prompt.
             return PreRender::Deferred;
         }
@@ -618,20 +617,19 @@ impl ToolCoordinator {
     /// Render one tool call's arguments for display, returning the content to
     /// persist for replay.
     ///
-    /// A `Custom` parameter style shows what the execution service's formatter
-    /// produced.
-    /// The formatter is a user-configured command, so it runs once, there,
-    /// under the call's access policy and cancellation token, and never a
-    /// second time here.
+    /// A parameter style that runs a formatter shows what the execution
+    /// service's formatter produced.
+    /// The formatter is a program, so it runs once, there, under the call's
+    /// access policy and cancellation token, and never a second time here.
     fn render_executor(&self, executor: &dyn Executor, renderer: &ToolRenderer) -> Option<String> {
         let name = executor.tool_name();
         if self.is_hidden(name) {
             return None;
         }
-        let ParametersStyle::Custom(_) = self.parameter_style(name) else {
+        if !self.parameter_style(name).runs_formatter() {
             self.render_approved_tool(name, &executor.arguments(), renderer);
             return None;
-        };
+        }
         // The service formats a call's arguments before releasing it, unless
         // the call is hidden or configured not to run. Both of those are
         // already handled, so no output here means there is no call to

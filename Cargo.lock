@@ -2622,6 +2622,7 @@ dependencies = [
  "futures",
  "indexmap",
  "jp_config",
+ "jp_plugin",
  "jp_process",
  "jp_tool",
  "minijinja",

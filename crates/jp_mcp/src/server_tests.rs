@@ -1,16 +1,24 @@
+use std::{fs, mem, sync::Arc};
+
 use async_trait::async_trait;
 use camino::Utf8PathBuf;
+use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_config::{
     AppConfig, Config as _,
     conversation::tool::{CommandConfig, PartialToolConfig, ToolConfig, ToolConfigWithDefaults},
 };
-use jp_tool::{Outcome, ToolDefinition, ToolDocs};
+use jp_plugin::{PROTOCOL_VERSION, message::PathsInfo};
+use jp_process::{ExitCode, MockProcessRunner, ProcessOutput};
+use jp_tool::{EnvRule, Outcome, ToolDefinition, ToolDocs};
 use serde_json::Map;
 
 use super::*;
 use crate::{
     Client,
-    server::testing::{echoing, no_commands},
+    server::{
+        command::sha256_file,
+        testing::{echoing, no_commands},
+    },
 };
 
 struct EchoArguments;
@@ -31,6 +39,11 @@ struct Fixture {
     config: ToolConfigWithDefaults,
     builtins: builtin::BuiltinExecutors,
     runner: Arc<dyn ProcessRunner>,
+    command_plugins: CommandPlugins,
+
+    /// Holds the plugin binaries [`Fixture::with_plugin`] writes.
+    dir: Utf8TempDir,
+    access: Option<AccessPolicy>,
     upstream: Client,
     root: Utf8PathBuf,
     invocation: InvocationContext,
@@ -54,6 +67,15 @@ impl Fixture {
             config: app.conversation.tools.get(name).unwrap(),
             builtins: builtin::BuiltinExecutors::new(),
             runner: no_commands(),
+            command_plugins: CommandPlugins::new(PluginInit {
+                workspace_id: "ws-abc".to_owned(),
+                storage: Some("/tmp/.jp".into()),
+                paths: PathsInfo::default(),
+                config: json!({"user": {"name": "tester"}}),
+                log_level: 0,
+            }),
+            dir: tempdir().unwrap(),
+            access: None,
             upstream: Client::new(IndexMap::new()),
             root: "/tmp".into(),
             invocation: InvocationContext::default(),
@@ -62,6 +84,36 @@ impl Fixture {
 
     fn with_builtin(mut self, name: &str, tool: impl BuiltinTool + 'static) -> Self {
         self.builtins = self.builtins.register(name, tool);
+        self
+    }
+
+    /// Put a `jp-{name}` binary on disk and admit it, with `options` as its
+    /// plugin options.
+    fn with_plugin(mut self, name: &str, options: Value) -> Self {
+        let binary = self.binary(name);
+        fs::write(&binary, "v1").unwrap();
+        let Value::Object(options) = options else {
+            panic!("plugin options are an object");
+        };
+        self.command_plugins = mem::take(&mut self.command_plugins).with(name, AdmittedPlugin {
+            sha256: sha256_file(&binary).unwrap(),
+            binary,
+            options,
+        });
+        self
+    }
+
+    fn without_storage(mut self) -> Self {
+        self.command_plugins = CommandPlugins::new(PluginInit::default());
+        self
+    }
+
+    fn binary(&self, name: &str) -> Utf8PathBuf {
+        self.dir.path().join(format!("jp-{name}"))
+    }
+
+    fn with_access(mut self, access: AccessPolicy) -> Self {
+        self.access = Some(access);
         self
     }
 
@@ -83,10 +135,11 @@ impl Fixture {
             action: Action::Run,
             config: &self.config,
             root: &self.root,
-            access: None,
+            access: self.access.as_ref(),
             invocation: &self.invocation,
             builtins: &self.builtins,
             runner: &self.runner,
+            command_plugins: &self.command_plugins,
             upstream: &self.upstream,
             cancellation: CancellationToken::new(),
             stderr: None,
@@ -670,6 +723,464 @@ async fn tool_with_an_unresolvable_schema_is_skipped() {
 
     let names = defs.iter().map(|d| d.name.as_str()).collect::<Vec<_>>();
     assert_eq!(names, vec!["healthy_tool"]);
+}
+
+/// A plugin that prints `lines`, each serialized as one protocol line, and
+/// exits successfully.
+fn plugin_printing(lines: &[Value]) -> Arc<MockProcessRunner> {
+    let stdout: String = lines.iter().map(|line| line.to_string() + "\n").collect();
+    Arc::new(MockProcessRunner::responding(move |_| {
+        Ok(ProcessOutput {
+            stdout: stdout.clone(),
+            stderr: String::new(),
+            status: ExitCode::success(),
+        })
+    }))
+}
+
+/// A plugin that answers with `outcome` and exits.
+fn plugin_answering(outcome: Value) -> Arc<MockProcessRunner> {
+    plugin_printing(&[
+        json!({"type": "ready", "protocol": 10}),
+        Value::Object(Map::from_iter([
+            ("type".to_owned(), json!("tool_outcome")),
+            ("outcome".to_owned(), outcome),
+        ])),
+        json!({"type": "exit", "code": 0}),
+    ])
+}
+
+/// The `init` the plugin was started with, read back from its stdin.
+fn init_sent(runner: &MockProcessRunner) -> Value {
+    let calls = runner.calls();
+    assert_eq!(calls.len(), 1, "the plugin ran once: {calls:?}");
+    let stdin = calls[0].stdin.as_deref().expect("init on stdin");
+    assert!(stdin.ends_with('\n'), "one line: {stdin:?}");
+    serde_json::from_str(stdin).unwrap()
+}
+
+#[tokio::test]
+async fn command_tool_runs_its_plugin_with_the_call_on_stdin() {
+    let runner = plugin_answering(json!({"type": "success", "content": "Created T-0abc123"}));
+    let fixture = Fixture::new(
+        "ticket_create",
+        json!({"source": "command.ticket.create", "options": {"mode": "strict"}}),
+        schema([
+            ("title", param("string"), true),
+            ("kind", json!({"type": "string", "default": "bug"}), false),
+        ]),
+    )
+    .with_plugin("ticket", json!({"dir": "packages/foo/tickets"}))
+    .with_runner(runner.clone())
+    .with_invocation(InvocationContext {
+        workspace_id: "ws-abc".to_owned(),
+        conversation_id: "jp-c17000000000".to_owned(),
+    });
+
+    let answers = Answers::from([("confirm".to_owned(), json!(true))]);
+    let outcome = execute(
+        &fixture.execution("call-1", json!({"title": "Fix it"})),
+        &answers,
+    )
+    .await
+    .unwrap();
+
+    let ExecutionOutcome::Completed { id, result } = outcome else {
+        panic!("expected a completed call, got {outcome:?}");
+    };
+    assert_eq!(id, "call-1");
+    assert_eq!(result, ToolResult::text("Created T-0abc123"));
+
+    let spec = &runner.calls()[0];
+    assert_eq!(spec.program, fixture.binary("ticket").as_str());
+    assert_eq!(spec.args, Vec::<String>::new());
+    assert_eq!(spec.dir, Utf8PathBuf::from("/tmp"));
+    assert!(spec.own_process_group, "a Ctrl-C must not reach the plugin");
+
+    assert_eq!(
+        init_sent(&runner),
+        json!({
+            "type": "init",
+            "version": PROTOCOL_VERSION,
+            "workspace": {"root": "/tmp", "storage": "/tmp/.jp", "id": "ws-abc"},
+            "paths": {},
+            "config": {"user": {"name": "tester"}},
+            "options": {"dir": "packages/foo/tickets"},
+            "args": [],
+            "log_level": 0,
+            "output_format": "text",
+            "tool": {
+                "action": "run",
+                "name": "create",
+                // The configured default is applied before the plugin sees the
+                // call, as it is for a local tool.
+                "arguments": {"title": "Fix it", "kind": "bug"},
+                "answers": {"confirm": true},
+                "options": {"mode": "strict"},
+                "conversation": "jp-c17000000000"
+            }
+        })
+    );
+}
+
+/// A tool that formats its own arguments is asked to, through the same `init`,
+/// with the action saying it is a description and not a run.
+#[tokio::test]
+async fn command_tool_formatting_its_arguments_says_so_in_init() {
+    let runner = plugin_answering(json!({"type": "success", "content": "File bug: Fix it"}));
+    let fixture = Fixture::new(
+        "ticket_create",
+        json!({"source": "command.ticket.create", "style": {"parameters": "tool"}}),
+        schema([("title", param("string"), true)]),
+    )
+    .with_plugin("ticket", json!({"dir": "packages/foo/tickets"}))
+    .with_runner(runner.clone());
+
+    let mut execution = fixture.execution("call-1", json!({"title": "Fix it"}));
+    execution.action = Action::FormatArguments;
+    let outcome = execute(&execution, &Answers::new()).await.unwrap();
+
+    let ExecutionOutcome::Completed { result, .. } = outcome else {
+        panic!("expected a completed call, got {outcome:?}");
+    };
+    assert_eq!(result, ToolResult::text("File bug: Fix it"));
+    let init = init_sent(&runner);
+    assert_eq!(init["tool"]["action"], "format_arguments");
+    assert_eq!(init["options"], json!({"dir": "packages/foo/tickets"}));
+}
+
+#[tokio::test]
+async fn command_tool_run_says_so_in_init() {
+    let runner = plugin_answering(json!({"type": "success", "content": "ok"}));
+    let fixture = Fixture::new(
+        "ticket_create",
+        json!({"source": "command.ticket.create"}),
+        schema([]),
+    )
+    .with_plugin("ticket", json!({}))
+    .with_runner(runner.clone());
+
+    execute(&fixture.execution("call-1", json!({})), &Answers::new())
+        .await
+        .unwrap();
+
+    assert_eq!(init_sent(&runner)["tool"]["action"], "run");
+}
+
+/// A local tool styled `parameters = "tool"` formats its own arguments by
+/// running its own command, with the action in `context.action`.
+#[tokio::test]
+async fn local_tool_formatting_its_arguments_runs_its_command_for_that_action() {
+    let fixture = Fixture::new(
+        "word_count",
+        json!({
+            "source": "local",
+            "command": {"program": "word_count", "args": ["{{context.action}}"], "shell": false},
+            "style": {"parameters": "tool"},
+        }),
+        schema([]),
+    )
+    .with_runner(echoing());
+
+    let mut execution = fixture.execution("call-1", json!({}));
+    execution.action = Action::FormatArguments;
+    let outcome = execute(&execution, &Answers::new()).await.unwrap();
+
+    let ExecutionOutcome::Completed { result, .. } = outcome else {
+        panic!("expected a completed call, got {outcome:?}");
+    };
+    assert_eq!(result, ToolResult::text("format_arguments\n"));
+}
+
+#[tokio::test]
+async fn command_tool_without_a_tool_name_uses_the_configured_key() {
+    let runner = plugin_answering(json!({"type": "success", "content": "ok"}));
+    let fixture = Fixture::new("labels", json!({"source": "command.ticket"}), schema([]))
+        .with_plugin("ticket", json!({}))
+        .with_runner(runner.clone());
+
+    execute(&fixture.execution("call-1", json!({})), &Answers::new())
+        .await
+        .unwrap();
+
+    assert_eq!(init_sent(&runner)["tool"]["name"], "labels");
+}
+
+/// The compiled policy reaches the plugin, which enforces it, as it reaches a
+/// local tool's command through `context.access`.
+#[tokio::test]
+async fn command_tool_receives_the_compiled_access_policy() {
+    let runner = plugin_answering(json!({"type": "success", "content": "ok"}));
+    let fixture = Fixture::new(
+        "ticket_create",
+        json!({"source": "command.ticket.create"}),
+        schema([]),
+    )
+    .with_plugin("ticket", json!({}))
+    .with_runner(runner.clone())
+    .with_access(AccessPolicy {
+        env: vec![EnvRule {
+            name: "AWS_*".to_owned(),
+            read: false,
+        }],
+        ..AccessPolicy::default()
+    });
+
+    execute(&fixture.execution("call-1", json!({})), &Answers::new())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        init_sent(&runner)["tool"]["access"],
+        json!({"fs": [], "net": [], "env": [{"name": "AWS_*", "read": false}]})
+    );
+}
+
+#[tokio::test]
+async fn command_tool_with_invalid_arguments_never_reaches_the_plugin() {
+    let runner = plugin_answering(json!({"type": "success", "content": "ok"}));
+    let fixture = Fixture::new(
+        "ticket_create",
+        json!({"source": "command.ticket.create"}),
+        schema([("title", param("string"), true)]),
+    )
+    .with_plugin("ticket", json!({}))
+    .with_runner(runner.clone());
+
+    let outcome = execute(&fixture.execution("call-1", json!({})), &Answers::new())
+        .await
+        .unwrap();
+
+    let ExecutionOutcome::Completed { result, .. } = outcome else {
+        panic!("expected a completed call, got {outcome:?}");
+    };
+    assert!(result.is_error());
+    assert!(
+        result.to_text().starts_with("Invalid arguments: "),
+        "got: {}",
+        result.to_text()
+    );
+    assert_eq!(runner.calls(), vec![]);
+}
+
+#[tokio::test]
+async fn command_tool_question_ends_the_attempt() {
+    let fixture = Fixture::new(
+        "ticket_create",
+        json!({"source": "command.ticket.create"}),
+        schema([]),
+    )
+    .with_plugin("ticket", json!({}))
+    .with_runner(plugin_answering(json!({
+        "type": "needs_input",
+        "question": {"id": "confirm", "text": "File it?", "answer_type": {"type": "boolean"}}
+    })));
+
+    let outcome = execute(&fixture.execution("call-1", json!({})), &Answers::new())
+        .await
+        .unwrap();
+
+    let ExecutionOutcome::NeedsInput { id, question } = outcome else {
+        panic!("expected a question, got {outcome:?}");
+    };
+    assert_eq!(id, "call-1");
+    assert_eq!(question.id.as_str(), "confirm");
+}
+
+#[tokio::test]
+async fn command_tool_error_outcome_keeps_its_details() {
+    let fixture = Fixture::new(
+        "ticket_create",
+        json!({"source": "command.ticket.create"}),
+        schema([]),
+    )
+    .with_plugin("ticket", json!({}))
+    .with_runner(plugin_answering(json!({
+        "type": "error", "message": "busy", "trace": ["lock held"], "transient": true
+    })));
+
+    let outcome = execute(&fixture.execution("call-1", json!({})), &Answers::new())
+        .await
+        .unwrap();
+
+    let ExecutionOutcome::Completed { result, .. } = outcome else {
+        panic!("expected a completed call, got {outcome:?}");
+    };
+    assert_eq!(
+        result.status,
+        ToolStatus::Error(ErrorDetails {
+            transient: true,
+            trace: vec!["lock held".into()],
+        })
+    );
+}
+
+/// A plugin that sent `tool_outcome` said it was answering in the outcome
+/// shape, so anything else is a protocol fault, not text for the model.
+#[tokio::test]
+async fn command_tool_outcome_in_the_wrong_shape_is_malformed_output() {
+    let fixture = Fixture::new(
+        "ticket_create",
+        json!({"source": "command.ticket.create"}),
+        schema([]),
+    )
+    .with_plugin("ticket", json!({}))
+    .with_runner(plugin_answering(json!({"content": "no type tag"})));
+
+    let error = execute(&fixture.execution("call-1", json!({})), &Answers::new())
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(error, ToolError::MalformedOutput(_)),
+        "got: {error:?}"
+    );
+}
+
+#[tokio::test]
+async fn command_tool_failing_exit_reports_the_plugin_reason() {
+    let fixture = Fixture::new(
+        "ticket_create",
+        json!({"source": "command.ticket.create"}),
+        schema([]),
+    )
+    .with_plugin("ticket", json!({}))
+    .with_runner(plugin_printing(&[
+        json!({"type": "ready", "protocol": 10}),
+        json!({"type": "exit", "code": 1, "reason": "No ticket T-0abc123."}),
+    ]));
+
+    let error = execute(&fixture.execution("call-1", json!({})), &Answers::new())
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "Command plugin `ticket` failed: No ticket T-0abc123."
+    );
+}
+
+#[tokio::test]
+async fn command_tool_whose_binary_cannot_start_fails() {
+    let fixture = Fixture::new(
+        "ticket_create",
+        json!({"source": "command.ticket.create"}),
+        schema([]),
+    )
+    .with_plugin("ticket", json!({}));
+    let binary = fixture.binary("ticket");
+    let fixture = fixture.with_runner(Arc::new(
+        MockProcessRunner::builder().expect_any().fails_to_spawn(),
+    ));
+
+    let error = execute(&fixture.execution("call-1", json!({})), &Answers::new())
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        format!("Command plugin `ticket` failed: failed to start {binary}: entity not found")
+    );
+}
+
+/// Only plugins the host admitted for the turn run; any other is refused before
+/// anything is spawned.
+#[tokio::test]
+async fn command_tool_of_a_plugin_not_admitted_never_runs() {
+    let runner = plugin_answering(json!({"type": "success", "content": "ok"}));
+    let fixture = Fixture::new(
+        "ticket_create",
+        json!({"source": "command.ticket.create"}),
+        schema([]),
+    )
+    .with_runner(runner.clone());
+
+    let error = execute(&fixture.execution("call-1", json!({})), &Answers::new())
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "Command plugin `ticket` cannot be run from here: it was not admitted for this turn"
+    );
+    assert_eq!(runner.calls(), vec![]);
+}
+
+/// Admission decided on a binary's contents.
+/// One replaced during the turn is refused at its next call rather than run on
+/// the strength of the old one.
+#[tokio::test]
+async fn command_tool_whose_binary_changed_after_admission_never_runs() {
+    let runner = plugin_answering(json!({"type": "success", "content": "ok"}));
+    let fixture = Fixture::new(
+        "ticket_create",
+        json!({"source": "command.ticket.create"}),
+        schema([]),
+    )
+    .with_plugin("ticket", json!({}))
+    .with_runner(runner.clone());
+    fs::write(fixture.binary("ticket"), "v2").unwrap();
+
+    let error = execute(&fixture.execution("call-1", json!({})), &Answers::new())
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "Command plugin `ticket` cannot be run from here: {} changed since it was admitted at \
+             the start of this turn",
+            fixture.binary("ticket")
+        )
+    );
+    assert_eq!(runner.calls(), vec![]);
+}
+
+#[tokio::test]
+async fn command_tool_without_workspace_storage_never_runs() {
+    let runner = plugin_answering(json!({"type": "success", "content": "ok"}));
+    let fixture = Fixture::new(
+        "ticket_create",
+        json!({"source": "command.ticket.create"}),
+        schema([]),
+    )
+    .without_storage()
+    .with_plugin("ticket", json!({}))
+    .with_runner(runner.clone());
+
+    let error = execute(&fixture.execution("call-1", json!({})), &Answers::new())
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "Command plugin `ticket` cannot be run from here: the workspace has no storage configured"
+    );
+    assert_eq!(runner.calls(), vec![]);
+}
+
+/// The cancellation token reaches the runner, which is what stops a running
+/// plugin.
+/// The mock reports a run whose token is cancelled as cancelled, so a token
+/// that never reached it would come back as a completed call.
+#[tokio::test]
+async fn cancelling_a_command_tool_reaches_the_runner() {
+    let runner = plugin_answering(json!({"type": "success", "content": "ok"}));
+    let fixture = Fixture::new(
+        "ticket_create",
+        json!({"source": "command.ticket.create"}),
+        schema([]),
+    )
+    .with_plugin("ticket", json!({}))
+    .with_runner(runner.clone());
+
+    let execution = fixture.execution("call-1", json!({}));
+    execution.cancellation.cancel();
+
+    let outcome = execute(&execution, &Answers::new()).await.unwrap();
+
+    assert!(outcome.is_cancelled(), "got {outcome:?}");
+    assert_eq!(runner.calls().len(), 1);
 }
 
 /// Naming a tool with `--tool` is an explicit request for it, so its schema

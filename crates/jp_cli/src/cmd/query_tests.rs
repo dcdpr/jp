@@ -242,6 +242,66 @@ fn mount_seeds_an_unconfigured_tool_from_the_defaults() {
     assert_eq!(seed.fs[0].path.as_deref(), Some("src"));
 }
 
+/// Which tools a bare `--mount` (no `TOOL:` prefix) grants the mounted path to.
+///
+/// Every tool that runs as a subprocess JP starts gets it, and nothing else: a
+/// local or command plugin tool left out would lose access the user mounted for
+/// it, and a builtin or MCP tool given a rule would carry a grant nothing
+/// enforces.
+#[test]
+fn a_bare_mount_reaches_every_enabled_subprocess_tool() {
+    let mut partial = PartialAppConfig::new_test();
+    for (name, source) in [
+        ("local_tool", ToolSource::Local { tool: None }),
+        ("plugin_tool", ToolSource::Command {
+            plugin: "ticket".to_owned(),
+            tool: None,
+        }),
+        ("mcp_tool", ToolSource::Mcp {
+            server: "server".to_owned(),
+            tool: None,
+        }),
+        ("builtin_tool", ToolSource::Builtin { tool: None }),
+    ] {
+        partial
+            .conversation
+            .tools
+            .tools
+            .insert(name.to_owned(), PartialToolConfig {
+                source: Some(source),
+                ..Default::default()
+            });
+    }
+
+    inject_mounts(
+        &mut partial,
+        &["notes=/elsewhere/notes".to_owned()],
+        Utf8Path::new("/ws"),
+        Utf8Path::new("/ws"),
+        None,
+    )
+    .unwrap();
+
+    let mut granted: Vec<&str> = partial
+        .conversation
+        .tools
+        .tools
+        .iter()
+        .filter(|(_, cfg)| {
+            cfg.access.as_ref().is_some_and(|access| {
+                access
+                    .fs
+                    .iter()
+                    .any(|rule| rule.path.as_deref() == Some("notes"))
+            })
+        })
+        .map(|(name, _)| name.as_str())
+        .collect();
+    granted.sort_unstable();
+
+    assert_eq!(granted, ["local_tool", "plugin_tool"]);
+}
+
 fn make_id(secs: u64) -> ConversationId {
     ConversationId::try_from(DateTime::<Utc>::UNIX_EPOCH + std::time::Duration::from_secs(secs))
         .unwrap()
@@ -348,6 +408,8 @@ async fn an_interrupt_during_mcp_startup_stops_the_turn_before_it_runs() {
         attachments: vec![],
         printer: Arc::new(printer),
         approvals: Arc::new(crate::access::approvals::ApprovalStore::default()),
+        command_plugins: CommandPlugins::default(),
+        refused_plugins: IndexMap::new(),
         chat_request: ChatRequest::from("hello"),
         workspace_id: workspace.id().clone(),
         pending_trim: PendingStreamTrim::default(),
@@ -435,6 +497,8 @@ async fn a_client_stop_during_mcp_startup_stops_the_turn_before_it_runs() {
         attachments: vec![],
         printer: Arc::new(printer),
         approvals: Arc::new(crate::access::approvals::ApprovalStore::default()),
+        command_plugins: CommandPlugins::default(),
+        refused_plugins: IndexMap::new(),
         chat_request: ChatRequest::from("hello"),
         workspace_id: workspace.id().clone(),
         pending_trim: PendingStreamTrim::default(),

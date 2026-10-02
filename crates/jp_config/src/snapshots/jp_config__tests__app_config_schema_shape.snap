@@ -485,6 +485,7 @@ conversation: ConversationConfig
           |: "json"
           |: "function_call"
           |: "off"
+          |: "tool"
           |: CommandConfigOrString
             |: string
             | (expanded): CommandConfig
@@ -849,7 +850,7 @@ conversation: ConversationConfig
                       tool_choice?: "auto" | "none" | "required" | string | null
           result: "allow" | "ask" | "edit" | "skip" | null
           run: "ask" | "allow" | "edit" | "skip" | null
-          source: string(/^(builtin|local)(\..+)?$|^mcp\.[^.]+(\..+)?$/)
+          source: string(/^(builtin|local)(\..+)?$|^(mcp|command)\.[^.]+(\..+)?$/)
           style:
             |: DisplayStyleConfig
               error: ErrorStyleConfig
@@ -862,6 +863,7 @@ conversation: ConversationConfig
                 |: "json"
                 |: "function_call"
                 |: "off"
+                |: "tool"
                 |: CommandConfigOrString
                   |: string
                   | (expanded): CommandConfig
@@ -1230,7 +1232,7 @@ conversation: ConversationConfig
                         tool_choice?: "auto" | "none" | "required" | string | null
             result: "allow" | "ask" | "edit" | "skip" | null
             run: "ask" | "allow" | "edit" | "skip" | null
-            source: string(/^(builtin|local)(\..+)?$|^mcp\.[^.]+(\..+)?$/)
+            source: string(/^(builtin|local)(\..+)?$|^(mcp|command)\.[^.]+(\..+)?$/)
             style:
               |: DisplayStyleConfig
                 error: ErrorStyleConfig
@@ -1243,6 +1245,7 @@ conversation: ConversationConfig
                   |: "json"
                   |: "function_call"
                   |: "off"
+                  |: "tool"
                   |: CommandConfigOrString
                     |: string
                     | (expanded): CommandConfig

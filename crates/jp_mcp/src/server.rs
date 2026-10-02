@@ -5,11 +5,12 @@
 //! [`http::Endpoint`] exposes that service over loopback Streamable HTTP.
 //!
 //! [`tool_definitions`] resolves the configured catalog.
-//! [`execute`] runs one attempt of a local command, built-in implementation, or
-//! upstream stdio MCP tool; the service handles input-driven re-execution and
-//! delivery barriers.
+//! [`execute`] runs one attempt of a local command, built-in implementation,
+//! command plugin, or upstream stdio MCP tool; the service handles input-driven
+//! re-execution and delivery barriers.
 
 pub mod builtin;
+pub mod command;
 pub mod http;
 mod http_client;
 pub mod json_schema;
@@ -20,6 +21,8 @@ use std::{fmt, sync::Arc};
 
 pub use builtin::BuiltinTool;
 use camino::Utf8Path;
+pub use command::{AdmittedPlugin, CommandPlugins, PluginInit};
+use command::{CommandToolCall, init_line, parse_plugin_output, plugin_stderr};
 use indexmap::IndexMap;
 use jp_config::{
     conversation::tool::{
@@ -39,7 +42,7 @@ use minijinja::{Environment, ErrorKind as MinijinjaErrorKind, value::ValueKind};
 use result::from_mcp;
 use serde_json::{Error as JsonError, Map, Value, json};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 use upstream::{UpstreamResult, decode_result, replace_envelope};
 
 use crate::{
@@ -613,9 +616,10 @@ pub struct Execution<'a> {
 
     /// What the tool is run for.
     ///
-    /// [`Action::FormatArguments`] runs the tool's argument formatter, a local
+    /// [`Action::FormatArguments`] runs the tool's argument formatter: the
     /// command configured in `style.parameters`, whatever the tool's own source
-    /// is.
+    /// is, or, for `style.parameters = "tool"`, the tool itself, asked to
+    /// describe the call instead of making it.
     pub action: Action,
 
     /// Where the tool comes from, and how it is configured to run.
@@ -634,8 +638,14 @@ pub struct Execution<'a> {
     /// Rust implementations, reached by a `builtin` source.
     pub builtins: &'a builtin::BuiltinExecutors,
 
-    /// Runs a local command: a `local` tool, or any tool's argument formatter.
+    /// Runs a subprocess: a `local` tool, a command plugin's binary, or any
+    /// tool's argument formatter.
     pub runner: &'a Arc<dyn ProcessRunner>,
+
+    /// The command plugins admitted for this turn, reached by a `command`
+    /// source.
+    /// A plugin missing from it does not run.
+    pub command_plugins: &'a CommandPlugins,
 
     /// Upstream connections, reached by an `mcp` source.
     pub upstream: &'a Client,
@@ -708,15 +718,23 @@ pub async fn execute(
         "Executing tool."
     );
 
+    // A formatter command runs as a local command whatever the tool's own
+    // source is. A tool styled `parameters = "tool"` is its own formatter, so
+    // it falls through to its source, which sees the action.
     if execution.action.is_format_arguments() {
-        let (ToolSource::Local { tool }
-        | ToolSource::Builtin { tool }
-        | ToolSource::Mcp { tool, .. }) = execution.config.source();
-        let ParametersStyle::Custom(command) = &execution.config.style().parameters else {
-            return Err(ToolError::MissingCommand);
-        };
-        let command = command.clone().command();
-        return execute_local(execution, arguments, answers, tool.as_deref(), command).await;
+        match &execution.config.style().parameters {
+            ParametersStyle::Custom(command) => {
+                let (ToolSource::Local { tool }
+                | ToolSource::Builtin { tool }
+                | ToolSource::Mcp { tool, .. }
+                | ToolSource::Command { tool, .. }) = execution.config.source();
+                let command = command.clone().command();
+                return execute_local(execution, arguments, answers, tool.as_deref(), command)
+                    .await;
+            }
+            ParametersStyle::Tool if execution.config.source().is_subprocess() => {}
+            _ => return Err(ToolError::MissingCommand),
+        }
     }
 
     match execution.config.source() {
@@ -732,6 +750,48 @@ pub async fn execute(
         ToolSource::Builtin { tool } => {
             execute_builtin(execution, &arguments, answers, tool.as_deref()).await
         }
+        ToolSource::Command { plugin, tool } => {
+            execute_command(execution, arguments, answers, plugin, tool.as_deref()).await
+        }
+    }
+}
+
+/// Apply configured defaults for missing parameters, then validate.
+///
+/// The error is the result to hand back to the model, which can correct its
+/// arguments and call again.
+fn prepare_arguments(
+    execution: &Execution<'_>,
+    arguments: &mut Value,
+    name: &str,
+) -> Result<(), ToolResult> {
+    let Some(args) = arguments.as_object_mut() else {
+        return Ok(());
+    };
+
+    apply_parameter_defaults(args, &execution.definition.parameters);
+
+    validate_tool_arguments(args, &execution.definition.parameters).map_err(|error| {
+        ToolResult::error(format!(
+            "Invalid arguments: {error}\n\nYou can call `describe_tools(tools: [\"{name}\"])` to \
+             learn more about how to use the tool correctly."
+        ))
+    })
+}
+
+/// The outcome of one attempt, from what a command printed or a plugin sent.
+fn command_outcome(id: String, name: &str, result: CommandResult) -> ExecutionOutcome {
+    match result {
+        CommandResult::Success(content) => ExecutionOutcome::Completed {
+            id,
+            result: ToolResult::text(content),
+        },
+        CommandResult::NeedsInput(question) => ExecutionOutcome::NeedsInput { id, question },
+        CommandResult::Cancelled => ExecutionOutcome::Cancelled { id },
+        other => ExecutionOutcome::Completed {
+            id,
+            result: other.into_tool_result(name),
+        },
     }
 }
 
@@ -750,19 +810,8 @@ async fn execute_local(
     let name = execution.invoked_name(tool);
     let id = execution.id.clone();
 
-    // Apply configured defaults for missing parameters, then validate.
-    if let Some(args) = arguments.as_object_mut() {
-        apply_parameter_defaults(args, &execution.definition.parameters);
-
-        if let Err(error) = validate_tool_arguments(args, &execution.definition.parameters) {
-            return Ok(ExecutionOutcome::Completed {
-                id,
-                result: ToolResult::error(format!(
-                    "Invalid arguments: {error}\n\nYou can call `describe_tools(tools: \
-                     [\"{name}\"])` to learn more about how to use the tool correctly."
-                )),
-            });
-        }
+    if let Err(result) = prepare_arguments(execution, &mut arguments, name) {
+        return Ok(ExecutionOutcome::Completed { id, result });
     }
 
     let ctx = execution.context(name, &arguments, answers);
@@ -783,18 +832,122 @@ async fn execute_local(
     )
     .await?;
 
-    match outcome {
-        CommandResult::Success(content) => Ok(ExecutionOutcome::Completed {
-            id,
-            result: ToolResult::text(content),
-        }),
-        CommandResult::NeedsInput(question) => Ok(ExecutionOutcome::NeedsInput { id, question }),
-        CommandResult::Cancelled => Ok(ExecutionOutcome::Cancelled { id }),
-        other => Ok(ExecutionOutcome::Completed {
-            id,
-            result: other.into_tool_result(name),
-        }),
+    Ok(command_outcome(id, name, outcome))
+}
+
+/// Execute a tool served by a command plugin and return the outcome.
+///
+/// Arguments are prepared as for a local tool, since the parameters come from
+/// configuration in both cases.
+/// The plugin runs once, through the runner, with `init` on its stdin; a
+/// cancelled call stops it the way it stops a local tool's command.
+/// The outcome the plugin sends is read the way a local tool's stdout is, so a
+/// malformed question surfaces the same way from either.
+async fn execute_command(
+    execution: &Execution<'_>,
+    mut arguments: Value,
+    answers: &Answers,
+    plugin: &str,
+    tool: Option<&str>,
+) -> Result<ExecutionOutcome, ToolError> {
+    let name = execution.invoked_name(tool);
+    let id = execution.id.clone();
+
+    if let Err(result) = prepare_arguments(execution, &mut arguments, name) {
+        return Ok(ExecutionOutcome::Completed { id, result });
     }
+
+    let admitted = execution.command_plugins.verify(plugin).map_err(|reason| {
+        ToolError::CommandPluginUnavailable {
+            plugin: plugin.to_owned(),
+            reason,
+        }
+    })?;
+    let failed = |message: String| ToolError::CommandPluginFailed {
+        plugin: plugin.to_owned(),
+        message,
+    };
+
+    let arguments = match arguments {
+        Value::Object(arguments) => arguments,
+        _ => Map::new(),
+    };
+
+    let init = execution
+        .command_plugins
+        .init_message(admitted, &CommandToolCall {
+            action: &execution.action,
+            plugin,
+            tool: name,
+            arguments: &arguments,
+            answers,
+            options: execution.config.options(),
+            root: execution.root,
+            access: execution.access,
+            invocation: execution.invocation,
+        })?;
+
+    let mut spec = ProcessSpec::new(
+        admitted.binary.as_str(),
+        Vec::<String>::new(),
+        execution.root,
+    );
+    spec.stdin = Some(init_line(init, plugin)?);
+    // A Ctrl-C at the terminal must not reach the plugin: JP stops it through
+    // the cancellation token, once the user has chosen what the interrupt
+    // means.
+    spec.own_process_group = true;
+
+    // The process runs on a blocking thread, which dropping this future would
+    // not stop, so the token is cancelled on drop as well as by the caller.
+    let cancellation = execution.cancellation.child_token();
+    let _stop_on_drop = cancellation.clone().drop_guard();
+    let watch = Watch {
+        stderr_lines: Some(plugin_stderr(
+            plugin.to_owned(),
+            name.to_owned(),
+            execution.stderr.clone(),
+        )),
+        cancellation: Some(cancellation),
+        ..Watch::default()
+    };
+
+    debug!(binary = %admitted.binary, plugin, tool = name, "Running a command plugin tool.");
+    let run = {
+        let runner = Arc::clone(execution.runner);
+        let spec = spec.clone();
+        tokio::task::spawn_blocking(move || runner.execute(&spec, &watch))
+    };
+
+    let finished = match run.await {
+        Ok(Ok(finished)) => finished,
+        Ok(Err(error)) => return Err(failed(format!("failed to start {spec}: {error}"))),
+        Err(error) => return Err(failed(format!("the run was lost: {error}"))),
+    };
+
+    if finished.ended == Ended::Cancelled {
+        info!(tool = %execution.definition.name, plugin, "Command plugin tool call cancelled");
+        return Ok(ExecutionOutcome::Cancelled { id });
+    }
+
+    let payload = parse_plugin_output(&finished.output.stdout).map_err(failed)?;
+    let raw = payload.to_string();
+
+    // A plugin that sent `tool_outcome` said it was answering in the outcome
+    // shape. Anything else is a protocol fault, not text for the model; a
+    // payload that claims to be a question is left to the parser below, which
+    // names what is wrong with it.
+    if let Err(error) = serde_json::from_value::<Outcome>(payload)
+        && !Outcome::claims_needs_input(&raw)
+    {
+        return Err(ToolError::MalformedOutput(error));
+    }
+
+    Ok(command_outcome(
+        id,
+        name,
+        parse_command_output(raw.as_bytes(), b"", true),
+    ))
 }
 
 /// Execute an MCP tool and return the outcome.
@@ -896,6 +1049,19 @@ async fn execute_builtin(
     })
 }
 
+/// Whether a tool is offered to the assistant: enabled, or named by
+/// `forced_tool` and not locked off.
+///
+/// The rule [`tool_definitions`] applies before resolving anything, exposed so
+/// a host preparing a turn can tell which tools it has to make runnable.
+#[must_use]
+pub fn is_offered(name: &str, config: &ToolConfigWithDefaults, forced_tool: Option<&str>) -> bool {
+    let enable = config.effective_enable();
+    let forced = forced_tool.is_some_and(|f| f == name);
+
+    enable.is_enabled() || (forced && !enable.is_locked())
+}
+
 /// Resolve all enabled tool definitions from config.
 ///
 /// If `forced_tool` is provided (e.g. from `ToolChoice::Function`), that tool
@@ -913,10 +1079,8 @@ pub async fn tool_definitions(
     let mut definitions = Vec::new();
 
     for (name, config) in configs {
-        let enable = config.effective_enable();
         let forced = forced_tool.is_some_and(|f| f == name);
-        // Drop disabled tools, but keep a forced tool unless it is locked-off.
-        if !enable.is_enabled() && (!forced || enable.is_locked()) {
+        if !is_offered(name, &config, forced_tool) {
             continue;
         }
 
@@ -965,11 +1129,13 @@ async fn resolve_tool(
 ) -> Result<ToolDefinition, ToolError> {
     let path = format!("conversation.tools.{name}.parameters");
     let definition = match config.source() {
-        ToolSource::Local { .. } | ToolSource::Builtin { .. } => ToolDefinition {
-            name: name.to_owned(),
-            docs: tool_docs_from_config(config),
-            parameters: json_schema::from_config(&path, config.parameters())?,
-        },
+        ToolSource::Local { .. } | ToolSource::Builtin { .. } | ToolSource::Command { .. } => {
+            ToolDefinition {
+                name: name.to_owned(),
+                docs: tool_docs_from_config(config),
+                parameters: json_schema::from_config(&path, config.parameters())?,
+            }
+        }
         ToolSource::Mcp { server, tool } => {
             resolve_mcp_tool(server, name, tool.as_deref(), config, mcp_client).await?
         }

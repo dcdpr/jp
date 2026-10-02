@@ -172,7 +172,7 @@ fn init(root: &Utf8Path, args: &[&str]) -> HostToPlugin {
 }
 
 fn init_at(version: u32, root: &Utf8Path, args: &[&str]) -> HostToPlugin {
-    HostToPlugin::Init(InitMessage {
+    HostToPlugin::Init(Box::new(InitMessage {
         version,
         workspace: WorkspaceInfo {
             root: root.to_path_buf(),
@@ -189,7 +189,8 @@ fn init_at(version: u32, root: &Utf8Path, args: &[&str]) -> HostToPlugin {
         args: args.iter().map(|arg| (*arg).to_owned()).collect(),
         log_level: 0,
         output_format: OutputFormat::default(),
-    })
+        tool: None,
+    }))
 }
 
 #[test]

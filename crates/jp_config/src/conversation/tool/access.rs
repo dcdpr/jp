@@ -1,7 +1,7 @@
 //! Resource access grants for a tool.
 //!
 //! Grants are declared either on one tool or on `conversation.tools.'*'`, which
-//! covers every local tool that declares none of its own.
+//! covers every local and command plugin tool that declares none of its own.
 //! A tool declaring any rules of its own ignores the `'*'` block entirely
 //! rather than adding to it, and the block moves as a unit: a tool declaring
 //! only `fs` rules also drops the `'*'` block's `env` rules.

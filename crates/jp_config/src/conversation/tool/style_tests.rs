@@ -12,6 +12,41 @@ fn test_link_style_deserialization() {
     assert_eq!(from_str::<LinkStyle>("\"osc8\"").unwrap(), LinkStyle::Osc8);
 }
 
+/// `tool` asks the tool itself to format its arguments; any other string that
+/// is not a keyword is a command.
+#[test]
+fn parameters_style_reads_tool_as_its_own_keyword() {
+    assert_eq!(
+        from_str::<ParametersStyle>("\"tool\"").unwrap(),
+        ParametersStyle::Tool
+    );
+    assert_eq!(
+        "tool".parse::<ParametersStyle>().unwrap(),
+        ParametersStyle::Tool
+    );
+    assert_eq!(
+        serde_json::to_string(&ParametersStyle::Tool).unwrap(),
+        "\"tool\""
+    );
+    assert_eq!(
+        from_str::<ParametersStyle>("\"tools fmt\"").unwrap(),
+        ParametersStyle::Custom(CommandConfigOrString::String("tools fmt".to_owned()))
+    );
+}
+
+/// A formatter runs for a command and for the tool itself; the built-in styles
+/// are rendered by JP.
+#[test]
+fn parameters_style_runs_a_formatter_for_a_command_or_the_tool() {
+    assert!(ParametersStyle::Tool.runs_formatter());
+    assert!(
+        ParametersStyle::Custom(CommandConfigOrString::String("fmt".to_owned())).runs_formatter()
+    );
+    assert!(!ParametersStyle::Json.runs_formatter());
+    assert!(!ParametersStyle::FunctionCall.runs_formatter());
+    assert!(!ParametersStyle::Off.runs_formatter());
+}
+
 #[test]
 fn test_inline_results_deserialization() {
     assert_eq!(
