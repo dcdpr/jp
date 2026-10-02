@@ -2286,3 +2286,64 @@ fn a_command_an_installed_plugin_claims_does_not_need_the_registry() {
 
     assert!(!needs_registry(&args, &route));
 }
+
+/// A third-party command entry, which claims nothing and only feeds hints.
+fn third_party(id: &str) -> RegistryPlugin {
+    RegistryPlugin {
+        id: id.to_owned(),
+        description: format!("{id} plugin"),
+        official: false,
+        repository: Some(format!("https://example.com/{id}")),
+        kind: PluginKind::default(),
+    }
+}
+
+/// The group's route, and the third-party entry its error names, for `line`.
+fn group_hint(line: &str, registry: &Registry) -> (usize, Option<String>) {
+    let args: Vec<String> = line.split(' ').map(ToOwned::to_owned).collect();
+    let Ok(Route::Group { consumed, .. }) = routing::route(&args, &[], Some(registry)) else {
+        panic!("`{line}` should route to the group");
+    };
+
+    let hint = third_party_below(&args, consumed, Some(registry)).map(|(key, _)| key.to_owned());
+    (consumed, hint)
+}
+
+/// A third-party command under an official group is named in the error, the way
+/// one at the root is, and still claims nothing: the command routes to the
+/// group.
+#[test]
+fn a_third_party_command_under_a_group_is_named() {
+    let mut registry = serve_group();
+    registry
+        .plugins
+        .insert("serve metrics".to_owned(), third_party("metrics"));
+
+    assert_eq!(
+        group_hint("serve metrics", &registry),
+        (1, Some("serve metrics".to_owned()))
+    );
+    assert_eq!(group_hint("serve http-api", &registry), (1, None));
+}
+
+/// An entry at or above the group's own path is not what was typed.
+#[test]
+fn a_third_party_entry_above_the_group_is_not_named() {
+    let mut registry = serve_group();
+    let group = registry.plugins.remove("serve").unwrap();
+    registry.plugins.insert("tools serve".to_owned(), group);
+    registry
+        .plugins
+        .insert("tools".to_owned(), third_party("tools"));
+
+    assert_eq!(group_hint("tools serve web", &registry), (2, None));
+}
+
+#[test]
+fn the_third_party_hint_says_where_the_plugin_comes_from() {
+    assert_eq!(
+        third_party_hint("serve metrics", &third_party("metrics")),
+        "\n  `jp serve metrics` is provided by the third-party plugin `metrics` \
+         (https://example.com/metrics).\n  Install it with `jp plugin install metrics`."
+    );
+}

@@ -350,7 +350,10 @@ fn check_unique_name(local: &[LocalPlugin], name: &str) -> Result<(), RouteError
 }
 
 /// The third-party registry entry with the longest key `args` starts with.
-fn third_party_hint<'a>(args: &[String], registry: Option<&'a Registry>) -> Route<'a> {
+///
+/// A catalog entry, for the hint an unknown command's error gives; it never
+/// decides which plugin runs.
+pub(crate) fn third_party_hint<'a>(args: &[String], registry: Option<&'a Registry>) -> Route<'a> {
     registry
         .into_iter()
         .flat_map(|registry| registry.plugins.iter())

@@ -2760,14 +2760,18 @@ fn show_help(
 ///
 /// `jp <group> -h` shows its help; a bare `jp <group>` shows it too and exits
 /// with code 2, as a built-in group does; anything else names a command no
-/// plugin provides.
+/// installed plugin provides, and the third-party plugin that does when the
+/// registry lists one.
+///
+/// `consumed` is how many of `args` name the group.
 fn run_group(
-    path: &[String],
-    rest: &[String],
+    args: &[String],
+    consumed: usize,
     entry: &RegistryPlugin,
     local: &[LocalPlugin],
     registry: Option<&Registry>,
 ) -> cmd::Output {
+    let (path, rest) = args.split_at(consumed);
     let text = help::render_group(
         path,
         &entry.description,
@@ -2784,14 +2788,56 @@ fn run_group(
         return Err(cmd::Error::from(2u8));
     }
 
-    Err(usage_error(format!(
-        "unrecognized subcommand '{}'\n\n  No plugin provides `jp {} {}`. Run `jp {} -h` to see \
-         what does.",
-        rest[0],
-        path.join(" "),
-        rest[0],
-        path.join(" "),
-    )))
+    let mut message = format!("unrecognized subcommand '{}'\n", rest[0]);
+    match third_party_below(args, consumed, registry) {
+        Some((key, entry)) => message.push_str(&third_party_hint(key, entry)),
+        None => {
+            let _ = write!(
+                message,
+                "\n  No plugin provides `jp {} {}`. Run `jp {} -h` to see what does.",
+                path.join(" "),
+                rest[0],
+                path.join(" "),
+            );
+        }
+    }
+
+    Err(usage_error(message))
+}
+
+/// The third-party registry entry that names a command below the group `args`
+/// routed to, when there is one.
+///
+/// `consumed` is how many of `args` name the group.
+/// An entry for the group's own path, or for a shorter one, is not what the
+/// user typed, so it is not returned.
+fn third_party_below<'a>(
+    args: &[String],
+    consumed: usize,
+    registry: Option<&'a Registry>,
+) -> Option<(&'a str, &'a RegistryPlugin)> {
+    match routing::third_party_hint(args, registry) {
+        Route::ThirdParty { key, entry } if routing::segments(key).len() > consumed => {
+            Some((key, entry))
+        }
+        _ => None,
+    }
+}
+
+/// The lines saying which third-party plugin provides `jp {key}`, and how to
+/// install it.
+fn third_party_hint(key: &str, entry: &RegistryPlugin) -> String {
+    let from = entry
+        .repository
+        .as_deref()
+        .map(|repository| format!(" ({repository})"))
+        .unwrap_or_default();
+
+    format!(
+        "\n  `jp {key}` is provided by the third-party plugin `{}`{from}.\n  Install it with `jp \
+         plugin install {}`.",
+        entry.id, entry.id,
+    )
 }
 
 /// The error for a command nothing handles.
@@ -2807,17 +2853,7 @@ fn unknown_subcommand_error(
     let mut message = format!("unrecognized subcommand '{name}'\n");
 
     if let Some((key, entry)) = third_party {
-        let from = entry
-            .repository
-            .as_deref()
-            .map(|repository| format!(" ({repository})"))
-            .unwrap_or_default();
-        let _ = write!(
-            message,
-            "\n  `jp {key}` is provided by the third-party plugin `{}`{from}.\n  Install it with \
-             `jp plugin install {}`.",
-            entry.id, entry.id,
-        );
+        message.push_str(&third_party_hint(key, entry));
         return usage_error(message);
     }
 
@@ -2889,13 +2925,7 @@ pub(crate) async fn run_external(args: &[String], ctx: &mut Ctx) -> cmd::Output 
         Route::Group {
             entry, consumed, ..
         } => {
-            return run_group(
-                &args[..consumed],
-                &args[consumed..],
-                entry,
-                &local,
-                registry.as_ref(),
-            );
+            return run_group(args, consumed, entry, &local, registry.as_ref());
         }
         Route::Local {
             plugin,
