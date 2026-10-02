@@ -1,17 +1,20 @@
 //! Admitting the command plugins a turn's tools run through.
 //!
 //! A turn whose tools run through command plugins (`source =
-//! "command.<plugin>"`) admits each of those plugins once, before the turn
-//! starts, with [`TurnPlugins::admit`]: the same trust decision `jp <plugin>`
-//! makes, asked at a point where a prompt cannot open inside a tool call.
-//! A plugin that is not admitted takes its tools out of the turn
-//! ([`without_refused_plugins`]), and the turn says so
-//! ([`report_refused_plugins`]).
+//! "plugin.command.<plugin>"`) admits each of those plugins once, before the
+//! turn starts, with [`TurnPlugins::admit`]: the same trust decision `jp
+//! <plugin>` makes, asked at a point where a prompt cannot open inside a tool
+//! call.
+//! The turn says which plugins were refused and why
+//! ([`report_refused_plugins`]), and fails when the tool `--tool` names is one
+//! of theirs ([`refuse_forced_tool`]).
 //!
 //! The admitted plugins go to the tool service as [`CommandPlugins`], which
 //! runs each call: it starts the admitted binary with an `init` carrying the
-//! call and the plugin's options from the turn's configuration, and reads back
-//! one `tool_outcome`.
+//! call, the turn's configuration, and the plugin's options from it, and reads
+//! back one `tool_outcome`.
+//! A tool on any plugin not handed over is left out of the turn
+//! ([`without_unadmitted_plugins`]).
 //! The plugin resolves no configuration of its own, so what it sees is what the
 //! query making the call sees: nested `.jp.toml` files, conversation config,
 //! and `--cfg` overrides included.
@@ -36,7 +39,7 @@ use super::{
     admission::{Official, admit},
     approvals::ApprovalStore,
     discovery::LocalPlugin,
-    dispatch::{local_plugins, plugin_options},
+    dispatch::local_plugins,
     registry, routing,
 };
 
@@ -49,7 +52,7 @@ pub(crate) fn plugins_needed(tools: &ToolsConfig, forced_tool: Option<&str>) -> 
         .iter()
         .filter(|(name, config)| is_offered(name, config, forced_tool))
         .filter_map(|(_, config)| match config.source() {
-            ToolSource::Command { plugin, .. } => Some(plugin.clone()),
+            ToolSource::CommandPlugin { plugin, .. } => Some(plugin.clone()),
             _ => None,
         })
         .collect()
@@ -195,7 +198,6 @@ fn admit_one(
     Ok(AdmittedPlugin {
         binary: named.plugin.path.clone(),
         sha256,
-        options: plugin_options(plugins_config, name),
     })
 }
 
@@ -206,37 +208,44 @@ fn error_message(error: crate::cmd::Error) -> String {
         .unwrap_or_else(|| format!("failed with exit code {}", error.code))
 }
 
-/// The turn's tools, without those whose plugin was refused.
+/// The turn's tools, without those on a plugin `plugins` does not hold.
+pub(crate) fn without_unadmitted_plugins<'a>(
+    tools: impl Iterator<Item = (&'a str, ToolConfigWithDefaults)>,
+    plugins: &CommandPlugins,
+) -> Vec<(&'a str, ToolConfigWithDefaults)> {
+    tools
+        .filter(|(_, config)| match config.source() {
+            ToolSource::CommandPlugin { plugin, .. } => plugins.is_admitted(plugin),
+            _ => true,
+        })
+        .collect()
+}
+
+/// Fail when `forced_tool` runs through a refused plugin.
 ///
 /// # Errors
 ///
-/// [`ToolError::CommandPluginUnavailable`] when `forced_tool` names one of
-/// them: the user asked for that tool, and a turn without it is not what they
-/// asked for.
-pub(crate) fn without_refused_plugins<'a>(
-    tools: impl Iterator<Item = (&'a str, ToolConfigWithDefaults)>,
+/// [`ToolError::CommandPluginUnavailable`], with the refusal's reason: the user
+/// asked for that tool, and a turn without it is not what they asked for.
+pub(crate) fn refuse_forced_tool(
+    tools: &ToolsConfig,
     refused: &IndexMap<String, String>,
     forced_tool: Option<&str>,
-) -> Result<Vec<(&'a str, ToolConfigWithDefaults)>, ToolError> {
-    let mut usable = Vec::new();
+) -> Result<(), ToolError> {
+    let Some(config) = forced_tool.and_then(|name| tools.get(name)) else {
+        return Ok(());
+    };
+    let ToolSource::CommandPlugin { plugin, .. } = config.source() else {
+        return Ok(());
+    };
+    let Some(reason) = refused.get(plugin) else {
+        return Ok(());
+    };
 
-    for (name, config) in tools {
-        if let ToolSource::Command { plugin, .. } = config.source()
-            && let Some(reason) = refused.get(plugin)
-        {
-            if forced_tool == Some(name) {
-                return Err(ToolError::CommandPluginUnavailable {
-                    plugin: plugin.clone(),
-                    reason: reason.clone(),
-                });
-            }
-            continue;
-        }
-
-        usable.push((name, config));
-    }
-
-    Ok(usable)
+    Err(ToolError::CommandPluginUnavailable {
+        plugin: plugin.clone(),
+        reason: reason.clone(),
+    })
 }
 
 /// Report the plugins a turn left out, and the tools that went with them.
@@ -254,7 +263,7 @@ pub(crate) fn report_refused_plugins(
             .iter()
             .filter(|(name, config)| is_offered(name, config, forced_tool))
             .filter(|(_, config)| {
-                matches!(config.source(), ToolSource::Command { plugin: p, .. } if p == plugin)
+                matches!(config.source(), ToolSource::CommandPlugin { plugin: p, .. } if p == plugin)
             })
             .map(|(name, _)| name.to_owned())
             .collect();

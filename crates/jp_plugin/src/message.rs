@@ -335,7 +335,8 @@ pub struct InitMessage {
 
     /// A tool call to answer, in place of running a command.
     ///
-    /// Set when the assistant calls a tool whose source is `command.<plugin>`.
+    /// Set when the assistant calls a tool whose source is
+    /// `plugin.command.<plugin>`.
     /// The plugin answers with [`PluginToHost::ToolOutcome`], then `exit`, and
     /// `args` is empty.
     /// `options` carries the plugin's options as the query resolved them,

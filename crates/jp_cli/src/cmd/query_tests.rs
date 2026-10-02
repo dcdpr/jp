@@ -253,7 +253,7 @@ fn a_bare_mount_reaches_every_enabled_subprocess_tool() {
     let mut partial = PartialAppConfig::new_test();
     for (name, source) in [
         ("local_tool", ToolSource::Local { tool: None }),
-        ("plugin_tool", ToolSource::Command {
+        ("plugin_tool", ToolSource::CommandPlugin {
             plugin: "ticket".to_owned(),
             tool: None,
         }),
@@ -409,7 +409,6 @@ async fn an_interrupt_during_mcp_startup_stops_the_turn_before_it_runs() {
         printer: Arc::new(printer),
         approvals: Arc::new(crate::access::approvals::ApprovalStore::default()),
         command_plugins: CommandPlugins::default(),
-        refused_plugins: IndexMap::new(),
         chat_request: ChatRequest::from("hello"),
         workspace_id: workspace.id().clone(),
         pending_trim: PendingStreamTrim::default(),
@@ -498,7 +497,6 @@ async fn a_client_stop_during_mcp_startup_stops_the_turn_before_it_runs() {
         printer: Arc::new(printer),
         approvals: Arc::new(crate::access::approvals::ApprovalStore::default()),
         command_plugins: CommandPlugins::default(),
-        refused_plugins: IndexMap::new(),
         chat_request: ChatRequest::from("hello"),
         workspace_id: workspace.id().clone(),
         pending_trim: PendingStreamTrim::default(),

@@ -727,7 +727,7 @@ pub async fn execute(
                 let (ToolSource::Local { tool }
                 | ToolSource::Builtin { tool }
                 | ToolSource::Mcp { tool, .. }
-                | ToolSource::Command { tool, .. }) = execution.config.source();
+                | ToolSource::CommandPlugin { tool, .. }) = execution.config.source();
                 let command = command.clone().command();
                 return execute_local(execution, arguments, answers, tool.as_deref(), command)
                     .await;
@@ -750,7 +750,7 @@ pub async fn execute(
         ToolSource::Builtin { tool } => {
             execute_builtin(execution, &arguments, answers, tool.as_deref()).await
         }
-        ToolSource::Command { plugin, tool } => {
+        ToolSource::CommandPlugin { plugin, tool } => {
             execute_command(execution, arguments, answers, plugin, tool.as_deref()).await
         }
     }
@@ -873,19 +873,17 @@ async fn execute_command(
         _ => Map::new(),
     };
 
-    let init = execution
-        .command_plugins
-        .init_message(admitted, &CommandToolCall {
-            action: &execution.action,
-            plugin,
-            tool: name,
-            arguments: &arguments,
-            answers,
-            options: execution.config.options(),
-            root: execution.root,
-            access: execution.access,
-            invocation: execution.invocation,
-        })?;
+    let init = execution.command_plugins.init_message(&CommandToolCall {
+        action: &execution.action,
+        plugin,
+        tool: name,
+        arguments: &arguments,
+        answers,
+        options: execution.config.options(),
+        root: execution.root,
+        access: execution.access,
+        invocation: execution.invocation,
+    })?;
 
     let mut spec = ProcessSpec::new(
         admitted.binary.as_str(),
@@ -1129,13 +1127,13 @@ async fn resolve_tool(
 ) -> Result<ToolDefinition, ToolError> {
     let path = format!("conversation.tools.{name}.parameters");
     let definition = match config.source() {
-        ToolSource::Local { .. } | ToolSource::Builtin { .. } | ToolSource::Command { .. } => {
-            ToolDefinition {
-                name: name.to_owned(),
-                docs: tool_docs_from_config(config),
-                parameters: json_schema::from_config(&path, config.parameters())?,
-            }
-        }
+        ToolSource::Local { .. }
+        | ToolSource::Builtin { .. }
+        | ToolSource::CommandPlugin { .. } => ToolDefinition {
+            name: name.to_owned(),
+            docs: tool_docs_from_config(config),
+            parameters: json_schema::from_config(&path, config.parameters())?,
+        },
         ToolSource::Mcp { server, tool } => {
             resolve_mcp_tool(server, name, tool.as_deref(), config, mcp_client).await?
         }

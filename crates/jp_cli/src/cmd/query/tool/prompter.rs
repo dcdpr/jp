@@ -556,7 +556,7 @@ fn build_permission_question(tool_name: &str, tool_source: &ToolSource) -> Strin
         ToolSource::Builtin { .. } => "built-in",
         ToolSource::Local { .. } => "local",
         ToolSource::Mcp { .. } => "mcp",
-        ToolSource::Command { .. } => "plugin",
+        ToolSource::CommandPlugin { .. } => "plugin",
     };
 
     let mut question = format!("Run {} {} tool", source_type, tool_name.yellow().bold());
@@ -569,7 +569,7 @@ fn build_permission_question(tool_name: &str, tool_source: &ToolSource) -> Strin
                 server.as_str().blue().bold()
             );
         }
-        ToolSource::Command { plugin, .. } => {
+        ToolSource::CommandPlugin { plugin, .. } => {
             question = format!(
                 "{} from {} plugin?",
                 question,

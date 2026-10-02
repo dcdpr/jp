@@ -132,7 +132,6 @@ fn verify_accepts_the_admitted_contents_and_refuses_changed_ones() {
     let plugins = CommandPlugins::default().with("ticket", AdmittedPlugin {
         sha256: sha256_file(&binary).unwrap(),
         binary: binary.clone(),
-        options: Map::new(),
     });
 
     assert_eq!(plugins.verify("ticket").map(|p| &p.binary), Ok(&binary));

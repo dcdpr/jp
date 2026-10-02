@@ -341,7 +341,7 @@ impl TerminalExecutorSource {
     /// It changes no execution policy.
     /// `runner` runs every subprocess: `local` tools, argument formatters, and
     /// the binaries of `command_plugins`, the plugins admitted for the tools
-    /// whose source is `command.<plugin>`.
+    /// whose source is `plugin.command.<plugin>`.
     pub(crate) async fn start_with_metadata(
         builtins: BuiltinExecutors,
         runner: Arc<dyn ProcessRunner>,

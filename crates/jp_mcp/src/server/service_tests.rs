@@ -16,6 +16,7 @@ use jp_config::{
     AppConfig, Config as _,
     conversation::tool::{PartialToolConfig, ToolConfig},
 };
+use jp_plugin::message::PathsInfo;
 use jp_process::{ExitCode, MockProcessRunner, ProcessOutput};
 use jp_tool::{Outcome, Question, ToolDefinition, ToolDocs};
 use serde_json::{Value, json};
@@ -112,6 +113,17 @@ fn fixture(run: &str, result: &str) -> (Service, HostReceiver, Arc<AtomicUsize>)
     (service, host, count)
 }
 
+/// What every plugin call of these tests' turns is told.
+fn plugin_init() -> PluginInit {
+    PluginInit {
+        workspace_id: "ws-abc".to_owned(),
+        storage: Some("/tmp/.jp".into()),
+        paths: PathsInfo::default(),
+        config: Arc::new(AppConfig::new_test()),
+        log_level: 0,
+    }
+}
+
 /// A service whose `count` tool is served by the command plugin `counter`.
 ///
 /// The admission contract (`run`, Host approval, fail-closed on Host loss) is
@@ -126,14 +138,9 @@ fn command_fixture(run: &str, result: &str) -> (Service, HostReceiver, Arc<Atomi
     let dir = tempdir().unwrap();
     let binary = dir.path().join("jp-counter");
     fs::write(&binary, "plugin").unwrap();
-    let plugins = CommandPlugins::new(PluginInit {
-        storage: Some("/tmp/.jp".into()),
-        ..PluginInit::default()
-    })
-    .with("counter", AdmittedPlugin {
+    let plugins = CommandPlugins::new(plugin_init()).with("counter", AdmittedPlugin {
         sha256: sha256_file(&binary).unwrap(),
         binary,
-        options: Map::new(),
     });
     let runner = {
         let count = count.clone();
@@ -152,9 +159,10 @@ fn command_fixture(run: &str, result: &str) -> (Service, HostReceiver, Arc<Atomi
             })
         })
     };
-    let partial: PartialToolConfig =
-        serde_json::from_value(json!({"source": "command.counter", "run": run, "result": result}))
-            .unwrap();
+    let partial: PartialToolConfig = serde_json::from_value(
+        json!({"source": "plugin.command.counter", "run": run, "result": result}),
+    )
+    .unwrap();
     let mut app = AppConfig::new_test();
     app.conversation.tools.insert(
         "count".into(),
@@ -198,14 +206,9 @@ fn plugin_service(config: Value) -> (Service, HostReceiver, Arc<MockProcessRunne
     let dir = tempdir().unwrap();
     let binary = dir.path().join("jp-counter");
     fs::write(&binary, "plugin").unwrap();
-    let plugins = CommandPlugins::new(PluginInit {
-        storage: Some("/tmp/.jp".into()),
-        ..PluginInit::default()
-    })
-    .with("counter", AdmittedPlugin {
+    let plugins = CommandPlugins::new(plugin_init()).with("counter", AdmittedPlugin {
         sha256: sha256_file(&binary).unwrap(),
         binary,
-        options: Map::new(),
     });
     let runner = Arc::new(MockProcessRunner::responding(move |spec| {
         // Owns the directory, so the binary lives as long as the service.
@@ -226,7 +229,7 @@ fn plugin_service(config: Value) -> (Service, HostReceiver, Arc<MockProcessRunne
         })
     }));
 
-    let mut partial = json!({"source": "command.counter"});
+    let mut partial = json!({"source": "plugin.command.counter"});
     let Value::Object(config) = config else {
         panic!("tool config is an object");
     };

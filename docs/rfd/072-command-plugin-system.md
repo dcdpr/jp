@@ -428,7 +428,7 @@ The tool names the plugin as its source:
 
 ```toml
 [conversation.tools.ticket_create]
-source = "command.ticket.create"
+source = "plugin.command.ticket.create"
 summary = "File a work item as a ticket."
 
 [conversation.tools.ticket_create.parameters.title]
@@ -436,8 +436,10 @@ type = "string"
 required = true
 ```
 
-`command.<plugin>` uses the configured tool name; `command.<plugin>.<tool>`
-names the tool the plugin knows it by.
+`plugin.command.<plugin>` uses the configured tool name;
+`plugin.command.<plugin>.<tool>` names the tool the plugin knows it by.
+The `command` segment names the plugin kind, the same one that keys
+`plugins.command.<plugin>`.
 Parameters come from configuration, as they do for a `local` tool.
 
 For each attempt, JP starts the plugin and sends an `init` that carries a `tool`

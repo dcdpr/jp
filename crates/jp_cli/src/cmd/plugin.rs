@@ -6,7 +6,7 @@
 //!   subcommands, which need no workspace
 //! - External plugin dispatch: routing an unknown subcommand to the plugin
 //!   whose manifest claims it, and spawning it
-//! - Tool calls served by plugins (`source = "command.<name>"`)
+//! - Tool calls served by plugins (`source = "plugin.command.<name>"`)
 //!
 //! See: `docs/rfd/072-command-plugin-system.md`
 

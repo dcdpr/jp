@@ -40,8 +40,8 @@ That needs a decision on how a tool declares which plugin it runs through.
 - **Date**: 2026-10-02T14:26:08Z
 
 Fixed on the host side: a tool declares the plugin it runs through with `source
-= "command.<plugin>[.<tool>]"`, and JP runs the plugin itself with the turn's
-resolved `plugins.command.<plugin>.options` in `init.options`.
+= "plugin.command.<plugin>[.<tool>]"`, and JP runs the plugin itself with the
+turn's resolved `plugins.command.<plugin>.options` in `init.options`.
 No child `jp` resolves config any more, so nested `.jp.toml` files, conversation
 config, and `--cfg` all reach the plugin.
 
@@ -56,7 +56,7 @@ The ticket tools still need to adopt it on the RFD 116 branch:
 - Read the ticket directory from `init.options["dir"]` when `--dir` is absent.
 - Enforce `tool.access` when present.
 - `REQUIRED_PROTOCOL = 12`.
-- `.jp/mcp/tools/ticket/*.toml`: `source = "command.ticket.<tool>"`, drop
+- `.jp/mcp/tools/ticket/*.toml`: `source = "plugin.command.ticket.<tool>"`, drop
   `command`, and `style.parameters = "tool"`.
 - Admit the binary: `plugins.command.ticket.run = "allow"` in `.jp/config.toml`,
   or `jp plugin approve`.
