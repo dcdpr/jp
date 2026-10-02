@@ -858,7 +858,7 @@ conversation: ConversationConfig
                       tool_choice?: "auto" | "none" | "required" | string | null
           result: "allow" | "ask" | "edit" | "skip" | null
           run: "ask" | "allow" | "edit" | "skip" | null
-          source: string(/^(builtin|local)(\..+)?$|^(mcp|command)\.[^.]+(\..+)?$/)
+          source: string(/^(builtin|local)(\..+)?$|^(mcp|plugin\.command)\.[^.]+(\..+)?$/)
           style:
             |: DisplayStyleConfig
               error: ErrorStyleConfig
@@ -1248,7 +1248,7 @@ conversation: ConversationConfig
                         tool_choice?: "auto" | "none" | "required" | string | null
             result: "allow" | "ask" | "edit" | "skip" | null
             run: "ask" | "allow" | "edit" | "skip" | null
-            source: string(/^(builtin|local)(\..+)?$|^(mcp|command)\.[^.]+(\..+)?$/)
+            source: string(/^(builtin|local)(\..+)?$|^(mcp|plugin\.command)\.[^.]+(\..+)?$/)
             style:
               |: DisplayStyleConfig
                 error: ErrorStyleConfig

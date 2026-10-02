@@ -16,9 +16,9 @@ A tool command that is a shell or a `just` recipe (every tool under
 `.jp/mcp/tools/` runs `just serve-tools ...`) has its real work in a grandchild,
 which survives the cancel and keeps running, writing files, or holding a port.
 
-Tools served by command plugins (`source = "command.<plugin>"`, T-0vm44ks) are
-spawned the same way in `crates/jp_cli/src/cmd/plugin/tool.rs` and have the same
-gap.
+Tools served by command plugins (`source = "plugin.command.<plugin>"`,
+T-0vm44ks) are spawned the same way in `crates/jp_cli/src/cmd/plugin/tool.rs`
+and have the same gap.
 
 `jp <plugin>` commands do not: on the plugin-routing branch (PR #1216) they are
 stopped through `ProcessTree`, which kills the process group on Unix and the job

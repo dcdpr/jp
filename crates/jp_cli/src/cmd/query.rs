@@ -150,7 +150,10 @@ use crate::{
         lock::{LockRequest, acquire_lock},
         plugin::{
             dispatch::well_known_paths,
-            tool::{TurnPlugins, plugins_needed, report_refused_plugins, without_refused_plugins},
+            tool::{
+                TurnPlugins, plugins_needed, refuse_forced_tool, report_refused_plugins,
+                without_unadmitted_plugins,
+            },
         },
     },
     config_pipeline::{self, ConfigReset, ConfigResetEvents},
@@ -1524,15 +1527,10 @@ pub(crate) struct TurnInputs {
     /// Standing decisions about which tool calls may run unattended.
     approvals: Arc<ApprovalStore>,
 
-    /// The command plugins admitted for this turn, with the options and
-    /// configuration their tool calls carry.
-    /// A tool on any other plugin fails as unavailable.
-    command_plugins: CommandPlugins,
-
-    /// Plugins admission refused for this turn, and why.
+    /// The command plugins admitted for this turn, sharing `config` with it.
     ///
-    /// Their tools are left out of the turn.
-    refused_plugins: IndexMap<String, String>,
+    /// A tool on any other plugin is left out of the turn.
+    command_plugins: CommandPlugins,
 
     /// The request that starts the turn.
     chat_request: ChatRequest,
@@ -1601,26 +1599,31 @@ impl TurnInputs {
         debug!(count = attachments.len(), "Attachments loaded.");
 
         // Admitted here, before the turn starts, so a prompt asking whether to
-        // trust a plugin binary never opens inside a tool call.
+        // trust a plugin binary never opens inside a tool call. The refusals
+        // are reported right after the prompts that decided them.
+        let forced_tool = config.assistant.tool_choice.function_name();
         let plugins = TurnPlugins::admit(
-            &plugins_needed(
-                &config.conversation.tools,
-                config.assistant.tool_choice.function_name(),
-            ),
+            &plugins_needed(&config.conversation.tools, forced_tool),
             &config.plugins,
             interactive,
             &printer,
         );
-        let refused_plugins = plugins.refused().clone();
+        report_refused_plugins(
+            &printer,
+            &config.conversation.tools,
+            plugins.refused(),
+            forced_tool,
+        );
+        refuse_forced_tool(&config.conversation.tools, plugins.refused(), forced_tool)?;
 
-        // Built from the turn's config, not the context's: a plugin serving a
-        // tool sees the options this query resolved, including conversation
-        // config and `--cfg`, rather than resolving its own from the root.
+        // The turn's config, not the context's: a plugin serving a tool sees
+        // the options this query resolved, including conversation config and
+        // `--cfg`, rather than resolving its own from the root.
         let command_plugins = plugins.into_command_plugins(PluginInit {
             workspace_id: ctx.workspace.id().to_string(),
             storage: ctx.storage_path().map(ToOwned::to_owned),
             paths: well_known_paths(ctx.user_storage_path()),
-            config: serde_json::to_value(config.to_partial())?,
+            config: config.clone(),
             log_level: ctx.term.args.verbose,
         });
 
@@ -1628,7 +1631,6 @@ impl TurnInputs {
             workspace_root: ctx.workspace.root().to_path_buf(),
             approvals: Arc::new(load_approval_store(ctx.fs_backend.as_deref())),
             command_plugins,
-            refused_plugins,
             workspace_id: ctx.workspace.id().clone(),
             signals: ctx.signals.clone(),
             mcp_client: ctx.mcp_client.clone(),
@@ -1675,17 +1677,8 @@ impl TurnInputs {
                 );
 
                 let forced_tool = cfg.assistant.tool_choice.function_name();
-                let offered = without_refused_plugins(
-                    cfg.conversation.tools.iter(),
-                    &self.refused_plugins,
-                    forced_tool,
-                )?;
-                report_refused_plugins(
-                    &self.printer,
-                    &cfg.conversation.tools,
-                    &self.refused_plugins,
-                    forced_tool,
-                );
+                let offered =
+                    without_unadmitted_plugins(cfg.conversation.tools.iter(), &self.command_plugins);
                 let tools = tool_definitions(
                     offered.into_iter(),
                     &self.mcp_client,

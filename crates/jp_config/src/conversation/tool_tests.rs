@@ -25,7 +25,7 @@ fn build_assigned(assignments: &[&str]) -> Result<crate::AppConfig, String> {
 #[test]
 fn parameters_tool_is_accepted_on_local_and_command_tools() {
     let config = build_assigned(&[
-        "conversation.tools.ticket_create.source=command.ticket.create",
+        "conversation.tools.ticket_create.source=plugin.command.ticket.create",
         "conversation.tools.ticket_create.style.parameters=tool",
         "conversation.tools.word_count.source=local",
         "conversation.tools.word_count.command=wc",
@@ -90,7 +90,7 @@ fn parameters_tool_in_the_defaults_is_rejected_when_an_mcp_tool_inherits_it() {
 fn parameters_tool_in_the_defaults_is_accepted_when_only_subprocess_tools_inherit_it() {
     let config = build_assigned(&[
         "conversation.tools.*.style.parameters=tool",
-        "conversation.tools.ticket_create.source=command.ticket.create",
+        "conversation.tools.ticket_create.source=plugin.command.ticket.create",
     ]);
 
     assert!(config.is_ok(), "{config:?}");
@@ -303,7 +303,7 @@ fn access_on_command_tool_is_accepted_by_validation() {
         .tools
         .tools
         .insert("ticket_create".to_owned(), PartialToolConfig {
-            source: Some(ToolSource::Command {
+            source: Some(ToolSource::CommandPlugin {
                 plugin: "ticket".to_owned(),
                 tool: Some("create".to_owned()),
             }),
@@ -359,7 +359,7 @@ fn defaults_access_applies_to_a_command_tool_without_its_own() {
         .tools
         .tools
         .insert("ticket_create".to_owned(), PartialToolConfig {
-            source: Some(ToolSource::Command {
+            source: Some(ToolSource::CommandPlugin {
                 plugin: "ticket".to_owned(),
                 tool: Some("create".to_owned()),
             }),
@@ -1625,16 +1625,21 @@ fn the_tool_source_pattern_agrees_with_the_parser() {
         "mcp.bookworm",
         "mcp.bookworm.crate_readme",
         "mcp.bookworm.a.b",
-        "command.ticket",
-        "command.ticket.create",
+        "plugin.command.ticket",
+        "plugin.command.ticket.create",
         // Rejected by the parser: no server or plugin named, an empty one,
-        // or a prefix that is not a source at all.
+        // a plugin kind JP does not have, or a prefix that is not a source at
+        // all.
         "mcp",
         "mcp.",
         "mcp..tool",
-        "command",
-        "command.",
-        "command..create",
+        "plugin",
+        "plugin.",
+        "plugin.command",
+        "plugin.command.",
+        "plugin.command..create",
+        "plugin.wasm.ticket",
+        "command.ticket",
         "nonsense",
         "",
         "builtinx",
@@ -1704,52 +1709,66 @@ fn test_tool_source_mcp_roundtrip_without_tool() {
 }
 
 #[test]
-fn test_tool_source_command_parses_plugin_only() {
-    let parsed: ToolSource = "command.ticket".parse().unwrap();
-    assert_eq!(parsed, ToolSource::Command {
+fn test_tool_source_command_plugin_parses_plugin_only() {
+    let parsed: ToolSource = "plugin.command.ticket".parse().unwrap();
+    assert_eq!(parsed, ToolSource::CommandPlugin {
         plugin: "ticket".to_owned(),
         tool: None,
     });
 }
 
 #[test]
-fn test_tool_source_command_parses_plugin_and_tool() {
-    let parsed: ToolSource = "command.ticket.create".parse().unwrap();
-    assert_eq!(parsed, ToolSource::Command {
+fn test_tool_source_command_plugin_parses_plugin_and_tool() {
+    let parsed: ToolSource = "plugin.command.ticket.create".parse().unwrap();
+    assert_eq!(parsed, ToolSource::CommandPlugin {
         plugin: "ticket".to_owned(),
         tool: Some("create".to_owned()),
     });
 }
 
 #[test]
-fn test_tool_source_command_rejects_missing_plugin() {
-    for input in ["command", "command.", "command..create"] {
+fn test_tool_source_command_plugin_rejects_missing_plugin() {
+    for input in [
+        "plugin",
+        "plugin.",
+        "plugin.command",
+        "plugin.command.",
+        "plugin.command..create",
+    ] {
         let err = input.parse::<ToolSource>().unwrap_err();
         assert_eq!(
             err,
-            "A command plugin tool source must name the plugin: use `command.<plugin>` or \
-             `command.<plugin>.<tool>`.",
+            "A plugin tool source must name the plugin: use `plugin.command.<plugin>` or \
+             `plugin.command.<plugin>.<tool>`.",
             "for {input:?}"
         );
     }
 }
 
+/// Only command plugins serve tools; another kind is named as unknown rather
+/// than read as a plugin called `wasm`.
 #[test]
-fn test_tool_source_command_roundtrip() {
+fn test_tool_source_rejects_an_unknown_plugin_kind() {
+    let err = "plugin.wasm.ticket".parse::<ToolSource>().unwrap_err();
+    assert_eq!(err, "Unknown plugin kind: wasm, must be: command");
+}
+
+#[test]
+fn test_tool_source_command_plugin_roundtrip() {
     for (original, serialized) in [
         (
-            ToolSource::Command {
+            ToolSource::CommandPlugin {
                 plugin: "ticket".to_owned(),
                 tool: Some("create".to_owned()),
             },
-            r#""command.ticket.create""#,
+            r#""plugin.command.ticket.create""#,
         ),
         (
-            ToolSource::Command {
+            ToolSource::CommandPlugin {
                 plugin: "ticket".to_owned(),
                 tool: None,
             },
-            r#""command.ticket""#,
+            r#""plugin.command.ticket""#,
         ),
     ] {
         assert_eq!(serde_json::to_string(&original).unwrap(), serialized);

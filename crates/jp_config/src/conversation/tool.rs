@@ -268,7 +268,7 @@ fn reject_access_on_non_local_tools(tools: &ToolsConfig) -> Result<(), ConfigErr
             continue;
         }
         let kind = match tool.source {
-            ToolSource::Local { .. } | ToolSource::Command { .. } => continue,
+            ToolSource::Local { .. } | ToolSource::CommandPlugin { .. } => continue,
             ToolSource::Builtin { .. } => "builtin",
             ToolSource::Mcp { .. } => "mcp",
         };
@@ -292,7 +292,7 @@ fn reject_access_on_non_local_tools(tools: &ToolsConfig) -> Result<(), ConfigErr
 /// rejected only when such a tool is a builtin or MCP one.
 fn reject_tool_formatter_on_non_subprocess_tools(tools: &ToolsConfig) -> Result<(), ConfigError> {
     let kind = |source: &ToolSource| match source {
-        ToolSource::Local { .. } | ToolSource::Command { .. } => None,
+        ToolSource::Local { .. } | ToolSource::CommandPlugin { .. } => None,
         ToolSource::Builtin { .. } => Some("builtin"),
         ToolSource::Mcp { .. } => Some("mcp"),
     };
@@ -523,9 +523,9 @@ pub struct ToolConfig {
     /// - `builtin`: Use a built-in tool.
     /// - `local`: Use a locally defined tool (shell command).
     /// - `mcp.<server>[.<tool>]`: Use a tool from an MCP server.
-    /// - `command.<plugin>[.<tool>]`: Use a tool served by a command plugin.
-    ///   The plugin receives `plugins.command.<plugin>.options` as this query
-    ///   resolved them.
+    /// - `plugin.command.<plugin>[.<tool>]`: Use a tool served by the command
+    ///   plugin configured under `plugins.command.<plugin>`.
+    ///   The plugin receives its `options` as this query resolved them.
     #[setting(required)]
     pub source: ToolSource,
 
@@ -1141,12 +1141,12 @@ pub enum ToolSource {
         tool: Option<String>,
     },
 
-    /// Use a tool served by a command plugin.
+    /// Use a tool served by a command plugin: `plugin.command.<plugin>`.
     ///
     /// The host runs the plugin itself and hands it the plugin's options from
     /// the query's resolved configuration, so the tool sees the same
     /// `plugins.command.<plugin>.options` the query does.
-    Command {
+    CommandPlugin {
         /// The plugin serving the tool, as named under `plugins.command`.
         plugin: String,
 
@@ -1189,9 +1189,9 @@ impl Serialize for ToolSource {
                 }
                 s
             }
-            Self::Command { plugin, tool } => tool.as_ref().map_or_else(
-                || format!("command.{plugin}"),
-                |tool| format!("command.{plugin}.{tool}"),
+            Self::CommandPlugin { plugin, tool } => tool.as_ref().map_or_else(
+                || format!("plugin.command.{plugin}"),
+                |tool| format!("plugin.command.{plugin}.{tool}"),
             ),
         };
         serializer.serialize_str(&s)
@@ -1230,23 +1230,28 @@ impl FromStr for ToolSource {
 
                 Ok(Self::Mcp { server, tool })
             }
-            "command" => {
+            "plugin" => {
                 let rest = tool.unwrap_or_default();
+                let (kind, rest) = rest.split_once('.').unwrap_or((rest.as_str(), ""));
+                match kind {
+                    "" | "command" => {}
+                    kind => return Err(format!("Unknown plugin kind: {kind}, must be: command")),
+                }
+
                 let (plugin, tool) = match rest.split_once('.') {
                     Some((plugin, tool)) => (plugin.to_owned(), Some(tool.to_owned())),
-                    None => (rest, None),
+                    None => (rest.to_owned(), None),
                 };
-
                 if plugin.is_empty() {
-                    return Err("A command plugin tool source must name the plugin: use \
-                                `command.<plugin>` or `command.<plugin>.<tool>`."
+                    return Err("A plugin tool source must name the plugin: use \
+                                `plugin.command.<plugin>` or `plugin.command.<plugin>.<tool>`."
                         .to_owned());
                 }
 
-                Ok(Self::Command { plugin, tool })
+                Ok(Self::CommandPlugin { plugin, tool })
             }
             _ => Err(format!(
-                "Unknown tool source: {source}, must be one of: builtin, local, mcp, command"
+                "Unknown tool source: {source}, must be one of: builtin, local, mcp, plugin"
             )),
         }
     }
@@ -1266,7 +1271,7 @@ impl ToolSource {
     /// compiled policy and enforce it.
     #[must_use]
     pub const fn is_subprocess(&self) -> bool {
-        matches!(self, Self::Local { .. } | Self::Command { .. })
+        matches!(self, Self::Local { .. } | Self::CommandPlugin { .. })
     }
 
     /// Return the custom name of the tool, if any.
@@ -1276,7 +1281,7 @@ impl ToolSource {
             Self::Builtin { tool }
             | Self::Local { tool }
             | Self::Mcp { tool, .. }
-            | Self::Command { tool, .. } => tool.as_deref(),
+            | Self::CommandPlugin { tool, .. } => tool.as_deref(),
         }
     }
 }
@@ -1287,16 +1292,18 @@ impl schematic::Schematic for ToolSource {
     }
 
     fn build_schema(mut schema: schematic::SchemaBuilder) -> schematic::Schema {
-        // The four prefixes are the whole vocabulary, and `mcp` and `command`
+        // The four prefixes are the whole vocabulary, and `mcp` and `plugin`
         // require a name after them. A bare string would accept
         // `source = "nonsense"`, which `FromStr` rejects.
         let mut schema = schema.string(schematic::schema::StringType {
-            pattern: Some(r"^(builtin|local)(\..+)?$|^(mcp|command)\.[^.]+(\..+)?$".to_owned()),
+            pattern: Some(
+                r"^(builtin|local)(\..+)?$|^(mcp|plugin\.command)\.[^.]+(\..+)?$".to_owned(),
+            ),
             ..schematic::schema::StringType::default()
         });
         schema.set_description(
             "Where a tool comes from: `builtin[.<tool>]`, `local[.<tool>]`, \
-             `mcp.<server>[.<tool>]`, or `command.<plugin>[.<tool>]`.",
+             `mcp.<server>[.<tool>]`, or `plugin.command.<plugin>[.<tool>]`.",
         );
         schema
     }

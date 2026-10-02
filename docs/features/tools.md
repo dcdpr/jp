@@ -14,14 +14,14 @@ definition.
 
 Every tool has a `source`:
 
-| Source                    | Definition                                                                         |
-| ------------------------- | ---------------------------------------------------------------------------------- |
-| `builtin`                 | Implemented inside JP.                                                             |
-| `local`                   | Runs a configured command. JP configuration defines its parameters.                |
-| `mcp.<server>`            | Uses the same-named tool from an MCP server. The server defines its parameters.    |
-| `mcp.<server>.<tool>`     | Uses a differently named tool from an MCP server. This allows a local alias.       |
-| `command.<plugin>`        | Asks a command plugin to answer the call. JP configuration defines its parameters. |
-| `command.<plugin>.<tool>` | Asks a command plugin for a differently named tool.                                |
+| Source                           | Definition                                                                         |
+| -------------------------------- | ---------------------------------------------------------------------------------- |
+| `builtin`                        | Implemented inside JP.                                                             |
+| `local`                          | Runs a configured command. JP configuration defines its parameters.                |
+| `mcp.<server>`                   | Uses the same-named tool from an MCP server. The server defines its parameters.    |
+| `mcp.<server>.<tool>`            | Uses a differently named tool from an MCP server. This allows a local alias.       |
+| `plugin.command.<plugin>`        | Asks a command plugin to answer the call. JP configuration defines its parameters. |
+| `plugin.command.<plugin>.<tool>` | Asks a command plugin for a differently named tool.                                |
 
 For example, a local tool starts with a complete definition:
 
@@ -52,7 +52,7 @@ A command plugin tool runs through the plugin, which receives
 
 ```toml
 [conversation.tools.ticket_create]
-source = "command.ticket.create"
+source = "plugin.command.ticket.create"
 
 [conversation.tools.ticket_create.style]
 # Ask the plugin to describe the call before it runs.

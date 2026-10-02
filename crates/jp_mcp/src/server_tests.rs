@@ -1,11 +1,13 @@
-use std::{fs, mem, sync::Arc};
+use std::{fs, sync::Arc};
 
 use async_trait::async_trait;
 use camino::Utf8PathBuf;
 use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_config::{
-    AppConfig, Config as _,
+    AppConfig, Config as _, PartialAppConfig,
+    assignment::{AssignKeyValue as _, KvAssignment},
     conversation::tool::{CommandConfig, PartialToolConfig, ToolConfig, ToolConfigWithDefaults},
+    util::build,
 };
 use jp_plugin::{PROTOCOL_VERSION, message::PathsInfo};
 use jp_process::{ExitCode, MockProcessRunner, ProcessOutput};
@@ -39,7 +41,15 @@ struct Fixture {
     config: ToolConfigWithDefaults,
     builtins: builtin::BuiltinExecutors,
     runner: Arc<dyn ProcessRunner>,
+
+    /// The plugins admitted for the turn, rebuilt by [`Fixture::refresh`] from
+    /// the three fields after it.
     command_plugins: CommandPlugins,
+
+    /// The turn's configuration, which gains each plugin's options.
+    turn: PartialAppConfig,
+    admitted: Vec<(String, AdmittedPlugin)>,
+    storage: Option<Utf8PathBuf>,
 
     /// Holds the plugin binaries [`Fixture::with_plugin`] writes.
     dir: Utf8TempDir,
@@ -67,13 +77,10 @@ impl Fixture {
             config: app.conversation.tools.get(name).unwrap(),
             builtins: builtin::BuiltinExecutors::new(),
             runner: no_commands(),
-            command_plugins: CommandPlugins::new(PluginInit {
-                workspace_id: "ws-abc".to_owned(),
-                storage: Some("/tmp/.jp".into()),
-                paths: PathsInfo::default(),
-                config: json!({"user": {"name": "tester"}}),
-                log_level: 0,
-            }),
+            command_plugins: CommandPlugins::default(),
+            turn: PartialAppConfig::new_test(),
+            admitted: vec![],
+            storage: Some("/tmp/.jp".into()),
             dir: tempdir().unwrap(),
             access: None,
             upstream: Client::new(IndexMap::new()),
@@ -87,24 +94,50 @@ impl Fixture {
         self
     }
 
-    /// Put a `jp-{name}` binary on disk and admit it, with `options` as its
-    /// plugin options.
-    fn with_plugin(mut self, name: &str, options: Value) -> Self {
+    /// Put a `jp-{name}` binary on disk and admit it, with `options` set as its
+    /// `plugins.command.<name>.options` in the turn's configuration.
+    fn with_plugin(mut self, name: &str, options: &Value) -> Self {
         let binary = self.binary(name);
         fs::write(&binary, "v1").unwrap();
-        let Value::Object(options) = options else {
-            panic!("plugin options are an object");
-        };
-        self.command_plugins = mem::take(&mut self.command_plugins).with(name, AdmittedPlugin {
+        self.turn
+            .assign(
+                format!("plugins.command.{name}.options:={options}")
+                    .parse::<KvAssignment>()
+                    .unwrap(),
+            )
+            .unwrap();
+        self.admitted.push((name.to_owned(), AdmittedPlugin {
             sha256: sha256_file(&binary).unwrap(),
             binary,
-            options,
-        });
-        self
+        }));
+        self.refresh()
     }
 
     fn without_storage(mut self) -> Self {
-        self.command_plugins = CommandPlugins::new(PluginInit::default());
+        self.storage = None;
+        self.refresh()
+    }
+
+    /// The configuration the turn's plugin calls are made under.
+    fn turn_config(&self) -> Arc<AppConfig> {
+        Arc::new(build(self.turn.clone()).unwrap())
+    }
+
+    fn refresh(mut self) -> Self {
+        let init = PluginInit {
+            workspace_id: "ws-abc".to_owned(),
+            storage: self.storage.clone(),
+            paths: PathsInfo::default(),
+            config: self.turn_config(),
+            log_level: 0,
+        };
+        self.command_plugins = self
+            .admitted
+            .iter()
+            .cloned()
+            .fold(CommandPlugins::new(init), |plugins, (name, admitted)| {
+                plugins.with(name, admitted)
+            });
         self
     }
 
@@ -799,13 +832,13 @@ async fn command_tool_runs_its_plugin_with_the_call_on_stdin() {
     let runner = plugin_answering(json!({"type": "success", "content": "Created T-0abc123"}));
     let fixture = Fixture::new(
         "ticket_create",
-        json!({"source": "command.ticket.create", "options": {"mode": "strict"}}),
+        json!({"source": "plugin.command.ticket.create", "options": {"mode": "strict"}}),
         schema([
             ("title", param("string"), true),
             ("kind", json!({"type": "string", "default": "bug"}), false),
         ]),
     )
-    .with_plugin("ticket", json!({"dir": "packages/foo/tickets"}))
+    .with_plugin("ticket", &json!({"dir": "packages/foo/tickets"}))
     .with_runner(runner.clone())
     .with_invocation(InvocationContext {
         workspace_id: "ws-abc".to_owned(),
@@ -832,14 +865,22 @@ async fn command_tool_runs_its_plugin_with_the_call_on_stdin() {
     assert_eq!(spec.dir, Utf8PathBuf::from("/tmp"));
     assert!(spec.own_process_group, "a Ctrl-C must not reach the plugin");
 
+    let mut init = init_sent(&runner);
+    // The whole configuration the turn resolved, as `jp <plugin>` sends it:
+    // compared against that configuration rather than written out, since it
+    // runs to every default.
     assert_eq!(
-        init_sent(&runner),
+        init.as_object_mut().unwrap().remove("config"),
+        Some(serde_json::to_value(fixture.turn_config().to_partial()).unwrap())
+    );
+    assert_eq!(
+        init,
         json!({
             "type": "init",
             "version": PROTOCOL_VERSION,
             "workspace": {"root": "/tmp", "storage": "/tmp/.jp", "id": "ws-abc"},
             "paths": {},
-            "config": {"user": {"name": "tester"}},
+            // Read from the turn's `plugins.command.ticket.options`.
             "options": {"dir": "packages/foo/tickets"},
             "args": [],
             "log_level": 0,
@@ -865,10 +906,10 @@ async fn command_tool_formatting_its_arguments_says_so_in_init() {
     let runner = plugin_answering(json!({"type": "success", "content": "File bug: Fix it"}));
     let fixture = Fixture::new(
         "ticket_create",
-        json!({"source": "command.ticket.create", "style": {"parameters": "tool"}}),
+        json!({"source": "plugin.command.ticket.create", "style": {"parameters": "tool"}}),
         schema([("title", param("string"), true)]),
     )
-    .with_plugin("ticket", json!({"dir": "packages/foo/tickets"}))
+    .with_plugin("ticket", &json!({"dir": "packages/foo/tickets"}))
     .with_runner(runner.clone());
 
     let mut execution = fixture.execution("call-1", json!({"title": "Fix it"}));
@@ -889,10 +930,10 @@ async fn command_tool_run_says_so_in_init() {
     let runner = plugin_answering(json!({"type": "success", "content": "ok"}));
     let fixture = Fixture::new(
         "ticket_create",
-        json!({"source": "command.ticket.create"}),
+        json!({"source": "plugin.command.ticket.create"}),
         schema([]),
     )
-    .with_plugin("ticket", json!({}))
+    .with_plugin("ticket", &json!({}))
     .with_runner(runner.clone());
 
     execute(&fixture.execution("call-1", json!({})), &Answers::new())
@@ -930,9 +971,13 @@ async fn local_tool_formatting_its_arguments_runs_its_command_for_that_action() 
 #[tokio::test]
 async fn command_tool_without_a_tool_name_uses_the_configured_key() {
     let runner = plugin_answering(json!({"type": "success", "content": "ok"}));
-    let fixture = Fixture::new("labels", json!({"source": "command.ticket"}), schema([]))
-        .with_plugin("ticket", json!({}))
-        .with_runner(runner.clone());
+    let fixture = Fixture::new(
+        "labels",
+        json!({"source": "plugin.command.ticket"}),
+        schema([]),
+    )
+    .with_plugin("ticket", &json!({}))
+    .with_runner(runner.clone());
 
     execute(&fixture.execution("call-1", json!({})), &Answers::new())
         .await
@@ -948,10 +993,10 @@ async fn command_tool_receives_the_compiled_access_policy() {
     let runner = plugin_answering(json!({"type": "success", "content": "ok"}));
     let fixture = Fixture::new(
         "ticket_create",
-        json!({"source": "command.ticket.create"}),
+        json!({"source": "plugin.command.ticket.create"}),
         schema([]),
     )
-    .with_plugin("ticket", json!({}))
+    .with_plugin("ticket", &json!({}))
     .with_runner(runner.clone())
     .with_access(AccessPolicy {
         env: vec![EnvRule {
@@ -976,10 +1021,10 @@ async fn command_tool_with_invalid_arguments_never_reaches_the_plugin() {
     let runner = plugin_answering(json!({"type": "success", "content": "ok"}));
     let fixture = Fixture::new(
         "ticket_create",
-        json!({"source": "command.ticket.create"}),
+        json!({"source": "plugin.command.ticket.create"}),
         schema([("title", param("string"), true)]),
     )
-    .with_plugin("ticket", json!({}))
+    .with_plugin("ticket", &json!({}))
     .with_runner(runner.clone());
 
     let outcome = execute(&fixture.execution("call-1", json!({})), &Answers::new())
@@ -1002,10 +1047,10 @@ async fn command_tool_with_invalid_arguments_never_reaches_the_plugin() {
 async fn command_tool_question_ends_the_attempt() {
     let fixture = Fixture::new(
         "ticket_create",
-        json!({"source": "command.ticket.create"}),
+        json!({"source": "plugin.command.ticket.create"}),
         schema([]),
     )
-    .with_plugin("ticket", json!({}))
+    .with_plugin("ticket", &json!({}))
     .with_runner(plugin_answering(json!({
         "type": "needs_input",
         "question": {"id": "confirm", "text": "File it?", "answer_type": {"type": "boolean"}}
@@ -1026,10 +1071,10 @@ async fn command_tool_question_ends_the_attempt() {
 async fn command_tool_error_outcome_keeps_its_details() {
     let fixture = Fixture::new(
         "ticket_create",
-        json!({"source": "command.ticket.create"}),
+        json!({"source": "plugin.command.ticket.create"}),
         schema([]),
     )
-    .with_plugin("ticket", json!({}))
+    .with_plugin("ticket", &json!({}))
     .with_runner(plugin_answering(json!({
         "type": "error", "message": "busy", "trace": ["lock held"], "transient": true
     })));
@@ -1056,10 +1101,10 @@ async fn command_tool_error_outcome_keeps_its_details() {
 async fn command_tool_outcome_in_the_wrong_shape_is_malformed_output() {
     let fixture = Fixture::new(
         "ticket_create",
-        json!({"source": "command.ticket.create"}),
+        json!({"source": "plugin.command.ticket.create"}),
         schema([]),
     )
-    .with_plugin("ticket", json!({}))
+    .with_plugin("ticket", &json!({}))
     .with_runner(plugin_answering(json!({"content": "no type tag"})));
 
     let error = execute(&fixture.execution("call-1", json!({})), &Answers::new())
@@ -1076,10 +1121,10 @@ async fn command_tool_outcome_in_the_wrong_shape_is_malformed_output() {
 async fn command_tool_failing_exit_reports_the_plugin_reason() {
     let fixture = Fixture::new(
         "ticket_create",
-        json!({"source": "command.ticket.create"}),
+        json!({"source": "plugin.command.ticket.create"}),
         schema([]),
     )
-    .with_plugin("ticket", json!({}))
+    .with_plugin("ticket", &json!({}))
     .with_runner(plugin_printing(&[
         json!({"type": "ready", "protocol": 10}),
         json!({"type": "exit", "code": 1, "reason": "No ticket T-0abc123."}),
@@ -1111,10 +1156,10 @@ async fn command_tool_that_crashes_after_answering_fails() {
     }));
     let fixture = Fixture::new(
         "ticket_create",
-        json!({"source": "command.ticket.create"}),
+        json!({"source": "plugin.command.ticket.create"}),
         schema([]),
     )
-    .with_plugin("ticket", json!({}))
+    .with_plugin("ticket", &json!({}))
     .with_runner(runner);
 
     let error = execute(&fixture.execution("call-1", json!({})), &Answers::new())
@@ -1132,10 +1177,10 @@ async fn command_tool_that_crashes_after_answering_fails() {
 async fn command_tool_whose_binary_cannot_start_fails() {
     let fixture = Fixture::new(
         "ticket_create",
-        json!({"source": "command.ticket.create"}),
+        json!({"source": "plugin.command.ticket.create"}),
         schema([]),
     )
-    .with_plugin("ticket", json!({}));
+    .with_plugin("ticket", &json!({}));
     let binary = fixture.binary("ticket");
     let fixture = fixture.with_runner(Arc::new(
         MockProcessRunner::builder().expect_any().fails_to_spawn(),
@@ -1158,7 +1203,7 @@ async fn command_tool_of_a_plugin_not_admitted_never_runs() {
     let runner = plugin_answering(json!({"type": "success", "content": "ok"}));
     let fixture = Fixture::new(
         "ticket_create",
-        json!({"source": "command.ticket.create"}),
+        json!({"source": "plugin.command.ticket.create"}),
         schema([]),
     )
     .with_runner(runner.clone());
@@ -1182,10 +1227,10 @@ async fn command_tool_whose_binary_changed_after_admission_never_runs() {
     let runner = plugin_answering(json!({"type": "success", "content": "ok"}));
     let fixture = Fixture::new(
         "ticket_create",
-        json!({"source": "command.ticket.create"}),
+        json!({"source": "plugin.command.ticket.create"}),
         schema([]),
     )
-    .with_plugin("ticket", json!({}))
+    .with_plugin("ticket", &json!({}))
     .with_runner(runner.clone());
     fs::write(fixture.binary("ticket"), "v2").unwrap();
 
@@ -1209,11 +1254,11 @@ async fn command_tool_without_workspace_storage_never_runs() {
     let runner = plugin_answering(json!({"type": "success", "content": "ok"}));
     let fixture = Fixture::new(
         "ticket_create",
-        json!({"source": "command.ticket.create"}),
+        json!({"source": "plugin.command.ticket.create"}),
         schema([]),
     )
     .without_storage()
-    .with_plugin("ticket", json!({}))
+    .with_plugin("ticket", &json!({}))
     .with_runner(runner.clone());
 
     let error = execute(&fixture.execution("call-1", json!({})), &Answers::new())
@@ -1236,10 +1281,10 @@ async fn cancelling_a_command_tool_reaches_the_runner() {
     let runner = plugin_answering(json!({"type": "success", "content": "ok"}));
     let fixture = Fixture::new(
         "ticket_create",
-        json!({"source": "command.ticket.create"}),
+        json!({"source": "plugin.command.ticket.create"}),
         schema([]),
     )
-    .with_plugin("ticket", json!({}))
+    .with_plugin("ticket", &json!({}))
     .with_runner(runner.clone());
 
     let execution = fixture.execution("call-1", json!({}));

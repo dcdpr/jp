@@ -7,7 +7,7 @@ use jp_config::{
     AppConfig, PartialAppConfig,
     assignment::{AssignKeyValue as _, KvAssignment},
 };
-use jp_plugin::registry::ApprovedPlugin;
+use jp_plugin::{message::PathsInfo, registry::ApprovedPlugin};
 use jp_printer::OutputFormat;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
@@ -28,17 +28,28 @@ fn turn_config(assignments: &[&str]) -> Arc<AppConfig> {
     Arc::new(jp_config::util::build(partial).unwrap())
 }
 
+/// What every plugin call of a turn under `config` is told.
+fn plugin_init(config: Arc<AppConfig>) -> PluginInit {
+    PluginInit {
+        workspace_id: "ws-abc".to_owned(),
+        storage: Some("/ws/.jp".into()),
+        paths: PathsInfo::default(),
+        config,
+        log_level: 0,
+    }
+}
+
 // --- Which plugins a turn needs ---
 
 /// A turn's tools: two on `ticket`, one disabled on `metrics`, one locked off
 /// on `secrets`, and a local tool.
 fn turn_tools() -> Arc<AppConfig> {
     turn_config(&[
-        "conversation.tools.ticket_create.source=command.ticket.create",
-        "conversation.tools.ticket_show.source=command.ticket.show",
-        "conversation.tools.metrics_dump.source=command.metrics",
+        "conversation.tools.ticket_create.source=plugin.command.ticket.create",
+        "conversation.tools.ticket_show.source=plugin.command.ticket.show",
+        "conversation.tools.metrics_dump.source=plugin.command.metrics",
         "conversation.tools.metrics_dump.enable=false",
-        "conversation.tools.secrets_read.source=command.secrets",
+        "conversation.tools.secrets_read.source=plugin.command.secrets",
         "conversation.tools.secrets_read.enable.state=false",
         "conversation.tools.secrets_read.enable.allow_toggle=never",
         "conversation.tools.word_count.source=local",
@@ -164,28 +175,6 @@ fn a_plugin_allowed_by_configuration_is_admitted() {
     assert_eq!(plugins.admitted["ticket"].binary, machine.path("ticket"));
 }
 
-/// The regression the ticket describes: a nested `.jp.toml`, a conversation, or
-/// `--cfg` can set the plugin's options for a query, and the plugin serving the
-/// query's tools has to see what the query sees, not what the workspace root
-/// resolves to.
-#[test]
-fn an_admitted_plugin_carries_the_options_the_turn_resolved() {
-    let machine = Machine::new().with_plugin("ticket", "v1");
-
-    let plugins = machine.admit(
-        &["ticket"],
-        &turn_config(&[
-            "plugins.command.ticket.run=allow",
-            "plugins.command.ticket.options.dir=packages/foo/tickets",
-        ]),
-    );
-
-    assert_eq!(
-        Value::Object(plugins.admitted["ticket"].options.clone()),
-        json!({"dir": "packages/foo/tickets"})
-    );
-}
-
 /// What admission recorded is what the tool service checks before each call, so
 /// an admitted binary that has not changed runs.
 #[test]
@@ -196,7 +185,7 @@ fn an_admitted_plugin_passes_the_check_before_each_call() {
         &turn_config(&["plugins.command.ticket.run=allow"]),
     );
 
-    let command_plugins = plugins.into_command_plugins(PluginInit::default());
+    let command_plugins = plugins.into_command_plugins(plugin_init(turn_config(&[])));
 
     assert_eq!(
         command_plugins.verify("ticket").map(|p| p.binary.clone()),
@@ -254,7 +243,7 @@ fn the_turn_pins_the_approved_contents() {
     assert_eq!(plugins.admitted["ticket"].sha256, approved);
 
     fs::write(machine.path("ticket"), "v2").unwrap();
-    let command_plugins = plugins.into_command_plugins(PluginInit::default());
+    let command_plugins = plugins.into_command_plugins(plugin_init(turn_config(&[])));
 
     assert_eq!(
         command_plugins.verify("ticket").map(|p| p.binary.clone()),
@@ -304,7 +293,7 @@ fn a_refused_plugin_is_not_handed_to_the_tool_service() {
 
     let command_plugins = machine
         .admit(&["ticket"], &turn_config(&[]))
-        .into_command_plugins(PluginInit::default());
+        .into_command_plugins(plugin_init(turn_config(&[])));
 
     assert_eq!(
         command_plugins.verify("ticket").map(|p| p.binary.clone()),
@@ -318,16 +307,33 @@ fn refused_ticket() -> IndexMap<String, String> {
     IndexMap::from([("ticket".to_owned(), "it is not approved".to_owned())])
 }
 
+/// The tool service is handed only admitted plugins, so a tool on any other
+/// plugin is left out of the turn: refused, or never needed because the tool is
+/// not offered.
 #[test]
-fn a_refused_plugin_takes_its_tools_out_of_the_turn() {
+fn a_tool_on_a_plugin_not_admitted_is_left_out_of_the_turn() {
     let config = turn_tools();
+    let names = |plugins: &CommandPlugins| {
+        let mut names: Vec<&str> =
+            without_unadmitted_plugins(config.conversation.tools.iter(), plugins)
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect();
+        names.sort_unstable();
+        names
+    };
+    let ticket =
+        CommandPlugins::new(plugin_init(turn_config(&[]))).with("ticket", AdmittedPlugin {
+            binary: "/bin/jp-ticket".into(),
+            sha256: "aaa".to_owned(),
+        });
 
-    let usable =
-        without_refused_plugins(config.conversation.tools.iter(), &refused_ticket(), None).unwrap();
-
-    let mut names: Vec<&str> = usable.iter().map(|(name, _)| *name).collect();
-    names.sort_unstable();
-    assert_eq!(names, ["metrics_dump", "secrets_read", "word_count"]);
+    assert_eq!(names(&CommandPlugins::default()), ["word_count"]);
+    assert_eq!(names(&ticket), [
+        "ticket_create",
+        "ticket_show",
+        "word_count"
+    ]);
 }
 
 /// Naming a tool with `--tool` asks for it; a turn without it is not what was
@@ -335,18 +341,25 @@ fn a_refused_plugin_takes_its_tools_out_of_the_turn() {
 #[test]
 fn forcing_a_tool_of_a_refused_plugin_fails_the_turn() {
     let config = turn_tools();
+    let tools = &config.conversation.tools;
 
-    let error = without_refused_plugins(
-        config.conversation.tools.iter(),
-        &refused_ticket(),
-        Some("ticket_show"),
-    )
-    .unwrap_err();
+    let error = refuse_forced_tool(tools, &refused_ticket(), Some("ticket_show")).unwrap_err();
 
     assert_eq!(
         error.to_string(),
         "Command plugin `ticket` cannot be run from here: it is not approved"
     );
+}
+
+/// Only the forced tool's own plugin matters: a refused plugin the forced tool
+/// does not run through leaves the turn to start without it.
+#[test]
+fn forcing_a_tool_of_another_source_starts_the_turn() {
+    let config = turn_tools();
+    let tools = &config.conversation.tools;
+
+    assert!(refuse_forced_tool(tools, &refused_ticket(), Some("word_count")).is_ok());
+    assert!(refuse_forced_tool(tools, &refused_ticket(), None).is_ok());
 }
 
 #[test]

@@ -303,8 +303,8 @@ pub(crate) struct Named<'a> {
     pub official: Option<&'a RegistryPlugin>,
 }
 
-/// Find the plugin named `name`, the way a tool's `command.<name>` source names
-/// it.
+/// Find the plugin named `name`, the way a tool's `plugin.command.<name>`
+/// source names it.
 ///
 /// A name, not a command path: a tool reaches a plugin by its identity, which
 /// keys its configuration and its approval, whatever command it claims.

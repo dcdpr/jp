@@ -273,7 +273,7 @@ fn init_message(
 ) -> Result<(HostToPlugin, Value), cmd::Error> {
     let config_json = config_value(config)?;
 
-    let options = plugin_options(&config.plugins, name);
+    let options = config.plugins.command_options(name);
 
     let storage = paths.storage.ok_or("workspace has no storage configured")?;
 
@@ -294,24 +294,6 @@ fn init_message(
     }));
 
     Ok((init, config_json))
-}
-
-/// The `options` a plugin is configured with under `plugins.command.<name>`,
-/// empty when it has none.
-pub(super) fn plugin_options(
-    plugins: &PluginsConfig,
-    name: &str,
-) -> serde_json::Map<String, Value> {
-    plugins
-        .command
-        .get(name)
-        .map(|c| {
-            c.options
-                .iter()
-                .map(|(k, v)| (k.clone(), v.0.clone()))
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 /// The configuration as a plugin reads it, in `init` and from `read_config`.

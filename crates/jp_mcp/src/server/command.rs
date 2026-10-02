@@ -1,14 +1,15 @@
 //! Tools served by command plugins.
 //!
-//! A tool whose source is `command.<plugin>` is answered by a plugin binary,
-//! run once per attempt the way a local tool's command is: its stdin carries
-//! one `init` message and is then closed, and its stdout carries back one
-//! `tool_outcome` and an `exit`.
+//! A tool whose source is `plugin.command.<plugin>` is answered by a plugin
+//! binary, run once per attempt the way a local tool's command is: its stdin
+//! carries one `init` message and is then closed, and its stdout carries back
+//! one `tool_outcome` and an `exit`.
 //!
 //! Which binaries may run is decided by the host before the turn starts, and
-//! handed in as [`CommandPlugins`]: each admitted plugin's binary, the hash of
-//! the contents that were admitted, and the plugin's options as the turn
-//! resolved them.
+//! handed in as [`CommandPlugins`]: each admitted plugin's binary and the hash
+//! of the contents that were admitted, alongside the turn's configuration.
+//! A call's `init` carries that configuration and the plugin's options read
+//! from it, so the plugin sees what the turn resolved.
 //! Nothing here decides trust; a plugin absent from [`CommandPlugins`] does not
 //! run.
 //!
@@ -18,7 +19,7 @@ use std::{collections::HashMap, fs, io, sync::Arc};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use indexmap::IndexMap;
-use jp_config::types::json_value::JsonValue;
+use jp_config::{AppConfig, types::json_value::JsonValue};
 use jp_plugin::{
     PROTOCOL_VERSION,
     message::{
@@ -36,7 +37,7 @@ use super::{Answers, StderrSink};
 
 /// The `init` fields every plugin a turn runs is told, whichever tool it
 /// answers.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PluginInit {
     /// The workspace's globally unique ID.
     pub workspace_id: String,
@@ -50,8 +51,11 @@ pub struct PluginInit {
     /// Well-known JP directories.
     pub paths: PathsInfo,
 
-    /// The turn's resolved configuration, as the `init` message carries it.
-    pub config: Value,
+    /// The turn's resolved configuration.
+    ///
+    /// Serialized into `init.config` for each call, and the source of the
+    /// plugin's `init.options`.
+    pub config: Arc<AppConfig>,
 
     /// The host's log verbosity, so plugin stderr matches `-v`.
     pub log_level: u8,
@@ -65,15 +69,17 @@ pub struct AdmittedPlugin {
 
     /// The SHA-256 of the contents admission decided on, from [`sha256_file`].
     pub sha256: String,
-
-    /// `plugins.command.<plugin>.options` as the turn resolved them.
-    pub options: Map<String, Value>,
 }
 
 /// The command plugins a turn may run, and what each call's `init` carries.
+///
+/// The default admits nothing, for a turn whose tools run through no plugin.
 #[derive(Debug, Clone, Default)]
 pub struct CommandPlugins {
-    init: PluginInit,
+    /// `None` only for the default, which no call reaches
+    /// [`Self::init_message`] through: with no plugin admitted,
+    /// [`Self::verify`] refuses first.
+    init: Option<PluginInit>,
     admitted: HashMap<String, AdmittedPlugin>,
 }
 
@@ -82,9 +88,15 @@ impl CommandPlugins {
     #[must_use]
     pub fn new(init: PluginInit) -> Self {
         Self {
-            init,
+            init: Some(init),
             admitted: HashMap::new(),
         }
+    }
+
+    /// Whether `plugin` was admitted for this turn.
+    #[must_use]
+    pub fn is_admitted(&self, plugin: &str) -> bool {
+        self.admitted.contains_key(plugin)
     }
 
     /// Let the plugin `name` run this turn.
@@ -120,33 +132,42 @@ impl CommandPlugins {
         Ok(admitted)
     }
 
-    /// The `init` that starts one attempt of `call` on `plugin`.
+    /// The `init` that starts one attempt of `call`.
     pub(super) fn init_message(
         &self,
-        plugin: &AdmittedPlugin,
         call: &CommandToolCall<'_>,
     ) -> Result<InitMessage, ToolError> {
-        let storage =
-            self.init
-                .storage
-                .clone()
-                .ok_or_else(|| ToolError::CommandPluginUnavailable {
-                    plugin: call.plugin.to_owned(),
-                    reason: "the workspace has no storage configured".to_owned(),
-                })?;
+        let unavailable = |reason: &str| ToolError::CommandPluginUnavailable {
+            plugin: call.plugin.to_owned(),
+            reason: reason.to_owned(),
+        };
+        let init = self
+            .init
+            .as_ref()
+            .ok_or_else(|| unavailable("no plugin was admitted for this turn"))?;
+        let storage = init
+            .storage
+            .clone()
+            .ok_or_else(|| unavailable("the workspace has no storage configured"))?;
+        let config = serde_json::to_value(init.config.to_partial()).map_err(|error| {
+            ToolError::CommandPluginFailed {
+                plugin: call.plugin.to_owned(),
+                message: format!("failed to serialize the configuration: {error}"),
+            }
+        })?;
 
         Ok(InitMessage {
             version: PROTOCOL_VERSION,
             workspace: WorkspaceInfo {
                 root: call.root.to_owned(),
                 storage,
-                id: self.init.workspace_id.clone(),
+                id: init.workspace_id.clone(),
             },
-            paths: self.init.paths.clone(),
-            config: self.init.config.clone(),
-            options: plugin.options.clone(),
+            paths: init.paths.clone(),
+            config,
+            options: init.config.plugins.command_options(call.plugin),
             args: vec![],
-            log_level: self.init.log_level,
+            log_level: init.log_level,
             // A tool's output goes to the model, which reads plain text.
             output_format: OutputFormat::Text,
             tool: Some(tool_call(call)?),
