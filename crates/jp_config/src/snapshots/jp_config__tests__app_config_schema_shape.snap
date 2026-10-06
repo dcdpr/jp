@@ -1365,8 +1365,9 @@ providers: ProviderConfig
         *: string
       api_key_env?: ApiKeyEnv
         |: string
+        |: [string]
         |:
-          *: string
+          *: string | [string]
       auth?: [string]
       base_url?: string
       beta_headers?: MergeableVec
@@ -1381,22 +1382,25 @@ providers: ProviderConfig
     cerebras: CerebrasConfig
       api_key_env?: ApiKeyEnv
         |: string
+        |: [string]
         |:
-          *: string
+          *: string | [string]
       auth?: [string]
       base_url?: string
     deepseek: DeepseekConfig
       api_key_env?: ApiKeyEnv
         |: string
+        |: [string]
         |:
-          *: string
+          *: string | [string]
       auth?: [string]
       base_url?: string
     google: GoogleConfig
       api_key_env?: ApiKeyEnv
         |: string
+        |: [string]
         |:
-          *: string
+          *: string | [string]
       auth?: [string]
       base_url?: string
     llamacpp: LlamacppConfig
@@ -1406,8 +1410,9 @@ providers: ProviderConfig
     openai: OpenaiConfig
       api_key_env?: ApiKeyEnv
         |: string
+        |: [string]
         |:
-          *: string
+          *: string | [string]
       auth?: [string]
       base_url?: string
       base_url_env?: string
@@ -1416,8 +1421,9 @@ providers: ProviderConfig
     openrouter: OpenrouterConfig
       api_key_env?: ApiKeyEnv
         |: string
+        |: [string]
         |:
-          *: string
+          *: string | [string]
       app_name?: string
       app_referrer: string | null
       auth?: [string]
@@ -1425,8 +1431,9 @@ providers: ProviderConfig
     vllm: VllmConfig
       api_key_env?: ApiKeyEnv
         |: string
+        |: [string]
         |:
-          *: string
+          *: string | [string]
       auth?: [string]
       base_url?: string
   mcp: MergeableMap_McpProviderConfig

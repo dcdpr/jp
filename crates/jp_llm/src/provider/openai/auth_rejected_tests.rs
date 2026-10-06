@@ -88,8 +88,8 @@ async fn refused_twice(model: ModelDetails) -> (Vec<String>, StreamError) {
         AuthEntry::ApiKey(Some("personal".to_owned())),
     ];
     config.api_key_env = ApiKeyEnv::Many(BTreeMap::from([
-        ("work".to_owned(), WORK_KEY_ENV.to_owned()),
-        ("personal".to_owned(), PERSONAL_KEY_ENV.to_owned()),
+        ("work".to_owned(), WORK_KEY_ENV.into()),
+        ("personal".to_owned(), PERSONAL_KEY_ENV.into()),
     ]));
 
     let provider = Openai::new(&config).unwrap();

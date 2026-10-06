@@ -911,9 +911,22 @@ fn read_api_keys() -> Result<Vec<(String, String, String)>, crate::Error> {
             match env {
                 // Named for the chain entry that selects it.
                 ApiKeyEnv::One(variable) => vec![(target, "api_key".to_owned(), variable)],
-                ApiKeyEnv::Many(variables) => variables
+
+                // One key read from several places: a row per variable, in
+                // the order they are tried, so the table shows which is set.
+                ApiKeyEnv::FirstOf(variables) => variables
                     .into_iter()
-                    .map(|(name, variable)| (target.clone(), name, variable))
+                    .map(|variable| (target.clone(), "api_key".to_owned(), variable))
+                    .collect(),
+                ApiKeyEnv::Many(keys) => keys
+                    .into_iter()
+                    .flat_map(|(name, variables)| {
+                        variables
+                            .as_slice()
+                            .iter()
+                            .map(|variable| (target.clone(), name.clone(), variable.clone()))
+                            .collect::<Vec<_>>()
+                    })
                     .collect(),
             }
         })
