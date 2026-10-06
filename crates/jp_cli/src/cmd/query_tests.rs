@@ -2460,10 +2460,61 @@ fn edit_message_rejects_a_forced_editor_when_non_interactive() {
         )
         .unwrap_err();
 
-    assert_matches!(error, Error::NonInteractiveEditor { .. });
+    let Error::NonInteractiveEditor { suggestion } = error else {
+        panic!("expected a non-interactive editor error, got: {error:?}");
+    };
+    assert_eq!(
+        suggestion,
+        "Run this from a terminal, or pass --no-edit instead to send the text as-is."
+    );
     assert_eq!(
         request.content, " >  quoted reply",
         "the seed stays put rather than becoming the turn"
+    );
+}
+
+#[test]
+fn edit_message_forced_editor_without_text_suggests_a_placeholder() {
+    // A bare `jp -e`, or `--quote` on a conversation with no assistant message
+    // to quote: the editor is forced and the request is empty, so `--no-edit`
+    // would synthesize rather than send anything the caller wrote. Advice to
+    // send "the text as-is" would name text that does not exist.
+    //
+    // Passing the query as an argument is not the escape here: `--edit` and
+    // `--quote` force the editor regardless of a positional query, so the run
+    // would fail the same way again.
+    let mut config = AppConfig::new_test();
+    config.editor.cmd = Some(CommandConfigOrString::String(
+        "jp-editor-that-does-not-exist".to_owned(),
+    ));
+
+    let query = Query {
+        edit: true,
+        ..Default::default()
+    };
+
+    let mut request = ChatRequest::default();
+    let stream = ConversationStream::new_test();
+    let mut pending_trim = PendingStreamTrim::default();
+    let error = query
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            false,
+            false,
+            &config,
+            Utf8Path::new("/tmp"),
+            &Printer::sink(),
+        )
+        .unwrap_err();
+
+    let Error::NonInteractiveEditor { suggestion } = error else {
+        panic!("expected a non-interactive editor error, got: {error:?}");
+    };
+    assert_eq!(
+        suggestion,
+        "Run this from a terminal, or use --no-edit to send a placeholder message."
     );
 }
 

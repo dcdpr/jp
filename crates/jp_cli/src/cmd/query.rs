@@ -1119,8 +1119,15 @@ impl Query {
             // the lines.
             Some(_) if self.force_edit() => {
                 return Err(Error::NonInteractiveEditor {
-                    suggestion: "Run this from a terminal, or pass --no-edit instead to send the \
-                                 text as-is.",
+                    // Without text there is nothing to "send as-is": `--no-edit`
+                    // on an empty request replays the trailing request or sends
+                    // `continue`, the same fallback the empty arm below names.
+                    suggestion: if request.is_empty() {
+                        "Run this from a terminal, or use --no-edit to send a placeholder message."
+                    } else {
+                        "Run this from a terminal, or pass --no-edit instead to send the text \
+                         as-is."
+                    },
                 });
             }
             backend if !request.is_empty() => {
