@@ -378,7 +378,12 @@ impl Question {
 }
 
 /// The type of answer expected for a given question.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// Serialized with an internal `type` tag, e.g. `{"type": "boolean"}`.
+/// Deserialization also accepts the legacy externally tagged form (`"Boolean"`,
+/// `"Text"`, `{"Select": {"options": [...]}}`), which tools that print the wire
+/// format by hand still emit.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AnswerType {
     /// Boolean yes/no question
@@ -395,6 +400,82 @@ pub enum AnswerType {
     /// Prompter input is not echoed, and the persisted inquiry response is
     /// recorded as redacted rather than carrying the answer.
     Secret,
+}
+
+impl<'de> Deserialize<'de> for AnswerType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+
+        // Only exact legacy shapes take the legacy path. Anything else, valid or
+        // not, goes through the tagged form, so errors describe the current
+        // format.
+        let legacy = match &value {
+            Value::String(name) => matches!(name.as_str(), "Boolean" | "Text"),
+            Value::Object(map) => map.len() == 1 && map.contains_key("Select"),
+            _ => false,
+        };
+
+        let result = if legacy {
+            wire::LegacyAnswerType::deserialize(value).map(Self::from)
+        } else {
+            wire::AnswerType::deserialize(value).map(Self::from)
+        };
+
+        result.map_err(serde::de::Error::custom)
+    }
+}
+
+/// Deserialization mirrors of the public `AnswerType`, one per accepted wire
+/// form.
+mod wire {
+    use serde::Deserialize;
+
+    /// The current internally tagged form.
+    ///
+    /// Named `AnswerType` because serde puts the enum name in its error
+    /// messages, which tool authors read.
+    #[derive(Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    pub(super) enum AnswerType {
+        Boolean,
+        Select { options: Vec<String> },
+        Text,
+        Secret,
+    }
+
+    /// The legacy externally tagged form.
+    ///
+    /// Has no `Secret` variant: no tool ever emitted one in this form.
+    #[derive(Deserialize)]
+    pub(super) enum LegacyAnswerType {
+        Boolean,
+        Select { options: Vec<String> },
+        Text,
+    }
+}
+
+impl From<wire::AnswerType> for AnswerType {
+    fn from(value: wire::AnswerType) -> Self {
+        match value {
+            wire::AnswerType::Boolean => Self::Boolean,
+            wire::AnswerType::Select { options } => Self::Select { options },
+            wire::AnswerType::Text => Self::Text,
+            wire::AnswerType::Secret => Self::Secret,
+        }
+    }
+}
+
+impl From<wire::LegacyAnswerType> for AnswerType {
+    fn from(value: wire::LegacyAnswerType) -> Self {
+        match value {
+            wire::LegacyAnswerType::Boolean => Self::Boolean,
+            wire::LegacyAnswerType::Select { options } => Self::Select { options },
+            wire::LegacyAnswerType::Text => Self::Text,
+        }
+    }
 }
 
 /// Contextual information available to a tool.
