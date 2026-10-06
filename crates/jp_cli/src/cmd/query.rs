@@ -574,6 +574,7 @@ impl Query {
                 &piped,
                 query.as_deref(),
                 stream,
+                ctx.term.interactive,
                 &cfg,
                 &conversation_path,
                 &ctx.printer,
@@ -899,6 +900,7 @@ impl Query {
         piped: &str,
         query: Option<&str>,
         stream: &ConversationStream,
+        interactive: bool,
         config: &AppConfig,
         conversation_root: &Utf8Path,
         printer: &Printer,
@@ -955,6 +957,7 @@ impl Query {
             view,
             &mut pending_trim,
             !piped.is_empty(),
+            interactive,
             config,
             conversation_root,
             printer,
@@ -1036,12 +1039,16 @@ impl Query {
     }
 
     // Open the editor for the query, if requested.
+    //
+    // `interactive` says whether a user is present to close the editor; when
+    // they are not, the editor is never opened.
     fn edit_message(
         &self,
         request: &mut ChatRequest,
         stream: &ConversationStream,
         pending_trim: &mut PendingStreamTrim,
         piped: bool,
+        interactive: bool,
         config: &AppConfig,
         conversation_root: &Utf8Path,
         printer: &Printer,
@@ -1098,12 +1105,44 @@ impl Query {
             return Ok((source, PartialAppConfig::empty()));
         }
 
+        // The editor is a child process that paints the whole screen and
+        // exits when a person saves and closes it. With nobody there it blocks
+        // forever on a buffer no one will close, so a non-interactive
+        // invocation is treated like having no editor configured: send whatever
+        // the request already holds, and fail when it holds nothing. The one
+        // exception is a caller that asked for the editor by name, below.
         let backend = match editor::build_editor_backend(&config.editor, printer) {
-            None if !request.is_empty() => {
+            Some(backend) if interactive => backend,
+            // `--edit` and `--quote` ask for the editor explicitly, so the
+            // seeded text was never meant to be sent unread: with `--quote` it
+            // is the assistant's own last message, waiting for a reply between
+            // the lines.
+            Some(_) if self.force_edit() => {
+                return Err(Error::NonInteractiveEditor {
+                    // Without text there is nothing to "send as-is": `--no-edit`
+                    // on an empty request replays the trailing request or sends
+                    // `continue`, the same fallback the empty arm below names.
+                    suggestion: if request.is_empty() {
+                        "Run this from a terminal, or use --no-edit to send a placeholder message."
+                    } else {
+                        "Run this from a terminal, or pass --no-edit instead to send the text \
+                         as-is."
+                    },
+                });
+            }
+            backend if !request.is_empty() => {
+                if backend.is_some() {
+                    debug!("Not opening the editor: the invocation is non-interactive.");
+                }
                 return Ok((source, PartialAppConfig::empty()));
             }
             None => return Err(Error::MissingEditor),
-            Some(backend) => backend,
+            Some(_) => {
+                return Err(Error::NonInteractiveEditor {
+                    suggestion: "Pass the query as an argument or on stdin, or use --no-edit to \
+                                 send a placeholder message.",
+                });
+            }
         };
 
         let (content, editor_provided_config) = editor::edit_query(

@@ -538,6 +538,14 @@ impl From<crate::error::Error> for Error {
             ]
             .into(),
             MissingEditor => [("message", "Missing editor".to_owned())].into(),
+            NonInteractiveEditor { suggestion } => [
+                (
+                    "message",
+                    "Cannot open the editor: nobody is present to close it".to_owned(),
+                ),
+                ("suggestion", suggestion.to_owned()),
+            ]
+            .into(),
             Schema(error) => [("message", "Invalid schema".to_owned()), ("error", error)].into(),
             StructuredData(error) => [
                 ("message", "No structured output".to_owned()),
