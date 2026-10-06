@@ -5,7 +5,7 @@
 //! JP never reads Claude Code's credential files.
 
 use std::{
-    fmt, fs, io,
+    env, fmt, fs, io,
     process::{ExitStatus, Stdio},
     str::{self, Utf8Error},
     time::Duration,
@@ -132,11 +132,16 @@ pub enum Error {
     /// Authentication output is not the expected JSON representation.
     #[error("Claude Code returned invalid authentication status")]
     AuthStatus(#[source] serde_json::Error),
-    /// Effective subscription authentication could not be established.
+    /// A login's status check showed it cannot serve subscription requests.
     #[error(
-        "Claude Code must use an active Pro or Max subscription login; run `claude-agent-acp \
-         --cli auth login --claudeai` and remove conflicting API-key/helper or cloud \
-         configuration; disable paid Usage credits to prevent overage"
+        "{login} cannot serve subscription requests: {reason}; {}",
+        remedy(login, reason)
+    )]
+    LoginRejected { login: Login, reason: Rejection },
+    /// Claude Code did not report a Pro or Max plan for a running session.
+    #[error(
+        "Claude Code did not confirm a Pro or Max plan for this session; check the login with `jp \
+         provider llm auth list`"
     )]
     SubscriptionRequired,
     /// Claude Code could not select the requested model.
@@ -161,6 +166,69 @@ pub enum Error {
          conversation"
     )]
     FlowChanged,
+}
+
+/// The Claude Code login a status check inspected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Login {
+    /// A login directory selected by a named subscription.
+    Named(Utf8PathBuf),
+    /// The login Claude Code uses when JP selects none, with the inherited
+    /// `CLAUDE_CONFIG_DIR` if one is set.
+    Inherited(Option<Utf8PathBuf>),
+}
+
+impl fmt::Display for Login {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Named(directory) => write!(f, "the Claude Code login at {directory}"),
+            Self::Inherited(Some(directory)) => write!(
+                f,
+                "Claude Code's inherited login at {directory} (from CLAUDE_CONFIG_DIR)"
+            ),
+            Self::Inherited(None) => f.write_str("Claude Code's inherited login at ~/.claude"),
+        }
+    }
+}
+
+/// Why a login cannot serve subscription requests.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum Rejection {
+    /// No account is signed in.
+    #[error("it is signed out")]
+    SignedOut,
+    /// An API key overrides the account, e.g. from `apiKeyHelper`.
+    #[error("it authenticates with an API key from `{origin}`")]
+    ApiKey { origin: String },
+    /// The account is not a Claude.ai account.
+    #[error("it is not signed in with a Claude account")]
+    NotClaudeAccount,
+    /// The account has no Pro or Max plan.
+    #[error("its account has no Pro or Max plan")]
+    NoPlan,
+    /// Requests go to a cloud provider rather than Anthropic.
+    #[error("it does not send requests to Anthropic directly")]
+    ThirdParty,
+}
+
+fn remedy(login: &Login, reason: &Rejection) -> String {
+    let fix = match (reason, login) {
+        (Rejection::ApiKey { .. }, _) => "remove that API key setting from Claude Code's settings",
+        (Rejection::ThirdParty, _) => "remove the provider setting from Claude Code's settings",
+        (_, Login::Named(_)) => {
+            "sign in again with `jp provider llm auth login anthropic --name <name>`"
+        }
+        (_, Login::Inherited(_)) => "sign in with `claude-agent-acp --cli auth login --claudeai`",
+    };
+    match login {
+        Login::Named(_) => fix.to_owned(),
+        // The inherited login is what an unnamed `subscription` entry selects,
+        // which is easy to reach by accident with `--auth sub`.
+        Login::Inherited(_) => format!(
+            "the `auth` chain named no subscription, so pass `--auth sub:<name>` to use a \
+             registered login (`jp provider llm auth list` shows them), or {fix}"
+        ),
+    }
 }
 
 /// A non-inference operation provided by the installed runtime.
@@ -242,7 +310,11 @@ enum Plan {
 /// Verify the installed adapter/runtime pair and its active subscription login.
 pub(super) async fn inspect(directory: Option<&Utf8Path>) -> Result<(), Error> {
     inspect_versions(directory).await?;
-    validate_auth(&run(Check::Authentication, directory).await?)
+    let login = match directory {
+        Some(directory) => Login::Named(directory.to_owned()),
+        None => Login::Inherited(env::var("CLAUDE_CONFIG_DIR").ok().map(Utf8PathBuf::from)),
+    };
+    validate_auth(&run(Check::Authentication, directory).await?, login).map(drop)
 }
 
 async fn inspect_versions(directory: Option<&Utf8Path>) -> Result<(), Error> {
@@ -282,9 +354,8 @@ pub(super) async fn login(directory: &Utf8Path) -> Result<AccountIdentity, Error
             status,
         });
     }
-    login_status(directory)
-        .await?
-        .ok_or(Error::SubscriptionRequired)
+    let output = run(Check::Authentication, Some(directory)).await?;
+    validate_auth(&output, Login::Named(directory.to_owned()))
 }
 
 pub(super) async fn login_status(directory: &Utf8Path) -> Result<Option<AccountIdentity>, Error> {
@@ -326,27 +397,43 @@ fn qualify_versions(adapter: &[u8], claude: &[u8]) -> Result<(), Error> {
     Ok(())
 }
 
-fn validate_auth(output: &[u8]) -> Result<(), Error> {
-    subscription_identity(output)?
-        .map(drop)
-        .ok_or(Error::SubscriptionRequired)
+fn validate_auth(output: &[u8], login: Login) -> Result<AccountIdentity, Error> {
+    let status: AuthStatus = serde_json::from_slice(output).map_err(Error::AuthStatus)?;
+    status
+        .identity()
+        .map_err(|reason| Error::LoginRejected { login, reason })
 }
 
 fn subscription_identity(output: &[u8]) -> Result<Option<AccountIdentity>, Error> {
     let status: AuthStatus = serde_json::from_slice(output).map_err(Error::AuthStatus)?;
-    if status.logged_in
-        && status.api_key_source.is_none()
-        && matches!(status.auth_method, Some(AuthMethod::ClaudeAccount))
-        && matches!(status.api_provider, Some(ApiProvider::FirstParty))
-        && matches!(status.subscription_type, Some(Plan::Pro | Plan::Max))
-    {
-        return Ok(Some(AccountIdentity {
+    Ok(status.identity().ok())
+}
+
+impl AuthStatus {
+    /// The subscription account this status describes, or the first reason it
+    /// does not describe one.
+    fn identity(self) -> Result<AccountIdentity, Rejection> {
+        if !self.logged_in {
+            return Err(Rejection::SignedOut);
+        }
+        if let Some(origin) = self.api_key_source {
+            return Err(Rejection::ApiKey { origin });
+        }
+        if !matches!(self.auth_method, Some(AuthMethod::ClaudeAccount)) {
+            return Err(Rejection::NotClaudeAccount);
+        }
+        if !matches!(self.subscription_type, Some(Plan::Pro | Plan::Max)) {
+            return Err(Rejection::NoPlan);
+        }
+        if !matches!(self.api_provider, Some(ApiProvider::FirstParty)) {
+            return Err(Rejection::ThirdParty);
+        }
+        Ok(AccountIdentity {
             // The runtime reports an organization ID, not an account UUID.
             account_id: None,
-            email: status.email.filter(|email| !email.is_empty()),
-        }));
+            email: self.email.filter(|email| !email.is_empty()),
+        })
     }
-    Ok(None)
 }
 
 /// Describe the selected model without an API-key-authenticated lookup.

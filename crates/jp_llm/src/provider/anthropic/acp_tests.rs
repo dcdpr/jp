@@ -39,21 +39,84 @@ fn qualified_runtime_pair() {
 
 #[test]
 fn subscription_status_is_fail_closed() {
-    validate_auth(br#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max","email":"ignored"}"#).unwrap();
-    validate_auth(br#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"Claude Pro"}"#).unwrap();
-    assert_matches!(validate_auth(br#"{"loggedIn":true,"authMethod":"api_key","apiProvider":"firstParty","subscriptionType":"max"}"#), Err(Error::SubscriptionRequired));
-    assert_matches!(validate_auth(br#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"bedrock","subscriptionType":"max"}"#), Err(Error::SubscriptionRequired));
+    let login = || Login::Named("/accounts/personal".into());
+    validate_auth(br#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max","email":"ignored"}"#, login()).unwrap();
+    validate_auth(br#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"Claude Pro"}"#, login()).unwrap();
+    for (status, expected) in [
+        (r#"{"loggedIn":false}"#, Rejection::SignedOut),
+        (r#"{"loggedIn":true}"#, Rejection::NotClaudeAccount),
+        (
+            r#"{"loggedIn":true,"authMethod":"api_key","apiProvider":"firstParty","subscriptionType":"max"}"#,
+            Rejection::NotClaudeAccount,
+        ),
+        (
+            r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"unknown"}"#,
+            Rejection::NoPlan,
+        ),
+        (
+            r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"bedrock","subscriptionType":"max"}"#,
+            Rejection::ThirdParty,
+        ),
+        (
+            r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max","apiKeySource":"apiKeyHelper"}"#,
+            Rejection::ApiKey {
+                origin: "apiKeyHelper".into(),
+            },
+        ),
+    ] {
+        assert_matches!(
+            validate_auth(status.as_bytes(), login()),
+            Err(Error::LoginRejected { reason, .. }) if reason == expected,
+            "{status}"
+        );
+    }
     assert_matches!(
-        validate_auth(br#"{"loggedIn":false}"#),
-        Err(Error::SubscriptionRequired)
+        validate_auth(b"not json", login()),
+        Err(Error::AuthStatus(_))
     );
-    assert_matches!(
-        validate_auth(br#"{"loggedIn":true}"#),
-        Err(Error::SubscriptionRequired)
+}
+
+#[test]
+fn rejected_inherited_login_points_at_named_subscriptions() {
+    let error = validate_auth(br#"{"loggedIn":false}"#, Login::Inherited(None)).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Claude Code's inherited login at ~/.claude cannot serve subscription requests: it is \
+         signed out; the `auth` chain named no subscription, so pass `--auth sub:<name>` to use a \
+         registered login (`jp provider llm auth list` shows them), or sign in with \
+         `claude-agent-acp --cli auth login --claudeai`"
     );
-    assert_matches!(validate_auth(br#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"unknown"}"#), Err(Error::SubscriptionRequired));
-    assert_matches!(validate_auth(br#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max","apiKeySource":"apiKeyHelper"}"#), Err(Error::SubscriptionRequired));
-    assert_matches!(validate_auth(b"not json"), Err(Error::AuthStatus(_)));
+}
+
+#[test]
+fn rejected_named_login_says_how_to_sign_in_again() {
+    let error = validate_auth(
+        br#"{"loggedIn":false}"#,
+        Login::Named("/accounts/personal".into()),
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "the Claude Code login at /accounts/personal cannot serve subscription requests: it is \
+         signed out; sign in again with `jp provider llm auth login anthropic --name <name>`"
+    );
+}
+
+#[test]
+fn rejected_api_key_login_names_the_key_source() {
+    let error = validate_auth(
+        br#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max","apiKeySource":"apiKeyHelper"}"#,
+        Login::Inherited(Some("/custom/claude".into())),
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Claude Code's inherited login at /custom/claude (from CLAUDE_CONFIG_DIR) cannot serve \
+         subscription requests: it authenticates with an API key from `apiKeyHelper`; the `auth` \
+         chain named no subscription, so pass `--auth sub:<name>` to use a registered login (`jp \
+         provider llm auth list` shows them), or remove that API key setting from Claude Code's \
+         settings"
+    );
 }
 
 #[test]

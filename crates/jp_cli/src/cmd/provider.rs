@@ -26,7 +26,7 @@ use comfy_table::{Cell, Row};
 use crossterm::style::{Color, Stylize as _};
 use jp_config::{
     FillDefaults as _, PartialAppConfig, PartialConfig as _, fs::user_data_dir,
-    model::id::ProviderId, types::api_key_env::ApiKeyEnv,
+    model::id::ProviderId, providers::llm::AuthEntry, types::api_key_env::ApiKeyEnv,
 };
 use jp_credentials::{
     CATEGORY_LLM, CredentialSecret, CredentialStore, StoreError, StoredCredential,
@@ -108,6 +108,9 @@ struct Login {
 
     /// The name to store the credential under, selected from an `auth` chain as
     /// `subscription:<name>`.
+    ///
+    /// The kind keywords `api_key`, `api`, `subscription`, `sub`, and `profile`
+    /// are reserved.
     #[arg(long, default_value = "default")]
     name: String,
 
@@ -279,6 +282,15 @@ impl Login {
             return Err(Error::from(format!(
                 "invalid credential name {:?}: must be non-empty and contain no whitespace",
                 self.name
+            )));
+        }
+        if let Ok(entry) = self.name.parse::<AuthEntry>()
+            && let Some(kind) = entry.kind()
+        {
+            return Err(Error::from(format!(
+                "credential name {name:?} is reserved: `--auth {name}` selects any `{kind}` \
+                 credential, not one named {name:?}; choose another name",
+                name = self.name
             )));
         }
 

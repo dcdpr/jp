@@ -35,7 +35,7 @@ npm install --global --prefix "$HOME/.local" --include=optional @agentclientprot
 export PATH="$HOME/.local/bin:$PATH"
 claude-agent-acp --version
 claude-agent-acp --cli --version
-jp provider llm auth login anthropic --name sub
+jp provider llm auth login anthropic --name personal
 jp provider llm auth list
 ```
 
@@ -56,7 +56,7 @@ JP derives a separate Claude-native transcript from the current conversation for
 each request; auxiliary queries do not share the main query's native session.
 
 ```sh
-jp query --new --auth sub:sub --model anthropic/claude-opus-5 "Review this change."
+jp query --new --auth sub:personal --model anthropic/claude-opus-5 "Review this change."
 ```
 
 This v0.1 path requires the runtime versions above.
@@ -111,8 +111,8 @@ Fixture tests alone do not establish live cache efficiency.
 Anthropic login defaults to Claude Code authentication through ACP:
 
 ```sh
-jp provider llm auth login anthropic --name sub
-jp provider llm auth login anthropic --name sub2
+jp provider llm auth login anthropic --name personal
+jp provider llm auth login anthropic --name work
 jp provider llm auth list
 ```
 
@@ -122,6 +122,8 @@ runtime.
 The user-data root honors `JP_USER_DATA_DIR`, then `$XDG_DATA_HOME/jp`, then the
 platform default.
 Names may contain ASCII letters, digits, hyphens, and underscores.
+The kind keywords `api_key`, `api`, `subscription`, `sub`, and `profile` are
+reserved: in an `auth` chain they select a kind, not a name.
 
 JP stores the absolute directory and account identity, not Claude Code's tokens.
 Claude Code owns credential storage and refresh.
@@ -131,18 +133,17 @@ No profile-manager dependency is required.
 Select an account with an explicit subscription name:
 
 ```sh
-jp query --new --model anthropic/claude-sonnet-5 --auth sub:sub2 "Reply with exactly OK."
+jp query --new --model anthropic/claude-sonnet-5 --auth sub:work "Reply with exactly OK."
 ```
 
-`--auth sub` is shorthand for an unnamed `subscription`, not the account named
-`sub`.
-Use `--auth sub:sub` to select that named account.
+`--auth sub` is shorthand for an unnamed `subscription`, which uses Claude Code's
+inherited login rather than any registered name.
 
 To register an existing login directory without relocating it, pass its exact
 absolute path when signing in:
 
 ```sh
-jp provider llm auth login anthropic --name sub2 --config-dir "$HOME/.local/share/jp/claude/sub2"
+jp provider llm auth login anthropic --name work --config-dir "$HOME/.local/share/jp/claude/work"
 ```
 
 The selected directory applies to authentication checks, the adapter and its SDK
@@ -159,7 +160,7 @@ Logout clears that account's runtime login before removing its registration, and
 retains the registration if the runtime fails:
 
 ```sh
-jp provider llm auth logout anthropic --name sub2
+jp provider llm auth logout anthropic --name work
 ```
 
 Logout does not delete configuration directories or conversation history.
@@ -183,7 +184,7 @@ reports an exhausted subscription window:
 ```toml
 [providers.llm.anthropic]
 subscription_flow = "acp"
-auth = ["sub:sub", "sub:sub2", "api_key"]
+auth = ["sub:personal", "sub:work", "api_key"]
 ```
 
 JP shares the direct flow's scoped cooldowns and chain advancement.
@@ -212,7 +213,7 @@ JP does not attribute cooldowns to an unnamed inherited login or a
 directory-only manual mapping.
 Without a recorded cooldown, including when the credential store cannot be
 written, an exhausted subscription stops the request instead of switching.
-A single-entry `--auth sub:sub2` replaces the configured chain and therefore
+A single-entry `--auth sub:work` replaces the configured chain and therefore
 disables fallback to other entries for that selection.
 
 ### Prompt caching
