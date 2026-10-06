@@ -33,13 +33,10 @@ impl Show {
             let conversation = ctx.workspace.metadata(&handle)?;
             let events = ctx.workspace.events(&handle)?;
 
+            let config = events.config().map_err(ConversationError::from)?;
+
             let mut attachments = vec![];
-            for attachment in events
-                .config()
-                .map_err(ConversationError::from)?
-                .conversation
-                .attachments
-            {
+            for attachment in &config.conversation.attachments {
                 attachments.push(attachment_detail_item(&attachment.to_url()?));
             }
 
@@ -52,6 +49,7 @@ impl Show {
                 .with_event_count(events.len())
                 .with_turn_count(events.iter_turns().len())
                 .with_title(conversation.title.as_ref())
+                .with_model(config.assistant.model.id.resolved().to_string())
                 .with_last_activated_at(Some(conversation.last_activated_at))
                 .with_pinned_flag(conversation.is_pinned())
                 .with_local_flag(local)

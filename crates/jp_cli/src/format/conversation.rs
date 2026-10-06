@@ -23,6 +23,9 @@ pub struct DetailsFmt {
     /// The conversation title.
     pub title: Option<String>,
 
+    /// The model the conversation is configured to use, as `provider/name`.
+    pub model: Option<String>,
+
     /// The number of events in the conversation.
     pub message_count: usize,
 
@@ -72,6 +75,7 @@ impl DetailsFmt {
             heading: None,
             assistant_name: None,
             title: None,
+            model: None,
             message_count: 0,
             turn_count: 0,
             pinned: None,
@@ -141,6 +145,12 @@ impl DetailsFmt {
         self
     }
 
+    #[must_use]
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = Some(model.into());
+        self
+    }
+
     /// Set the line rendered above the rows.
     #[must_use]
     pub fn with_heading(mut self, heading: impl Into<String>) -> Self {
@@ -206,6 +216,7 @@ impl DetailsFmt {
             "id": self.id.to_string(),
             "title": self.title,
             "assistant": self.assistant_name,
+            "model": self.model,
             "active": self.active,
             "pinned": self.pinned,
             "local": self.local,
@@ -247,6 +258,10 @@ impl DetailsFmt {
 
         if let Some(name) = self.assistant_name.clone() {
             rows.push(self.scalar("Assistant", name));
+        }
+
+        if let Some(model) = self.model.clone() {
+            rows.push(self.scalar("Model", model));
         }
 
         if self.message_count > 0 {
@@ -351,3 +366,7 @@ impl fmt::Display for DetailsFmt {
         write!(f, "{}", details(self.heading(), self.rows()))
     }
 }
+
+#[cfg(test)]
+#[path = "conversation_tests.rs"]
+mod tests;
