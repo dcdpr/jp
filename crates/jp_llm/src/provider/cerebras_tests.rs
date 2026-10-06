@@ -1,7 +1,10 @@
 use eventsource_stream::Event as MessageEvent;
 use futures::StreamExt as _;
 use jp_config::assistant::sections::SectionConfig;
-use jp_conversation::{ConversationEvent, event::ToolCallRequest};
+use jp_conversation::{
+    ConversationEvent,
+    event::{ChatRequest, ToolCallRequest},
+};
 use reqwest_eventsource::Error as SseError;
 
 use super::*;
@@ -718,6 +721,110 @@ fn transform_schema_forces_strict_objects() {
     assert_eq!(nested["additionalProperties"], false);
     let nested_req = nested["required"].as_array().unwrap();
     assert!(nested_req.contains(&json!("value")));
+}
+
+/// The `response_format` a request for `schema` sends.
+fn response_format_for(schema: Value) -> Value {
+    let model = ModelDetails::empty((PROVIDER, "future-model-99").try_into().unwrap());
+    let events = jp_conversation::ConversationStream::new_test().with_turn(ChatRequest {
+        content: "Extract".into(),
+        schema: Some(serde_json::from_value(schema).unwrap()),
+        author: None,
+    });
+    let query = ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+
+    let (body, _) = create_request(&model, query).unwrap();
+    body["response_format"].clone()
+}
+
+/// Strict mode would close `meta` and leave the model only `{}` for it.
+/// With `strict: false` the schema is a hint, so it goes as declared.
+#[test]
+fn structured_output_with_a_free_form_object_is_unstrict() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "name": { "type": "string", "pattern": "^[a-z]+$" },
+            "meta": { "type": "object" }
+        },
+        "required": ["name"]
+    });
+
+    assert_eq!(
+        response_format_for(schema.clone()),
+        json!({
+            "type": "json_schema",
+            "json_schema": {
+                "name": "structured_output",
+                "schema": schema,
+                "strict": false
+            }
+        })
+    );
+}
+
+/// Strict mode has no composition keywords; the `allOf` entry's property is
+/// merged in rather than demoted to a description hint.
+#[test]
+fn structured_output_merges_an_all_of_entry() {
+    let format = response_format_for(json!({
+        "type": "object",
+        "properties": { "id": { "type": "string" } },
+        "allOf": [{
+            "type": "object",
+            "properties": { "name": { "type": "string" } }
+        }]
+    }));
+
+    assert_eq!(
+        format["json_schema"],
+        json!({
+            "name": "structured_output",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "name": { "type": "string" }
+                },
+                "required": ["id", "name"],
+                "additionalProperties": false
+            },
+            "strict": true
+        })
+    );
+}
+
+#[test]
+fn structured_output_with_a_fixed_shape_is_strict() {
+    let format = response_format_for(json!({
+        "type": "object",
+        "properties": { "name": { "type": "string" } },
+        "required": ["name"]
+    }));
+
+    assert_eq!(
+        format["json_schema"],
+        json!({
+            "name": "structured_output",
+            "schema": {
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "required": ["name"],
+                "additionalProperties": false
+            },
+            "strict": true
+        })
+    );
 }
 
 #[test]

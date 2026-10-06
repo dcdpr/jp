@@ -123,6 +123,153 @@ mod truncation {
     }
 }
 
+mod structured_output {
+    use jp_config::assistant::tool_choice::ToolChoice;
+    use jp_conversation::{ConversationStream, event::ChatRequest, thread::Thread};
+    use serde_json::{Value, json};
+
+    use super::super::create_request;
+    use crate::{
+        model::ModelDetails,
+        provider::ProviderId,
+        query::{ChatQuery, Truncation},
+    };
+
+    /// The `text.format` a request for `schema` sends.
+    fn format_for(schema: Value) -> Value {
+        let events = ConversationStream::new_test().with_turn(ChatRequest {
+            content: "Extract".into(),
+            schema: Some(serde_json::from_value(schema).unwrap()),
+            author: None,
+        });
+        let query = ChatQuery {
+            thread: Thread {
+                system_prompt: None,
+                sections: vec![],
+                attachments: vec![],
+                events,
+            },
+            tools: vec![],
+            tool_choice: ToolChoice::Auto,
+            truncation: Truncation::default(),
+        };
+
+        let model = ModelDetails::empty((ProviderId::Openai, "gpt-5.6").try_into().unwrap());
+        let (request, ..) = create_request(&model, query).unwrap();
+
+        serde_json::to_value(request).unwrap()["text"]["format"].clone()
+    }
+
+    /// Strict mode would close `meta` and leave the model only `{}` for it.
+    #[test]
+    fn a_free_form_object_sends_the_schema_unstrict() {
+        let format = format_for(json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" },
+                "meta": { "type": "object" }
+            },
+            "required": ["name"]
+        }));
+
+        assert_eq!(
+            format,
+            json!({
+                "type": "json_schema",
+                "name": "structured_output",
+                "description": "Structured output",
+                "strict": false,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string" },
+                        "meta": { "type": "object" }
+                    },
+                    "required": ["name"]
+                }
+            })
+        );
+    }
+
+    /// For structured output the root is the answer itself, so an open root
+    /// counts too.
+    #[test]
+    fn a_root_allowing_additional_properties_sends_the_schema_unstrict() {
+        let format = format_for(json!({
+            "type": "object",
+            "properties": { "name": { "type": "string" } },
+            "additionalProperties": { "type": "string" }
+        }));
+
+        assert_eq!(format["strict"], json!(false));
+        assert_eq!(
+            format["schema"],
+            json!({
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "additionalProperties": { "type": "string" }
+            })
+        );
+    }
+
+    /// The root's `allOf` branch carries a free-form object.
+    /// Strict mode would close it, and flattening the branch would drop it
+    /// altogether.
+    #[test]
+    fn a_free_form_object_in_a_root_all_of_sends_the_schema_unstrict() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "allOf": [{
+                "type": "object",
+                "properties": { "body": { "type": "object" } }
+            }]
+        });
+
+        let format = format_for(schema.clone());
+
+        assert_eq!(format["strict"], json!(false));
+        assert_eq!(format["schema"], schema);
+    }
+
+    #[test]
+    fn a_conflicting_all_of_sends_the_schema_unstrict() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "allOf": [{
+                "type": "object",
+                "properties": { "id": { "type": "integer" } }
+            }]
+        });
+
+        let format = format_for(schema.clone());
+
+        assert_eq!(format["strict"], json!(false));
+        assert_eq!(format["schema"], schema);
+    }
+
+    #[test]
+    fn a_fixed_shape_stays_strict() {
+        let format = format_for(json!({
+            "type": "object",
+            "properties": { "name": { "type": "string" } },
+            "required": ["name"]
+        }));
+
+        assert_eq!(format["strict"], json!(true));
+        assert_eq!(
+            format["schema"],
+            json!({
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "required": ["name"],
+                "additionalProperties": false
+            })
+        );
+    }
+}
+
 mod make_schema_nullable {
     use serde_json::json;
 
@@ -431,6 +578,198 @@ mod convert_tools {
         }));
 
         assert_eq!(tool["strict"], json!(false));
+    }
+
+    /// An object parameter that declares no properties accepts any keys, and
+    /// the strict subset has no way to say so: closing it leaves the model only
+    /// `{}`, and OpenAI rejects the whole request besides.
+    #[test]
+    fn a_free_form_object_parameter_drops_strict_mode() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string" },
+                "body": { "type": "object", "description": "The request body." }
+            },
+            "required": ["url", "body"]
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+        assert_eq!(
+            tool["parameters"]["properties"]["body"],
+            json!({ "type": "object", "description": "The request body." })
+        );
+    }
+
+    /// An empty `properties` map declares no keys, the same as omitting it.
+    #[test]
+    fn an_object_parameter_with_empty_properties_drops_strict_mode() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": {
+                "body": { "type": "object", "properties": {} }
+            },
+            "required": ["body"]
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+        assert_eq!(
+            tool["parameters"]["properties"]["body"],
+            json!({ "type": "object", "properties": {} })
+        );
+    }
+
+    /// A map type admits keys beyond the declared ones.
+    /// Strict mode would overwrite `additionalProperties` with `false` and drop
+    /// them.
+    #[test]
+    fn an_object_parameter_allowing_additional_properties_drops_strict_mode() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": {
+                "headers": {
+                    "type": "object",
+                    "properties": { "host": { "type": "string" } },
+                    "additionalProperties": { "type": "string" }
+                }
+            },
+            "required": ["headers"]
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+        assert_eq!(
+            tool["parameters"]["properties"]["headers"],
+            json!({
+                "type": "object",
+                "properties": { "host": { "type": "string" } },
+                "additionalProperties": { "type": "string" }
+            })
+        );
+    }
+
+    /// An MCP tool whose arguments are a map type takes keys beyond the
+    /// declared ones.
+    /// The value schema for those keys reaches the API intact.
+    #[test]
+    fn a_root_allowing_additional_properties_drops_strict_mode() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "additionalProperties": { "type": "string" }
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+        assert_eq!(
+            tool["parameters"]["additionalProperties"],
+            json!({ "type": "string" })
+        );
+    }
+
+    /// A tool unstrict for a nested open object keeps the root closed when its
+    /// source says so.
+    #[test]
+    fn an_unstrict_tool_keeps_a_closed_root_closed() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": { "body": { "type": "object" } },
+            "additionalProperties": false
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+        assert_eq!(tool["parameters"]["additionalProperties"], json!(false));
+    }
+
+    /// One schema cannot hold two different definitions of `id`, and the strict
+    /// subset cannot keep the `allOf`, so the tool goes unstrict as declared.
+    #[test]
+    fn a_conflicting_all_of_entry_drops_strict_mode() {
+        let all_of = json!([{
+            "type": "object",
+            "properties": { "id": { "type": "integer" } }
+        }]);
+        let tool = converted(json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "allOf": all_of
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+        assert_eq!(tool["parameters"]["allOf"], all_of);
+    }
+
+    /// An entry that refers back to its holder has no finite flattening.
+    #[test]
+    fn a_self_referencing_all_of_entry_drops_strict_mode() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "allOf": [{ "$ref": "#" }]
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+        assert_eq!(tool["parameters"]["allOf"], json!([{ "$ref": "#" }]));
+    }
+
+    /// `Optional[dict]` in Pydantic: the free-form object sits inside `anyOf`.
+    #[test]
+    fn a_nullable_free_form_object_parameter_drops_strict_mode() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": {
+                "meta": { "anyOf": [{ "type": "object" }, { "type": "null" }] }
+            }
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+        assert_eq!(
+            tool["parameters"]["properties"]["meta"],
+            json!({ "anyOf": [{ "type": "object" }, { "type": "null" }] })
+        );
+    }
+
+    /// `Optional[Model]` in Pydantic: the wrapper has no `type` of its own, but
+    /// every branch is typed and closed, so the tool stays strict.
+    #[test]
+    fn a_nullable_object_with_declared_properties_stays_strict() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": {
+                "meta": {
+                    "anyOf": [
+                        { "type": "object", "properties": { "id": { "type": "string" } } },
+                        { "type": "null" }
+                    ]
+                }
+            }
+        }));
+
+        assert_eq!(tool["strict"], json!(true));
+    }
+
+    #[test]
+    fn a_nested_object_with_declared_properties_stays_strict() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } }
+                }
+            },
+            "required": ["body"]
+        }));
+
+        assert_eq!(tool["strict"], json!(true));
+        // `id` was optional, so strict mode requires it and makes it nullable.
+        assert_eq!(
+            tool["parameters"]["properties"]["body"],
+            json!({
+                "type": "object",
+                "properties": { "id": { "type": ["string", "null"] } },
+                "required": ["id"],
+                "additionalProperties": false
+            })
+        );
     }
 
     #[test]
@@ -841,6 +1180,73 @@ mod ensure_strict_schema {
         assert!(out.get("allOf").is_none());
         assert_eq!(out["type"], "object");
         assert_eq!(out["description"], "Extra info");
+    }
+
+    /// The holder and its `allOf` entry both declare properties; the strict
+    /// schema carries all of them, and optionality follows the merged
+    /// `required`.
+    #[test]
+    fn allof_merges_properties_with_the_holder() {
+        let out = run(json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "required": ["id"],
+            "allOf": [{
+                "type": "object",
+                "properties": { "name": { "type": "string" } }
+            }]
+        }));
+
+        assert_eq!(
+            out,
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "name": { "type": ["string", "null"] }
+                },
+                "required": ["id", "name"],
+                "additionalProperties": false
+            })
+        );
+    }
+
+    /// An entry that is a reference merges the definition it points to.
+    #[test]
+    fn allof_reads_an_entry_through_its_reference() {
+        let out = run(json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "allOf": [{ "$ref": "#/$defs/Base" }],
+            "$defs": {
+                "Base": {
+                    "type": "object",
+                    "properties": { "name": { "type": "string" } },
+                    "required": ["name"]
+                }
+            }
+        }));
+
+        assert_eq!(
+            out,
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": ["string", "null"] },
+                    "name": { "type": "string" }
+                },
+                "required": ["id", "name"],
+                "additionalProperties": false,
+                "$defs": {
+                    "Base": {
+                        "type": "object",
+                        "properties": { "name": { "type": "string" } },
+                        "required": ["name"],
+                        "additionalProperties": false
+                    }
+                }
+            })
+        );
     }
 
     #[test]

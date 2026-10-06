@@ -34,7 +34,10 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tracing::{debug, trace, warn};
 
-use super::{EventStream, openai::parameters_with_decoding};
+use super::{
+    EventStream,
+    openai::{fits_strict_subset, parameters_with_decoding},
+};
 use crate::{
     decoding::ArgumentDecoders,
     error::StreamError,
@@ -271,7 +274,11 @@ pub(crate) fn convert_tools(
             _ => true,
         })
         .map(|tool| {
-            let (parameters, decoding) = parameters_with_decoding(&tool.parameters, true);
+            // A server that compiles the schema into a grammar honors a closed
+            // object literally, so a schema outside the strict subset goes
+            // unstrict rather than losing its open objects.
+            let strict = fits_strict_subset(&tool.parameters);
+            let (parameters, decoding) = parameters_with_decoding(&tool.parameters, strict);
             decoders.insert(&tool.name, decoding);
             json!({
                 "type": "function",
@@ -279,7 +286,7 @@ pub(crate) fn convert_tools(
                     "name": tool.name,
                     "description": tool.docs.schema_description().unwrap_or_default(),
                     "parameters": parameters,
-                    "strict": true,
+                    "strict": strict,
                 },
             })
         })

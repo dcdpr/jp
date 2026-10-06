@@ -22,7 +22,7 @@ use jp_conversation::{
     thread::text_attachments_to_xml,
 };
 use jp_credentials::CredentialStore;
-use jp_tool::ToolDefinition;
+use jp_tool::{ToolDefinition, schema::has_unconstrained_node};
 use openai_responses::{
     Client, CreateError, StreamError as OpenaiStreamError,
     types::{self, Include, Request, SummaryConfig},
@@ -46,7 +46,7 @@ use crate::{
         ModelDeprecation, ReasoningDetails,
         catalog::{Catalog, Entry},
     },
-    provider::trace_to_tmpfile,
+    provider::{output_schema_is_open, trace_to_tmpfile},
     query::{ChatQuery, Truncation},
     stream::with_tool_call_keepalive,
 };
@@ -1426,21 +1426,28 @@ fn create_request(
     let service_tier = parameters.service_tier.and_then(convert_service_tier);
 
     // Build the text config from structured output schema and/or verbosity.
-    // Transform the schema for OpenAI's strict structured output mode.
+    // A schema inside the strict subset is transformed into its strict shape.
+    // One with an open object goes unstrict as declared: closing the object
+    // would leave the model only `{}` for it, or drop a map type's extra keys.
     let text = match thread.events.schema() {
-        Some(schema) => Some(types::TextConfig {
-            format: types::TextFormat::JsonSchema {
-                schema: {
-                    let mut v = Value::Object(schema);
-                    ensure_strict_schema(&mut v);
-                    v
+        Some(schema) => {
+            let open = output_schema_is_open(&schema);
+            let mut schema = Value::Object(schema);
+            let strict = !open && flatten_all_of(&mut schema);
+            if strict {
+                ensure_strict_schema(&mut schema);
+            }
+
+            Some(types::TextConfig {
+                format: types::TextFormat::JsonSchema {
+                    schema,
+                    description: "Structured output".to_owned(),
+                    name: "structured_output".to_owned(),
+                    strict: Some(strict),
                 },
-                description: "Structured output".to_owned(),
-                name: "structured_output".to_owned(),
-                strict: Some(true),
-            },
-            verbosity,
-        }),
+                verbosity,
+            })
+        }
         None => verbosity.map(|v| types::TextConfig {
             format: types::TextFormat::default(),
             verbosity: Some(v),
@@ -3104,10 +3111,12 @@ fn classify_stream_error(error: types::response::Error) -> StreamError {
 ///   OpenAI's docs: "it is possible to emulate an optional parameter by using a
 ///   union type with null").
 /// - Recursion descends into every property value, into `items`, into each
-///   `anyOf` variant, into `$defs`/`definitions`, and into the entries of an
-///   `allOf`.
-/// - `allOf` is flattened into the parent schema (OpenAI's strict mode doesn't
-///   accept composition keywords).
+///   `anyOf` variant, and into `$defs`/`definitions`.
+/// - Every `allOf` is first merged into the schema that holds it (see
+///   [`flatten_all_of`]), since OpenAI's strict mode doesn't accept composition
+///   keywords.
+///   One that cannot be merged stays as declared, and the API rejects it;
+///   callers that can fall back to unstrict check first.
 /// - `null` defaults are stripped (no meaningful distinction in strict mode).
 /// - A `$ref` with sibling properties is unravelled by inlining the resolved
 ///   definition and re-running on the merged result (OpenAI supports standalone
@@ -3128,17 +3137,197 @@ fn classify_stream_error(error: types::response::Error) -> StreamError {
 ///
 /// See: <https://platform.openai.com/docs/guides/structured-outputs>
 fn ensure_strict_schema(schema: &mut Value) {
+    ensure_flattened(schema);
     let root = schema.clone();
     process_strict(schema, &root);
+}
+
+/// Merge every `allOf` before a strict rewrite.
+///
+/// One that cannot be merged stays as declared, and the API rejects the schema.
+/// Callers that can fall back to unstrict decide with [`flatten_all_of`] or
+/// [`fits_strict_subset`] first, so reaching the warning is a caller bug.
+fn ensure_flattened(schema: &mut Value) {
+    if !flatten_all_of(schema) {
+        warn!("Sending a strict schema with an `allOf` that cannot be merged.");
+    }
+}
+
+/// Annotations an `allOf` entry may disagree on; the schema holding it keeps
+/// its own.
+const ANNOTATIONS: &[&str] = &["title", "description", "examples", "default", "$comment"];
+
+/// Keywords whose value maps names to schemas.
+const SCHEMA_MAPS: &[&str] = &["properties", "$defs", "definitions"];
+
+/// Keywords whose value is a schema, or a list of schemas.
+const SCHEMA_SLOTS: &[&str] = &[
+    "items",
+    "additionalProperties",
+    "anyOf",
+    "oneOf",
+    "prefixItems",
+];
+
+/// Merge every `allOf` in the document into the schema that holds it.
+///
+/// Each entry is read through its `$ref`, then merged keyword by keyword:
+/// `properties` combine by name, `required` lists are joined, and annotations
+/// the holder already has stay.
+/// Any other keyword, or a property declared on both sides, must be the same in
+/// both, since one schema cannot hold two different constraints for it.
+///
+/// Returns `false`, leaving `schema` untouched, when an entry disagrees with
+/// its holder, its `$ref` cannot be followed, or it refers back to a schema
+/// already being merged.
+pub(crate) fn flatten_all_of(schema: &mut Value) -> bool {
+    let root = schema.clone();
+    let mut flattened = schema.clone();
+    if !flatten_node(&mut flattened, &root, &mut vec![]) {
+        return false;
+    }
+
+    *schema = flattened;
+    true
+}
+
+/// Whether a tool's parameters fit OpenAI's strict subset once rewritten.
+///
+/// They do not when an object or a value is left open (see
+/// [`has_unconstrained_node`]), or when an `allOf` cannot be merged into its
+/// holder (see [`flatten_all_of`]).
+pub(crate) fn fits_strict_subset(parameters: &Value) -> bool {
+    !has_unconstrained_node(parameters) && flatten_all_of(&mut parameters.clone())
+}
+
+/// Flatten `schema` and every schema nested in it, tracking the references
+/// being inlined so an entry that points back at its holder stops the walk.
+fn flatten_node(schema: &mut Value, root: &Value, inlining: &mut Vec<String>) -> bool {
+    let Value::Object(map) = schema else {
+        return true;
+    };
+
+    if let Some(entries) = map.remove("allOf") {
+        let Value::Array(entries) = entries else {
+            return false;
+        };
+
+        for entry in entries {
+            let mark = inlining.len();
+            let merged = resolve_entry(entry, root, inlining).is_some_and(|mut entry| {
+                if !flatten_node(&mut entry, root, inlining) {
+                    return false;
+                }
+
+                match entry {
+                    Value::Object(entry) => merge_schema(map, entry),
+                    _ => false,
+                }
+            });
+            inlining.truncate(mark);
+
+            if !merged {
+                return false;
+            }
+        }
+    }
+
+    for key in SCHEMA_MAPS {
+        if let Some(Value::Object(schemas)) = map.get_mut(*key)
+            && !schemas
+                .values_mut()
+                .all(|schema| flatten_node(schema, root, inlining))
+        {
+            return false;
+        }
+    }
+
+    for key in SCHEMA_SLOTS {
+        let flattened = match map.get_mut(*key) {
+            Some(Value::Array(schemas)) => schemas
+                .iter_mut()
+                .all(|schema| flatten_node(schema, root, inlining)),
+            Some(schema) => flatten_node(schema, root, inlining),
+            None => true,
+        };
+
+        if !flattened {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Read an `allOf` entry through its `$ref` chain, merging the keywords written
+/// next to each reference over the definition it points to.
+///
+/// Returns `None` when a reference cannot be followed, the merge disagrees, or
+/// the reference is one already being inlined.
+fn resolve_entry(mut entry: Value, root: &Value, inlining: &mut Vec<String>) -> Option<Value> {
+    while let Some(pointer) = entry.get("$ref").and_then(Value::as_str).map(str::to_owned) {
+        if inlining.contains(&pointer) {
+            return None;
+        }
+
+        let target = resolve_ref(&pointer, root)?;
+        inlining.push(pointer);
+
+        let Value::Object(mut siblings) = entry else {
+            return None;
+        };
+        siblings.remove("$ref");
+        if !merge_schema(&mut siblings, target) {
+            return None;
+        }
+
+        entry = Value::Object(siblings);
+    }
+
+    Some(entry)
+}
+
+/// Merge `entry` into `holder`, returning `false` when they disagree.
+fn merge_schema(holder: &mut Map<String, Value>, entry: Map<String, Value>) -> bool {
+    for (key, value) in entry {
+        if ANNOTATIONS.contains(&key.as_str()) || !holder.contains_key(&key) {
+            holder.entry(key).or_insert(value);
+            continue;
+        }
+
+        let merged = match (key.as_str(), holder.get_mut(&key), value) {
+            ("properties", Some(Value::Object(ours)), Value::Object(theirs)) => {
+                theirs.into_iter().all(|(name, schema)| {
+                    if let Some(existing) = ours.get(&name) {
+                        return *existing == schema;
+                    }
+
+                    ours.insert(name, schema);
+                    true
+                })
+            }
+            ("required", Some(Value::Array(ours)), Value::Array(theirs)) => {
+                for name in theirs {
+                    if !ours.contains(&name) {
+                        ours.push(name);
+                    }
+                }
+                true
+            }
+            (_, existing, value) => existing.is_some_and(|existing| *existing == value),
+        };
+
+        if !merged {
+            return false;
+        }
+    }
+
+    true
 }
 
 /// Composition keywords whose branch selection this traversal cannot follow.
 const UNFOLLOWABLE_COMPOSITION: &[&str] = &["$ref", "allOf", "oneOf"];
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "schema rewriting and its decoding instructions share one traversal"
-)]
 fn process_strict(schema: &mut Value, root: &Value) -> ArgumentDecoding {
     let Value::Object(map) = schema else {
         return ArgumentDecoding::default();
@@ -3235,27 +3424,12 @@ fn process_strict(schema: &mut Value, root: &Value) -> ArgumentDecoding {
         }
     }
 
-    // 4. Flatten `allOf` into the parent. Earlier entries (and keys
-    //    already on the parent) take precedence. OpenAI's strict mode
-    //    rejects composition keywords, so even multi-entry `allOf`
-    //    must collapse.
-    if let Some(Value::Array(entries)) = map.remove("allOf") {
-        for mut entry in entries {
-            process_strict(&mut entry, root);
-            if let Value::Object(entry_map) = entry {
-                for (k, v) in entry_map {
-                    map.entry(k).or_insert(v);
-                }
-            }
-        }
-    }
-
-    // 5. Strip `null` defaults.
+    // 4. Strip `null` defaults.
     if map.get("default") == Some(&Value::Null) {
         map.remove("default");
     }
 
-    // 6. Unravel `$ref` with siblings. OpenAI supports standalone
+    // 5. Unravel `$ref` with siblings. OpenAI supports standalone
     //    `$ref` but not alongside other keys.
     if map.contains_key("$ref")
         && map.len() > 1
@@ -3348,13 +3522,19 @@ pub(crate) fn parameters_with_decoding(
     document
         .entry("required")
         .or_insert_with(|| Value::Array(vec![]));
-    document.insert("additionalProperties".to_owned(), (!strict).into());
 
+    // Unstrict, the source's own `additionalProperties` stands: a value schema
+    // for a map type's extra keys, or an explicit `false`. Strict mode closes
+    // every object, the root included, in `process_strict`.
     if !strict {
+        document
+            .entry("additionalProperties")
+            .or_insert(Value::Bool(true));
         return (document, ArgumentDecoding::default());
     }
 
     let mut document = Value::Object(document);
+    ensure_flattened(&mut document);
     let root = document.clone();
     let decoding = process_strict(&mut document, &root);
     (document.as_object().cloned().unwrap_or_default(), decoding)
@@ -3466,12 +3646,14 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> (Vec<types::Tool>, ArgumentDecod
     let tools = tools
         .into_iter()
         .map(|tool| {
-            // The strict subset requires a type on every property, which a
-            // parameter the server left free-form does not have. Dropping
-            // strict mode for that one tool costs its adherence guarantee;
-            // sending it strict costs the whole request, and every other tool
-            // in it.
-            let strict = !jp_tool::schema::has_unconstrained_node(&tool.parameters);
+            // The strict subset requires a type on every property and a
+            // fixed, closed key set on every object, which a free-form
+            // parameter, an object that declares no properties, or a map type
+            // does not have, nor does an `allOf` whose entries disagree with
+            // their holder. Dropping strict mode for that one tool costs its
+            // adherence guarantee; sending it strict costs the whole request,
+            // and every other tool in it.
+            let strict = fits_strict_subset(&tool.parameters);
             let (parameters, decoding) = parameters_with_decoding(&tool.parameters, strict);
             decoders.insert(&tool.name, decoding);
 

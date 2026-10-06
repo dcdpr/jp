@@ -301,6 +301,22 @@ async fn nullable_object_preserves_null_but_decodes_its_properties() {
     );
 }
 
+/// A property merged in from `allOf` is an ordinary property of the strict
+/// schema, so the `null` standing for its omission is decoded away.
+#[tokio::test]
+async fn strict_tool_decodes_properties_merged_from_all_of() {
+    let schema = json!({
+        "type": "object",
+        "required": ["query"],
+        "properties": {"query": {"type": "string"}},
+        "allOf": [{"type": "object", "properties": {"limit": {"type": "integer"}}}]
+    });
+    assert_eq!(
+        assemble(&schema, true, r#"{"query":"parse_document","limit":null}"#).await,
+        json!({"query": "parse_document"})
+    );
+}
+
 #[tokio::test]
 async fn non_strict_tool_keeps_nulls() {
     let schema = json!({"type": "object", "properties": {"query": {"type": "string"}}});
