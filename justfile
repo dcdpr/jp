@@ -1020,8 +1020,8 @@ commit-this *ARGS: _install-jp
 
 # Review a GitHub pull request, queueing inline comments to a draft review.
 #
-# Each comment is added one at a time and prompts you to approve or reject
-# it before it is posted. The review remains PENDING (only visible to the
+# Each comment is added one at a time, without prompting, to the draft
+# review. The review remains PENDING (only visible to the
 # authenticating user, via `JP_GITHUB_TOKEN` or `GITHUB_TOKEN`) until you
 # submit it from the GitHub UI.
 [group('jp')]
