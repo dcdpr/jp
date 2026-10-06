@@ -323,10 +323,10 @@ reasons from a false premise.
 
 The call is recorded as an error when no operation succeeded, such as one whose
 first operation failed and stopped the rest.
-One success is enough for it to count as a success; the framed sections name
-the operations that failed.
-The provider sees the same distinction it would for a bare call to the tool,
-and replay picks the error or the success style by it.
+One success is enough for it to count as a success; the framed sections name the
+operations that failed.
+The provider sees the same distinction it would for a bare call to the tool, and
+replay picks the error or the success style by it.
 
 ### Interrupts
 
