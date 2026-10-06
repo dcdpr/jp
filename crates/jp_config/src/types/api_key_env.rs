@@ -68,12 +68,6 @@ impl KeyVariables {
     }
 }
 
-impl From<String> for KeyVariables {
-    fn from(variable: String) -> Self {
-        Self::One(variable)
-    }
-}
-
 impl From<&str> for KeyVariables {
     fn from(variable: &str) -> Self {
         Self::One(variable.to_owned())
