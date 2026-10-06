@@ -37,8 +37,7 @@ Everything that already works and isn't specific to bugs:
 - **Prompt templates:** mission, continue, handover, repair.
 - **`next-target` executable**, optional.
   When a mission has one, the harness runs it before each turn and inserts its
-  output into the prompt; empty output means no targets remain and ends the
-  run.
+  output into the prompt; empty output means no targets remain and ends the run.
   When a mission has none, the model picks its own target, as bug-hunt does
   today.
 - **`gate` executable:** runs after each turn and reports pass or fail with

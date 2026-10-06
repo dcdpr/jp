@@ -14,10 +14,10 @@ The decisions belong to the maintainers.
 
 **For an assistant picking this up:** apply the items under *Decided* as
 written.
-For each item under *To decide*, don't choose. Draft the entry instead: the
-current finding count, three or four real examples from the workspace, and the
-options with what each one costs. Then stop and ask the user to decide before
-writing it into the config.
+For each item under *To decide*, don't choose.
+Draft the entry instead: the current finding count, three or four real examples
+from the workspace, and the options with what each one costs.
+Then stop and ask the user to decide before writing it into the config.
 The PR is where the decisions get reviewed.
 
 Depends on T-0yh5frr for the `exempt` policy list.
