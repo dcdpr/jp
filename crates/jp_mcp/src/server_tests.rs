@@ -4,7 +4,7 @@ use jp_config::{
     AppConfig, Config as _,
     conversation::tool::{PartialToolConfig, ToolConfig, ToolConfigWithDefaults},
 };
-use jp_tool::{Outcome, ToolDefinition, ToolDocs};
+use jp_tool::{AnswerType, Outcome, ToolDefinition, ToolDocs};
 use serde_json::Map;
 
 use super::*;
@@ -188,13 +188,24 @@ fn parse_command_output_empty_question_id_is_invalid_inquiry() {
 }
 
 #[test]
-fn parse_command_output_legacy_answer_type_shape_is_malformed_inquiry() {
-    // A stale local-tool binary emits the pre-082 externally-tagged answer
-    // type (`"answer_type":"Boolean"`) instead of the internally-tagged
-    // `{"type":"boolean"}` this build parses. The question id is valid, so
-    // the payload must surface as a tool-level error rather than being handed
-    // to the model as raw JSON.
+fn parse_command_output_legacy_answer_type_shape_is_needs_input() {
+    // Shell-script tools print the externally tagged answer type
+    // (`"answer_type":"Boolean"`) by hand and cannot be rebuilt against a
+    // newer `jp_tool`, so the legacy shape must still parse as a question.
     let stdout = br#"{"type":"needs_input","question":{"id":"apply_changes","text":"Apply?","answer_type":"Boolean","default":true}}"#;
+    let result = parse_command_output(stdout, b"", true);
+    let CommandResult::NeedsInput(question) = result else {
+        panic!("expected NeedsInput, got {result:?}");
+    };
+    assert_eq!(question.answer_type, AnswerType::Boolean);
+}
+
+#[test]
+fn parse_command_output_unknown_answer_type_is_malformed_inquiry() {
+    // An answer type this build does not know (a newer tool, or a typo) is
+    // protocol skew. The question id is valid, so the payload must surface as
+    // a tool-level error rather than being handed to the model as raw JSON.
+    let stdout = br#"{"type":"needs_input","question":{"id":"apply_changes","text":"Apply?","answer_type":"Maybe","default":true}}"#;
     let result = parse_command_output(stdout, b"", true);
     assert!(
         matches!(result, CommandResult::MalformedInquiry { .. }),
