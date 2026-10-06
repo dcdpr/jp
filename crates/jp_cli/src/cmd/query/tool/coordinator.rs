@@ -1101,6 +1101,16 @@ impl ToolCoordinator {
         let Some(mut batch) = self.batch.take() else {
             return ExecutionResult::default();
         };
+        // Register the tool interrupt handler for this phase. While
+        // registered, the first Ctrl-C press is delivered to this loop; the
+        // guard deregisters the handler when the calls are done.
+        //
+        // Registered before the first pump: calls whose approval already
+        // completed while the response streamed are released by that pump,
+        // and a press landing after they start must reach this handler, not
+        // the turn's.
+        let (interrupt_guard, mut interrupt_rx) = signals.push_handler();
+
         batch.stream_ended = true;
         self.pump(&mut batch, host);
 
@@ -1108,11 +1118,6 @@ impl ToolCoordinator {
             tools = batch.calls.len(),
             "Driving tool calls to completion."
         );
-
-        // Register the tool interrupt handler for this phase. While
-        // registered, the first Ctrl-C press is delivered to this loop; the
-        // guard deregisters the handler when the calls are done.
-        let (interrupt_guard, mut interrupt_rx) = signals.push_handler();
 
         let mut outcome = ExecutionOutcome::Completed;
         let mut stop = Stop::default();
