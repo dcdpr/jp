@@ -233,11 +233,12 @@ impl ConversationStream {
         Ok(partial)
     }
 
-    /// Dotted config paths explicitly cleared and not subsequently set.
+    /// Dotted config paths explicitly cleared and still absent from the
+    /// accumulated state.
     ///
     /// Reset deltas discard earlier clears.
-    /// A clear followed by a replacement in the same apply delta is not
-    /// included.
+    /// A path the accumulated state holds a value at is not included, whether
+    /// the value arrived in the clearing delta or a later one.
     /// Unknown paths are ignored.
     ///
     /// # Errors
@@ -250,6 +251,12 @@ impl ConversationStream {
                 ConfigDelta::Apply(apply) => unsets.extend(apply.unsets.iter().cloned()),
                 ConfigDelta::Reset(_) => unsets.clear(),
             }
+        }
+
+        // Nothing cleared means nothing to probe, and the fold below is a full
+        // merge per delta in the stream.
+        if unsets.is_empty() {
+            return Ok(Vec::new());
         }
 
         let partial = self.config_partial()?;
