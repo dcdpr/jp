@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.7028513603665629,
-  "iosp_score": 0.9136877941323721,
+  "quality_score": 0.7028860816848206,
+  "iosp_score": 0.9137309847878302,
   "violations": 862,
-  "total": 13799,
+  "total": 13804,
   "complexity_warnings": 163,
   "magic_number_warnings": 238,
   "nesting_depth_warnings": 27,
@@ -16,7 +16,7 @@
   "fragment_groups": 0,
   "boilerplate_warnings": 286,
   "srp_struct_warnings": 46,
-  "srp_module_warnings": 207,
+  "srp_module_warnings": 208,
   "wildcard_import_warnings": 0,
   "sdp_violations": 0,
   "coupling_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 47,
   "structural_coupling_warnings": 8,
-  "total_findings": 2807,
+  "total_findings": 2808,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -2743,17 +2743,17 @@
     {
       "name": "build_inquiry_backend",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1093
+      "line": 1096
     },
     {
       "name": "build_inquiry_overrides",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1192
+      "line": 1195
     },
     {
       "name": "commit_tool_responses",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1307
+      "line": 1310
     },
     {
       "name": "build_execution_plan",
@@ -2768,7 +2768,7 @@
     {
       "name": "ToolPrompter::prompt_ask",
       "file": "crates/jp_cli/src/cmd/query/tool/prompter.rs",
-      "line": 179
+      "line": 180
     },
     {
       "name": "stderr_sink",

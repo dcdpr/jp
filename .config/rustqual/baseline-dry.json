@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.650690702390975,
-  "iosp_score": 0.8116854908774979,
+  "quality_score": 0.6506185173027932,
+  "iosp_score": 0.8116445796219857,
   "violations": 867,
-  "total": 6460,
+  "total": 6459,
   "complexity_warnings": 0,
   "magic_number_warnings": 0,
   "nesting_depth_warnings": 0,
@@ -2748,17 +2748,17 @@
     {
       "name": "build_inquiry_backend",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1093
+      "line": 1096
     },
     {
       "name": "build_inquiry_overrides",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1192
+      "line": 1195
     },
     {
       "name": "commit_tool_responses",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1307
+      "line": 1310
     },
     {
       "name": "build_execution_plan",
@@ -2773,7 +2773,7 @@
     {
       "name": "ToolPrompter::prompt_ask",
       "file": "crates/jp_cli/src/cmd/query/tool/prompter.rs",
-      "line": 179
+      "line": 180
     },
     {
       "name": "stderr_sink",
