@@ -82,7 +82,10 @@ serve-web *ARGS: _install-serve-web
     #!/usr/bin/env sh
     set -eu
 
-    cargo run {{quiet_flag}} --package jp_cli -- serve-web "$@"
+    # A checkout build never matches the released checksum, and every rebuild
+    # changes its digest, so an approval would not survive the next build.
+    cargo run {{quiet_flag}} --package jp_cli -- \
+        --cfg plugins.command.serve-web.run=allow serve web "$@"
 
 # Serve the web UI, picking up source changes without killing a running turn.
 #
@@ -229,13 +232,18 @@ serve-web-watch *ARGS:
             continue
         fi
 
-        # `--workspace` goes before the subcommand on purpose: `serve-web` is an
-        # external subcommand, so clap hands everything after it to the plugin
-        # verbatim, global flags included.
+        # `--workspace` and `--cfg` go before the subcommand on purpose: `serve
+        # web` is a plugin command, so clap hands everything after it to the
+        # plugin verbatim, global flags included.
+        #
+        # `run=allow` because the plugin is rebuilt from this checkout on every
+        # change: its digest never matches the release, and an approval is tied to
+        # the digest, so it would be refused after the first rebuild.
+        allow="plugins.command.serve-web.run=allow"
         if [ -n "$workspace" ]; then
-            "$jp" --workspace "$workspace" -vv serve-web "$@" | cat || true
+            "$jp" --workspace "$workspace" --cfg "$allow" -vv serve web "$@" | cat || true
         else
-            "$jp" -vv serve-web "$@" | cat || true
+            "$jp" --cfg "$allow" -vv serve web "$@" | cat || true
         fi
 
         if [ ! -f "$restart_stamp" ]; then
@@ -299,10 +307,10 @@ _restart-serve-web PORT:
     # Scoped to the port so a second supervisor is not caught by it.
     #
     # The subcommand does not follow the binary name directly: the supervisor runs
-    # `jp -vv serve-web`, and a pattern that assumes otherwise matches nothing and
+    # `jp -vv serve web`, and a pattern that assumes otherwise matches nothing and
     # turns the kill below into a silent no-op.
     server_pid() {
-        pgrep -f "/jp .*serve-web.*--port[= ]{{PORT}}" 2>/dev/null | head -1 || true
+        pgrep -f "/jp .*serve web.*--port[= ]{{PORT}}" 2>/dev/null | head -1 || true
     }
 
     # Does a conversation lock name the server we are about to stop?
