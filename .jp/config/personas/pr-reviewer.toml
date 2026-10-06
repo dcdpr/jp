@@ -19,7 +19,8 @@ extends = [
 reasoning.display = "timer"
 
 [conversation.tools]
-github_pr_review_add_comment.enable = true
+github_pr_review_add_comment = { enable = true, run = "unattended" }
+github_pr_review_add_reply.run = "unattended"
 # `github_pulls` is redundant in this persona: the PR's title, description,
 # and unified diff are already in the attached `gh:pull/N/diff` resource,
 # and any related-PR lookups can go through `github_issues` /
