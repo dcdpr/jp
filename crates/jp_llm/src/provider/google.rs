@@ -532,6 +532,9 @@ fn model_overrides(id: &str) -> Option<&'static ModelDetails> {
 /// See: <https://ai.google.dev/gemini-api/docs/models> See:
 /// <https://ai.google.dev/gemini-api/docs/deprecations> See:
 /// <https://ai.google.dev/gemini-api/docs/thinking#levels-budgets>
+// qual:allow(complexity, magic_numbers) reason: "model catalogue: thinking
+// budgets and cutoff dates are data maintained against Google's published
+// documentation"
 static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
     let date = |year, month, day| NaiveDate::from_ymd_opt(year, month, day).unwrap();
     let id = |name: &str| ModelIdConfig::try_from((PROVIDER, name)).unwrap();

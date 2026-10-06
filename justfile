@@ -10,6 +10,7 @@ insta_version        := "1.48.0"
 jilu_version         := "0.13.2"
 llvm_cov_version     := "0.8.7"
 nextest_version      := "0.9.143"
+rustqual_version     := "1.8.2"
 shear_version        := "1.13.4"
 vet_version          := "0.10.2"
 
@@ -3635,6 +3636,30 @@ check-all *FLAGS:
 check-and-fix *FLAGS:
     @just check --fix --allow-dirty {{FLAGS}}
 
+# Run the structural quality checks (rustqual) over the workspace.
+#
+# Two passes, because rustqual's DRY dimension cannot enable dead-code
+# detection without also firing on the repeated setup blocks that `*_tests.rs`
+# files are deliberately built from. `.config/rustqual/config.toml` covers
+# every other dimension across the full workspace; `dry.toml` covers DRY over
+# production code only. Both configs carry the full rationale.
+#
+# Never fails: this is the exploratory entry point. `just qual-ci` is the gate.
+[group('check')]
+qual *FLAGS: _install-rustqual
+    rustqual -c .config/rustqual/config.toml --no-fail {{FLAGS}}
+    rustqual -c .config/rustqual/dry.toml --no-fail {{FLAGS}}
+
+# Re-record the rustqual baselines that `qual-ci` gates against.
+#
+# Run after a change that deliberately moves the finding count — a refactor
+# that removes findings, or an accepted batch of new ones — and commit the
+# result alongside it, so the diff shows what moved and why.
+[group('check')]
+qual-baseline: _install-rustqual
+    rustqual -c .config/rustqual/config.toml --no-fail --save-baseline .config/rustqual/baseline.json
+    rustqual -c .config/rustqual/dry.toml --no-fail --save-baseline .config/rustqual/baseline-dry.json
+
 # Run tests, using nextest.
 [group('check')]
 [group('main')]
@@ -3808,7 +3833,7 @@ fmt: (_rustup_component "rustfmt") _install-comfort
 
 # Run all ci tasks.
 [group('ci')]
-ci: lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci
+ci: lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci qual-ci
 
 # Lint the code on CI.
 [group('ci')]
@@ -3861,6 +3886,99 @@ lint-ci: (_rustup_component "clippy") _install_ci_matchers
     # server has to be compiled that way somewhere, or the `client`-only
     # spelling rots unnoticed.
     cargo clippy --locked --package jp_mcp --all-targets --no-default-features --features client --no-deps --profile=lint -- --deny warnings
+
+# Check structural code quality on CI.
+#
+# Gates on per-category regression against the committed baselines rather than
+# on an absolute score. The workspace carries known findings; the bar for new
+# code is "no worse than what is already there". Refresh with
+# `just qual-baseline`.
+#
+# rustqual's own `--compare --fail-on-regression` is deliberately unused. It
+# prints a finding delta, but defines a regression as `quality_score` dropping,
+# and that score is a ratio over every function in the workspace: a change that
+# adds compliant code alongside a new finding dilutes the score enough to hold
+# it level, and the gate passes. A baseline it cannot parse is worse — rustqual
+# prints the error, reports "not regressed", and exits 0 under `--no-fail`.
+#
+# So rustqual runs only as a report generator, into a temp file, and
+# `regressions.jq` decides the verdict: any count above its baseline fails the
+# job, and a baseline that cannot be compared is an error rather than a pass.
+#
+# Output is captured. Each pass prints every baselined finding on every run,
+# which buries the verdict; on success only the totals are shown, on failure the
+# categories that moved. `--format github` is deliberately absent: it annotates
+# all baselined findings rather than the new ones, and GitHub caps the display
+# at ten, so the annotations would hide the regression behind existing findings.
+#
+# Needs `jq`, which GitHub's runners ship.
+[group('ci')]
+qual-ci: _install-rustqual _install_ci_matchers
+    #!/usr/bin/env sh
+    set -eu
+
+    tmp=$(mktemp -d "${TMPDIR:-/tmp}/rustqual.XXXXXX")
+    trap 'rm -rf "$tmp"' EXIT
+
+    filter=.config/rustqual/regressions.jq
+    main=.config/rustqual/baseline.json
+
+    # Prove the gate can still fail before trusting it to pass. A gate that has
+    # broken open is invisible by definition, so both directions are checked on
+    # every run: a baseline one finding below the current one has to read as a
+    # regression, and an unparseable baseline has to be an error.
+    canary() {
+        jq '.magic_number_warnings = (.magic_number_warnings // 0) - 1' \
+            "$main" > "$tmp/lowered.json" || return 1
+        out=$(jq -nr -f "$filter" \
+            --slurpfile old "$tmp/lowered.json" --slurpfile new "$main" 2>&1) || {
+            echo "::error::the regression filter errored on its canary input"
+            printf '%s\n' "$out"
+            return 1
+        }
+        [ -n "$out" ] || {
+            echo "::error::the regression filter reported nothing for a known regression"
+            return 1
+        }
+        printf 'not json\n' > "$tmp/broken.json" || return 1
+        if jq -nr -f "$filter" \
+            --slurpfile old "$tmp/broken.json" --slurpfile new "$main" >/dev/null 2>&1
+        then
+            echo "::error::the regression filter accepted a malformed baseline"
+            return 1
+        fi
+    }
+
+    qual_pass() {
+        base=".config/rustqual/$2"
+        fresh="$tmp/$2"
+        log=$(rustqual -c ".config/rustqual/$1" --no-fail --save-baseline "$fresh" 2>&1) || {
+            echo "::error::rustqual could not analyse the workspace in the $1 pass"
+            printf '%s\n' "$log"
+            return 1
+        }
+        over=$(jq -nr -f "$filter" --slurpfile old "$base" --slurpfile new "$fresh" 2>&1) || {
+            echo "::error::cannot compare the $1 pass against $base"
+            printf '%s\n' "$over"
+            return 1
+        }
+        totals=$(jq -nr --slurpfile old "$base" --slurpfile new "$fresh" \
+            '"findings \($old[0].total_findings) -> \($new[0].total_findings)"') || return 1
+        [ -z "$over" ] || {
+            echo "::error::rustqual regression in the $1 pass ($totals)"
+            printf '%s\n' "$over"
+            echo "Fix the findings above, or run \`just qual-baseline\` and commit the result when the new count is deliberate."
+            return 1
+        }
+        echo "$1: no category above baseline ($totals)"
+    }
+
+    canary
+
+    status=0
+    qual_pass config.toml baseline.json || status=1
+    qual_pass dry.toml baseline-dry.json || status=1
+    exit "$status"
 
 # Check code formatting on CI.
 [group('ci')]
@@ -4037,6 +4155,19 @@ _install-bookworm *args:
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path crates/contrib/bookworm {{args}}
+
+# Build and install `rustqual`, the structural quality analyser.
+#
+# Built from source rather than `_install`: rustqual publishes no release
+# binaries (every tag from v0.4.2 to v1.8.2 has zero assets), declares no
+# `[package.metadata.binstall]`, and is absent from quickinstall, so
+# `cargo binstall --only-signed` has nothing to resolve.
+#
+# `cargo install` is a sub-second no-op once the pinned version is present, so
+# this is safe to depend on from every recipe. A version bump reinstalls
+# without needing `JP_INSTALL=1`, unlike the path-installed tools below.
+_install-rustqual *args:
+    cargo install {{quiet_flag}} --locked rustqual@{{rustqual_version}} {{args}}
 
 _install-comfort *args:
     #!/usr/bin/env sh
