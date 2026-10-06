@@ -65,3 +65,52 @@ dropping and so missed new findings entirely; `.config/rustqual/regressions.jq`
 now does a per-category comparison.
 Whatever replaces the committed baseline should keep that filter — the
 per-category check is orthogonal to where the numbers come from.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-10-06T15:03:44Z
+
+## Observed: the gate fires on commits the branch does not contain
+
+First real CI run of `qual-ci` on `#1190` failed with `srp_module_warnings: 207
+-> 208 (+1)` while the same recipe passed locally with identical numbers on both
+sides.
+
+Cause is narrower than "baselines go stale", and worse:
+
+`.github/workflows/rust.yml:167` checks out with no `ref:`, so a `pull_request`
+run gets `refs/pull/N/merge` — the head merged into *current* `main`.
+The branch was rebased onto `150ba7868` and its baselines re-recorded there
+(`e7e3b424c`).
+`main` then took `dbafe5485` (#1242, 16:30) and `dfae02a91` (#1207, 16:33) the
+same afternoon.
+CI measured `branch + dfae02a91`; the baseline describes `branch + 150ba7868`.
+The `+1` is a file crossing a threshold in that delta — #1242 adds net +21
+lines to `crates/jp_cli/src/cmd/query/tool/prompter.rs`, which is otherwise
+unflagged.
+
+Two consequences beyond staleness:
+
+1. **Not reproducible locally.** No sequence of local commands shows the
+   failure, because the tree CI measured does not exist in any worktree.
+   The author's only lever is to rebase and re-record — which is the reflex
+   this ticket exists to prevent, now with no diagnostic alternative.
+2. **The comparison is invalid in both directions.** A committed baseline
+   describes exactly one tree.
+   Compared against a merge tree, it invents regressions *and* can mask real
+   ones: if the merge happens to delete findings elsewhere, a genuine new
+   finding nets to zero and passes.
+
+So a committed baseline and the merge ref cannot both be right.
+The measured tree and the baseline have to share a base.
+That makes option 3 (analyse `HEAD` and the merge-base in the same job, no
+committed baseline) the correct target rather than merely the tidiest.
+
+A cheaper interim exists: a per-task `checkout_ref` through `matrix.include`,
+set to `github.event.pull_request.head.sha` for `qual` only, leaving `test` and
+the other tasks on the merge ref where testing the merge result is the point.
+Needs one thing verified first — whether `actions/checkout` treats an empty
+`ref:` as unset, which is what the other matrix entries would pass.
