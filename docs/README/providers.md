@@ -136,8 +136,8 @@ Select an account with an explicit subscription name:
 jp query --new --model anthropic/claude-sonnet-5 --auth sub:work "Reply with exactly OK."
 ```
 
-`--auth sub` is shorthand for an unnamed `subscription`, which uses Claude Code's
-inherited login rather than any registered name.
+`--auth sub` is shorthand for an unnamed `subscription`, which uses Claude
+Code's inherited login rather than any registered name.
 
 To register an existing login directory without relocating it, pass its exact
 absolute path when signing in:
