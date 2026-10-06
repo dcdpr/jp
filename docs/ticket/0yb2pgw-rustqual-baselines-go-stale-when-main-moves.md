@@ -114,3 +114,16 @@ set to `github.event.pull_request.head.sha` for `qual` only, leaving `test` and
 the other tasks on the merge ref where testing the merge result is the point.
 Needs one thing verified first — whether `actions/checkout` treats an empty
 `ref:` as unset, which is what the other matrix entries would pass.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-10-06T21:46:15Z
+
+Decided: option 3, with no committed baseline.
+Findings are compared one by one by `(rule, file, symbol)` rather than
+per-category counts, and the comparison lives in a new `qual` crate (T-0yh5frr).
+CI compares the merge ref against `HEAD^1` in the same job (T-0yh5npc), so the
+measured tree and the base always match and the interim `checkout_ref`
+workaround isn't needed.
+This ticket closes when T-0yh5npc lands.
