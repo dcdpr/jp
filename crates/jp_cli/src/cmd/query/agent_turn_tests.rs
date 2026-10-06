@@ -353,13 +353,13 @@ impl Provider for UnrecordedCallProvider {
             let mut params = CallToolRequestParams::new("http_tool");
             params.meta = Some(Meta(Map::from_iter([("test/agentId".into(), "agent-call".into())])));
             let peer = client.peer().clone();
-            let call = tokio::spawn(async move { peer.call_tool(params).await });
+            // The turn drops this stream on the error below, and with it
+            // `client`, whose session cancellation fails the pending call.
+            tokio::spawn(async move { peer.call_tool(params).await });
             yield Ok(Event::Part { index: 0, part: EventPart::ToolCall(ToolCallPart::Start { id: "agent-call".into(), name: "http_tool".into(), decoding: None }), metadata: Map::new() });
             yield Ok(Event::Part { index: 0, part: EventPart::ToolCall(ToolCallPart::ArgumentChunk("{}".into())), metadata: Map::new() });
             yield Ok(Event::flush(0));
             yield Err(idle_timeout());
-            call.abort();
-            drop(client);
         };
         Ok(QueryStream {
             events: Box::pin(stream),
