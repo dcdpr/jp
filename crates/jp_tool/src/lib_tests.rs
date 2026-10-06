@@ -143,6 +143,14 @@ fn answer_type_rejects_unknown_shape_in_current_format_terms() {
         "invalid type: string \"Maybe\", expected internally tagged enum AnswerType"
     );
 
+    // `Secret` postdates the legacy format, so its legacy spelling is not a
+    // legacy shape.
+    let error = serde_json::from_value::<AnswerType>(json!("Secret")).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "invalid type: string \"Secret\", expected internally tagged enum AnswerType"
+    );
+
     let error = serde_json::from_value::<AnswerType>(json!({ "type": "maybe" })).unwrap_err();
     assert_eq!(
         error.to_string(),
