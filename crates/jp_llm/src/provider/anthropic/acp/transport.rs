@@ -603,9 +603,10 @@ pub(super) struct NativeArtifact {
 impl NativeArtifact {
     /// Write the transcript under `directory`.
     ///
-    /// With `keep`, the file stays on disk after the request and its path is
-    /// logged at `info`; otherwise the path is logged at `debug` and the file
-    /// is removed on drop.
+    /// With `keep`, a fully written file stays on disk after the request and
+    /// its path is logged at `info`; otherwise the path is logged at `debug`
+    /// and the file is removed on drop.
+    /// A write that fails partway removes the file either way.
     fn write(
         prepared: &PreparedRequest,
         root: &Utf8Path,
@@ -634,20 +635,23 @@ impl NativeArtifact {
             options.mode(0o600);
         }
         let mut file = options.open(&path).map_err(Error::NativeIo)?;
-        if keep {
-            info!(%path, "Keeping the derived Claude transcript because JP_DEBUG is set.");
-        } else {
-            debug!(%path, "Wrote the derived Claude transcript.");
-        }
-        let artifact = Self {
+        // Cleanup stays armed until the write succeeds, so a failure never
+        // leaves a truncated transcript behind, even under `keep`.
+        let mut artifact = Self {
             session: Some(session),
-            path: (!keep).then_some(path),
+            path: Some(path.clone()),
         };
         for record in prepared.records(session, root, Utc::now()) {
             serde_json::to_writer(&mut file, &record).map_err(Error::NativeJson)?;
             file.write_all(b"\n").map_err(Error::NativeIo)?;
         }
         file.flush().map_err(Error::NativeIo)?;
+        if keep {
+            artifact.path = None;
+            info!(%path, "Keeping the derived Claude transcript because JP_DEBUG is set.");
+        } else {
+            debug!(%path, "Wrote the derived Claude transcript.");
+        }
         Ok(artifact)
     }
 }
