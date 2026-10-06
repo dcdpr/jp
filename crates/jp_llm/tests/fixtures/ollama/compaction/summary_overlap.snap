@@ -7,7 +7,7 @@ expression: request
   "messages": [
     {
       "role": "user",
-      "content": "[Summary of previous conversation]",
+      "content": "[Summary of the earlier part of this conversation. The messages after it are still in your context.]",
       "tool_calls": [],
       "thinking": null
     },
@@ -19,7 +19,7 @@ expression: request
     },
     {
       "role": "user",
-      "content": "[Summary of previous conversation]",
+      "content": "[Summary of a middle part of this conversation. The messages before and after it are still in your context.]",
       "tool_calls": [],
       "thinking": null
     },
