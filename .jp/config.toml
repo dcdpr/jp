@@ -15,12 +15,17 @@ anthropic.beta_headers = [
 ]
 
 # In-workspace MCP server for browsing Rust crate documentation from docs.rs.
-# The `just serve-bookworm` recipe rebuilds the release binary on every spawn
-# (incremental, so it's a no-op when source is unchanged).
+#
+# Runs the installed `bookworm` binary directly, so the server still starts when
+# the justfile cannot be parsed. `just` (and a `cargo install`) only runs when the binary is
+# missing. `JP_INSTALL=1 just _install-bookworm` picks up local source changes.
 [providers.mcp.bookworm]
 type = "stdio"
-command = "just"
-arguments = ["serve-bookworm"]
+command = "sh"
+arguments = [
+    "-c",
+    "command -v bookworm >/dev/null 2>&1 || just _install-bookworm >&2 || exit 1; exec bookworm mcp",
+]
 
 # `jp ticket` is served by a plugin in this repository, installed with
 # `just _install-ticket` and found on $PATH. It is deliberately absent from the

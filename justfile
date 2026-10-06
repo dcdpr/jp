@@ -3714,18 +3714,11 @@ serve-tools CONTEXT TOOL:
 
 # Run the bookworm MCP server (docs.rs documentation tools).
 #
-# Rebuilds the release binary first; `cargo build` is incremental, so this is
-# a no-op when nothing has changed and a fast incremental compile when it has.
-# The repo's `.jp/config.toml` points `providers.mcp.bookworm.command` at this
-# recipe, so every `jp query` that uses bookworm tools picks up the latest
-# local source automatically.
+# Uses the installed `bookworm` binary, installing it first if it is missing.
+# Run `JP_INSTALL=1 just _install-bookworm` to pick up local source changes.
 [group('tools')]
-serve-bookworm: _build-bookworm
-    @$(cargo metadata --format-version 1 | jq -r .build_directory)/release/bookworm mcp
-
-[private]
-@_build-bookworm:
-    cargo build {{quiet_flag}} --release --package bookworm
+serve-bookworm: _install-bookworm
+    @bookworm mcp
 
 # Build all command plugin binaries for a target (defaults to host).
 [group('plugins')]
@@ -4034,6 +4027,16 @@ _install-serve-web *args:
     chmod 755 "$dir/.jp-serve-web.new"
     mv -f "$dir/.jp-serve-web.new" "$dir/jp-serve-web"
     echo "Installed jp-serve-web to $dir" >&2
+
+# Build and install the `bookworm` MCP server that `.jp/config.toml` runs.
+_install-bookworm *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -z "${JP_INSTALL:-}" ] && command -v bookworm >/dev/null 2>&1; then
+        echo "Skipping bookworm rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
+        exit 0
+    fi
+    cargo install {{quiet_flag}} --locked --path crates/contrib/bookworm {{args}}
 
 _install-comfort *args:
     #!/usr/bin/env sh
