@@ -20,7 +20,7 @@ use jp_conversation::{
 };
 use jp_inquire::prompt::MockPromptBackend;
 use jp_llm::{
-    Error as LlmError, EventStream, Provider, StreamError,
+    Error as LlmError, EventStream, Provider, StreamError, StreamErrorKind,
     event::{Event, EventPart, FinishReason, ToolCallPart},
     model::ModelDetails,
     query::{ChatQuery, QueryContext, QueryStream, ToolExecution},
@@ -41,6 +41,7 @@ use super::{PendingStreamTrim, ToolCoordinator, TurnInterrupts, run_turn_loop};
 use crate::{
     access::approvals::ApprovalStore,
     cmd::query::tool::{executor::mock::no_commands, mcp_executor::TerminalExecutorSource},
+    error::Error,
     signals::testing::detached_router,
 };
 
@@ -138,10 +139,13 @@ impl Provider for AgentProvider {
     }
 }
 
+/// Runs [`AgentProvider`] until its answer is complete, then fails that stream
+/// with `error`, and answers the restarted request from committed history.
 struct SwitchingAgentProvider {
     first: AgentProvider,
     starts: AtomicUsize,
     next_execution: ToolExecution,
+    error: fn() -> StreamError,
 }
 
 #[async_trait]
@@ -169,12 +173,13 @@ impl Provider for SwitchingAgentProvider {
         if index == 0 {
             let started = self.first.start_query(model, query, context).await?;
             let mut source = started.events;
+            let error = self.error;
             let events = async_stream::stream! {
                 let mut answered = false;
                 while let Some(event) = source.next().await {
                     if matches!(&event, Ok(Event::Part { part: EventPart::Message(_), .. })) { answered = true; }
                     if answered && matches!(&event, Ok(Event::Finished(_))) {
-                        yield Err(StreamError::subscription_exhausted("quota reached", None, None).with_credential_change());
+                        yield Err(error());
                         return;
                     }
                     yield event;
@@ -185,10 +190,7 @@ impl Provider for SwitchingAgentProvider {
                 execution: started.execution,
             });
         }
-        assert_eq!(
-            index, 1,
-            "credential changes must not restart the original tools"
-        );
+        assert_eq!(index, 1, "a restart must not rerun the original tools");
         let requests = query
             .thread
             .events
@@ -229,25 +231,63 @@ impl Provider for SwitchingAgentProvider {
     }
 }
 
+/// The assistant header every turn in this file writes to the chrome channel.
+const HEADER: &str = "\n── \x1b[1mjp\x1b[0m \x1b[2m(anthropic/test)\x1b[0m \
+                      ─────────────────────────────────────────────────────────\n\n";
+
+fn quota_exhausted() -> StreamError {
+    StreamError::subscription_exhausted("quota reached", None, None).with_credential_change()
+}
+
+fn idle_timeout() -> StreamError {
+    StreamError::timeout("no activity from provider for 136s")
+}
+
 #[tokio::test]
 async fn agent_quota_fallback_reuses_committed_tools_with_another_agent() {
-    assert_agent_fallback(ToolExecution::Agent {
+    let execution = ToolExecution::Agent {
         correlation_key: "test/agentId",
-    })
-    .await;
+    };
+
+    let chrome = assert_agent_restart(execution, quota_exhausted, 0).await;
+
+    assert_eq!(chrome, HEADER);
 }
 
 #[tokio::test]
 async fn agent_quota_fallback_can_change_to_caller_owned_execution() {
-    assert_agent_fallback(ToolExecution::Caller).await;
+    let chrome = assert_agent_restart(ToolExecution::Caller, quota_exhausted, 0).await;
+
+    assert_eq!(chrome, HEADER);
 }
 
-async fn assert_agent_fallback(next_execution: ToolExecution) {
+/// A connection that goes quiet after every tool result is recorded (a laptop
+/// lid closed mid-turn) is retried like any other stream, rebuilding the agent
+/// request from committed history without rerunning the tools.
+#[tokio::test]
+async fn agent_idle_timeout_after_recorded_tool_results_restarts_the_agent() {
+    let execution = ToolExecution::Agent {
+        correlation_key: "test/agentId",
+    };
+
+    let chrome = assert_agent_restart(execution, idle_timeout, 1).await;
+
+    assert_eq!(chrome, format!("{HEADER}⚠ Timeout, retrying (1/1)…\n"));
+}
+
+/// Run a turn through [`SwitchingAgentProvider`] and return what it wrote to
+/// the chrome channel.
+async fn assert_agent_restart(
+    next_execution: ToolExecution,
+    error: fn() -> StreamError,
+    max_retries: u32,
+) -> String {
     timeout(Duration::from_secs(10), async {
         let temp = tempdir().unwrap();
         let root = temp.path();
         let mut config = AppConfig::new_test();
-        config.assistant.request.max_retries = 0;
+        config.assistant.request.max_retries = max_retries;
+        config.assistant.request.base_backoff_ms = 1;
         let partial: PartialToolConfig = serde_json::from_value(json!({"source":"builtin","run":"allow","style":{"hidden":true},"questions":{"confirm":{"answer":true}}})).unwrap();
         config.conversation.tools.insert("http_tool".into(), ToolConfig::from_partial(partial, vec![]).unwrap());
         let storage = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
@@ -260,16 +300,113 @@ async fn assert_agent_fallback(next_execution: ToolExecution) {
         let count = Arc::new(AtomicUsize::new(0));
         let client = Client::default();
         let (source, owner) = TerminalExecutorSource::start(BuiltinExecutors::new().register("http_tool", InquiringTool(count.clone())), no_commands(), &definitions, &config.conversation.tools, Arc::new(ApprovalStore::default()), InvocationContext::default(), &client, root.to_owned()).await.unwrap();
-        let provider = Arc::new(SwitchingAgentProvider { first: AgentProvider { starts: AtomicUsize::new(0), storage, conversation: id, config: config.clone() }, starts: AtomicUsize::new(0), next_execution });
+        let provider = Arc::new(SwitchingAgentProvider { first: AgentProvider { starts: AtomicUsize::new(0), storage, conversation: id, config: config.clone() }, starts: AtomicUsize::new(0), next_execution, error });
         let model = provider.model_details(&"test".parse().unwrap()).await.unwrap();
         let router = detached_router();
-        let (printer, output, _) = Printer::memory(OutputFormat::TextPretty);
+        let (printer, output, chrome) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         run_turn_loop(provider.clone(), &model, &config, &router, root, InvocationContext::default(), false, &[], &lock, ToolChoice::Auto, &definitions, printer.clone(), Arc::new(MockPromptBackend::new()), ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)), ChatRequest::from("Run the tool."), PendingStreamTrim::default(), router.turn_interrupt(), TurnInterrupts::none()).await.unwrap();
         assert_eq!(count.load(Ordering::SeqCst), 4);
         assert_eq!(provider.starts.load(Ordering::SeqCst), 2);
         printer.flush();
         assert_eq!(output.lock().as_str(), "Finished.\n\nContinued.\n\n");
+        owner.shutdown().await.unwrap();
+        chrome.lock().as_str().to_owned()
+    }).await.unwrap()
+}
+
+/// Submits a tool call the way Claude Code does, then fails its only stream
+/// with an idle timeout before JP has recorded that call's result.
+struct UnrecordedCallProvider {
+    starts: AtomicUsize,
+}
+
+#[async_trait]
+impl Provider for UnrecordedCallProvider {
+    async fn model_details(&self, _: &Name) -> Result<ModelDetails, LlmError> {
+        Ok(ModelDetails::empty("anthropic/test".parse().unwrap()))
+    }
+    async fn models(&self) -> Result<Vec<ModelDetails>, LlmError> {
+        Ok(vec![])
+    }
+    async fn chat_completion_stream(
+        &self,
+        _: &ModelDetails,
+        _: ChatQuery,
+    ) -> Result<EventStream, LlmError> {
+        panic!("start_query must select the execution contract")
+    }
+    async fn start_query(
+        &self,
+        _: &ModelDetails,
+        _: ChatQuery,
+        context: QueryContext,
+    ) -> Result<QueryStream, LlmError> {
+        assert_eq!(
+            self.starts.fetch_add(1, Ordering::SeqCst),
+            0,
+            "a call with no recorded result may have run, so it must not be replayed"
+        );
+        let client = connect(&context.mcp_endpoint.unwrap()).await.unwrap();
+        let stream = async_stream::stream! {
+            yield Ok(Event::ToolCallPending { id: "agent-call".into(), name: "http_tool".into() });
+            let mut params = CallToolRequestParams::new("http_tool");
+            params.meta = Some(Meta(Map::from_iter([("test/agentId".into(), "agent-call".into())])));
+            let peer = client.peer().clone();
+            // The turn drops this stream on the error below, and with it
+            // `client`, whose session cancellation fails the pending call.
+            tokio::spawn(async move { peer.call_tool(params).await });
+            yield Ok(Event::Part { index: 0, part: EventPart::ToolCall(ToolCallPart::Start { id: "agent-call".into(), name: "http_tool".into(), decoding: None }), metadata: Map::new() });
+            yield Ok(Event::Part { index: 0, part: EventPart::ToolCall(ToolCallPart::ArgumentChunk("{}".into())), metadata: Map::new() });
+            yield Ok(Event::flush(0));
+            yield Err(idle_timeout());
+        };
+        Ok(QueryStream {
+            events: Box::pin(stream),
+            execution: ToolExecution::Agent {
+                correlation_key: "test/agentId",
+            },
+        })
+    }
+}
+
+/// A retry budget alone does not license a restart: with a tool call whose
+/// outcome is unknown, the timeout ends the turn instead.
+#[tokio::test]
+async fn agent_idle_timeout_with_an_unrecorded_tool_result_ends_the_turn() {
+    timeout(Duration::from_secs(10), async {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        let mut config = AppConfig::new_test();
+        config.assistant.request.max_retries = 1;
+        config.assistant.request.base_backoff_ms = 1;
+        let partial: PartialToolConfig = serde_json::from_value(json!({"source":"builtin","run":"allow","style":{"hidden":true},"questions":{"confirm":{"answer":true}}})).unwrap();
+        config.conversation.tools.insert("http_tool".into(), ToolConfig::from_partial(partial, vec![]).unwrap());
+        let storage = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
+        let mut workspace = Workspace::in_memory(root).with_backend(storage);
+        let timestamp = datetime!(2026-09-11 12:00:00 Z);
+        let id = ConversationId::try_from(timestamp).unwrap();
+        let conversation = Conversation { last_activated_at: timestamp, ..Conversation::default() };
+        let lock = workspace.create_and_lock_conversation_with_id(id, conversation, config.clone().into(), None).unwrap();
+        let definitions = vec![ToolDefinition { name: "http_tool".into(), docs: ToolDocs::default(), parameters: json!({"type":"object","properties":{}}) }];
+        let count = Arc::new(AtomicUsize::new(0));
+        let client = Client::default();
+        let (source, owner) = TerminalExecutorSource::start(BuiltinExecutors::new().register("http_tool", InquiringTool(count.clone())), no_commands(), &definitions, &config.conversation.tools, Arc::new(ApprovalStore::default()), InvocationContext::default(), &client, root.to_owned()).await.unwrap();
+        let provider = Arc::new(UnrecordedCallProvider { starts: AtomicUsize::new(0) });
+        let model = provider.model_details(&"test".parse().unwrap()).await.unwrap();
+        let router = detached_router();
+        let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
+
+        let result = run_turn_loop(provider.clone(), &model, &config, &router, root, InvocationContext::default(), false, &[], &lock, ToolChoice::Auto, &definitions, Arc::new(printer), Arc::new(MockPromptBackend::new()), ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)), ChatRequest::from("Run the tool."), PendingStreamTrim::default(), router.turn_interrupt(), TurnInterrupts::none()).await;
+
+        let Err(Error::Llm(LlmError::Stream(error))) = result else {
+            panic!("expected the idle timeout to end the turn, got {result:?}");
+        };
+        assert_eq!(error.kind, StreamErrorKind::Timeout);
+        assert_eq!(provider.starts.load(Ordering::SeqCst), 1);
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+        let requests = lock.events().iter().filter_map(|event| event.event.as_tool_call_request()).map(|call| call.id.clone()).collect::<Vec<_>>();
+        assert_eq!(requests, vec!["agent-call"]);
         owner.shutdown().await.unwrap();
     }).await.unwrap();
 }
