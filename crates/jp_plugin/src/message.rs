@@ -47,9 +47,6 @@ pub struct PathsInfo {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostToPlugin {
     /// Sent immediately after spawning the plugin.
-    ///
-    /// Boxed: it is sent once per run and is several times larger than any
-    /// other message.
     Init(Box<InitMessage>),
 
     /// Response to `list_conversations`.

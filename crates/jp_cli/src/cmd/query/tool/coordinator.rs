@@ -424,9 +424,6 @@ enum Wait {
     Admission,
 
     /// Its approval prompt is open.
-    ///
-    /// Boxed: every other variant carries nothing, so an unboxed one would size
-    /// every call's state to the prompt's details.
     Approval(Box<PermissionInfo>),
 
     /// Parked at release, for the batch to be released.
