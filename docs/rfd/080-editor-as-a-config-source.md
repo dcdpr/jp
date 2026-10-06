@@ -133,7 +133,8 @@ For non-editable commands the flow is `resolve_partial` → `build` →
 
 ### Computing the editor delta
 
-The editor preamble is *seeded* with values from the resolved partial.
+The editor preamble is *seeded* with values from the resolved partial: the
+*config seed*.
 An unchanged preamble reproduces those values, so recording the parsed preamble
 as-is would persist seeded fields as if the user had typed them (e.g., a
 `--model` CLI flag would re-appear as an editor-authored `config_delta` event).
@@ -144,11 +145,52 @@ The extraction:
 editor_delta = seed_partial.delta(parsed_partial)
 ```
 
+`seed_partial` is this invocation's config seed.
 `PartialConfigDelta::delta` is the existing primitive used elsewhere for this
 kind of diff.
 Only `editor_delta` is folded into the partial and persisted.
 Today's `editor::edit_query` skips this step and exhibits a phantom-delta bug;
 the extraction fixes it as part of moving editor invocation pre-dispatch.
+
+**Kept drafts.** `QUERY_MESSAGE.md` outlives the invocation that wrote it: it is
+kept after an empty query, an interrupt, or a failed turn.
+Its preamble then holds that earlier invocation's config seed, which can differ
+from this one's: the earlier run may have used a model this run's `--cfg`
+replaced.
+Diffing that preamble against this invocation's config seed reads every stale
+pre-filled value as a user edit, and records it.
+
+The draft therefore stores its config seed in a hidden comment below the
+preamble, `<!-- CONFIG_SEED: ... -->`, and the preamble is reconciled before the
+editor opens.
+Only the pre-filled fields are reconciled:
+
+```txt
+for field in pre-filled fields:
+    if preamble[field] == stored_seed[field]:   // left alone by the user
+        preamble[field] = seed_partial[field]
+stored_seed := seed_partial                      // both written to the file
+```
+
+Every other field in the preamble was added by the user and is kept as written,
+merge strategy included.
+Diffing such a field against a config seed that never held it reads it as a
+change from nothing and drops its strategy: an `[assistant.instructions]`
+override with `strategy = "replace"` and an empty list would vanish, and a
+non-empty one would append instead of replace.
+The extraction above follows the same split:
+`seed_partial.delta(parsed_partial)` is taken over the pre-filled fields, and
+every other field of `parsed_partial` enters `editor_delta` as written.
+
+The user sees this invocation's config with their earlier edits on top.
+
+- In a draft without a stored config seed, every pre-filled field takes
+  `seed_partial`'s value: nothing tells an edit apart from a pre-filled value.
+  Fields the user added are kept.
+- A preamble that is not valid TOML is left as it is, with its stored config
+  seed; its parse error reopens the editor through `ParseOutcome::Retry`.
+  Once the repaired preamble parses, its pre-filled fields are reconciled
+  against that stored config seed, so an untouched stale value is not recorded.
 
 **Limitations.** `seed.delta(parsed)` is additions-only:
 
@@ -351,8 +393,10 @@ struct EditorInput {
 ```
 
 The existing `RevertFileGuard` semantics carry through: `drive_editor` creates
-the file (or reuses an existing one) with the seed content, the guard restores
-original content if not disarmed, successful parsing disarms before returning.
+the file (or reuses an existing one, its preamble reconciled as described in
+[Computing the editor delta](#computing-the-editor-delta)) with the seed
+content, the guard restores original content if not disarmed, successful parsing
+disarms before returning.
 On `ParseOutcome::Retry`, the protocol must preserve the edited file contents
 for the next editor invocation — either by disarming the guard before
 re-driving the editor, or by carrying the edited raw content into the next
@@ -361,10 +405,10 @@ Reusing the same `path` alone is not sufficient if the guard restores between
 invocations.
 
 The body of today's `editor::edit_query` splits cleanly: the `QueryDocument`
-construction and seed-content logic moves into `Query::editor_input`; the
-`QueryDocument::try_from(content)` reparse, seed-vs-parsed delta extraction (see
-"Computing the editor delta" above), and TOML parse-error retry logic move into
-`Query::parse_editor_output`.
+construction and seed-content logic, including preamble reconciliation, moves
+into `Query::editor_input`; the `QueryDocument::try_from(content)` reparse,
+seed-vs-parsed delta extraction (see "Computing the editor delta" above), and
+TOML parse-error retry logic move into `Query::parse_editor_output`.
 
 The early-return paths in today's `Query::edit_message` (no-edit + replay,
 query-as-argv, missing editor) translate to `EditorRequest::Skip` (with the
@@ -589,7 +633,8 @@ restructuring `run_inner` and the lock acquisition path.
    stdin/argv/replay/seed-build logic and returns `EditorRequest<PreparedQuery>`
    (`Skip` for the query-as-argv / `--no-edit` paths — with template rendering
    applied to the final output before returning, since `Skip` bypasses
-   `parse_editor_output`; `Abort` is reserved and unused by `Query`);
+   `parse_editor_output`; `Abort` is reserved and unused by `Query`) and
+   reconciles a kept draft's preamble against the stored config seed;
    `parse_editor_output` parses the saved preamble, computes `editor_delta =
    seed.delta(parsed)`, runs template rendering on the edited content, and
    returns `ParseOutcome::Run { delta, output }` or
@@ -641,6 +686,9 @@ restructuring `run_inner` and the lock acquisition path.
      (covers the `--new` two-build path).
    - Unchanged editor preamble after `--model X` produces no phantom
      `config_delta` event (covers seed-vs-parsed extraction).
+   - A draft kept after a failed turn and reopened under a different config
+     shows this invocation's config with only the user's earlier edits on top,
+     and records only those edits (covers preamble reconciliation).
    - `jp q --model alias` persists a concrete model ID (resolved alias) in the
      invocation delta event, not the alias name (covers invocation-delta alias
      resolution).

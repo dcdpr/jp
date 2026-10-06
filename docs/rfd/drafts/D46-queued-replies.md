@@ -119,8 +119,12 @@ come from:
 
 - The file is a `QueryDocument` (config preamble plus query text), while
   `preserve_query_message_file` writes raw content.
-  Writing a queued reply must preserve an existing preamble, which is the same
-  problem [RFD 093] is solving in this file.
+  Writing a queued reply must preserve an existing preamble together with its
+  `<!-- CONFIG_SEED: ... -->` comment, the config the preamble was pre-filled
+  with.
+  The next open reconciles the preamble against that config seed to tell the
+  user's config edits apart from stale pre-filled values ([RFD 093]); a preamble
+  written back without it loses those edits.
 
 Recovery is conditional: `preserve_query_message_file` only writes when
 user-local storage is configured, because scratch must never land in the
@@ -449,8 +453,9 @@ independent keys within it.
 - **Interaction with [RFD 093].** Active work there reshapes query composition
   and the draft's role.
   The queued reply writes the same file 093 reads, so the two need to agree on
-  preamble handling; this RFD assumes 093's rule that the buffer wins for query
-  text and the preamble is preserved untouched.
+  preamble handling; this RFD assumes 093's rules that the buffer wins for query
+  text and that the preamble is reconciled against its config seed when the
+  draft is next opened, which requires the queued write to keep both.
 
 ## Implementation Plan
 
