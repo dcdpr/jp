@@ -155,20 +155,20 @@ it.
 Falling back to a bare call here would replace "operation 2: unknown argument
 `pth`" with "unknown argument `ops`".
 
-**The tool declares `ops`.**
-The arguments are an envelope only if every check passes: `ops` is a non-empty
-array, every element is an object, and every element validates against the
-tool's own schema, with coercion and defaults applied to a copy.
+**The tool declares `ops`.** The arguments are an envelope only if every check
+passes: `ops` is a non-empty array, every element is an object, and every
+element validates against the tool's own schema, with coercion and defaults
+applied to a copy.
 If any check fails, the `ops` is the tool's own and the call runs bare.
 When both readings validate (possible when the tool requires nothing, as in
-`{"ops": [{"dry_run": true}]}`), the envelope wins: it is the shape every
-caller was shown.
+`{"ops": [{"dry_run": true}]}`), the envelope wins: it is the shape every caller
+was shown.
 
 The advertised schema still requires `ops`.
 Strict tool use on OpenAI and Anthropic rejects a schema whose root is an
 `anyOf`, so a schema permitting both shapes at the root cannot be advertised to
-them, and merging the tool's properties into the envelope as optional would
-drop every `required` the tool declares.
+them, and merging the tool's properties into the envelope as optional would drop
+every `required` the tool declares.
 Bare calls are accepted, not advertised: a model or client that sends one gets a
 working call, and one that follows the schema batches.
 
@@ -208,18 +208,16 @@ Two Host-side mechanisms carry over without modification:
 A child talks to the Host through the same private channel and interactions as
 any call, with three additions.
 
-**Every interaction says which operation it is for.**
-`CallInfo` gains `operation: Option<Operation>`, where `Operation` carries the
-parent's `InvocationId`, the operation's zero-based `index`, and the operation
-`count`.
+**Every interaction says which operation it is for.** `CallInfo` gains
+`operation: Option<Operation>`, where `Operation` carries the parent's
+`InvocationId`, the operation's zero-based `index`, and the operation `count`.
 `CallInfo::request` stays the caller's original request, envelope included, so
 the Host's correlation check sees the same request for every child.
 The operation's own arguments arrive where they always do, in `Prepare` and
 `Release`.
 
-**A child ends with `Settled`, not `Record`.**
-The conversation records one response per tool call, so a child is never
-recorded on its own.
+**A child ends with `Settled`, not `Record`.** The conversation records one
+response per tool call, so a child is never recorded on its own.
 Its last interaction is a new `Interaction::Settled`, carrying a `Recording` of
 the operation: its executed arguments, its unedited result (absent if it never
 executed), and the result approved for delivery.
@@ -231,9 +229,8 @@ Every child the service concludes sends exactly one `Settled`, including one a
 A child the Host resolves itself with `complete_call` (as it does for Stop &
 respond) sends none, because the Host already holds its result.
 
-**The parent's `Record` carries the operations.**
-`Recording` gains `operations: Vec<Recording>`, one entry per child in the order
-the assistant wrote them.
+**The parent's `Record` carries the operations.** `Recording` gains `operations:
+Vec<Recording>`, one entry per child in the order the assistant wrote them.
 `result` holds the folded body, which is also what the MCP caller receives, so
 what JP records and what it delivers are the same text.
 
@@ -252,9 +249,9 @@ its tool runs.
 Under a limit, children take slots in the order the assistant wrote them, so
 `concurrency = 1` runs them in that order whatever order the Host released them
 in.
-Once a slot is free, the parent checks the error policy: under
-`on_error = "stop"`, a child behind a failed operation settles as not run instead
-of executing.
+Once a slot is free, the parent checks the error policy: under `on_error =
+"stop"`, a child behind a failed operation settles as not run instead of
+executing.
 
 A child that ran reports its failure from the tool's own result, before it gives
 up its slot and before result-mode policy applies, so the next child cannot slip
@@ -282,15 +279,14 @@ It neither schedules nor folds.
   An operation's display state is keyed by `<tool call id>#<index>`, so each
   prompt, running state, and result belongs to its own line.
 - Each operation is a call of its own in the coordinator's batch: announced,
-  prompted for, and released in the order the assistant wrote it, like any
-  call.
+  prompted for, and released in the order the assistant wrote it, like any call.
 - `Settled` completes an operation's executor; the parent's `Record` completes
   the tool call and is what the conversation stores.
   The Host asks for that `Record` once every operation has a response, and
   counts the batch as settled only once it arrives.
-- Every operation, whoever decided its outcome (the tool, the user at its
-  prompt or result review, a cancellation), is resolved with `Executor::settle`,
-  which answers whatever barrier the child is parked on.
+- Every operation, whoever decided its outcome (the tool, the user at its prompt
+  or result review, a cancellation), is resolved with `Executor::settle`, which
+  answers whatever barrier the child is parked on.
   An operation cannot wait for the call's acknowledgement the way a plain call
   does, because the call is only recorded once every operation is resolved.
   Settling first makes sure the call's MCP request was sent: an operation
@@ -330,11 +326,11 @@ its child:
 
 - **Stop & respond** holds every unfinished child and completes each with the
   cancellation response, running or waiting for a slot.
-  The parent folds those like any other result, so the call records one
-  response saying which operations were cancelled.
+  The parent folds those like any other result, so the call records one response
+  saying which operations were cancelled.
 - **Restart** pauses the unfinished children.
-  Settled children keep their results; the others re-prepare on resume, and
-  the Host re-renders and re-prompts only those.
+  Settled children keep their results; the others re-prepare on resume, and the
+  Host re-renders and re-prompts only those.
 - **Escalating** past the menu cancels the Host's attempts; each unfinished
   child ends as cancelled and nothing further starts.
 
@@ -501,9 +497,9 @@ The mitigation is the permission decision a user can remember for the rest of
 the turn, which approves the remaining operations without prompting.
 Whether that is enough is an observation to make in use.
 
-**Do clients validate against the advertised schema?** An MCP client that
-checks arguments against `inputSchema` before sending would refuse a bare call
-the server accepts.
+**Do clients validate against the advertised schema?** An MCP client that checks
+arguments against `inputSchema` before sending would refuse a bare call the
+server accepts.
 That costs nothing a client following the schema would miss, but it means bare
 calls are a leniency of the server, not a promise to every caller.
 
