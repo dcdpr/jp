@@ -14,13 +14,19 @@ use camino_tempfile::Utf8TempDir;
 use jp_config::{
     AppConfig, PartialAppConfig,
     fs::load_partial,
-    model::id::{PartialModelIdConfig, ProviderId},
+    model::{
+        id::{PartialModelIdConfig, ProviderId},
+        parameters::ReasoningConfig,
+    },
     util::build,
 };
 use jp_conversation::ConversationStream;
 use jp_editor::{EditOutcome, EditRequest, EditorBackend};
 
-use super::{CUT_MARKER, EditorResult, QUERY_FILENAME, edit_query, parser::QueryDocument};
+use super::{
+    CUT_MARKER, EditorResult, QUERY_FILENAME, config_seed, edit_query, parser::QueryDocument,
+    refresh_untouched,
+};
 
 /// An editor that records the file it is shown, optionally applies one textual
 /// edit, and saves.
@@ -75,6 +81,11 @@ impl EditorBackend for ScriptedEditor {
 }
 
 fn config_with_model(name: &str) -> AppConfig {
+    config_with_model_and(name, "")
+}
+
+/// A config running `name`, with the TOML in `extra` layered on top.
+fn config_with_model_and(name: &str, extra: &str) -> AppConfig {
     let mut partial = AppConfig::new_test().to_partial();
     partial.assistant.model.id = PartialModelIdConfig {
         provider: Some(ProviderId::Anthropic),
@@ -82,7 +93,8 @@ fn config_with_model(name: &str) -> AppConfig {
     }
     .into();
 
-    build(partial).unwrap()
+    let extra = toml::from_str::<PartialAppConfig>(extra).unwrap();
+    build(load_partial(partial, extra).unwrap()).unwrap()
 }
 
 /// The config the conversation ends up with once the editor's output is applied
@@ -243,5 +255,128 @@ fn editing_one_draft_field_leaves_the_others_following_the_config() {
             .resolved()
             .to_string(),
         "anthropic/claude-opus-5-5"
+    );
+}
+
+/// A kept draft whose block no longer parses is shown as it stands, and once
+/// the user repairs it, the pre-filled fields they left alone still follow this
+/// run's config.
+///
+/// The block cannot be refreshed before the editor opens, so the refresh has to
+/// happen when the repaired block is read back.
+#[test]
+fn a_repaired_draft_block_follows_the_current_config() {
+    let dir = Utf8TempDir::new().unwrap();
+    let stream = ConversationStream::new_test();
+
+    let stale = config_with_model("claude-opus-5.5");
+    edit_query(
+        &stale,
+        dir.path(),
+        &stream,
+        "hello",
+        &ScriptedEditor::saving(),
+        None,
+    )
+    .unwrap();
+
+    // A draft left with a half-typed edit: the closing quote is missing.
+    let path = dir.path().join(QUERY_FILENAME);
+    let draft = fs::read_to_string(&path).unwrap();
+    fs::write(
+        &path,
+        draft.replace(r#"reasoning = "auto""#, r#"reasoning = "off"#),
+    )
+    .unwrap();
+
+    let current = config_with_model("claude-opus-5-5");
+    let editor = ScriptedEditor::replacing(r#"reasoning = "off"#, r#"reasoning = "off""#);
+    let (_, output) = edit_query(&current, dir.path(), &stream, "", &editor, None).unwrap();
+
+    // The invalid block reaches the editor untouched: nothing in it can be read.
+    assert_eq!(editor.shown_config_block(), indoc::indoc! {r#"
+            [assistant.model.id]
+            provider = "anthropic"
+            name = "claude-opus-5.5"
+
+            [assistant.model.parameters]
+            reasoning = "off"#});
+
+    let applied = applied(&current, output);
+    assert_eq!(
+        applied.assistant.model.id.resolved().to_string(),
+        "anthropic/claude-opus-5-5"
+    );
+    assert_eq!(
+        applied.assistant.model.parameters.reasoning,
+        Some(ReasoningConfig::Off)
+    );
+}
+
+/// A setting the user added to the block keeps its merge strategy across a
+/// reopen.
+///
+/// Clearing the inherited instructions with `strategy = "replace"` and an empty
+/// list must still clear them after the draft is reopened under another model,
+/// rather than vanish or turn into an append.
+#[test]
+fn an_added_draft_setting_keeps_its_merge_strategy() {
+    let dir = Utf8TempDir::new().unwrap();
+    let stream = ConversationStream::new_test();
+
+    let stale = config_with_model("claude-opus-5.5");
+    let editor = ScriptedEditor::replacing(
+        r#"reasoning = "auto""#,
+        "reasoning = \"auto\"\n\n[assistant.instructions]\nvalue = []\nstrategy = \"replace\"",
+    );
+    edit_query(&stale, dir.path(), &stream, "hello", &editor, None).unwrap();
+
+    let current = config_with_model_and("claude-opus-5-5", indoc::indoc! {r#"
+        [[assistant.instructions]]
+        title = "Inherited"
+        items = ["Answer in French."]
+    "#});
+    assert_eq!(current.assistant.instructions.len(), 1);
+
+    let editor = ScriptedEditor::saving();
+    let (_, output) = edit_query(&current, dir.path(), &stream, "", &editor, None).unwrap();
+
+    // Re-rendered through the config type, so the default flag is spelled out.
+    assert_eq!(editor.shown_config_block(), indoc::indoc! {r#"
+            [assistant.instructions]
+            value = []
+            strategy = "replace"
+            discard_when_merged = false
+
+            [assistant.model.id]
+            provider = "anthropic"
+            name = "claude-opus-5-5"
+
+            [assistant.model.parameters]
+            reasoning = "auto""#});
+    assert_eq!(applied(&current, output).assistant.instructions, vec![]);
+}
+
+/// Refreshing an untouched block onto another run's seed yields that seed
+/// exactly.
+///
+/// Fails when [`config_seed`] gains a pre-filled field that
+/// [`refresh_untouched`] does not refresh: an untouched value in it would
+/// otherwise survive a config change.
+#[test]
+fn refresh_untouched_covers_every_pre_filled_field() {
+    let stale = config_seed(&config_with_model("claude-opus-5.5"));
+    let current = config_seed(&config_with_model_and(
+        "claude-opus-5-5",
+        "assistant.model.parameters.reasoning = \"off\"",
+    ));
+    assert_ne!(
+        stale.assistant.model.parameters.reasoning,
+        current.assistant.model.parameters.reasoning
+    );
+
+    assert_eq!(
+        refresh_untouched(stale.clone(), Some(&stale), &current),
+        current
     );
 }

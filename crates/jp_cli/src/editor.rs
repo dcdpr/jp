@@ -10,8 +10,8 @@ use std::{
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{FixedOffset, Local};
 use jp_config::{
-    AppConfig, PartialAppConfig, PartialConfig as _, ToPartial as _, editor::EditorConfig,
-    fs::load_partial, model::parameters::PartialReasoningConfig,
+    AppConfig, PartialAppConfig, ToPartial as _, editor::EditorConfig,
+    model::parameters::PartialReasoningConfig,
 };
 use jp_conversation::{
     ConversationStream,
@@ -340,7 +340,14 @@ pub(crate) fn edit_query(
     let mut partial = PartialAppConfig::empty();
     if !doc.meta.config.value.is_empty() {
         match toml::from_str::<PartialAppConfig>(doc.meta.config.value) {
-            Ok(v) => partial = v,
+            // A block that did not parse when the editor opened was shown with
+            // the seed it was written with. Now that it reads, the pre-filled
+            // fields the user left alone take this run's values; for a block
+            // that was refreshed on open this changes nothing.
+            Ok(v) => match parse_seed(doc.meta.config.seed) {
+                Some(stored) => partial = refresh_untouched(v, Some(&stored), &seed),
+                None => partial = v,
+            },
             Err(error) => {
                 let error = error.to_string();
                 return edit_query(config, conversation_root, stream, "", editor, Some(&error));
@@ -353,6 +360,8 @@ pub(crate) fn edit_query(
 }
 
 /// The config a draft's block is pre-filled with.
+///
+/// A field added here must also be refreshed by [`refresh_untouched`].
 fn config_seed(config: &AppConfig) -> PartialAppConfig {
     let mut seed = PartialAppConfig::empty();
     seed.assistant.model.id = config.assistant.model.id.to_partial();
@@ -379,15 +388,13 @@ enum ConfigBlock {
 
 /// Bring a stored config block up to date with the config of this run.
 ///
-/// The block is `stored_seed` plus whatever the user edited, so the edits are
-/// its difference from the seed.
-/// Those edits are laid over `seed`, and every value the user left alone takes
-/// the value `seed` has.
+/// The pre-filled fields the user left alone take `seed`'s values, and every
+/// other field is kept as written; see [`refresh_untouched`].
 ///
-/// A block that is not valid TOML is kept as it is: its edits cannot be read,
-/// and the parse error it produces reopens the editor on it.
-/// A block without a readable seed is replaced by `seed` whole, because nothing
-/// tells the values the user edited apart from the pre-filled ones.
+/// A block that is not valid TOML is kept as it is, with its stored seed: its
+/// fields cannot be read, and the parse error it produces reopens the editor on
+/// it.
+/// [`edit_query`] refreshes it once the user's fix makes it read.
 fn reconcile_config_block(
     block: &str,
     stored_seed: Option<&str>,
@@ -405,27 +412,51 @@ fn reconcile_config_block(
         return ConfigBlock::Keep;
     };
 
-    let Some(stored_seed) =
-        stored_seed.and_then(|json| serde_json::from_str::<PartialAppConfig>(json).ok())
-    else {
-        if stored != *seed {
-            warn!("Replacing the config block of a query draft written without a seed.");
-        }
-        return render(seed);
-    };
-
-    let edits = stored_seed.delta(stored);
-    if edits.is_empty() {
-        return render(seed);
+    let stored_seed = parse_seed(stored_seed);
+    let refreshed = refresh_untouched(stored.clone(), stored_seed.as_ref(), seed);
+    if stored_seed.is_none() && refreshed != stored {
+        warn!("Refreshing the pre-filled config of a query draft written without a seed.");
     }
 
-    match load_partial(seed.clone(), edits) {
-        Ok(merged) => render(&merged),
-        Err(error) => {
-            warn!(%error, "Failed to reapply query draft config edits.");
-            ConfigBlock::Keep
-        }
+    render(&refreshed)
+}
+
+/// Read a draft's stored config seed, if it has a readable one.
+fn parse_seed(json: Option<&str>) -> Option<PartialAppConfig> {
+    json.and_then(|json| serde_json::from_str(json).ok())
+}
+
+/// Give the pre-filled fields of `block` that the user left alone the values
+/// `seed` has.
+///
+/// A pre-filled field counts as left alone while it still holds the value
+/// `stored_seed` filled it with.
+/// Without a `stored_seed` nothing tells an edit apart from a pre-filled value,
+/// so every pre-filled field takes `seed`'s value.
+///
+/// Every field the block was not pre-filled with is the user's own addition and
+/// is returned exactly as written, merge strategy included: diffing it against
+/// a seed that never held it would read it as a change from nothing, and lose
+/// the strategy that says how it merges.
+///
+/// Covers the same fields [`config_seed`] fills.
+fn refresh_untouched(
+    mut block: PartialAppConfig,
+    stored_seed: Option<&PartialAppConfig>,
+    seed: &PartialAppConfig,
+) -> PartialAppConfig {
+    let stored = stored_seed.map(|stored| &stored.assistant.model);
+    let model = &mut block.assistant.model;
+
+    if stored.is_none_or(|stored| stored.id == model.id) {
+        model.id = seed.assistant.model.id.clone();
     }
+
+    if stored.is_none_or(|stored| stored.parameters.reasoning == model.parameters.reasoning) {
+        model.parameters.reasoning = seed.assistant.model.parameters.reasoning.clone();
+    }
+
+    block
 }
 
 fn build_history_text(history: &ConversationStream) -> String {
