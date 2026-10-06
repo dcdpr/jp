@@ -417,6 +417,47 @@ async fn auth_kind_keywords_are_rejected_as_names() {
 }
 
 #[tokio::test]
+async fn registered_reserved_name_can_log_in_again() {
+    // Registrations made before these names were reserved stay selectable as
+    // `sub:<name>`, so signing in to them again must keep working.
+    let root = Utf8TempDir::new().unwrap();
+    let store = store_at(root.path());
+    let directory = root.path().join("data/claude/sub");
+    store
+        .mutate(|document| {
+            document.insert_profile(
+                CATEGORY_LLM,
+                PROVIDER_ANTHROPIC,
+                "sub",
+                registration(&directory),
+            );
+            Ok(())
+        })
+        .unwrap();
+    let auth = FakeAuth::default();
+    let (printer, _, _) = Printer::memory(OutputFormat::Text);
+    login_args("sub")
+        .run_with_auth(&store, &printer, &auth, Some(root.path()))
+        .await
+        .unwrap();
+    printer.shutdown();
+    assert_eq!(*auth.calls.lock().unwrap(), vec![(
+        "login".into(),
+        directory.clone()
+    )]);
+    assert_eq!(
+        store
+            .load()
+            .unwrap()
+            .profiles(CATEGORY_LLM, PROVIDER_ANTHROPIC)
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["sub"]
+    );
+}
+
+#[tokio::test]
 async fn signed_out_subscription_is_not_reported_as_usable() {
     let root = Utf8TempDir::new().unwrap();
     let store = store_at(root.path());

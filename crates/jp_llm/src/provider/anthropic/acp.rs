@@ -213,15 +213,25 @@ pub enum Rejection {
 
 fn remedy(login: &Login, reason: &Rejection) -> String {
     let fix = match (reason, login) {
-        (Rejection::ApiKey { .. }, _) => "remove that API key setting from Claude Code's settings",
-        (Rejection::ThirdParty, _) => "remove the provider setting from Claude Code's settings",
-        (_, Login::Named(_)) => {
-            "sign in again with `jp provider llm auth login anthropic --name <name>`"
+        (Rejection::ApiKey { .. }, _) => {
+            "remove that API key setting from Claude Code's settings".to_owned()
         }
-        (_, Login::Inherited(_)) => "sign in with `claude-agent-acp --cli auth login --claudeai`",
+        (Rejection::ThirdParty, _) => {
+            "remove the provider setting from Claude Code's settings".to_owned()
+        }
+        // The directory may come from an `acp_config_dirs` mapping that no
+        // registration names; without `--config-dir`, login would register a
+        // different directory and the next query would report a conflict.
+        (_, Login::Named(directory)) => format!(
+            "sign in again with `jp provider llm auth login anthropic --name <name> --config-dir \
+             {directory}`"
+        ),
+        (_, Login::Inherited(_)) => {
+            "sign in with `claude-agent-acp --cli auth login --claudeai`".to_owned()
+        }
     };
     match login {
-        Login::Named(_) => fix.to_owned(),
+        Login::Named(_) => fix,
         // The inherited login is what an unnamed `subscription` entry selects,
         // which is easy to reach by accident with `--auth sub`.
         Login::Inherited(_) => format!(

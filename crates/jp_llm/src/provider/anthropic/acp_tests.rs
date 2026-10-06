@@ -98,7 +98,8 @@ fn rejected_named_login_says_how_to_sign_in_again() {
     assert_eq!(
         error.to_string(),
         "the Claude Code login at /accounts/personal cannot serve subscription requests: it is \
-         signed out; sign in again with `jp provider llm auth login anthropic --name <name>`"
+         signed out; sign in again with `jp provider llm auth login anthropic --name <name> \
+         --config-dir /accounts/personal`"
     );
 }
 

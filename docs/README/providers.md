@@ -124,6 +124,8 @@ platform default.
 Names may contain ASCII letters, digits, hyphens, and underscores.
 The kind keywords `api_key`, `api`, `subscription`, `sub`, and `profile` are
 reserved: in an `auth` chain they select a kind, not a name.
+A login already registered under one of them can still sign in again, and is
+selected with the explicit form, e.g. `--auth sub:sub`.
 
 JP stores the absolute directory and account identity, not Claude Code's tokens.
 Claude Code owns credential storage and refresh.

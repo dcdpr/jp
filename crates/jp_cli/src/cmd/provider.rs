@@ -110,7 +110,7 @@ struct Login {
     /// `subscription:<name>`.
     ///
     /// The kind keywords `api_key`, `api`, `subscription`, `sub`, and `profile`
-    /// are reserved.
+    /// are reserved for new credentials.
     #[arg(long, default_value = "default")]
     name: String,
 
@@ -284,7 +284,15 @@ impl Login {
                 self.name
             )));
         }
-        if let Ok(entry) = self.name.parse::<AuthEntry>()
+        // A registration made before these names were reserved is still
+        // selectable as `<kind>:<name>`, so signing in to it again is allowed.
+        let registered = store
+            .load()
+            .map_err(|error| store_error(&error))?
+            .profiles(CATEGORY_LLM, &self.target.store_key())
+            .is_some_and(|profiles| profiles.contains_key(&self.name));
+        if !registered
+            && let Ok(entry) = self.name.parse::<AuthEntry>()
             && let Some(kind) = entry.kind()
         {
             return Err(Error::from(format!(
