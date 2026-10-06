@@ -74,15 +74,6 @@ impl PromptBackend for UnavailableBackend {
         Err(InquireError::NotTTY)
     }
 
-    fn text(
-        &self,
-        _message: &str,
-        _default: Option<&str>,
-        _writer: &mut dyn std::io::Write,
-    ) -> Result<String, InquireError> {
-        Err(InquireError::NotTTY)
-    }
-
     fn select(
         &self,
         _message: &str,

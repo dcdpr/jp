@@ -1102,15 +1102,6 @@ impl PromptBackend for HeldPromptBackend {
         panic!("unexpected prompt: {message}")
     }
 
-    fn text(
-        &self,
-        message: &str,
-        _default: Option<&str>,
-        _writer: &mut dyn std::io::Write,
-    ) -> Result<String, InquireError> {
-        panic!("unexpected prompt: {message}")
-    }
-
     fn select(
         &self,
         message: &str,

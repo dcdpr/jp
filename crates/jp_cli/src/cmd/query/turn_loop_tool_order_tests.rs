@@ -134,16 +134,6 @@ impl PromptBackend for TranscriptPromptBackend {
         Err(InquireError::OperationCanceled)
     }
 
-    fn text(
-        &self,
-        message: &str,
-        _default: Option<&str>,
-        _writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
-        self.record(message);
-        Err(InquireError::OperationCanceled)
-    }
-
     fn select(
         &self,
         message: &str,

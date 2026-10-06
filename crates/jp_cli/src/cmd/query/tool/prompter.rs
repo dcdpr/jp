@@ -13,6 +13,7 @@
 use std::{io::Write as _, sync::Arc};
 
 use crossterm::style::Stylize as _;
+use inquire::InquireError;
 use jp_config::conversation::tool::{RunMode, ToolSource};
 use jp_conversation::event::SelectOption;
 use jp_editor::{EditOutcome, EditorBackend};
@@ -476,11 +477,12 @@ impl ToolPrompter {
                 })
             }
             AnswerType::Text => {
-                let default_str = question.default.as_ref().and_then(|v| v.as_str());
-
-                let answer = self
-                    .prompt_backend
-                    .text(&question.text, default_str, &mut writer)?;
+                let seed = question
+                    .default
+                    .as_ref()
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let answer = self.prompt_text(&question.text, seed)?;
 
                 Ok(QuestionResult {
                     answer: Value::String(answer),
@@ -494,6 +496,25 @@ impl ToolPrompter {
                     answer: Value::String(answer),
                     persist_level: jp_tool::PersistLevel::None,
                 })
+            }
+        }
+    }
+
+    /// Ask for a free-text answer in the inline reply widget, seeded with
+    /// `seed`.
+    ///
+    /// An empty or whitespace-only submission is refused: the prompt opens
+    /// again with `seed` restored and a note that an answer is required.
+    /// Cancelling returns [`InquireError::OperationCanceled`].
+    fn prompt_text(&self, message: &str, seed: &str) -> Result<String, Error> {
+        let mut prompt = message.to_owned();
+        loop {
+            match self.inline_edit(&prompt, seed)? {
+                InlineEditResult::Cancelled => return Err(InquireError::OperationCanceled.into()),
+                InlineEditResult::Submitted(answer) if answer.trim().is_empty() => {
+                    prompt = format!("An answer is required. {message}");
+                }
+                InlineEditResult::Submitted(answer) => return Ok(answer),
             }
         }
     }

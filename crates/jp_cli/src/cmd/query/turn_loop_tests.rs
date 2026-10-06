@@ -1893,17 +1893,6 @@ impl PromptBackend for DelayedPromptBackend {
         )
     }
 
-    fn text(
-        &self,
-        message: &str,
-        default: Option<&str>,
-        writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
-        self.started.notify_one();
-        std::thread::sleep(self.delay);
-        self.inner.text(message, default, writer)
-    }
-
     fn select(
         &self,
         message: &str,
@@ -6174,16 +6163,6 @@ impl PromptBackend for ObservingPromptBackend {
             help,
             output,
         )
-    }
-
-    fn text(
-        &self,
-        message: &str,
-        default: Option<&str>,
-        writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
-        self.observe();
-        self.inner.text(message, default, writer)
     }
 
     fn select(

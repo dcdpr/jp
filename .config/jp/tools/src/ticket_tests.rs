@@ -554,10 +554,14 @@ fn create_asks_for_a_shorter_title() {
     ));
 
     assert_eq!(question.id, "shorter_title");
+    assert_eq!(question.text, "Shorter title, at most 60 characters?");
+    // The title as given, so a prompt opens with it ready to edit rather
+    // than empty.
     assert_eq!(
-        question.text,
-        "The title is 71 characters, and a ticket takes at most 60. Give a shorter title for: \
-         Make provider fixtures deterministic and sanitize recorded model output"
+        question.default,
+        Some(json!(
+            "Make provider fixtures deterministic and sanitize recorded model output"
+        ))
     );
     assert!(
         ids(&dir).is_empty(),
@@ -669,11 +673,7 @@ fn the_title_limit_is_configurable() {
         json!({ "max_title_length": 10 }),
     ));
 
-    assert_eq!(
-        question.text,
-        "The title is 18 characters, and a ticket takes at most 10. Give a shorter title for: \
-         Bump the deny list"
-    );
+    assert_eq!(question.text, "Shorter title, at most 10 characters?");
 }
 
 /// The declaration routes the question and advertises the limit, both by hand,

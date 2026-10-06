@@ -45,14 +45,6 @@ pub trait PromptBackend: Send + Sync {
         output: Box<dyn Write + Send>,
     ) -> Result<ReplyOutcome, InquireError>;
 
-    /// Display a single-line text input prompt.
-    fn text(
-        &self,
-        message: &str,
-        default: Option<&str>,
-        writer: &mut dyn Write,
-    ) -> Result<String, InquireError>;
-
     /// Display a selection menu.
     fn select(
         &self,
@@ -95,15 +87,6 @@ impl<P: PromptBackend + ?Sized> PromptBackend for &P {
             help,
             output,
         )
-    }
-
-    fn text(
-        &self,
-        message: &str,
-        default: Option<&str>,
-        writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
-        (*self).text(message, default, writer)
     }
 
     fn select(
@@ -172,19 +155,6 @@ impl PromptBackend for TerminalPromptBackend {
             .prompt(output)
     }
 
-    fn text(
-        &self,
-        message: &str,
-        default: Option<&str>,
-        writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
-        let mut prompt = inquire::Text::new(message);
-        if let Some(s) = default {
-            prompt = prompt.with_default(s);
-        }
-        prompt.prompt_with_writer(writer)
-    }
-
     fn select(
         &self,
         message: &str,
@@ -209,14 +179,14 @@ impl PromptBackend for TerminalPromptBackend {
 /// Mock prompt backend for testing.
 ///
 /// Pre-load the responses returned by the prompt methods (`inline_select`,
-/// `inline_reply`, `text`, `select`).
+/// `inline_reply`, `select`, `password`).
 ///
 /// Uses `Mutex` instead of `RefCell` to satisfy `Send + Sync` bounds.
 #[derive(Debug, Default)]
 pub struct MockPromptBackend {
     inline_responses: Mutex<VecDeque<char>>,
     reply_outcomes: Mutex<VecDeque<ReplyOutcome>>,
-    text_responses: Mutex<VecDeque<String>>,
+    reply_seeds: Mutex<Vec<String>>,
     select_responses: Mutex<VecDeque<String>>,
     password_responses: Mutex<VecDeque<String>>,
 }
@@ -244,14 +214,10 @@ impl MockPromptBackend {
         self
     }
 
-    /// Add responses to the inline select menu.
+    /// The text each `inline_reply` call opened its buffer with, in call order.
     #[must_use]
-    pub fn with_text_responses(
-        self,
-        responses: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Self {
-        *self.text_responses.lock() = responses.into_iter().map(Into::into).collect();
-        self
+    pub fn reply_seeds(&self) -> Vec<String> {
+        self.reply_seeds.lock().clone()
     }
 
     #[must_use]
@@ -295,27 +261,16 @@ impl PromptBackend for MockPromptBackend {
     fn inline_reply(
         &self,
         message: &str,
-        _initial_text: &str,
+        initial_text: &str,
         _edit_mode: ReplyEditMode,
         _editor_escape: bool,
         _help: Option<&str>,
         mut output: Box<dyn Write + Send>,
     ) -> Result<ReplyOutcome, InquireError> {
         write!(output, "{message}")?;
+        self.reply_seeds.lock().push(initial_text.to_owned());
 
         self.reply_outcomes
-            .lock()
-            .pop_front()
-            .ok_or(InquireError::OperationCanceled)
-    }
-
-    fn text(
-        &self,
-        _message: &str,
-        _default: Option<&str>,
-        _writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
-        self.text_responses
             .lock()
             .pop_front()
             .ok_or(InquireError::OperationCanceled)

@@ -532,11 +532,63 @@ fn question_boolean_uses_inline_select() {
 }
 
 #[test]
-fn question_text_uses_backend() {
-    let prompt = MockPromptBackend::new().with_text_responses(["user input"]);
-    let question = jp_tool::Question::text("q2", "Input:").unwrap();
-    let result = prompter(prompt).prompt_question(&question).unwrap();
-    assert_eq!(result.answer, Value::String("user input".to_string()));
+fn question_text_opens_the_reply_widget_on_its_default() {
+    let prompt = Arc::new(
+        MockPromptBackend::new().with_reply_outcomes([ReplyOutcome::Submit("Short title".into())]),
+    );
+    let prompter = ToolPrompter::with_backends(printer(), None, prompt.clone());
+    let question = jp_tool::Question::text("title", "Shorter title?")
+        .unwrap()
+        .with_default("A title that is much too long");
+
+    let result = prompter.prompt_question(&question).unwrap();
+
+    assert_eq!(result.answer, json!("Short title"));
+    assert_eq!(prompt.reply_seeds(), ["A title that is much too long"]);
+}
+
+/// An empty answer is never submitted: the prompt opens again, on the default,
+/// saying an answer is required, and only the next non-empty one is returned.
+#[test]
+fn question_text_refuses_an_empty_answer() {
+    let prompt = Arc::new(MockPromptBackend::new().with_reply_outcomes([
+        ReplyOutcome::Submit(String::new()),
+        ReplyOutcome::Submit("  \n ".into()),
+        ReplyOutcome::Submit("Short title".into()),
+    ]));
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let prompter = ToolPrompter::with_backends(Arc::new(printer), None, prompt.clone());
+    let question = jp_tool::Question::text("title", "Shorter title?")
+        .unwrap()
+        .with_default("Long title");
+
+    let result = prompter.prompt_question(&question).unwrap();
+    prompter.printer.flush();
+
+    assert_eq!(result.answer, json!("Short title"));
+    assert_eq!(prompt.reply_seeds(), [
+        "Long title",
+        "Long title",
+        "Long title"
+    ]);
+    // The mock widget writes each prompt's message and nothing else.
+    assert_eq!(
+        *out.lock(),
+        "Shorter title?An answer is required. Shorter title?An answer is required. Shorter title?"
+    );
+}
+
+#[test]
+fn question_text_cancelled_is_a_user_cancellation() {
+    let prompt = MockPromptBackend::new().with_reply_outcomes([ReplyOutcome::Cancelled]);
+    let question = jp_tool::Question::text("title", "Shorter title?").unwrap();
+
+    let error = prompter(prompt).prompt_question(&question).unwrap_err();
+
+    assert!(
+        matches!(error, Error::Inquire(InquireError::OperationCanceled)),
+        "{error:?}"
+    );
 }
 
 #[test]
