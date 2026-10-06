@@ -124,6 +124,22 @@ fn display_shows_the_command_line() {
     );
 }
 
+/// A program path is one literal token however many spaces it contains, so it
+/// renders quoted: pasting the line into a shell runs the same program.
+#[test]
+fn display_quotes_a_direct_program_path_with_spaces() {
+    let cmd = command(
+        "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+        &["--wait"],
+        false,
+    );
+
+    assert_eq!(
+        cmd.to_string(),
+        "'/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code' --wait"
+    );
+}
+
 /// A shell command names the shell that interprets it, so a reader can tell
 /// that `|`, `&&`, and `$(...)` in the line are live rather than literal.
 #[test]

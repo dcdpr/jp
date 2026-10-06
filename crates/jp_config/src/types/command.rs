@@ -259,9 +259,13 @@ impl CommandConfig {
     }
 }
 
-/// Renders as the command line a reader would type to run this command: the
-/// program followed by its shell-quoted arguments, wrapped in `sh -c '…'` when
-/// `shell` is set.
+/// Renders as the command line a reader would type to run this command, wrapped
+/// in `sh -c '…'` when `shell` is set.
+///
+/// Every word is shell-quoted, so a program path or an argument containing
+/// spaces stays one token.
+/// A `shell` command's program is the exception: it is shell syntax rather than
+/// a literal path, so it is quoted only as part of the whole script.
 ///
 /// This is the form shown in prompts, error messages, and logs, and it names
 /// the shell rather than reproducing an exact invocation: each executor adds
@@ -272,14 +276,19 @@ impl CommandConfig {
 /// [`shell_command_line`]: CommandConfig::shell_command_line
 impl fmt::Display for CommandConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let line = self.shell_command_line();
-
+        // Quoting only ever fails on an interior NUL byte, which a shell could
+        // not carry anyway; showing the bare line beats showing nothing.
         if !self.shell {
-            return write!(f, "{line}");
+            let words =
+                std::iter::once(self.program.as_str()).chain(self.args.iter().map(String::as_str));
+
+            return match shlex::try_join(words) {
+                Ok(quoted) => write!(f, "{quoted}"),
+                Err(_) => write!(f, "{}", self.shell_command_line()),
+            };
         }
 
-        // `try_quote` only fails on an interior NUL byte, which a shell could
-        // not carry anyway; showing the bare line beats showing nothing.
+        let line = self.shell_command_line();
         match shlex::try_quote(&line) {
             Ok(quoted) => write!(f, "sh -c {quoted}"),
             Err(_) => write!(f, "sh -c {line}"),

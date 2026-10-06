@@ -466,6 +466,11 @@ pub async fn run_tool_command(
         shell,
     };
 
+    // Rendered before `spec` takes the fields, so a spawn failure names the
+    // command as configured rather than as the runner received it: `spec`
+    // space-joins its tokens, which loses every argument boundary.
+    let command_display = command.to_string();
+
     let mut spec = if command.shell {
         // The rendered command line is shell syntax: the program verbatim, its
         // arguments shell-quoted so multi-word ones keep their boundaries.
@@ -496,7 +501,7 @@ pub async fn run_tool_command(
         Ok(Ok(finished)) => finished,
         Ok(Err(error)) => {
             return Err(ToolError::SpawnError {
-                command: spec.to_string(),
+                command: command_display,
                 error,
             });
         }

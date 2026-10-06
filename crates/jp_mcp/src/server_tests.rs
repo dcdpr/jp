@@ -352,6 +352,30 @@ fn command(program: &str, args: &[&str]) -> CommandConfig {
     }
 }
 
+/// A command that fails to start is named as it was configured, with a
+/// multi-word argument kept whole.
+///
+/// The runner space-joins the tokens it was handed, so reading the name back
+/// off it would report two arguments where the user wrote one.
+#[tokio::test]
+async fn spawn_failure_names_the_configured_command() {
+    let error = run_tool_command(
+        &no_commands(),
+        command("jp-missing-formatter", &["two words"]),
+        Value::Null,
+        "/tmp".into(),
+        CancellationToken::new(),
+        None,
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "Failed to spawn command: jp-missing-formatter 'two words'"
+    );
+}
+
 /// Regression: `{{tool}}` must render as valid JSON, including `null` for null
 /// fields (not Jinja2's `none`).
 /// Originally fixed with `AutoEscape::Json`, now handled by the custom
