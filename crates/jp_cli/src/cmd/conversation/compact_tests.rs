@@ -1,6 +1,7 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use camino_tempfile::{Utf8TempDir, tempdir};
+use chrono::{DateTime, Utc};
 use clap::Parser as _;
 use jp_config::{
     AppConfig, PartialAppConfig,
@@ -11,12 +12,13 @@ use jp_config::{
     model::{PartialModelConfig, id::PartialModelIdOrAliasConfig},
 };
 use jp_conversation::{
-    ByteSize, Compaction, ConversationStream, PolicySpec, ReasoningPolicy, SummaryPolicy,
-    SummarySource, ToolCallPolicy,
+    ByteSize, Compaction, Conversation, ConversationId, ConversationStream, PolicySpec,
+    ReasoningPolicy, SummaryPolicy, SummarySource, ToolCallPolicy,
     event::{ChatResponse, ToolCallRequest, ToolCallResponse},
 };
 use jp_llm::event::NoticeSink;
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
+use jp_storage::backend::FsStorageBackend;
 use jp_workspace::Workspace;
 use serde_json::{Map, Value};
 use tokio::runtime::Runtime;
@@ -487,6 +489,11 @@ fn preview_ctx() -> (Ctx, SharedBuffer, Utf8TempDir) {
     (ctx, out, tmp)
 }
 
+/// A fixed id for the previews, so the rendered errors are deterministic.
+fn preview_id() -> ConversationId {
+    ConversationId::try_from(DateTime::<Utc>::UNIX_EPOCH + Duration::from_secs(1)).unwrap()
+}
+
 #[test]
 fn preview_rejects_a_blank_verbatim_summary() {
     // Regression: `--summary '' --dry-run` used to print a successful preview
@@ -497,6 +504,7 @@ fn preview_rejects_a_blank_verbatim_summary() {
 
     let error = Compact::preview_compaction(
         &ctx,
+        preview_id(),
         &stream,
         &[summary_rule(Some("   "))],
         &parse_compact(&[]).range,
@@ -541,6 +549,101 @@ fn the_default_rules_cannot_satisfy_a_conversation_shorter_than_three_turns() {
     }
 }
 
+/// An empty plan on *any* target must be refused before *any* target is
+/// compacted.
+///
+/// Checking inside the mutation loop compacts and flushes the first
+/// conversation, then errors on the second: the earlier one stays mutated, the
+/// later ones are never reached, and the exit status says the run failed.
+/// Re-running then compacts the earlier one a second time, which under a
+/// summary rule is a second paid request.
+#[test]
+fn an_empty_plan_on_a_later_target_compacts_nothing() {
+    let tmp = tempdir().unwrap();
+    let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
+    let storage = tmp.path().join(".jp");
+    let user = tmp.path().join("user");
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage)
+            .unwrap()
+            .with_user_storage(&user, None, "abc")
+            .unwrap(),
+    );
+    let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    // Three turns is the first size the built-in rules can satisfy; two is the
+    // largest they cannot.
+    let id_a = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace.create_conversation_with_id(
+        id_a,
+        Conversation::default().with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+    let lock_a = ctx
+        .workspace
+        .test_lock(ctx.workspace.acquire_conversation(&id_a).unwrap());
+    lock_a
+        .as_mut()
+        .update_events(|e| e.extend(stream_of(3).iter().map(|x| x.event.clone())));
+    drop(lock_a);
+
+    ctx.set_now(ctx.now() + Duration::from_secs(1));
+
+    let id_b = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace.create_conversation_with_id(
+        id_b,
+        Conversation::default().with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+    let lock_b = ctx
+        .workspace
+        .test_lock(ctx.workspace.acquire_conversation(&id_b).unwrap());
+    lock_b
+        .as_mut()
+        .update_events(|e| e.extend(stream_of(2).iter().map(|x| x.event.clone())));
+    drop(lock_b);
+
+    let handle_a = ctx.workspace.acquire_conversation(&id_a).unwrap();
+    let handle_b = ctx.workspace.acquire_conversation(&id_b).unwrap();
+    let error = Runtime::new()
+        .unwrap()
+        .block_on(parse_compact(&[]).run(&mut ctx, vec![handle_a, handle_b]))
+        .unwrap_err();
+
+    // The refusal names B, not A, so the user can tell which target stopped the
+    // run.
+    assert_eq!(
+        error.message.as_deref(),
+        Some(
+            "No turns to compact in conversation jp-c10, the selection resolves to 0 of its 2 \
+             turns."
+        )
+    );
+
+    // A is the assertion that matters: it would be satisfiable on its own, so
+    // only the preflight keeps it untouched.
+    let handle_a = ctx.workspace.acquire_conversation(&id_a).unwrap();
+    assert_eq!(
+        ctx.workspace
+            .events(&handle_a)
+            .unwrap()
+            .compactions()
+            .count(),
+        0,
+        "a refused multi-target run must not leave the earlier target compacted"
+    );
+}
+
 /// Three turns is the first size the defaults can satisfy, so the error must
 /// not fire there: it compacts the middle turn.
 #[test]
@@ -573,6 +676,7 @@ fn an_explicit_start_still_collides_with_the_rule_s_protected_end() {
 
     let error = Compact::preview_compaction(
         &ctx,
+        preview_id(),
         &stream_of(3),
         &default_rules(),
         &parse_compact(&["--from", "3"]).range,
@@ -581,7 +685,10 @@ fn an_explicit_start_still_collides_with_the_rule_s_protected_end() {
 
     assert_eq!(
         error.message.as_deref(),
-        Some("No turns to compact, the selection resolves to 0 of this conversation's 3 turns.")
+        Some(
+            "No turns to compact in conversation jp-c10, the selection resolves to 0 of its 3 \
+             turns."
+        )
     );
 }
 
@@ -593,6 +700,7 @@ fn a_selection_with_no_window_is_rejected_too() {
 
     let error = Compact::preview_compaction(
         &ctx,
+        preview_id(),
         &stream_of(3),
         &default_rules(),
         &parse_compact(&["--first", "0"]).range,
@@ -601,7 +709,10 @@ fn a_selection_with_no_window_is_rejected_too() {
 
     assert_eq!(
         error.message.as_deref(),
-        Some("No turns to compact, the selection resolves to 0 of this conversation's 3 turns.")
+        Some(
+            "No turns to compact in conversation jp-c10, the selection resolves to 0 of its 3 \
+             turns."
+        )
     );
 }
 
@@ -614,6 +725,7 @@ fn preview_rejects_a_selection_that_compacts_nothing() {
 
     let error = Compact::preview_compaction(
         &ctx,
+        preview_id(),
         &stream_of(2),
         &default_rules(),
         &parse_compact(&[]).range,
@@ -625,7 +737,10 @@ fn preview_rejects_a_selection_that_compacts_nothing() {
     // renders under the message.
     assert_eq!(
         error.message.as_deref(),
-        Some("No turns to compact, the selection resolves to 0 of this conversation's 2 turns.")
+        Some(
+            "No turns to compact in conversation jp-c10, the selection resolves to 0 of its 2 \
+             turns."
+        )
     );
     assert!(error.metadata.is_empty(), "got {:?}", error.metadata);
 }
@@ -663,7 +778,14 @@ fn preview_does_not_itemize_a_summary_rule() {
     .unwrap()
     .remove(0);
 
-    Compact::preview_compaction(&ctx, &stream, &[rule], &parse_compact(&[]).range).unwrap();
+    Compact::preview_compaction(
+        &ctx,
+        preview_id(),
+        &stream,
+        &[rule],
+        &parse_compact(&[]).range,
+    )
+    .unwrap();
     ctx.printer.flush();
 
     // One range line and nothing under it. The 4 KB reasoning block clears the
@@ -685,8 +807,14 @@ fn preview_refuses_an_overlap_the_real_run_would_refuse() {
     let mut rule = summary_rule(Some("hand-written"));
     rule.keep_last = RuleBound::FromEnd(2);
 
-    let error =
-        Compact::preview_compaction(&ctx, &stream, &[rule], &parse_compact(&[]).range).unwrap_err();
+    let error = Compact::preview_compaction(
+        &ctx,
+        preview_id(),
+        &stream,
+        &[rule],
+        &parse_compact(&[]).range,
+    )
+    .unwrap_err();
 
     ctx.printer.flush();
     // The full refusal as the user reads it: what went wrong, and the exact

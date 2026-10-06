@@ -524,13 +524,17 @@ These two configurations show the distinction:
   happened, minus the bulk.
 - **Summarization (heavy):** Everything in the range is replaced by a single
   summary.
-  The summarizer reads ALL raw events (messages, reasoning, tool calls) to
-  produce the summary, so tool usage and decisions are captured in the text.
+  The summarizer reads the range's stored events (messages, reasoning, tool
+  calls) to produce the summary, so tool usage and decisions are captured in the
+  text.
   No orphaned events remain.
 
-When `summary` is set, `reasoning` and `tool_calls` are ignored — the summary
-replaces everything.
-They only apply when compacting without summarization.
+When `summary` is set, `reasoning` and `tool_calls` no longer affect the
+projection — the summary replaces the whole range regardless.
+They do still narrow what the summarizer reads: a rule carrying both `reasoning
+= "strip"` and `summary` summarizes the range with the reasoning already gone,
+so the text stands in for the turns the stored event will actually project.
+A rule setting `summary` alone summarizes the range whole.
 
 #### Stacking Semantics
 
@@ -576,7 +580,7 @@ Formally: given new range `[X, Y]` and existing summary range `[A, B]`, if the
 ranges intersect but neither fully contains the other, extend to `[min(X, A),
 max(Y, B)]`.
 Repeat until no partial overlaps remain.
-The summarizer then reads raw events for the extended range.
+The summarizer then reads the stored events for the extended range.
 
 This constraint applies only when `summary` is set.
 All other policies operate per-event and compose naturally with partial
@@ -584,19 +588,28 @@ overlaps.
 
 #### Raw-Stream Invariant
 
-**Summarization always reads the raw (non-compacted) event stream.** The
-summarizer sees the original messages, not prior summaries.
+**No prior compaction reaches a summarizer.** The summarizer sees the range's
+stored events, not another compaction's opinion of them.
 This prevents compound information loss — summarizing a summary degrades
 quality at each step.
 
 When compaction B's range overlaps with compaction A's range, B's summarizer
-reads the original events for its full range, ignoring A's summary entirely.
+reads the stored events for its full range, ignoring A's summary entirely.
 At projection time, B's summary wins for the overlapping region (it has a later
 timestamp), and it is a faithful summary of the originals.
+The same holds for A's mechanical policies: stripping reasoning over a range and
+later summarizing part of it are two decisions, and the second is allowed to
+disagree with the first.
 
 This is already guaranteed by the additive design — the raw events are always
 in `events.json` — but it is worth stating as an invariant: **no code path
-should feed a projected view to a summarizer.**
+should feed another compaction's projection to a summarizer.**
+
+The one projection a summarizer does see is its own compaction's mechanical
+policies (see [Strategies](#strategies)).
+That is not compound loss: the stripped content is what the stored event
+discards anyway, so summarizing it would describe turns the projection never
+shows.
 
 ### Strategies
 
@@ -632,8 +645,8 @@ count in coding conversations.
 
 ##### `summarize`
 
-Sends the raw events in the specified range to an LLM with instructions to
-produce a concise summary.
+Sends the range's stored events to an LLM with instructions to produce a concise
+summary, narrowed by the same rule's `reasoning` and `tool_calls` policies.
 Produces a compaction with `summary: Some(SummaryPolicy { summary })`.
 When set, this replaces all provider-visible events in the range.
 
@@ -768,8 +781,9 @@ Compaction here applies the `tool_calls` policies uniformly across all tools.
 - **Summaries are lossy.** Even though the original events are preserved, the
   LLM only sees the compacted view.
   A poor summary can mislead the model worse than a long conversation.
-  Mitigation: summaries are generated from raw events (never from prior
-  summaries), and the summarization model and prompt are configurable.
+  Mitigation: summaries are generated from the range's stored events (never from
+  another compaction's projection), and the summarization model and prompt are
+  configurable.
 
 - **Storage growth.** Compaction events add to the stream rather than reducing
   stored size.

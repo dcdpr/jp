@@ -607,10 +607,10 @@ impl From<crate::error::Error> for Error {
             // One line, no suggestion: the neighbouring variants' `suggestion`
             // field renders as an extra row under the message, which is more
             // than this is worth saying.
-            NothingToCompact { turns } => [(
+            NothingToCompact { id, turns } => [(
                 "message",
                 format!(
-                    "No turns to compact, the selection resolves to 0 of this conversation's \
+                    "No turns to compact in conversation {id}, the selection resolves to 0 of its \
                      {turns} turns."
                 ),
             )]
