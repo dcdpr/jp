@@ -32,7 +32,7 @@ use jp_openrouter::{
         tool::{self, FunctionCall, Tool, ToolCall, ToolCallType, ToolFunction},
     },
 };
-use jp_tool::{ToolDefinition, schema::has_unconstrained_node};
+use jp_tool::ToolDefinition;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use tracing::{debug, error, info, trace, warn};
@@ -46,7 +46,9 @@ use crate::{
     event_builder::EventBuilder,
     model::ReasoningDetails as ModelReasoningDetails,
     provider::{
-        Provider, openai::parameters_with_decoding, output_schema_is_open, trace_to_tmpfile,
+        Provider,
+        openai::{fits_strict_subset, parameters_with_decoding},
+        output_schema_is_open, trace_to_tmpfile,
     },
     query::ChatQuery,
     stream::with_tool_call_keepalive,
@@ -745,7 +747,7 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> (Vec<Tool>, ArgumentDecoders) {
         .map(|tool| {
             // A schema outside the strict subset gets the whole request
             // rejected, or its open objects closed; send that one tool unstrict.
-            let strict = !has_unconstrained_node(&tool.parameters);
+            let strict = fits_strict_subset(&tool.parameters);
             let (parameters, decoding) = parameters_with_decoding(&tool.parameters, strict);
             decoders.insert(&tool.name, decoding);
             Tool::Function {

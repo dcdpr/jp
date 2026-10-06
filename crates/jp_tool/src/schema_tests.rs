@@ -473,6 +473,59 @@ mod has_unconstrained_node {
         })));
     }
 
+    /// A root that admits keys beyond its declared ones is a map type, the same
+    /// as one nested below it.
+    #[test]
+    fn finds_a_root_that_allows_additional_properties() {
+        assert!(has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "additionalProperties": { "type": "string" }
+        })));
+        assert!(has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "additionalProperties": true
+        })));
+    }
+
+    /// A root composed with `allOf` gets its keys from the branches, so they
+    /// are walked like its own properties.
+    #[test]
+    fn finds_a_free_form_object_inside_a_root_all_of() {
+        assert!(has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "allOf": [{
+                "type": "object",
+                "properties": { "body": { "type": "object" } }
+            }]
+        })));
+    }
+
+    #[test]
+    fn reports_a_root_all_of_with_declared_properties() {
+        assert!(!has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "allOf": [{
+                "type": "object",
+                "properties": { "name": { "type": "string" } }
+            }]
+        })));
+    }
+
+    /// An empty root that is already closed is the canonical strict shape for a
+    /// tool with no parameters.
+    #[test]
+    fn ignores_a_closed_empty_root_object() {
+        assert!(!has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        })));
+    }
+
     /// A tool with no parameters has an empty root object; that is the
     /// canonical strict shape and stays strict.
     #[test]

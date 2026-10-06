@@ -773,6 +773,37 @@ fn structured_output_with_a_free_form_object_is_unstrict() {
     );
 }
 
+/// Strict mode has no composition keywords; the `allOf` entry's property is
+/// merged in rather than demoted to a description hint.
+#[test]
+fn structured_output_merges_an_all_of_entry() {
+    let format = response_format_for(json!({
+        "type": "object",
+        "properties": { "id": { "type": "string" } },
+        "allOf": [{
+            "type": "object",
+            "properties": { "name": { "type": "string" } }
+        }]
+    }));
+
+    assert_eq!(
+        format["json_schema"],
+        json!({
+            "name": "structured_output",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "name": { "type": "string" }
+                },
+                "required": ["id", "name"],
+                "additionalProperties": false
+            },
+            "strict": true
+        })
+    );
+}
+
 #[test]
 fn structured_output_with_a_fixed_shape_is_strict() {
     let format = response_format_for(json!({

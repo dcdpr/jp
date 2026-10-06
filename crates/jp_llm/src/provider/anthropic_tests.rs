@@ -3097,6 +3097,22 @@ mod strict_tools {
         assert_eq!(tool["input_schema"], parameters);
     }
 
+    /// Strict mode would overwrite the root's `additionalProperties` and drop
+    /// the dynamic keys the tool accepts.
+    #[test]
+    fn a_map_type_root_is_sent_unstrict() {
+        let parameters = json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "additionalProperties": { "type": "string" }
+        });
+
+        let tool = converted(parameters.clone());
+
+        assert_eq!(tool.get("strict"), None);
+        assert_eq!(tool["input_schema"], parameters);
+    }
+
     #[test]
     fn a_fixed_shape_stays_strict() {
         let tool = converted(json!({
@@ -3116,6 +3132,55 @@ mod strict_tools {
             })
         );
     }
+}
+
+/// The free-form object sits in the root's `allOf` branch rather than its own
+/// properties, which the check has to reach too.
+#[test]
+fn structured_output_with_a_free_form_object_in_a_root_all_of_is_refused() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-sonnet-4-5").try_into().unwrap(),
+        display_name: None,
+        context_window: Some(200_000),
+        max_output_tokens: Some(64_000),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(true),
+        prefill: None,
+        subscription: None,
+        features: vec![],
+    };
+
+    let schema = Map::from_iter([
+        ("type".into(), json!("object")),
+        ("properties".into(), json!({"id": {"type": "string"}})),
+        (
+            "allOf".into(),
+            json!([{"type": "object", "properties": {"body": {"type": "object"}}}]),
+        ),
+    ]);
+    let events = ConversationStream::new_test().with_turn(ChatRequest {
+        content: "Extract".into(),
+        schema: Some(schema),
+        author: None,
+    });
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+
+    let error = create_request(&model, query, true, &BetaFeatures(vec![]), false)
+        .expect_err("an open object cannot be constrained");
+
+    assert_matches!(error, Error::UnsupportedOutputSchema { .. });
 }
 
 /// Anthropic always constrains structured output, and every object in the

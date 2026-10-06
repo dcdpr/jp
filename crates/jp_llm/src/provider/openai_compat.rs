@@ -28,13 +28,16 @@ use jp_conversation::{
     ConversationStream,
     event::{ChatResponse, EventKind, ToolCallResponse},
 };
-use jp_tool::{ToolDefinition, schema::has_unconstrained_node};
+use jp_tool::ToolDefinition;
 use reqwest_eventsource::Event as SseEvent;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tracing::{debug, trace, warn};
 
-use super::{EventStream, openai::parameters_with_decoding};
+use super::{
+    EventStream,
+    openai::{fits_strict_subset, parameters_with_decoding},
+};
 use crate::{
     decoding::ArgumentDecoders,
     error::StreamError,
@@ -274,7 +277,7 @@ pub(crate) fn convert_tools(
             // A server that compiles the schema into a grammar honors a closed
             // object literally, so a schema outside the strict subset goes
             // unstrict rather than losing its open objects.
-            let strict = !has_unconstrained_node(&tool.parameters);
+            let strict = fits_strict_subset(&tool.parameters);
             let (parameters, decoding) = parameters_with_decoding(&tool.parameters, strict);
             decoders.insert(&tool.name, decoding);
             json!({

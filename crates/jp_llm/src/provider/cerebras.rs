@@ -24,7 +24,7 @@ use tracing::{debug, trace, warn};
 
 use super::{
     EventStream, ModelDetails, Provider,
-    openai::parameters_with_strict_mode,
+    openai::{flatten_all_of, parameters_with_strict_mode},
     openai_compat::{merge_consecutive_assistant_messages, parse_chunk},
 };
 use crate::{
@@ -599,13 +599,15 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
 
     if let Some(schema) = structured_schema {
         // Strict mode closes every object, which would leave the model only
-        // `{}` for an open one. Unstrict, the schema is a hint and goes as
-        // declared, since the strict-subset rules no longer apply.
-        let strict = !output_schema_is_open(&schema);
-        let schema = if strict {
-            transform_schema(schema)
-        } else {
-            Value::Object(schema)
+        // `{}` for an open one, and has no composition keywords, so an
+        // `allOf` is merged into its holder. Unstrict, the schema is a hint
+        // and goes as declared, since the strict-subset rules no longer apply.
+        let open = output_schema_is_open(&schema);
+        let mut schema = Value::Object(schema);
+        let strict = !open && flatten_all_of(&mut schema);
+        let schema = match schema {
+            Value::Object(schema) if strict => transform_schema(schema),
+            schema => schema,
         };
 
         body["response_format"] = json!({

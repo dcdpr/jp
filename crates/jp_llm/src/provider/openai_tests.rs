@@ -212,6 +212,43 @@ mod structured_output {
         );
     }
 
+    /// The root's `allOf` branch carries a free-form object.
+    /// Strict mode would close it, and flattening the branch would drop it
+    /// altogether.
+    #[test]
+    fn a_free_form_object_in_a_root_all_of_sends_the_schema_unstrict() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "allOf": [{
+                "type": "object",
+                "properties": { "body": { "type": "object" } }
+            }]
+        });
+
+        let format = format_for(schema.clone());
+
+        assert_eq!(format["strict"], json!(false));
+        assert_eq!(format["schema"], schema);
+    }
+
+    #[test]
+    fn a_conflicting_all_of_sends_the_schema_unstrict() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "allOf": [{
+                "type": "object",
+                "properties": { "id": { "type": "integer" } }
+            }]
+        });
+
+        let format = format_for(schema.clone());
+
+        assert_eq!(format["strict"], json!(false));
+        assert_eq!(format["schema"], schema);
+    }
+
     #[test]
     fn a_fixed_shape_stays_strict() {
         let format = format_for(json!({
@@ -608,6 +645,69 @@ mod convert_tools {
                 "additionalProperties": { "type": "string" }
             })
         );
+    }
+
+    /// An MCP tool whose arguments are a map type takes keys beyond the
+    /// declared ones.
+    /// The value schema for those keys reaches the API intact.
+    #[test]
+    fn a_root_allowing_additional_properties_drops_strict_mode() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "additionalProperties": { "type": "string" }
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+        assert_eq!(
+            tool["parameters"]["additionalProperties"],
+            json!({ "type": "string" })
+        );
+    }
+
+    /// A tool unstrict for a nested open object keeps the root closed when its
+    /// source says so.
+    #[test]
+    fn an_unstrict_tool_keeps_a_closed_root_closed() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": { "body": { "type": "object" } },
+            "additionalProperties": false
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+        assert_eq!(tool["parameters"]["additionalProperties"], json!(false));
+    }
+
+    /// One schema cannot hold two different definitions of `id`, and the strict
+    /// subset cannot keep the `allOf`, so the tool goes unstrict as declared.
+    #[test]
+    fn a_conflicting_all_of_entry_drops_strict_mode() {
+        let all_of = json!([{
+            "type": "object",
+            "properties": { "id": { "type": "integer" } }
+        }]);
+        let tool = converted(json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "allOf": all_of
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+        assert_eq!(tool["parameters"]["allOf"], all_of);
+    }
+
+    /// An entry that refers back to its holder has no finite flattening.
+    #[test]
+    fn a_self_referencing_all_of_entry_drops_strict_mode() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "allOf": [{ "$ref": "#" }]
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+        assert_eq!(tool["parameters"]["allOf"], json!([{ "$ref": "#" }]));
     }
 
     /// `Optional[dict]` in Pydantic: the free-form object sits inside `anyOf`.
@@ -1080,6 +1180,73 @@ mod ensure_strict_schema {
         assert!(out.get("allOf").is_none());
         assert_eq!(out["type"], "object");
         assert_eq!(out["description"], "Extra info");
+    }
+
+    /// The holder and its `allOf` entry both declare properties; the strict
+    /// schema carries all of them, and optionality follows the merged
+    /// `required`.
+    #[test]
+    fn allof_merges_properties_with_the_holder() {
+        let out = run(json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "required": ["id"],
+            "allOf": [{
+                "type": "object",
+                "properties": { "name": { "type": "string" } }
+            }]
+        }));
+
+        assert_eq!(
+            out,
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "name": { "type": ["string", "null"] }
+                },
+                "required": ["id", "name"],
+                "additionalProperties": false
+            })
+        );
+    }
+
+    /// An entry that is a reference merges the definition it points to.
+    #[test]
+    fn allof_reads_an_entry_through_its_reference() {
+        let out = run(json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "allOf": [{ "$ref": "#/$defs/Base" }],
+            "$defs": {
+                "Base": {
+                    "type": "object",
+                    "properties": { "name": { "type": "string" } },
+                    "required": ["name"]
+                }
+            }
+        }));
+
+        assert_eq!(
+            out,
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": ["string", "null"] },
+                    "name": { "type": "string" }
+                },
+                "required": ["id", "name"],
+                "additionalProperties": false,
+                "$defs": {
+                    "Base": {
+                        "type": "object",
+                        "properties": { "name": { "type": "string" } },
+                        "required": ["name"],
+                        "additionalProperties": false
+                    }
+                }
+            })
+        );
     }
 
     #[test]

@@ -239,11 +239,13 @@ pub fn validate_types(path: &str, types: &[String]) -> Result<(), Error> {
     Ok(())
 }
 
-/// Whether any node below the root leaves its value open: either the JSON type,
-/// or the keys of an object (see [`Node::is_open_object`]).
+/// Whether the schema leaves a value open: either the JSON type, or the keys of
+/// an object (see [`Node::is_open_object`]).
 ///
-/// The root object is not checked, so a tool with no parameters, whose root
-/// declares no properties, does not count.
+/// The root counts when it admits keys beyond its declared ones, and its
+/// composition branches are walked like its properties.
+/// A root that declares no properties does not count on that ground alone, so a
+/// tool with no parameters stays closed.
 ///
 /// Walks properties, array items, and `anyOf`, `oneOf` and `allOf` branches,
 /// reading through `$ref` the way [`Node`] does, and stops at a definition
@@ -252,10 +254,18 @@ pub fn validate_types(path: &str, types: &[String]) -> Result<(), Error> {
 /// merely because it declares no `type` of its own.
 #[must_use]
 pub fn has_unconstrained_node(schema: &Value) -> bool {
-    Node::root(schema)
-        .properties()
-        .iter()
-        .any(|(_, property)| is_open(property, &mut vec![]))
+    let root = Node::root(schema);
+    let mut visiting = vec![];
+
+    root.admits_extra_keys()
+        || root
+            .branches()
+            .iter()
+            .any(|branch| is_open(branch, &mut visiting))
+        || root
+            .properties()
+            .iter()
+            .any(|(_, property)| is_open(property, &mut visiting))
 }
 
 fn is_open(node: &Node<'_>, visiting: &mut Vec<String>) -> bool {
@@ -426,12 +436,14 @@ impl<'a> Node<'a> {
             return false;
         }
 
-        let admits_extra_keys = self
-            .node
-            .get("additionalProperties")
-            .is_some_and(|additional| additional != &Value::Bool(false));
+        !self.has_properties() || self.admits_extra_keys()
+    }
 
-        !self.has_properties() || admits_extra_keys
+    /// Whether `additionalProperties` is set to anything other than `false`.
+    fn admits_extra_keys(&self) -> bool {
+        self.node
+            .get("additionalProperties")
+            .is_some_and(|additional| additional != &Value::Bool(false))
     }
 
     /// Whether a value satisfies this node's declared types.
