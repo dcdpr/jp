@@ -29,14 +29,17 @@ In disagreements between code and docs, the code is authoritative.
     - [Conversation](#conversation)
     - [Conversation Event](#conversation-event)
     - [EditorBackend](#editorbackend)
+    - [Envelope](#envelope)
     - [Event Overlay](#event-overlay)
     - [External Login](#external-login)
+    - [Fan-Out](#fan-out)
     - [InlineReply](#inlinereply)
     - [Inquiry](#inquiry)
     - [Invocation](#invocation)
     - [JP MCP Server](#jp-mcp-server)
     - [Match](#match)
     - [MCP Host](#mcp-host)
+    - [Operation](#operation)
     - [Persona](#persona)
     - [Pinned Conversation](#pinned-conversation)
     - [Provider](#provider)
@@ -188,6 +191,17 @@ scripts outcomes for tests.
 Defined as the `EditorBackend` trait in `jp_editor`; call sites obtain one
 through `build_editor_backend` in `jp_cli`.
 
+### Envelope
+
+The argument shape a [Fan-Out](#fan-out) tool is advertised with: an object
+holding one `ops` array, each element of which is one complete set of the tool's
+own arguments.
+JP's construction rather than anything the tool declares; built by `envelope` in
+`jp_mcp::server::fan_out`.
+
+**Not the same as** the tool's own parameter schema, which describes one
+[Operation](#operation) and is what each operation is validated against.
+
 ### Event Overlay
 
 A non-destructive overlay that rewrites the metadata of the events it matches
@@ -214,6 +228,19 @@ Implemented by `CredentialSecret::External` in `jp_credentials`.
 
 **Not the same as** a JP-stored token or a subscription flow: the login
 identifies an account, while the flow selects how requests reach the provider.
+
+### Fan-Out
+
+A tool call carrying several independent [Operations](#operation) in an
+[Envelope](#envelope), which the [JP MCP Server](#jp-mcp-server) runs as
+separate [Invocations](#invocation) and folds into the single response the
+caller is waiting for.
+A property of a tool's configuration, not of its implementation, which still
+receives one operation per execution; configured by `FanOutConfig` in
+`jp_config::conversation::tool`.
+
+**Not the same as** a tool that takes several targets as one action, such as
+`fs_modify_file`, which applies them together and is approved as one.
 
 ### InlineReply
 
@@ -242,6 +269,10 @@ the moment the call is admitted to the moment its result is recorded.
 It carries an identity the server assigns itself, so two callers asking for the
 same tool with the same arguments at the same time remain distinguishable.
 Implemented as `InvocationId` in `jp_mcp::server::service`.
+
+Each [Operation](#operation) of a [Fan-Out](#fan-out) call runs as a child of
+the call's invocation, and ends by settling into it rather than by being
+recorded.
 
 **Not the same as** a [Tool Call](#tool-call), which is the pair of conversation
 events an invocation produces, nor a transport request ID, which belongs to
@@ -287,6 +318,19 @@ In JP the Host is the CLI process, reached through the private channel a
 the protocol.
 The Host is one such caller, and a third-party client is another; only the Host
 answers the server's decisions.
+
+### Operation
+
+One element of a [Fan-Out](#fan-out) call's `ops` array: one complete set of the
+tool's arguments, run as its own child [Invocation](#invocation) and shown,
+approved, and reviewed as a call of its own.
+`Operation` in `jp_mcp::server::service` identifies one by its call's
+invocation, its position, and the number of operations in the call.
+
+**Not the same as** a [Tool Call](#tool-call): the operations of one call share
+its tool call id, and the conversation records one response for all of them.
+Nor the informal sense used by access policies, where an operation is whatever
+one tool execution does to a path.
 
 ### Pinned Conversation
 

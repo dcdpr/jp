@@ -5,6 +5,15 @@
 //! Dropping a receiver does not cancel or retry work; use [`Call::cancel`] or
 //! [`Service::cancel_current`].
 //! The MCP Host must drain [`HostReceiver`] while calls are outstanding.
+//!
+//! A call to a tool with `fan_out` configured that carries an envelope runs as
+//! a parent invocation with one child invocation per operation; see
+//! [`fan_out`].
+//! Each child talks to the Host like any call, tagged with its [`Operation`],
+//! and ends with [`Interaction::Settled`]; the parent folds their results and
+//! owns the one [`Interaction::Record`].
+//!
+//! [`fan_out`]: super::fan_out
 
 use std::{
     collections::HashMap,
@@ -15,7 +24,7 @@ use std::{
 use camino::Utf8PathBuf;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{
-    FormatMode, ResultMode, RunMode, ToolConfigWithDefaults, style::ParametersStyle,
+    FanOut, FormatMode, ResultMode, RunMode, ToolConfigWithDefaults, style::ParametersStyle,
 };
 use jp_process::ProcessRunner;
 use jp_tool::{
@@ -32,6 +41,7 @@ use super::{
     Answers, CommandResult, Execution, ExecutionOutcome, InvocationContext, StderrSink,
     builtin::BuiltinExecutors,
     execute,
+    fan_out::{self, OperationOutcome, Split},
     result::{ResultError, to_mcp},
 };
 use crate::{CallToolResult, Client};
@@ -73,7 +83,24 @@ pub struct CallInfo {
     /// The service-assigned invocation ID.
     pub id: InvocationId,
     /// Original caller input; edits do not change it.
+    ///
+    /// For an operation of a fanned-out call this is the whole call, envelope
+    /// included; the operation's own arguments arrive with `Prepare`.
     pub request: CallRequest,
+    /// Which operation of a fanned-out call this invocation runs, or `None` for
+    /// an ordinary call and for the fanned-out call itself.
+    pub operation: Option<Operation>,
+}
+
+/// One operation of a fanned-out call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Operation {
+    /// The invocation of the call the operation belongs to.
+    pub parent: InvocationId,
+    /// Zero-based position of the operation in the caller's `ops` array.
+    pub index: usize,
+    /// How many operations the call carries.
+    pub count: usize,
 }
 
 /// A required interaction for one invocation.
@@ -213,6 +240,19 @@ pub enum Interaction {
         /// The content approved for delivery, including skip explanations.
         reply: oneshot::Sender<HostReply<ToolResult>>,
     },
+    /// Report how one operation of a fanned-out call ended.
+    ///
+    /// The last interaction of every operation, instead of `Record`: the
+    /// operation is not recorded on its own, but folded into its call's
+    /// `Record`.
+    /// Not sent for an operation the Host resolved with `complete_call`, since
+    /// the Host supplied that result itself.
+    Settled {
+        /// How the operation ended.
+        settlement: Box<Recording>,
+        /// Acknowledges that the Host has taken the settlement.
+        reply: oneshot::Sender<HostReply<()>>,
+    },
     /// Acknowledge final recording before returning the result to the caller.
     Record {
         /// What the Host is being asked to record.
@@ -237,6 +277,8 @@ pub struct Recording {
     pub raw_result: Option<ToolResult>,
 
     /// Content approved for delivery.
+    ///
+    /// For a fanned-out call, the folded result of its operations.
     pub result: ToolResult,
 }
 
@@ -251,7 +293,7 @@ impl Interaction {
             Self::Release { reply, .. } => reply.is_closed(),
             Self::Input { reply, .. } => reply.is_closed(),
             Self::Review { reply, .. } => reply.is_closed(),
-            Self::Record { reply, .. } => reply.is_closed(),
+            Self::Settled { reply, .. } | Self::Record { reply, .. } => reply.is_closed(),
         }
     }
 }
@@ -354,6 +396,29 @@ impl Call {
 struct CallOutput {
     result: ToolResult,
     delivery_decided: bool,
+
+    /// For an operation a `stop` policy ruled out, the one-based position of
+    /// the operation whose failure stopped it.
+    not_run: Option<usize>,
+}
+
+impl CallOutput {
+    /// A result still subject to the tool's result-delivery policy.
+    fn undecided(result: ToolResult) -> Self {
+        Self {
+            result,
+            delivery_decided: false,
+            not_run: None,
+        }
+    }
+
+    /// A result the Host or the service has already settled on.
+    fn decided(result: ToolResult) -> Self {
+        Self {
+            delivery_decided: true,
+            ..Self::undecided(result)
+        }
+    }
 }
 
 impl Call {
@@ -379,6 +444,10 @@ pub struct Service {
 
 struct Inner {
     tools: IndexMap<String, ConfiguredTool>,
+
+    /// What each tool is advertised as, in the same order: its own definition,
+    /// or the fan-out envelope around it.
+    advertised: IndexMap<String, ToolDefinition>,
     upstream: Client,
     builtins: BuiltinExecutors,
     runner: Arc<dyn ProcessRunner>,
@@ -420,6 +489,122 @@ struct ActiveCall {
     id: InvocationId,
 }
 
+impl ActiveCall {
+    /// Keep `id` in the active set until this guard drops.
+    fn new(inner: &Arc<Inner>, id: InvocationId) -> Self {
+        Self {
+            inner: inner.clone(),
+            id,
+        }
+    }
+}
+
+/// What a submitted call turns out to need.
+enum Work {
+    /// One invocation running the tool.
+    Plain,
+    /// One child invocation per operation, under the submitted call.
+    FanOut {
+        policy: FanOut,
+        operations: Vec<Map<String, Value>>,
+    },
+    /// Nothing to run: the call is answered with this result as recorded.
+    Refuse(ToolResult),
+}
+
+/// An invocation's entry in the active set, as its task needs it.
+struct Control {
+    id: InvocationId,
+    lifetime: CancellationToken,
+    attempt: CancellationToken,
+    resume: Arc<Notify>,
+}
+
+/// Allocate an invocation and add it to the active set.
+///
+/// `lifetime` ends the invocation when cancelled; each attempt runs under a
+/// child of it.
+fn register(inner: &Arc<Inner>, lifetime: CancellationToken) -> Result<Control, ServiceError> {
+    let mut state = inner.state();
+    if state.stopped {
+        return Err(ServiceError::Stopped);
+    }
+    state.next_id = state
+        .next_id
+        .checked_add(1)
+        .ok_or(ServiceError::IdExhausted)?;
+    let id = InvocationId(state.next_id);
+    let attempt = lifetime.child_token();
+    let resume = Arc::new(Notify::new());
+    state.active.insert(id, CallControl {
+        lifetime: lifetime.clone(),
+        attempt: attempt.clone(),
+        resume: resume.clone(),
+        completion: None,
+    });
+    Ok(Control {
+        id,
+        lifetime,
+        attempt,
+        resume,
+    })
+}
+
+/// Run one invocation of the tool to its result, across the attempts a Host
+/// restart opens.
+///
+/// `gate` is the fan-out policy an operation runs under, with its position.
+async fn drive(
+    inner: &Arc<Inner>,
+    call: &CallInfo,
+    tool: &ConfiguredTool,
+    arguments: &Map<String, Value>,
+    gate: Option<(&Arc<Gate>, usize)>,
+    control: Control,
+) -> Result<CallOutput, ServiceError> {
+    let _active = ActiveCall::new(inner, control.id);
+    let Control {
+        id,
+        lifetime,
+        mut attempt,
+        resume,
+    } = control;
+    loop {
+        let result = tokio::select! {
+            biased;
+            () = lifetime.cancelled() => Some(Err(ServiceError::Cancelled)),
+            () = inner.host.closed() => Some(Err(ServiceError::HostDisconnected)),
+            () = attempt.cancelled() => None,
+            result = run_call(inner, call, tool.clone(), arguments.clone(), gate, &attempt) => {
+                Some(result)
+            }
+        };
+        if let Some(result) = result {
+            return result;
+        }
+        // The MCP caller still owns the same pending request. Wait for the Host
+        // to re-prepare it before opening another attempt.
+        tokio::select! {
+            biased;
+            () = lifetime.cancelled() => return Err(ServiceError::Cancelled),
+            () = inner.host.closed() => return Err(ServiceError::HostDisconnected),
+            () = resume.notified() => {},
+        }
+        let completion = inner
+            .state()
+            .active
+            .get_mut(&id)
+            .and_then(|control| control.completion.take());
+        if let Some(result) = completion {
+            return Ok(CallOutput::decided(result));
+        }
+        attempt = lifetime.child_token();
+        if let Some(control) = inner.state().active.get_mut(&id) {
+            control.attempt = attempt.clone();
+        }
+    }
+}
+
 impl Drop for ActiveCall {
     fn drop(&mut self) {
         self.inner.state().active.remove(&self.id);
@@ -444,14 +629,21 @@ impl Service {
         invocation: InvocationContext,
     ) -> Result<(Self, HostReceiver), ServiceError> {
         let mut catalog = IndexMap::new();
+        let mut advertised = IndexMap::new();
         for tool in tools {
             if tool.config.access().is_some() && matches!(tool.access, Ok(None)) {
                 return Err(ServiceError::MissingAccessPolicy(tool.definition.name));
             }
             let name = tool.definition.name.clone();
+            let definition = if tool.config.fan_out().is_some() {
+                fan_out::advertise(&tool.definition)
+            } else {
+                tool.definition.clone()
+            };
             if catalog.insert(name.clone(), tool).is_some() {
                 return Err(ServiceError::DuplicateTool(name));
             }
+            advertised.insert(name, definition);
         }
         let (host, receiver) = mpsc::channel(32);
         let (progress, _) = broadcast::channel(64);
@@ -459,6 +651,7 @@ impl Service {
             Self {
                 inner: Arc::new(Inner {
                     tools: catalog,
+                    advertised,
                     upstream,
                     builtins,
                     runner,
@@ -475,8 +668,12 @@ impl Service {
     }
 
     /// Advertised definitions in their configured order.
+    ///
+    /// A tool with `fan_out` configured is advertised with the envelope schema
+    /// around its own, which is what every caller, JP's own provider requests
+    /// included, should be shown.
     pub fn definitions(&self) -> impl Iterator<Item = &ToolDefinition> {
-        self.inner.tools.values().map(|tool| &tool.definition)
+        self.inner.advertised.values()
     }
 
     /// Metadata supplied by the Host; empty maps are omitted from descriptions.
@@ -503,10 +700,6 @@ impl Service {
     /// root, policy, or answers.
     pub fn start_call(&self, request: CallRequest) -> Result<Call, ServiceError> {
         let inner = self.inner.clone();
-        let mut state = inner.state();
-        if state.stopped {
-            return Err(ServiceError::Stopped);
-        }
         let tool = inner
             .tools
             .get(&request.name)
@@ -514,63 +707,48 @@ impl Service {
             .ok_or_else(|| ToolError::NotFound {
                 name: request.name.clone(),
             })?;
-        state.next_id = state
-            .next_id
-            .checked_add(1)
-            .ok_or(ServiceError::IdExhausted)?;
-        let id = InvocationId(state.next_id);
-        let cancellation = CancellationToken::new();
-        let mut attempt = cancellation.child_token();
-        let resume = Arc::new(Notify::new());
-        state.active.insert(id, CallControl {
-            lifetime: cancellation.clone(),
-            attempt: attempt.clone(),
-            resume: resume.clone(),
-            completion: None,
-        });
-        drop(state);
-        let (sender, result) = oneshot::channel();
-        let task_token = cancellation.clone();
-        let active = ActiveCall {
-            inner: inner.clone(),
-            id,
+
+        let work = match tool.config.fan_out() {
+            None => Work::Plain,
+            Some(policy) => match fan_out::split(&tool.definition, &request.arguments) {
+                Split::Bare => Work::Plain,
+                Split::Envelope(operations) => Work::FanOut { policy, operations },
+                Split::Malformed(error) => {
+                    Work::Refuse(ToolResult::error(error.message(&request.name)))
+                }
+            },
         };
+
+        let cancellation = CancellationToken::new();
+        let control = register(&inner, cancellation.clone())?;
+        let id = control.id;
+        let (sender, result) = oneshot::channel();
         tokio::spawn(async move {
-            let _active = active;
-            let call = CallInfo { id, request };
-            let result = loop {
-                let result = tokio::select! {
-                    biased;
-                    () = task_token.cancelled() => Some(Err(ServiceError::Cancelled)),
-                    () = inner.host.closed() => Some(Err(ServiceError::HostDisconnected)),
-                    () = attempt.cancelled() => None,
-                    result = run_call(&inner, &call, tool.clone(), &attempt) => Some(result),
-                };
-                if let Some(result) = result {
-                    break result;
+            let arguments = request.arguments.clone();
+            let call = CallInfo {
+                id,
+                request,
+                operation: None,
+            };
+            let result = match work {
+                Work::Plain => drive(&inner, &call, &tool, &arguments, None, control).await,
+                Work::Refuse(result) => {
+                    let _active = ActiveCall::new(&inner, id);
+                    tokio::select! {
+                        biased;
+                        () = control.lifetime.cancelled() => Err(ServiceError::Cancelled),
+                        () = inner.host.closed() => Err(ServiceError::HostDisconnected),
+                        output = record_without_executing(&inner, &call, arguments, result) => output,
+                    }
                 }
-                // The MCP caller still owns the same pending request. Wait for
-                // the Host to re-prepare it before opening another attempt.
-                tokio::select! {
-                    biased;
-                    () = task_token.cancelled() => break Err(ServiceError::Cancelled),
-                    () = inner.host.closed() => break Err(ServiceError::HostDisconnected),
-                    () = resume.notified() => {},
-                }
-                let completion = inner
-                    .state()
-                    .active
-                    .get_mut(&id)
-                    .and_then(|control| control.completion.take());
-                if let Some(result) = completion {
-                    break Ok(CallOutput {
-                        result,
-                        delivery_decided: true,
-                    });
-                }
-                attempt = task_token.child_token();
-                if let Some(control) = inner.state().active.get_mut(&id) {
-                    control.attempt = attempt.clone();
+                Work::FanOut { policy, operations } => {
+                    let _active = ActiveCall::new(&inner, id);
+                    tokio::select! {
+                        biased;
+                        () = control.lifetime.cancelled() => Err(ServiceError::Cancelled),
+                        () = inner.host.closed() => Err(ServiceError::HostDisconnected),
+                        output = run_fan_out(&inner, &call, &tool, policy, operations, &control.lifetime) => output,
+                    }
                 }
             };
             drop(sender.send(result));
@@ -703,14 +881,15 @@ async fn ask<T>(
         .map_err(Into::into)
 }
 
-fn validate_arguments(
-    tool: &ConfiguredTool,
+/// Coerce, default, and validate `arguments` against the tool's own schema.
+pub(super) fn validate_arguments(
+    definition: &ToolDefinition,
     arguments: &mut Map<String, Value>,
 ) -> Result<(), ServiceError> {
-    tool.definition.coerce_arguments(arguments);
-    apply_parameter_defaults(arguments, &tool.definition.parameters);
-    validate_tool_arguments(arguments, &tool.definition.parameters)?;
-    for (name, node) in Node::root(&tool.definition.parameters).properties() {
+    definition.coerce_arguments(arguments);
+    apply_parameter_defaults(arguments, &definition.parameters);
+    validate_tool_arguments(arguments, &definition.parameters)?;
+    for (name, node) in Node::root(&definition.parameters).properties() {
         if let Some(value) = arguments.get(&name) {
             validate_value(&name, value, &node)?;
         }
@@ -741,10 +920,11 @@ async fn run_call(
     inner: &Inner,
     call: &CallInfo,
     tool: ConfiguredTool,
+    mut arguments: Map<String, Value>,
+    gate: Option<(&Arc<Gate>, usize)>,
     cancellation: &CancellationToken,
 ) -> Result<CallOutput, ServiceError> {
-    let mut arguments = call.request.arguments.clone();
-    validate_arguments(&tool, &mut arguments)?;
+    validate_arguments(&tool.definition, &mut arguments)?;
     // A skipped or hidden call shows nothing, so its formatter is a command
     // that would run for output nobody reads.
     let formats = matches!(tool.config.style().parameters, ParametersStyle::Custom(_))
@@ -789,7 +969,7 @@ async fn run_call(
             return record_without_executing(inner, call, arguments, result).await;
         }
     };
-    validate_arguments(&tool, &mut arguments)?;
+    validate_arguments(&tool.definition, &mut arguments)?;
     // Arguments the Host edited make any earlier formatting stale, so the
     // presentation is rebuilt from what will actually execute.
     if formats && (formatted_arguments.is_none() || arguments != original_arguments) {
@@ -809,7 +989,19 @@ async fn run_call(
     .await?;
     let (output, executed) = match release {
         ReleaseDecision::Execute => {
-            let output = match attempt(
+            // An operation of a fanned-out call waits here for its turn under
+            // the call's concurrency limit, and is not run at all once an
+            // earlier operation failed under `on_error = "stop"`.
+            let permit = match gate {
+                None => None,
+                Some((gate, index)) => match gate.enter(index).await {
+                    Entry::Run(permit) => Some(permit),
+                    Entry::NotRun { after } => {
+                        return settle_not_run(inner, call, arguments, after).await;
+                    }
+                },
+            };
+            let attempted = attempt(
                 inner,
                 call,
                 &tool,
@@ -818,27 +1010,29 @@ async fn run_call(
                 &mut answers,
                 cancellation,
             )
-            .await?
-            {
-                Attempt::Completed(result) => CallOutput {
-                    result,
-                    delivery_decided: false,
-                },
-                Attempt::Settled(result) => CallOutput {
-                    result,
-                    delivery_decided: true,
-                },
+            .await;
+            // Recorded before the permit is released, whichever way the attempt
+            // ended, so the next operation cannot start between this failure
+            // and the gate learning of it. The tool's own result decides, not
+            // the one delivered after result-mode policy.
+            if let Some((gate, index)) = gate {
+                let failed = match &attempted {
+                    Ok(Attempt::Completed(result) | Attempt::Settled(result)) => result.is_error(),
+                    Ok(Attempt::Failed(_)) | Err(_) => true,
+                };
+                if failed {
+                    gate.fail(index);
+                }
+            }
+            drop(permit);
+            let output = match attempted? {
+                Attempt::Completed(result) => CallOutput::undecided(result),
+                Attempt::Settled(result) => CallOutput::decided(result),
                 Attempt::Failed(error) => return Err(error.into()),
             };
             (output, true)
         }
-        ReleaseDecision::Complete { result } => (
-            CallOutput {
-                result,
-                delivery_decided: true,
-            },
-            false,
-        ),
+        ReleaseDecision::Complete { result } => (CallOutput::decided(result), false),
     };
     deliver_result(inner, call, &tool, arguments, output, executed).await
 }
@@ -901,6 +1095,279 @@ fn formatter_failure(result: &ToolResult) -> String {
     text
 }
 
+/// Conclude an invocation: `Record` for a call, `Settled` for an operation of a
+/// fanned-out call.
+async fn conclude(
+    inner: &Inner,
+    call: &CallInfo,
+    recording: Recording,
+) -> Result<(), ServiceError> {
+    let recording = Box::new(recording);
+    if call.operation.is_some() {
+        ask(inner, call, |reply| Interaction::Settled {
+            settlement: recording,
+            reply,
+        })
+        .await
+    } else {
+        ask(inner, call, |reply| Interaction::Record {
+            recording,
+            reply,
+        })
+        .await
+    }
+}
+
+/// Settle an operation a `stop` policy ruled out.
+async fn settle_not_run(
+    inner: &Inner,
+    call: &CallInfo,
+    arguments: Map<String, Value>,
+    after: usize,
+) -> Result<CallOutput, ServiceError> {
+    let result = ToolResult::error(format!(
+        "Operation not run: stopped after operation {after} failed."
+    ));
+    let mut output = record_without_executing(inner, call, arguments, result).await?;
+    output.not_run = Some(after);
+    Ok(output)
+}
+
+/// Run a fanned-out call: one child invocation per operation, folded into the
+/// call's one `Record`.
+async fn run_fan_out(
+    inner: &Arc<Inner>,
+    call: &CallInfo,
+    tool: &ConfiguredTool,
+    policy: FanOut,
+    operations: Vec<Map<String, Value>>,
+    lifetime: &CancellationToken,
+) -> Result<CallOutput, ServiceError> {
+    let count = operations.len();
+    let gate = Arc::new(Gate::new(policy, count));
+
+    // Whatever path this call leaves by, none of its operations keeps running.
+    let children = lifetime.child_token();
+    let _children = children.clone().drop_guard();
+
+    let mut tasks = Vec::with_capacity(count);
+    for (index, arguments) in operations.into_iter().enumerate() {
+        let control = register(inner, children.child_token())?;
+        let operation = CallInfo {
+            id: control.id,
+            request: call.request.clone(),
+            operation: Some(Operation {
+                parent: call.id,
+                index,
+                count,
+            }),
+        };
+        let (inner, tool, gate) = (inner.clone(), tool.clone(), gate.clone());
+        tasks.push(tokio::spawn(async move {
+            let output = drive(
+                &inner,
+                &operation,
+                &tool,
+                &arguments,
+                Some((&gate, index)),
+                control,
+            )
+            .await;
+            settle_operation(&inner, &operation, arguments, output, &gate, index).await
+        }));
+    }
+
+    let mut outcomes = Vec::with_capacity(count);
+    for task in tasks {
+        outcomes.push(task.await.map_err(|_| ServiceError::TaskLost)??);
+    }
+
+    let result = fan_out::fold(&outcomes);
+    conclude(inner, call, Recording {
+        arguments: call.request.arguments.clone(),
+        raw_result: None,
+        result: result.clone(),
+    })
+    .await?;
+    Ok(CallOutput::decided(result))
+}
+
+/// Turn how one operation's invocation ended into its folded outcome.
+///
+/// An operation that failed before concluding (invalid arguments, an answer the
+/// tool cannot take) still has a Host waiting on it, so it is settled here with
+/// the error.
+/// One the Host cancelled or completed itself needs no settlement: the Host
+/// already knows how it ended.
+async fn settle_operation(
+    inner: &Inner,
+    call: &CallInfo,
+    arguments: Map<String, Value>,
+    output: Result<CallOutput, ServiceError>,
+    gate: &Gate,
+    index: usize,
+) -> Result<OperationOutcome, ServiceError> {
+    let output = match output {
+        Ok(output) => output,
+        // Nothing will record the call either.
+        Err(error @ (ServiceError::HostDisconnected | ServiceError::Stopped)) => {
+            gate.finish(index, false);
+            return Err(error);
+        }
+        Err(ServiceError::Cancelled) => {
+            CallOutput::decided(ToolResult::error("Operation cancelled."))
+        }
+        Err(error) => {
+            let result = ToolResult::error(error.to_string());
+            match record_without_executing(inner, call, arguments, result.clone()).await {
+                Ok(output) => output,
+                Err(error @ (ServiceError::HostDisconnected | ServiceError::Stopped)) => {
+                    gate.finish(index, false);
+                    return Err(error);
+                }
+                Err(_) => CallOutput::decided(result),
+            }
+        }
+    };
+
+    // An operation that ran told the gate about its own failure before giving
+    // up its slot, from the tool's result rather than the delivered one, which
+    // `result = "skip"` turns into a success. This catches one that ended
+    // without running, whose delivered result is all there is.
+    let failed = output.not_run.is_none() && output.result.is_error();
+    gate.finish(index, failed);
+
+    Ok(match output.not_run {
+        Some(after) => OperationOutcome::NotRun { after },
+        None if output.result.is_error() => OperationOutcome::Error(output.result.to_text()),
+        None => OperationOutcome::Ok(output.result.to_text()),
+    })
+}
+
+/// The concurrency and error policy the operations of one fanned-out call run
+/// under.
+///
+/// An operation enters after the Host releases it and before it executes.
+/// Under a concurrency limit operations start in the order the caller wrote
+/// them: one waits until every earlier operation has started or settled.
+struct Gate {
+    limit: Option<usize>,
+    stops_on_error: bool,
+    state: Mutex<GateState>,
+    changed: Notify,
+}
+
+struct GateState {
+    /// Per operation, whether it has started or settled without starting.
+    passed: Vec<bool>,
+    /// Operations executing now.
+    in_flight: usize,
+    /// One-based position of the earliest operation that failed.
+    first_failure: Option<usize>,
+}
+
+/// Whether an operation may execute.
+enum Entry {
+    /// Execute, holding a concurrency slot until the permit drops.
+    Run(Permit),
+    /// Do not execute: an earlier operation failed under `on_error = "stop"`.
+    NotRun { after: usize },
+}
+
+/// A concurrency slot, released when dropped.
+struct Permit(Arc<Gate>);
+
+impl Drop for Permit {
+    fn drop(&mut self) {
+        self.0.state().in_flight -= 1;
+        self.0.changed.notify_waiters();
+    }
+}
+
+impl Gate {
+    fn new(policy: FanOut, count: usize) -> Self {
+        Self {
+            limit: policy.concurrency,
+            stops_on_error: policy.stops_on_error(),
+            state: Mutex::new(GateState {
+                passed: vec![false; count],
+                in_flight: 0,
+                first_failure: None,
+            }),
+            changed: Notify::new(),
+        }
+    }
+
+    fn state(&self) -> MutexGuard<'_, GateState> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Wait until operation `index` may execute, or learn that it may not.
+    async fn enter(self: &Arc<Self>, index: usize) -> Entry {
+        loop {
+            // Enabled before the state is read, so a change in between still
+            // wakes this waiter.
+            let changed = self.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+
+            if let Some(entry) = self.try_enter(index) {
+                self.changed.notify_waiters();
+                return entry;
+            }
+            changed.await;
+        }
+    }
+
+    /// Decide operation `index`'s entry now, or `None` if it has to wait.
+    fn try_enter(self: &Arc<Self>, index: usize) -> Option<Entry> {
+        let mut state = self.state();
+        if self.stops_on_error
+            && let Some(after) = state.first_failure
+        {
+            state.passed[index] = true;
+            return Some(Entry::NotRun { after });
+        }
+        let turn = self.limit.is_none_or(|limit| {
+            state.in_flight < limit && state.passed[..index].iter().all(|passed| *passed)
+        });
+        if !turn {
+            return None;
+        }
+        state.in_flight += 1;
+        state.passed[index] = true;
+        Some(Entry::Run(Permit(self.clone())))
+    }
+
+    /// Record that operation `index` failed.
+    fn fail(&self, index: usize) {
+        record_failure(&mut self.state(), index);
+        self.changed.notify_waiters();
+    }
+
+    /// Record that operation `index` settled, and whether it failed.
+    ///
+    /// Both are recorded under one lock, so an operation entering in between
+    /// never sees this one as passed but not failed.
+    fn finish(&self, index: usize, failed: bool) {
+        let mut state = self.state();
+        state.passed[index] = true;
+        if failed {
+            record_failure(&mut state, index);
+        }
+        drop(state);
+        self.changed.notify_waiters();
+    }
+}
+
+/// Keep the earliest failed operation's one-based position.
+fn record_failure(state: &mut GateState, index: usize) {
+    let position = index + 1;
+    if state.first_failure.is_none_or(|first| position < first) {
+        state.first_failure = Some(position);
+    }
+}
+
 /// Record a call the Host resolved before it could execute.
 async fn record_without_executing(
     inner: &Inner,
@@ -908,21 +1375,14 @@ async fn record_without_executing(
     arguments: Map<String, Value>,
     result: ToolResult,
 ) -> Result<CallOutput, ServiceError> {
-    ask(inner, call, |reply| Interaction::Record {
-        recording: Box::new(Recording {
-            arguments,
-            // Nothing ran, so there is no unedited result behind the delivered
-            // one.
-            raw_result: None,
-            result: result.clone(),
-        }),
-        reply,
+    conclude(inner, call, Recording {
+        arguments,
+        // Nothing ran, so there is no unedited result behind the delivered one.
+        raw_result: None,
+        result: result.clone(),
     })
     .await?;
-    Ok(CallOutput {
-        result,
-        delivery_decided: true,
-    })
+    Ok(CallOutput::decided(result))
 }
 
 async fn deliver_result(
@@ -936,6 +1396,7 @@ async fn deliver_result(
     let CallOutput {
         result: raw_result,
         delivery_decided,
+        ..
     } = output;
     let result = if delivery_decided {
         raw_result.clone()
@@ -953,21 +1414,15 @@ async fn deliver_result(
             }
         }
     };
-    ask(inner, call, |reply| Interaction::Record {
-        recording: Box::new(Recording {
-            arguments,
-            // A call the Host resolved at an earlier barrier never produced a
-            // result of its own, so there is nothing unedited behind it.
-            raw_result: (executed && !delivery_decided).then_some(raw_result),
-            result: result.clone(),
-        }),
-        reply,
+    conclude(inner, call, Recording {
+        arguments,
+        // A call the Host resolved at an earlier barrier never produced a
+        // result of its own, so there is nothing unedited behind it.
+        raw_result: (executed && !delivery_decided).then_some(raw_result),
+        result: result.clone(),
     })
     .await?;
-    Ok(CallOutput {
-        result,
-        delivery_decided: true,
-    })
+    Ok(CallOutput::decided(result))
 }
 
 /// How running the tool, or its argument formatter, ended.

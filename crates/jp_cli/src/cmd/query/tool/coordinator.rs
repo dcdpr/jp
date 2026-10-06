@@ -45,7 +45,7 @@
 //! [`submit`]: ToolCoordinator::submit
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     future::pending,
     sync::Arc,
 };
@@ -78,7 +78,10 @@ use url::Url;
 
 use super::{
     ToolRenderer,
-    executor::{Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo, Review},
+    executor::{
+        CallExecutors, Executor, ExecutorError, ExecutorResult, ExecutorSource, FanOutCall,
+        PermissionInfo, Review,
+    },
     inquiry::{self, InquiryBackend, InquiryError},
     prompter::{PermissionResult, ToolPrompter},
 };
@@ -165,6 +168,10 @@ pub(crate) enum ToolEvent {
 
     /// The call's result review closed.
     Reviewed { call: usize, review: Review },
+
+    /// A fanned-out call's operations were folded into the one response it is
+    /// recorded with.
+    Folded { group: usize, review: Review },
 }
 
 #[derive(Debug, Default)]
@@ -252,7 +259,28 @@ fn stderr_sink(
 /// The tool calls of one response, from arrival to their recorded responses.
 struct Batch {
     /// Every call the batch took, in the order the assistant sent them.
+    ///
+    /// A fanned-out call is one entry per operation, in the order the assistant
+    /// wrote them, so each is announced, prompted for, and run like a call of
+    /// its own.
     calls: Vec<Call>,
+
+    /// The fanned-out calls among `calls`, each recorded once its operations
+    /// are all settled.
+    groups: Vec<Group>,
+
+    /// Whether the user chose to restart the calls.
+    ///
+    /// A restart prepares every call without a response again, so nothing is
+    /// settled with the execution service in the meantime: an operation it had
+    /// not finished resumes rather than ending.
+    restarting: bool,
+
+    /// Stops the folding of fanned-out calls, for a batch that is abandoned.
+    ///
+    /// Separate from `cancellation`: a user stopping the calls still has their
+    /// responses recorded, folded ones included.
+    folds: CancellationToken,
 
     /// Calls settled on arrival, because their tool is not available.
     unavailable: Vec<ToolCallResponse>,
@@ -285,6 +313,9 @@ impl Batch {
         let (events, receiver) = mpsc::unbounded_channel();
         Self {
             calls: Vec::new(),
+            groups: Vec::new(),
+            restarting: false,
+            folds: CancellationToken::new(),
             unavailable: Vec::new(),
             events,
             receiver,
@@ -307,16 +338,46 @@ impl Batch {
     }
 
     /// Whether every call has a response.
+    ///
+    /// A fanned-out call has one once its operations are folded, unless the
+    /// calls are restarting, in which case nothing is folded.
     fn settled(&self) -> bool {
         self.calls.iter().all(|call| call.review.is_some())
+            && (self.restarting || self.groups.iter().all(|group| group.review.is_some()))
     }
 }
 
-/// One tool call in a batch.
+/// A fanned-out call: the operations it runs, and the response it records.
+struct Group {
+    /// The tool call id every operation answers to.
+    tool_id: String,
+
+    /// The call as a whole, which the execution service records once every
+    /// operation is settled.
+    fan_out: Arc<dyn FanOutCall>,
+
+    /// The operations' indices into the batch's calls.
+    operations: Vec<usize>,
+
+    /// Whether the call's folded response has been asked for.
+    folding: bool,
+
+    /// The response the call is recorded with, once folded.
+    review: Option<Review>,
+}
+
+/// One tool call in a batch, or one operation of a fanned-out call.
 struct Call {
     tool_id: String,
     tool_name: String,
     executor: Arc<dyn Executor>,
+
+    /// Key of the call's display state: its tool call id, or for an operation,
+    /// that id and the operation's position.
+    state_key: String,
+
+    /// For an operation of a fanned-out call, its group in the batch.
+    group: Option<usize>,
 
     /// Answers to the call's questions, which its tool and formatter both see.
     answers: IndexMap<String, Value>,
@@ -512,10 +573,12 @@ pub struct ToolCoordinator {
     tools_config: ToolsConfig,
     interrupt_config: ToolInterruptConfig,
     executor_source: Box<dyn ExecutorSource>,
-    /// Rendered custom argument output for approved calls.
-    /// Keyed by tool call ID.
+    /// Rendered custom argument output for approved calls, by tool call ID and
+    /// then by operation.
+    ///
+    /// A call announced again, as a restart does, replaces what it stored.
     /// Drained by the turn loop to write into event metadata.
-    rendered_arguments: HashMap<String, String>,
+    rendered_arguments: HashMap<String, BTreeMap<Option<usize>, String>>,
 }
 
 impl ToolCoordinator {
@@ -553,9 +616,14 @@ impl ToolCoordinator {
     ///
     /// Returns `(tool_call_id, rendered_content)` pairs for the calls that were
     /// approved.
+    /// A fanned-out call's operations are joined with a newline, in the order
+    /// the assistant wrote them, because one event carries the whole call.
     /// The caller writes these into event metadata.
     pub fn drain_rendered_arguments(&mut self) -> HashMap<String, String> {
         std::mem::take(&mut self.rendered_arguments)
+            .into_iter()
+            .map(|(id, operations)| (id, operations.into_values().collect::<Vec<_>>().join("\n")))
+            .collect()
     }
 
     pub fn is_prompting(&self) -> bool {
@@ -711,6 +779,7 @@ impl ToolCoordinator {
     pub fn cancel(&self) {
         if let Some(batch) = &self.batch {
             batch.cancellation.cancel();
+            batch.folds.cancel();
         }
     }
 
@@ -734,38 +803,52 @@ impl ToolCoordinator {
             }
         }
         batch.cancellation.cancel();
+        batch.folds.cancel();
     }
 
-    /// Prepares a single executor for a tool call request.
+    /// Prepares the executors for a tool call request.
     ///
-    /// Returns the executor on success, or an error response if the tool cannot
-    /// be resolved (e.g. missing from config or definitions).
+    /// An ordinary call yields exactly one executor.
+    /// A call that carries a fan-out envelope yields one per operation, all
+    /// sharing the request's tool call id; the execution service decides which
+    /// calls those are.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error response when the tool cannot be resolved (missing from
+    /// config or definitions).
     pub fn prepare_one(
         &mut self,
         request: ToolCallRequest,
-    ) -> Result<Box<dyn Executor>, ToolCallResponse> {
-        self.tool_states
-            .insert(request.id.clone(), ToolCallState::Queued);
-
-        if let Some(executor) = self
+    ) -> Result<CallExecutors, ToolCallResponse> {
+        let (id, name) = (request.id.clone(), request.name.clone());
+        let Some(prepared) = self
             .tools_config
-            .get(&request.name)
-            .and_then(|config| self.executor_source.create(request.clone(), config))
-        {
-            return Ok(executor);
-        }
+            .get(&name)
+            .and_then(|config| self.executor_source.create(request, config))
+        else {
+            return Err(self.unavailable(id, &name));
+        };
 
-        warn!(tool = %request.name, "Tool not available, returning error to LLM");
-        self.set_tool_state(&request.id, ToolCallState::Completed);
-        Err(ToolCallResponse {
-            id: request.id,
+        for executor in &prepared.operations {
+            self.tool_states
+                .insert(executor.state_key(), ToolCallState::Queued);
+        }
+        Ok(prepared)
+    }
+
+    /// The response for a tool the LLM named but JP cannot run.
+    fn unavailable(&mut self, id: String, name: &str) -> ToolCallResponse {
+        warn!(tool = %name, "Tool not available, returning error to LLM");
+        self.set_tool_state(&id, ToolCallState::Completed);
+        ToolCallResponse {
+            id,
             result: Err(format!(
-                "Tool '{}' is not available. It may have been available earlier in this \
+                "Tool '{name}' is not available. It may have been available earlier in this \
                  conversation but is no longer enabled. Do not retry this tool until it it is \
                  available again in the list of enabled tools.",
-                request.name,
             )),
-        })
+        }
     }
 
     /// Renders the tool call header and arguments.
@@ -812,18 +895,18 @@ impl ToolCoordinator {
         };
 
         if !interactive && matches!(info.run_mode, RunMode::Ask | RunMode::Edit) {
-            self.set_tool_state(&info.tool_id, ToolCallState::Running);
+            self.set_tool_state(&info.state_key, ToolCallState::Running);
             return PermissionDecision::Approved;
         }
 
         // Check for a persisted permission decision from earlier in this turn.
         match turn_state.remembered_permission(&info.tool_name) {
             Some(true) => {
-                self.set_tool_state(&info.tool_id, ToolCallState::Running);
+                self.set_tool_state(&info.state_key, ToolCallState::Running);
                 PermissionDecision::Approved
             }
             Some(false) => {
-                self.set_tool_state(&info.tool_id, ToolCallState::Completed);
+                self.set_tool_state(&info.state_key, ToolCallState::Completed);
                 PermissionDecision::Skipped(Self::remembered_skip(&info.tool_id))
             }
             None => PermissionDecision::NeedsPrompt(info),
@@ -858,14 +941,14 @@ impl ToolCoordinator {
                     turn_state.remember_permission(&info.tool_name, true);
                 }
                 executor.set_arguments(arguments);
-                self.set_tool_state(&info.tool_id, ToolCallState::Running);
+                self.set_tool_state(&info.state_key, ToolCallState::Running);
                 Ok(())
             }
             Ok(PermissionResult::Skip { reason, persist }) => {
                 if persist {
                     turn_state.remember_permission(&info.tool_name, false);
                 }
-                self.set_tool_state(&info.tool_id, ToolCallState::Completed);
+                self.set_tool_state(&info.state_key, ToolCallState::Completed);
                 let msg = if let Some(r) = reason {
                     format!("Tool skipped by user: {r}")
                 } else {
@@ -877,7 +960,7 @@ impl ToolCoordinator {
                 })
             }
             Err(error) => {
-                self.set_tool_state(&info.tool_id, ToolCallState::Completed);
+                self.set_tool_state(&info.state_key, ToolCallState::Completed);
                 Err(ToolCallResponse {
                     id: info.tool_id.clone(),
                     result: Err(format!("Permission prompt failed: {error}")),
@@ -897,41 +980,75 @@ impl ToolCoordinator {
             self.tool_states.clear();
             self.batch = Some(Batch::new());
         }
-        let executor = self.prepare_one(request);
+        let tool_id = request.id.clone();
+        let prepared = self.prepare_one(request);
         let Some(mut batch) = self.batch.take() else {
             return;
         };
-        match executor {
+        match prepared {
             Err(response) => batch.unavailable.push(response),
-            Ok(executor) => {
-                let executor: Arc<dyn Executor> = Arc::from(executor);
-                // Formatting a call the user already said no to would run a
-                // formatter command for output nobody sees.
-                let remembered_denial = host.interactive
-                    && executor.needs_permission()
-                    && host.turn_state.remembered_permission(executor.tool_name()) == Some(false);
-                let render_arguments = !self.is_hidden(executor.tool_name()) && !remembered_denial;
-                let index = batch.calls.len();
-                batch.calls.push(Call {
-                    tool_id: executor.tool_id().to_owned(),
-                    tool_name: executor.tool_name().to_owned(),
-                    executor,
-                    answers: IndexMap::new(),
-                    stderr: None,
-                    wait: Wait::Step,
-                    step: None,
-                    decided: false,
-                    announced: false,
-                    released: false,
-                    pre_render: None,
-                    question: None,
-                    review: None,
+            Ok(CallExecutors {
+                operations,
+                fan_out,
+            }) => {
+                // Each operation of a fanned-out call is a call of its own
+                // here, so it is shown, asked about, and run like one.
+                let group = fan_out.map(|fan_out| {
+                    batch.groups.push(Group {
+                        tool_id,
+                        fan_out,
+                        operations: Vec::with_capacity(operations.len()),
+                        folding: false,
+                        review: None,
+                    });
+                    batch.groups.len() - 1
                 });
-                Self::spawn_step(&mut batch, index, Step::Prepare { render_arguments });
+                for executor in operations {
+                    self.add_call(&mut batch, Arc::from(executor), group, host);
+                }
             }
         }
         self.pump(&mut batch, host);
         self.batch = Some(batch);
+    }
+
+    /// Add a call, or one operation of a fanned-out call, to the batch, and
+    /// start it.
+    fn add_call(
+        &self,
+        batch: &mut Batch,
+        executor: Arc<dyn Executor>,
+        group: Option<usize>,
+        host: &Host<'_>,
+    ) {
+        // Formatting a call the user already said no to would run a formatter
+        // command for output nobody sees.
+        let remembered_denial = host.interactive
+            && executor.needs_permission()
+            && host.turn_state.remembered_permission(executor.tool_name()) == Some(false);
+        let render_arguments = !self.is_hidden(executor.tool_name()) && !remembered_denial;
+        let index = batch.calls.len();
+        if let Some(group) = group {
+            batch.groups[group].operations.push(index);
+        }
+        batch.calls.push(Call {
+            tool_id: executor.tool_id().to_owned(),
+            tool_name: executor.tool_name().to_owned(),
+            state_key: executor.state_key(),
+            group,
+            executor,
+            answers: IndexMap::new(),
+            stderr: None,
+            wait: Wait::Step,
+            step: None,
+            decided: false,
+            announced: false,
+            released: false,
+            pre_render: None,
+            question: None,
+            review: None,
+        });
+        Self::spawn_step(batch, index, Step::Prepare { render_arguments });
     }
 
     /// Wait for the next thing a call's work in flight reports.
@@ -984,6 +1101,16 @@ impl ToolCoordinator {
         let Some(mut batch) = self.batch.take() else {
             return ExecutionResult::default();
         };
+        // Register the tool interrupt handler for this phase. While
+        // registered, the first Ctrl-C press is delivered to this loop; the
+        // guard deregisters the handler when the calls are done.
+        //
+        // Registered before the first pump: calls whose approval already
+        // completed while the response streamed are released by that pump,
+        // and a press landing after they start must reach this handler, not
+        // the turn's.
+        let (interrupt_guard, mut interrupt_rx) = signals.push_handler();
+
         batch.stream_ended = true;
         self.pump(&mut batch, host);
 
@@ -991,11 +1118,6 @@ impl ToolCoordinator {
             tools = batch.calls.len(),
             "Driving tool calls to completion."
         );
-
-        // Register the tool interrupt handler for this phase. While
-        // registered, the first Ctrl-C press is delivered to this loop; the
-        // guard deregisters the handler when the calls are done.
-        let (interrupt_guard, mut interrupt_rx) = signals.push_handler();
 
         let mut outcome = ExecutionOutcome::Completed;
         let mut stop = Stop::default();
@@ -1099,6 +1221,7 @@ impl ToolCoordinator {
                 for call in &batch.calls {
                     call.executor.pause_for_restart();
                 }
+                batch.restarting = true;
                 batch.cancellation.cancel();
                 self.abandon_parked(batch, host);
                 outcome.upgrade(ExecutionOutcome::Restart);
@@ -1119,6 +1242,28 @@ impl ToolCoordinator {
                     batch.calls[*index].executor.hold_for_response();
                 }
                 batch.cancellation.cancel();
+                // An operation of a fanned-out call answers inside its call's
+                // folded response, which the execution service builds from
+                // what each operation settled with. So an operation settles
+                // with its cancellation response now, rather than having it
+                // put over its result once the call is recorded.
+                for &index in &stop.cancelled {
+                    let call = &batch.calls[index];
+                    if call.group.is_none() {
+                        continue;
+                    }
+                    let cancelled = ToolCallResponse {
+                        id: call.tool_id.clone(),
+                        result: Ok(self.cancelled(response.as_deref(), &call.tool_name)),
+                    };
+                    self.close(
+                        batch,
+                        index,
+                        Review::replaced(cancelled),
+                        CancellationReason::User,
+                        host,
+                    );
+                }
                 self.abandon_parked(batch, host);
                 stop.message = response;
                 if exit {
@@ -1145,17 +1290,16 @@ impl ToolCoordinator {
             .collect();
 
         for (index, call) in batch.calls.into_iter().enumerate() {
+            // An operation is recorded as part of its call, below.
+            if call.group.is_some() {
+                continue;
+            }
             let Some(mut review) = call.review else {
                 continue;
             };
             if stop.cancelled.contains(&index) {
-                review.response.result = Ok(if let Some(msg) = &stop.message {
-                    format!("Tool run cancelled by user with a custom message:\n\n{msg}")
-                } else {
-                    // No custom message: each cancelled tool answers with its
-                    // configured cancellation response.
-                    self.cancellation_response(&call.tool_name)
-                });
+                review.response.result =
+                    Ok(self.cancelled(stop.message.as_deref(), &call.tool_name));
                 // The cancellation message stands in for whatever the tool
                 // would have produced.
                 review.edited = true;
@@ -1163,7 +1307,27 @@ impl ToolCoordinator {
             reviews.insert(call.tool_id, review);
         }
 
+        // A fanned-out call is recorded with what the execution service folded
+        // from its operations, cancelled ones included, which is also what its
+        // MCP caller receives.
+        for group in batch.groups {
+            if let Some(review) = group.review {
+                reviews.insert(group.tool_id, review);
+            }
+        }
+
         reviews
+    }
+
+    /// What a call the user stopped answers with: their message, or without
+    /// one, its tool's configured cancellation response.
+    fn cancelled(&self, message: Option<&str>, tool_name: &str) -> String {
+        match message {
+            Some(message) => {
+                format!("Tool run cancelled by user with a custom message:\n\n{message}")
+            }
+            None => self.cancellation_response(tool_name),
+        }
     }
 
     /// Advance the call `event` is about.
@@ -1268,6 +1432,9 @@ impl ToolCoordinator {
                 host.renderer.focus(&batch.calls[call].tool_id);
                 self.render_result(&tool_name, &review.response, host.renderer);
                 self.settle(batch, call, review, host);
+            }
+            ToolEvent::Folded { group, review } => {
+                batch.groups[group].review = Some(review);
             }
         }
     }
@@ -1426,7 +1593,7 @@ impl ToolCoordinator {
                 self.settle(batch, index, Review::unchanged(response), host);
             }
             PermissionDecision::NeedsPrompt(info) => {
-                self.set_tool_state(&info.tool_id, ToolCallState::AwaitingPermission);
+                self.set_tool_state(&info.state_key, ToolCallState::AwaitingPermission);
                 // A tool call reached from a reasoning block sits inside that
                 // block's shading, and a prompt is a visual row like any other
                 // (RFD 095).
@@ -1478,10 +1645,15 @@ impl ToolCoordinator {
             host.renderer.focus(&call.tool_id);
             self.render_executor(call.executor.as_ref(), host.renderer)
         };
-        if let Some(content) = content {
-            self.rendered_arguments
-                .insert(call.tool_id.clone(), content);
-        }
+        let Some(content) = content else {
+            return;
+        };
+        // Keyed by operation, so announcing the call again (after a restart)
+        // replaces its description instead of adding a second copy.
+        self.rendered_arguments
+            .entry(call.tool_id.clone())
+            .or_default()
+            .insert(call.executor.op_index(), content);
     }
 
     /// Release every admitted call to run.
@@ -1519,8 +1691,8 @@ impl ToolCoordinator {
             let call = &mut batch.calls[index];
             call.stderr = stderr_sink(host.renderer, &self.tools_config, &call.tool_name);
             call.released = true;
-            let tool_id = call.tool_id.clone();
-            self.set_tool_state(&tool_id, ToolCallState::Running);
+            let state_key = call.state_key.clone();
+            self.set_tool_state(&state_key, ToolCallState::Running);
             Self::spawn_step(batch, index, Step::Execute);
         }
     }
@@ -1629,7 +1801,8 @@ impl ToolCoordinator {
             });
             // Nothing is on the terminal while the assistant answers, so a
             // Ctrl-C opens the interrupt menu rather than waiting for it.
-            self.set_tool_state(&tool_id, ToolCallState::Running);
+            let state_key = batch.calls[index].state_key.clone();
+            self.set_tool_state(&state_key, ToolCallState::Running);
 
             let backend = Arc::clone(host.inquiry_backend);
             let events_stream = Self::paused_events(host.conv, &tool_id, &question);
@@ -1659,13 +1832,13 @@ impl ToolCoordinator {
     fn answer(&mut self, batch: &mut Batch, index: usize, question_id: String, answer: Value) {
         let call = &mut batch.calls[index];
         call.answers.insert(question_id, answer);
-        let tool_id = call.tool_id.clone();
+        let state_key = call.state_key.clone();
         let state = if call.released {
             ToolCallState::Running
         } else {
             ToolCallState::Queued
         };
-        self.set_tool_state(&tool_id, state);
+        self.set_tool_state(&state_key, state);
         Self::spawn_step(batch, index, Step::Execute);
     }
 
@@ -1693,7 +1866,8 @@ impl ToolCoordinator {
                 }
 
                 let tool_id = batch.calls[call].tool_id.clone();
-                self.set_tool_state(&tool_id, ToolCallState::AwaitingInput);
+                let state_key = batch.calls[call].state_key.clone();
+                self.set_tool_state(&state_key, ToolCallState::AwaitingInput);
                 host.renderer.focus(&tool_id);
                 host.printer
                     .set_prompt_background(host.renderer.current_region());
@@ -1739,9 +1913,9 @@ impl ToolCoordinator {
                 response,
                 mode,
             } => {
-                let tool_id = batch.calls[call].tool_id.clone();
+                let state_key = batch.calls[call].state_key.clone();
                 let tool_name = batch.calls[call].tool_name.clone();
-                self.set_tool_state(&tool_id, ToolCallState::AwaitingResultEdit);
+                self.set_tool_state(&state_key, ToolCallState::AwaitingResultEdit);
                 host.renderer.mark_drawn();
                 batch.prompting = true;
                 Self::spawn_result_mode_prompt(
@@ -1834,12 +2008,73 @@ impl ToolCoordinator {
             }
             Self::record_inquiry_cancelled(host.conv, &open.inquiry_id, reason);
         }
+        // An operation of a fanned-out call is not recorded on its own; the
+        // execution service folds it into its call, once told how it ended.
+        // A restart prepares it again instead, so the service is told nothing.
+        let group = call.group.filter(|_| !batch.restarting);
+        if group.is_some() {
+            let executor = Arc::clone(&call.executor);
+            let review = review.clone();
+            tokio::spawn(async move {
+                if let Err(error) = executor.settle(review).await {
+                    warn!(%error, "Could not settle an operation of a fanned-out call.");
+                }
+            });
+        }
         call.review = Some(review);
         call.wait = Wait::Done;
         call.decided = true;
         call.announced = true;
-        let tool_id = call.tool_id.clone();
-        self.set_tool_state(&tool_id, ToolCallState::Completed);
+        let state_key = call.state_key.clone();
+        self.set_tool_state(&state_key, ToolCallState::Completed);
+        if let Some(group) = group {
+            Self::fold_when_settled(batch, group);
+        }
+    }
+
+    /// Ask for a fanned-out call's folded response, once every one of its
+    /// operations is settled.
+    ///
+    /// The execution service records the call only after each operation has
+    /// told it how it ended, so this waits on that in the background and
+    /// reports [`ToolEvent::Folded`].
+    fn fold_when_settled(batch: &mut Batch, index: usize) {
+        let group = &mut batch.groups[index];
+        if group.folding
+            || group
+                .operations
+                .iter()
+                .any(|&call| batch.calls[call].review.is_none())
+        {
+            return;
+        }
+        group.folding = true;
+        let fan_out = Arc::clone(&group.fan_out);
+        let tool_id = group.tool_id.clone();
+        let events = batch.events.clone();
+        let folds = batch.folds.clone();
+        tokio::spawn(async move {
+            let review = tokio::select! {
+                biased;
+                () = folds.cancelled() => return,
+                recorded = fan_out.recorded() => match recorded {
+                    Ok(response) => Review::unchanged(response),
+                    // Recorded as failed, so the conversation still pairs the
+                    // request with a response.
+                    Err(error) => {
+                        warn!(%error, tool_id, "A fanned-out call could not be completed.");
+                        Review::replaced(ToolCallResponse {
+                            id: tool_id,
+                            result: Err(format!("Tool call could not be completed: {error}")),
+                        })
+                    }
+                },
+            };
+            drop(events.send(ToolEvent::Folded {
+                group: index,
+                review,
+            }));
+        });
     }
 
     /// Settle every call nothing is running for, after the batch was cancelled.
