@@ -426,6 +426,75 @@ fn wrap_ranges_measures_a_bounded_prefix_rather_than_the_whole_suffix() {
 }
 
 #[test]
+fn truncate_to_width_does_not_count_escape_sequences() {
+    // Nine columns of budget are nine visible characters, whatever sits between
+    // them.
+    assert_eq!(
+        truncate_to_width("Deploy\x1b[2J plan for the quarter", 10),
+        "Deploy\x1b[2J pl…"
+    );
+}
+
+#[test]
+fn truncate_to_width_never_cuts_inside_an_escape_sequence() {
+    // A sequence cut in half would swallow the text written after it.
+    assert_eq!(
+        truncate_to_width("ab\x1b[38;5;196mcdef", 3),
+        "ab\x1b[38;5;196m…"
+    );
+    assert_eq!(
+        truncate_to_width("ab\x1b]8;;http://x\x07cdef", 3),
+        "ab\x1b]8;;http://x\x07…"
+    );
+}
+
+#[test]
+fn truncate_to_width_keeps_a_reset_right_after_the_cut() {
+    // The visible text that fits ends exactly where the styling closes, so the
+    // close comes along with it.
+    assert_eq!(
+        truncate_to_width("\x1b[31mred\x1b[0m and more", 4),
+        "\x1b[31mred\x1b[0m…"
+    );
+}
+
+#[test]
+fn prefix_and_suffix_take_escape_sequences_whole() {
+    let s = "ab\x1b[31mcd";
+
+    assert_eq!(prefix_end_for_width(s, 2), 7);
+    assert_eq!(suffix_start_for_width(s, 2), 2);
+}
+
+#[test]
+fn wrap_ranges_does_not_count_escape_sequences() {
+    assert_eq!(wrapped("\x1b[31maaaa bbbb", 4), ["\x1b[31maaaa", "bbbb"]);
+}
+
+#[test]
+fn wrap_ranges_never_breaks_on_whitespace_inside_an_escape_sequence() {
+    // A window title's text is the sequence's payload, not a word to wrap on.
+    // Breaking there would split the sequence across two rows.
+    assert_eq!(wrapped("a\x1b]0;build status\x07bcdef", 3), [
+        "a\x1b]0;build status\x07bc",
+        "def"
+    ]);
+    assert_eq!(wrapped("aa bb\x1b]0;x y\x07cc", 5), [
+        "aa",
+        "bb\x1b]0;x y\x07cc"
+    ]);
+}
+
+#[test]
+fn wrap_ranges_puts_an_escape_on_the_row_of_the_cluster_after_it() {
+    // A row holding nothing but an escape sequence would print as a blank line.
+    assert_eq!(wrapped("\x1b[31m\u{65E5}\u{672C}", 1), [
+        "\x1b[31m\u{65E5}",
+        "\u{672C}"
+    ]);
+}
+
+#[test]
 fn wrap_ranges_rows_all_fit_the_budget() {
     // The property the whole function exists for, checked across the shapes the
     // cases above pin individually.

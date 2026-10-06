@@ -13,7 +13,7 @@ use std::{
 };
 
 use camino::Utf8PathBuf;
-use inquire::InquireError;
+use inquire::{InquireError, TextAnswer};
 use jp_config::{AppConfig, Config as _, conversation::tool::PartialToolConfig};
 use jp_conversation::event::InquiryId;
 use jp_inquire::{InlineOption, ReplyEditMode, ReplyOutcome, prompt::PromptBackend};
@@ -139,7 +139,7 @@ impl PromptBackend for TranscriptPromptBackend {
         message: &str,
         _default: Option<&str>,
         _writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<TextAnswer, InquireError> {
         self.record(message);
         Err(InquireError::OperationCanceled)
     }
@@ -150,7 +150,7 @@ impl PromptBackend for TranscriptPromptBackend {
         _options: Vec<String>,
         _default: Option<usize>,
         _writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<usize, InquireError> {
         self.record(message);
         Err(InquireError::OperationCanceled)
     }

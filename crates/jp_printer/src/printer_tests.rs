@@ -118,6 +118,121 @@ fn test_pretty_true_preserves_ansi() {
 }
 
 #[test]
+fn pretty_output_keeps_what_jp_draws_with_and_drops_the_rest() {
+    // Whoever printed it, text cannot clear the screen, retitle the window, or
+    // return to the start of the row; styling and a background filled to the
+    // edge still work.
+    let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.print("\x1b[31mred\x1b[0m \x1b[2Jcleared");
+    printer.eprint("\x1b[48;5;236mstatus\x1b[K\x1b[49m\r\x1b]0;title\x07");
+    printer.flush();
+
+    assert_eq!(*out.lock(), "\x1b[31mred\x1b[0m cleared");
+    assert_eq!(*err.lock(), "\x1b[48;5;236mstatus\x1b[K\x1b[49m");
+}
+
+#[test]
+fn styling_left_open_is_closed_when_the_printer_shuts_down() {
+    // A stored title or matched line can open a color and never close it.
+    // Left open, it would color the shell prompt after JP exits.
+    let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.print("\x1b[41mred");
+    printer.eprint("\x1b[31mclosed\x1b[0m");
+    printer.shutdown();
+
+    assert_eq!(*out.lock(), "\x1b[41mred\x1b[0m");
+    assert_eq!(*err.lock(), "\x1b[31mclosed\x1b[0m");
+}
+
+#[test]
+fn a_link_left_open_is_ended_when_the_printer_shuts_down() {
+    // Left open, the shell prompt after JP would link to the stored target.
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.print("\x1b]8;;http://x\x07link");
+    printer.shutdown();
+
+    assert_eq!(*out.lock(), "\x1b]8;;http://x\x07link\x1b]8;;\x07");
+}
+
+#[test]
+fn a_sequence_split_across_writes_is_dropped_whole() {
+    // `write!` reaches the worker one argument at a time.
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+
+    write!(printer.out_writer(), "a\x1b[{}Jb", 2).unwrap();
+    printer.flush();
+
+    assert_eq!(*out.lock(), "ab");
+}
+
+#[test]
+fn a_line_printed_for_a_prompt_is_filtered_too() {
+    // The line names what the question is about, such as a conversation's
+    // title.
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.prompt_println("Remove \x1b[2J\"evil\"?");
+    printer.flush();
+
+    assert_eq!(*out.lock(), "Remove \"evil\"?\n");
+}
+
+#[test]
+fn a_widget_draws_with_the_whole_terminal() {
+    // A widget moves its own cursor between frames.
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "\x1b[1A\x1b[2Kanswer").unwrap();
+    }
+    printer.flush();
+
+    assert_eq!(*out.lock(), "\x1b[1A\x1b[2Kanswer");
+}
+
+#[test]
+fn off_lets_pretty_output_through_as_written() {
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.set_sanitize_mode(SanitizeMode::Off);
+    printer.print("a\x1b[2Jb");
+    printer.flush();
+
+    assert_eq!(*out.lock(), "a\x1b[2Jb");
+}
+
+#[test]
+fn visualize_marks_what_pretty_output_lost() {
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.set_sanitize_mode(SanitizeMode::Visualize);
+    printer.print("a\x1b[2Jb");
+    printer.flush();
+
+    assert_eq!(*out.lock(), "a\u{241b}b");
+}
+
+#[test]
+fn typewriter_text_the_floor_drops_is_not_left_pending() {
+    // A device control string's payload counts as visible when the task is
+    // queued, and is never written. Left counted, it slows every task after it.
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.print("ab\x1bPpayload\x1b\\".typewriter(Duration::from_millis(1)));
+    printer.flush();
+
+    assert_eq!(*out.lock(), "ab");
+    assert_eq!(
+        printer.delay_control.pending_chars.load(Ordering::Relaxed),
+        0
+    );
+}
+
+#[test]
 fn test_pretty_false_strips_typewriter_ansi() {
     let (printer, out, _) = Printer::memory(OutputFormat::Text);
 
@@ -210,29 +325,6 @@ fn json_eprint_wraps_each_fragment_as_a_record() {
     printer.flush();
 
     assert_eq!(*err.lock(), "{\"message\":\".\"}\n{\"message\":\".\"}\n");
-}
-
-#[test]
-fn erase_line_writes_the_escape_on_a_text_format() {
-    let (printer, _, err) = Printer::memory(OutputFormat::TextPretty);
-
-    printer.erase_line();
-    printer.flush();
-
-    assert_eq!(*err.lock(), "\r\x1b[K");
-}
-
-// A cursor escape is neither a record nor part of one, so emitting it into an
-// NDJSON stream leaves the stream unparseable for the sake of a repaint no
-// JSON consumer can see.
-#[test]
-fn erase_line_is_silent_in_json() {
-    let (printer, _, err) = Printer::memory(OutputFormat::Json);
-
-    printer.erase_line();
-    printer.flush();
-
-    assert_eq!(*err.lock(), "");
 }
 
 #[test]
@@ -1243,7 +1335,6 @@ fn silenced_chrome_drops_writer_output() {
     let printer = printer.with_chrome(Chrome::Silenced);
 
     writeln!(printer.err_writer(), "waiting 3s").unwrap();
-    printer.erase_line();
     printer.flush();
 
     assert_eq!(*err.lock(), "");

@@ -8,12 +8,18 @@
 //! Measuring with `str::len` counts bytes and overstates any non-ASCII string;
 //! counting `char`s understates wide characters and ignores escape sequences
 //! entirely.
+//!
+//! The functions that cut or split text take styled text as readily as plain
+//! text: an escape sequence costs no columns and is never split, so a cut
+//! cannot leave half a sequence to swallow what is written after it.
 
 use std::{iter, ops::Range};
 
 use strip_ansi_escapes::strip_str;
-use unicode_segmentation::UnicodeSegmentation as _;
+use unicode_segmentation::{GraphemeIndices, UnicodeSegmentation as _};
 use unicode_width::UnicodeWidthStr;
+
+use crate::ansi::{Segment, segments};
 
 /// Display width of `s` in terminal columns.
 ///
@@ -55,9 +61,9 @@ const MAX_LIGATURE_PROBES: usize = 8;
 /// sequence is either kept whole or dropped whole rather than left with a
 /// trailing joiner.
 ///
-/// `s` is expected to carry no ANSI escapes: the budget is spent on the text,
-/// so escape bytes would consume it and could be split mid-sequence.
-/// Truncate before styling, not after.
+/// Escape sequences cost no columns and are kept or dropped whole.
+/// One that directly follows the last character kept is kept with it, so
+/// styling that closes there stays closed.
 ///
 /// Runs in time proportional to the input, with the whole-string measurements
 /// needed for ligatures confined to the few clusters around the cut.
@@ -84,10 +90,9 @@ pub fn truncate_to_width(s: &str, max_width: usize) -> String {
 ///
 /// Returns `0` when even the first grapheme cluster is too wide, and `s.len()`
 /// when the whole string fits.
-/// The offset always falls on a grapheme cluster boundary.
-///
-/// `s` is expected to carry no ANSI escapes, for the reason given on
-/// [`truncate_to_width`].
+/// The offset always falls on a grapheme cluster boundary, and never inside an
+/// escape sequence; a sequence directly after the last cluster that fits is
+/// counted in.
 #[must_use]
 pub fn prefix_end_for_width(s: &str, max_width: usize) -> usize {
     longest_fitting_prefix(s, max_width).0
@@ -98,10 +103,9 @@ pub fn prefix_end_for_width(s: &str, max_width: usize) -> usize {
 ///
 /// Returns `s.len()` when even the last grapheme cluster is too wide, and `0`
 /// when the whole string fits.
-/// The offset always falls on a grapheme cluster boundary.
-///
-/// `s` is expected to carry no ANSI escapes, for the reason given on
-/// [`truncate_to_width`].
+/// The offset always falls on a grapheme cluster boundary, and never inside an
+/// escape sequence; a sequence directly before the first cluster that fits is
+/// counted in.
 #[must_use]
 pub fn suffix_start_for_width(s: &str, max_width: usize) -> usize {
     longest_fitting_suffix(s, max_width).0
@@ -123,8 +127,7 @@ pub fn suffix_start_for_width(s: &str, max_width: usize) -> usize {
 /// `max_width` of `0` yields the whole string unsplit, since no positive number
 /// of columns is available to split it into.
 ///
-/// `s` is expected to carry no ANSI escapes, for the reason given on
-/// [`truncate_to_width`].
+/// Escape sequences cost no columns and are never split across rows.
 ///
 /// Runs in time proportional to the input: each row measures only as far as its
 /// own width, never the rest of the string.
@@ -149,19 +152,22 @@ pub fn wrap_ranges(s: &str, max_width: usize) -> Vec<Range<usize>> {
             return rows;
         }
 
-        if end == 0 {
+        if display_width(&rest[..end]) == 0 {
             // A single cluster wider than the whole row. It has to go somewhere,
-            // and leaving it for the next row would never terminate.
-            end = first_cluster_end(rest);
+            // and leaving it for the next row would never terminate. Escape
+            // sequences ahead of it go with it, or they would make a row of
+            // their own.
+            end = first_visible_end(rest);
         }
 
         // The widest word break the budget allows. The budget boundary itself
         // counts when the character there is whitespace, which is the case of a
-        // word ending exactly at the row edge.
+        // word ending exactly at the row edge. `end` never falls inside an
+        // escape sequence, so whitespace there is visible text.
         let word_break = if rest[end..].starts_with(char::is_whitespace) {
             Some(end)
         } else {
-            rest[..end].rfind(char::is_whitespace)
+            last_visible_whitespace(&rest[..end])
         };
 
         // Whitespace before the break belongs to the break, not to the row.
@@ -185,13 +191,101 @@ pub fn wrap_ranges(s: &str, max_width: usize) -> Vec<Range<usize>> {
     rows
 }
 
-/// Byte offset just past the first grapheme cluster of `s`.
+/// Byte offset of the last whitespace in `s` that is not part of an escape
+/// sequence.
 ///
-/// `s.len()` when `s` is empty.
-fn first_cluster_end(s: &str) -> usize {
-    s.grapheme_indices(true)
-        .next()
-        .map_or(s.len(), |(at, cluster)| at + cluster.len())
+/// Whitespace inside one, such as a window title's text, is the sequence's
+/// payload: breaking a row there would split the sequence.
+fn last_visible_whitespace(s: &str) -> Option<usize> {
+    units(s)
+        .filter(|unit| !unit.escape && unit.text.starts_with(char::is_whitespace))
+        .last()
+        .map(|unit| unit.offset)
+}
+
+/// Byte offset just past the first grapheme cluster of `s` that is not part of
+/// an escape sequence.
+///
+/// `s.len()` when there is none.
+fn first_visible_end(s: &str) -> usize {
+    units(s)
+        .find(|unit| !unit.escape)
+        .map_or(s.len(), |unit| unit.offset + unit.text.len())
+}
+
+/// A piece of text a cut may fall on either side of, but never inside.
+struct Unit<'a> {
+    /// Byte offset of the piece in the string it came from.
+    offset: usize,
+
+    /// The piece itself.
+    text: &'a str,
+
+    /// Whether the piece is an escape sequence, which costs no columns.
+    escape: bool,
+}
+
+/// `s` as grapheme clusters and whole escape sequences, in order.
+///
+/// Lazy, so a caller that stops early pays only for what it read.
+const fn units(s: &str) -> Units<'_> {
+    Units {
+        s,
+        clusters: None,
+        skip_to: 0,
+    }
+}
+
+/// Iterator returned by [`units`].
+struct Units<'a> {
+    /// The string being walked.
+    s: &'a str,
+
+    /// Its grapheme clusters, created on the first call.
+    clusters: Option<GraphemeIndices<'a>>,
+
+    /// Byte offset of the end of the escape sequence last returned; the
+    /// clusters before it belong to that sequence.
+    skip_to: usize,
+}
+
+impl<'a> Iterator for Units<'a> {
+    type Item = Unit<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let s = self.s;
+        let clusters = self
+            .clusters
+            .get_or_insert_with(|| s.grapheme_indices(true));
+
+        loop {
+            let (offset, cluster) = clusters.next()?;
+            if offset < self.skip_to {
+                continue;
+            }
+
+            // `ESC` is a control character, so it is always a cluster of its own.
+            if cluster != "\x1b" {
+                return Some(Unit {
+                    offset,
+                    text: cluster,
+                    escape: false,
+                });
+            }
+
+            let len = match segments(&s[offset..]).next() {
+                Some(Segment::Escape(escape)) => escape.len(),
+                _ => cluster.len(),
+            };
+            self.skip_to = offset + len;
+
+            return Some(Unit {
+                offset,
+                text: &s[offset..offset + len],
+                escape: true,
+            });
+        }
+    }
 }
 
 /// Byte offset just past the longest prefix of `s` that fits `budget` columns,
@@ -218,8 +312,23 @@ fn longest_fitting_prefix(s: &str, budget: usize) -> (usize, usize) {
     let mut probes = 0;
     let mut measurements = 0;
 
-    for (offset, cluster) in s.grapheme_indices(true) {
+    for Unit {
+        offset,
+        text: cluster,
+        escape,
+    } in units(s)
+    {
         let candidate = offset + cluster.len();
+
+        // An escape sequence costs nothing, so it fits wherever the text before
+        // it did.
+        if escape {
+            if end == offset {
+                end = candidate;
+            }
+            continue;
+        }
+
         sum += UnicodeWidthStr::width(cluster);
 
         if sum <= budget {
@@ -233,7 +342,7 @@ fn longest_fitting_prefix(s: &str, budget: usize) -> (usize, usize) {
         probes += 1;
         measurements += 1;
 
-        if UnicodeWidthStr::width(&s[..candidate]) <= budget {
+        if display_width(&s[..candidate]) <= budget {
             end = candidate;
             // A ligature closed and brought the prefix back under budget; allow
             // a fresh run of probes for the next one.
@@ -257,7 +366,19 @@ fn longest_fitting_suffix(s: &str, budget: usize) -> (usize, usize) {
     let mut probes = 0;
     let mut measurements = 0;
 
-    for (offset, cluster) in s.grapheme_indices(true).rev() {
+    for Unit {
+        offset,
+        text: cluster,
+        escape,
+    } in units(s).collect::<Vec<_>>().into_iter().rev()
+    {
+        if escape {
+            if start == offset + cluster.len() {
+                start = offset;
+            }
+            continue;
+        }
+
         sum += UnicodeWidthStr::width(cluster);
 
         if sum <= budget {
@@ -271,7 +392,7 @@ fn longest_fitting_suffix(s: &str, budget: usize) -> (usize, usize) {
         probes += 1;
         measurements += 1;
 
-        if UnicodeWidthStr::width(&s[offset..]) <= budget {
+        if display_width(&s[offset..]) <= budget {
             start = offset;
             probes = 0;
         }

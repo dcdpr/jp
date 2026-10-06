@@ -1,5 +1,9 @@
-use std::sync::Arc;
+use std::{
+    io,
+    sync::{Arc, Mutex},
+};
 
+use inquire::TextAnswer;
 use jp_editor::MockEditorBackend;
 use jp_inquire::{ReplyOutcome, prompt::MockPromptBackend};
 use jp_printer::{OutputFormat, SharedBuffer};
@@ -541,10 +545,252 @@ fn question_text_uses_backend() {
 
 #[test]
 fn question_select_uses_backend() {
-    let prompt = MockPromptBackend::new().with_select_responses(["Option B"]);
+    let prompt = MockPromptBackend::new().with_select_responses([1]);
     let question = jp_tool::Question::select("q3", "Choose:")
         .unwrap()
         .with_options(vec!["Option A".to_string(), "Option B".to_string()]);
     let result = prompter(prompt).prompt_question(&question).unwrap();
     assert_eq!(result.answer, Value::String("Option B".to_string()));
+}
+
+/// What a question prompt was asked to show.
+#[derive(Debug, Clone, PartialEq)]
+enum Shown {
+    /// A boolean question, asked as an inline choice.
+    Choice {
+        message: String,
+    },
+    Select {
+        message: String,
+        options: Vec<String>,
+        default: Option<usize>,
+    },
+    Text {
+        message: String,
+        default: Option<String>,
+    },
+    Secret {
+        message: String,
+    },
+}
+
+/// Answers like the mock it wraps, and records what each question prompt was
+/// asked to show.
+struct RecordingBackend {
+    inner: MockPromptBackend,
+    log: Mutex<Vec<Shown>>,
+}
+
+impl RecordingBackend {
+    fn record(&self, shown: Shown) {
+        self.log.lock().unwrap().push(shown);
+    }
+
+    fn shown(&self) -> Vec<Shown> {
+        self.log.lock().unwrap().clone()
+    }
+}
+
+impl PromptBackend for RecordingBackend {
+    fn inline_select(
+        &self,
+        message: &str,
+        options: Vec<InlineOption>,
+        default: Option<char>,
+        writer: &mut dyn io::Write,
+    ) -> Result<char, InquireError> {
+        self.record(Shown::Choice {
+            message: message.to_owned(),
+        });
+        self.inner.inline_select(message, options, default, writer)
+    }
+
+    fn inline_reply(
+        &self,
+        message: &str,
+        initial_text: &str,
+        edit_mode: ReplyEditMode,
+        editor_escape: bool,
+        help: Option<&str>,
+        output: Box<dyn io::Write + Send>,
+    ) -> Result<ReplyOutcome, InquireError> {
+        self.inner.inline_reply(
+            message,
+            initial_text,
+            edit_mode,
+            editor_escape,
+            help,
+            output,
+        )
+    }
+
+    fn text(
+        &self,
+        message: &str,
+        default: Option<&str>,
+        writer: &mut dyn io::Write,
+    ) -> Result<TextAnswer, InquireError> {
+        self.record(Shown::Text {
+            message: message.to_owned(),
+            default: default.map(str::to_owned),
+        });
+        self.inner.text(message, default, writer)
+    }
+
+    fn select(
+        &self,
+        message: &str,
+        options: Vec<String>,
+        default: Option<usize>,
+        writer: &mut dyn io::Write,
+    ) -> Result<usize, InquireError> {
+        self.record(Shown::Select {
+            message: message.to_owned(),
+            options: options.clone(),
+            default,
+        });
+        self.inner.select(message, options, default, writer)
+    }
+
+    fn password(&self, message: &str, writer: &mut dyn io::Write) -> Result<String, InquireError> {
+        self.record(Shown::Secret {
+            message: message.to_owned(),
+        });
+        self.inner.password(message, writer)
+    }
+}
+
+/// A prompter answering with `prompt`, and the record of what it showed.
+fn recording_prompter(prompt: MockPromptBackend) -> (ToolPrompter, Arc<RecordingBackend>) {
+    let backend = Arc::new(RecordingBackend {
+        inner: prompt,
+        log: Mutex::default(),
+    });
+    let prompter = ToolPrompter::with_backends(printer(), None, backend.clone());
+
+    (prompter, backend)
+}
+
+#[test]
+fn a_pre_amble_keeps_its_lines_and_loses_its_controls() {
+    // A patch under review is the usual pre-amble, so its line breaks and tabs
+    // stay. A carriage return or a cursor movement could redraw a line of it
+    // before the user approves.
+    let (prompter, out) =
+        prompter_with_output(MockPromptBackend::new().with_inline_responses(['y']));
+    let question = jp_tool::Question::boolean("apply", "Apply the patch?")
+        .unwrap()
+        .with_preamble("-\told\r\n+\tnew\x1b[1A\x1b[2K");
+
+    prompter.prompt_question(&question).unwrap();
+    prompter.printer.flush();
+
+    assert_eq!(*out.lock(), "-\told\n+\tnew[1A[2K\n");
+}
+
+#[test]
+fn a_question_is_shown_as_one_plain_line() {
+    let (prompter, backend) =
+        recording_prompter(MockPromptBackend::new().with_inline_responses(['n']));
+    let question =
+        jp_tool::Question::boolean("confirm", "Delete\x1b[8m every\x1b[28m file?\r\nProceed?")
+            .unwrap();
+
+    prompter.prompt_question(&question).unwrap();
+
+    assert_eq!(backend.shown(), [Shown::Choice {
+        message: "Delete[8m every[28m file?Proceed?".into()
+    }]);
+}
+
+#[test]
+fn select_labels_are_plain_and_the_answer_is_the_option_offered() {
+    let (prompter, backend) =
+        recording_prompter(MockPromptBackend::new().with_select_responses([1]));
+    let question = jp_tool::Question::select("branch", "Branch?\x07")
+        .unwrap()
+        .with_options(vec!["main".into(), "release\x1b[31m".into()])
+        .with_default("release\x1b[31m");
+
+    let result = prompter.prompt_question(&question).unwrap();
+
+    assert_eq!(backend.shown(), [Shown::Select {
+        message: "Branch?".into(),
+        options: vec!["main".into(), "release[31m".into()],
+        default: Some(1),
+    }]);
+    assert_eq!(result.answer, json!("release\x1b[31m"));
+}
+
+#[test]
+fn options_that_look_the_same_answer_with_the_one_chosen() {
+    // Both options show as `main`. The answer follows the row the user chose,
+    // not the first label that matches it.
+    let prompt = MockPromptBackend::new().with_select_responses([1]);
+    let question = jp_tool::Question::select("branch", "Branch?")
+        .unwrap()
+        .with_options(vec!["main".into(), "main\x07".into()]);
+
+    let result = prompter(prompt).prompt_question(&question).unwrap();
+
+    assert_eq!(result.answer, json!("main\x07"));
+}
+
+#[test]
+fn an_accepted_text_default_is_the_default_the_tool_offered() {
+    // A prompt answers with the default it showed when the user accepts it,
+    // and what it showed has the default's control characters removed.
+    let (prompter, backend) =
+        recording_prompter(MockPromptBackend::new().with_accepted_text_default());
+    let question = jp_tool::Question::text("tag", "Tag?")
+        .unwrap()
+        .with_default("v1.2\x07");
+
+    let result = prompter.prompt_question(&question).unwrap();
+
+    assert_eq!(backend.shown(), [Shown::Text {
+        message: "Tag?".into(),
+        default: Some("v1.2".into()),
+    }]);
+    assert_eq!(result.answer, json!("v1.2\x07"));
+}
+
+#[test]
+fn typing_the_shown_default_answers_with_what_was_typed() {
+    // The default shows as `main`, and the user types `main` rather than
+    // pressing Enter. That is their answer, not the default with its line
+    // break.
+    let prompt = MockPromptBackend::new().with_text_responses(["main"]);
+    let question = jp_tool::Question::text("branch", "Branch?")
+        .unwrap()
+        .with_default("main\n");
+
+    let result = prompter(prompt).prompt_question(&question).unwrap();
+
+    assert_eq!(result.answer, json!("main"));
+}
+
+#[test]
+fn a_typed_text_answer_is_returned_as_typed() {
+    let prompt = MockPromptBackend::new().with_text_responses(["v2.0"]);
+    let question = jp_tool::Question::text("tag", "Tag?")
+        .unwrap()
+        .with_default("v1.2\x07");
+
+    let result = prompter(prompt).prompt_question(&question).unwrap();
+
+    assert_eq!(result.answer, json!("v2.0"));
+}
+
+#[test]
+fn a_secret_question_is_shown_as_one_plain_line() {
+    let (prompter, backend) =
+        recording_prompter(MockPromptBackend::new().with_password_responses(["hunter2"]));
+    let question = jp_tool::Question::secret("token", "Token\x1b[8m?").unwrap();
+
+    prompter.prompt_question(&question).unwrap();
+
+    assert_eq!(backend.shown(), [Shown::Secret {
+        message: "Token[8m?".into()
+    }]);
 }

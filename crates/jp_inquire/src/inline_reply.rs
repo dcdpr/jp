@@ -14,9 +14,10 @@ use std::{borrow::Cow, io::Write};
 
 use crossterm::cursor::SetCursorStyle;
 use inquire::InquireError;
+use nu_ansi_term::{Color, Style};
 use reedline::{
-    CursorConfig, EditCommand, EditMode, Emacs, KeyCode, KeyModifiers, Keybindings, Prompt,
-    PromptEditMode, PromptHistorySearch, Reedline, ReedlineEvent, Signal, Vi,
+    CursorConfig, EditCommand, EditMode, Emacs, Highlighter, KeyCode, KeyModifiers, Keybindings,
+    Prompt, PromptEditMode, PromptHistorySearch, Reedline, ReedlineEvent, Signal, StyledText, Vi,
     default_emacs_keybindings, default_vi_insert_keybindings, default_vi_normal_keybindings,
 };
 
@@ -129,7 +130,8 @@ impl InlineReply {
             // Terminals that don't support bracketed paste ignore the
             // enable sequence, so this is safe unconditionally.
             .use_bracketed_paste(true)
-            .use_kitty_keyboard_enhancement(true);
+            .use_kitty_keyboard_enhancement(true)
+            .with_highlighter(Box::new(PlainBuffer));
 
         if self.edit_mode == ReplyEditMode::Vi {
             // Distinct cursor shapes for insert/normal, as a vi user expects.
@@ -220,6 +222,57 @@ fn outcome_from_signal(signal: Signal, buffer: &str) -> ReplyOutcome {
         // (`#[non_exhaustive]`) variant cancel the reply.
         _ => ReplyOutcome::Cancelled,
     }
+}
+
+/// Paints the buffer with each control character other than a line break or a
+/// tab shown as `?` in reverse video.
+///
+/// The buffer can be seeded with text JP did not write, such as a tool result
+/// the user edits before it is sent, and reedline writes what a highlighter
+/// returns to the terminal as it is: a control character there would move the
+/// cursor or restyle the screen.
+/// The buffer keeps the characters, so submitting it unchanged returns the text
+/// it was seeded with.
+///
+/// A stand-in has as many bytes as the character it replaces, one `?` per byte,
+/// because reedline cuts what it paints at the cursor's byte offset into the
+/// buffer.
+struct PlainBuffer;
+
+impl Highlighter for PlainBuffer {
+    fn highlight(&self, line: &str, _cursor: usize) -> StyledText {
+        let mut styled = StyledText::new();
+        let mut text_start = 0;
+
+        for (at, c) in line.char_indices() {
+            if !c.is_control() || matches!(c, '\n' | '\t') {
+                continue;
+            }
+
+            if text_start < at {
+                styled.push((text_style(), line[text_start..at].to_owned()));
+            }
+            styled.push((marker_style(), "?".repeat(c.len_utf8())));
+            text_start = at + c.len_utf8();
+        }
+
+        if text_start < line.len() {
+            styled.push((text_style(), line[text_start..].to_owned()));
+        }
+
+        styled
+    }
+}
+
+/// How the buffer's text is painted: the color reedline gives a buffer when no
+/// highlighter is set.
+fn text_style() -> Style {
+    Color::White.normal()
+}
+
+/// How the stand-in for a control character is painted.
+fn marker_style() -> Style {
+    Color::White.reverse()
 }
 
 /// Minimal reedline [`Prompt`] in JP's reply style: the message, the buffer,

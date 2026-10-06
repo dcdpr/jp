@@ -412,6 +412,33 @@ fn prints_structured_data() {
     assert!(output.contains("```json"), "got: {output}");
 }
 
+#[test]
+fn replayed_structured_output_cannot_color_the_terminal() {
+    // A schema asking for a string stores the model's `\u001b[31m` as a real
+    // escape in the value.
+    let (mut ctx, id, out, _err, _tmp) = setup_ctx(vec![ConversationEvent::new(
+        ChatResponse::structured(json!("\u{1b}[31mred")),
+        ts(0, 0, 0),
+    )]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnSelection::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    // Matched as a block rather than whole: the role header above it names how
+    // long ago the turn was, which moves with the clock.
+    let output = out.lock().clone();
+    assert!(!output.contains("\x1b[31m"), "got: {output:?}");
+    assert!(output.contains("\n```json\nred\n```\n"), "got: {output:?}");
+}
+
 /// Regression: replay must close the structured `json` fence.
 /// Before this fix, `TurnRenderer::flush()` only flushed the chat sub-renderer,
 /// so a conversation ending on a `ChatResponse::Structured` printed an opening

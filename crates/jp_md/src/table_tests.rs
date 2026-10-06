@@ -344,6 +344,7 @@ fn test_format_table_fits_the_budget() {
             default_background: None,
             inline_code_bg: None,
             indent: 0,
+            content: None,
         },
         Some(40),
     )
@@ -391,6 +392,7 @@ fn test_format_simple_table() {
             default_background: None,
             inline_code_bg: None,
             indent: 0,
+            content: None,
         },
         None,
     )
@@ -448,6 +450,7 @@ fn test_format_table_with_wrapping() {
             default_background: None,
             inline_code_bg: None,
             indent: 0,
+            content: None,
         },
         None,
     )
@@ -512,6 +515,7 @@ fn test_format_table_wrapping_respects_alignment() {
             default_background: None,
             inline_code_bg: None,
             indent: 0,
+            content: None,
         },
         None,
     )
@@ -583,6 +587,7 @@ fn test_wrapped_rows_open_with_the_continuation_edge() {
             default_background: None,
             inline_code_bg: None,
             indent: 0,
+            content: None,
         },
         None,
     )
@@ -625,6 +630,7 @@ fn test_continuation_edge_can_be_disabled() {
             default_background: None,
             inline_code_bg: None,
             indent: 0,
+            content: None,
         },
         None,
     )
@@ -669,6 +675,7 @@ fn test_wide_header_is_truncated_not_wrapped() {
             default_background: None,
             inline_code_bg: None,
             indent: 0,
+            content: None,
         },
         None,
     )
@@ -710,6 +717,7 @@ fn test_format_aligned_table() {
             default_background: None,
             inline_code_bg: None,
             indent: 0,
+            content: None,
         },
         None,
     )
