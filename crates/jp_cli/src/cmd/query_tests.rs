@@ -2424,6 +2424,50 @@ fn edit_message_skips_editor_when_non_interactive() {
 }
 
 #[test]
+fn edit_message_rejects_a_forced_editor_when_non_interactive() {
+    // `--quote` seeds the request with the assistant's own last message, for
+    // the user to reply between the quoted lines. With nobody to compose that
+    // reply, sending the seed would submit the assistant's words as the user's
+    // turn and persist it, so the run fails instead.
+    //
+    // `--edit` shares the condition, so it needs no test of its own.
+    let mut config = AppConfig::new_test();
+    config.editor.cmd = Some(CommandConfigOrString::String(
+        "jp-editor-that-does-not-exist".to_owned(),
+    ));
+
+    let query = Query {
+        input: QueryInput {
+            quote: Some(true),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let mut request = ChatRequest::from(" >  quoted reply");
+    let stream = ConversationStream::new_test();
+    let mut pending_trim = PendingStreamTrim::default();
+    let error = query
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            false,
+            false,
+            &config,
+            Utf8Path::new("/tmp"),
+            &Printer::sink(),
+        )
+        .unwrap_err();
+
+    assert_matches!(error, Error::NonInteractiveEditor { .. });
+    assert_eq!(
+        request.content, " >  quoted reply",
+        "the seed stays put rather than becoming the turn"
+    );
+}
+
+#[test]
 fn edit_message_without_a_query_is_an_error_when_non_interactive() {
     // Nothing to send and no way to compose it: erroring out is the only
     // honest outcome. The run used to hang in the editor instead.
@@ -3296,7 +3340,7 @@ fn editor_ctx(
     // it five times with backoff is time these tests would only spend waiting.
     config.assistant.request.max_retries = 0;
 
-    let ctx = Ctx::new(
+    let mut ctx = Ctx::new(
         crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         Some(fs),
@@ -3306,6 +3350,12 @@ fn editor_ctx(
         Some(session.clone()),
         printer,
     );
+
+    // Opening the editor is the path these tests exercise, and the editor only
+    // opens for a user who can close it. `Ctx::new` reads that off the
+    // process's own stdout, which the in-memory printer does not replace, so
+    // pin it rather than inherit whatever the test binary was launched with.
+    ctx.term.interactive = true;
 
     (ctx, out, err, tmp)
 }

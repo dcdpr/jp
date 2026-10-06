@@ -126,6 +126,11 @@ fn open_editor_refuses_a_non_interactive_invocation() {
     .unwrap();
     let (mut ctx, _tmp) = setup(id);
 
+    // `Ctx::new` reads interactivity off the process's own stdout, which the
+    // in-memory printer does not replace, so pin it here rather than inherit
+    // whatever the test binary was launched with.
+    ctx.term.interactive = false;
+
     let edit = || Edit {
         target: PositionalIds::from_targets(vec![]),
         local: None,
@@ -138,11 +143,6 @@ fn open_editor_refuses_a_non_interactive_invocation() {
         metadata: false,
         base_config: false,
     };
-
-    assert!(
-        !ctx.term.interactive,
-        "a captured stdout is not a terminal, so no user is present"
-    );
 
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
     let error = edit().run_open_editor(&mut ctx, &[handle]).unwrap_err();

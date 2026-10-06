@@ -111,3 +111,29 @@ Not done: rejecting an explicit `--edit` alongside `--no-interactive`.
 It is now ignored rather than honoured, which is the safe direction but still
 silent.
 Worth a separate ticket if it bites.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-10-06T09:41:04Z
+- **Re**: #1
+
+Correction to the last paragraph: an editor-forcing flag under
+`--no-interactive` is rejected, not ignored.
+
+Ignoring it was not the safe direction after all.
+`--quote` seeds the request with the assistant's last message before
+`edit_message` runs, so on a conversation with any prior response the request is
+non-empty by the time the backend resolves.
+Skipping the editor there sent the assistant's own words back as the user's
+turn, called the provider, and persisted the exchange — and stdout being
+redirected is enough to trigger it, no `--no-interactive` needed.
+
+`Query::edit_message` now matches `Some(_) if self.force_edit()` ahead of the
+non-empty-request fallback and returns `Error::NonInteractiveEditor` suggesting
+a terminal or `--no-edit`.
+The guard sits inside the `Some(_)` path, so a run with no editor configured
+still falls back as it always has.
+
+`force_edit()` covers `--edit` and `--quote` together, so the contradiction the
+description asked to reject is rejected too.
