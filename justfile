@@ -4145,7 +4145,6 @@ _install-serve-web *args:
     chmod 755 "$dir/.jp-serve-web.new"
     mv -f "$dir/.jp-serve-web.new" "$dir/jp-serve-web"
     echo "Installed jp-serve-web to $dir" >&2
-<<<<<<< HEAD
 
 # Build and install the `bookworm` MCP server that `.jp/config.toml` runs.
 _install-bookworm *args:
@@ -4156,8 +4155,6 @@ _install-bookworm *args:
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path crates/contrib/bookworm {{args}}
-||||||| parent of dd64ec494 (chore(rustqual): Install from source instead of via binstall)
-=======
 
 # Build and install `rustqual`, the structural quality analyser.
 #
@@ -4171,7 +4168,6 @@ _install-bookworm *args:
 # without needing `JP_INSTALL=1`, unlike the path-installed tools below.
 _install-rustqual *args:
     cargo install {{quiet_flag}} --locked rustqual@{{rustqual_version}} {{args}}
->>>>>>> dd64ec494 (chore(rustqual): Install from source instead of via binstall)
 
 _install-comfort *args:
     #!/usr/bin/env sh
