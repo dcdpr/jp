@@ -320,14 +320,6 @@ async fn each_operation_runs_as_its_own_invocation_and_the_call_records_once() {
         recording.result,
         ToolResult::text("[1/2] ok\na\n\n[2/2] ok\nb\n")
     );
-    assert_eq!(
-        recording
-            .operations
-            .iter()
-            .map(|operation| operation.result.clone())
-            .collect::<Vec<_>>(),
-        vec![ToolResult::text("a"), ToolResult::text("b")]
-    );
     settled.sort_by_key(|(index, _)| *index);
     assert_eq!(
         settled
@@ -360,7 +352,7 @@ async fn a_bare_call_to_a_fan_out_tool_runs_as_an_ordinary_call() {
     let (recording, settled) = approve_all(&mut host).await;
 
     assert!(settled.is_empty());
-    assert!(recording.operations.is_empty());
+    assert_eq!(recording.result, ToolResult::text("a"));
     assert_eq!(call.finish().await.unwrap(), ToolResult::text("a"));
     assert_eq!(*runs.lock().unwrap(), vec!["a".to_owned()]);
 }

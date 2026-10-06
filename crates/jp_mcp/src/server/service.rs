@@ -248,7 +248,7 @@ pub enum Interaction {
     /// Not sent for an operation the Host resolved with `complete_call`, since
     /// the Host supplied that result itself.
     Settled {
-        /// How the operation ended; `operations` is always empty.
+        /// How the operation ended.
         settlement: Box<Recording>,
         /// Acknowledges that the Host has taken the settlement.
         reply: oneshot::Sender<HostReply<()>>,
@@ -268,7 +268,7 @@ pub enum Interaction {
 }
 
 /// One call as the Host should record it.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Recording {
     /// Post-edit execution arguments, separate from `CallInfo::request`.
     pub arguments: Map<String, Value>,
@@ -280,11 +280,6 @@ pub struct Recording {
     ///
     /// For a fanned-out call, the folded result of its operations.
     pub result: ToolResult,
-
-    /// How each operation of a fanned-out call ended, in the order the caller
-    /// wrote them.
-    /// Empty for any other call.
-    pub operations: Vec<Recording>,
 }
 
 impl Interaction {
@@ -402,10 +397,6 @@ struct CallOutput {
     result: ToolResult,
     delivery_decided: bool,
 
-    /// What the Host was sent when the invocation concluded, if it concluded
-    /// through the service rather than by the Host's `complete_call`.
-    recording: Option<Recording>,
-
     /// For an operation a `stop` policy ruled out, the one-based position of
     /// the operation whose failure stopped it.
     not_run: Option<usize>,
@@ -417,7 +408,6 @@ impl CallOutput {
         Self {
             result,
             delivery_decided: false,
-            recording: None,
             not_run: None,
         }
     }
@@ -1111,22 +1101,21 @@ async fn conclude(
     inner: &Inner,
     call: &CallInfo,
     recording: Recording,
-) -> Result<Recording, ServiceError> {
-    let sent = Box::new(recording.clone());
+) -> Result<(), ServiceError> {
+    let recording = Box::new(recording);
     if call.operation.is_some() {
         ask(inner, call, |reply| Interaction::Settled {
-            settlement: sent,
+            settlement: recording,
             reply,
         })
-        .await?;
+        .await
     } else {
         ask(inner, call, |reply| Interaction::Record {
-            recording: sent,
+            recording,
             reply,
         })
-        .await?;
+        .await
     }
-    Ok(recording)
 }
 
 /// Settle an operation a `stop` policy ruled out.
@@ -1189,29 +1178,21 @@ async fn run_fan_out(
     }
 
     let mut outcomes = Vec::with_capacity(count);
-    let mut settlements = Vec::with_capacity(count);
     for task in tasks {
-        let (outcome, settlement) = task.await.map_err(|_| ServiceError::TaskLost)??;
-        outcomes.push(outcome);
-        settlements.push(settlement);
+        outcomes.push(task.await.map_err(|_| ServiceError::TaskLost)??);
     }
 
     let result = fan_out::fold(&outcomes);
-    let recording = conclude(inner, call, Recording {
+    conclude(inner, call, Recording {
         arguments: call.request.arguments.clone(),
         raw_result: None,
         result: result.clone(),
-        operations: settlements,
     })
     .await?;
-    Ok(CallOutput {
-        recording: Some(recording),
-        ..CallOutput::decided(result)
-    })
+    Ok(CallOutput::decided(result))
 }
 
-/// Turn how one operation's invocation ended into its folded outcome and the
-/// settlement its call records.
+/// Turn how one operation's invocation ended into its folded outcome.
 ///
 /// An operation that failed before concluding (invalid arguments, an answer the
 /// tool cannot take) still has a Host waiting on it, so it is settled here with
@@ -1225,7 +1206,7 @@ async fn settle_operation(
     output: Result<CallOutput, ServiceError>,
     gate: &Gate,
     index: usize,
-) -> Result<(OperationOutcome, Recording), ServiceError> {
+) -> Result<OperationOutcome, ServiceError> {
     let output = match output {
         Ok(output) => output,
         // Nothing will record the call either.
@@ -1238,7 +1219,7 @@ async fn settle_operation(
         }
         Err(error) => {
             let result = ToolResult::error(error.to_string());
-            match record_without_executing(inner, call, arguments.clone(), result.clone()).await {
+            match record_without_executing(inner, call, arguments, result.clone()).await {
                 Ok(output) => output,
                 Err(error @ (ServiceError::HostDisconnected | ServiceError::Stopped)) => {
                     gate.finish(index, false);
@@ -1256,18 +1237,11 @@ async fn settle_operation(
     let failed = output.not_run.is_none() && output.result.is_error();
     gate.finish(index, failed);
 
-    let outcome = match output.not_run {
+    Ok(match output.not_run {
         Some(after) => OperationOutcome::NotRun { after },
         None if output.result.is_error() => OperationOutcome::Error(output.result.to_text()),
         None => OperationOutcome::Ok(output.result.to_text()),
-    };
-    let settlement = output.recording.unwrap_or(Recording {
-        arguments,
-        raw_result: None,
-        result: output.result,
-        operations: Vec::new(),
-    });
-    Ok((outcome, settlement))
+    })
 }
 
 /// The concurrency and error policy the operations of one fanned-out call run
@@ -1401,18 +1375,14 @@ async fn record_without_executing(
     arguments: Map<String, Value>,
     result: ToolResult,
 ) -> Result<CallOutput, ServiceError> {
-    let recording = conclude(inner, call, Recording {
+    conclude(inner, call, Recording {
         arguments,
         // Nothing ran, so there is no unedited result behind the delivered one.
         raw_result: None,
         result: result.clone(),
-        operations: Vec::new(),
     })
     .await?;
-    Ok(CallOutput {
-        recording: Some(recording),
-        ..CallOutput::decided(result)
-    })
+    Ok(CallOutput::decided(result))
 }
 
 async fn deliver_result(
@@ -1444,19 +1414,15 @@ async fn deliver_result(
             }
         }
     };
-    let recording = conclude(inner, call, Recording {
+    conclude(inner, call, Recording {
         arguments,
         // A call the Host resolved at an earlier barrier never produced a
         // result of its own, so there is nothing unedited behind it.
         raw_result: (executed && !delivery_decided).then_some(raw_result),
         result: result.clone(),
-        operations: Vec::new(),
     })
     .await?;
-    Ok(CallOutput {
-        recording: Some(recording),
-        ..CallOutput::decided(result)
-    })
+    Ok(CallOutput::decided(result))
 }
 
 /// How running the tool, or its argument formatter, ended.

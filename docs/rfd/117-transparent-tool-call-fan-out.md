@@ -229,13 +229,13 @@ Every child the service concludes sends exactly one `Settled`, including one a
 A child the Host resolves itself with `complete_call` (as it does for Stop &
 respond) sends none, because the Host already holds its result.
 
-**The parent's `Record` carries the operations.** `Recording` gains `operations:
-Vec<Recording>`, one entry per child in the order the assistant wrote them.
-`result` holds the folded body, which is also what the MCP caller receives, so
-what JP records and what it delivers are the same text.
+**The parent ends with `Record`, holding the folded body.** Its `result` is
+also what the MCP caller receives, so what JP records and what it delivers are
+the same text.
+Each operation's own result already reached the Host in its `Settled`.
 
 A plain call, including a bare call to a fan-out tool, has `operation: None` on
-every interaction and an empty `operations` list, and sees no change.
+every interaction and sees no change.
 
 ### Scheduling
 
@@ -435,9 +435,8 @@ that a tool's parameters are held exactly as the source declared them.
 That stays true of `ToolDefinition`, but what the server advertises for a
 fan-out tool is its own construction.
 
-**The Host protocol grows.** `CallInfo::operation`, `Interaction::Settled`, and
-`Recording::operations` are new, and the Host has to demultiplex one MCP call
-into several executors.
+**The Host protocol grows.** `CallInfo::operation` and `Interaction::Settled`
+are new, and the Host has to demultiplex one MCP call into several executors.
 Every Host implementation carries that, not only JP's terminal one.
 
 **Replay loses operation boundaries in custom-formatter output.** The chunks are
@@ -499,7 +498,7 @@ A tool that gains fan-out behaves identically per operation.
 Some models may keep issuing one operation per call, which costs an extra
 envelope of tokens per call and delivers nothing.
 Enabling it on `fs_read_file` first and measuring the operation-count
-distribution answers this before the feature spreads.
+distribution answers this before the feature spreads; T-0yavtsr tracks that.
 
 **Permission fatigue on write tools.** Fan-out plus a write tool that asks
 before running means N prompts.
@@ -539,7 +538,7 @@ and have JP's provider request take its tool definitions from the same place.
 
 ### Phase 3: Child invocations
 
-Add `CallInfo::operation`, `Interaction::Settled`, and `Recording::operations`.
+Add `CallInfo::operation` and `Interaction::Settled`.
 Expand an envelope into child invocations under a parent, apply `concurrency`
 and `on_error` between release and execution, and fold into the parent's
 `Record`.
@@ -557,15 +556,6 @@ Route pause, resume, and cancel to the right invocation.
 
 **Depends on:** Phase 3.
 **Mergeable:** with Phase 3.
-
-### Phase 5: Enable and measure
-
-Turn on `fan_out` for `fs_read_file`, `fs_grep_files`, and `fs_list_files`.
-Record the distribution of operations per call over a week of use before
-enabling it anywhere else.
-
-**Depends on:** Phase 4.
-**Mergeable:** yes.
 
 ## References
 

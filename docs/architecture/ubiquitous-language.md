@@ -232,8 +232,9 @@ identifies an account, while the flow selects how requests reach the provider.
 ### Fan-Out
 
 A tool call carrying several independent [Operations](#operation) in an
-[Envelope](#envelope), which the [JP MCP Server](#jp-mcp-server) runs one by one
-and folds into the single response the caller is waiting for.
+[Envelope](#envelope), which the [JP MCP Server](#jp-mcp-server) runs as separate
+[Invocations](#invocation) and folds into the single response the caller is
+waiting for.
 A property of a tool's configuration, not of its implementation, which still
 receives one operation per execution; configured by `FanOutConfig` in
 `jp_config::conversation::tool`.
