@@ -555,6 +555,16 @@ fn create_asks_for_a_shorter_title() {
 
     assert_eq!(question.id, "shorter_title");
     assert_eq!(question.text, "Shorter title, at most 60 characters?");
+    // The title the formatter saw, which is the edited one when the user
+    // changed the arguments at the approval prompt: the assistant's history
+    // only has the title it first sent.
+    assert_eq!(
+        question.pre_amble.as_deref(),
+        Some(
+            "The title is 71 characters: Make provider fixtures deterministic and sanitize \
+             recorded model output"
+        )
+    );
     // The title as given, so a prompt opens with it ready to edit rather
     // than empty.
     assert_eq!(
