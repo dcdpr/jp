@@ -1,5 +1,5 @@
 use camino_tempfile::tempdir;
-use jp_process::MockProcessRunner;
+use jp_process::{ExitCode, MockProcessRunner};
 use jp_tool::{Action, Context};
 
 use super::*;
@@ -77,6 +77,92 @@ fn test_cargo_test_with_failure() {
                 </test_failure>
             </results>
             ```"});
+}
+
+/// A test nextest kills for exceeding its slow-timeout is reported with a
+/// reason and no captured output, which is exactly what nextest's libtest
+/// reporter writes for it.
+/// Counting it as passed would hide a hang behind a green summary.
+#[test]
+fn a_timed_out_test_is_reported_as_failed() {
+    let stdout = indoc::indoc! {r#"
+        {"type":"test","event":"started","name":"my_crate::my_crate$tests::slow"}
+        {"type":"test","event":"failed","name":"my_crate::my_crate$tests::slow","exec_time":60.01,"reason":"time limit exceeded"}
+        {"type":"test","event":"ok","name":"my_crate::my_crate$tests::fast","exec_time":0.01}
+    "#};
+    let runner = MockProcessRunner::builder()
+        .expect_any()
+        .returns(ProcessOutput {
+            stdout: stdout.to_owned(),
+            stderr: String::new(),
+            status: ExitCode::from_code(100),
+        });
+
+    let content = cargo_test_impl(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        None,
+        None,
+        false,
+        false,
+        &runner,
+    )
+    .unwrap()
+    .unwrap_content();
+
+    assert_eq!(content, indoc::indoc! {"
+        Ran 2/2 tests, of which 1 failed.
+
+        What follows is an XML representation of the failed tests:
+
+        ```xml
+        <results>
+            <test_failure>
+                <crate>my_crate</crate>
+                <path>tests::slow</path>
+                <reason>time limit exceeded</reason>
+            </test_failure>
+        </results>
+        ```"});
+}
+
+/// Nextest failing the run without any failure the tool could parse is not a
+/// green run: the output format changed, or something failed outside a test.
+/// The exit code and stderr are what is left to go on.
+#[test]
+fn a_failed_run_with_no_parsed_failures_is_not_reported_as_passing() {
+    let stdout =
+        r#"{"type":"test","event":"ok","name":"my_crate::my_crate$tests::fast","exec_time":0.01}"#;
+    let runner = MockProcessRunner::builder()
+        .expect_any()
+        .returns(ProcessOutput {
+            stdout: stdout.to_owned(),
+            stderr: "error: test run failed\n".to_owned(),
+            status: ExitCode::from_code(100),
+        });
+
+    let content = cargo_test_impl(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        None,
+        None,
+        false,
+        false,
+        &runner,
+    )
+    .unwrap()
+    .unwrap_content();
+
+    assert_eq!(content, indoc::indoc! {"
+        Ran 1/1 tests, of which 0 failed.
+
+        However, nextest exited with status 100, so the run did not succeed even though no \
+        failing test was reported. Its error output follows:
+
+        error: test run failed
+    "});
 }
 
 #[test]
