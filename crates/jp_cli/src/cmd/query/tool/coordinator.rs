@@ -424,7 +424,10 @@ enum Wait {
     Admission,
 
     /// Its approval prompt is open.
-    Approval(PermissionInfo),
+    ///
+    /// Boxed: every other variant carries nothing, so an unboxed one would size
+    /// every call's state to the prompt's details.
+    Approval(Box<PermissionInfo>),
 
     /// Parked at release, for the batch to be released.
     Release,
@@ -1613,7 +1616,7 @@ impl ToolCoordinator {
                     }),
                     PreRender::Deferred => None,
                 };
-                call.wait = Wait::Approval(info.clone());
+                call.wait = Wait::Approval(Box::new(info.clone()));
                 batch.prompting = true;
 
                 let prompter = Arc::clone(host.prompter);
