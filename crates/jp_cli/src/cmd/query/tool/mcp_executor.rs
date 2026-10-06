@@ -1065,8 +1065,6 @@ impl PendingCall {
 }
 
 enum Received {
-    /// Boxed because a call holds one of these only while dispatching it, and
-    /// the largest variant is several times the size of the rest.
     Interaction(Box<Interaction>),
 
     /// The MCP call returned its final result.

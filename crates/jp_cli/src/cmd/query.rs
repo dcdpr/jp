@@ -1253,8 +1253,6 @@ impl Query {
                 .with_interrupt(cfg.interrupt.tool_call.clone());
         let prompt_backend = Arc::new(TerminalPromptBackend);
 
-        // Boxed because the loop's state machine is large, and inlining it
-        // would put the whole of it in every future that awaits this one.
         let result = Box::pin(run_turn_loop(
             provider,
             &model,

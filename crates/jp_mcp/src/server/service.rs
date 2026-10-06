@@ -257,10 +257,6 @@ pub enum Interaction {
     /// Acknowledge final recording before returning the result to the caller.
     Record {
         /// What the Host is being asked to record.
-        ///
-        /// Boxed because it is the largest thing the private channel carries,
-        /// and every other interaction in flight would otherwise be sized for
-        /// it.
         recording: Box<Recording>,
         /// Acknowledges the Host's configured persistence policy, not an
         /// unconditional disk write.
