@@ -325,24 +325,24 @@ fn expand_error_messages_name_the_tool_and_the_envelope() {
     );
 }
 
-/// One successful operation reads exactly like a call to the same tool without
-/// fan-out, which is what keeps the envelope invisible at N=1.
+/// One operation reads exactly like a call to the same tool without fan-out,
+/// success or failure, which is what keeps the envelope invisible at N=1.
 #[test]
 fn fold_returns_a_lone_success_without_any_framing() {
     let folded = fold(&[OperationOutcome::Ok("file contents".to_owned())]);
 
-    assert_eq!(folded, "file contents");
+    assert_eq!(folded, ToolResult::text("file contents"));
 }
 
-/// A lone *failure* still gets framing: the assistant needs to see that the one
-/// operation it asked for is the one that failed.
 #[test]
-fn fold_frames_a_lone_failure() {
+fn fold_returns_a_lone_failure_as_an_unframed_error() {
     let folded = fold(&[OperationOutcome::Error("not found".to_owned())]);
 
-    assert_eq!(folded, "[1/1] error\nnot found\n");
+    assert_eq!(folded, ToolResult::error("not found"));
 }
 
+/// One success is enough for the call to have done something, so it is not an
+/// error; the failed sections say which operations did not.
 #[test]
 fn fold_frames_each_operation_with_its_position() {
     let folded = fold(&[
@@ -353,7 +353,24 @@ fn fold_frames_each_operation_with_its_position() {
 
     assert_eq!(
         folded,
-        "[1/3] ok\nfirst\n\n[2/3] error\nsecond failed\n\n[3/3] ok\nthird\n"
+        ToolResult::text("[1/3] ok\nfirst\n\n[2/3] error\nsecond failed\n\n[3/3] ok\nthird\n")
+    );
+}
+
+/// A call none of whose operations succeeded is an error, so the caller sees it
+/// flagged the way it would see a bare call to the same tool fail.
+#[test]
+fn fold_reports_a_call_with_no_success_as_an_error() {
+    let folded = fold(&[
+        OperationOutcome::Error("first failed".to_owned()),
+        OperationOutcome::NotRun { after: 1 },
+    ]);
+
+    assert_eq!(
+        folded,
+        ToolResult::error(
+            "[1/2] error\nfirst failed\n\n[2/2] not run (stopped after operation 1 failed)\n"
+        )
     );
 }
 
@@ -370,7 +387,10 @@ fn fold_names_the_operations_that_never_started() {
 
     assert_eq!(
         folded,
-        "[1/4] ok\nFile deleted.\n\n[2/4] error\nFile has uncommitted changes.\n\n[3/4] not run \
-         (stopped after operation 2 failed)\n\n[4/4] not run (stopped after operation 2 failed)\n"
+        ToolResult::text(
+            "[1/4] ok\nFile deleted.\n\n[2/4] error\nFile has uncommitted changes.\n\n[3/4] not \
+             run (stopped after operation 2 failed)\n\n[4/4] not run (stopped after operation 2 \
+             failed)\n"
+        )
     );
 }

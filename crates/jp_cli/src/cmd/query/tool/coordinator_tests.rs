@@ -721,6 +721,109 @@ async fn a_fanned_out_call_asks_about_each_operation_and_records_once() {
     );
 }
 
+/// Tools named `name` whose calls an argument formatter describes, and which
+/// run without asking.
+fn described_tools(name: &str) -> ToolsConfig {
+    let partial: jp_config::conversation::tool::PartialToolConfig = serde_json::from_value(json!({
+        "source": "builtin", "run": "allow",
+        "style": {"parameters": "describe"},
+    }))
+    .unwrap();
+    let mut tools = jp_config::AppConfig::new_test().conversation.tools;
+    tools.insert(
+        name.into(),
+        ToolConfig::from_partial(partial, vec![]).unwrap(),
+    );
+    tools
+}
+
+/// Take `request` to its response twice without draining what was stored in
+/// between, the way a restart hands the calls still without a response back to
+/// the coordinator before anything is persisted, then drain.
+async fn described_twice(
+    coordinator: &mut ToolCoordinator,
+    request: &ToolCallRequest,
+) -> HashMap<String, String> {
+    let printer = Arc::new(Printer::sink());
+    let (_workspace, lock) = test_lock();
+    let conv = lock.as_mut();
+    for _ in 0..2 {
+        drive(
+            coordinator,
+            vec![request.clone()],
+            Arc::new(MockPromptBackend::new()),
+            Arc::new(MockInquiryBackend::new(HashMap::new())),
+            &mut TurnState::default(),
+            &conv,
+            &printer,
+        )
+        .await;
+    }
+    coordinator.drain_rendered_arguments()
+}
+
+/// A call's stored description is the one it was last shown with.
+///
+/// Announced again after a restart, a call replaces its description rather than
+/// adding a second copy, which replay would print twice.
+#[tokio::test]
+async fn announcing_a_call_again_replaces_its_stored_description() {
+    let source = TestExecutorSource::new().with_executor("example", |request| {
+        Box::new(
+            MockExecutor::completed(&request.id, &request.name, "ran").with_formatted("described"),
+        )
+    });
+    let mut coordinator = ToolCoordinator::new(described_tools("example"), Box::new(source));
+    let request = ToolCallRequest {
+        id: "call-1".into(),
+        name: "example".into(),
+        arguments: Map::new(),
+    };
+
+    let stored = described_twice(&mut coordinator, &request).await;
+
+    assert_eq!(
+        stored,
+        HashMap::from([("call-1".to_owned(), "described".to_owned())])
+    );
+}
+
+/// A fanned-out call's description holds each operation's once, in the order
+/// the assistant wrote them, however often the call is announced.
+#[tokio::test]
+async fn a_fanned_out_calls_description_holds_each_operation_once_in_order() {
+    let source = TestExecutorSource::new().with_call("example", |request| CallExecutors {
+        operations: ["first", "second"]
+            .into_iter()
+            .enumerate()
+            .map(|(op, description)| {
+                Box::new(
+                    MockExecutor::completed(&request.id, &request.name, "ran")
+                        .for_operation(op)
+                        .with_formatted(description),
+                ) as Box<dyn Executor>
+            })
+            .collect(),
+        fan_out: Some(Arc::new(ScriptedFanOut(ToolCallResponse {
+            id: request.id.clone(),
+            result: Ok("ran".into()),
+        }))),
+    });
+    let mut coordinator = ToolCoordinator::new(described_tools("example"), Box::new(source));
+    let request = ToolCallRequest {
+        id: "call-1".into(),
+        name: "example".into(),
+        arguments: Map::new(),
+    };
+
+    let stored = described_twice(&mut coordinator, &request).await;
+
+    assert_eq!(
+        stored,
+        HashMap::from([("call-1".to_owned(), "first\nsecond".to_owned())])
+    );
+}
+
 #[test]
 fn test_permission_decision_cache_is_isolated_from_answers() {
     let mut coordinator = ToolCoordinator::new(

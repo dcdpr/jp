@@ -1,4 +1,4 @@
-# RFD 113: Transparent Tool Call Fan-Out
+# RFD 117: Transparent Tool Call Fan-Out
 
 - **Status**: Implemented
 - **Category**: Design
@@ -253,10 +253,12 @@ Once a slot is free, the parent checks the error policy: under `on_error =
 "stop"`, a child behind a failed operation settles as not run instead of
 executing.
 
-A child that ran reports its failure from the tool's own result, before it gives
-up its slot and before result-mode policy applies, so the next child cannot slip
-through and `result = "skip"` or a declined `result = "ask"` review cannot hide
-it.
+A child released to run reports its failure before it gives up its slot, so the
+next child cannot slip through.
+That covers a tool that ran and reported an error, and one that could not be run
+at all (a command that fails to spawn, an upstream MCP error).
+The tool's own result decides, before result-mode policy applies, so `result =
+"skip"` or a declined `result = "ask"` review cannot hide the failure.
 A child that ended without running (a Host decision, an argument the tool
 rejects) reports a failure from the result it ended with.
 
@@ -300,8 +302,8 @@ It neither schedules nor folds.
 The parent folds its children in the order the assistant wrote them, not the
 order they finished.
 
-A fan-out call carrying one successful operation is recorded bare, so at N=1 the
-envelope leaves no trace in the result.
+A fan-out call carrying one operation is recorded bare, success or failure, so
+at N=1 the envelope leaves no trace in the result.
 Otherwise the folded body frames each operation and states what did not run:
 
 ```text
@@ -318,6 +320,13 @@ File has uncommitted changes. Please stage or discard first.
 
 Without the "not run" lines the assistant assumes all five were attempted and
 reasons from a false premise.
+
+The call is recorded as an error when no operation succeeded, such as one whose
+first operation failed and stopped the rest.
+One success is enough for it to count as a success; the framed sections name
+the operations that failed.
+The provider sees the same distinction it would for a bare call to the tool,
+and replay picks the error or the success style by it.
 
 ### Interrupts
 
@@ -345,9 +354,12 @@ that declares its own `ops` parameter replays as operations.
 
 Custom-formatter output is stored on the `ToolCallRequest` event, which carries
 the whole call.
-Each operation's rendered chunk is joined with a newline into one string, which
-reproduces on replay exactly what was printed live and keeps the stored value a
-string for conversations recorded before fan-out existed.
+Each operation's rendered chunk is joined with a newline into one string, in the
+order the assistant wrote the operations, which keeps the stored value a string
+for conversations recorded before fan-out existed.
+An operation announced again after a restart replaces its chunk.
+Replay therefore shows every operation's header and then every description,
+where the live output put each description under its own header.
 
 ### Configuration
 

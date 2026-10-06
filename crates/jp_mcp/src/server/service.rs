@@ -1011,7 +1011,7 @@ async fn run_call(
                     }
                 },
             };
-            let output = match attempt(
+            let attempted = attempt(
                 inner,
                 call,
                 &tool,
@@ -1020,20 +1020,26 @@ async fn run_call(
                 &mut answers,
                 cancellation,
             )
-            .await?
-            {
+            .await;
+            // Recorded before the permit is released, whichever way the attempt
+            // ended, so the next operation cannot start between this failure
+            // and the gate learning of it. The tool's own result decides, not
+            // the one delivered after result-mode policy.
+            if let Some((gate, index)) = gate {
+                let failed = match &attempted {
+                    Ok(Attempt::Completed(result) | Attempt::Settled(result)) => result.is_error(),
+                    Ok(Attempt::Failed(_)) | Err(_) => true,
+                };
+                if failed {
+                    gate.fail(index);
+                }
+            }
+            drop(permit);
+            let output = match attempted? {
                 Attempt::Completed(result) => CallOutput::undecided(result),
                 Attempt::Settled(result) => CallOutput::decided(result),
                 Attempt::Failed(error) => return Err(error.into()),
             };
-            // Recorded before the permit is released, so the next operation
-            // cannot slip through between this failure and its recording.
-            if let Some((gate, index)) = gate
-                && output.result.is_error()
-            {
-                gate.fail(index);
-            }
-            drop(permit);
             (output, true)
         }
         ReleaseDecision::Complete { result } => (CallOutput::decided(result), false),
@@ -1190,7 +1196,7 @@ async fn run_fan_out(
         settlements.push(settlement);
     }
 
-    let result = ToolResult::text(fan_out::fold(&outcomes));
+    let result = fan_out::fold(&outcomes);
     let recording = conclude(inner, call, Recording {
         arguments: call.request.arguments.clone(),
         raw_result: None,
@@ -1361,23 +1367,30 @@ impl Gate {
 
     /// Record that operation `index` failed.
     fn fail(&self, index: usize) {
-        let mut state = self.state();
-        let position = index + 1;
-        if state.first_failure.is_none_or(|first| position < first) {
-            state.first_failure = Some(position);
-        }
-        drop(state);
+        record_failure(&mut self.state(), index);
         self.changed.notify_waiters();
     }
 
     /// Record that operation `index` settled, and whether it failed.
+    ///
+    /// Both are recorded under one lock, so an operation entering in between
+    /// never sees this one as passed but not failed.
     fn finish(&self, index: usize, failed: bool) {
-        self.state().passed[index] = true;
+        let mut state = self.state();
+        state.passed[index] = true;
         if failed {
-            self.fail(index);
-        } else {
-            self.changed.notify_waiters();
+            record_failure(&mut state, index);
         }
+        drop(state);
+        self.changed.notify_waiters();
+    }
+}
+
+/// Keep the earliest failed operation's one-based position.
+fn record_failure(state: &mut GateState, index: usize) {
+    let position = index + 1;
+    if state.first_failure.is_none_or(|first| position < first) {
+        state.first_failure = Some(position);
     }
 }
 

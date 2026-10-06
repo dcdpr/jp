@@ -84,6 +84,10 @@ pub(crate) struct MockExecutor {
 
     /// Where what this executor is settled with goes, when a test watches.
     settlements: Option<Arc<Mutex<Vec<Review>>>>,
+
+    /// The argument formatter's description of the call, as the execution
+    /// service would report it.
+    formatted: Option<String>,
 }
 
 impl MockExecutor {
@@ -109,7 +113,15 @@ impl MockExecutor {
             }))),
             op: None,
             settlements: None,
+            formatted: None,
         }
+    }
+
+    /// Report `description` as the argument formatter's description of the
+    /// call.
+    pub(crate) fn with_formatted(mut self, description: &str) -> Self {
+        self.formatted = Some(description.to_owned());
+        self
     }
 
     /// Stand for operation `op` of a fanned-out call.
@@ -142,6 +154,10 @@ impl MockExecutor {
 
 #[async_trait]
 impl Executor for MockExecutor {
+    fn formatted_arguments(&self) -> Option<String> {
+        self.formatted.clone()
+    }
+
     fn tool_id(&self) -> &str {
         &self.tool_id
     }

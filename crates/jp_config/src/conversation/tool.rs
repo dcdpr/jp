@@ -2026,7 +2026,7 @@ pub struct FanOutConfig {
 
     /// Maximum operations in flight at once.
     ///
-    /// Defaults to unbounded.
+    /// Defaults to unbounded; `0` also means unbounded.
     /// Set to `1` to run them one at a time, in the order the assistant wrote
     /// them, which is what an ordered sequence of writes needs.
     /// Set to a small number for an endpoint that rate-limits.

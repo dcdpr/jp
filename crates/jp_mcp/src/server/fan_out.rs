@@ -13,7 +13,7 @@
 //! into the one response the caller receives.
 //! Running the operations lives in the service.
 
-use jp_tool::{ToolDefinition, schema::Node};
+use jp_tool::{ToolDefinition, ToolResult, schema::Node};
 use serde_json::{Map, Value, json};
 
 use super::service::validate_arguments;
@@ -236,22 +236,38 @@ pub enum OperationOutcome {
     },
 }
 
-/// Fold per-operation outcomes into the single body the caller receives.
+/// Fold per-operation outcomes into the single result the caller receives.
 ///
 /// Each operation gets a header naming its position, so a model reading the
 /// result can line each section up with the operation it wrote.
 /// Operations that never started say so explicitly: without that, a model that
 /// asked for five and reads three assumes the other two succeeded silently.
 ///
-/// A single successful operation is returned bare, with no framing at all, so a
+/// A single operation is returned bare, with no framing at all, so a
 /// one-operation call reads exactly like a call to the same tool without
-/// fan-out.
+/// fan-out, success or failure.
+/// Otherwise the result is an error only when no operation succeeded.
 #[must_use]
-pub fn fold(outcomes: &[OperationOutcome]) -> String {
-    if let [OperationOutcome::Ok(content)] = outcomes {
-        return content.clone();
+pub fn fold(outcomes: &[OperationOutcome]) -> ToolResult {
+    match outcomes {
+        [OperationOutcome::Ok(content)] => return ToolResult::text(content.clone()),
+        [OperationOutcome::Error(message)] => return ToolResult::error(message.clone()),
+        _ => {}
     }
 
+    let body = frame(outcomes);
+    if outcomes
+        .iter()
+        .any(|outcome| matches!(outcome, OperationOutcome::Ok(_)))
+    {
+        ToolResult::text(body)
+    } else {
+        ToolResult::error(body)
+    }
+}
+
+/// Frame each operation's outcome under a header naming its position.
+fn frame(outcomes: &[OperationOutcome]) -> String {
     let count = outcomes.len();
     let mut body = String::new();
 

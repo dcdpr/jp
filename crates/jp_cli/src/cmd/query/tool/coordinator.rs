@@ -45,7 +45,7 @@
 //! [`submit`]: ToolCoordinator::submit
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     future::pending,
     sync::Arc,
 };
@@ -573,10 +573,12 @@ pub struct ToolCoordinator {
     tools_config: ToolsConfig,
     interrupt_config: ToolInterruptConfig,
     executor_source: Box<dyn ExecutorSource>,
-    /// Rendered custom argument output for approved calls.
-    /// Keyed by tool call ID.
+    /// Rendered custom argument output for approved calls, by tool call ID and
+    /// then by operation.
+    ///
+    /// A call announced again, as a restart does, replaces what it stored.
     /// Drained by the turn loop to write into event metadata.
-    rendered_arguments: HashMap<String, String>,
+    rendered_arguments: HashMap<String, BTreeMap<Option<usize>, String>>,
 }
 
 impl ToolCoordinator {
@@ -614,9 +616,14 @@ impl ToolCoordinator {
     ///
     /// Returns `(tool_call_id, rendered_content)` pairs for the calls that were
     /// approved.
+    /// A fanned-out call's operations are joined with a newline, in the order
+    /// the assistant wrote them, because one event carries the whole call.
     /// The caller writes these into event metadata.
     pub fn drain_rendered_arguments(&mut self) -> HashMap<String, String> {
         std::mem::take(&mut self.rendered_arguments)
+            .into_iter()
+            .map(|(id, operations)| (id, operations.into_values().collect::<Vec<_>>().join("\n")))
+            .collect()
     }
 
     pub fn is_prompting(&self) -> bool {
@@ -1636,16 +1643,12 @@ impl ToolCoordinator {
         let Some(content) = content else {
             return;
         };
-        // One event carries a fanned-out call, so its operations' descriptions
-        // are stored as one record. Joining them reproduces on replay what was
-        // printed live: these descriptions, one after another.
+        // Keyed by operation, so announcing the call again (after a restart)
+        // replaces its description instead of adding a second copy.
         self.rendered_arguments
             .entry(call.tool_id.clone())
-            .and_modify(|rendered| {
-                rendered.push('\n');
-                rendered.push_str(&content);
-            })
-            .or_insert(content);
+            .or_default()
+            .insert(call.executor.op_index(), content);
     }
 
     /// Release every admitted call to run.

@@ -432,7 +432,7 @@ async fn stop_leaves_the_operations_after_a_failure_not_run() {
 
     assert_eq!(
         recording.result,
-        ToolResult::text(
+        ToolResult::error(
             "[1/2] error\nbad path\n\n[2/2] not run (stopped after operation 1 failed)\n"
         )
     );
@@ -465,6 +465,74 @@ async fn stop_acts_on_a_failure_that_result_skip_hides() {
     );
     call.finish().await.unwrap();
     assert_eq!(*runs.lock().unwrap(), vec!["bad"]);
+}
+
+/// An operation that could not be run at all (a builtin that is not registered,
+/// an upstream MCP error, a command that fails to spawn) stops the rest under
+/// `stop`, the same as one that ran and reported an error.
+///
+/// The Host holds its acknowledgement of the first operation's settlement until
+/// the second has settled.
+/// The gate has to learn of the failure while the first operation still holds
+/// its slot: learning of it only once that settlement is acknowledged lets the
+/// second start in between.
+#[tokio::test]
+async fn stop_acts_on_an_operation_that_could_not_run() {
+    let (service, mut host) = service(
+        json!({
+            "source": "builtin",
+            "run": "allow",
+            "fan_out": {"concurrency": 1, "on_error": "stop"},
+        }),
+        "/tmp".into(),
+        // Nothing is registered under `count`, so every attempt fails to start.
+        BuiltinExecutors::new(),
+        no_commands(),
+        InvocationContext::default(),
+    );
+    let call = service.start_call(envelope_request(&["a", "b"])).unwrap();
+
+    let mut held = None;
+    let mut second_settled = false;
+    let recording = loop {
+        let request = next(&mut host).await;
+        let index = request.call.operation.map(|operation| operation.index);
+        match request.interaction {
+            Interaction::RenderArguments { reply } => reply.send(Ok(false)).unwrap(),
+            Interaction::Prepare {
+                arguments, reply, ..
+            } => reply.send(Ok(Admission::Run { arguments })).unwrap(),
+            Interaction::Release { reply, .. } => reply.send(Ok(ReleaseDecision::Execute)).unwrap(),
+            Interaction::Settled { reply, .. } if index == Some(0) && !second_settled => {
+                held = Some(reply);
+            }
+            Interaction::Settled { reply, .. } => {
+                reply.send(Ok(())).unwrap();
+                if index == Some(1) {
+                    second_settled = true;
+                    if let Some(first) = held.take() {
+                        first.send(Ok(())).unwrap();
+                    }
+                }
+            }
+            Interaction::Record { recording, reply } => {
+                reply.send(Ok(())).unwrap();
+                break recording;
+            }
+            Interaction::Input { .. } | Interaction::Review { .. } => {
+                panic!("unexpected interaction")
+            }
+        }
+    };
+
+    assert_eq!(
+        recording.result,
+        ToolResult::error(
+            "[1/2] error\nTool not found: count\n\n[2/2] not run (stopped after operation 1 \
+             failed)\n"
+        )
+    );
+    call.finish().await.unwrap();
 }
 
 /// An operation the Host declines settles without running, and the rest run.

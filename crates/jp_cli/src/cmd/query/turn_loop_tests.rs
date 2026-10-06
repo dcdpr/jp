@@ -5621,9 +5621,11 @@ async fn a_stop_policy_that_rules_out_the_rest_ends_the_turn() {
     .expect("the turn ends");
 
     assert_eq!(turn.runs, vec!["bad.rs"], "the second operation never ran");
+    // Nothing succeeded, so the call is recorded as the error it is: the
+    // provider is told so, and replay shows it in the error style.
     assert_eq!(
         turn.response.result,
-        Ok(
+        Err(
             "[1/2] error\nno such file\n\n[2/2] not run (stopped after operation 1 failed)\n"
                 .to_owned()
         )
