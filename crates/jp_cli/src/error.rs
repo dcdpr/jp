@@ -242,6 +242,23 @@ pub(crate) enum Error {
     #[error("Compaction error: {0}")]
     Compaction(String),
 
+    /// The compaction rules and turn selection together named no turn.
+    ///
+    /// Names the conversation and its size, and nothing else.
+    /// The bounds that came up empty are usually config the user never typed (a
+    /// rule's `keep_first` / `keep_last`), so naming them as a range would read
+    /// as a range they asked for.
+    /// A malformed range they did type is rejected earlier, by
+    /// [`crate::cmd::turn_selection::TurnSelection::check_turn_range`].
+    ///
+    /// The id matters because one invocation can name several conversations,
+    /// and the whole run is refused when any of them would compact nothing.
+    #[error(
+        "No turns to compact in conversation {id}, the selection resolves to 0 of its {turns} \
+         turns."
+    )]
+    NothingToCompact { id: ConversationId, turns: usize },
+
     /// A summary range would have to grow over text that cannot be re-derived.
     ///
     /// Turn numbers are 1-based, as displayed.

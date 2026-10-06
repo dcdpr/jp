@@ -8,9 +8,9 @@ use jp_config::{
     },
 };
 use jp_conversation::{
-    ByteSize, Compaction, CompactionRange, ConversationStream, PolicySpec, ReasoningPolicy,
-    SummaryOverlap, SummaryPolicy, SummarySource, ToolCallPolicy, compaction::extend_summary_range,
-    stream::AffectedItem,
+    ByteSize, Compaction, CompactionRange, ConversationId, ConversationStream, PolicySpec,
+    ReasoningPolicy, SummaryOverlap, SummaryPolicy, SummarySource, ToolCallPolicy,
+    compaction::extend_summary_range, stream::AffectedItem,
 };
 use jp_llm::event::NoticeSink;
 use jp_workspace::{ConversationHandle, ConversationMut, Workspace};
@@ -496,7 +496,9 @@ fn overlap_error(overlap: &SummaryOverlap) -> crate::error::Error {
 /// already-resolved range.
 ///
 /// A rule carrying `summary.text` is satisfied without contacting a provider.
-/// Otherwise the summarizer reads the raw events in `events` for the range.
+/// Otherwise the summarizer reads the range in `events` as this rule's
+/// mechanical policies leave it, so the text stands in for the turns the stored
+/// event will actually project.
 async fn build_compaction_for_range(
     events: &ConversationStream,
     cfg: &jp_config::AppConfig,
@@ -525,6 +527,7 @@ async fn build_compaction_for_range(
         events,
         range.from_turn,
         range.to_turn,
+        &compaction,
         Some(summary),
         cfg,
         notices,
@@ -903,20 +906,57 @@ impl Compact {
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         self.validate()?;
         self.range.validate()?;
-
-        // Reject an out-of-range `--turn` against every target before compacting
-        // any of them, so a bad endpoint on the last conversation can't leave the
-        // earlier ones already compacted.
-        // `compact_one` re-checks against the locked snapshot, which is the
-        // authoritative count if a concurrent writer appends in between.
-        for handle in &handles {
-            self.range
-                .check_turn_range(ctx.workspace.events(handle)?.turn_count())?;
-        }
+        self.preflight(ctx, &handles)?;
 
         for handle in handles {
             self.compact_one(ctx, handle).await?;
         }
+        Ok(())
+    }
+
+    /// Refuse every deterministic failure against every target before the first
+    /// one is compacted.
+    ///
+    /// `compact_one` repeats these checks against the locked snapshot, which is
+    /// the authoritative count if a concurrent writer appends in between.
+    /// Running them here as well is what keeps a refusal on a later
+    /// conversation from leaving the earlier ones already compacted: the
+    /// summarizer request and the write both happen inside `compact_one`, so a
+    /// refusal that first surfaces there has already cost money and mutated
+    /// state.
+    ///
+    /// Covers the out-of-range and malformed `--turn` values, an empty plan, an
+    /// unresolvable summary overlap, and a blank verbatim summary — every
+    /// refusal that needs no provider.
+    /// `--reset` plans no compaction, so it has nothing to resolve.
+    fn preflight(&self, ctx: &Ctx, handles: &[ConversationHandle]) -> Output {
+        // Config is resolved once per invocation and fixed from then on, so the
+        // rules planned here are the ones `compact_one` will plan again.
+        let rules = match self.reset {
+            Some(_) => None,
+            None => Some(
+                self.effective_rules(&ctx.config())
+                    .map_err(|e| crate::error::Error::Compaction(e.to_string()))?,
+            ),
+        };
+
+        for handle in handles {
+            let events = ctx.workspace.events(handle)?;
+            self.range.check_turn_range(events.turn_count())?;
+
+            let Some(rules) = rules.as_deref() else {
+                continue;
+            };
+
+            if plan_compactions(&events, rules, &self.range)?.is_empty() {
+                return Err(crate::error::Error::NothingToCompact {
+                    id: handle.id(),
+                    turns: events.turn_count(),
+                }
+                .into());
+            }
+        }
+
         Ok(())
     }
 
@@ -945,7 +985,7 @@ impl Compact {
             .map_err(|e| crate::error::Error::Compaction(e.to_string()))?;
 
         if self.dry_run {
-            return Self::preview_compaction(ctx, &events_snapshot, &rules, &self.range);
+            return Self::preview_compaction(ctx, conv.id(), &events_snapshot, &rules, &self.range);
         }
 
         let compactions = build_compaction_events(
@@ -958,9 +998,17 @@ impl Compact {
         )
         .await?;
 
+        // A run that compacts nothing is an error rather than a silent no-op: a
+        // rule's bounds can come from config the user never typed, so without
+        // this the only signal is the absence of one.
+        // `preflight` already refused this against every target; reaching it here
+        // means a concurrent writer changed the turn count in between.
         if compactions.is_empty() {
-            ctx.printer.println("Nothing to compact.");
-            return Ok(());
+            return Err(crate::error::Error::NothingToCompact {
+                id: conv.id(),
+                turns: events_snapshot.turn_count(),
+            }
+            .into());
         }
 
         let last_turn = events_snapshot.turn_count().saturating_sub(1);
@@ -1036,6 +1084,7 @@ impl Compact {
     /// preview never promises a compaction the run cannot perform.
     fn preview_compaction(
         ctx: &Ctx,
+        id: ConversationId,
         events_snapshot: &ConversationStream,
         rules: &[CompactionRuleConfig],
         selection: &TurnSelection,
@@ -1098,9 +1147,14 @@ impl Compact {
             }
         }
 
+        // The preview refuses what the real run refuses, so an empty plan is the
+        // same error here.
         if new_segments.is_empty() {
-            ctx.printer.println("Nothing to compact.");
-            return Ok(());
+            return Err(crate::error::Error::NothingToCompact {
+                id,
+                turns: events_snapshot.turn_count(),
+            }
+            .into());
         }
 
         // Prepend the pre-existing compactions so already-compacted turns aren't

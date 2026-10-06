@@ -130,7 +130,13 @@ pub struct SummaryPolicy {
 }
 
 impl SummaryPolicy {
-    /// A summary produced by a model reading the raw events in the range.
+    /// A summary produced by a model reading the range's stored events.
+    ///
+    /// No other compaction's policies narrow what the model sees, so a summary
+    /// is never built from another summary.
+    /// The mechanical policies of the compaction this summary belongs to do
+    /// apply, so a rule that strips reasoning summarizes a range with the
+    /// reasoning already gone.
     #[must_use]
     pub fn generated(summary: impl Into<String>) -> Self {
         Self {
@@ -158,7 +164,8 @@ impl SummaryPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SummarySource {
-    /// Produced by a model reading the raw events in the range.
+    /// Produced by a model reading the range's stored events, narrowed only by
+    /// the mechanical policies of the compaction the summary belongs to.
     #[default]
     Generated,
 
