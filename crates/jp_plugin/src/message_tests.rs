@@ -5,7 +5,7 @@ use super::*;
 
 #[test]
 fn host_init_roundtrip() {
-    let msg = HostToPlugin::Init(InitMessage {
+    let msg = HostToPlugin::Init(Box::new(InitMessage {
         version: 1,
         workspace: WorkspaceInfo {
             root: "/project".into(),
@@ -22,10 +22,102 @@ fn host_init_roundtrip() {
         args: vec!["--web".to_owned()],
         log_level: 0,
         output_format: OutputFormat::JsonPretty,
-    });
+        tool: None,
+    }));
 
     let json = serde_json::to_string(&msg).unwrap();
     let parsed: HostToPlugin = from_str(&json).unwrap();
+    assert_eq!(msg, parsed);
+}
+
+/// The wire shape a plugin serving tools parses, pinned so a field renamed on
+/// the host side shows up here rather than as a plugin that silently stops
+/// answering.
+#[test]
+fn host_init_with_a_tool_call_serializes_to_the_documented_shape() {
+    let msg = HostToPlugin::Init(Box::new(InitMessage {
+        version: 12,
+        workspace: WorkspaceInfo {
+            root: "/project".into(),
+            storage: "/project/.jp".into(),
+            id: "abc12".to_owned(),
+        },
+        paths: PathsInfo::default(),
+        config: json!({}),
+        options: Map::from_iter([("dir".to_owned(), json!("packages/foo/tickets"))]),
+        args: vec![],
+        log_level: 0,
+        output_format: OutputFormat::Text,
+        tool: Some(ToolCall {
+            action: ToolAction::FormatArguments,
+            name: "create".to_owned(),
+            arguments: Map::from_iter([("title".to_owned(), json!("Fix it"))]),
+            answers: Map::new(),
+            options: Map::new(),
+            access: Some(json!({"fs": [], "net": [], "env": [{"name": "AWS_*", "read": false}]})),
+            conversation: "jp-c17000000000".to_owned(),
+        }),
+    }));
+
+    assert_eq!(
+        serde_json::to_value(&msg).unwrap(),
+        json!({
+            "type": "init",
+            "version": 12,
+            "workspace": {"root": "/project", "storage": "/project/.jp", "id": "abc12"},
+            "paths": {},
+            "config": {},
+            "options": {"dir": "packages/foo/tickets"},
+            "args": [],
+            "log_level": 0,
+            "output_format": "text",
+            "tool": {
+                "action": "format_arguments",
+                "name": "create",
+                "arguments": {"title": "Fix it"},
+                "access": {"fs": [], "net": [], "env": [{"name": "AWS_*", "read": false}]},
+                "conversation": "jp-c17000000000"
+            }
+        })
+    );
+}
+
+/// A tool call that names no action is a run.
+#[test]
+fn tool_call_without_an_action_is_a_run() {
+    let call: ToolCall = from_str(r#"{"name":"create"}"#).unwrap();
+
+    assert_eq!(call.action, ToolAction::Run);
+    assert_eq!(
+        serde_json::to_value(&call).unwrap(),
+        json!({"action": "run", "name": "create", "arguments": {}})
+    );
+}
+
+#[test]
+fn host_init_without_a_tool_call_reads_as_a_command() {
+    let json = r#"{"type":"init","version":9,"workspace":{"root":"/p","storage":"/p/.jp","id":"x"},"config":{},"args":["list"]}"#;
+    let HostToPlugin::Init(init) = from_str(json).unwrap() else {
+        panic!("expected Init");
+    };
+
+    assert_eq!(init.tool, None);
+}
+
+#[test]
+fn plugin_tool_outcome_roundtrip() {
+    let msg = PluginToHost::ToolOutcome(ToolOutcomeMessage {
+        outcome: json!({"type": "success", "content": "Created T-0abc123"}),
+    });
+    // Compared as values: key order inside `outcome` depends on whether
+    // `serde_json`'s `preserve_order` is unified into this build.
+    let json = serde_json::to_string(&msg).unwrap();
+    assert_eq!(
+        from_str::<Value>(&json).unwrap(),
+        json!({"type": "tool_outcome", "outcome": {"type": "success", "content": "Created T-0abc123"}})
+    );
+
+    let parsed: PluginToHost = from_str(&json).unwrap();
     assert_eq!(msg, parsed);
 }
 

@@ -417,6 +417,31 @@ fn test_pre_render_for_prompt_custom_defers_until_the_service_formats() {
     assert_eq!(strip_ansi(&stderr.lock()), "");
 }
 
+/// A tool that formats its own arguments runs a program to do so, exactly as a
+/// configured command does, so it defers the same way.
+#[test]
+fn test_pre_render_for_prompt_tool_style_defers_until_the_service_formats() {
+    let coordinator = coordinator_with_style("ticket_create", ParametersStyle::Tool);
+
+    let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let tool_renderer = ToolRenderer::new(
+        ErrChannel::new(printer.clone()),
+        jp_config::AppConfig::new_test().style,
+    );
+
+    let executor = MockExecutor::completed("call-1", "ticket_create", "done");
+    let result = coordinator.pre_render_for_prompt(&executor, &tool_renderer);
+
+    assert!(
+        matches!(result, PreRender::Deferred),
+        "an unformatted tool style should defer rendering, got: {result:?}"
+    );
+
+    printer.flush();
+    assert_eq!(strip_ansi(&stderr.lock()), "");
+}
+
 /// Take `requests` from arrival to their responses through `coordinator`, as
 /// the turn loop does once the response has finished streaming.
 ///

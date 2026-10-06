@@ -1,4 +1,5 @@
 use std::{
+    fs,
     future::pending,
     io,
     sync::{
@@ -10,10 +11,12 @@ use std::{
 use assert_matches::assert_matches;
 use async_trait::async_trait;
 use camino::Utf8Path;
+use camino_tempfile::tempdir;
 use jp_config::{
     AppConfig, Config as _,
     conversation::tool::{PartialToolConfig, ToolConfig},
 };
+use jp_plugin::message::PathsInfo;
 use jp_process::{ExitCode, MockProcessRunner, ProcessOutput};
 use jp_tool::{Outcome, Question, ToolDefinition, ToolDocs};
 use serde_json::{Value, json};
@@ -24,7 +27,9 @@ use tokio::{
 
 use super::*;
 use crate::server::{
+    AdmittedPlugin, PluginInit,
     builtin::BuiltinTool,
+    command::sha256_file,
     testing::{echoing, no_commands, printed},
 };
 
@@ -82,6 +87,7 @@ fn service(
         Client::default(),
         builtins,
         runner,
+        CommandPlugins::default(),
         root.to_owned(),
         invocation,
     )
@@ -105,6 +111,190 @@ fn fixture(run: &str, result: &str) -> (Service, HostReceiver, Arc<AtomicUsize>)
         InvocationContext::default(),
     );
     (service, host, count)
+}
+
+/// What every plugin call of these tests' turns is told.
+fn plugin_init() -> PluginInit {
+    PluginInit {
+        workspace_id: "ws-abc".to_owned(),
+        storage: Some("/tmp/.jp".into()),
+        paths: PathsInfo::default(),
+        config: Arc::new(AppConfig::new_test()),
+        log_level: 0,
+    }
+}
+
+/// A service whose `count` tool is served by the command plugin `counter`,
+/// configured by `config` on top of its source.
+///
+/// The plugin answers by the action its `init` names: `described` when asked to
+/// format its arguments, `ran` when run, so a test can tell which of the two
+/// produced what it sees.
+/// Every run is recorded on the returned runner, which is the only evidence
+/// that the plugin ran: a denied call and one that silently went nowhere look
+/// the same from the result alone.
+fn plugin_service(config: Value) -> (Service, HostReceiver, Arc<MockProcessRunner>) {
+    let dir = tempdir().unwrap();
+    let binary = dir.path().join("jp-counter");
+    fs::write(&binary, "plugin").unwrap();
+    let plugins = CommandPlugins::new(plugin_init()).with("counter", AdmittedPlugin {
+        sha256: sha256_file(&binary).unwrap(),
+        binary,
+    });
+    let runner = Arc::new(MockProcessRunner::responding(move |spec| {
+        // Owns the directory, so the binary lives as long as the service.
+        let _dir = &dir;
+        let init: Value = serde_json::from_str(spec.stdin.as_deref().unwrap_or("{}")).unwrap();
+        let content = match init["tool"]["action"].as_str() {
+            Some("format_arguments") => "described",
+            _ => "ran",
+        };
+        Ok(ProcessOutput {
+            stdout: format!(
+                "{}\n{}\n",
+                json!({"type": "tool_outcome", "outcome": {"type": "success", "content": content}}),
+                json!({"type": "exit", "code": 0}),
+            ),
+            stderr: String::new(),
+            status: ExitCode::success(),
+        })
+    }));
+
+    let mut partial = json!({"source": "plugin.command.counter"});
+    let Value::Object(config) = config else {
+        panic!("tool config is an object");
+    };
+    partial.as_object_mut().unwrap().extend(config);
+    let partial: PartialToolConfig = serde_json::from_value(partial).unwrap();
+    let mut app = AppConfig::new_test();
+    app.conversation.tools.insert(
+        "count".into(),
+        ToolConfig::from_partial(partial, vec![]).unwrap(),
+    );
+    let tool = ConfiguredTool {
+        definition: ToolDefinition {
+            name: "count".into(),
+            docs: ToolDocs::default(),
+            parameters: json!({
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            }),
+        },
+        config: app.conversation.tools.get("count").unwrap(),
+        access: Ok(None),
+        metadata: Map::new(),
+    };
+    let (service, host) = Service::new(
+        vec![tool],
+        Client::default(),
+        BuiltinExecutors::new(),
+        runner.clone(),
+        plugins,
+        "/tmp".into(),
+        InvocationContext::default(),
+    )
+    .unwrap();
+    (service, host, runner)
+}
+
+/// The action each run of the plugin was started for, in order.
+fn actions(runner: &MockProcessRunner) -> Vec<String> {
+    runner
+        .calls()
+        .iter()
+        .map(|spec| {
+            let init: Value = serde_json::from_str(spec.stdin.as_deref().unwrap()).unwrap();
+            init["tool"]["action"].as_str().unwrap().to_owned()
+        })
+        .collect()
+}
+
+/// A plugin tool styled `parameters = "tool"` is asked to describe the call,
+/// and what it answers is what the Host shows before approval.
+#[tokio::test]
+async fn a_plugin_describes_its_own_call_before_approval() {
+    let (service, mut host, runner) = plugin_service(json!({
+        "run": "ask", "result": "allow", "format": "allow", "style": {"parameters": "tool"}
+    }));
+    let call = service.start_call(request()).unwrap();
+
+    let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
+        panic!("expected visibility request")
+    };
+    reply.send(Ok(true)).unwrap();
+    let Interaction::Prepare {
+        arguments,
+        formatted_arguments,
+        reply,
+        ..
+    } = next(&mut host).await.interaction
+    else {
+        panic!("expected preparation")
+    };
+    assert_eq!(formatted_arguments.as_deref(), Some("described"));
+    assert_eq!(actions(&runner), ["format_arguments"]);
+
+    reply.send(Ok(Admission::Run { arguments })).unwrap();
+    let Interaction::Release { reply, .. } = next(&mut host).await.interaction else {
+        panic!("expected release")
+    };
+    reply.send(Ok(ReleaseDecision::Execute)).unwrap();
+    let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
+        panic!("expected recording")
+    };
+    reply.send(Ok(())).unwrap();
+
+    assert_eq!(call.finish().await.unwrap(), ToolResult::text("ran"));
+    assert_eq!(actions(&runner), ["format_arguments", "run"]);
+}
+
+/// `format = "ask"` holds the plugin back until the call is admitted, as it
+/// does a formatter command: nothing runs before the user says yes.
+#[tokio::test]
+async fn a_plugin_formatter_waits_for_approval_under_format_ask() {
+    let (service, mut host, runner) = plugin_service(json!({
+        "run": "ask", "result": "allow", "format": "ask", "style": {"parameters": "tool"}
+    }));
+    let call = service.start_call(request()).unwrap();
+
+    let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
+        panic!("expected visibility request")
+    };
+    reply.send(Ok(true)).unwrap();
+    let Interaction::Prepare {
+        arguments,
+        formatted_arguments,
+        reply,
+        ..
+    } = next(&mut host).await.interaction
+    else {
+        panic!("expected preparation")
+    };
+    assert!(formatted_arguments.is_none());
+    assert_eq!(actions(&runner), Vec::<String>::new());
+
+    reply.send(Ok(Admission::Run { arguments })).unwrap();
+    let Interaction::Release {
+        formatted_arguments,
+        reply,
+        ..
+    } = next(&mut host).await.interaction
+    else {
+        panic!("expected release")
+    };
+    assert_eq!(formatted_arguments.as_deref(), Some("described"));
+    assert_eq!(actions(&runner), ["format_arguments"]);
+    reply
+        .send(Ok(ReleaseDecision::Complete {
+            result: ToolResult::text("stopped"),
+        }))
+        .unwrap();
+    let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
+        panic!("expected recording")
+    };
+    reply.send(Ok(())).unwrap();
+    call.finish().await.unwrap();
 }
 
 async fn release(host: &mut HostReceiver) {
@@ -671,6 +861,105 @@ async fn denied_call_never_executes() {
 }
 
 #[tokio::test]
+async fn command_tool_waits_for_admission_before_the_plugin_runs() {
+    let (service, mut host, runner) = plugin_service(json!({"run": "ask", "result": "unattended"}));
+    let call = service.start_call(request()).unwrap();
+
+    let Interaction::Prepare {
+        arguments, reply, ..
+    } = next(&mut host).await.interaction
+    else {
+        panic!("expected preparation")
+    };
+    assert_eq!(runner.calls().len(), 0, "ran before it was admitted");
+    reply.send(Ok(Admission::Run { arguments })).unwrap();
+
+    let Interaction::Release { reply, .. } = next(&mut host).await.interaction else {
+        panic!("expected release")
+    };
+    assert_eq!(runner.calls().len(), 0, "ran before it was released");
+    reply.send(Ok(ReleaseDecision::Execute)).unwrap();
+
+    let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
+        panic!("expected recording")
+    };
+    reply.send(Ok(())).unwrap();
+    assert_eq!(call.finish().await.unwrap(), ToolResult::text("ran"));
+    assert_eq!(runner.calls().len(), 1);
+}
+
+#[tokio::test]
+async fn denied_command_tool_never_reaches_the_plugin() {
+    let (service, mut host, runner) = plugin_service(json!({"run": "ask", "result": "unattended"}));
+    let call = service.start_call(request()).unwrap();
+    let Interaction::Prepare { reply, .. } = next(&mut host).await.interaction else {
+        panic!("expected preparation")
+    };
+    reply
+        .send(Ok(Admission::Skip {
+            reason: "denied".into(),
+        }))
+        .unwrap();
+    let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
+        panic!("expected recording")
+    };
+    reply.send(Ok(())).unwrap();
+    assert_eq!(call.finish().await.unwrap(), ToolResult::text("denied"));
+    assert_eq!(runner.calls().len(), 0);
+}
+
+/// `run = "skip"` resolves the call without asking the Host and without running
+/// anything.
+#[tokio::test]
+async fn skipped_command_tool_never_reaches_the_plugin() {
+    let (service, mut host, runner) =
+        plugin_service(json!({"run": "skip", "result": "unattended"}));
+    let call = service.start_call(request()).unwrap();
+    let Interaction::Record { recording, reply } = next(&mut host).await.interaction else {
+        panic!("expected recording, not a preparation")
+    };
+    assert_eq!(
+        recording.result,
+        ToolResult::text("Tool execution skipped by configuration.")
+    );
+    reply.send(Ok(())).unwrap();
+    call.finish().await.unwrap();
+    assert_eq!(runner.calls().len(), 0);
+}
+
+#[tokio::test]
+async fn invalid_edited_arguments_never_reach_the_plugin() {
+    let (service, mut host, runner) =
+        plugin_service(json!({"run": "edit", "result": "unattended"}));
+    let call = service.start_call(request()).unwrap();
+    let Interaction::Prepare { reply, .. } = next(&mut host).await.interaction else {
+        panic!("expected preparation")
+    };
+    reply
+        .send(Ok(Admission::Run {
+            arguments: Map::new(),
+        }))
+        .unwrap();
+    assert!(matches!(
+        call.finish().await,
+        Err(ServiceError::Tool(ToolError::Arguments { .. }))
+    ));
+    assert_eq!(runner.calls().len(), 0);
+}
+
+#[tokio::test]
+async fn command_tool_host_loss_fails_closed() {
+    let (service, host, runner) = plugin_service(json!({"run": "ask", "result": "unattended"}));
+    drop(host);
+    let call = service.start_call(request()).unwrap();
+    assert!(matches!(
+        call.finish().await,
+        Err(ServiceError::HostDisconnected)
+    ));
+    assert_eq!(runner.calls().len(), 0);
+}
+
+#[tokio::test]
 async fn invalid_edited_arguments_do_not_reach_execution() {
     let (service, mut host, count) = fixture("edit", "allow");
     let call = service.start_call(request()).unwrap();
@@ -934,6 +1223,7 @@ async fn local_inquiry_exits_and_runs_a_new_process_with_the_answer() {
         Client::default(),
         BuiltinExecutors::new(),
         runner.clone(),
+        CommandPlugins::default(),
         "/tmp".into(),
         InvocationContext::default(),
     )
@@ -1104,6 +1394,139 @@ async fn dropping_result_receiver_does_not_cancel_or_reexecute() {
     reply.send(Ok(())).unwrap();
     assert_eq!(count.load(Ordering::SeqCst), 2);
     service.shutdown().await;
+}
+
+/// A service whose `count` tool is a local command styled `parameters =
+/// "tool"`, so the same command both formats its arguments and runs.
+///
+/// The command is passed the action it was started for, and prints `described`
+/// when formatting and `ran` when run, so a test can see both which runs
+/// happened and which produced what it sees.
+fn local_tool_formatter_fixture(format: &str) -> (Service, HostReceiver, Arc<MockProcessRunner>) {
+    let runner = Arc::new(MockProcessRunner::responding(|spec| {
+        let content = match spec.args.first().map(String::as_str) {
+            Some("format_arguments") => "described",
+            _ => "ran",
+        };
+        Ok(ProcessOutput {
+            stdout: content.to_owned(),
+            stderr: String::new(),
+            status: ExitCode::success(),
+        })
+    }));
+    let (service, host) = service(
+        json!({
+            "source": "local",
+            "run": "ask",
+            "result": "allow",
+            "format": format,
+            "style": {"parameters": "tool"},
+            "command": {"program": "count", "args": ["{{context.action}}"], "shell": false},
+        }),
+        "/tmp".into(),
+        BuiltinExecutors::new(),
+        runner.clone(),
+        InvocationContext::default(),
+    );
+    (service, host, runner)
+}
+
+/// The actions the local command was started for, in order.
+fn local_actions(runner: &MockProcessRunner) -> Vec<String> {
+    runner
+        .calls()
+        .iter()
+        .map(|spec| spec.args.join(" "))
+        .collect()
+}
+
+/// A local tool styled `parameters = "tool"` runs its own command to describe
+/// the call, and what it prints is what the Host shows before approval.
+#[tokio::test]
+async fn a_local_tool_describes_its_own_call_before_approval() {
+    let (service, mut host, runner) = local_tool_formatter_fixture("allow");
+    let call = service.start_call(request()).unwrap();
+
+    let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
+        panic!("expected visibility request")
+    };
+    reply.send(Ok(true)).unwrap();
+    let Interaction::Prepare {
+        arguments,
+        formatted_arguments,
+        reply,
+        ..
+    } = next(&mut host).await.interaction
+    else {
+        panic!("expected preparation")
+    };
+    assert_eq!(formatted_arguments.as_deref(), Some("described"));
+    assert_eq!(local_actions(&runner), ["format_arguments"]);
+
+    reply.send(Ok(Admission::Run { arguments })).unwrap();
+    let Interaction::Release { reply, .. } = next(&mut host).await.interaction else {
+        panic!("expected release")
+    };
+    reply.send(Ok(ReleaseDecision::Execute)).unwrap();
+    let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
+        panic!("expected recording")
+    };
+    reply.send(Ok(())).unwrap();
+
+    assert_eq!(call.finish().await.unwrap(), ToolResult::text("ran"));
+    assert_eq!(local_actions(&runner), ["format_arguments", "run"]);
+}
+
+/// `format = "ask"` holds the local command back until the call is admitted:
+/// nothing runs before the user says yes, and a call the Host then resolves
+/// itself never runs for real.
+#[tokio::test]
+async fn a_local_tool_formatter_waits_for_approval_under_format_ask() {
+    let (service, mut host, runner) = local_tool_formatter_fixture("ask");
+    let call = service.start_call(request()).unwrap();
+
+    let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
+        panic!("expected visibility request")
+    };
+    reply.send(Ok(true)).unwrap();
+    let Interaction::Prepare {
+        arguments,
+        formatted_arguments,
+        reply,
+        ..
+    } = next(&mut host).await.interaction
+    else {
+        panic!("expected preparation")
+    };
+    assert!(formatted_arguments.is_none());
+    assert_eq!(
+        local_actions(&runner),
+        Vec::<String>::new(),
+        "nothing ran before admission"
+    );
+
+    reply.send(Ok(Admission::Run { arguments })).unwrap();
+    let Interaction::Release {
+        formatted_arguments,
+        reply,
+        ..
+    } = next(&mut host).await.interaction
+    else {
+        panic!("expected release")
+    };
+    assert_eq!(formatted_arguments.as_deref(), Some("described"));
+    reply
+        .send(Ok(ReleaseDecision::Complete {
+            result: ToolResult::text("stopped"),
+        }))
+        .unwrap();
+    let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
+        panic!("expected recording")
+    };
+    reply.send(Ok(())).unwrap();
+    call.finish().await.unwrap();
+
+    assert_eq!(local_actions(&runner), ["format_arguments"]);
 }
 
 /// A service whose `count` tool formats its arguments with a `formatter`

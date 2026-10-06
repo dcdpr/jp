@@ -8,6 +8,94 @@ use crate::{
     util::build,
 };
 
+/// Build a config from `assignments`, each written as `--cfg` takes it.
+fn build_assigned(assignments: &[&str]) -> Result<crate::AppConfig, String> {
+    use crate::assignment::{AssignKeyValue as _, KvAssignment};
+
+    let mut partial = PartialAppConfig::new_test();
+    for assignment in assignments {
+        partial
+            .assign(assignment.parse::<KvAssignment>().unwrap())
+            .unwrap();
+    }
+    build(partial).map_err(|error| error.to_string())
+}
+
+/// A tool that runs as a subprocess can be asked to format its own arguments.
+#[test]
+fn parameters_tool_is_accepted_on_local_and_command_tools() {
+    let config = build_assigned(&[
+        "conversation.tools.ticket_create.source=plugin.command.ticket.create",
+        "conversation.tools.ticket_create.style.parameters=tool",
+        "conversation.tools.word_count.source=local",
+        "conversation.tools.word_count.command=wc",
+        "conversation.tools.word_count.style.parameters=tool",
+    ])
+    .unwrap();
+
+    for name in ["ticket_create", "word_count"] {
+        assert_eq!(
+            config
+                .conversation
+                .tools
+                .get(name)
+                .unwrap()
+                .style()
+                .parameters,
+            style::ParametersStyle::Tool
+        );
+    }
+}
+
+/// A builtin or MCP tool has nothing JP can ask to format its arguments, and a
+/// call announced by an empty formatter would show no arguments at all.
+#[test]
+fn parameters_tool_is_rejected_on_an_mcp_tool() {
+    let error = build_assigned(&[
+        "conversation.tools.notes.source=mcp.grizzly",
+        "conversation.tools.notes.style.parameters=tool",
+    ])
+    .unwrap_err();
+
+    assert!(
+        error.contains(
+            "conversation.tools.notes: `style.parameters = \"tool\"` is only supported on local \
+             and command plugin tools, but 'notes' is a mcp tool"
+        ),
+        "unexpected error: {error}"
+    );
+}
+
+/// The `'*'` block reaches every tool without a style of its own, so setting
+/// `tool` there is rejected when a builtin or MCP tool would inherit it.
+#[test]
+fn parameters_tool_in_the_defaults_is_rejected_when_an_mcp_tool_inherits_it() {
+    let error = build_assigned(&[
+        "conversation.tools.*.style.parameters=tool",
+        "conversation.tools.notes.source=mcp.grizzly",
+    ])
+    .unwrap_err();
+
+    assert!(
+        error.contains(
+            "conversation.tools.'*'.style.parameters: `tool` is only supported on local and \
+             command plugin tools, but 'notes' is a mcp tool that inherits it; set it on each \
+             tool instead"
+        ),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn parameters_tool_in_the_defaults_is_accepted_when_only_subprocess_tools_inherit_it() {
+    let config = build_assigned(&[
+        "conversation.tools.*.style.parameters=tool",
+        "conversation.tools.ticket_create.source=plugin.command.ticket.create",
+    ]);
+
+    assert!(config.is_ok(), "{config:?}");
+}
+
 /// A tool opting out of the progress window keeps that answer through the whole
 /// loader, not just when the style is built in memory.
 ///
@@ -191,9 +279,106 @@ fn access_on_mcp_tool_is_rejected_by_validation() {
 
     let err = build(partial).unwrap_err().to_string();
     assert!(
-        err.contains("only supported on local tools"),
+        err.contains(
+            "conversation.tools.my_mcp: `access` is only supported on local and command plugin \
+             tools, but 'my_mcp' is a mcp tool"
+        ),
         "unexpected error: {err}"
     );
+}
+
+/// A command plugin tool is a subprocess like a local tool, so it takes the
+/// same grants.
+#[test]
+fn access_on_command_tool_is_accepted_by_validation() {
+    use crate::{
+        PartialAppConfig,
+        conversation::tool::access::{PartialAccessConfig, PartialFsRuleConfig},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("ticket_create".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::CommandPlugin {
+                plugin: "ticket".to_owned(),
+                tool: Some("create".to_owned()),
+            }),
+            access: Some(PartialAccessConfig {
+                fs: vec![PartialFsRuleConfig {
+                    path: Some(".".to_owned()),
+                    read: Some(true),
+                    ..Default::default()
+                }]
+                .into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
+    let config = build(partial).unwrap();
+    let access = config
+        .conversation
+        .tools
+        .get("ticket_create")
+        .unwrap()
+        .access()
+        .expect("the tool's own grants")
+        .clone();
+
+    assert_eq!(access.fs.len(), 1);
+    assert_eq!(access.fs[0].path, ".");
+}
+
+/// A `'*'` block restricts every subprocess-backed tool, command plugin tools
+/// included: one left out would run unrestricted under a policy the user
+/// believes covers it.
+#[test]
+fn defaults_access_applies_to_a_command_tool_without_its_own() {
+    use crate::{
+        PartialAppConfig,
+        conversation::tool::access::{PartialAccessConfig, PartialFsRuleConfig},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools.defaults.access = Some(PartialAccessConfig {
+        fs: vec![PartialFsRuleConfig {
+            path: Some("src".to_owned()),
+            read: Some(true),
+            ..Default::default()
+        }]
+        .into(),
+        ..Default::default()
+    });
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("ticket_create".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::CommandPlugin {
+                plugin: "ticket".to_owned(),
+                tool: Some("create".to_owned()),
+            }),
+            ..Default::default()
+        });
+
+    let config = build(partial).unwrap();
+    let access = config
+        .conversation
+        .tools
+        .get("ticket_create")
+        .unwrap()
+        .access()
+        .expect("inherited from the '*' block")
+        .clone();
+
+    assert_eq!(access.fs.len(), 1);
+    assert_eq!(access.fs[0].path, "src");
+    assert_eq!(access.fs[0].read, Some(true));
 }
 
 #[test]
@@ -1440,11 +1625,21 @@ fn the_tool_source_pattern_agrees_with_the_parser() {
         "mcp.bookworm",
         "mcp.bookworm.crate_readme",
         "mcp.bookworm.a.b",
-        // Rejected by the parser: no server named, an empty server, or a
-        // prefix that is not a source at all.
+        "plugin.command.ticket",
+        "plugin.command.ticket.create",
+        // Rejected by the parser: no server or plugin named, an empty one,
+        // a plugin kind JP does not have, or a prefix that is not a source at
+        // all.
         "mcp",
         "mcp.",
         "mcp..tool",
+        "plugin",
+        "plugin.",
+        "plugin.command",
+        "plugin.command.",
+        "plugin.command..create",
+        "plugin.wasm.ticket",
+        "command.ticket",
         "nonsense",
         "",
         "builtinx",
@@ -1511,6 +1706,75 @@ fn test_tool_source_mcp_roundtrip_without_tool() {
 
     let parsed: ToolSource = serde_json::from_str(&serialized).unwrap();
     assert_eq!(parsed, original);
+}
+
+#[test]
+fn test_tool_source_command_plugin_parses_plugin_only() {
+    let parsed: ToolSource = "plugin.command.ticket".parse().unwrap();
+    assert_eq!(parsed, ToolSource::CommandPlugin {
+        plugin: "ticket".to_owned(),
+        tool: None,
+    });
+}
+
+#[test]
+fn test_tool_source_command_plugin_parses_plugin_and_tool() {
+    let parsed: ToolSource = "plugin.command.ticket.create".parse().unwrap();
+    assert_eq!(parsed, ToolSource::CommandPlugin {
+        plugin: "ticket".to_owned(),
+        tool: Some("create".to_owned()),
+    });
+}
+
+#[test]
+fn test_tool_source_command_plugin_rejects_missing_plugin() {
+    for input in [
+        "plugin",
+        "plugin.",
+        "plugin.command",
+        "plugin.command.",
+        "plugin.command..create",
+    ] {
+        let err = input.parse::<ToolSource>().unwrap_err();
+        assert_eq!(
+            err,
+            "A plugin tool source must name the plugin: use `plugin.command.<plugin>` or \
+             `plugin.command.<plugin>.<tool>`.",
+            "for {input:?}"
+        );
+    }
+}
+
+/// Only command plugins serve tools; another kind is named as unknown rather
+/// than read as a plugin called `wasm`.
+#[test]
+fn test_tool_source_rejects_an_unknown_plugin_kind() {
+    let err = "plugin.wasm.ticket".parse::<ToolSource>().unwrap_err();
+    assert_eq!(err, "Unknown plugin kind: wasm, must be: command");
+}
+
+#[test]
+fn test_tool_source_command_plugin_roundtrip() {
+    for (original, serialized) in [
+        (
+            ToolSource::CommandPlugin {
+                plugin: "ticket".to_owned(),
+                tool: Some("create".to_owned()),
+            },
+            r#""plugin.command.ticket.create""#,
+        ),
+        (
+            ToolSource::CommandPlugin {
+                plugin: "ticket".to_owned(),
+                tool: None,
+            },
+            r#""plugin.command.ticket""#,
+        ),
+    ] {
+        assert_eq!(serde_json::to_string(&original).unwrap(), serialized);
+        let parsed: ToolSource = serde_json::from_str(serialized).unwrap();
+        assert_eq!(parsed, original);
+    }
 }
 
 #[test]

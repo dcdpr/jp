@@ -19,7 +19,7 @@ use super::*;
 use crate::{
     Client, Content,
     server::{
-        InvocationContext,
+        CommandPlugins, InvocationContext,
         builtin::{BuiltinExecutors, BuiltinTool},
         service::{
             Admission, CallRequest, ConfiguredTool, HostReceiver, Interaction, ReleaseDecision,
@@ -61,6 +61,7 @@ fn setup() -> (Service, HostReceiver, Arc<AtomicUsize>) {
         Client::default(),
         BuiltinExecutors::new().register("count", Count(count.clone())),
         no_commands(),
+        CommandPlugins::default(),
         "/tmp".into(),
         InvocationContext::default(),
     )

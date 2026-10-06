@@ -27,6 +27,7 @@ server = [
     "dep:base64",
     "dep:camino",
     "dep:futures",
+    "dep:jp_plugin",
     "dep:jp_process",
     "dep:jp_tool",
     "dep:minijinja",
@@ -42,6 +43,7 @@ server = [
 [dependencies]
 jp_config = { workspace = true }
 jp_process = { workspace = true, optional = true }
+jp_plugin = { workspace = true, optional = true }
 jp_tool = { workspace = true, optional = true }
 
 async-trait = { workspace = true, optional = true }
