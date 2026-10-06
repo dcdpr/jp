@@ -761,17 +761,19 @@ pub async fn execute(
     }
 }
 
-/// Apply configured defaults for missing parameters, then validate.
+/// The name the tool's implementation answers to, and `arguments` with
+/// configured defaults applied for missing parameters, then validated.
 ///
 /// The error is the result to hand back to the model, which can correct its
 /// arguments and call again.
-fn prepare_arguments(
-    execution: &Execution<'_>,
-    arguments: &mut Value,
-    name: &str,
-) -> Result<(), ToolResult> {
+fn prepare_arguments<'a>(
+    execution: &'a Execution<'_>,
+    mut arguments: Value,
+    tool: Option<&'a str>,
+) -> Result<(&'a str, Value), ToolResult> {
+    let name = execution.invoked_name(tool);
     let Some(args) = arguments.as_object_mut() else {
-        return Ok(());
+        return Ok((name, arguments));
     };
 
     apply_parameter_defaults(args, &execution.definition.parameters);
@@ -781,7 +783,9 @@ fn prepare_arguments(
             "Invalid arguments: {error}\n\nYou can call `describe_tools(tools: [\"{name}\"])` to \
              learn more about how to use the tool correctly."
         ))
-    })
+    })?;
+
+    Ok((name, arguments))
 }
 
 /// The outcome of one attempt, from what a command printed or a plugin sent.
@@ -807,17 +811,16 @@ fn command_outcome(id: String, name: &str, result: CommandResult) -> ExecutionOu
 /// Arguments are defaulted and validated first either way.
 async fn execute_local(
     execution: &Execution<'_>,
-    mut arguments: Value,
+    arguments: Value,
     answers: &Answers,
     tool: Option<&str>,
     command: CommandConfig,
 ) -> Result<ExecutionOutcome, ToolError> {
-    let name = execution.invoked_name(tool);
     let id = execution.id.clone();
-
-    if let Err(result) = prepare_arguments(execution, &mut arguments, name) {
-        return Ok(ExecutionOutcome::Completed { id, result });
-    }
+    let (name, arguments) = match prepare_arguments(execution, arguments, tool) {
+        Ok(prepared) => prepared,
+        Err(result) => return Ok(ExecutionOutcome::Completed { id, result }),
+    };
 
     let ctx = execution.context(name, &arguments, answers);
 
@@ -850,17 +853,16 @@ async fn execute_local(
 /// malformed question surfaces the same way from either.
 async fn execute_command(
     execution: &Execution<'_>,
-    mut arguments: Value,
+    arguments: Value,
     answers: &Answers,
     plugin: &str,
     tool: Option<&str>,
 ) -> Result<ExecutionOutcome, ToolError> {
-    let name = execution.invoked_name(tool);
     let id = execution.id.clone();
-
-    if let Err(result) = prepare_arguments(execution, &mut arguments, name) {
-        return Ok(ExecutionOutcome::Completed { id, result });
-    }
+    let (name, arguments) = match prepare_arguments(execution, arguments, tool) {
+        Ok(prepared) => prepared,
+        Err(result) => return Ok(ExecutionOutcome::Completed { id, result }),
+    };
 
     let admitted = execution.command_plugins.verify(plugin).map_err(|reason| {
         ToolError::CommandPluginUnavailable {
@@ -868,10 +870,6 @@ async fn execute_command(
             reason,
         }
     })?;
-    let failed = |message: String| ToolError::CommandPluginFailed {
-        plugin: plugin.to_owned(),
-        message,
-    };
 
     let arguments = match arguments {
         Value::Object(arguments) => arguments,
@@ -889,13 +887,26 @@ async fn execute_command(
         access: execution.access,
         invocation: execution.invocation,
     })?;
+    let stdin = init_line(init, plugin)?;
 
-    let mut spec = ProcessSpec::new(
-        admitted.binary.as_str(),
-        Vec::<String>::new(),
-        execution.root,
-    );
-    spec.stdin = Some(init_line(init, plugin)?);
+    let Some(stdout) = run_plugin(execution, &admitted.binary, stdin, plugin, name).await? else {
+        return Ok(ExecutionOutcome::Cancelled { id });
+    };
+
+    Ok(command_outcome(id, name, plugin_result(&stdout, plugin)?))
+}
+
+/// Run the plugin `binary` once with `stdin`, returning what it printed on
+/// stdout, or `None` when the call was cancelled.
+async fn run_plugin(
+    execution: &Execution<'_>,
+    binary: &Utf8Path,
+    stdin: String,
+    plugin: &str,
+    tool: &str,
+) -> Result<Option<String>, ToolError> {
+    let mut spec = ProcessSpec::new(binary.as_str(), Vec::<String>::new(), execution.root);
+    spec.stdin = Some(stdin);
     // A Ctrl-C at the terminal must not reach the plugin: JP stops it through
     // the cancellation token, once the user has chosen what the interrupt
     // means.
@@ -908,14 +919,14 @@ async fn execute_command(
     let watch = Watch {
         stderr_lines: Some(plugin_stderr(
             plugin.to_owned(),
-            name.to_owned(),
+            tool.to_owned(),
             execution.stderr.clone(),
         )),
         cancellation: Some(cancellation),
         ..Watch::default()
     };
 
-    debug!(binary = %admitted.binary, plugin, tool = name, "Running a command plugin tool.");
+    debug!(%binary, plugin, tool, "Running a command plugin tool.");
     let run = {
         let runner = Arc::clone(execution.runner);
         let spec = spec.clone();
@@ -924,33 +935,47 @@ async fn execute_command(
 
     let finished = match run.await {
         Ok(Ok(finished)) => finished,
-        Ok(Err(error)) => return Err(failed(format!("failed to start {spec}: {error}"))),
-        Err(error) => return Err(failed(format!("the run was lost: {error}"))),
+        Ok(Err(error)) => {
+            return Err(plugin_failed(
+                plugin,
+                format!("failed to start {spec}: {error}"),
+            ));
+        }
+        Err(error) => return Err(plugin_failed(plugin, format!("the run was lost: {error}"))),
     };
 
     if finished.ended == Ended::Cancelled {
         info!(tool = %execution.definition.name, plugin, "Command plugin tool call cancelled");
-        return Ok(ExecutionOutcome::Cancelled { id });
+        return Ok(None);
     }
 
-    let payload = parse_plugin_output(&finished.output.stdout).map_err(failed)?;
+    Ok(Some(finished.output.stdout))
+}
+
+/// What a plugin's stdout answered, read the way a local tool's stdout is.
+///
+/// A plugin that sent `tool_outcome` said it was answering in the outcome
+/// shape, so anything else is a protocol fault, not text for the model.
+/// A payload that claims to be a question is left to [`parse_command_output`],
+/// which names what is wrong with it.
+fn plugin_result(stdout: &str, plugin: &str) -> Result<CommandResult, ToolError> {
+    let payload = parse_plugin_output(stdout).map_err(|message| plugin_failed(plugin, message))?;
     let raw = payload.to_string();
 
-    // A plugin that sent `tool_outcome` said it was answering in the outcome
-    // shape. Anything else is a protocol fault, not text for the model; a
-    // payload that claims to be a question is left to the parser below, which
-    // names what is wrong with it.
     if let Err(error) = serde_json::from_value::<Outcome>(payload)
         && !Outcome::claims_needs_input(&raw)
     {
         return Err(ToolError::MalformedOutput(error));
     }
 
-    Ok(command_outcome(
-        id,
-        name,
-        parse_command_output(raw.as_bytes(), b"", true),
-    ))
+    Ok(parse_command_output(raw.as_bytes(), b"", true))
+}
+
+fn plugin_failed(plugin: &str, message: String) -> ToolError {
+    ToolError::CommandPluginFailed {
+        plugin: plugin.to_owned(),
+        message,
+    }
 }
 
 /// Execute an MCP tool and return the outcome.

@@ -150,10 +150,7 @@ use crate::{
         lock::{LockRequest, acquire_lock},
         plugin::{
             dispatch::well_known_paths,
-            tool::{
-                TurnPlugins, plugins_needed, refuse_forced_tool, report_refused_plugins,
-                without_unadmitted_plugins,
-            },
+            tool::{admit_turn_plugins, without_unadmitted_plugins},
         },
     },
     config_pipeline::{self, ConfigReset, ConfigResetEvents},
@@ -1597,33 +1594,18 @@ impl TurnInputs {
         debug!(count = attachments.len(), "Attachments loaded.");
 
         // Admitted here, before the turn starts, so a prompt asking whether to
-        // trust a plugin binary never opens inside a tool call. The refusals
-        // are reported right after the prompts that decided them.
-        let forced_tool = config.assistant.tool_choice.function_name();
-        let plugins = TurnPlugins::admit(
-            &plugins_needed(&config.conversation.tools, forced_tool),
-            &config.plugins,
-            interactive,
-            &printer,
-        );
-        report_refused_plugins(
-            &printer,
-            &config.conversation.tools,
-            plugins.refused(),
-            forced_tool,
-        );
-        refuse_forced_tool(&config.conversation.tools, plugins.refused(), forced_tool)?;
-
+        // trust a plugin binary never opens inside a tool call.
+        //
         // The turn's config, not the context's: a plugin serving a tool sees
         // the options this query resolved, including conversation config and
         // `--cfg`, rather than resolving its own from the root.
-        let command_plugins = plugins.into_command_plugins(PluginInit {
+        let command_plugins = admit_turn_plugins(&config, interactive, &printer, PluginInit {
             workspace_id: ctx.workspace.id().to_string(),
             storage: ctx.storage_path().map(ToOwned::to_owned),
             paths: well_known_paths(ctx.user_storage_path()),
             config: config.clone(),
             log_level: ctx.term.args.verbose,
-        });
+        })?;
 
         Ok(Self {
             workspace_root: ctx.workspace.root().to_path_buf(),

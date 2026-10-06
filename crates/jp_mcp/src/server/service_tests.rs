@@ -124,84 +124,15 @@ fn plugin_init() -> PluginInit {
     }
 }
 
-/// A service whose `count` tool is served by the command plugin `counter`.
-///
-/// The admission contract (`run`, Host approval, fail-closed on Host loss) is
-/// the service's and does not depend on the source; these fixtures pin that for
-/// a command plugin tool.
-///
-/// The counter records how many times the plugin's binary was run, which is the
-/// only evidence that it ran: a denied call and one that silently went nowhere
-/// look the same from the result alone.
-fn command_fixture(run: &str, result: &str) -> (Service, HostReceiver, Arc<AtomicUsize>) {
-    let count = Arc::new(AtomicUsize::new(0));
-    let dir = tempdir().unwrap();
-    let binary = dir.path().join("jp-counter");
-    fs::write(&binary, "plugin").unwrap();
-    let plugins = CommandPlugins::new(plugin_init()).with("counter", AdmittedPlugin {
-        sha256: sha256_file(&binary).unwrap(),
-        binary,
-    });
-    let runner = {
-        let count = count.clone();
-        // Owns the directory, so the binary lives as long as the service.
-        MockProcessRunner::responding(move |_| {
-            let _dir = &dir;
-            count.fetch_add(1, Ordering::SeqCst);
-            Ok(ProcessOutput {
-                stdout: format!(
-                    "{}\n{}\n",
-                    json!({"type": "tool_outcome", "outcome": {"type": "success", "content": "ran"}}),
-                    json!({"type": "exit", "code": 0}),
-                ),
-                stderr: String::new(),
-                status: ExitCode::success(),
-            })
-        })
-    };
-    let partial: PartialToolConfig = serde_json::from_value(
-        json!({"source": "plugin.command.counter", "run": run, "result": result}),
-    )
-    .unwrap();
-    let mut app = AppConfig::new_test();
-    app.conversation.tools.insert(
-        "count".into(),
-        ToolConfig::from_partial(partial, vec![]).unwrap(),
-    );
-    let tool = ConfiguredTool {
-        definition: ToolDefinition {
-            name: "count".into(),
-            docs: ToolDocs::default(),
-            parameters: json!({
-                "type": "object",
-                "properties": {"path": {"type": "string"}},
-                "required": ["path"],
-            }),
-        },
-        config: app.conversation.tools.get("count").unwrap(),
-        access: Ok(None),
-        metadata: Map::new(),
-    };
-    let (service, host) = Service::new(
-        vec![tool],
-        Client::default(),
-        BuiltinExecutors::new(),
-        Arc::new(runner),
-        plugins,
-        "/tmp".into(),
-        InvocationContext::default(),
-    )
-    .unwrap();
-    (service, host, count)
-}
-
 /// A service whose `count` tool is served by the command plugin `counter`,
 /// configured by `config` on top of its source.
 ///
 /// The plugin answers by the action its `init` names: `described` when asked to
 /// format its arguments, `ran` when run, so a test can tell which of the two
 /// produced what it sees.
-/// Every run is recorded on the returned runner.
+/// Every run is recorded on the returned runner, which is the only evidence
+/// that the plugin ran: a denied call and one that silently went nowhere look
+/// the same from the result alone.
 fn plugin_service(config: Value) -> (Service, HostReceiver, Arc<MockProcessRunner>) {
     let dir = tempdir().unwrap();
     let binary = dir.path().join("jp-counter");
@@ -931,7 +862,7 @@ async fn denied_call_never_executes() {
 
 #[tokio::test]
 async fn command_tool_waits_for_admission_before_the_plugin_runs() {
-    let (service, mut host, count) = command_fixture("ask", "unattended");
+    let (service, mut host, runner) = plugin_service(json!({"run": "ask", "result": "unattended"}));
     let call = service.start_call(request()).unwrap();
 
     let Interaction::Prepare {
@@ -940,21 +871,13 @@ async fn command_tool_waits_for_admission_before_the_plugin_runs() {
     else {
         panic!("expected preparation")
     };
-    assert_eq!(
-        count.load(Ordering::SeqCst),
-        0,
-        "ran before it was admitted"
-    );
+    assert_eq!(runner.calls().len(), 0, "ran before it was admitted");
     reply.send(Ok(Admission::Run { arguments })).unwrap();
 
     let Interaction::Release { reply, .. } = next(&mut host).await.interaction else {
         panic!("expected release")
     };
-    assert_eq!(
-        count.load(Ordering::SeqCst),
-        0,
-        "ran before it was released"
-    );
+    assert_eq!(runner.calls().len(), 0, "ran before it was released");
     reply.send(Ok(ReleaseDecision::Execute)).unwrap();
 
     let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
@@ -962,12 +885,12 @@ async fn command_tool_waits_for_admission_before_the_plugin_runs() {
     };
     reply.send(Ok(())).unwrap();
     assert_eq!(call.finish().await.unwrap(), ToolResult::text("ran"));
-    assert_eq!(count.load(Ordering::SeqCst), 1);
+    assert_eq!(runner.calls().len(), 1);
 }
 
 #[tokio::test]
 async fn denied_command_tool_never_reaches_the_plugin() {
-    let (service, mut host, count) = command_fixture("ask", "unattended");
+    let (service, mut host, runner) = plugin_service(json!({"run": "ask", "result": "unattended"}));
     let call = service.start_call(request()).unwrap();
     let Interaction::Prepare { reply, .. } = next(&mut host).await.interaction else {
         panic!("expected preparation")
@@ -982,14 +905,15 @@ async fn denied_command_tool_never_reaches_the_plugin() {
     };
     reply.send(Ok(())).unwrap();
     assert_eq!(call.finish().await.unwrap(), ToolResult::text("denied"));
-    assert_eq!(count.load(Ordering::SeqCst), 0);
+    assert_eq!(runner.calls().len(), 0);
 }
 
 /// `run = "skip"` resolves the call without asking the Host and without running
 /// anything.
 #[tokio::test]
 async fn skipped_command_tool_never_reaches_the_plugin() {
-    let (service, mut host, count) = command_fixture("skip", "unattended");
+    let (service, mut host, runner) =
+        plugin_service(json!({"run": "skip", "result": "unattended"}));
     let call = service.start_call(request()).unwrap();
     let Interaction::Record { recording, reply } = next(&mut host).await.interaction else {
         panic!("expected recording, not a preparation")
@@ -1000,12 +924,13 @@ async fn skipped_command_tool_never_reaches_the_plugin() {
     );
     reply.send(Ok(())).unwrap();
     call.finish().await.unwrap();
-    assert_eq!(count.load(Ordering::SeqCst), 0);
+    assert_eq!(runner.calls().len(), 0);
 }
 
 #[tokio::test]
 async fn invalid_edited_arguments_never_reach_the_plugin() {
-    let (service, mut host, count) = command_fixture("edit", "unattended");
+    let (service, mut host, runner) =
+        plugin_service(json!({"run": "edit", "result": "unattended"}));
     let call = service.start_call(request()).unwrap();
     let Interaction::Prepare { reply, .. } = next(&mut host).await.interaction else {
         panic!("expected preparation")
@@ -1019,19 +944,19 @@ async fn invalid_edited_arguments_never_reach_the_plugin() {
         call.finish().await,
         Err(ServiceError::Tool(ToolError::Arguments { .. }))
     ));
-    assert_eq!(count.load(Ordering::SeqCst), 0);
+    assert_eq!(runner.calls().len(), 0);
 }
 
 #[tokio::test]
 async fn command_tool_host_loss_fails_closed() {
-    let (service, host, count) = command_fixture("ask", "unattended");
+    let (service, host, runner) = plugin_service(json!({"run": "ask", "result": "unattended"}));
     drop(host);
     let call = service.start_call(request()).unwrap();
     assert!(matches!(
         call.finish().await,
         Err(ServiceError::HostDisconnected)
     ));
-    assert_eq!(count.load(Ordering::SeqCst), 0);
+    assert_eq!(runner.calls().len(), 0);
 }
 
 #[tokio::test]

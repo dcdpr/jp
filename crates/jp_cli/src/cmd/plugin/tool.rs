@@ -2,7 +2,7 @@
 //!
 //! A turn whose tools run through command plugins (`source =
 //! "plugin.command.<plugin>"`) admits each of those plugins once, before the
-//! turn starts, with [`TurnPlugins::admit`]: the same trust decision `jp
+//! turn starts, with [`admit_turn_plugins`]: the same trust decision `jp
 //! <plugin>` makes, asked at a point where a prompt cannot open inside a tool
 //! call.
 //! The turn says which plugins were refused and why
@@ -26,6 +26,7 @@ use std::collections::{BTreeSet, HashMap};
 use crossterm::style::Stylize as _;
 use indexmap::IndexMap;
 use jp_config::{
+    AppConfig,
     conversation::tool::{ToolConfigWithDefaults, ToolSource, ToolsConfig},
     plugins::PluginsConfig,
 };
@@ -42,6 +43,36 @@ use super::{
     dispatch::local_plugins,
     registry, routing,
 };
+
+/// Admit the command plugins a turn's tools run through, and hand the admitted
+/// ones over with `init`.
+///
+/// Says which plugins were refused, and why, before the turn starts.
+///
+/// # Errors
+///
+/// [`ToolError::CommandPluginUnavailable`] when the tool `--tool` names runs
+/// through a refused plugin.
+pub(crate) fn admit_turn_plugins(
+    config: &AppConfig,
+    interactive: bool,
+    printer: &Printer,
+    init: PluginInit,
+) -> Result<CommandPlugins, ToolError> {
+    let tools = &config.conversation.tools;
+    let forced_tool = config.assistant.tool_choice.function_name();
+
+    let plugins = TurnPlugins::admit(
+        &plugins_needed(tools, forced_tool),
+        &config.plugins,
+        interactive,
+        printer,
+    );
+    report_refused_plugins(printer, tools, plugins.refused(), forced_tool);
+    refuse_forced_tool(tools, plugins.refused(), forced_tool)?;
+
+    Ok(plugins.into_command_plugins(init))
+}
 
 /// The plugins the offered tools of a turn run through.
 ///
@@ -91,40 +122,23 @@ impl TurnPlugins {
         let local = local_plugins(&approvals);
         let registry = registry::load_cached();
 
-        Self::admit_from(
-            needed,
-            &local,
-            registry.as_ref(),
+        Self::admit_from(needed, Admitter {
+            local: &local,
+            registry: registry.as_ref(),
             plugins_config,
-            &mut approvals,
+            approvals: &mut approvals,
             interactive,
             printer,
-        )
+        })
     }
 
     /// [`Self::admit`], with the binaries, the registry, and the approvals
     /// passed in.
-    fn admit_from(
-        needed: &BTreeSet<String>,
-        local: &[LocalPlugin],
-        registry: Option<&Registry>,
-        plugins_config: &PluginsConfig,
-        approvals: &mut ApprovalStore,
-        interactive: bool,
-        printer: &Printer,
-    ) -> Self {
+    fn admit_from(needed: &BTreeSet<String>, mut admitter: Admitter<'_>) -> Self {
         let mut plugins = Self::default();
 
         for name in needed {
-            match admit_one(
-                name,
-                local,
-                registry,
-                plugins_config,
-                approvals,
-                interactive,
-                printer,
-            ) {
+            match admitter.admit(name) {
                 Ok(admitted) => {
                     debug!(plugin = name, binary = %admitted.binary, "Plugin admitted for the turn.");
                     plugins.admitted.insert(name.clone(), admitted);
@@ -155,50 +169,57 @@ impl TurnPlugins {
     }
 }
 
-/// Admit one plugin by name.
-///
-/// The error is the reason, written for the user.
-fn admit_one(
-    name: &str,
-    local: &[LocalPlugin],
-    registry: Option<&Registry>,
-    plugins_config: &PluginsConfig,
-    approvals: &mut ApprovalStore,
+/// What admitting a plugin by name decides against: the binaries on this
+/// machine, the official registry, the run policy, and the saved approvals.
+struct Admitter<'a> {
+    local: &'a [LocalPlugin],
+    registry: Option<&'a Registry>,
+    plugins_config: &'a PluginsConfig,
+    approvals: &'a mut ApprovalStore,
+
+    /// Whether a binary nobody approved is asked about, rather than refused.
     interactive: bool,
-    printer: &Printer,
-) -> Result<AdmittedPlugin, String> {
-    let named = routing::by_name(name, local, registry)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| {
-            format!("no `jp-{name}` binary in the plugin install directory or on $PATH")
-        })?;
+    printer: &'a Printer,
+}
 
-    let official = Official {
-        official: named.official.is_some(),
-        sha256: named
-            .official
-            .and_then(registry::release)
-            .map(|release| release.sha256.as_str()),
-        replaces: None,
-    };
+impl Admitter<'_> {
+    /// Admit one plugin by name.
+    ///
+    /// The error is the reason, written for the user.
+    fn admit(&mut self, name: &str) -> Result<AdmittedPlugin, String> {
+        let named = routing::by_name(name, self.local, self.registry)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| {
+                format!("no `jp-{name}` binary in the plugin install directory or on $PATH")
+            })?;
 
-    // The digest admission decided on, not a second read of the file: a binary
-    // replaced while the prompt was open must fail the per-call check, not
-    // become the turn's baseline.
-    let sha256 = admit(
-        named.plugin,
-        official,
-        plugins_config,
-        approvals,
-        interactive,
-        printer,
-    )
-    .map_err(error_message)?;
+        let official = Official {
+            official: named.official.is_some(),
+            sha256: named
+                .official
+                .and_then(registry::release)
+                .map(|release| release.sha256.as_str()),
+            replaces: None,
+        };
 
-    Ok(AdmittedPlugin {
-        binary: named.plugin.path.clone(),
-        sha256,
-    })
+        // The digest admission decided on, not a second read of the file: a
+        // binary replaced while the prompt was open must fail the per-call
+        // check, not become the turn's baseline.
+        let sha256 = admit(
+            named.plugin,
+            official,
+            self.plugins_config,
+            self.approvals,
+            self.interactive,
+            self.printer,
+        )
+        .map_err(error_message)?;
+
+        Ok(AdmittedPlugin {
+            binary: named.plugin.path.clone(),
+            sha256,
+        })
+    }
 }
 
 /// The sentence a command error carries, without its exit code.

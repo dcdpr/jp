@@ -150,15 +150,14 @@ impl Machine {
     ) -> TurnPlugins {
         let needed = needed.iter().map(|name| (*name).to_owned()).collect();
 
-        TurnPlugins::admit_from(
-            &needed,
-            &self.plugins,
-            None,
-            &config.plugins,
+        TurnPlugins::admit_from(&needed, Admitter {
+            local: &self.plugins,
+            registry: None,
+            plugins_config: &config.plugins,
             approvals,
-            false,
-            &Printer::sink(),
-        )
+            interactive: false,
+            printer: &Printer::sink(),
+        })
     }
 }
 
