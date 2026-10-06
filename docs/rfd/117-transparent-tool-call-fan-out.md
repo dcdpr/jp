@@ -229,9 +229,9 @@ Every child the service concludes sends exactly one `Settled`, including one a
 A child the Host resolves itself with `complete_call` (as it does for Stop &
 respond) sends none, because the Host already holds its result.
 
-**The parent ends with `Record`, holding the folded body.** Its `result` is
-also what the MCP caller receives, so what JP records and what it delivers are
-the same text.
+**The parent ends with `Record`, holding the folded body.** Its `result` is also
+what the MCP caller receives, so what JP records and what it delivers are the
+same text.
 Each operation's own result already reached the Host in its `Settled`.
 
 A plain call, including a bare call to a fan-out tool, has `operation: None` on
