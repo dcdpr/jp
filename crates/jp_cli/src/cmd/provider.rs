@@ -26,7 +26,7 @@ use comfy_table::{Cell, Row};
 use crossterm::style::{Color, Stylize as _};
 use jp_config::{
     FillDefaults as _, PartialAppConfig, PartialConfig as _, fs::user_data_dir,
-    model::id::ProviderId, types::api_key_env::ApiKeyEnv,
+    model::id::ProviderId, providers::llm::AuthEntry, types::api_key_env::ApiKeyEnv,
 };
 use jp_credentials::{
     CATEGORY_LLM, CredentialSecret, CredentialStore, StoreError, StoredCredential,
@@ -108,6 +108,9 @@ struct Login {
 
     /// The name to store the credential under, selected from an `auth` chain as
     /// `subscription:<name>`.
+    ///
+    /// The kind keywords `api_key`, `api`, `subscription`, `sub`, and `profile`
+    /// are reserved for new credentials.
     #[arg(long, default_value = "default")]
     name: String,
 
@@ -279,6 +282,23 @@ impl Login {
             return Err(Error::from(format!(
                 "invalid credential name {:?}: must be non-empty and contain no whitespace",
                 self.name
+            )));
+        }
+        // A registration made before these names were reserved is still
+        // selectable as `<kind>:<name>`, so signing in to it again is allowed.
+        let registered = store
+            .load()
+            .map_err(|error| store_error(&error))?
+            .profiles(CATEGORY_LLM, &self.target.store_key())
+            .is_some_and(|profiles| profiles.contains_key(&self.name));
+        if !registered
+            && let Ok(entry) = self.name.parse::<AuthEntry>()
+            && let Some(kind) = entry.kind()
+        {
+            return Err(Error::from(format!(
+                "credential name {name:?} is reserved: `--auth {name}` selects any `{kind}` \
+                 credential, not one named {name:?}; choose another name",
+                name = self.name
             )));
         }
 

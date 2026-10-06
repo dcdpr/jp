@@ -138,12 +138,12 @@ async fn default_login_registers_runtime_directory_without_tokens() {
     let store = store_at(root.path());
     let auth = FakeAuth::default();
     let (printer, out, _) = Printer::memory(OutputFormat::Text);
-    login_args("sub")
+    login_args("personal")
         .run_with_auth(&store, &printer, &auth, Some(root.path()))
         .await
         .unwrap();
     printer.shutdown();
-    let directory = root.path().join("data/claude/sub");
+    let directory = root.path().join("data/claude/personal");
     assert_eq!(*auth.calls.lock().unwrap(), vec![(
         "login".into(),
         directory.clone()
@@ -153,12 +153,12 @@ async fn default_login_registers_runtime_directory_without_tokens() {
             .load()
             .unwrap()
             .profiles(CATEGORY_LLM, PROVIDER_ANTHROPIC)
-            .unwrap()["sub"],
+            .unwrap()["personal"],
         registration(&directory)
     );
     assert_eq!(
         out.lock().as_str(),
-        "Logged in to anthropic as \"sub\" (first@example.com).\n"
+        "Logged in to anthropic as \"personal\" (first@example.com).\n"
     );
 }
 
@@ -166,13 +166,13 @@ async fn default_login_registers_runtime_directory_without_tokens() {
 async fn relogin_preserves_the_registered_directory_when_data_root_changes() {
     let root = Utf8TempDir::new().unwrap();
     let store = store_at(root.path());
-    let directory = root.path().join("original/sub");
+    let directory = root.path().join("original/personal");
     store
         .mutate(|document| {
             document.insert_profile(
                 CATEGORY_LLM,
                 PROVIDER_ANTHROPIC,
-                "sub",
+                "personal",
                 registration(&directory),
             );
             Ok(())
@@ -180,7 +180,7 @@ async fn relogin_preserves_the_registered_directory_when_data_root_changes() {
         .unwrap();
     let auth = FakeAuth::default();
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
-    login_args("sub")
+    login_args("personal")
         .run_with_auth(
             &store,
             &printer,
@@ -200,11 +200,16 @@ async fn relogin_preserves_the_registered_directory_when_data_root_changes() {
 async fn failed_login_keeps_existing_registration() {
     let root = Utf8TempDir::new().unwrap();
     let store = store_at(root.path());
-    let directory = root.path().join("data/claude/sub");
+    let directory = root.path().join("data/claude/personal");
     let existing = registration(&directory);
     store
         .mutate(|document| {
-            document.insert_profile(CATEGORY_LLM, PROVIDER_ANTHROPIC, "sub", existing.clone());
+            document.insert_profile(
+                CATEGORY_LLM,
+                PROVIDER_ANTHROPIC,
+                "personal",
+                existing.clone(),
+            );
             Ok(())
         })
         .unwrap();
@@ -213,7 +218,7 @@ async fn failed_login_keeps_existing_registration() {
         ..Default::default()
     };
     let (printer, out, _) = Printer::memory(OutputFormat::Text);
-    let error = login_args("sub")
+    let error = login_args("personal")
         .run_with_auth(&store, &printer, &auth, Some(root.path()))
         .await
         .unwrap_err();
@@ -228,7 +233,7 @@ async fn failed_login_keeps_existing_registration() {
             .load()
             .unwrap()
             .profiles(CATEGORY_LLM, PROVIDER_ANTHROPIC)
-            .unwrap()["sub"],
+            .unwrap()["personal"],
         existing
     );
     assert_eq!(out.lock().as_str(), "");
@@ -376,6 +381,80 @@ async fn unsafe_names_are_rejected_before_runtime_login() {
     );
     assert!(auth.calls.lock().unwrap().is_empty());
     assert_eq!(store.load().unwrap().iter().count(), 0);
+}
+
+#[tokio::test]
+async fn auth_kind_keywords_are_rejected_as_names() {
+    // An `auth` chain reads these words as a credential kind, so a login
+    // stored under one could only be selected as `subscription:<name>`, and
+    // `--auth sub` would silently select some other login.
+    for (name, kind) in [
+        ("sub", "subscription"),
+        ("subscription", "subscription"),
+        ("profile", "subscription"),
+        ("api", "api_key"),
+        ("api_key", "api_key"),
+    ] {
+        let root = Utf8TempDir::new().unwrap();
+        let store = store_at(root.path());
+        let auth = FakeAuth::default();
+        let (printer, _, _) = Printer::memory(OutputFormat::Text);
+        let error = login_args(name)
+            .run_with_auth(&store, &printer, &auth, Some(root.path()))
+            .await
+            .unwrap_err();
+        printer.shutdown();
+        assert_eq!(
+            error.message.unwrap(),
+            format!(
+                "credential name {name:?} is reserved: `--auth {name}` selects any `{kind}` \
+                 credential, not one named {name:?}; choose another name"
+            )
+        );
+        assert!(auth.calls.lock().unwrap().is_empty());
+        assert_eq!(store.load().unwrap().iter().count(), 0);
+    }
+}
+
+#[tokio::test]
+async fn registered_reserved_name_can_log_in_again() {
+    // Registrations made before these names were reserved stay selectable as
+    // `sub:<name>`, so signing in to them again must keep working.
+    let root = Utf8TempDir::new().unwrap();
+    let store = store_at(root.path());
+    let directory = root.path().join("data/claude/sub");
+    store
+        .mutate(|document| {
+            document.insert_profile(
+                CATEGORY_LLM,
+                PROVIDER_ANTHROPIC,
+                "sub",
+                registration(&directory),
+            );
+            Ok(())
+        })
+        .unwrap();
+    let auth = FakeAuth::default();
+    let (printer, _, _) = Printer::memory(OutputFormat::Text);
+    login_args("sub")
+        .run_with_auth(&store, &printer, &auth, Some(root.path()))
+        .await
+        .unwrap();
+    printer.shutdown();
+    assert_eq!(*auth.calls.lock().unwrap(), vec![(
+        "login".into(),
+        directory.clone()
+    )]);
+    assert_eq!(
+        store
+            .load()
+            .unwrap()
+            .profiles(CATEGORY_LLM, PROVIDER_ANTHROPIC)
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["sub"]
+    );
 }
 
 #[tokio::test]
@@ -581,7 +660,7 @@ async fn token_login_requires_explicit_direct_opt_in() {
     let root = Utf8TempDir::new().unwrap();
     let store = store_at(root.path());
     let auth = FakeAuth::default();
-    let mut args = login_args("sub");
+    let mut args = login_args("personal");
     args.setup_token = true;
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
     let error = args
