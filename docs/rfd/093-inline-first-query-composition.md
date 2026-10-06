@@ -143,11 +143,13 @@ preamble is user intent.
 The draft therefore records what its preamble was pre-filled with, the *config
 seed*, in a hidden `<!-- CONFIG_SEED: ... -->` comment below the preamble.
 Before either surface reads the preamble, it is reconciled with the current
-invocation: the user's edits (the preamble's difference from its config seed)
-are laid over this invocation's pre-fill, and the config seed is replaced.
-A draft without a config seed takes this invocation's pre-fill whole, because
-nothing tells its edits apart from its pre-filled values.
-A preamble that is not valid TOML is left as it is, for item 3 to handle.
+invocation: each pre-filled field the user left alone takes this invocation's
+value, every other field is kept exactly as the user wrote it, and the config
+seed is replaced ([RFD 080] gives the rule).
+In a draft without a config seed every pre-filled field takes this invocation's
+value, because nothing tells an edit apart from a pre-filled value.
+A preamble that is not valid TOML is left as it is with its config seed, for
+item 3 to handle, and is reconciled once the repaired preamble parses.
 
 Both surfaces then run the same query-document config step: parse the
 `QueryDocument` structure, parse the reconciled TOML preamble, resolve model

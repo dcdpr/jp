@@ -162,22 +162,35 @@ pre-filled value as a user edit, and records it.
 
 The draft therefore stores its config seed in a hidden comment below the
 preamble, `<!-- CONFIG_SEED: ... -->`, and the preamble is reconciled before the
-editor opens:
+editor opens.
+Only the pre-filled fields are reconciled:
 
 ```txt
-edits        = stored_seed.delta(stored_preamble)
-preamble     = load_partial(seed_partial, edits)   // written to the file
-stored_seed := seed_partial
+for field in pre-filled fields:
+    if preamble[field] == stored_seed[field]:   // left alone by the user
+        preamble[field] = seed_partial[field]
+stored_seed := seed_partial                      // both written to the file
 ```
 
-The user sees this invocation's config with their earlier edits on top, and the
-extraction above holds: `seed_partial.delta(parsed_partial)` is the carried
-edits plus whatever changed in this session.
+Every other field in the preamble was added by the user and is kept as written,
+merge strategy included.
+Diffing such a field against a config seed that never held it reads it as a
+change from nothing and drops its strategy: an `[assistant.instructions]`
+override with `strategy = "replace"` and an empty list would vanish, and a
+non-empty one would append instead of replace.
+The extraction above follows the same split:
+`seed_partial.delta(parsed_partial)` is taken over the pre-filled fields, and
+every other field of `parsed_partial` enters `editor_delta` as written.
 
-- A draft without a stored config seed takes `seed_partial` whole: nothing tells
-  its edits apart from its pre-filled values.
-- A preamble that is not valid TOML is left as it is; its parse error reopens
-  the editor through `ParseOutcome::Retry`.
+The user sees this invocation's config with their earlier edits on top.
+
+- In a draft without a stored config seed, every pre-filled field takes
+  `seed_partial`'s value: nothing tells an edit apart from a pre-filled value.
+  Fields the user added are kept.
+- A preamble that is not valid TOML is left as it is, with its stored config
+  seed; its parse error reopens the editor through `ParseOutcome::Retry`.
+  Once the repaired preamble parses, its pre-filled fields are reconciled
+  against that stored config seed, so an untouched stale value is not recorded.
 
 **Limitations.** `seed.delta(parsed)` is additions-only:
 
