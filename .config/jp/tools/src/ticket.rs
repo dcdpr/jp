@@ -206,6 +206,9 @@ fn create(
 ///
 /// A title over the limit is put back as a [`SHORTER_TITLE`] question, so the
 /// ticket can be retitled without the body being sent a second time.
+/// The question's default is the title as given, so a prompt opens with it
+/// ready to edit, and its preamble names that title, so an assistant asked to
+/// shorten it sees the one being filed rather than the one it first sent.
 /// The answer replaces the title outright; one that is itself unusable ends the
 /// call, because asking again under the same id would put the tool straight
 /// back where it started.
@@ -228,12 +231,11 @@ fn fitting_title(
 
         let question = match Question::text(
             SHORTER_TITLE,
-            format!(
-                "The title is {count} characters, and a ticket takes at most {limit}. Give a \
-                 shorter title for: {title}"
-            ),
+            format!("Shorter title, at most {limit} characters?"),
         ) {
-            Ok(question) => question,
+            Ok(question) => question
+                .with_preamble(format!("The title is {count} characters: {title}"))
+                .with_default(title),
             Err(err) => return Err(Err(err.into())),
         };
 
