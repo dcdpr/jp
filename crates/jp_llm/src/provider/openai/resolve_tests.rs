@@ -967,8 +967,8 @@ async fn test_an_entry_is_tried_once_per_request() {
         AuthEntry::ApiKey(Some("personal".to_owned())),
     ]);
     chain.api_key_env = ApiKeyEnv::Many(BTreeMap::from([
-        ("work".to_owned(), SET_ENV_VAR.to_owned()),
-        ("personal".to_owned(), ALSO_SET_ENV_VAR.to_owned()),
+        ("work".to_owned(), SET_ENV_VAR.into()),
+        ("personal".to_owned(), ALSO_SET_ENV_VAR.into()),
     ]));
     let refused = StreamError::auth_rejected("invalid key");
 

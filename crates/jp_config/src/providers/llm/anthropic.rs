@@ -107,10 +107,18 @@ pub struct AnthropicConfig {
     /// Environment variable that contains the API key.
     ///
     /// A map names several keys, each selectable from the `auth` chain as
-    /// `api_key:<name>`:
+    /// `api_key:<name>`.
+    /// Each key is a variable, or a list read the same way as below:
     ///
     /// ```toml
     /// api_key_env = { work = "WORK_ANTHROPIC_KEY", personal = "MY_ANTHROPIC_KEY" }
+    /// ```
+    ///
+    /// A list is one key, read from the first variable that holds a non-empty
+    /// value:
+    ///
+    /// ```toml
+    /// api_key_env = ["WORK_ANTHROPIC_KEY", "MY_ANTHROPIC_KEY"]
     /// ```
     #[setting(default = "ANTHROPIC_API_KEY")]
     pub api_key_env: ApiKeyEnv,
@@ -157,7 +165,7 @@ impl AssignKeyValue for PartialAnthropicConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
-            "api_key_env" => self.api_key_env = kv.try_some_object_or_from_str()?,
+            "api_key_env" => self.api_key_env = kv.try_some_value()?,
             "base_url" => self.base_url = kv.try_some_string()?,
             "subscription_flow" => self.subscription_flow = kv.try_some_object_or_from_str()?,
             "acp_config_dirs" => {

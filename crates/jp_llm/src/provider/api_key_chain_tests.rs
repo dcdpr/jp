@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use jp_config::types::api_key_env::KeyVariables;
+
 use super::*;
 
 /// A variable the environment always holds, so no test has to set one and race
@@ -27,7 +29,7 @@ fn many(pairs: &[(&str, &str)]) -> ApiKeyEnv {
     ApiKeyEnv::Many(
         pairs
             .iter()
-            .map(|(name, variable)| ((*name).to_owned(), (*variable).to_owned()))
+            .map(|(name, variable)| ((*name).to_owned(), (*variable).into()))
             .collect::<BTreeMap<_, _>>(),
     )
 }
@@ -111,6 +113,63 @@ fn test_single_entry_reports_the_missing_variable() {
     assert!(
         matches!(&error, ChainError::MissingEnv(name) if name == UNSET),
         "unexpected error: {error}"
+    );
+}
+
+fn first_of(variables: &[&str]) -> ApiKeyEnv {
+    ApiKeyEnv::FirstOf(variables.iter().map(|v| (*v).to_owned()).collect())
+}
+
+/// A list is tried in order, so an unset first variable falls through to the
+/// next one without the chain having to name a second entry.
+#[test]
+fn test_a_list_reads_the_first_variable_that_is_set() {
+    let expected = std::env::var(set()).unwrap();
+    let keys = first_of(&[UNSET, set(), also_set()]);
+
+    let (key, selected) = resolve("cerebras", &chain(&["api_key"]), &keys).unwrap();
+
+    assert_eq!(key, expected);
+    assert_eq!(selected, AuthEntry::ApiKey(None));
+}
+
+/// The earlier variable wins when both are set.
+#[test]
+fn test_a_list_prefers_the_earlier_variable() {
+    let expected = std::env::var(also_set()).unwrap();
+    let keys = first_of(&[also_set(), set()]);
+
+    let (key, _) = resolve("cerebras", &chain(&["api_key"]), &keys).unwrap();
+
+    assert_eq!(key, expected);
+}
+
+/// A named key's list falls through within the one entry, and the entry it
+/// reports is still the name the chain asked for.
+#[test]
+fn test_a_named_list_reads_the_first_variable_that_is_set() {
+    let expected = std::env::var(set()).unwrap();
+    let keys = ApiKeyEnv::Many(BTreeMap::from([(
+        "work".to_owned(),
+        KeyVariables::FirstOf(vec![UNSET.to_owned(), set().to_owned()]),
+    )]));
+
+    let (key, selected) = resolve("cerebras", &chain(&["api_key:work"]), &keys).unwrap();
+
+    assert_eq!(key, expected);
+    assert_eq!(selected, AuthEntry::ApiKey(Some("work".to_owned())));
+}
+
+/// With none set, the error names every variable that was tried.
+#[test]
+fn test_a_list_with_nothing_set_names_every_variable() {
+    let keys = first_of(&[UNSET, ALSO_UNSET]);
+
+    let error = resolve("cerebras", &chain(&["api_key"]), &keys).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "Missing environment variable: JP_TEST_CHAIN_KEY_UNSET or JP_TEST_CHAIN_KEY_ALSO_UNSET"
     );
 }
 

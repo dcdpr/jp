@@ -34,7 +34,7 @@ use tracing::{debug, warn};
 use crate::{
     credential::Credential,
     error::{StreamError, StreamErrorKind},
-    provider::openai::oauth,
+    provider::{api_key_chain, openai::oauth},
 };
 
 /// Errors from walking the credential chain.
@@ -696,12 +696,12 @@ fn walk_chain(
                 // A name no key answers to is a config mistake, not a
                 // credential to fall past: the next entry would bill a
                 // different key.
-                let variable = config
+                let variables = config
                     .api_key_env
-                    .variable(name.as_deref())
+                    .variables(name.as_deref())
                     .map_err(ResolveError::ApiKeyEnv)?;
 
-                if let Some(key) = super::super::api_key_chain::read_key(variable) {
+                if let Some(key) = api_key_chain::read_first_key(variables) {
                     return Ok((
                         Landing::Ready(Credential::ApiKey(key), Attribution::default()),
                         entry.clone(),
@@ -712,8 +712,9 @@ fn walk_chain(
 
                 // A single-entry chain reports the missing variable by name,
                 // rather than as an exhausted chain of one.
+                let variable = api_key_chain::describe_variables(variables);
                 if config.auth.len() == 1 {
-                    return Err(ResolveError::MissingEnv(variable.to_owned()));
+                    return Err(ResolveError::MissingEnv(variable));
                 }
 
                 skip(
