@@ -1,6 +1,6 @@
 # Extract a reusable loop harness from bug-hunt
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: domain=tooling

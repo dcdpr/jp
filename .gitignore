@@ -23,6 +23,8 @@ lcov.info
 
 # Logs
 *.log
+# The loop harness's turn logs are part of a mission's record.
+!/.config/loop/missions/*/state/**/*.log
 /tmp
 
 # Agentic-Shepherd

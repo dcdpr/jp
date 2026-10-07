@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#
+# Passes when the whole workspace, tests included, still compiles.
+
+set -euo pipefail
+
+exec cargo check --workspace --all-targets --message-format short
