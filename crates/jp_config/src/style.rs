@@ -6,10 +6,10 @@ pub mod lock_wait;
 pub mod markdown;
 pub mod mcp_startup;
 pub mod reasoning;
-pub mod stderr_rows;
 pub mod streaming;
 pub mod tool_call;
 pub mod typewriter;
+pub mod window_rows;
 
 use std::fmt;
 

@@ -1,9 +1,8 @@
-//! How many rows of a child process's output a progress indicator shows.
+//! How many rows of output a progress indicator shows above its status row.
 //!
-//! Waits that spawn a child process — an MCP server starting, a tool running
-//! — can show the last few lines that child wrote to stderr above the timer,
-//! so a five-minute build looks like progress rather than a hang.
-//! The lines are erased with the timer and never join the transcript.
+//! The rows form a window holding the most recent output of whatever feeds the
+//! indicator, such as the stderr of an MCP server that is still starting.
+//! They are erased with the status row and never join the transcript.
 //!
 //! ```toml
 //! [style.mcp_startup]
@@ -11,30 +10,28 @@
 //! ```
 //!
 //! This is the size of the window, which is screen space and therefore shared:
-//! there is one window per wait, however many sources feed it.
-//! Whether an individual source contributes is a separate question, asked
-//! per-tool by `conversation.tools.<name>.style.print_stderr`.
+//! there is one window per indicator, however many sources feed it.
 
 use std::{fmt, num::ParseIntError};
 
 use schematic::ConfigEnum;
 use serde::{Deserialize, Serialize};
 
-/// How many rows of a child's stderr to show above a progress indicator.
+/// How many rows of output to show above a progress indicator's status row.
 ///
-/// - `false` or `0`: show no output, only the timer.
+/// - `false` or `0`: show no output, only the status row.
 /// - `true`: size the window from the terminal height (a tenth of it).
 /// - `N`: show exactly `N` rows.
 ///
 /// The count is shared across every source feeding the indicator rather than
-/// being one window each: `stderr_rows = 1` is a single row that each source
-/// replaces with its latest line.
+/// being one window each: `1` is a single row that each source replaces with
+/// its latest line.
 /// A terminal whose height cannot be determined shows no output whatever the
 /// value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, ConfigEnum)]
 #[serde(rename_all = "snake_case")]
-pub enum StderrRows {
-    /// Show no output; the indicator is the timer alone.
+pub enum WindowRows {
+    /// Show no output; the indicator is its status row alone.
     #[default]
     #[serde(alias = "false")]
     Off,
@@ -48,7 +45,7 @@ pub enum StderrRows {
     Fixed(RowCount),
 }
 
-impl StderrRows {
+impl WindowRows {
     /// Whether any output rows are shown.
     #[must_use]
     pub const fn is_enabled(self) -> bool {
@@ -56,8 +53,8 @@ impl StderrRows {
     }
 }
 
-impl From<bool> for StderrRows {
-    /// `false` shows the timer alone; `true` sizes the window from the
+impl From<bool> for WindowRows {
+    /// `false` shows the status row alone; `true` sizes the window from the
     /// terminal.
     fn from(v: bool) -> Self {
         if v { Self::Auto } else { Self::Off }
@@ -85,15 +82,15 @@ impl fmt::Display for RowCount {
     }
 }
 
-impl<'de> Deserialize<'de> for StderrRows {
+impl<'de> Deserialize<'de> for WindowRows {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        struct StderrRowsVisitor;
+        struct WindowRowsVisitor;
 
-        impl<'de> serde::de::Visitor<'de> for StderrRowsVisitor {
-            type Value = StderrRows;
+        impl<'de> serde::de::Visitor<'de> for WindowRowsVisitor {
+            type Value = WindowRows;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("a boolean, a string (\"off\", \"auto\"), or a row count")
@@ -103,7 +100,7 @@ impl<'de> Deserialize<'de> for StderrRows {
             where
                 E: serde::de::Error,
             {
-                Ok(StderrRows::from(v))
+                Ok(WindowRows::from(v))
             }
 
             fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
@@ -111,8 +108,8 @@ impl<'de> Deserialize<'de> for StderrRows {
                 E: serde::de::Error,
             {
                 match v {
-                    "off" | "false" => Ok(StderrRows::Off),
-                    "auto" | "true" => Ok(StderrRows::Auto),
+                    "off" | "false" => Ok(WindowRows::Off),
+                    "auto" | "true" => Ok(WindowRows::Auto),
                     s => s.parse::<u16>().map(fixed).map_err(|_| {
                         serde::de::Error::unknown_variant(v, &["off", "auto", "a number"])
                     }),
@@ -156,29 +153,29 @@ impl<'de> Deserialize<'de> for StderrRows {
                     Helper::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
 
                 Ok(match helper {
-                    Helper::Off => StderrRows::Off,
-                    Helper::Auto => StderrRows::Auto,
-                    Helper::Fixed(rows) => StderrRows::Fixed(rows),
+                    Helper::Off => WindowRows::Off,
+                    Helper::Auto => WindowRows::Auto,
+                    Helper::Fixed(rows) => WindowRows::Fixed(rows),
                 })
             }
         }
 
-        deserializer.deserialize_any(StderrRowsVisitor)
+        deserializer.deserialize_any(WindowRowsVisitor)
     }
 }
 
-/// A row count as a [`StderrRows`], collapsing `0` to [`StderrRows::Off`].
+/// A row count as a [`WindowRows`], collapsing `0` to [`WindowRows::Off`].
 ///
 /// `0` and `false` are the same request, and a zero-row window is something
 /// nothing can render into.
-const fn fixed(rows: u16) -> StderrRows {
+const fn fixed(rows: u16) -> WindowRows {
     if rows == 0 {
-        StderrRows::Off
+        WindowRows::Off
     } else {
-        StderrRows::Fixed(RowCount { rows })
+        WindowRows::Fixed(RowCount { rows })
     }
 }
 
 #[cfg(test)]
-#[path = "stderr_rows_tests.rs"]
+#[path = "window_rows_tests.rs"]
 mod tests;

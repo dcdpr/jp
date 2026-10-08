@@ -14,7 +14,7 @@ use std::{
 use crossterm::style::Stylize as _;
 use jp_config::{
     conversation::tool::style::{InlineResults, LinkStyle, ParametersStyle, TruncateLines},
-    style::{StyleConfig, stderr_rows::StderrRows},
+    style::{StyleConfig, window_rows::WindowRows},
 };
 use jp_conversation::event::ToolCallResponse;
 use jp_md::format::Formatter;
@@ -27,11 +27,11 @@ use serde_json::{Map, Value};
 /// The two enums are deliberately separate: `jp_printer` knows nothing about
 /// JP's config tree, and the config key is a user-facing contract that outlives
 /// any one renderer.
-pub(crate) const fn output_lines(stderr_rows: StderrRows) -> OutputLines {
+pub(crate) const fn output_lines(stderr_rows: WindowRows) -> OutputLines {
     match stderr_rows {
-        StderrRows::Off => OutputLines::Off,
-        StderrRows::Auto => OutputLines::Auto,
-        StderrRows::Fixed(count) => OutputLines::Rows(count.rows),
+        WindowRows::Off => OutputLines::Off,
+        WindowRows::Auto => OutputLines::Auto,
+        WindowRows::Fixed(count) => OutputLines::Rows(count.rows),
     }
 }
 
