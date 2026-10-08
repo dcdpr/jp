@@ -178,7 +178,7 @@ impl TerminalCapability {
     /// window that shrank below the drawn row count turns a captured height
     /// into a hazard, because the erase then walks up further than the viewport
     /// has rows and clears content that was never the region's.
-    fn live_size(self) -> (Option<u16>, Option<u16>) {
+    pub(crate) fn live_size(self) -> (Option<u16>, Option<u16>) {
         if !self.measured {
             return (self.columns, self.rows);
         }
@@ -232,7 +232,7 @@ impl OutputLines {
     ///
     /// Zero when the height is unknown: the worker cannot bound a window it
     /// cannot size, and an unbounded one is what makes an erase eat content.
-    fn rows(self, height: Option<u16>) -> usize {
+    pub(crate) fn rows(self, height: Option<u16>) -> usize {
         let Some(height) = height else {
             return 0;
         };
