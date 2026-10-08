@@ -1547,6 +1547,9 @@ style: StyleConfig
           top_k: int | null
           top_p: float | null
       |: null
+    window: ReasoningWindowConfig
+      rows?: "off" (aka false) | "auto" (aka true) | string
+      timer?: bool
   streaming: StreamingConfig
     progress: ProgressConfig
       delay_secs?: int
