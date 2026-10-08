@@ -1,4 +1,7 @@
+use schematic::SchemaBuilder;
+
 use super::*;
+use crate::schema_shape::render;
 
 /// Parse a TOML scalar as a `stderr_rows` value.
 fn parse(toml: &str) -> WindowRows {
@@ -30,6 +33,13 @@ fn zero_rows_means_off() {
     assert_eq!(parse("0"), WindowRows::Off);
 }
 
+/// `--cfg style.mcp_startup.stderr_rows=0` reaches the type as a string, and
+/// has to mean what `stderr_rows = 0` means in a file.
+#[test]
+fn zero_rows_from_a_string_means_off() {
+    assert_eq!("0".parse::<WindowRows>().unwrap(), WindowRows::Off);
+}
+
 #[test]
 fn the_keywords_parse_too() {
     assert_eq!(parse(r#""off""#), WindowRows::Off);
@@ -54,6 +64,29 @@ fn an_unknown_keyword_is_rejected() {
     }
 
     assert!(toml::from_str::<Wrapper>(r#"stderr_rows = "loads""#).is_err());
+}
+
+#[test]
+fn an_unknown_string_names_the_accepted_values() {
+    let error = "loads".parse::<WindowRows>().unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "invalid row count `loads`: expected `off`, `auto`, `false`, `true`, or a number of rows"
+    );
+}
+
+/// A consumer validating a config file against the schema has to accept every
+/// form the doc comments offer: `stderr_rows = true` and `stderr_rows = 4` as
+/// much as `stderr_rows = "auto"`.
+#[test]
+fn the_schema_lists_the_keywords_a_bool_and_a_row_count() {
+    let schema = SchemaBuilder::build_root::<WindowRows>();
+
+    assert_eq!(
+        render(&schema).trim_end(),
+        r#""off" (aka false) | "auto" (aka true) | bool | int"#
+    );
 }
 
 #[test]

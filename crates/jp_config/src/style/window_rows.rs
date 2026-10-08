@@ -12,9 +12,14 @@
 //! This is the size of the window, which is screen space and therefore shared:
 //! there is one window per indicator, however many sources feed it.
 
-use std::{fmt, num::ParseIntError};
+use std::{fmt, str::FromStr};
 
-use schematic::ConfigEnum;
+use schematic::{
+    Schema, SchemaBuilder, Schematic,
+    schema::{
+        BooleanType, EnumType, IntegerKind, IntegerType, LiteralValue, SchemaField, UnionType,
+    },
+};
 use serde::{Deserialize, Serialize};
 
 /// How many rows of output to show above a progress indicator's status row.
@@ -28,20 +33,17 @@ use serde::{Deserialize, Serialize};
 /// its latest line.
 /// A terminal whose height cannot be determined shows no output whatever the
 /// value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, ConfigEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WindowRows {
     /// Show no output; the indicator is its status row alone.
     #[default]
-    #[serde(alias = "false")]
     Off,
 
     /// Size the window from the terminal's height.
-    #[serde(alias = "true")]
     Auto,
 
     /// Show exactly this many rows.
-    #[variant(fallback)]
     Fixed(RowCount),
 }
 
@@ -68,17 +70,63 @@ pub struct RowCount {
     pub rows: u16,
 }
 
-impl TryFrom<&str> for RowCount {
-    type Error = ParseIntError;
+/// A string that is neither a keyword nor a row count.
+#[derive(Debug, thiserror::Error)]
+#[error("invalid row count `{0}`: expected `off`, `auto`, `false`, `true`, or a number of rows")]
+pub struct WindowRowsParseError(String);
 
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        s.parse().map(|rows| Self { rows })
+impl FromStr for WindowRows {
+    type Err = WindowRowsParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "off" | "false" => Ok(Self::Off),
+            "auto" | "true" => Ok(Self::Auto),
+            _ => s
+                .parse::<u16>()
+                .map(fixed)
+                .map_err(|_| WindowRowsParseError(s.to_owned())),
+        }
     }
 }
 
-impl fmt::Display for RowCount {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.rows)
+impl TryFrom<&str> for WindowRows {
+    type Error = WindowRowsParseError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+impl Schematic for WindowRows {
+    fn schema_name() -> Option<String> {
+        Some("WindowRows".to_owned())
+    }
+
+    fn build_schema(mut schema: SchemaBuilder) -> Schema {
+        // The string spellings of the booleans are listed beside the keywords
+        // they mean, since `--cfg KEY=false` hands the value over as a string.
+        let keyword = |value: &str, alias: &str| {
+            let mut field = SchemaField::new(Schema::literal_value(LiteralValue::String(
+                value.to_owned(),
+            )));
+            field.aliases = vec![alias.to_owned()];
+            field
+        };
+
+        schema.union(UnionType::new_any([
+            schema.nest().enumerable(EnumType::from_fields(
+                [
+                    ("Off".to_owned(), keyword("off", "false")),
+                    ("Auto".to_owned(), keyword("auto", "true")),
+                ],
+                Some(0),
+            )),
+            schema.nest().boolean(BooleanType::default()),
+            schema
+                .nest()
+                .integer(IntegerType::new_kind(IntegerKind::U16)),
+        ]))
     }
 }
 
@@ -107,13 +155,8 @@ impl<'de> Deserialize<'de> for WindowRows {
             where
                 E: serde::de::Error,
             {
-                match v {
-                    "off" | "false" => Ok(WindowRows::Off),
-                    "auto" | "true" => Ok(WindowRows::Auto),
-                    s => s.parse::<u16>().map(fixed).map_err(|_| {
-                        serde::de::Error::unknown_variant(v, &["off", "auto", "a number"])
-                    }),
-                }
+                v.parse()
+                    .map_err(|_| serde::de::Error::unknown_variant(v, &["off", "auto", "a number"]))
             }
 
             fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
