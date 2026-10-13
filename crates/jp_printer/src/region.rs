@@ -1,7 +1,9 @@
 //! Ephemeral status regions, drawn and erased by the printer's worker thread.
 //!
 //! A **status region** is a block of chrome rows at the bottom of the terminal:
-//! a status row carrying a subject, an elapsed time, and an optional detail.
+//! a status row carrying a subject, an elapsed time, and an optional detail,
+//! below an optional window of recent source output.
+//! A region claimed with [`RegionStyle::window_only`] is the window alone.
 //! The worker draws it, ticks it, and erases it before any printer-managed
 //! write on any channel reaches the terminal, so a client never has to order
 //! its own clear against its own output.
@@ -262,8 +264,9 @@ pub struct RegionStyle {
     /// The detail the first frame renders with, before any update arrives.
     detail: Option<String>,
 
-    /// Renders the status row from elapsed seconds and the current detail.
-    format: RowFormat,
+    /// Renders the status row from elapsed seconds and the current detail;
+    /// `None` for a region that is its window alone.
+    format: Option<RowFormat>,
 }
 
 impl RegionStyle {
@@ -287,7 +290,25 @@ impl RegionStyle {
             interval: interval.max(MIN_INTERVAL),
             output: OutputLines::Off,
             detail: None,
-            format: Box::new(format),
+            format: Some(Box::new(format)),
+        }
+    }
+
+    /// A region that is its window alone, with no status row.
+    ///
+    /// It appears `delay` after the claim and redraws every `interval`, and
+    /// draws nothing while its window is empty.
+    /// [`Self::with_output`] sizes the window.
+    ///
+    /// Intervals below 10ms are raised to 10ms.
+    #[must_use]
+    pub fn window_only(delay: Duration, interval: Duration) -> Self {
+        Self {
+            delay,
+            interval: interval.max(MIN_INTERVAL),
+            output: OutputLines::Off,
+            detail: None,
+            format: None,
         }
     }
 
@@ -745,7 +766,8 @@ impl RegionEntry {
         self.claimed_at.elapsed() >= self.style.delay
     }
 
-    /// The physical rows to paint: window rows above, status row last.
+    /// The physical rows to paint: window rows above, then the status row when
+    /// the region has one.
     ///
     /// Every row is bounded to the terminal's current width, and the whole
     /// block to its current height, so a resize can never leave the worker
@@ -753,8 +775,10 @@ impl RegionEntry {
     fn rows(&self) -> Vec<String> {
         let (columns, height) = self.terminal.live_size();
 
-        let secs = self.claimed_at.elapsed().as_secs_f64();
-        let status = (self.style.format)(secs, self.detail.as_deref());
+        let status = self.style.format.as_ref().map(|format| {
+            let secs = self.claimed_at.elapsed().as_secs_f64();
+            format(secs, self.detail.as_deref())
+        });
 
         // The buffer holds more than the window shows, so what is on screen is
         // its tail. Labelling and alignment key on that tail, not the buffer:
@@ -788,7 +812,7 @@ impl RegionEntry {
             })
             .collect();
         drop(buffer);
-        rows.push(status);
+        rows.extend(status);
 
         if let Some(columns) = columns {
             for row in &mut rows {
@@ -1101,6 +1125,13 @@ impl RegionStack {
         }
 
         let rows = entry.rows();
+
+        // A window-only region whose window is empty has nothing to show.
+        if rows.is_empty() {
+            self.erase(writer);
+            return;
+        }
+
         let background = entry.background.clone();
 
         // The rows the block still occupies on screen, which is not what it

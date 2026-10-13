@@ -170,8 +170,9 @@ impl ToPartial for ReasoningConfig {
 /// A window at the bottom of the terminal that shows the assistant's reasoning
 /// while it reasons.
 ///
-/// The window holds the most recent rows of reasoning above a status row, and
-/// both are erased once the assistant stops reasoning.
+/// The window holds the most recent rows of reasoning, with a status row below
+/// them unless `timer` is off, and is erased once the assistant stops
+/// reasoning.
 /// The reasoning is still recorded in the conversation.
 /// `jp conversation print --style full` shows it afterwards.
 ///
@@ -182,7 +183,7 @@ impl ToPartial for ReasoningConfig {
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ReasoningWindowConfig {
-    /// Rows of reasoning to show above the status row.
+    /// Rows of reasoning the window shows.
     ///
     /// - `false` or `0`: no window; reasoning is shown as
     ///   `style.reasoning.display` says.
@@ -203,10 +204,11 @@ pub struct ReasoningWindowConfig {
     #[setting(default = "off")]
     pub rows: WindowRows,
 
-    /// Show how long the assistant has been reasoning on the status row.
+    /// Show a status row below the window with how long the assistant has been
+    /// reasoning.
     ///
     /// Defaults to `true`, which shows `⏱ Reasoning… 4.1s`.
-    /// Set to `false` to show `Reasoning…` alone.
+    /// Set to `false` to show the rows of reasoning alone.
     /// Has no effect without a window.
     #[setting(default = true)]
     pub timer: bool,

@@ -602,16 +602,21 @@ impl ChatRenderer {
     }
 
     /// Claim the status region reasoning chrome is drawn in, with `output`
-    /// window rows above its status row.
+    /// window rows.
+    ///
+    /// With `timer`, a status row below the window counts the seconds reasoning
+    /// has taken; without it, the region is the window alone.
     fn claim_reasoning_region(&self, timer: bool, output: OutputLines) -> StatusRegion {
-        self.printer.status_region(
-            RegionStyle::new(
-                self.region_delay,
-                Duration::from_millis(100),
-                move |secs, _detail| reasoning_status(secs, timer),
-            )
-            .with_output(output),
-        )
+        let interval = Duration::from_millis(100);
+        let style = if timer {
+            RegionStyle::new(self.region_delay, interval, |secs, _detail| {
+                reasoning_status(secs)
+            })
+        } else {
+            RegionStyle::window_only(self.region_delay, interval)
+        };
+
+        self.printer.status_region(style.with_output(output))
     }
 
     /// The window rows a reasoning block opened now would get; zero when it
@@ -1277,13 +1282,9 @@ impl ChatRenderer {
 }
 
 /// The status row shown while the assistant reasons, counting the seconds it
-/// has spent when `timer` is set.
-fn reasoning_status(secs: f64, timer: bool) -> String {
-    if timer {
-        format!("\x1b[2m\u{23f1} Reasoning\u{2026} {secs:.1}s\x1b[22m")
-    } else {
-        "\x1b[2mReasoning\u{2026}\x1b[22m".to_owned()
-    }
+/// has spent.
+fn reasoning_status(secs: f64) -> String {
+    format!("\x1b[2m\u{23f1} Reasoning\u{2026} {secs:.1}s\x1b[22m")
 }
 
 /// Build a labeled horizontal rule used as a role-boundary marker.

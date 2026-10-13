@@ -2530,10 +2530,10 @@ fn the_window_wraps_at_the_width_of_stderr() {
     );
 }
 
-/// With `timer` off, the status row says the assistant is reasoning without
-/// counting how long.
+/// With `timer` off, the window is the reasoning rows alone, with no status row
+/// below them.
 #[test]
-fn the_status_row_leaves_out_the_elapsed_time_when_the_timer_is_off() {
+fn the_window_has_no_status_row_when_the_timer_is_off() {
     let mut config = window_config(4);
     config.style.reasoning.window.timer = false;
     let (mut renderer, _out, err) = create_window_renderer(config, 24);
@@ -2542,11 +2542,7 @@ fn the_status_row_leaves_out_the_elapsed_time_when_the_timer_is_off() {
     renderer.printer.flush();
 
     let screen = chrome_screen(&err);
-    assert_eq!(
-        screen.used(),
-        ["Checking the README.", "Reasoning…"],
-        "{screen}"
-    );
+    assert_eq!(screen.used(), ["Checking the README."], "{screen}");
 }
 
 /// A character budget applies in the window as it does inline: the first
