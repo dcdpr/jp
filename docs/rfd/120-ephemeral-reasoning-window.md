@@ -78,10 +78,9 @@ No reasoning is left on screen.
 The one exception is a resize: a terminal shrunk below the window's height while
 the window is drawn pushes its top rows into scrollback, where the erase cannot
 reach them ([RFD 091]).
-An interrupt menu hides the window while it is open, like any prompt.
-What the window shows after the user picks *continue* is decided by a test in
-phase 3 (see [Risks and Open Questions](#risks-and-open-questions)).
-Reasoning that resumes after a tool call opens a fresh, empty window.
+An interrupt menu erases the window when it opens, like any prompt.
+Reasoning that resumes after the user picks *continue*, or after a tool call,
+opens a fresh, empty window.
 
 The reasoning is still recorded in the conversation stream.
 `jp conversation print --style full` replays it as before; the window governs
@@ -93,14 +92,15 @@ One new section, `style.reasoning.window`, with two keys:
 
 ```toml
 [style.reasoning.window]
-# Rows of reasoning shown above the status row.
+# Rows of reasoning shown in the window.
 # false (default): no window; reasoning renders inline as `display` says.
 # true: a tenth of the terminal height.
 # N: exactly N rows, still bounded by the terminal height.
 rows = 8
 
-# Show the elapsed time on the status row ("⏱ Reasoning… 4.1s") instead of
-# a bare "Reasoning…". Defaults to true.
+# Show a status row below the window with the elapsed time
+# ("⏱ Reasoning… 4.1s"). false shows the rows of reasoning alone.
+# Defaults to true.
 timer = true
 ```
 
@@ -356,16 +356,15 @@ proposed on those merits.
   A burst of pushes raises one refresh per worker wakeup (`LineSink::push`).
   Whether that repaint rate flickers depends on the terminal and the token rate,
   and has to be checked on a real terminal.
-- **The window after an interrupt.** Choosing *continue* in the interrupt menu
-  runs `ChatRenderer::reset`, which releases the region, so the resumed
-  reasoning starts in an empty window and the rows the user was reading when
-  they pressed Ctrl-C are gone.
-  Phase 3 tests this on a real terminal.
-  If the empty window reads as lost context, a continuation keeps the region
-  claimed instead: the reset that follows *continue* skips the release, the
-  region's buffer survives, and the window redraws with its rows when the menu
-  closes, the way `reset_preserving_region` already keeps the content region
-  open across a stream retry.
+- **The window after an interrupt.** The flush that runs before the interrupt
+  menu opens releases the window, so reasoning after *continue* starts in an
+  empty window and the rows the user was reading when they pressed Ctrl-C are
+  gone.
+  Checked on a real terminal in phase 3, this does not read as lost context, so
+  the window is not kept across the menu.
+  Keeping it would mean leaving it claimed through that flush and through the
+  reset that follows *continue*, the way `reset_preserving_region` already keeps
+  the content region open across a stream retry.
   *Reply* starts a fresh window either way: it begins a new assistant section
   after a user message, and a reasoning region never survives a user message
   ([RFD 095]).
