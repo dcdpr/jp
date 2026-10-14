@@ -26,7 +26,7 @@ use tracing::warn;
 use super::config_delta::{self, ConfigDelta};
 use crate::{
     Compaction, EventId, EventOverlay,
-    event::{ConversationEvent, EventKind},
+    event::{ChatResponse, ConversationEvent, EventKind},
     storage::{decode_event_value, encode_event},
 };
 
@@ -190,6 +190,27 @@ impl<'de> Deserialize<'de> for EventPayload {
                 );
             }
             warn!(%tag, "Unknown conversation event kind; preserving raw event.");
+            return Ok(Self::Unknown(value));
+        }
+
+        // `ChatResponse` is untagged: its content key selects the variant, so a
+        // variant added by a newer jp arrives under a known `type` tag. One
+        // with no known content key is preserved the same way.
+        if tag == "chat_response"
+            && !ChatResponse::CONTENT_KEYS
+                .iter()
+                .any(|key| value.get(key).is_some())
+        {
+            #[cfg(debug_assertions)]
+            {
+                let mut probe = value.clone();
+                decode_event_value(&mut probe);
+                debug_assert!(
+                    serde_json::from_value::<ConversationEvent>(probe).is_err(),
+                    "a ChatResponse content key is missing from ChatResponse::CONTENT_KEYS",
+                );
+            }
+            warn!("Unknown chat response variant; preserving raw event.");
             return Ok(Self::Unknown(value));
         }
 
