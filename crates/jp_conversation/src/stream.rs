@@ -723,7 +723,9 @@ impl ConversationStream {
     /// at the time the event was added.
     #[must_use]
     pub fn last(&self) -> Option<ConversationEventWithConfigRef<'_>> {
-        self.iter().last()
+        // `next_back` folds the deltas before the event once; `Iterator::last`
+        // would walk forward and clone the config at every event.
+        self.iter().next_back()
     }
 
     /// Similar to [`Self::last`], but returns a mutable reference to the last
