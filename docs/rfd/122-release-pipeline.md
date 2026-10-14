@@ -285,7 +285,7 @@ release branch and shows on its tip; elsewhere, `just ci` runs the same checks
 locally.
 
 The tag push is a person's, so it starts JP's distribution workflow, which the
-binary-distribution RFD defines.
+RFD that distributes the `jp` binary defines.
 The release's notes stay on `main`: correcting them, at any time, is a change to
 its directory there, and every place the notes appear renders them again.
 A cut's or pick's change request that merges after the tag is one such change.
@@ -457,9 +457,9 @@ documents itself:
 - `jp release render` prints them, to read while a release is prepared or to
   hand to another tool.
 - `jp vite` turns them into pages on the site ([On the site](#on-the-site)).
-- The binary-distribution RFD puts the release notes in the GitHub Release,
-  linking to the upgrade guide on the site, and renders them again when the
-  release's directory changes on `main`.
+- The RFD that distributes the `jp` binary puts the release notes in the GitHub
+  Release, linking to the upgrade guide on the site, and renders them again when
+  the release's directory changes on `main`.
 
 ### Credits and links
 
@@ -515,7 +515,7 @@ GitHub, and no workflow writes to a branch:
 | A push to `main` or `release/*` | The checks; on `main`, `just changelog-ci` among them, since release branches have no fragments | Nothing                                                            |
 | Daily                           | `just release-due`                                                                              | An issue labelled `release` when a release is due and none is open |
 | A push to `main`                | The site build ([On the site](#on-the-site))                                                    | The site                                                           |
-| A push of a `v*` tag            | Distribution (the binary-distribution RFD)                                                      | Release binaries, the GitHub Release; closes the reminder issue    |
+| A push of a `v*` tag            | Distribution of the `jp` binary                                                                 | The `jp` binaries, the GitHub Release; closes the reminder issue   |
 
 Every push and every tag comes from a person running a command, so every
 workflow starts on its own.
@@ -542,8 +542,8 @@ Where they go is `jp vite`'s choice: JP serves them under `/releases/`, with an
 index of releases and their dates, and replaces the navigation's "Change Log"
 entry with "Releases".
 
-The docs build installs the `changelog` binary in place of `jilu`: compiled from
-the checkout until a release publishes it, downloaded after.
+The docs build installs the `changelog` binary in place of `jilu`, compiled from
+the checkout; it builds the `changelog` crate alone.
 Its checkout already fetches full history, which crediting needs.
 
 Release pages are rendered from `main`, where the notes live.
@@ -655,9 +655,10 @@ that generates the change log are removed.
 ## Non-Goals
 
 - **Building, signing, and distributing binaries.** Separate RFDs, started by
-  the tag push: the `jp` binary first, plugins after.
-  CI installs the release tooling instead of building it once releases publish
-  `jp-release`, the `changelog` binary, and [RFD 116]'s plugins alongside `jp`.
+  the tag push: one for the `jp` binary alone, then one for the command plugins
+  ready to ship, `jp-release` among them.
+  Until releases publish `jp` and `jp-release`, JP's release workflows compile
+  them from the checkout.
 - **Pre-releases.** A release candidate must not consume the fragments its final
   release needs, which needs its own design.
 - **Independent package versions.** One release, one version.
