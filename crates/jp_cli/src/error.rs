@@ -76,6 +76,11 @@ pub(crate) enum Error {
     #[error("MCP Host control failed: {0}")]
     McpHost(#[source] ExecutorError),
 
+    /// The Host lost its connection to the JP MCP Server mid-turn, so the turn
+    /// ended with the calls it could not complete.
+    #[error("Lost the connection to the JP MCP Server")]
+    McpConnectionLost,
+
     #[error("LLM error")]
     Llm(#[from] jp_llm::Error),
 
