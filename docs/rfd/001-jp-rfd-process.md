@@ -4,7 +4,7 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
-- **Extended by**: [RFD 100][tickets], [RFD 116](116-shareable-rfd-ticket-and-site-tooling.md)
+- **Extended by**: [RFD 100][tickets], [RFD 116]
 - **Summary**: Establishes a lightweight Request for Discussion process for
   proposing and tracking design decisions with clear lifecycle states.
 
@@ -641,6 +641,7 @@ The steps are:
 
 [RFC 3]: https://datatracker.ietf.org/doc/html/rfc3
 [RFD 002]: 002-using-llms.md
+[RFD 116]: 116-shareable-rfd-ticket-and-site-tooling.md
 [`000-decision-template.md`]: 000-decision-template.md
 [`000-design-template.md`]: 000-design-template.md
 [`000-guide-template.md`]: 000-guide-template.md

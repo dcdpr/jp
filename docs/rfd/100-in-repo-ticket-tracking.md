@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-05
 - **Extends**: [RFD 001], [RFD 041]
-- **Extended by**: [RFD 102], [RFD 116](116-shareable-rfd-ticket-and-site-tooling.md)
+- **Extended by**: [RFD 102], [RFD 116]
 - **Summary**: Lightweight markdown-based work items tracked in-repo, displacing
   GitHub issues from assistant context with kanban board and RFD promotion
   mechanics.
@@ -455,4 +455,5 @@ How the tooling gets there is not fixed.
 [RFD 041]: 041-rfd-lifecycle-enhancements.md
 [RFD 101]: 101-conversation-labels.md
 [RFD 102]: 102-collision-resistant-ticket-identifiers.md
+[RFD 116]: 116-shareable-rfd-ticket-and-site-tooling.md
 [`jp_label`]: https://github.com/dcdpr/jp/tree/main/crates/jp_label
