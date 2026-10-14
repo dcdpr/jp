@@ -57,8 +57,10 @@ numbers are assigned when `rfd_promote` advances a draft to Discussion \
 status, which also moves the file up to `docs/rfd/`.
 
 `rfd_promote` handles deferred numbering: for DNN-prefixed drafts, it \
-assigns the next available permanent number and renames the file. When \
-promoting to Accepted, it offers to file the RFD's tracking ticket.
+assigns the next available permanent number and renames the file. Pass \
+`mmm` to assign a specific number instead, when the next one is taken on \
+another branch. When promoting to Accepted, it offers to file the RFD's \
+tracking ticket.
 
 Promoting a draft to Discussion publishes it, and a published RFD needs a \
 `- **Summary**:` metadata field or the docs build fails. Nothing writes \

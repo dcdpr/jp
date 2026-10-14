@@ -173,7 +173,9 @@ preserving as a record of the rejected idea); the choice is the author's.
 The RFD is complete enough to review.
 When the author runs `just rfd-promote D01` (using the draft ID), the tooling:
 
-1. Assigns the next available sequential permanent number.
+1. Assigns the next available sequential permanent number, or the number given
+   as a second argument (`just rfd-promote D01 042`) when the next one is taken
+   on another branch.
 2. Moves the file from `docs/rfd/drafts/D01-slug.md` to `docs/rfd/042-slug.md`
    (for example).
 3. Updates the heading in the file.
@@ -514,8 +516,9 @@ Run `just --list --group rfd` to see them.
 | Command                         | Description                              |
 | ------------------------------- | ---------------------------------------- |
 | `just rfd-draft CATEGORY TITLE` | Create a new draft under `drafts/`.      |
-| `just rfd-promote NNN`          | Advance status. Draft → Discussion       |
-|                                 | assigns number; Discussion → Accepted    |
+| `just rfd-promote NNN [MMM]`    | Advance status. Draft → Discussion       |
+|                                 | assigns number `MMM`, or the next        |
+|                                 | available one; Discussion → Accepted     |
 |                                 | offers the tracking ticket.              |
 | `just rfd-track NNN`            | File or refresh the RFD's tracking       |
 |                                 | ticket, printing its id.                 |

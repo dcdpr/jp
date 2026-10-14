@@ -2108,8 +2108,12 @@ _rfd-link SOURCE TARGET FORWARD INVERSE:
 # file out of `drafts/`.
 #
 # Accepts: a permanent number (41, 041) or a draft ID (D01).
+#
+# MMM, only when promoting a draft, is the permanent number to assign instead of
+# the next available one. The scan for free numbers only sees this checkout, so
+# pass MMM when the next number is taken on another branch.
 [group('rfd')]
-rfd-promote NNN: _install-jp _install-comfort _install-ticket
+rfd-promote NNN MMM="": _install-jp _install-comfort _install-ticket
     #!/usr/bin/env sh
     set -eu
 
@@ -2127,6 +2131,34 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
             echo "Promotable statuses: Draft, Discussion, Accepted." >&2
             exit 1 ;;
     esac
+
+    # --- Target number (Draft -> Discussion only) ---
+    # Validated before anything is written, so a bad target leaves the draft
+    # untouched.
+    target_arg="{{MMM}}"
+    target_num=""
+    if [ -n "$target_arg" ]; then
+        if [ "$current" != "Draft" ]; then
+            echo "A target number only applies when promoting a draft; RFD ${rfd_id} is '${current}'." >&2
+            exit 1
+        fi
+        if ! echo "$target_arg" | grep -qE '^[0-9]+$'; then
+            echo "Target number must be a number, got '${target_arg}'." >&2
+            exit 1
+        fi
+        target_n=$(echo "$target_arg" | sed 's/^0*//')
+        target_n=${target_n:-0}
+        if [ "$target_n" -lt 1 ] || [ "$target_n" -gt 999 ]; then
+            echo "Target number must be between 1 and 999, got '${target_arg}'." >&2
+            exit 1
+        fi
+        target_num=$(printf "%03d" "$target_n")
+        target_taken=$(ls "docs/rfd/${target_num}-"*.md 2>/dev/null | head -1)
+        if [ -n "$target_taken" ]; then
+            echo "RFD ${target_num} is taken by $(basename "$target_taken")." >&2
+            exit 1
+        fi
+    fi
 
     # --- Pre-flight (Draft -> Discussion): refuse if Requires or Extends
     # contain draft references. The promoted RFD becomes a published file;
@@ -2220,8 +2252,12 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
         old_draft_id=$(echo "$basename_f" | sed 's/^\(D[0-9]*\)-.*/\1/')
         slug=$(echo "$basename_f" | sed 's/^[A-Z]*[0-9]*-//; s/\.md$//')
 
-        # Assign next available permanent number.
-        num=$(just _rfd-next-number) || exit 1
+        # Assign the requested permanent number, or the next available one.
+        if [ -n "$target_num" ]; then
+            num="$target_num"
+        else
+            num=$(just _rfd-next-number) || exit 1
+        fi
         new_basename="${num}-${slug}.md"
         new_file="docs/rfd/${new_basename}"
         final_file="$new_file"

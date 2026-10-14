@@ -2,13 +2,13 @@
 enable = false
 run = "ask"
 source = "local"
-command = "just rfd-promote {{tool.arguments.nnn}}"
+command = "just rfd-promote {{tool.arguments.nnn}} {{tool.arguments.mmm | default('')}}"
 description = """Promote an RFD to the next stage (Draft -> Discussion -> Accepted -> Implemented).
 
-For drafts (DNN-prefixed), assigns a permanent number and moves the file \
-from `docs/rfd/drafts/` up to `docs/rfd/`. When promoting to Accepted, offers \
-to file the RFD's tracking ticket, with its Implementation Plan as the \
-description."""
+For drafts (DNN-prefixed), assigns a permanent number (the next available one, \
+or `mmm`) and moves the file from `docs/rfd/drafts/` up to `docs/rfd/`. When \
+promoting to Accepted, offers to file the RFD's tracking ticket, with its \
+Implementation Plan as the description."""
 
 [conversation.tools.rfd_promote.style]
 inline_results = "full"
@@ -19,4 +19,11 @@ parameters = "function_call"
 description = """ID of the RFD to promote. Accepts a permanent number (41, 041) or a \
 draft ID (D01)."""
 required = true
+type = "string"
+
+[conversation.tools.rfd_promote.parameters.mmm]
+description = """Permanent number to assign when promoting a draft (e.g. 123). If \
+omitted, the next available number is used; pass it explicitly when that number \
+is taken on another branch. Rejected for RFDs that are not drafts."""
+required = false
 type = "string"
