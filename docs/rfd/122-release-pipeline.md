@@ -6,6 +6,7 @@
 - **Date**: 2026-07-01
 - **Extends**: [RFD 116]
 - **Requires**: [RFD 121]
+- **Required by**: [RFD 123]
 - **Summary**: The `jp release` plugin cuts releases onto branches, files their
   notes on `main` through pull requests, and tags them.
 
@@ -768,6 +769,7 @@ Depends on Phase 1.
 [RFD 099]: 099-native-macos-app-for-browsing-conversations.md
 [RFD 116]: 116-shareable-rfd-ticket-and-site-tooling.md
 [RFD 121]: 121-changelog-fragments-and-validation.md
+[RFD 123]: 123-distributing-the-jp-binary.md
 [Triggering a workflow from a workflow]: https://docs.github.com/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow
 [Vector releases index]: https://vector.dev/releases/
 [Vector's release checklist]: https://github.com/vectordotdev/vector/blob/master/.github/ISSUE_TEMPLATE/minor-release.md
