@@ -2,8 +2,10 @@
 enable = false
 run = "ask"
 source = "local"
-command = "just rfd-abandon {{tool.arguments.nnn}}"
-description = "Abandon an RFD."
+command = "just rfd-abandon {{tool.arguments.nnn}} {{tool.arguments.reason}}"
+description = """Abandon an RFD (draft or published), recording why. Refuses an RFD \
+that is already Implemented, Superseded, or Abandoned, and removes it from the \
+priority board."""
 
 [conversation.tools.rfd_abandon.style]
 inline_results = "full"
@@ -11,6 +13,12 @@ results_file_link = "off"
 parameters = "function_call"
 
 [conversation.tools.rfd_abandon.parameters.nnn]
-description = "ID of the RFD to abandon."
+description = "ID of the RFD to abandon. Permanent number (95, 095) or draft ID (D24)."
+required = true
+type = "string"
+
+[conversation.tools.rfd_abandon.parameters.reason]
+description = """Why the RFD is abandoned, in one sentence. Written into the RFD \
+as `> **Abandoned**: <reason>` above its first section."""
 required = true
 type = "string"
