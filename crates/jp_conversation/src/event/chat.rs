@@ -107,6 +107,18 @@ pub enum ChatResponse {
 }
 
 impl ChatResponse {
+    /// The content key each variant is stored under, one per variant.
+    ///
+    /// `ChatResponse` is untagged, so the key that is present selects the
+    /// variant.
+    /// A stored `chat_response` holding none of these keys was written by a
+    /// newer build, and the conversation stream deserializer keeps it verbatim
+    /// instead of failing the load.
+    /// Adding a variant means adding its key here too;
+    /// `every_variant_serializes_with_a_listed_content_key` catches a forgotten
+    /// entry.
+    pub(crate) const CONTENT_KEYS: &'static [&'static str] = &["message", "reasoning", "data"];
+
     /// Creates a new message response.
     #[must_use]
     pub fn message(content: impl Into<String>) -> Self {
