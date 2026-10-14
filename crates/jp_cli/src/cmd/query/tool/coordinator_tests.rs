@@ -746,6 +746,145 @@ async fn a_fanned_out_call_asks_about_each_operation_and_records_once() {
     );
 }
 
+/// A call that finds the Host's connection to the JP MCP Server gone as soon as
+/// it is submitted.
+struct Disconnected {
+    tool_id: String,
+    tool_name: String,
+}
+
+#[async_trait]
+impl Executor for Disconnected {
+    fn tool_id(&self) -> &str {
+        &self.tool_id
+    }
+
+    fn tool_name(&self) -> &str {
+        &self.tool_name
+    }
+
+    fn arguments(&self) -> Map<String, Value> {
+        Map::new()
+    }
+
+    fn permission_info(&self) -> Option<PermissionInfo> {
+        None
+    }
+
+    fn set_arguments(&self, _: Value) {}
+
+    async fn prepare(&self, _: bool, _: CancellationToken) -> ExecutorResult {
+        ExecutorResult::Failed(ExecutorError::ConnectionLost(Box::new(io::Error::other(
+            "Session expired (HTTP 404)",
+        ))))
+    }
+
+    async fn execute(
+        &self,
+        _: &IndexMap<String, Value>,
+        _: CancellationToken,
+        _: Option<jp_mcp::server::StderrSink>,
+    ) -> ExecutorResult {
+        panic!("a call that was never admitted must not be released")
+    }
+}
+
+/// Once the Host's connection to the JP MCP Server is lost, nothing in the
+/// batch can run: every call is recorded as not executed, none is put to the
+/// user, and the batch reports the lost connection so the turn ends.
+///
+/// The second call asks before running, and the prompt backend holds no answer:
+/// a prompt shown for it would settle it as a failed prompt instead.
+#[tokio::test]
+async fn a_lost_connection_settles_every_call_without_asking() {
+    let mut tools = ask_tools();
+    tools.insert(
+        "lost_tool".to_owned(),
+        ToolConfig::from_partial(
+            serde_json::from_value(json!({"source": "builtin", "run": "allow"})).unwrap(),
+            vec![],
+        )
+        .unwrap(),
+    );
+    let source = TestExecutorSource::new()
+        .with_executor("lost_tool", |request| {
+            Box::new(Disconnected {
+                tool_id: request.id,
+                tool_name: request.name,
+            })
+        })
+        .with_executor("my_tool", |request| {
+            Box::new(
+                MockExecutor::completed(&request.id, &request.name, "ran").with_permission_info(
+                    PermissionInfo {
+                        tool_id: request.id.clone(),
+                        state_key: request.id.clone(),
+                        tool_name: request.name.clone(),
+                        tool_source: ToolSource::Builtin { tool: None },
+                        run_mode: RunMode::Ask,
+                        arguments: Value::Object(Map::new()),
+                    },
+                ),
+            )
+        });
+    let mut coordinator = ToolCoordinator::new(tools, Box::new(source));
+    let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let (_workspace, lock) = test_lock();
+    let mut turn_state = TurnState::default();
+
+    let result = drive(
+        &mut coordinator,
+        vec![
+            ToolCallRequest {
+                id: "call_1".into(),
+                name: "lost_tool".into(),
+                arguments: Map::new(),
+            },
+            ToolCallRequest {
+                id: "call_2".into(),
+                name: "my_tool".into(),
+                arguments: Map::new(),
+            },
+        ],
+        Arc::new(MockPromptBackend::new()),
+        Arc::new(MockInquiryBackend::new(HashMap::new())),
+        &mut turn_state,
+        &lock.as_mut(),
+        &printer,
+    )
+    .await;
+
+    assert_eq!(result.outcome, ExecutionOutcome::ConnectionLost);
+    assert_eq!(
+        result
+            .reviews
+            .iter()
+            .map(|(id, review)| (id.as_str(), review.response.result.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "call_1",
+                Err(
+                    "Tool 'lost_tool' was not executed: JP could not complete the call. You may \
+                     retry it."
+                        .to_owned()
+                )
+            ),
+            (
+                "call_2",
+                Err(
+                    "Tool 'my_tool' was not executed: JP could not complete the call. You may \
+                     retry it."
+                        .to_owned()
+                )
+            ),
+        ]
+    );
+    printer.flush();
+    assert_eq!(strip_ansi(&stderr.lock()), "");
+}
+
 /// Tools named `name` whose calls an argument formatter describes, and which
 /// run without asking.
 fn described_tools(name: &str) -> ToolsConfig {

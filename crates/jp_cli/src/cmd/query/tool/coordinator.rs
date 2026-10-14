@@ -46,6 +46,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
+    fmt::Display,
     future::pending,
     sync::Arc,
 };
@@ -171,7 +172,14 @@ pub(crate) enum ToolEvent {
 
     /// A fanned-out call's operations were folded into the one response it is
     /// recorded with.
-    Folded { group: usize, review: Review },
+    ///
+    /// `connection_lost` describes the failure when the call could not be
+    /// recorded because the Host lost its connection to the JP MCP Server.
+    Folded {
+        group: usize,
+        review: Review,
+        connection_lost: Option<String>,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -210,6 +218,13 @@ pub enum ExecutionOutcome {
     /// filled in; the caller should record the responses and end the turn
     /// without a follow-up request.
     Stopped,
+
+    /// The Host lost its connection to the JP MCP Server, so no call could
+    /// complete.
+    /// Every call has a response recording that; the caller should record the
+    /// responses and end the turn with an error, rather than hand the failures
+    /// to the assistant to retry on a connection that is gone.
+    ConnectionLost,
 
     /// The user escalated past the tool interrupt menu (cancelled it with
     /// Ctrl-C).
@@ -306,6 +321,10 @@ struct Batch {
 
     /// Whether the progress row was claimed for the released calls.
     progress: bool,
+
+    /// Whether the Host lost its connection to the JP MCP Server, after which
+    /// no call can complete.
+    connection_lost: bool,
 }
 
 impl Batch {
@@ -325,6 +344,7 @@ impl Batch {
             stream_ended: false,
             released: false,
             progress: false,
+            connection_lost: false,
         }
     }
 
@@ -1184,6 +1204,10 @@ impl ToolCoordinator {
             }
         }
 
+        if batch.connection_lost {
+            outcome.upgrade(ExecutionOutcome::ConnectionLost);
+        }
+
         // Deregister the tool interrupt handler.
         drop(interrupt_guard);
 
@@ -1431,9 +1455,26 @@ impl ToolCoordinator {
                 self.render_result(&tool_name, &review.response, host.renderer);
                 self.settle(batch, call, review, host);
             }
-            ToolEvent::Folded { group, review } => {
-                batch.groups[group].review = Some(review);
-            }
+            ToolEvent::Folded {
+                group,
+                review,
+                connection_lost,
+            } => self.on_folded(batch, group, review, connection_lost, host),
+        }
+    }
+
+    /// Take the response a fanned-out call is recorded with.
+    fn on_folded(
+        &mut self,
+        batch: &mut Batch,
+        group: usize,
+        review: Review,
+        connection_lost: Option<String>,
+        host: &mut Host<'_>,
+    ) {
+        batch.groups[group].review = Some(review);
+        if let Some(error) = connection_lost {
+            self.lose_connection(batch, &error, host);
         }
     }
 
@@ -1445,8 +1486,22 @@ impl ToolCoordinator {
         result: ExecutorResult,
         host: &mut Host<'_>,
     ) {
+        let released = batch.calls[index].released;
+        if let ExecutorResult::Failed(error) | ExecutorResult::OutcomeUnknown(error) = &result
+            && error.is_connection_lost()
+        {
+            self.lose_connection(batch, error, host);
+        }
+        // Nothing can run once the connection is gone, so a call that gets this
+        // far ends here rather than waiting on the user or on a release.
+        // A result it completed with stands: it is what the call produced.
+        if batch.connection_lost && !matches!(result, ExecutorResult::Completed(_)) {
+            let may_have_run = released && matches!(result, ExecutorResult::OutcomeUnknown(_));
+            self.settle_lost(batch, index, may_have_run, host);
+            return;
+        }
+
         let call = &mut batch.calls[index];
-        let released = call.released;
         let tool_id = call.tool_id.clone();
         match result {
             ExecutorResult::AwaitingAdmission => call.wait = Wait::Admission,
@@ -2052,25 +2107,27 @@ impl ToolCoordinator {
         let events = batch.events.clone();
         let folds = batch.folds.clone();
         tokio::spawn(async move {
-            let review = tokio::select! {
+            let (review, connection_lost) = tokio::select! {
                 biased;
                 () = folds.cancelled() => return,
                 recorded = fan_out.recorded() => match recorded {
-                    Ok(response) => Review::unchanged(response),
+                    Ok(response) => (Review::unchanged(response), None),
                     // Recorded as failed, so the conversation still pairs the
                     // request with a response.
                     Err(error) => {
                         warn!(%error, tool_id, "A fanned-out call could not be completed.");
-                        Review::replaced(ToolCallResponse {
+                        let review = Review::replaced(ToolCallResponse {
                             id: tool_id,
                             result: Err(format!("Tool call could not be completed: {error}")),
-                        })
+                        });
+                        (review, error.is_connection_lost().then(|| error.to_string()))
                     }
                 },
             };
             drop(events.send(ToolEvent::Folded {
                 group: index,
                 review,
+                connection_lost,
             }));
         });
     }
@@ -2261,6 +2318,20 @@ impl ToolCoordinator {
             may_have_run,
             "Tool call could not be completed."
         );
+        self.settle_lost(batch, index, may_have_run, host);
+    }
+
+    /// Record a call JP could not complete, with what the model needs to decide
+    /// what to do next.
+    fn settle_lost(
+        &mut self,
+        batch: &mut Batch,
+        index: usize,
+        may_have_run: bool,
+        host: &mut Host<'_>,
+    ) {
+        let call = &batch.calls[index];
+        let tool_name = &call.tool_name;
         let message = if may_have_run {
             format!(
                 "Tool '{tool_name}' may have run, but JP lost the call before its result arrived. \
@@ -2273,10 +2344,38 @@ impl ToolCoordinator {
             )
         };
         let response = ToolCallResponse {
-            id: batch.calls[index].tool_id.clone(),
+            id: call.tool_id.clone(),
             result: Err(message),
         };
         self.settle(batch, index, Review::replaced(response), host);
+    }
+
+    /// Stop the batch after the Host lost its connection to the JP MCP Server.
+    ///
+    /// Every call travels on that connection, so none still unsettled can
+    /// complete: each is recorded as lost now, rather than prompted for or
+    /// waited on.
+    /// `finish` then reports [`ExecutionOutcome::ConnectionLost`].
+    fn lose_connection(&mut self, batch: &mut Batch, error: &dyn Display, host: &mut Host<'_>) {
+        if batch.connection_lost {
+            return;
+        }
+        batch.connection_lost = true;
+        let endpoint = self.endpoint();
+        warn!(
+            %error,
+            endpoint = endpoint.as_ref().map_or("", Url::as_str),
+            "Lost the connection to the JP MCP Server; ending the turn without the remaining \
+             tool calls."
+        );
+        for index in 0..batch.calls.len() {
+            let call = &batch.calls[index];
+            if matches!(call.wait, Wait::Done) {
+                continue;
+            }
+            let may_have_run = call.released;
+            self.settle_lost(batch, index, may_have_run, host);
+        }
     }
 
     /// Record a tool's question on the current turn, and return the inquiry id
