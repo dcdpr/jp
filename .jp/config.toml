@@ -39,6 +39,11 @@ run = "allow"
 [plugins.command.ticket.options]
 assistant = "jp"
 
+# `jp rfd` is served the same way, installed with `just _install-rfd`. Its
+# options are left at their defaults, which are JP's layout.
+[plugins.command.rfd]
+run = "allow"
+
 [providers.llm.aliases]
 # Anthropic aliases
 anthropic = "anthropic/claude-sonnet-5-5"

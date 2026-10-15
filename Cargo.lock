@@ -2136,6 +2136,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "jp-rfd"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "clap",
+ "jp_plugin",
+ "jp_tool",
+ "regex",
+ "serde",
+ "serde_json",
+ "ticket",
+ "toml",
+]
+
+[[package]]
 name = "jp-serve-web"
 version = "0.1.0"
 dependencies = [

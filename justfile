@@ -4000,6 +4000,19 @@ _install-ticket *args:
     fi
     cargo install {{quiet_flag}} --locked --path crates/plugins/command/ticket --debug {{args}}
 
+# Build and install the `jp-rfd` command plugin that backs `jp rfd`.
+#
+# The plugin is not in the published registry, so `jp` picks it up from `$PATH`
+# (`plugins.command.rfd.run` in `.jp/config.toml` approves it).
+_install-rfd *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -z "${JP_INSTALL:-}" ] && command -v jp-rfd >/dev/null 2>&1; then
+        echo "Skipping jp-rfd rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
+        exit 0
+    fi
+    cargo install {{quiet_flag}} --locked --path crates/plugins/command/rfd --debug {{args}}
+
 # Build the `jp-serve-web` command plugin into JP's plugin directory.
 #
 # Not `cargo install`, unlike the other plugins. `serve-web` is an official

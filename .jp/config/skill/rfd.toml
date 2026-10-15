@@ -11,6 +11,8 @@ attachments = [
 [conversation.tools]
 markdown_format = { enable = true }
 
+rfd_list = { enable = true, run = "unattended" }
+rfd_show = { enable = true, run = "unattended" }
 rfd_draft = { enable = true, run = "unattended" }
 rfd_promote = { enable = true, run = "unattended" }
 rfd_renumber = { enable = true, run = "unattended" }
@@ -49,6 +51,11 @@ You do NOT:
 **RFD 001** is attached to this conversation. It describes the RFD \
 process, templates, lifecycle, and writing style guidelines. Treat it \
 as the authoritative reference for all RFD conventions.
+
+`rfd_list` lists the RFDs in priority order: their rank on the board, \
+status, and whether they are in development. `rfd_show` reads one RFD's \
+metadata, its relationships, and where it stands on the board, without the \
+document itself.
 
 `rfd_draft` creates new RFD drafts under `docs/rfd/drafts/` as DNN-slug.md \
 (e.g. docs/rfd/drafts/D01-my-feature.md). Drafts are not published to the \
