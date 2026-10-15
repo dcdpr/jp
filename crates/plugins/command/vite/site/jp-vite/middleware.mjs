@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -33,27 +33,80 @@ export function writeRefusal() {
 //
 // It runs in the workspace root `jp vite serve` named, or in the VitePress
 // source directory on a dev server started another way, which only reads.
+//
+// It runs in a session of its own, with no terminal. `jp vite serve` runs in a
+// background process group of the user's terminal, so a `jp` that kept that
+// terminal would be stopped by the first read or mode change it made there, and
+// nothing would resume it. There is nobody to answer a prompt either, hence
+// `--no-interactive` and no stdin.
+//
 // `timeout` bounds a command that waits on a provider; `0` waits as long as it
-// takes.
+// takes. A command still running then is killed with its whole process group.
 function jp(args, timeout = 0) {
     const settings = readSettings()
-    const pinned = []
+    const pinned = ['--no-interactive']
     if (settings.rfd) pinned.push('--cfg', `plugins.command.rfd.options.dir=${settings.rfd.dir}`)
     if (settings.ticket) {
         pinned.push('--cfg', `plugins.command.ticket.options.dir=${settings.ticket.dir}`)
     }
 
     return new Promise((done) => {
-        execFile('jp', [...pinned, ...args], {
+        const command = `jp ${args.join(' ')}`
+        let stdout = ''
+        let stderr = ''
+        let timedOut = false
+        let settled = false
+        let timer = null
+
+        // A child that fails to start reports `error` and may report `close`
+        // after it, so whichever comes first answers.
+        const finish = (ok, output) => {
+            if (settled) return
+            settled = true
+            clearTimeout(timer)
+            if (!ok) console.warn(`[jp-vite] ${command} failed:\n${output}`)
+            done({ ok, output: output.trim() })
+        }
+
+        const child = spawn('jp', [...pinned, ...args], {
             cwd: process.env.JP_VITE_SERVE || SRC_DIR,
-            timeout,
-        }, (error, stdout, stderr) => {
-            done({
-                ok: !error,
-                output: (stdout || stderr || String(error ?? '')).trim(),
-            })
+            detached: true,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+        })
+        child.stdout.setEncoding('utf-8').on('data', (chunk) => { stdout += chunk })
+        child.stderr.setEncoding('utf-8').on('data', (chunk) => { stderr += chunk })
+
+        if (timeout > 0) {
+            timer = setTimeout(() => {
+                timedOut = true
+                killGroup(child)
+            }, timeout)
+        }
+
+        child.on('error', (err) => finish(false, `${command}: ${err.message ?? err}`))
+        child.on('close', (code) => {
+            if (timedOut) {
+                // Its stderr names the trace log, which says where it stopped.
+                return finish(false, `${command} gave no answer within ` +
+                    `${Math.round(timeout / 1000)} seconds and was stopped.\n${stderr}`)
+            }
+            finish(code === 0, stdout || stderr || `${command} exited with ${code}`)
         })
     })
+}
+
+// Kill a detached child and everything else in the process group it leads.
+//
+// `SIGKILL` rather than `SIGTERM`: `jp` takes `SIGTERM` as a request to shut
+// down gracefully, which it acts on only where it checks for one, and a process
+// its terminal has stopped doesn't act on `SIGTERM` at all.
+function killGroup(child) {
+    try {
+        process.kill(process.platform === 'win32' ? child.pid : -child.pid, 'SIGKILL')
+    } catch {
+        child.kill('SIGKILL')
+    }
 }
 
 // Read a JSON request body of at most `limit` bytes.

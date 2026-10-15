@@ -120,8 +120,8 @@ function canToggleDev(rfd) {
 }
 
 // RFDs with a checkbox write in flight. The first mark on an RFD files its
-// tracking ticket, which reads the RFD's implementation plan through a provider
-// and takes seconds.
+// tracking ticket, which reads the RFD's implementation plan through a model
+// and can take a minute or more.
 const devPending = ref(new Set())
 
 // Mark an RFD as in development, or stop it, by moving its tracking ticket.
@@ -135,17 +135,24 @@ async function toggleDev(rfd, event) {
 
     const active = !inDev.value.has(rfd.num)
     devPending.value = new Set(devPending.value).add(rfd.num)
-    setNotice(
-        active
+
+    // The elapsed time shows the request is still open, and for how long.
+    const started = Date.now()
+    const progress = () => {
+        const seconds = Math.floor((Date.now() - started) / 1000)
+        const doing = active
             ? `RFD ${rfd.num}: starting its tracking ticket…`
-            : `RFD ${rfd.num}: moving its tracking ticket back to Todo…`,
-        'warn',
-    )
+            : `RFD ${rfd.num}: moving its tracking ticket back to Todo…`
+        setNotice(seconds ? `${doing} ${seconds}s` : doing, 'warn')
+    }
+    progress()
+    const ticker = setInterval(progress, 1000)
 
     const { ok, output } = await postBoard('/__rfd-development', {
         num: rfd.num,
         active,
     })
+    clearInterval(ticker)
 
     const pending = new Set(devPending.value)
     pending.delete(rfd.num)

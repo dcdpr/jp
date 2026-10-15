@@ -18,12 +18,6 @@ import { problem } from '@@jp-vite@@/theme/problem.mjs'
 import DocIndex from '@@jp-vite@@/theme/DocIndex.vue'
 </script>
 
-<DocIndex
-    v-if="!problem"
-    :entries="data"
-    :filters="settings.rfd.categories"
-    :show-status="false"
-    storage-key="rfd-drafts"
-/>
+<DocIndex v-if="!problem" :entries="data" :filters="settings.rfd.categories" :show-status="false" storage-key="rfd-drafts" />
 
 [published RFDs]: ../
