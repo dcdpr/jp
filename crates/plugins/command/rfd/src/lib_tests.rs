@@ -124,6 +124,25 @@ fn cli_definition_is_valid() {
     Args::command().debug_assert();
 }
 
+/// `jp vite serve` reads the revision of the site files this plugin was built
+/// alongside out of the parentheses.
+#[test]
+fn the_version_names_the_site_revision() {
+    let root = Utf8TempDir::new().unwrap();
+
+    let (text, code, _) = printed(&exchange(&init(root.path(), &["--version"])));
+
+    assert_eq!(code, 0);
+    assert_eq!(text, format!("jp rfd {VERSION}\n"));
+
+    let revision = VERSION
+        .split_once("(site ")
+        .and_then(|(_, rest)| rest.strip_suffix(')'))
+        .unwrap();
+    assert_eq!(revision.len(), 16, "{VERSION}");
+    assert!(revision.chars().all(|c| c.is_ascii_hexdigit()), "{VERSION}");
+}
+
 #[test]
 fn list_takes_a_category_and_the_section_flags() {
     match parse(&["list", "design", "--backlog", "--full"])
@@ -611,15 +630,10 @@ fn track_start_and_stop_take_an_id() {
     assert!(parse(&["track"]).is_err());
 }
 
-/// [`workspace`], with a ticket vocabulary defining the tracking label, RFD 043
-/// Accepted and untracked, and RFD 044 in Discussion.
+/// [`workspace`], with RFD 043 Accepted and untracked, and RFD 044 in
+/// Discussion.
 fn trackable() -> Utf8TempDir {
     let root = workspace();
-    fs::write(
-        root.path().join("docs/ticket/.labels.json"),
-        r#"{"type": {"description": "The type", "values": ["tracking"]}}"#,
-    )
-    .unwrap();
     fs::write(
         root.path().join("docs/rfd/043-more-order.md"),
         "# RFD 043: More Order\n\n- **Status**: Accepted\n\n## Implementation Plan\n",
@@ -634,10 +648,16 @@ fn trackable() -> Utf8TempDir {
     root
 }
 
-/// The init for running `args`, attributed to a configured user.
+/// The init for running `args`, attributed to a configured user, on a board
+/// whose ticket vocabulary defines the tracking label.
 fn init_by_jane(root: &Utf8Path, args: &[&str]) -> HostToPlugin {
     let mut message = init_message(root, args);
-    message.config = json!({ "user": { "name": "Jane Doe <jane@example.com>" } });
+    message.config = json!({
+        "user": { "name": "Jane Doe <jane@example.com>" },
+        "plugins": { "command": { "ticket": { "options": {
+            "labels": { "type": { "description": "The type", "values": ["tracking"] } }
+        } } } }
+    });
 
     HostToPlugin::Init(Box::new(message))
 }
@@ -872,10 +892,11 @@ fn a_declined_or_unanswerable_offer_files_nothing() {
 #[test]
 fn a_tracking_ticket_that_cannot_be_filed_leaves_the_promotion() {
     let root = trackable();
-    fs::write(root.path().join("docs/ticket/.labels.json"), "{}").unwrap();
+    let mut unlabelled = init_message(root.path(), &["promote", "44"]);
+    unlabelled.config = json!({ "user": { "name": "Jane Doe <jane@example.com>" } });
 
     let messages = exchange_all(&[
-        init_by_jane(root.path(), &["promote", "44"]),
+        HostToPlugin::Init(Box::new(unlabelled)),
         HostToPlugin::Composed(ComposeResponse {
             id: None,
             text: Some("file".to_owned()),
@@ -887,8 +908,8 @@ fn a_tracking_ticket_that_cannot_be_filed_leaves_the_promotion() {
     assert_eq!(code, 0);
     let warning = "Could not file the tracking ticket: Tracking tickets carry the label \
                    `type=tracking`, which the ticket vocabulary doesn't define. Add `tracking` to \
-                   the values of `type` in docs/ticket/.labels.json.\nRun `jp rfd track 044` to \
-                   retry.\n";
+                   the values of `plugins.command.ticket.options.labels.type`.\nRun `jp rfd track \
+                   044` to retry.\n";
     assert_eq!(chrome(&messages), [warning]);
 }
 

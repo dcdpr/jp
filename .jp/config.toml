@@ -39,10 +39,92 @@ run = "allow"
 [plugins.command.ticket.options]
 assistant = "jp"
 
+# The labels a ticket can carry: each key, what it covers, and the values it
+# takes. `jp ticket tools sync .jp/mcp/tools/ticket` mirrors them into the
+# `ticket_*` tool definitions, and `jp vite sync` into the site.
+[plugins.command.ticket.options.labels.client]
+description = "The client surface"
+values = ["cli", "macos", "web"]
+
+[plugins.command.ticket.options.labels.llm-provider]
+description = "The provider related to the ticket, if any"
+values = ["anthropic", "cerebras", "google", "llamacpp", "ollama", "openai", "openrouter"]
+
+[plugins.command.ticket.options.labels.domain]
+description = "The subsystem, across whatever crates it spans."
+values = ["conversation", "llm", "mcp", "plugins", "storage", "tooling"]
+
+[plugins.command.ticket.options.labels.type]
+description = "The type of ticket"
+values = [
+    "bug",
+    "enhancement",
+    "feature",
+    "follow-up",
+    "pre-rfd",
+    "question",
+    "task",
+    "tracking",
+]
+
+[plugins.command.ticket.options.labels.package]
+description = "Any relevant packages"
+values = [
+    "bookworm",
+    "comfort",
+    "grizzly",
+    "jp_attachment",
+    "jp_attachment_agentic_shepherd",
+    "jp_attachment_bear_note",
+    "jp_attachment_cmd_output",
+    "jp_attachment_file_content",
+    "jp_attachment_github",
+    "jp_attachment_http_content",
+    "jp_attachment_internal",
+    "jp_attachment_mcp_resources",
+    "jp_cli",
+    "jp_config",
+    "jp_conversation",
+    "jp_editor",
+    "jp_github",
+    "jp_id",
+    "jp_inquire",
+    "jp_label",
+    "jp_llm",
+    "jp_macro",
+    "jp_mcp",
+    "jp_md",
+    "jp_openrouter",
+    "jp_plugin",
+    "jp_printer",
+    "jp_storage",
+    "jp_task",
+    "jp_term",
+    "jp_test",
+    "jp_tombmap",
+    "jp_tool",
+    "jp_workspace",
+    "json_edit",
+    "schematic",
+    "xct2cli",
+]
+
 # `jp rfd` is served the same way, installed with `just _install-rfd`. Its
 # options are left at their defaults, which are JP's layout.
 [plugins.command.rfd]
 run = "allow"
+
+# `jp vite` keeps the site's RFD and ticket pages in step with the two plugins
+# above, installed with `just _install-vite`. The site reads its settings from
+# `docs/.vitepress/jp-vite/settings.json`, which `jp vite sync` writes from
+# this configuration.
+[plugins.command.vite]
+run = "allow"
+
+# Pinned rather than read from each contributor's `origin` remote, so everyone
+# writes the same settings.
+[plugins.command.vite.options]
+repository = "https://github.com/dcdpr/jp"
 
 [providers.llm.aliases]
 # Anthropic aliases

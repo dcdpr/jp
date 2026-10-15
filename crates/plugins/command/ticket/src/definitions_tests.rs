@@ -1,7 +1,7 @@
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use serde_json::json;
-use ticket::{Kind, Status, store};
+use ticket::{Kind, Status};
 
 use super::*;
 use crate::tool::{DEFAULT_MAX_TITLE_LENGTH, SHORTER_TITLE, TOOLS};
@@ -438,16 +438,22 @@ fn jp_definitions_advertise_what_the_tools_accept() {
     assert_create_declares_the_question_and_the_limit(&routed);
 }
 
-/// JP's board vocabulary has to parse, whatever it currently holds.
+/// JP's board vocabulary, in its workspace configuration, has to parse,
+/// whatever it currently holds.
 ///
 /// Deliberately not a comparison against the lists JP's definitions advertise:
 /// those are a mirror kept by `jp ticket tools sync`, and adding a label should
 /// never turn a second file into a failing test.
 #[test]
 fn the_jp_board_vocabulary_parses() {
-    let dir = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../..")
-        .join(store::DEFAULT_DIR);
+    let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../.jp/config.toml");
+    let config: toml::Value = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
 
-    store::vocabulary(&dir).unwrap_or_else(|error| panic!("{dir}: {error}"));
+    let labels = ["plugins", "command", "ticket", "options", "labels"]
+        .iter()
+        .try_fold(&config, |value, key| value.get(key))
+        .unwrap_or_else(|| panic!("{path} defines no `plugins.command.ticket.options.labels`"));
+
+    Vocabulary::from_value(serde_json::to_value(labels).unwrap())
+        .unwrap_or_else(|error| panic!("{path}: {error}"));
 }

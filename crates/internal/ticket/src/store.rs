@@ -15,11 +15,9 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
-use jp_label::vocabulary;
 
 use crate::{
-    Comment, LABEL_KEY, LABELS_FILE, Labels, NewTicket, ParseError, Status, Ticket, TicketId,
-    Vocabulary,
+    Comment, LABEL_KEY, Labels, NewTicket, ParseError, Status, Ticket, TicketId, Vocabulary,
     id::{MAX_BUCKET, TAIL_SPACE},
     import::{Import, escaped},
     parse, render,
@@ -69,8 +67,6 @@ pub enum Error {
     /// Allocation refuses rather than wrapping, which would reuse old time
     /// prefixes, or widening, which would break the fixed-width form.
     Exhausted,
-    /// The board's label vocabulary can't be read.
-    Labels(vocabulary::Error),
     /// A write named labels the board won't accept.
     Rejected(jp_label::Rejected),
     /// A ticket file that is there but isn't a well-formed ticket.
@@ -118,7 +114,6 @@ impl fmt::Display for Error {
             Self::Exhausted => f.write_str(
                 "The ticket id format has no time buckets left; it needs a wider time component.",
             ),
-            Self::Labels(error) => error.fmt(f),
             Self::Rejected(error) => error.fmt(f),
             Self::Malformed { id, error } => write!(f, "{id} is not a well-formed ticket: {error}"),
             Self::Board { path, reason } => write!(f, "{path} is not a board order: {reason}."),
@@ -142,7 +137,6 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Parse(error) | Self::Malformed { error, .. } => Some(error),
-            Self::Labels(error) => Some(error),
             Self::Rejected(error) => Some(error),
             Self::Io(error) => Some(error),
             _ => None,
@@ -153,12 +147,6 @@ impl std::error::Error for Error {
 impl From<ParseError> for Error {
     fn from(error: ParseError) -> Self {
         Self::Parse(error)
-    }
-}
-
-impl From<vocabulary::Error> for Error {
-    fn from(error: vocabulary::Error) -> Self {
-        Self::Labels(error)
     }
 }
 
@@ -310,21 +298,6 @@ pub fn set_field(dir: &Utf8Path, id: TicketId, key: &str, value: &str) -> Result
     fs::write(&path, updated)?;
 
     Ok(path)
-}
-
-/// Read the board's label vocabulary.
-///
-/// A board with no `.labels.json` defines no labels, which is a board that
-/// hasn't started using them rather than an error — reading a ticket must not
-/// depend on the file being there.
-/// A file that is present but unreadable *is* an error: silently treating it as
-/// empty would reject every label a caller asks for and blame the caller.
-pub fn vocabulary(dir: &Utf8Path) -> Result<Vocabulary> {
-    match fs::read_to_string(dir.join(LABELS_FILE)) {
-        Ok(source) => Ok(Vocabulary::parse(&source)?),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vocabulary::default()),
-        Err(error) => Err(error.into()),
-    }
 }
 
 /// Replace a ticket's labels, returning its path and what it now carries.

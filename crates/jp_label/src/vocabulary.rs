@@ -5,7 +5,9 @@
 //! [`Vocabulary::resolve`], which is the only thing that turns a string into a
 //! [`Labels`] a write can trust.
 //!
-//! The declaration is JSON, one entry per key:
+//! The declaration is a map of keys to entries, read from JSON with
+//! [`Vocabulary::parse`] or from an already parsed value with
+//! [`Vocabulary::from_value`]:
 //!
 //! ```json
 //! {
@@ -38,6 +40,7 @@ use std::{
 };
 
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::{KeyError, Labels, parse_token, validate_key, validate_value};
 
@@ -112,6 +115,26 @@ impl Vocabulary {
         let document: BTreeMap<String, Entry> =
             serde_json::from_str(source).map_err(|error| Error::Malformed(error.to_string()))?;
 
+        Self::validated(document)
+    }
+
+    /// Read a vocabulary from a value already parsed, such as a table of a
+    /// configuration file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the value isn't the documented shape, when a key
+    /// or value can't be used as written, or when two entries differ only by
+    /// case.
+    pub fn from_value(value: Value) -> Result<Self, Error> {
+        let document: BTreeMap<String, Entry> =
+            serde_json::from_value(value).map_err(|error| Error::Malformed(error.to_string()))?;
+
+        Self::validated(document)
+    }
+
+    /// Check a declaration and build the vocabulary it declares.
+    fn validated(document: BTreeMap<String, Entry>) -> Result<Self, Error> {
         let mut facets = BTreeMap::new();
         let mut seen_keys: BTreeMap<String, String> = BTreeMap::new();
 
@@ -330,7 +353,7 @@ fn matching<'a>(mut candidates: impl Iterator<Item = &'a String>, name: &str) ->
 /// A vocabulary declaration that can't be read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
-    /// The text isn't a JSON object of key to entry.
+    /// The declaration isn't a map of key to entry.
     Malformed(String),
     /// A key or value can't be used as written.
     Name(KeyError),
@@ -352,8 +375,8 @@ impl fmt::Display for Error {
         match self {
             Self::Malformed(reason) => write!(
                 f,
-                "The label vocabulary is not a JSON object mapping each key to a `description`, \
-                 `values`, and optional `retired`: {reason}"
+                "The label vocabulary is not a map of each key to a `description`, `values`, and \
+                 optional `retired`: {reason}"
             ),
             Self::Name(error) => write!(f, "The label vocabulary is unusable: {error}."),
             Self::EmptyValue { key } => {

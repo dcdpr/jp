@@ -292,3 +292,30 @@ fn an_empty_vocabulary_refuses_everything() {
         "`client` is not a known label key. This vocabulary defines no labels."
     );
 }
+
+/// A configuration file declares the vocabulary as a table, which reaches the
+/// reader already parsed.
+#[test]
+fn reads_the_same_vocabulary_from_a_parsed_value() {
+    let value: Value = serde_json::from_str(VOCABULARY).unwrap();
+
+    assert_eq!(Vocabulary::from_value(value).unwrap(), vocabulary());
+}
+
+#[test]
+fn a_parsed_value_is_checked_like_a_document() {
+    let flat = serde_json::json!({ "client": "The client." });
+    assert!(matches!(
+        Vocabulary::from_value(flat),
+        Err(Error::Malformed(_))
+    ));
+
+    let clashing = serde_json::json!({
+        "client": { "values": ["cli"] },
+        "Client": { "values": ["web"] },
+    });
+    assert!(matches!(
+        Vocabulary::from_value(clashing),
+        Err(Error::DuplicateKey { .. })
+    ));
+}

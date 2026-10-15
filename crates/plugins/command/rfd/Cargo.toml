@@ -31,6 +31,11 @@ regex = { workspace = true, features = ["std", "perf", "unicode-perl"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
 
+[build-dependencies]
+# `--version` reports the revision of the site files `jp vite` writes, which
+# read what this plugin writes.
+site-revision = { workspace = true }
+
 [dev-dependencies]
 # Checks that the configuration `track` asks its plan query to run under names
 # keys `jp` knows.

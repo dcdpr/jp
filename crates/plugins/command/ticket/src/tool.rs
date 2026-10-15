@@ -31,11 +31,14 @@ use jp_tool::{AccessPolicy, Action, Capability, Context, FsAccessError, Outcome,
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 use ticket::{
-    Comment, Kind, LABELS_FILE, Labels, NewTicket, ParseError, Selector, Status, Ticket, TicketId,
-    parse, render, store,
+    Comment, Kind, Labels, NewTicket, ParseError, Selector, Status, Ticket, TicketId, parse,
+    render, store,
 };
 
-use crate::{describe_vocabulary, options::Options};
+use crate::{
+    describe_vocabulary,
+    options::{Options, leftover_labels_file},
+};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -146,6 +149,9 @@ struct Tickets<'a> {
 
     /// Who what the call files is attributed to.
     author: &'a str,
+
+    /// The plugin's settings, which hold the board's label vocabulary.
+    options: &'a Options,
 }
 
 impl<'a> Tickets<'a> {
@@ -192,6 +198,7 @@ impl<'a> Tickets<'a> {
             root,
             dir: root.join(relative),
             author: &options.assistant,
+            options,
         })
     }
 
@@ -297,7 +304,7 @@ fn create(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall, preview:
         return refuse("`title` must not be empty.");
     }
     let labels = match resolve_labels(
-        &tickets.dir,
+        tickets.options,
         args.optional::<Vec<String>>("labels")?.as_deref(),
     )? {
         Ok(labels) => labels,
@@ -407,11 +414,11 @@ fn option_or<T: DeserializeOwned>(options: &Map<String, Value>, key: &str, defau
 
 /// Check labels against the board's vocabulary.
 ///
-/// The outer error is the vocabulary file being unreadable, which is the
-/// board's problem; the inner one is a label the board doesn't define, which is
-/// the caller's and comes back as a refusal naming the known set.
+/// The outer error is the vocabulary being unreadable, which is the board's
+/// problem; the inner one is a label the board doesn't define, which is the
+/// caller's and comes back as a refusal naming the known set.
 fn resolve_labels(
-    dir: &Utf8Path,
+    options: &Options,
     requested: Option<&[String]>,
 ) -> Result<Result<Labels, String>, Error> {
     // A call that names no labels doesn't read the vocabulary at all, so a
@@ -420,7 +427,8 @@ fn resolve_labels(
         return Ok(Ok(Labels::default()));
     };
 
-    Ok(store::vocabulary(dir)?
+    Ok(options
+        .vocabulary()?
         .resolve(requested)
         .map_err(|refusal| refusal.to_string()))
 }
@@ -442,7 +450,7 @@ fn label(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
         return refuse("`labels` must be an array. Pass `[]` to clear the labels.");
     };
 
-    let vocabulary = store::vocabulary(&tickets.dir)?;
+    let vocabulary = tickets.options.vocabulary()?;
     match store::set_labels(&tickets.dir, id, &vocabulary, &requested) {
         Ok((_, applied)) if applied.is_empty() => Ok(format!("Cleared the labels on {id}.").into()),
         Ok((_, applied)) => Ok(format!("{id}: {applied}").into()),
@@ -454,10 +462,10 @@ fn label(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
 
 /// List the labels the board defines, with what each one covers.
 fn labels(tickets: &Tickets<'_>) -> Answer {
-    let vocabulary = store::vocabulary(&tickets.dir)?;
-    let file = tickets.relative(&tickets.dir.join(LABELS_FILE));
+    let vocabulary = tickets.options.vocabulary()?;
+    let leftover = leftover_labels_file(&tickets.dir).map(|path| tickets.relative(&path));
 
-    Ok(describe_vocabulary(&vocabulary, &file).into())
+    Ok(describe_vocabulary(&vocabulary, leftover.as_deref()).into())
 }
 
 fn comment(tickets: &Tickets<'_>, args: &Arguments<'_>, preview: bool) -> Answer {

@@ -556,7 +556,14 @@ fn track(place: &Place<'_>, args: &Arguments<'_>, config: &Value) -> Reply {
     place.require(Dir::Rfds, &[Capability::Read])?;
     place.require_tickets(&TRACKING)?;
 
-    let tracked = cmd::track::track(&place.paths, id, &assistant(config)?, &mut no_plan)?;
+    let vocabulary = options::ticket_vocabulary(config)?;
+    let tracked = cmd::track::track(
+        &place.paths,
+        &vocabulary,
+        id,
+        &assistant(config)?,
+        &mut no_plan,
+    )?;
 
     Ok(reported(tracked.report))
 }
@@ -566,7 +573,14 @@ fn start(place: &Place<'_>, args: &Arguments<'_>, config: &Value) -> Reply {
     place.require(Dir::Rfds, &[Capability::Read])?;
     place.require_tickets(&TRACKING)?;
 
-    let output = cmd::track::start(&place.paths, id, &assistant(config)?, &mut no_plan)?;
+    let vocabulary = options::ticket_vocabulary(config)?;
+    let output = cmd::track::start(
+        &place.paths,
+        &vocabulary,
+        id,
+        &assistant(config)?,
+        &mut no_plan,
+    )?;
 
     Ok(reported(output))
 }

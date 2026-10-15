@@ -8,25 +8,19 @@ next: false
 
 RFDs are short design documents that describe a significant change before
 implementation begins.
-See [RFD 001] for the full process.
-
-- **Design** — feature proposals and architectural changes
-- **Decision** — recording a specific choice: a technology, convention, or
-  standard
-- **Guide** — how-tos and reference material for contributors
-- **Process** — how the project operates: workflows, policies, values
 
 The active backlog in priority order lives on the [priorities] page.
 Proposals that haven't been assigned a permanent number yet live on the [draft
 RFDs] page.
 
 <script setup>
-import { data } from '../.vitepress/loaders/rfds.data.js'
-import DocIndex from '../.vitepress/theme/DocIndex.vue'
+import { data } from '../.vitepress/jp-vite/loaders/rfds.data.js'
+import settings from '../.vitepress/jp-vite/settings.json'
+import { problem } from '../.vitepress/jp-vite/theme/problem.mjs'
+import DocIndex from '../.vitepress/jp-vite/theme/DocIndex.vue'
 </script>
 
-<DocIndex :entries="data" />
+<DocIndex v-if="!problem" :entries="data" :filters="settings.rfd.categories" />
 
-[RFD 001]: ./001-jp-rfd-process
 [draft RFDs]: ./drafts/
 [priorities]: ./priority

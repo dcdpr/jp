@@ -3,8 +3,8 @@ enable = false
 source = "plugin.command.ticket.labels"
 summary = "List the labels the board defines, with what each one covers."
 description = """
-Print every label key in `docs/ticket/.labels.json`, what it covers, and the
-values it accepts, retired ones marked.
+Print every label key the board defines, what it covers, and the values it
+accepts, retired ones marked.
 
 The label parameters of the other ticket tools already list the accepted
 values; this explains what each key is for.

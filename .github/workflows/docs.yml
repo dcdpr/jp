@@ -54,9 +54,11 @@ jobs:
           fi
 
           # The site is assembled from `docs/`, by recipes in the justfile, by
-          # this workflow. The change log is generated from git tags, which a
-          # pull request cannot move.
-          sources='^docs/|^justfile$|^\.github/workflows/docs\.yml$'
+          # this workflow. Its RFD and ticket pages are synced from the
+          # `jp-vite` crate, with settings read from `.jp/config.toml`. The
+          # change log is generated from git tags, which a pull request cannot
+          # move.
+          sources='^docs/|^justfile$|^\.github/workflows/docs\.yml$|^crates/plugins/command/vite/|^\.jp/config\.toml$'
 
           # Via a file rather than a pipe: `grep -q` exits on the first match,
           # and the resulting SIGPIPE would trip `pipefail`, turning a match
@@ -97,6 +99,10 @@ jobs:
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
       - if: ${{ steps.task.outputs.run == 'true' }}
         run: corepack enable
+      # The RFD and ticket pages read files `jp vite sync` writes; a site file or
+      # a label changed without the sync would publish stale ones.
+      - if: ${{ steps.task.outputs.run == 'true' }}
+        run: just site-ci
       - if: ${{ steps.task.outputs.run == 'true' }}
         run: just build-changelog > change-log.md
       # Fetch the plugin registry before the build so VitePress copies it from

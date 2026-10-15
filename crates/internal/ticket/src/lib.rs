@@ -35,9 +35,9 @@
 //! board, and [`import`] carries the rules for content that comes from
 //! upstream.
 //!
-//! Labels are `key=value` annotations from [`jp_label`]; the board's vocabulary
-//! lives in `.labels.json` next to the ticket files and is read by
-//! [`store::vocabulary`].
+//! Labels are `key=value` annotations from [`jp_label`].
+//! The board's vocabulary is the caller's to read, from wherever it keeps its
+//! configuration, and a label write takes it as a [`Vocabulary`].
 //!
 //! The id is in the filename and nowhere else, so renaming a ticket is a rename
 //! and there is no second copy to keep in step.
@@ -57,9 +57,6 @@ pub mod store;
 
 pub use id::TicketId;
 pub use jp_label::{Labels, Selector, Vocabulary};
-
-/// The vocabulary file, inside the ticket directory.
-pub const LABELS_FILE: &str = ".labels.json";
 
 /// The metadata key one label is written under.
 ///

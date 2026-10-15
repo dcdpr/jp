@@ -13,8 +13,30 @@ fn parse(args: &[&str]) -> Result<Args, clap::Error> {
 
 /// Every command that writes needs an author; the tests supply one rather than
 /// depending on the machine's git config.
+///
+/// The board defines [`labelled`]'s vocabulary, so label writes have something
+/// to check against.
 fn run_command(dir: &Utf8TempDir, command: Command) -> Result<Output, String> {
-    run_in(dir.path(), command)
+    run_with_options(dir.path(), command, &labelled())
+}
+
+/// The plugin's default options, with a label vocabulary.
+fn labelled() -> Options {
+    let options = json!({
+        "labels": {
+            "client": { "description": "The client.", "values": ["cli", "macos"] },
+            "package": {
+                "description": "The crate.",
+                "values": ["jp_cli", "jp_config"],
+                "retired": ["jp_legacy"]
+            }
+        }
+    });
+    let Value::Object(options) = options else {
+        unreachable!("options are an object");
+    };
+
+    Options::read(&options).unwrap()
 }
 
 /// Run a command against `dir` as both the workspace root and the ticket
@@ -58,23 +80,6 @@ fn write_ticket(dir: &Utf8Path, body: &str, title: &str, status: Status) -> Tick
     std::fs::write(dir.join(format!("{body}-slug.md")), document).unwrap();
 
     body.parse().unwrap()
-}
-
-/// Give a board a vocabulary, so label writes have something to check against.
-fn write_vocabulary(dir: &Utf8TempDir) {
-    std::fs::create_dir_all(dir.path()).unwrap();
-    std::fs::write(
-        dir.path().join(LABELS_FILE),
-        r#"{
-            "client": {"description": "The client.", "values": ["cli", "macos"]},
-            "package": {
-                "description": "The crate.",
-                "values": ["jp_cli", "jp_config"],
-                "retired": ["jp_legacy"]
-            }
-        }"#,
-    )
-    .unwrap();
 }
 
 /// File a labelled ticket and hand back its id.
@@ -539,6 +544,23 @@ fn labelling_without_an_id_offers_the_picker() {
     .unwrap_err();
 
     assert_eq!(error, "No tickets to choose from.");
+}
+
+/// `jp vite serve` reads the revision of the site files this plugin was built
+/// alongside out of the parentheses.
+#[test]
+fn the_version_names_the_site_revision() {
+    let error = parse(&["--version"]).unwrap_err();
+
+    assert!(!error.use_stderr());
+    assert_eq!(error.to_string(), format!("jp ticket {VERSION}\n"));
+
+    let revision = VERSION
+        .split_once("(site ")
+        .and_then(|(_, rest)| rest.strip_suffix(')'))
+        .unwrap();
+    assert_eq!(revision.len(), 16, "{VERSION}");
+    assert!(revision.chars().all(|c| c.is_ascii_hexdigit()), "{VERSION}");
 }
 
 /// `--help` reaches us as an error, but it is output, not a failure.
@@ -1509,7 +1531,6 @@ fn a_bad_argument_exits_non_zero_with_a_reason() {
 #[test]
 fn labels_survive_the_round_trip_and_show_in_the_listing() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     let id = add_labelled(&dir, "Window title truncates", &[
         "package=jp_config",
@@ -1535,7 +1556,6 @@ fn labels_survive_the_round_trip_and_show_in_the_listing() {
 #[test]
 fn listing_narrows_to_tickets_carrying_every_label() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     let both = add_labelled(&dir, "Both", &["client=macos", "package=jp_cli"]);
     add_labelled(&dir, "One", &["package=jp_cli"]);
@@ -1560,7 +1580,6 @@ fn listing_narrows_to_tickets_carrying_every_label() {
 #[test]
 fn listing_narrows_on_a_bare_key() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     add_labelled(&dir, "Client work", &["client=cli"]);
     add_labelled(&dir, "Crate work", &["package=jp_cli"]);
@@ -1582,7 +1601,6 @@ fn listing_narrows_on_a_bare_key() {
 #[test]
 fn labelling_replaces_the_whole_set() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
     let id = add_labelled(&dir, "Replace me", &["client=macos", "package=jp_cli"]);
 
     let out = run_command(&dir, Command::Label {
@@ -1612,7 +1630,6 @@ fn labelling_replaces_the_whole_set() {
 #[test]
 fn an_unknown_label_is_refused_with_the_known_set() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     let error = run_command(&dir, Command::Add {
         kind: Some(Kind::Bug),
@@ -1638,7 +1655,6 @@ fn an_unknown_label_is_refused_with_the_known_set() {
 #[test]
 fn the_vocabulary_listing_names_each_label_and_what_it_covers() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     let out = run_command(&dir, Command::Labels).unwrap();
 
@@ -1656,7 +1672,6 @@ fn the_vocabulary_listing_names_each_label_and_what_it_covers() {
 #[test]
 fn a_retired_label_already_on_a_ticket_can_be_kept() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     // Written by hand: `legacy-ui` can no longer be applied through the CLI,
     // which is exactly the situation an old ticket is in.
@@ -1686,7 +1701,6 @@ fn a_retired_label_already_on_a_ticket_can_be_kept() {
 #[test]
 fn a_retired_label_cannot_be_added_fresh() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
     let id = add_labelled(&dir, "Fresh", &[]);
 
     let error = run_command(&dir, Command::Label {
@@ -1706,15 +1720,65 @@ fn a_retired_label_cannot_be_added_fresh() {
 fn a_board_without_a_vocabulary_says_where_to_define_one() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let out = run_command(&dir, Command::Labels).unwrap();
+    let out = run_in(dir.path(), Command::Labels).unwrap();
+
+    assert_eq!(
+        out.text,
+        "This board defines no labels. Add them to `plugins.command.ticket.options.labels`.\n"
+    );
+}
+
+/// The file the vocabulary lived in before it moved into the options is no
+/// longer read, so a board that kept it is told why its labels are gone.
+#[test]
+fn a_leftover_labels_file_is_pointed_out() {
+    let dir = Utf8TempDir::new().unwrap();
+    std::fs::write(dir.path().join(".labels.json"), "{}").unwrap();
+
+    let out = run_in(dir.path(), Command::Labels).unwrap();
 
     assert_eq!(
         out.text,
         format!(
-            "This board defines no labels. Add them to {}.\n",
+            "This board defines no labels. Add them to \
+             `plugins.command.ticket.options.labels`.\n{} is no longer read: move its keys \
+             there.\n",
             dir.path().join(".labels.json")
         )
     );
+}
+
+/// A vocabulary that doesn't parse fails the commands that label, named by
+/// where it is configured, and no others.
+#[test]
+fn a_broken_vocabulary_fails_only_what_labels() {
+    let dir = Utf8TempDir::new().unwrap();
+    let Value::Object(options) = json!({ "labels": { "client": "The client." } }) else {
+        unreachable!("options are an object");
+    };
+    let options = Options::read(&options).unwrap();
+
+    let error = run_with_options(dir.path(), Command::Labels, &options).unwrap_err();
+    assert!(
+        error.starts_with(
+            "`plugins.command.ticket.options.labels`: The label vocabulary is not a map"
+        ),
+        "{error}"
+    );
+
+    run_with_options(
+        dir.path(),
+        Command::Add {
+            kind: Some(Kind::Bug),
+            title: Some("Unlabelled".to_owned()),
+            author: Some("john".to_owned()),
+            body: None,
+            implements: None,
+            labels: vec![],
+        },
+        &options,
+    )
+    .unwrap();
 }
 
 /// An unreadable ticket is reported to the log, not mixed into stdout where it

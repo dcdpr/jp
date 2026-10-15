@@ -11,14 +11,19 @@ use serde_json::json;
 use super::*;
 use crate::cmd::tests::{Workspace, ticket};
 
-const VOCABULARY: &str =
-    r#"{"type": {"description": "The type of ticket", "values": ["bug", "feature", "tracking"]}}"#;
+/// A ticket vocabulary defining the tracking label.
+fn vocabulary() -> Vocabulary {
+    Vocabulary::parse(
+        r#"{"type": {"description": "The type of ticket", "values": ["bug", "feature", "tracking"]}}"#,
+    )
+    .unwrap()
+}
 
-/// RFD 116 is Accepted and RFD 117 is in Discussion; the tickets define the
-/// tracking label.
+/// RFD 116 is Accepted and RFD 117 is in Discussion, beside an empty ticket
+/// directory.
 fn workspace() -> Workspace {
     let workspace = Workspace::new();
-    workspace.write("docs/ticket/.labels.json", VOCABULARY);
+    fs::create_dir_all(&workspace.paths.tickets).unwrap();
     workspace.rfd(
         "116-shareable-tooling.md",
         &[("Status", "Accepted")],
@@ -96,11 +101,17 @@ fn track_files_a_ticket_holding_the_plan() {
     let workspace = workspace();
     let mut asked = vec![];
 
-    let tracked = track(&workspace.paths, id("116"), &filer(), &mut |request| {
-        asked.push((request.id, request.file.to_owned()));
-        assert!(request.document.contains("### Phase 1: Tickets"));
-        Ok(phases())
-    })
+    let tracked = track(
+        &workspace.paths,
+        &vocabulary(),
+        id("116"),
+        &filer(),
+        &mut |request| {
+            asked.push((request.id, request.file.to_owned()));
+            assert!(request.document.contains("### Phase 1: Tickets"));
+            Ok(phases())
+        },
+    )
     .unwrap();
 
     assert_eq!(asked, [(
@@ -143,9 +154,13 @@ Tracking ticket for [RFD 116](../rfd/116-shareable-tooling.md).
 fn a_plan_that_cannot_be_read_leaves_the_marker() {
     let workspace = workspace();
 
-    let tracked = track(&workspace.paths, id("116"), &filer(), &mut |_| {
-        Ok(Plan::Unavailable("the provider is down".to_owned()))
-    })
+    let tracked = track(
+        &workspace.paths,
+        &vocabulary(),
+        id("116"),
+        &filer(),
+        &mut |_| Ok(Plan::Unavailable("the provider is down".to_owned())),
+    )
     .unwrap();
 
     let description = "\
@@ -165,9 +180,13 @@ Tracking ticket for [RFD 116](../rfd/116-shareable-tooling.md).
 fn an_rfd_without_a_plan_leaves_the_marker() {
     let workspace = workspace();
 
-    let tracked = track(&workspace.paths, id("116"), &filer(), &mut |_| {
-        Ok(Plan::Phases(vec![]))
-    })
+    let tracked = track(
+        &workspace.paths,
+        &vocabulary(),
+        id("116"),
+        &filer(),
+        &mut |_| Ok(Plan::Phases(vec![])),
+    )
     .unwrap();
 
     assert!(read_ticket(&workspace, tracked.ticket).contains(PENDING));
@@ -184,7 +203,14 @@ fn an_existing_tracking_ticket_is_reused() {
     let workspace = workspace();
     let before = filed(&workspace, "Todo", "Edited by hand.");
 
-    let tracked = track(&workspace.paths, id("116"), &filer(), &mut unread).unwrap();
+    let tracked = track(
+        &workspace.paths,
+        &vocabulary(),
+        id("116"),
+        &filer(),
+        &mut unread,
+    )
+    .unwrap();
 
     assert_eq!(tracked.ticket.to_string(), "T-02wt0k1");
     let note = "docs/ticket/02wt0k1-shareable-tooling.md (T-02wt0k1) already tracks RFD 116.";
@@ -205,7 +231,14 @@ fn a_pending_plan_is_read_into_the_existing_ticket() {
         &format!("Tracking ticket for [RFD 116](../rfd/116-shareable-tooling.md).\n\n{PENDING}"),
     );
 
-    let tracked = track(&workspace.paths, id("116"), &filer(), &mut |_| Ok(phases())).unwrap();
+    let tracked = track(
+        &workspace.paths,
+        &vocabulary(),
+        id("116"),
+        &filer(),
+        &mut |_| Ok(phases()),
+    )
+    .unwrap();
 
     let note = "Read the Implementation Plan of RFD 116 into \
                 docs/ticket/02wt0k1-shareable-tooling.md (T-02wt0k1).";
@@ -233,9 +266,13 @@ fn a_plan_still_pending_leaves_the_ticket_as_it_was() {
         "Tracking ticket.\n\n<!-- rfd-plan: pending -->",
     );
 
-    let tracked = track(&workspace.paths, id("116"), &filer(), &mut |_| {
-        Ok(Plan::Unavailable("no provider".to_owned()))
-    })
+    let tracked = track(
+        &workspace.paths,
+        &vocabulary(),
+        id("116"),
+        &filer(),
+        &mut |_| Ok(Plan::Unavailable("no provider".to_owned())),
+    )
     .unwrap();
 
     assert_eq!(
@@ -255,7 +292,14 @@ fn a_phase_ticket_is_not_the_tracking_ticket() {
         &ticket("Phase one", "Todo", &[("Implements", "116")], ""),
     );
 
-    let tracked = track(&workspace.paths, id("116"), &filer(), &mut |_| Ok(phases())).unwrap();
+    let tracked = track(
+        &workspace.paths,
+        &vocabulary(),
+        id("116"),
+        &filer(),
+        &mut |_| Ok(phases()),
+    )
+    .unwrap();
 
     assert_ne!(tracked.ticket.to_string(), "T-02wt0k1");
     assert_eq!(ticket_files(&workspace).len(), 2);
@@ -280,18 +324,41 @@ fn only_an_accepted_or_implemented_rfd_is_tracked() {
         ),
     ] {
         assert_eq!(
-            track(&workspace.paths, id(rfd), &filer(), &mut unread).unwrap_err(),
+            track(
+                &workspace.paths,
+                &vocabulary(),
+                id(rfd),
+                &filer(),
+                &mut unread
+            )
+            .unwrap_err(),
             error
         );
         assert_eq!(
-            start(&workspace.paths, id(rfd), &filer(), &mut unread).unwrap_err(),
+            start(
+                &workspace.paths,
+                &vocabulary(),
+                id(rfd),
+                &filer(),
+                &mut unread
+            )
+            .unwrap_err(),
             error
         );
     }
     assert!(ticket_files(&workspace).is_empty());
 
     workspace.rfd("030-built.md", &[("Status", "Implemented")], "Body.");
-    assert!(track(&workspace.paths, id("030"), &filer(), &mut |_| Ok(phases())).is_ok());
+    assert!(
+        track(
+            &workspace.paths,
+            &vocabulary(),
+            id("030"),
+            &filer(),
+            &mut |_| Ok(phases())
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -301,11 +368,25 @@ fn tracking_needs_a_ticket_directory() {
     let error = "Tracking needs tickets, and there is no ticket directory at docs/ticket.";
 
     assert_eq!(
-        track(&workspace.paths, id("116"), &filer(), &mut unread).unwrap_err(),
+        track(
+            &workspace.paths,
+            &vocabulary(),
+            id("116"),
+            &filer(),
+            &mut unread
+        )
+        .unwrap_err(),
         error
     );
     assert_eq!(
-        start(&workspace.paths, id("116"), &filer(), &mut unread).unwrap_err(),
+        start(
+            &workspace.paths,
+            &vocabulary(),
+            id("116"),
+            &filer(),
+            &mut unread
+        )
+        .unwrap_err(),
         error
     );
     assert_eq!(stop(&workspace.paths, id("116")).unwrap_err(), error);
@@ -315,31 +396,38 @@ fn tracking_needs_a_ticket_directory() {
 fn the_vocabulary_has_to_define_the_tracking_label() {
     let workspace = workspace();
 
-    workspace.write(
-        "docs/ticket/.labels.json",
-        r#"{"type": {"description": "The type", "values": ["bug"]}}"#,
-    );
+    let without =
+        Vocabulary::parse(r#"{"type": {"description": "The type", "values": ["bug"]}}"#).unwrap();
+    let error = "Tracking tickets carry the label `type=tracking`, which the ticket vocabulary \
+                 doesn't define. Add `tracking` to the values of \
+                 `plugins.command.ticket.options.labels.type`.";
     assert_eq!(
-        track(&workspace.paths, id("116"), &filer(), &mut unread).unwrap_err(),
-        "Tracking tickets carry the label `type=tracking`, which the ticket vocabulary doesn't \
-         define. Add `tracking` to the values of `type` in docs/ticket/.labels.json."
+        track(&workspace.paths, &without, id("116"), &filer(), &mut unread).unwrap_err(),
+        error
     );
 
-    workspace.write(
-        "docs/ticket/.labels.json",
+    let retired = Vocabulary::parse(
         r#"{"type": {"description": "The type", "values": ["bug"], "retired": ["tracking"]}}"#,
-    );
+    )
+    .unwrap();
+    let error = "Tracking tickets carry the label `type=tracking`, which the ticket vocabulary \
+                 retires. Move `tracking` back to the values of \
+                 `plugins.command.ticket.options.labels.type`.";
     assert_eq!(
-        track(&workspace.paths, id("116"), &filer(), &mut unread).unwrap_err(),
-        "Tracking tickets carry the label `type=tracking`, which the ticket vocabulary retires. \
-         Move `tracking` back to the values of `type` in docs/ticket/.labels.json."
+        track(&workspace.paths, &retired, id("116"), &filer(), &mut unread).unwrap_err(),
+        error
     );
 
-    fs::remove_file(workspace.paths.tickets.join(LABELS_FILE)).unwrap();
     assert!(
-        track(&workspace.paths, id("116"), &filer(), &mut unread)
-            .unwrap_err()
-            .starts_with("Tracking tickets carry the label `type=tracking`, which the ticket")
+        track(
+            &workspace.paths,
+            &Vocabulary::default(),
+            id("116"),
+            &filer(),
+            &mut unread
+        )
+        .unwrap_err()
+        .starts_with("Tracking tickets carry the label `type=tracking`, which the ticket")
     );
     assert!(ticket_files(&workspace).is_empty());
 }
@@ -349,9 +437,13 @@ fn the_vocabulary_has_to_define_the_tracking_label() {
 fn an_interrupted_plan_read_files_nothing() {
     let workspace = workspace();
 
-    let error = track(&workspace.paths, id("116"), &filer(), &mut |_| {
-        Err("Interrupted.".to_owned())
-    })
+    let error = track(
+        &workspace.paths,
+        &vocabulary(),
+        id("116"),
+        &filer(),
+        &mut |_| Err("Interrupted.".to_owned()),
+    )
     .unwrap_err();
 
     assert_eq!(error, "Interrupted.");
@@ -362,7 +454,14 @@ fn an_interrupted_plan_read_files_nothing() {
 fn start_files_the_ticket_and_moves_it_to_in_progress() {
     let workspace = workspace();
 
-    let output = start(&workspace.paths, id("116"), &filer(), &mut |_| Ok(phases())).unwrap();
+    let output = start(
+        &workspace.paths,
+        &vocabulary(),
+        id("116"),
+        &filer(),
+        &mut |_| Ok(phases()),
+    )
+    .unwrap();
 
     let [name] = ticket_files(&workspace).try_into().unwrap();
     assert_eq!(
@@ -381,10 +480,16 @@ fn start_files_the_ticket_and_moves_it_to_in_progress() {
     );
 
     let read = Cell::new(false);
-    let again = start(&workspace.paths, id("116"), &filer(), &mut |_| {
-        read.set(true);
-        Ok(phases())
-    })
+    let again = start(
+        &workspace.paths,
+        &vocabulary(),
+        id("116"),
+        &filer(),
+        &mut |_| {
+            read.set(true);
+            Ok(phases())
+        },
+    )
     .unwrap();
     assert_eq!(
         again.text,
@@ -460,7 +565,14 @@ fn a_second_tracking_ticket_is_reported_and_the_first_used() {
         ),
     );
 
-    let tracked = track(&workspace.paths, id("116"), &filer(), &mut unread).unwrap();
+    let tracked = track(
+        &workspace.paths,
+        &vocabulary(),
+        id("116"),
+        &filer(),
+        &mut unread,
+    )
+    .unwrap();
 
     assert_eq!(tracked.ticket.to_string(), "T-02wt0k1");
     let warning = "\
@@ -477,7 +589,14 @@ fn an_unreadable_ticket_is_reported_when_filing() {
     let workspace = workspace();
     workspace.write("docs/ticket/02wt0k9-broken.md", "Not a ticket.\n");
 
-    let tracked = track(&workspace.paths, id("116"), &filer(), &mut |_| Ok(phases())).unwrap();
+    let tracked = track(
+        &workspace.paths,
+        &vocabulary(),
+        id("116"),
+        &filer(),
+        &mut |_| Ok(phases()),
+    )
+    .unwrap();
 
     assert_eq!(tracked.report.warnings, [format!(
         "Warning: these tickets could not be read; if one of them tracks RFD 116, {} duplicates \
@@ -495,9 +614,12 @@ fn the_link_to_the_rfd_is_relative_to_the_ticket_directory() {
         Utf8Path::new("docs/rfd"),
         Utf8Path::new("work/tickets"),
     );
-    workspace.write("work/tickets/.labels.json", VOCABULARY);
+    fs::create_dir_all(&paths.tickets).unwrap();
 
-    let tracked = track(&paths, id("116"), &filer(), &mut |_| Ok(phases())).unwrap();
+    let tracked = track(&paths, &vocabulary(), id("116"), &filer(), &mut |_| {
+        Ok(phases())
+    })
+    .unwrap();
 
     let path = store::locate_ticket(&paths.tickets, tracked.ticket).unwrap();
     assert!(

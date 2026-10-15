@@ -597,15 +597,9 @@ fn renumber_without_the_workspace_says_what_went_unchecked() {
     assert!(root.path().join("docs/rfd/drafts/D07-sketch.md").exists());
 }
 
-/// The workspace with a ticket vocabulary defining the tracking label, and RFD
-/// 043 Accepted with no tracking ticket yet.
+/// The workspace with RFD 043 Accepted and no tracking ticket yet.
 fn trackable() -> Utf8TempDir {
     let root = workspace();
-    fs::write(
-        root.path().join("docs/ticket/.labels.json"),
-        r#"{"type": {"description": "The type", "values": ["tracking"]}}"#,
-    )
-    .unwrap();
     fs::write(
         root.path().join("docs/rfd/043-more-order.md"),
         "# RFD 043: More Order\n\n- **Status**: Accepted\n",
@@ -626,9 +620,19 @@ fn tracking_ticket(root: &Utf8TempDir) -> String {
     fs::read_to_string(root.path().join("docs/ticket").join(name)).unwrap()
 }
 
-/// The config naming who `jp ticket` attributes a tool's tickets to.
+/// The config whose ticket vocabulary defines the tracking label.
+fn with_labels() -> Value {
+    json!({ "plugins": { "command": { "ticket": { "options": {
+        "labels": { "type": { "description": "The type", "values": ["tracking"] } }
+    } } } } })
+}
+
+/// [`with_labels`], also naming who `jp ticket` attributes a tool's tickets to.
 fn with_assistant() -> Value {
-    json!({ "plugins": { "command": { "ticket": { "options": { "assistant": "jp" } } } } })
+    let mut config = with_labels();
+    config["plugins"]["command"]["ticket"]["options"]["assistant"] = json!("jp");
+
+    config
 }
 
 /// A tool call can't have the plan read, so the ticket is filed with the marker
@@ -662,7 +666,11 @@ fn track_files_the_ticket_with_the_plan_pending() {
 fn start_and_stop_move_the_tracking_ticket() {
     let root = trackable();
 
-    let started = content(run_tool(&root, "start", json!({ "id": "043" })));
+    let started = content(run(
+        &init(&root, with_labels()),
+        &call("start", json!({ "id": "043" })),
+        &Options::default(),
+    ));
     assert!(started.contains(": Todo -> In Progress\n"), "{started}");
     let ticket = tracking_ticket(&root);
     assert!(ticket.contains("- **Status**: In Progress\n"), "{ticket}");

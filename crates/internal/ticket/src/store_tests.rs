@@ -1,7 +1,7 @@
 use camino_tempfile::Utf8TempDir;
 
 use super::*;
-use crate::{Kind, LABELS_FILE};
+use crate::Kind;
 
 const DATE: &str = "2026-08-05";
 const STAMP: &str = "2026-08-05T14:03:11Z";
@@ -26,11 +26,9 @@ fn new_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
         .0
 }
 
-/// A vocabulary written into a board, so label writes have something to check
-/// against.
-fn write_vocabulary(dir: &Utf8TempDir) {
-    fs::write(
-        dir.path().join(LABELS_FILE),
+/// A board's vocabulary, so label writes have something to check against.
+fn test_vocabulary() -> Vocabulary {
+    Vocabulary::parse(
         r#"{
             "client": {"description": "The client.", "values": ["cli", "macos"]},
             "package": {
@@ -40,7 +38,7 @@ fn write_vocabulary(dir: &Utf8TempDir) {
             }
         }"#,
     )
-    .unwrap();
+    .unwrap()
 }
 
 fn owned(labels: &[&str]) -> Vec<String> {
@@ -602,34 +600,11 @@ fn stripping_ids_converts_the_heading_and_its_own_replies() {
     );
 }
 
-/// A board that hasn't started using labels reads fine; it just defines none.
-#[test]
-fn a_board_without_a_vocabulary_file_defines_no_labels() {
-    let dir = Utf8TempDir::new().unwrap();
-
-    assert!(vocabulary(dir.path()).unwrap().is_empty());
-}
-
-/// A vocabulary that is present but broken must not read as "no labels": every
-/// write would then be refused with the caller blamed for the typo.
-#[test]
-fn a_malformed_vocabulary_file_is_an_error() {
-    let dir = Utf8TempDir::new().unwrap();
-    fs::write(dir.path().join(LABELS_FILE), "not json").unwrap();
-
-    assert!(matches!(
-        vocabulary(dir.path()),
-        Err(Error::Labels(vocabulary::Error::Malformed(_)))
-    ));
-}
-
 #[test]
 fn create_writes_one_line_per_label() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
-    let resolved = vocabulary(dir.path())
-        .unwrap()
+    let resolved = test_vocabulary()
         .resolve(&owned(&[
             "package=jp_config",
             "client=cli",
@@ -653,8 +628,7 @@ fn create_writes_one_line_per_label() {
 #[test]
 fn no_label_line_grows_with_the_number_of_labels() {
     let dir = Utf8TempDir::new().unwrap();
-    fs::write(
-        dir.path().join(LABELS_FILE),
+    let vocabulary = Vocabulary::parse(
         r#"{"package": {"values": [
             "jp_attachment_agentic_shepherd",
             "jp_attachment_mcp_resources",
@@ -663,8 +637,7 @@ fn no_label_line_grows_with_the_number_of_labels() {
     )
     .unwrap();
 
-    let resolved = vocabulary(dir.path())
-        .unwrap()
+    let resolved = vocabulary
         .resolve(&owned(&[
             "package=jp_attachment_agentic_shepherd",
             "package=jp_attachment_mcp_resources",
@@ -682,8 +655,7 @@ fn no_label_line_grows_with_the_number_of_labels() {
 #[test]
 fn set_labels_replaces_the_whole_set() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
-    let vocabulary = vocabulary(dir.path()).unwrap();
+    let vocabulary = test_vocabulary();
 
     let resolved = vocabulary
         .resolve(&owned(&["package=jp_config", "client=cli"]))
@@ -702,8 +674,7 @@ fn set_labels_replaces_the_whole_set() {
 #[test]
 fn set_labels_with_nothing_drops_every_line() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
-    let vocabulary = vocabulary(dir.path()).unwrap();
+    let vocabulary = test_vocabulary();
 
     let resolved = vocabulary
         .resolve(&owned(&["client=cli", "package=jp_cli"]))
@@ -722,8 +693,7 @@ fn set_labels_with_nothing_drops_every_line() {
 #[test]
 fn set_labels_adds_the_field_to_a_ticket_without_one() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
-    let vocabulary = vocabulary(dir.path()).unwrap();
+    let vocabulary = test_vocabulary();
     let id = new_ticket(&dir, "Unlabelled");
 
     let (path, _) = set_labels(dir.path(), id, &vocabulary, &owned(&["client=macos"])).unwrap();
@@ -738,8 +708,7 @@ fn set_labels_adds_the_field_to_a_ticket_without_one() {
 #[test]
 fn one_key_holds_several_values() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
-    let vocabulary = vocabulary(dir.path()).unwrap();
+    let vocabulary = test_vocabulary();
     let id = new_ticket(&dir, "Two crates");
 
     let (path, applied) = set_labels(
@@ -764,8 +733,7 @@ fn one_key_holds_several_values() {
 #[test]
 fn a_retired_label_already_on_a_ticket_survives_a_relabel() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
-    let vocabulary = vocabulary(dir.path()).unwrap();
+    let vocabulary = test_vocabulary();
 
     // Written by hand: `jp_legacy` can no longer be applied through the API,
     // which is exactly the situation an old ticket is in.
@@ -795,8 +763,7 @@ fn a_retired_label_already_on_a_ticket_survives_a_relabel() {
 #[test]
 fn a_retired_label_cannot_be_added_to_a_ticket_without_it() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
-    let vocabulary = vocabulary(dir.path()).unwrap();
+    let vocabulary = test_vocabulary();
     let id = new_ticket(&dir, "Fresh");
 
     let error =
@@ -813,8 +780,7 @@ fn a_retired_label_cannot_be_added_to_a_ticket_without_it() {
 #[test]
 fn a_rejected_relabel_writes_nothing() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
-    let vocabulary = vocabulary(dir.path()).unwrap();
+    let vocabulary = test_vocabulary();
 
     let resolved = vocabulary.resolve(&owned(&["client=cli"])).unwrap();
     let (id, path) = create(dir.path(), &draft("Labelled", &resolved)).unwrap();

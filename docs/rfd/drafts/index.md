@@ -9,15 +9,21 @@ next: false
 Drafts are proposals that haven't been assigned a permanent number yet.
 They carry a temporary `DNN` id and may change substantially — or be abandoned
 — before promotion.
-See [RFD 001] for the full process, and the [published RFDs] for accepted and
-implemented proposals.
+See the [published RFDs] for accepted and implemented proposals.
 
 <script setup>
-import { data } from '../../.vitepress/loaders/rfd-drafts.data.js'
-import DocIndex from '../../.vitepress/theme/DocIndex.vue'
+import { data } from '../../.vitepress/jp-vite/loaders/rfd-drafts.data.js'
+import settings from '../../.vitepress/jp-vite/settings.json'
+import { problem } from '../../.vitepress/jp-vite/theme/problem.mjs'
+import DocIndex from '../../.vitepress/jp-vite/theme/DocIndex.vue'
 </script>
 
-<DocIndex :entries="data" :show-status="false" storage-key="rfd-drafts" />
+<DocIndex
+    v-if="!problem"
+    :entries="data"
+    :filters="settings.rfd.categories"
+    :show-status="false"
+    storage-key="rfd-drafts"
+/>
 
-[RFD 001]: ../001-jp-rfd-process
 [published RFDs]: ../

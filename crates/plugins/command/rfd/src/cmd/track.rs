@@ -18,13 +18,14 @@ use camino::{Utf8Path, Utf8PathBuf};
 use jp_plugin::message::QueryRequest;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-use ticket::{Kind, LABELS_FILE, Labels, NewTicket, Status, Ticket, TicketId, store};
+use ticket::{Kind, Labels, NewTicket, Status, Ticket, TicketId, Vocabulary, store};
 
 use crate::{
     Output,
     board::{self, TRACKING_LABEL},
     document::{self, Document},
     id::RfdId,
+    options::TICKET_LABELS_KEY,
     paths::{self, Paths},
     references,
 };
@@ -104,8 +105,10 @@ pub(crate) struct Tracked {
 ///
 /// Only an Accepted or Implemented RFD carries one: implementation begins at
 /// Accepted.
+/// `vocabulary` is the ticket board's, which has to define the tracking label.
 pub(crate) fn track(
     paths: &Paths,
+    vocabulary: &Vocabulary,
     id: RfdId,
     filer: &Filer,
     read_plan: &mut ReadPlan<'_>,
@@ -123,7 +126,7 @@ pub(crate) fn track(
         ));
     }
 
-    let labels = tracking_labels(paths)?;
+    let labels = tracking_labels(vocabulary)?;
     let entries = store::list(&paths.tickets).map_err(|error| error.to_string())?;
 
     let mut report = Output::default();
@@ -206,11 +209,12 @@ pub(crate) fn track(
 /// then move that ticket to In Progress.
 pub(crate) fn start(
     paths: &Paths,
+    vocabulary: &Vocabulary,
     id: RfdId,
     filer: &Filer,
     read_plan: &mut ReadPlan<'_>,
 ) -> Result<Output, String> {
-    let tracked = track(paths, id, filer, read_plan)?;
+    let tracked = track(paths, vocabulary, id, filer, read_plan)?;
     let (path, previous) = store::set_status(&paths.tickets, tracked.ticket, Status::InProgress)
         .map_err(|error| error.to_string())?;
 
@@ -260,23 +264,23 @@ fn needs_tickets(paths: &Paths) -> Result<(), String> {
 
 /// The tracking label, as the ticket vocabulary spells it, or a refusal naming
 /// the entry to add.
-fn tracking_labels(paths: &Paths) -> Result<Labels, String> {
+fn tracking_labels(vocabulary: &Vocabulary) -> Result<Labels, String> {
     let (key, value) = TRACKING_LABEL;
-    let vocabulary = store::vocabulary(&paths.tickets).map_err(|error| error.to_string())?;
 
     vocabulary
         .resolve(&[format!("{key}={value}")])
         .map_err(|rejected| {
-            let file = paths.show(&paths.tickets.join(LABELS_FILE));
             if rejected.retired.is_empty() {
                 format!(
                     "Tracking tickets carry the label `{key}={value}`, which the ticket \
-                     vocabulary doesn't define. Add `{value}` to the values of `{key}` in {file}."
+                     vocabulary doesn't define. Add `{value}` to the values of \
+                     `{TICKET_LABELS_KEY}.{key}`."
                 )
             } else {
                 format!(
                     "Tracking tickets carry the label `{key}={value}`, which the ticket \
-                     vocabulary retires. Move `{value}` back to the values of `{key}` in {file}."
+                     vocabulary retires. Move `{value}` back to the values of \
+                     `{TICKET_LABELS_KEY}.{key}`."
                 )
             }
         })

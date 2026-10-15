@@ -70,6 +70,7 @@ carrying one.
 """
 
 # The accepted values live in `synced.toml`, generated from
-# `docs/ticket/.labels.json` by `jp ticket tools sync .jp/mcp/tools/ticket`.
+# `plugins.command.ticket.options.labels` by
+# `jp ticket tools sync .jp/mcp/tools/ticket`.
 [conversation.tools.ticket_list.parameters.labels.items]
 type = "string"

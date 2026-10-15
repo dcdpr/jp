@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use camino_tempfile::Utf8TempDir;
 use jp_plugin::message::{OutputFormat, PathsInfo, WorkspaceInfo};
 use jp_tool::FsRule;
@@ -38,13 +40,28 @@ fn object(value: Value) -> Map<String, Value> {
 }
 
 /// The plugin's defaults, with the assistant named `jp` so the expected
-/// documents read like JP's own tickets.
+/// documents read like JP's own tickets, and a label vocabulary so label writes
+/// have something to check against.
 fn options() -> Options {
-    Options {
-        assistant: "jp".to_owned(),
-        ..Options::default()
-    }
+    let Value::Object(options) = json!({
+        "assistant": "jp",
+        "labels": {
+            "client": { "description": "The client.", "values": ["cli", "macos"] },
+            "package": {
+                "description": "The crate.",
+                "values": ["jp_cli", "jp_config"],
+                "retired": ["jp_legacy"]
+            }
+        }
+    }) else {
+        unreachable!("options are an object");
+    };
+
+    Options::read(&options).unwrap()
 }
+
+/// [`options`], for helpers that borrow it for as long as the test runs.
+static OPTIONS: LazyLock<Options> = LazyLock::new(options);
 
 /// Run one call the way the host does: the action, the arguments, the answers
 /// so far, and the tool's own options.
@@ -116,6 +133,7 @@ fn tickets(dir: &Utf8TempDir) -> Tickets<'_> {
         root: dir.path(),
         dir: dir.path().join(store::DEFAULT_DIR),
         author: "jp",
+        options: &OPTIONS,
     }
 }
 
@@ -184,24 +202,6 @@ fn write_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
     .unwrap();
 
     id
-}
-
-/// Give a board a vocabulary, so label writes have something to check against.
-fn write_vocabulary(dir: &Utf8TempDir) {
-    let tickets = dir.path().join(store::DEFAULT_DIR);
-    fs::create_dir_all(&tickets).unwrap();
-    fs::write(
-        tickets.join(LABELS_FILE),
-        r#"{
-            "client": {"description": "The client.", "values": ["cli", "macos"]},
-            "package": {
-                "description": "The crate.",
-                "values": ["jp_cli", "jp_config"],
-                "retired": ["jp_legacy"]
-            }
-        }"#,
-    )
-    .unwrap();
 }
 
 /// Ids are generated, so tests follow the ones that were handed out.
@@ -1262,7 +1262,6 @@ fn every_served_tool_is_dispatched() {
 #[test]
 fn create_writes_labels_and_list_shows_them() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     content(run_tool(
         &dir,
@@ -1289,7 +1288,6 @@ fn create_writes_labels_and_list_shows_them() {
 #[test]
 fn list_narrows_to_tickets_carrying_every_label() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     for (title, labels) in [
         ("Both", json!(["client=cli", "package=jp_cli"])),
@@ -1321,7 +1319,6 @@ fn list_narrows_to_tickets_carrying_every_label() {
 #[test]
 fn label_replaces_the_whole_set() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
     let id = write_ticket(&dir, "Tool call header misaligned");
 
     let out = content(run_tool(
@@ -1356,7 +1353,6 @@ fn label_replaces_the_whole_set() {
 #[test]
 fn a_null_label_list_is_refused_and_writes_nothing() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
     let id = write_ticket(&dir, "Tool call header misaligned");
 
     content(run_tool(
@@ -1385,7 +1381,6 @@ fn a_null_label_list_is_refused_and_writes_nothing() {
 #[test]
 fn an_unknown_label_is_refused_with_the_known_set() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     let message = error_message(run_tool(
         &dir,
@@ -1407,7 +1402,6 @@ fn an_unknown_label_is_refused_with_the_known_set() {
 #[test]
 fn a_retired_label_already_on_a_ticket_can_be_kept() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     // Written by hand: `jp_legacy` can no longer be applied through the tool,
     // which is exactly the situation an old ticket is in.
@@ -1432,7 +1426,6 @@ fn a_retired_label_already_on_a_ticket_can_be_kept() {
 #[test]
 fn a_retired_label_cannot_be_added_fresh() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
     write_ticket(&dir, "Fresh");
 
     let message = error_message(run_tool(
@@ -1454,7 +1447,6 @@ fn a_retired_label_cannot_be_added_fresh() {
 #[test]
 fn an_unknown_label_is_refused_before_the_preview() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     let message = error_message(preview_tool(
         &dir,
@@ -1472,7 +1464,6 @@ fn an_unknown_label_is_refused_before_the_preview() {
 #[test]
 fn labelling_a_missing_ticket_says_so() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     let message = error_message(run_tool(
         &dir,
@@ -1486,7 +1477,6 @@ fn labelling_a_missing_ticket_says_so() {
 #[test]
 fn labels_describes_the_vocabulary() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     assert_eq!(
         content(run_tool(&dir, "labels", json!({}))),
@@ -1496,14 +1486,44 @@ fn labels_describes_the_vocabulary() {
     );
 }
 
-/// The path is the one the assistant can open, relative to the workspace.
+/// Run `labels` on a board whose options define no vocabulary.
+fn run_labels_unlabelled(dir: &Utf8TempDir) -> Outcome {
+    let call = ToolCall {
+        action: ToolAction::Run,
+        name: "labels".to_owned(),
+        arguments: Map::new(),
+        answers: Map::new(),
+        options: Map::new(),
+        access: None,
+        conversation: "test".to_owned(),
+    };
+
+    run(&init(dir), &call, &Options::default())
+}
+
 #[test]
 fn labels_on_a_board_without_a_vocabulary_says_where_to_define_one() {
     let dir = Utf8TempDir::new().unwrap();
 
     assert_eq!(
-        content(run_tool(&dir, "labels", json!({}))),
-        "This board defines no labels. Add them to docs/ticket/.labels.json.\n"
+        content(run_labels_unlabelled(&dir)),
+        "This board defines no labels. Add them to `plugins.command.ticket.options.labels`.\n"
+    );
+}
+
+/// The path is the one the assistant can open, relative to the workspace.
+#[test]
+fn labels_points_out_a_leftover_labels_file() {
+    let dir = Utf8TempDir::new().unwrap();
+    let tickets = dir.path().join(store::DEFAULT_DIR);
+    fs::create_dir_all(&tickets).unwrap();
+    fs::write(tickets.join(".labels.json"), "{}").unwrap();
+
+    assert_eq!(
+        content(run_labels_unlabelled(&dir)),
+        "This board defines no labels. Add them to \
+         `plugins.command.ticket.options.labels`.\ndocs/ticket/.labels.json is no longer read: \
+         move its keys there.\n"
     );
 }
 

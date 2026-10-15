@@ -2171,9 +2171,14 @@ ticket-grep +ARGS:
     @rg {{ARGS}} docs/ticket/
 
 # Locally develop the documentation, with hot-reloading.
+#
+# Runs through `jp vite serve`, which keeps the site's settings in step with the
+# configuration and is the only dev server the RFD and ticket pages accept
+# edits from. It checks `jp ticket` and `jp rfd` were built from the same site
+# files as `jp vite`, so all three are installed first.
 [group('docs')]
-develop-docs *FLAGS="--host --allowedHosts --open": _install-ticket
-    just _docs "dev" {{FLAGS}}
+develop-docs *FLAGS="--host --allowedHosts --open": _docs-install _install-jp _install-site-plugins
+    jp vite serve -- {{FLAGS}}
 
 # Open the RFD priority board for drag-and-drop reordering.
 #
@@ -2182,21 +2187,22 @@ develop-docs *FLAGS="--host --allowedHosts --open": _install-ticket
 # file to publish the new order. The board is read-only in the production build
 # — the write endpoint only exists on the dev server.
 [group('rfd')]
-rfd-manage:
-    just _docs "dev" "--host" "--allowedHosts" "--open" "/rfd/priority"
+rfd-manage: _docs-install _install-jp _install-site-plugins
+    jp vite serve -- --host --allowedHosts --open /rfd/priority
 
 # Test the documentation site's own tooling.
 #
-# The site is assembled by the `.mjs` modules under `docs/.vitepress/`, which
-# Cargo knows nothing about. `node --test` needs no dependency beyond the Node
-# the site build already requires.
+# The site's loaders are `.mjs` modules that `jp vite sync` writes from
+# `crates/plugins/command/vite/site/`, which Cargo knows nothing about.
+# `node --test` needs no dependency beyond the Node the site build already
+# requires.
 #
 # The pattern is quoted so node globs it rather than the shell: a positional
 # argument to `--test` is a glob, `sh` has no `**`, and an unmatched pattern
 # would otherwise arrive as a literal path node tries to execute.
 [group('docs')]
 test-docs *FLAGS:
-    node --test {{FLAGS}} 'docs/.vitepress/**/*.test.mjs'
+    node --test {{FLAGS}} 'crates/plugins/command/vite/js-tests/**/*.test.mjs'
 
 # Build the statically built documentation.
 [group('docs')]
@@ -2598,6 +2604,21 @@ test-ci SCOPE="workspace": (_install "cargo-nextest@" + nextest_version) _instal
     # No target selection, matching `just test`; see the reasoning there.
     cargo nextest run --locked --cargo-profile=nextest --status-level=slow --failure-output=immediate-final --workspace --no-fail-fast {{ if SCOPE == "jp-only" { non_jp_excludes } else { "" } }}
 
+# Check on CI that the site's own files are the ones `jp vite sync` writes from
+# this checkout and its configuration.
+#
+# Fails on a site file changed in `crates/plugins/command/vite/site/`, or a
+# label vocabulary changed in `.jp/config.toml`, without `jp vite sync` run.
+# Both binaries are rebuilt, as debug builds: the runner restores `~/.cargo/bin`
+# from a cache, which may hold older ones.
+[group('ci')]
+site-ci:
+    #!/usr/bin/env sh
+    set -eu
+    JP_INSTALL=1 just _install-jp --debug
+    JP_INSTALL=1 just _install-vite
+    jp --no-interactive vite sync --check
+
 # Generate documentation on CI.
 [group('ci')]
 docs-ci: _install_ci_matchers
@@ -2706,6 +2727,31 @@ _install-rfd *args:
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path crates/plugins/command/rfd --debug {{args}}
+
+# Build and install the `jp-vite` command plugin that backs `jp vite`.
+#
+# The plugin is not in the published registry, so `jp` picks it up from `$PATH`
+# (`plugins.command.vite.run` in `.jp/config.toml` approves it).
+_install-vite *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -z "${JP_INSTALL:-}" ] && command -v jp-vite >/dev/null 2>&1; then
+        echo "Skipping jp-vite rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
+        exit 0
+    fi
+    cargo install {{quiet_flag}} --locked --path crates/plugins/command/vite --debug {{args}}
+
+# Install the three plugins the site needs, from this checkout.
+#
+# `jp vite serve` refuses to trust the RFD and ticket pages unless `jp ticket`
+# and `jp rfd` were built from the same site files as `jp vite`, so the three
+# are rebuilt together.
+_install-site-plugins:
+    #!/usr/bin/env sh
+    set -eu
+    JP_INSTALL=1 just _install-ticket
+    JP_INSTALL=1 just _install-rfd
+    JP_INSTALL=1 just _install-vite
 
 # Build the `jp-serve-web` command plugin into JP's plugin directory.
 #

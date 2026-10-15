@@ -57,14 +57,27 @@ use crate::{
     },
     document::Document,
     id::RfdId,
-    options::{Options, ticket_dir},
+    options::{Options, ticket_dir, ticket_vocabulary},
     paths::Paths,
     render::Sections,
 };
 
+/// What `jp rfd --version` prints after the command's name: the plugin's
+/// version, and the revision of the site files it was built alongside.
+///
+/// `jp vite serve` reads the revision out of the parentheses, to tell whether
+/// the site's loaders read what this plugin writes.
+const VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (site ",
+    env!("JP_SITE_REVISION"),
+    ")"
+);
+
 #[derive(Debug, Parser)]
 #[command(
     name = "jp rfd",
+    version = VERSION,
     about = "Write and track RFDs, design documents with a lifecycle."
 )]
 struct Args {
@@ -583,7 +596,8 @@ fn execute<R: BufRead, W: Write>(
         Command::Promote { id } => promote(ctx, id, session),
 
         Command::Track { id } => {
-            let tracked = track::track(paths, id, &user(ctx)?, &mut |request| {
+            let vocabulary = ticket_vocabulary(ctx.config)?;
+            let tracked = track::track(paths, &vocabulary, id, &user(ctx)?, &mut |request| {
                 session.read_plan(request)
             })?;
 
@@ -592,9 +606,12 @@ fn execute<R: BufRead, W: Write>(
             Ok(output)
         }
 
-        Command::Start { id } => track::start(paths, id, &user(ctx)?, &mut |request| {
-            session.read_plan(request)
-        }),
+        Command::Start { id } => {
+            let vocabulary = ticket_vocabulary(ctx.config)?;
+            track::start(paths, &vocabulary, id, &user(ctx)?, &mut |request| {
+                session.read_plan(request)
+            })
+        }
 
         Command::Stop { id } => track::stop(paths, id),
 
@@ -699,7 +716,8 @@ fn promote<R: BufRead, W: Write>(
     let mut output = Output::default();
     let filed = match session.choose(tracking_offer(id)) {
         Ok(Some(answer)) if answer == FILE_TRACKING_TICKET => user(ctx).and_then(|filer| {
-            track::track(&ctx.paths, id, &filer, &mut |request| {
+            let vocabulary = ticket_vocabulary(ctx.config)?;
+            track::track(&ctx.paths, &vocabulary, id, &filer, &mut |request| {
                 session.read_plan(request)
             })
         }),

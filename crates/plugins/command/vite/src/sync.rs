@@ -1,0 +1,150 @@
+//! What syncing changes in a project: the owned files that are missing or
+//! differ from what the binary writes, and the files under
+//! `.vitepress/jp-vite/` the binary no longer has.
+//!
+//! [`plan`] reads the project and changes nothing; [`apply`] writes the plan.
+//! Whether the project may be written at all is [`crate::git`]'s to say.
+
+use std::{collections::BTreeSet, fs, io};
+
+use camino::{Utf8Path, Utf8PathBuf};
+
+use crate::site::Owned;
+
+/// One change syncing makes, to a path relative to the workspace root.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Change {
+    /// Write a file that is missing or differs.
+    Write(Owned),
+
+    /// Remove a file under `.vitepress/jp-vite/` the binary doesn't have.
+    Remove(Utf8PathBuf),
+}
+
+impl Change {
+    /// The path the change touches.
+    pub(crate) fn path(&self) -> &Utf8Path {
+        match self {
+            Self::Write(owned) => &owned.path,
+            Self::Remove(path) => path,
+        }
+    }
+}
+
+/// The changes that bring the project at `root` in line with `owned`.
+///
+/// `owned_dir` is the directory the binary owns whole, relative to the root: a
+/// file in it that `owned` doesn't name is removed.
+/// Dotfiles are left alone, as what an editor or a file manager leaves behind.
+pub(crate) fn plan(
+    root: &Utf8Path,
+    owned: Vec<Owned>,
+    owned_dir: &Utf8Path,
+) -> Result<Vec<Change>, String> {
+    let named: BTreeSet<Utf8PathBuf> = owned.iter().map(|file| file.path.clone()).collect();
+    let mut changes = vec![];
+
+    for file in owned {
+        let path = root.join(&file.path);
+        match fs::read(&path) {
+            Ok(contents) if contents == file.contents => {}
+            Ok(_) => changes.push(Change::Write(file)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                changes.push(Change::Write(file));
+            }
+            Err(error) => return Err(format!("{path}: {error}")),
+        }
+    }
+
+    for path in files_below(root, owned_dir)? {
+        if !named.contains(&path) {
+            changes.push(Change::Remove(path));
+        }
+    }
+
+    changes.sort_by(|a, b| a.path().cmp(b.path()));
+
+    Ok(changes)
+}
+
+/// Make the changes, creating directories as needed.
+///
+/// A directory a removal empties is removed with it, up to `owned_dir`.
+pub(crate) fn apply(
+    root: &Utf8Path,
+    changes: &[Change],
+    owned_dir: &Utf8Path,
+) -> Result<(), String> {
+    for change in changes {
+        let path = root.join(change.path());
+        match change {
+            Change::Write(owned) => {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent).map_err(|error| format!("{parent}: {error}"))?;
+                }
+                fs::write(&path, &owned.contents).map_err(|error| format!("{path}: {error}"))?;
+            }
+            Change::Remove(_) => {
+                fs::remove_file(&path).map_err(|error| format!("{path}: {error}"))?;
+                remove_empty_parents(&path, &root.join(owned_dir));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Every file below `dir`, relative to `root`, dotfiles and the contents of
+/// dot-directories left out.
+/// A directory that doesn't exist holds none.
+fn files_below(root: &Utf8Path, dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>, String> {
+    let mut found = vec![];
+    let mut pending = vec![dir.to_path_buf()];
+
+    while let Some(dir) = pending.pop() {
+        let absolute = root.join(&dir);
+        let entries = match fs::read_dir(&absolute) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("{absolute}: {error}")),
+        };
+
+        for entry in entries {
+            let entry = entry.map_err(|error| format!("{absolute}: {error}"))?;
+            let Ok(name) = entry.file_name().into_string() else {
+                continue;
+            };
+            if name.starts_with('.') {
+                continue;
+            }
+
+            let kind = entry
+                .file_type()
+                .map_err(|error| format!("{absolute}/{name}: {error}"))?;
+            if kind.is_dir() {
+                pending.push(dir.join(&name));
+            } else {
+                found.push(dir.join(&name));
+            }
+        }
+    }
+
+    Ok(found)
+}
+
+/// Remove the directories above `path` that are now empty, stopping at `top`.
+///
+/// Best effort: a directory that is still in use, or can't be removed, stays.
+fn remove_empty_parents(path: &Utf8Path, top: &Utf8Path) {
+    let mut dir = path.parent();
+    while let Some(current) = dir {
+        if current == top || !current.starts_with(top) || fs::remove_dir(current).is_err() {
+            return;
+        }
+        dir = current.parent();
+    }
+}
+
+#[cfg(test)]
+#[path = "sync_tests.rs"]
+mod tests;

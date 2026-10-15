@@ -36,17 +36,32 @@ use jp_plugin::message::{
 use serde::Serialize;
 use serde_json::Value;
 use ticket::{
-    Comment, Kind, LABELS_FILE, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId,
-    Vocabulary,
+    Comment, Kind, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId, Vocabulary,
     board::{self, Place},
     import::Import,
     store,
 };
 
-use crate::options::Options;
+use crate::options::{LABELS_KEY, Options, leftover_labels_file};
+
+/// What `jp ticket --version` prints after the command's name: the plugin's
+/// version, and the revision of the site files it was built alongside.
+///
+/// `jp vite serve` reads the revision out of the parentheses, to tell whether
+/// the site's loaders read what this plugin writes.
+const VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (site ",
+    env!("JP_SITE_REVISION"),
+    ")"
+);
 
 #[derive(Debug, Parser)]
-#[command(name = "jp ticket", about = "Track work items as markdown files.")]
+#[command(
+    name = "jp ticket",
+    version = VERSION,
+    about = "Track work items as markdown files."
+)]
 struct Args {
     /// Directory holding the ticket files, relative to the workspace root.
     /// Defaults to `plugins.command.ticket.options.dir`, then `docs/ticket`.
@@ -1248,7 +1263,7 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             &resolve_author(author, config)?,
             body.as_deref().unwrap_or_default(),
             implements.as_deref(),
-            &labels,
+            &resolve_labels(ctx.options, &labels)?,
         ),
 
         Command::Comment {
@@ -1271,9 +1286,11 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             Ok(format!("Added {id}#{position} by {author}\n").into())
         }
 
-        Command::Label { id, labels } => relabel(dir, required(id, "ticket id")?, &labels),
+        Command::Label { id, labels } => {
+            relabel(dir, ctx.options, required(id, "ticket id")?, &labels)
+        }
 
-        Command::Labels => vocabulary_listing(dir),
+        Command::Labels => vocabulary_listing(dir, ctx.options),
 
         Command::Close { id } => move_ticket(dir, required(id, "ticket id")?, Status::Done),
 
@@ -1369,7 +1386,7 @@ fn tools(ctx: &Context<'_>, command: ToolsCommand) -> Result<Output, String> {
         ToolsCommand::Sync { path } => definitions::sync(
             &resolve_dir(ctx.root, &path),
             ctx.config,
-            &read_vocabulary(&ctx.dir)?,
+            &ctx.options.vocabulary()?,
         ),
     }
 }
@@ -1635,9 +1652,8 @@ fn add(
     author: &str,
     body: &str,
     implements: Option<&str>,
-    labels: &[String],
+    labels: &Labels,
 ) -> Result<Output, String> {
-    let labels = resolve_labels(dir, labels)?;
     let date = Local::now().format("%Y-%m-%d").to_string();
 
     let (id, path) = store::create(dir, &NewTicket {
@@ -1646,7 +1662,7 @@ fn add(
         authors: author,
         date: &date,
         implements,
-        labels: &labels,
+        labels,
         description: body,
     })
     .map_err(|error| error.to_string())?;
@@ -1658,8 +1674,13 @@ fn add(
 ///
 /// Checked against the ticket rather than against the vocabulary alone, so a
 /// retired value the ticket already carries can be listed again and kept.
-fn relabel(dir: &Utf8Path, id: TicketId, requested: &[String]) -> Result<Output, String> {
-    let vocabulary = read_vocabulary(dir)?;
+fn relabel(
+    dir: &Utf8Path,
+    options: &Options,
+    id: TicketId,
+    requested: &[String],
+) -> Result<Output, String> {
+    let vocabulary = options.vocabulary()?;
     let (path, applied) =
         store::set_labels(dir, id, &vocabulary, requested).map_err(|error| error.to_string())?;
 
@@ -1675,30 +1696,38 @@ fn relabel(dir: &Utf8Path, id: TicketId, requested: &[String]) -> Result<Output,
 ///
 /// Both the refusal and the vocabulary's own error carry enough to act on, so
 /// they are handed to the user as they are.
-fn resolve_labels(dir: &Utf8Path, requested: &[String]) -> Result<Labels, String> {
-    read_vocabulary(dir)?
+/// A ticket filed without labels doesn't read the vocabulary at all, so a board
+/// with a broken vocabulary can still file unlabelled tickets.
+fn resolve_labels(options: &Options, requested: &[String]) -> Result<Labels, String> {
+    if requested.is_empty() {
+        return Ok(Labels::default());
+    }
+
+    options
+        .vocabulary()?
         .resolve(requested)
         .map_err(|error| error.to_string())
 }
 
-fn read_vocabulary(dir: &Utf8Path) -> Result<Vocabulary, String> {
-    store::vocabulary(dir).map_err(|error| error.to_string())
-}
-
 /// List the labels the board defines, with what each one covers.
-fn vocabulary_listing(dir: &Utf8Path) -> Result<Output, String> {
-    let vocabulary = read_vocabulary(dir)?;
+fn vocabulary_listing(dir: &Utf8Path, options: &Options) -> Result<Output, String> {
+    let vocabulary = options.vocabulary()?;
+    let leftover = leftover_labels_file(dir);
 
-    Ok(describe_vocabulary(&vocabulary, dir.join(LABELS_FILE).as_str()).into())
+    Ok(describe_vocabulary(&vocabulary, leftover.as_deref().map(Utf8Path::as_str)).into())
 }
 
 /// Describe the labels a board defines, with what each one covers.
 ///
-/// `file` names where the vocabulary is defined, for a board that defines none
-/// yet.
-fn describe_vocabulary(vocabulary: &Vocabulary, file: &str) -> String {
+/// `leftover` names the file a board defined its labels in before they moved
+/// into its options, for a board that defines none and still has it.
+fn describe_vocabulary(vocabulary: &Vocabulary, leftover: Option<&str>) -> String {
     if vocabulary.is_empty() {
-        return format!("This board defines no labels. Add them to {file}.\n");
+        let mut text = format!("This board defines no labels. Add them to `{LABELS_KEY}`.\n");
+        if let Some(file) = leftover {
+            text.push_str(&format!("{file} is no longer read: move its keys there.\n"));
+        }
+        return text;
     }
 
     let mut out = String::new();

@@ -5,16 +5,26 @@
 //! dir = "docs/ticket"
 //! assistant = "jp"
 //! board.done_limit = 8
+//!
+//! [plugins.command.ticket.options.labels.type]
+//! description = "The type of ticket"
+//! values = ["bug", "feature", "tracking"]
 //! ```
 //!
 //! Every option is optional.
 //! Keys this plugin doesn't read are ignored, so a configuration written for a
 //! newer `jp-ticket` still loads.
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use ticket::store;
+use ticket::{Vocabulary, store};
+
+/// Where the label vocabulary is configured, as a user writes it.
+pub(crate) const LABELS_KEY: &str = "plugins.command.ticket.options.labels";
+
+/// The file the vocabulary was read from before it moved into `labels`.
+const LEGACY_LABELS_FILE: &str = ".labels.json";
 
 /// The author written on tickets and comments filed through a tool, when
 /// `assistant` isn't set.
@@ -35,6 +45,13 @@ pub(crate) struct Options {
 
     /// How `jp ticket board` lays out the board.
     pub board: BoardOptions,
+
+    /// The label vocabulary, as configured: a table per key, holding its
+    /// `description`, its `values`, and the values `retired` from it.
+    ///
+    /// Kept as written and read by [`Options::vocabulary`], so a vocabulary
+    /// that doesn't parse fails only the commands that label.
+    pub labels: Option<Value>,
 }
 
 /// How `jp ticket board` lays out the board.
@@ -51,6 +68,7 @@ impl Default for Options {
             dir: Utf8PathBuf::from(store::DEFAULT_DIR),
             assistant: DEFAULT_ASSISTANT.to_owned(),
             board: BoardOptions::default(),
+            labels: None,
         }
     }
 }
@@ -88,6 +106,29 @@ impl Options {
             ..read
         })
     }
+
+    /// The labels the board defines.
+    ///
+    /// A board that configures none defines none, which is a board that hasn't
+    /// started using them rather than an error.
+    pub(crate) fn vocabulary(&self) -> Result<Vocabulary, String> {
+        match &self.labels {
+            None => Ok(Vocabulary::default()),
+            Some(labels) => Vocabulary::from_value(labels.clone())
+                .map_err(|error| format!("`{LABELS_KEY}`: {error}")),
+        }
+    }
+}
+
+/// The file in `dir` a board defined its labels in before they moved into
+/// `labels`, when one is still there.
+///
+/// Nothing reads it, so a board that kept it defines no labels until its keys
+/// are moved.
+pub(crate) fn leftover_labels_file(dir: &Utf8Path) -> Option<Utf8PathBuf> {
+    let path = dir.join(LEGACY_LABELS_FILE);
+
+    path.is_file().then_some(path)
 }
 
 #[cfg(test)]

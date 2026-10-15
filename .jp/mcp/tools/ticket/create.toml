@@ -86,11 +86,12 @@ Each label is a `key=value` pair. A key may be named more than once, which is
 how a ticket spanning two crates says so: `["package=jp_cli",
 "package=jp_config"]`.
 
-The set is closed and defined in `docs/ticket/.labels.json`. A label outside it
-is refused, and the refusal names the ones you can use.
+The set is closed and defined in the workspace configuration. A label outside
+it is refused, and the refusal names the ones you can use.
 """
 
 # The accepted values live in `synced.toml`, generated from
-# `docs/ticket/.labels.json` by `jp ticket tools sync .jp/mcp/tools/ticket`.
+# `plugins.command.ticket.options.labels` by
+# `jp ticket tools sync .jp/mcp/tools/ticket`.
 [conversation.tools.ticket_create.parameters.labels.items]
 type = "string"

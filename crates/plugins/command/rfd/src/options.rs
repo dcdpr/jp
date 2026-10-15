@@ -11,13 +11,16 @@
 //! newer `jp-rfd` still loads.
 //!
 //! The ticket directory belongs to `jp ticket`, and is read from its options
-//! ([`ticket_dir`]), as is who a ticket filed through a tool is attributed to
-//! ([`assistant`]).
+//! ([`ticket_dir`]), as are who a ticket filed through a tool is attributed to
+//! ([`assistant`]) and the labels a ticket can carry ([`ticket_vocabulary`]).
 
 use camino::Utf8PathBuf;
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use ticket::store;
+use ticket::{Vocabulary, store};
+
+/// Where `jp ticket` configures the label vocabulary, as a user writes it.
+pub(crate) const TICKET_LABELS_KEY: &str = "plugins.command.ticket.options.labels";
 
 /// Where the RFDs live when `dir` isn't set.
 const DEFAULT_DIR: &str = "docs/rfd";
@@ -108,6 +111,18 @@ pub(crate) fn ticket_dir(config: &Value) -> Result<Utf8PathBuf, String> {
         None | Some(Value::Null) => Ok(Utf8PathBuf::from(store::DEFAULT_DIR)),
         Some(Value::String(dir)) if !dir.trim().is_empty() => Ok(Utf8PathBuf::from(dir)),
         Some(_) => Err("`plugins.command.ticket.options.dir` is not a directory path.".to_owned()),
+    }
+}
+
+/// The labels a ticket can carry, as `jp ticket` is configured: its
+/// `plugins.command.ticket.options.labels`, or none.
+///
+/// `config` is the whole configuration the host passed in `init`.
+pub(crate) fn ticket_vocabulary(config: &Value) -> Result<Vocabulary, String> {
+    match config.pointer("/plugins/command/ticket/options/labels") {
+        None | Some(Value::Null) => Ok(Vocabulary::default()),
+        Some(labels) => Vocabulary::from_value(labels.clone())
+            .map_err(|error| format!("`{TICKET_LABELS_KEY}`: {error}")),
     }
 }
 

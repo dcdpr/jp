@@ -32,6 +32,11 @@ serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
 tokio = { workspace = true }
 
+[build-dependencies]
+# `--version` reports the revision of the site files `jp vite` writes, which
+# read what this plugin writes.
+site-revision = { workspace = true }
+
 [dev-dependencies]
 camino-tempfile = { workspace = true }
 strip-ansi-escapes = { workspace = true }

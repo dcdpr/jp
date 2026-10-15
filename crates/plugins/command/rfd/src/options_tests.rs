@@ -120,3 +120,29 @@ fn the_ticket_directory_comes_from_the_ticket_plugins_options() {
         Err("`plugins.command.ticket.options.dir` is not a directory path.".to_owned())
     );
 }
+
+/// The label vocabulary is `jp ticket`'s setting too: a tracking ticket carries
+/// a label the ticket board has to define.
+#[test]
+fn the_ticket_vocabulary_comes_from_the_ticket_plugins_options() {
+    assert!(ticket_vocabulary(&json!({})).unwrap().is_empty());
+
+    let vocabulary = ticket_vocabulary(&json!({
+        "plugins": { "command": { "ticket": { "options": {
+            "labels": { "type": { "description": "The type", "values": ["tracking"] } }
+        } } } }
+    }))
+    .unwrap();
+    assert_eq!(vocabulary.tokens(), ["type=tracking"]);
+
+    let error = ticket_vocabulary(&json!({
+        "plugins": { "command": { "ticket": { "options": { "labels": { "type": "x" } } } } }
+    }))
+    .unwrap_err();
+    assert!(
+        error.starts_with(
+            "`plugins.command.ticket.options.labels`: The label vocabulary is not a map"
+        ),
+        "{error}"
+    );
+}
