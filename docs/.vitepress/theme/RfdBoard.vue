@@ -106,7 +106,7 @@ const inDev = ref(
     new Set(props.entries.filter(e => e.inDevelopment).map(e => e.num))
 )
 
-// Statuses whose RFDs can be marked in development. `just rfd-track` refuses
+// Statuses whose RFDs can be marked in development. `jp rfd start` refuses
 // anything earlier, where implementation has not begun (see RFD 001).
 const TRACKABLE_STATUSES = new Set(['Accepted', 'Implemented'])
 

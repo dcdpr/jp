@@ -23,7 +23,7 @@ use std::{
 
 use camino::Utf8Path;
 use serde::Serialize;
-use ticket::{Status, store};
+use ticket::{Status, Ticket, store};
 
 use crate::{
     document::{Header, referenced_labels, title},
@@ -32,7 +32,7 @@ use crate::{
 };
 
 /// The label marking a ticket as its RFD's tracking ticket.
-const TRACKING_LABEL: (&str, &str) = ("type", "tracking");
+pub(crate) const TRACKING_LABEL: (&str, &str) = ("type", "tracking");
 
 /// Statuses that take an RFD off the board, which ranks open work only.
 pub(crate) const TERMINAL_STATUSES: [&str; 3] = ["Implemented", "Superseded", "Abandoned"];
@@ -293,26 +293,31 @@ fn entry(source: &Source) -> Entry {
     }
 }
 
-/// The RFDs whose tracking ticket is In Progress, by canonical id.
+/// The RFD `ticket` is the tracking ticket of, if it is one.
 ///
 /// A tracking ticket carries the `type=tracking` label and names its RFD in
 /// `Implements`.
-/// Phase tickets name the same RFD without the label and don't count.
+/// Phase tickets name the same RFD without the label, and track nothing.
+#[must_use]
+pub(crate) fn tracked(ticket: &Ticket) -> Option<RfdId> {
+    let (key, value) = TRACKING_LABEL;
+    if !ticket.metadata.labels.contains(key, value) {
+        return None;
+    }
+
+    ticket.metadata.implements.as_deref()?.parse().ok()
+}
+
+/// The RFDs whose tracking ticket is In Progress, by canonical id.
+///
 /// Tickets that didn't parse are passed over.
 #[must_use]
 pub(crate) fn in_development(tickets: &[store::Entry]) -> BTreeSet<String> {
     tickets
         .iter()
         .filter_map(|entry| entry.ticket.as_ref().ok())
-        .filter(|ticket| {
-            ticket.metadata.status == Status::InProgress
-                && ticket
-                    .metadata
-                    .labels
-                    .contains(TRACKING_LABEL.0, TRACKING_LABEL.1)
-        })
-        .filter_map(|ticket| ticket.metadata.implements.as_deref())
-        .filter_map(|implements| implements.parse::<RfdId>().ok())
+        .filter(|ticket| ticket.metadata.status == Status::InProgress)
+        .filter_map(tracked)
         .map(|id| id.to_string())
         .collect()
 }

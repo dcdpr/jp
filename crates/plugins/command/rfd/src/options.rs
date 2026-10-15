@@ -11,7 +11,8 @@
 //! newer `jp-rfd` still loads.
 //!
 //! The ticket directory belongs to `jp ticket`, and is read from its options
-//! ([`ticket_dir`]).
+//! ([`ticket_dir`]), as is who a ticket filed through a tool is attributed to
+//! ([`assistant`]).
 
 use camino::Utf8PathBuf;
 use serde::Deserialize;
@@ -23,6 +24,10 @@ const DEFAULT_DIR: &str = "docs/rfd";
 
 /// The categories when `categories` isn't set.
 const DEFAULT_CATEGORIES: [&str; 4] = ["design", "decision", "guide", "process"];
+
+/// Who a ticket filed through a tool is attributed to, when `jp ticket` sets
+/// nobody.
+const DEFAULT_ASSISTANT: &str = "assistant";
 
 /// The settings every command and tool runs with.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -103,6 +108,24 @@ pub(crate) fn ticket_dir(config: &Value) -> Result<Utf8PathBuf, String> {
         None | Some(Value::Null) => Ok(Utf8PathBuf::from(store::DEFAULT_DIR)),
         Some(Value::String(dir)) if !dir.trim().is_empty() => Ok(Utf8PathBuf::from(dir)),
         Some(_) => Err("`plugins.command.ticket.options.dir` is not a directory path.".to_owned()),
+    }
+}
+
+/// Who a ticket filed through a tool is attributed to, as `jp ticket` is
+/// configured: its `plugins.command.ticket.options.assistant`, or `assistant`.
+///
+/// `config` is the whole configuration the host passed in `init`.
+pub(crate) fn assistant(config: &Value) -> Result<String, String> {
+    match config.pointer("/plugins/command/ticket/options/assistant") {
+        None | Some(Value::Null) => Ok(DEFAULT_ASSISTANT.to_owned()),
+        Some(Value::String(name))
+            if !name.trim().is_empty() && !name.chars().any(char::is_control) =>
+        {
+            Ok(name.trim().to_owned())
+        }
+        Some(_) => {
+            Err("`plugins.command.ticket.options.assistant` must be a name on one line.".to_owned())
+        }
     }
 }
 

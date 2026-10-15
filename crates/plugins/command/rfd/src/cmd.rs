@@ -3,6 +3,8 @@
 //! Each one checks everything it can before it writes, so a refusal leaves the
 //! repository as it was, and reports what it changed as an [`Output`]: one line
 //! per change, and warnings for what is left to check by hand.
+//! [`track`] also asks for an RFD's Implementation Plan, which whoever runs it
+//! reads through the host when there is one to ask.
 //!
 //! [`Output`]: crate::Output
 
@@ -14,6 +16,7 @@ pub(crate) mod rank;
 pub(crate) mod relate;
 pub(crate) mod rename;
 pub(crate) mod renumber;
+pub(crate) mod track;
 
 use camino::{Utf8Path, Utf8PathBuf};
 

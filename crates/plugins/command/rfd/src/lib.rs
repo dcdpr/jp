@@ -13,6 +13,9 @@
 //! one view, and [`render`] prints it.
 //! [`cmd`] holds the commands that change RFDs, which write every metadata
 //! change through [`document::Document`].
+//! A command that asks the user something, or reads an RFD's plan through a
+//! model, reaches the host through a [`Session`]; a tool call has no host to
+//! ask, so its plan stays pending.
 //!
 //! See: `docs/rfd/001-jp-rfd-process.md`,
 //! `docs/rfd/116-shareable-rfd-ticket-and-site-tooling.md`
@@ -39,15 +42,20 @@ use camino::{Utf8Path, Utf8PathBuf};
 use chrono::Local;
 use clap::{ArgGroup, CommandFactory, Parser, Subcommand};
 use jp_plugin::message::{
-    DescribeResponse, ExitMessage, HostToPlugin, InitMessage, PluginToHost, PrintMessage, ToolCall,
-    ToolOutcomeMessage,
+    ComposeMode, ComposeOption, ComposeRequest, DescribeResponse, ExitMessage, HostToPlugin,
+    InitMessage, PluginToHost, PrintMessage, ToolCall, ToolOutcomeMessage,
 };
 use serde_json::Value;
 use ticket::TicketId;
 
 use crate::{
     board::Loaded,
-    cmd::{draft::Draft, rank::Place},
+    cmd::{
+        draft::Draft,
+        rank::Place,
+        track::{self, Filer, Plan, PlanRequest},
+    },
+    document::Document,
     id::RfdId,
     options::{Options, ticket_dir},
     paths::Paths,
@@ -129,8 +137,35 @@ enum Command {
     ///
     /// A draft gets the next permanent number, and every reference to its draft
     /// id is rewritten.
+    /// An RFD reaching Accepted is offered its tracking ticket.
     Promote {
         /// The RFD: a number (`42`, `042`) or a draft id (`D05`).
+        id: RfdId,
+    },
+
+    /// File or refresh an RFD's tracking ticket, printing its id.
+    ///
+    /// The ticket holds the RFD's Implementation Plan, read out of the document
+    /// by a model.
+    /// When the plan can't be read, a marker stands in for it, and the next run
+    /// reads it again.
+    /// Only an Accepted or Implemented RFD carries a tracking ticket.
+    Track {
+        /// The RFD: a number (`42`, `042`).
+        id: RfdId,
+    },
+
+    /// Mark an RFD as in development, filing its tracking ticket if it has none
+    /// and moving the ticket to In Progress.
+    Start {
+        /// The RFD: a number (`42`, `042`).
+        id: RfdId,
+    },
+
+    /// Mark an RFD as no longer in development, moving its tracking ticket back
+    /// to Todo.
+    Stop {
+        /// The RFD: a number (`42`, `042`).
         id: RfdId,
     },
 
@@ -249,13 +284,19 @@ enum ToolsCommand {
     },
 }
 
-/// What a subcommand produced: text for the user, and warnings about what is
-/// left to check.
+/// What a subcommand produced.
 ///
-/// Warnings stay out of the text so `--json` output survives a pipe into `jq`.
+/// Notes and warnings stay out of the text so `--json` output survives a pipe
+/// into `jq`.
 #[derive(Debug, Default)]
 struct Output {
+    /// What a script reads, on stdout.
     text: String,
+
+    /// What the command did, on stderr.
+    notes: Vec<String>,
+
+    /// What is left to check, on stderr.
     warnings: Vec<String>,
 }
 
@@ -263,7 +304,79 @@ impl From<String> for Output {
     fn from(text: String) -> Self {
         Self {
             text,
-            warnings: vec![],
+            ..Self::default()
+        }
+    }
+}
+
+impl Output {
+    /// Add `other`'s text, notes, and warnings after this one's.
+    fn extend(&mut self, other: Self) {
+        self.text.push_str(&other.text);
+        self.notes.extend(other.notes);
+        self.warnings.extend(other.warnings);
+    }
+}
+
+/// The host a command runs under, reached over the protocol.
+///
+/// Every request waits for its answer before the next one goes out, so no reply
+/// has to be matched to its request by id.
+struct Session<'a, R, W> {
+    stdin: &'a mut R,
+    stdout: &'a mut W,
+}
+
+impl<R: BufRead, W: Write> Session<'_, R, W> {
+    /// Print `output` now: notes and warnings on stderr, then the text on
+    /// stdout.
+    ///
+    /// On stderr, which `--quiet` silences, rather than in the log, which only
+    /// `-v` shows: a warning names something to check now.
+    fn emit(&mut self, output: &Output) -> Result<(), String> {
+        for line in output.notes.iter().chain(&output.warnings) {
+            print_to(self.stdout, &format!("{line}\n"), "chrome")?;
+        }
+        if !output.text.is_empty() {
+            print(self.stdout, &output.text)?;
+        }
+
+        Ok(())
+    }
+
+    /// Ask the user to choose one of a request's options.
+    ///
+    /// `None` when there is nobody at a terminal to ask, or they declined.
+    fn choose(&mut self, request: ComposeRequest) -> Result<Option<String>, String> {
+        send(self.stdout, &PluginToHost::Compose(request))?;
+
+        match read_message(self.stdin)? {
+            HostToPlugin::Composed(response) => Ok(response.text),
+            HostToPlugin::Error(error) => Err(error.message),
+            HostToPlugin::Shutdown => Err("Interrupted.".to_owned()),
+            other => Err(format!("expected a composed response, got: {other:?}")),
+        }
+    }
+
+    /// Have the host read an RFD's Implementation Plan through a model.
+    ///
+    /// A query the host refuses or that fails leaves the plan unavailable; an
+    /// interruption ends the command.
+    fn read_plan(&mut self, request: &PlanRequest<'_>) -> Result<Plan, String> {
+        send(
+            self.stdout,
+            &PluginToHost::Query(track::plan_query(request)),
+        )?;
+
+        loop {
+            match read_message(self.stdin)? {
+                // The conversation the plan is read in exists; the turn follows.
+                HostToPlugin::Created(_) => {}
+                HostToPlugin::QueryComplete(done) => return Ok(track::plan_from(done.data)),
+                HostToPlugin::Error(error) => return Ok(Plan::Unavailable(error.message)),
+                HostToPlugin::Shutdown => return Err("Interrupted.".to_owned()),
+                other => return Err(format!("expected the query's result, got: {other:?}")),
+            }
         }
     }
 }
@@ -302,7 +415,10 @@ pub fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String
 
             match &init.tool {
                 Some(call) => answer_tool_call(&init, call, &mut stdout),
-                None => handle_command(&init, &mut stdout),
+                None => handle_command(&init, &mut Session {
+                    stdin: &mut stdin,
+                    stdout: &mut stdout,
+                }),
             }
         }
         other => Err(format!("expected init or describe, got: {other:?}")),
@@ -350,26 +466,29 @@ fn answer_tool_call(
     send_exit(stdout, 0, None)
 }
 
-fn handle_command(init: &InitMessage, stdout: &mut impl Write) -> Result<(), String> {
+fn handle_command<R: BufRead, W: Write>(
+    init: &InitMessage,
+    session: &mut Session<'_, R, W>,
+) -> Result<(), String> {
     let parsed = Args::try_parse_from(iter::once("jp rfd".to_owned()).chain(init.args.clone()));
 
     let args = match parsed {
         Ok(args) => args,
         // `--help` and `--version` surface as errors that aren't failures.
         Err(error) if !error.use_stderr() => {
-            print(stdout, &error.to_string())?;
-            return send_exit(stdout, 0, None);
+            print(session.stdout, &error.to_string())?;
+            return send_exit(session.stdout, 0, None);
         }
-        Err(error) => return send_exit(stdout, 1, Some(&error.to_string())),
+        Err(error) => return send_exit(session.stdout, 1, Some(&error.to_string())),
     };
 
     let options = match Options::read(&init.options) {
         Ok(options) => options,
-        Err(message) => return send_exit(stdout, 1, Some(&message)),
+        Err(message) => return send_exit(session.stdout, 1, Some(&message)),
     };
     let tickets = match ticket_dir(&init.config) {
         Ok(tickets) => tickets,
-        Err(message) => return send_exit(stdout, 1, Some(&message)),
+        Err(message) => return send_exit(session.stdout, 1, Some(&message)),
     };
 
     let ctx = Context {
@@ -378,19 +497,12 @@ fn handle_command(init: &InitMessage, stdout: &mut impl Write) -> Result<(), Str
         options: &options,
     };
 
-    match execute(&ctx, args.command) {
+    match execute(&ctx, args.command, session) {
         Ok(output) => {
-            // On stderr, which `--quiet` silences, rather than in the log,
-            // which only `-v` shows: a warning names something to check now.
-            for warning in &output.warnings {
-                print_to(stdout, &format!("{warning}\n"), "chrome")?;
-            }
-            if !output.text.is_empty() {
-                print(stdout, &output.text)?;
-            }
-            send_exit(stdout, 0, None)
+            session.emit(&output)?;
+            send_exit(session.stdout, 0, None)
         }
-        Err(message) => send_exit(stdout, 1, Some(&message)),
+        Err(message) => send_exit(session.stdout, 1, Some(&message)),
     }
 }
 
@@ -411,7 +523,11 @@ fn today() -> String {
     Local::now().format("%Y-%m-%d").to_string()
 }
 
-fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
+fn execute<R: BufRead, W: Write>(
+    ctx: &Context<'_>,
+    command: Command,
+    session: &mut Session<'_, R, W>,
+) -> Result<Output, String> {
     let paths = &ctx.paths;
 
     match command {
@@ -431,7 +547,11 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
                 render::list_text(&board, category.as_deref(), sections, full)
             };
 
-            Ok(Output { text, warnings })
+            Ok(Output {
+                text,
+                warnings,
+                ..Output::default()
+            })
         }
 
         Command::Show { id, json } => {
@@ -447,32 +567,36 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
                 render::show_text(&board, entry)
             };
 
-            Ok(Output { text, warnings })
+            Ok(Output {
+                text,
+                warnings,
+                ..Output::default()
+            })
         }
 
         Command::Draft {
             category,
             title,
             from_ticket,
-        } => {
-            let author = author::resolve(&paths.root, ctx.config)?;
-            let (date, title) = (today(), title.join(" "));
-            let draft = Draft {
-                category: &category,
-                title: &title,
-                author: &author,
-                date: &date,
-            };
+        } => draft(ctx, &category, &title.join(" "), from_ticket),
 
-            match from_ticket {
-                Some(ticket) => {
-                    cmd::draft::from_ticket(paths, &ctx.options.categories, ticket, &draft)
-                }
-                None => cmd::draft::draft(paths, &ctx.options.categories, &draft),
-            }
+        Command::Promote { id } => promote(ctx, id, session),
+
+        Command::Track { id } => {
+            let tracked = track::track(paths, id, &user(ctx)?, &mut |request| {
+                session.read_plan(request)
+            })?;
+
+            let mut output = tracked.report;
+            output.text = format!("{}\n", tracked.ticket);
+            Ok(output)
         }
 
-        Command::Promote { id } => cmd::promote::promote(paths, id),
+        Command::Start { id } => track::start(paths, id, &user(ctx)?, &mut |request| {
+            session.read_plan(request)
+        }),
+
+        Command::Stop { id } => track::stop(paths, id),
 
         Command::Extend { id, target } => cmd::relate::extend(paths, id, target),
 
@@ -491,14 +615,11 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             before,
             after,
             backlog: _,
-        } => {
-            let place = match (before, after) {
-                (Some(other), _) => Place::Before(other),
-                (_, Some(other)) => Place::After(other),
-                (None, None) => Place::Backlog,
-            };
-            cmd::rank::rank(paths, id, place)
-        }
+        } => cmd::rank::rank(paths, id, match (before, after) {
+            (Some(other), _) => Place::Before(other),
+            (_, Some(other)) => Place::After(other),
+            (None, None) => Place::Backlog,
+        }),
 
         Command::Init => cmd::init::init(paths, &ctx.options.categories),
 
@@ -512,6 +633,122 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             &resolve_dir(&paths.root, &path),
             ctx.config,
             &ctx.options.categories,
+        ),
+    }
+}
+
+/// Write a new draft, from a ticket when one is named, attributed to the user
+/// at the terminal.
+fn draft(
+    ctx: &Context<'_>,
+    category: &str,
+    title: &str,
+    from_ticket: Option<TicketId>,
+) -> Result<Output, String> {
+    let author = author::resolve(&ctx.paths.root, ctx.config)?;
+    let date = today();
+    let draft = Draft {
+        category,
+        title,
+        author: &author,
+        date: &date,
+    };
+
+    match from_ticket {
+        Some(ticket) => {
+            cmd::draft::from_ticket(&ctx.paths, &ctx.options.categories, ticket, &draft)
+        }
+        None => cmd::draft::draft(&ctx.paths, &ctx.options.categories, &draft),
+    }
+}
+
+/// The user at the terminal, filing today.
+fn user(ctx: &Context<'_>) -> Result<Filer, String> {
+    Ok(Filer {
+        author: author::resolve(&ctx.paths.root, ctx.config)?,
+        date: today(),
+    })
+}
+
+/// The value of the tracking offer's choice that files the ticket.
+const FILE_TRACKING_TICKET: &str = "file";
+
+/// Advance an RFD one status, offering its tracking ticket when it reaches
+/// Accepted.
+///
+/// The promotion is reported before the question, which is about what it
+/// reports.
+/// Nothing that goes wrong with the ticket fails the command: the status is
+/// already written, and `jp rfd track` files the ticket later.
+fn promote<R: BufRead, W: Write>(
+    ctx: &Context<'_>,
+    id: RfdId,
+    session: &mut Session<'_, R, W>,
+) -> Result<Output, String> {
+    let file = ctx.paths.resolve(id)?;
+    let before = Document::parse(&paths::read(&file)?).header().status();
+    let promoted = cmd::promote::promote(&ctx.paths, id)?;
+
+    // A project without tickets doesn't track its RFDs.
+    if before.as_deref() != Some("Discussion") || !ctx.paths.tickets.is_dir() {
+        return Ok(promoted);
+    }
+
+    session.emit(&promoted)?;
+
+    let mut output = Output::default();
+    let filed = match session.choose(tracking_offer(id)) {
+        Ok(Some(answer)) if answer == FILE_TRACKING_TICKET => user(ctx).and_then(|filer| {
+            track::track(&ctx.paths, id, &filer, &mut |request| {
+                session.read_plan(request)
+            })
+        }),
+        // Declined, or nobody at a terminal to ask: acceptance records an
+        // agreed direction, not a commitment to start building.
+        Ok(_) => {
+            output.notes.push(format!(
+                "Skipped the tracking ticket. File it later with `jp rfd track {id}`."
+            ));
+            return Ok(output);
+        }
+        Err(error) => Err(error),
+    };
+
+    match filed {
+        Ok(tracked) => {
+            output.text = format!(
+                "Review {} before committing it; `jp ticket board` shows the board.\n",
+                tracked.ticket
+            );
+            output.extend(tracked.report);
+        }
+        Err(error) => output.warnings.push(format!(
+            "Could not file the tracking ticket: {error}\nRun `jp rfd track {id}` to retry."
+        )),
+    }
+
+    Ok(output)
+}
+
+/// The question `promote` asks about an RFD it accepted.
+fn tracking_offer(id: RfdId) -> ComposeRequest {
+    let option = |value: &str, label: &str| ComposeOption {
+        value: value.to_owned(),
+        label: label.to_owned(),
+    };
+
+    ComposeRequest {
+        id: None,
+        message: format!("File the tracking ticket for RFD {id}?"),
+        mode: ComposeMode::Select {
+            options: vec![
+                option(FILE_TRACKING_TICKET, "Yes"),
+                option("skip", "No, file it later"),
+            ],
+            default: Some(FILE_TRACKING_TICKET.to_owned()),
+        },
+        help: Some(
+            "The ticket holds the RFD's Implementation Plan, read out of it by a model.".to_owned(),
         ),
     }
 }

@@ -69,7 +69,7 @@ whole implementation or one phase of it.
 
 The RFD's *tracking* ticket carries this field together with the label
 `type=tracking`, and that one ticket is what the RFD priority board reports as
-in development. An RFD has at most one, filed by `just rfd-track`, so name
+in development. An RFD has at most one, filed by `rfd_track`, so name
 `type=tracking` here only when the RFD has none.
 """
 

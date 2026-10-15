@@ -420,9 +420,9 @@ const ticketWriter = {
 // Dev-only endpoint for an RFD's in-development state (`/rfd/priority`).
 //
 // The state lives on the RFD's tracking ticket, so a write shells out to
-// `just rfd-start` / `just rfd-stop` rather than touching a file. Marking an
-// RFD files that ticket when it has none, which reads the RFD's implementation
-// plan through a provider.
+// `jp rfd start` / `jp rfd stop` rather than touching a file. Marking an RFD
+// files that ticket when it has none, which reads the RFD's implementation plan
+// through a provider.
 const rfdDevelopmentWriter = {
     name: 'rfd-development-writer',
     configureServer(server) {
@@ -470,10 +470,10 @@ const rfdDevelopmentWriter = {
                     return
                 }
 
-                // The recipe name is chosen here rather than taken from the
+                // The command is chosen here rather than taken from the
                 // request, so a request can only ask for one of the two
                 // operations, on a published RFD. Whether that RFD is far
-                // enough along to carry a tracking ticket is the recipe's call.
+                // enough along to carry a tracking ticket is `jp rfd`'s call.
                 if (
                     typeof parsed.num !== 'string' ||
                     !/^\d{3}$/.test(parsed.num) ||
@@ -484,8 +484,8 @@ const rfdDevelopmentWriter = {
                     return
                 }
 
-                const recipe = parsed.active ? 'rfd-start' : 'rfd-stop'
-                execFile('just', [recipe, parsed.num], {
+                const command = parsed.active ? 'start' : 'stop'
+                execFile('jp', ['rfd', command, parsed.num], {
                     cwd: resolve(server.config.root, '..'),
                     // Reading the plan goes to a provider; the default (no
                     // timeout) leaves a wedged run holding the request open

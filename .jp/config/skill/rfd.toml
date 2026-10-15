@@ -21,6 +21,9 @@ rfd_supersede = { enable = true, run = "unattended" }
 rfd_abandon = { enable = true, run = "unattended" }
 rfd_extend = { enable = true, run = "unattended" }
 rfd_require = { enable = true, run = "unattended" }
+rfd_track = { enable = true, run = "unattended" }
+rfd_start = { enable = true, run = "unattended" }
+rfd_stop = { enable = true, run = "unattended" }
 
 fs_modify_file = { enable = true, run = "unattended" }
 fs_create_file.questions.overwrite_file.answer = true
@@ -65,7 +68,14 @@ status, which also moves the file up to `docs/rfd/`.
 
 `rfd_promote` handles deferred numbering: for DNN-prefixed drafts, it \
 assigns the next available permanent number and renames the file. When \
-promoting to Accepted, it offers to file the RFD's tracking ticket.
+promoting to Accepted, it offers to file the RFD's tracking ticket at a \
+terminal; when it can't ask, file it with `rfd_track` once the user wants it.
+
+`rfd_track` files or refreshes an Accepted or Implemented RFD's tracking \
+ticket, `rfd_start` marks the RFD in development by moving that ticket to In \
+Progress, and `rfd_stop` moves it back to Todo. A ticket filed through a tool \
+holds a marker in place of the Implementation Plan until `jp rfd track` runs \
+at a terminal.
 
 Promoting a draft to Discussion publishes it, and a published RFD needs a \
 `- **Summary**:` metadata field or the docs build fails. Nothing writes \

@@ -1,9 +1,12 @@
-use std::fs;
+use std::{fs, slice};
 
 use camino_tempfile::Utf8TempDir;
 use chrono::NaiveDate;
 use clap::Error as ClapError;
-use jp_plugin::message::{OutputFormat, PathsInfo, ToolAction, WorkspaceInfo};
+use jp_plugin::message::{
+    ComposeResponse, CreatedResponse, ErrorResponse, OutputFormat, PathsInfo,
+    QueryCompleteResponse, QueryRequest, ToolAction, WorkspaceInfo,
+};
 use serde_json::{Map, json};
 
 use super::*;
@@ -78,7 +81,16 @@ fn init(root: &Utf8Path, args: &[&str]) -> HostToPlugin {
 /// Drive the plugin the way the host does: one JSON message in, the reply
 /// stream out.
 fn exchange(message: &HostToPlugin) -> Vec<PluginToHost> {
-    let input = serde_json::to_string(message).unwrap() + "\n";
+    exchange_all(slice::from_ref(message))
+}
+
+/// Drive the plugin through a conversation: `messages` are what the host
+/// answers, in order, starting with `init`.
+fn exchange_all(messages: &[HostToPlugin]) -> Vec<PluginToHost> {
+    let input: String = messages
+        .iter()
+        .map(|message| serde_json::to_string(message).unwrap() + "\n")
+        .collect();
     let mut output = vec![];
     run(input.as_bytes(), &mut output).unwrap();
 
@@ -574,4 +586,345 @@ fn a_tool_call_is_answered_with_its_outcome_then_exit() {
         }
         other => panic!("unexpected exchange: {other:?}"),
     }
+}
+
+#[test]
+fn track_start_and_stop_take_an_id() {
+    assert!(matches!(
+        parse(&["track", "116"]).unwrap().command,
+        Command::Track {
+            id: RfdId::Published(116)
+        }
+    ));
+    assert!(matches!(
+        parse(&["start", "116"]).unwrap().command,
+        Command::Start {
+            id: RfdId::Published(116)
+        }
+    ));
+    assert!(matches!(
+        parse(&["stop", "116"]).unwrap().command,
+        Command::Stop {
+            id: RfdId::Published(116)
+        }
+    ));
+    assert!(parse(&["track"]).is_err());
+}
+
+/// [`workspace`], with a ticket vocabulary defining the tracking label, RFD 043
+/// Accepted and untracked, and RFD 044 in Discussion.
+fn trackable() -> Utf8TempDir {
+    let root = workspace();
+    fs::write(
+        root.path().join("docs/ticket/.labels.json"),
+        r#"{"type": {"description": "The type", "values": ["tracking"]}}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.path().join("docs/rfd/043-more-order.md"),
+        "# RFD 043: More Order\n\n- **Status**: Accepted\n\n## Implementation Plan\n",
+    )
+    .unwrap();
+    fs::write(
+        root.path().join("docs/rfd/044-discussed.md"),
+        "# RFD 044: Discussed\n\n- **Status**: Discussion\n",
+    )
+    .unwrap();
+
+    root
+}
+
+/// The init for running `args`, attributed to a configured user.
+fn init_by_jane(root: &Utf8Path, args: &[&str]) -> HostToPlugin {
+    let mut message = init_message(root, args);
+    message.config = json!({ "user": { "name": "Jane Doe <jane@example.com>" } });
+
+    HostToPlugin::Init(Box::new(message))
+}
+
+/// The host's answers to a plan query that finished with `data`.
+fn plan_answered(data: Value) -> [HostToPlugin; 2] {
+    [
+        HostToPlugin::Created(CreatedResponse {
+            id: Some("plan".to_owned()),
+            conversation: "jp-c17000000001".to_owned(),
+        }),
+        HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id: Some("plan".to_owned()),
+            conversation: "jp-c17000000001".to_owned(),
+            data: Some(data),
+        }),
+    ]
+}
+
+fn one_phase() -> Value {
+    json!({ "phases": [{ "title": "Order things", "summary": "Keeps them in order." }] })
+}
+
+/// The queries the plugin asked the host to run.
+fn queries(messages: &[PluginToHost]) -> Vec<&QueryRequest> {
+    messages
+        .iter()
+        .filter_map(|message| match message {
+            PluginToHost::Query(query) => Some(query),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The questions the plugin asked the host to put to the user.
+fn questions(messages: &[PluginToHost]) -> Vec<&ComposeRequest> {
+    messages
+        .iter()
+        .filter_map(|message| match message {
+            PluginToHost::Compose(request) => Some(request),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The tracking ticket RFD 043 got, as written.
+fn tracking_ticket(root: &Utf8TempDir) -> Option<String> {
+    fs::read_dir(root.path().join("docs/ticket"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .find(|name| name.ends_with("-more-order.md"))
+        .map(|name| fs::read_to_string(root.path().join("docs/ticket").join(name)).unwrap())
+}
+
+/// The plan is read by a turn the host runs, and the ticket's id is all that
+/// lands on stdout, for a script to pick up.
+#[test]
+fn track_reads_the_plan_through_the_host() {
+    let root = trackable();
+    let [created, complete] = plan_answered(one_phase());
+
+    let messages = exchange_all(&[
+        init_by_jane(root.path(), &["track", "43"]),
+        created,
+        complete,
+    ]);
+
+    let [query] = queries(&messages)[..] else {
+        panic!("expected one query: {messages:?}");
+    };
+    assert!(query.new);
+    assert!(query.schema.is_some());
+    assert!(
+        query
+            .content
+            .contains("<document path=\"docs/rfd/043-more-order.md\">")
+    );
+
+    let (text, code, reason) = printed(&messages);
+    assert_eq!((code, reason), (0, None));
+    assert!(text.starts_with("T-") && text.ends_with('\n'), "{text}");
+    assert!(
+        chrome(&messages)[0].starts_with("Filed docs/ticket/"),
+        "{messages:?}"
+    );
+
+    let ticket = tracking_ticket(&root).unwrap();
+    assert!(
+        ticket.contains("- **Authors**: Jane Doe <jane@example.com>\n"),
+        "{ticket}"
+    );
+    assert!(
+        ticket.ends_with("## Implementation plan\n\n- **Order things**: Keeps them in order.\n"),
+        "{ticket}"
+    );
+}
+
+#[test]
+fn a_query_the_host_refuses_leaves_the_plan_pending() {
+    let root = trackable();
+
+    let messages = exchange_all(&[
+        init_by_jane(root.path(), &["track", "43"]),
+        HostToPlugin::Error(ErrorResponse {
+            id: Some("plan".to_owned()),
+            request: Some("query".to_owned()),
+            message: "no provider is configured".to_owned(),
+        }),
+    ]);
+
+    let (_, code, _) = printed(&messages);
+    assert_eq!(code, 0);
+    assert!(
+        chrome(&messages).iter().any(|line| line.starts_with(
+            "The Implementation Plan of RFD 043 could not be read: no provider is configured."
+        )),
+        "{messages:?}"
+    );
+    assert!(
+        tracking_ticket(&root)
+            .unwrap()
+            .ends_with("<!-- rfd-plan: pending -->\n")
+    );
+}
+
+/// Interrupting the plan's read files no ticket without its plan.
+#[test]
+fn an_interrupted_track_files_nothing() {
+    let root = trackable();
+
+    let messages = exchange_all(&[
+        init_by_jane(root.path(), &["track", "43"]),
+        HostToPlugin::Shutdown,
+    ]);
+
+    let (_, code, reason) = printed(&messages);
+    assert_eq!((code, reason.as_deref()), (1, Some("Interrupted.")));
+    assert_eq!(tracking_ticket(&root), None);
+}
+
+/// The promotion is reported before the question about it, and a yes files the
+/// ticket with its plan read.
+#[test]
+fn promoting_to_accepted_offers_the_tracking_ticket() {
+    let root = trackable();
+    fs::write(
+        root.path().join("docs/rfd/043-more-order.md"),
+        "# RFD 043: More Order\n\n- **Status**: Discussion\n",
+    )
+    .unwrap();
+    let [created, complete] = plan_answered(one_phase());
+
+    let messages = exchange_all(&[
+        init_by_jane(root.path(), &["promote", "43"]),
+        HostToPlugin::Composed(ComposeResponse {
+            id: None,
+            text: Some("file".to_owned()),
+            values: vec![],
+        }),
+        created,
+        complete,
+    ]);
+
+    let promoted = messages
+        .iter()
+        .position(|message| {
+            matches!(message, PluginToHost::Print(print)
+                if print.text == "docs/rfd/043-more-order.md: Discussion -> Accepted\n")
+        })
+        .expect("the promotion is reported");
+    let asked = messages
+        .iter()
+        .position(|message| matches!(message, PluginToHost::Compose(_)))
+        .expect("the tracking ticket is offered");
+    assert!(promoted < asked, "{messages:?}");
+
+    let [question] = questions(&messages)[..] else {
+        panic!("expected one question: {messages:?}");
+    };
+    assert_eq!(question.message, "File the tracking ticket for RFD 043?");
+    assert!(
+        matches!(&question.mode, ComposeMode::Select { default: Some(value), .. } if value == "file")
+    );
+
+    let (text, code, _) = printed(&messages);
+    assert_eq!(code, 0);
+    assert!(text.contains("\nReview T-"), "{text}");
+    assert!(
+        text.ends_with(" before committing it; `jp ticket board` shows the board.\n"),
+        "{text}"
+    );
+    assert!(
+        tracking_ticket(&root)
+            .unwrap()
+            .contains("- **Order things**: Keeps them in order.")
+    );
+}
+
+/// No, and no terminal to ask on, both leave the ticket for later: accepting an
+/// RFD is not a commitment to start building it.
+#[test]
+fn a_declined_or_unanswerable_offer_files_nothing() {
+    for answer in [Some("skip".to_owned()), None] {
+        let root = trackable();
+
+        let messages = exchange_all(&[
+            init_by_jane(root.path(), &["promote", "44"]),
+            HostToPlugin::Composed(ComposeResponse {
+                id: None,
+                text: answer.clone(),
+                values: vec![],
+            }),
+        ]);
+
+        let (_, code, _) = printed(&messages);
+        assert_eq!(code, 0, "{answer:?}");
+        assert_eq!(
+            chrome(&messages),
+            ["Skipped the tracking ticket. File it later with `jp rfd track 044`.\n"],
+            "{answer:?}"
+        );
+        assert!(queries(&messages).is_empty(), "{answer:?}");
+        assert!(
+            fs::read_to_string(root.path().join("docs/rfd/044-discussed.md"))
+                .unwrap()
+                .contains("- **Status**: Accepted\n")
+        );
+    }
+}
+
+/// A ticket that can't be filed doesn't undo the promotion before it.
+#[test]
+fn a_tracking_ticket_that_cannot_be_filed_leaves_the_promotion() {
+    let root = trackable();
+    fs::write(root.path().join("docs/ticket/.labels.json"), "{}").unwrap();
+
+    let messages = exchange_all(&[
+        init_by_jane(root.path(), &["promote", "44"]),
+        HostToPlugin::Composed(ComposeResponse {
+            id: None,
+            text: Some("file".to_owned()),
+            values: vec![],
+        }),
+    ]);
+
+    let (_, code, _) = printed(&messages);
+    assert_eq!(code, 0);
+    let warning = "Could not file the tracking ticket: Tracking tickets carry the label \
+                   `type=tracking`, which the ticket vocabulary doesn't define. Add `tracking` to \
+                   the values of `type` in docs/ticket/.labels.json.\nRun `jp rfd track 044` to \
+                   retry.\n";
+    assert_eq!(chrome(&messages), [warning]);
+}
+
+/// Only acceptance offers the ticket, and a project without tickets is never
+/// asked.
+#[test]
+fn other_promotions_offer_nothing() {
+    let root = trackable();
+    let messages = exchange(&init_by_jane(root.path(), &["promote", "42"]));
+    assert!(questions(&messages).is_empty(), "{messages:?}");
+    assert_eq!(printed(&messages).1, 0);
+
+    let root = trackable();
+    fs::remove_dir_all(root.path().join("docs/ticket")).unwrap();
+    let messages = exchange(&init_by_jane(root.path(), &["promote", "44"]));
+    assert!(questions(&messages).is_empty(), "{messages:?}");
+    assert_eq!(printed(&messages).1, 0);
+}
+
+#[test]
+fn start_and_stop_move_the_tracking_ticket() {
+    let root = trackable();
+    let [created, complete] = plan_answered(one_phase());
+
+    let started = exchange_all(&[
+        init_by_jane(root.path(), &["start", "43"]),
+        created,
+        complete,
+    ]);
+    let (text, code, _) = printed(&started);
+    assert_eq!(code, 0);
+    assert!(text.ends_with(": Todo -> In Progress\n"), "{text}");
+
+    let stopped = exchange(&init_by_jane(root.path(), &["stop", "43"]));
+    let (text, code, _) = printed(&stopped);
+    assert_eq!(code, 0);
+    assert!(text.ends_with(": In Progress -> Todo\n"), "{text}");
+    assert!(queries(&stopped).is_empty());
 }

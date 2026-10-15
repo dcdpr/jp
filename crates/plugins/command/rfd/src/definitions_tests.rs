@@ -301,14 +301,15 @@ fn every_served_tool_has_a_starting_definition() {
 
 /// JP routes no tool this plugin doesn't serve: a definition naming one is an
 /// error at conversation time.
-/// The lifecycle tools still run through JP's recipes, which call `jp rfd`, so
-/// they are routed elsewhere and don't count.
+/// The lifecycle tools JP had before this plugin served them still run through
+/// JP's recipes, which call `jp rfd`, so they are routed elsewhere and don't
+/// count.
 #[test]
 fn jp_routes_only_tools_this_plugin_serves() {
     let routed = routed(&read_definitions(&jp_definitions()));
     let names: Vec<&str> = routed.iter().map(|(name, ..)| name.as_str()).collect();
 
-    assert_eq!(names, ["list", "show"]);
+    assert_eq!(names, ["list", "show", "start", "stop", "track"]);
     assert!(names.iter().all(|name| TOOLS.contains(name)), "{names:?}");
     assert_category_tools_declare_the_parameter(&routed);
 }
