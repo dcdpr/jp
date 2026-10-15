@@ -5,18 +5,8 @@
 //! - The RFD files: published ones in the RFD directory, drafts in its
 //!   `drafts/` directory.
 //!
-//! - The board file, [`PRIORITY_FILE`] in the RFD directory, which ranks open
-//!   work into milestone groups above an unranked backlog:
-//!
-//!   ```json
-//!   {
-//!     "planned": [
-//!       { "milestone": "Internal Release v0.1", "ids": ["044", "D50"] },
-//!       { "milestone": null, "ids": ["053"] }
-//!     ],
-//!     "backlog": ["010", "D01"]
-//!   }
-//!   ```
+//! - The board file ([`priority`]), which ranks open work into milestone groups
+//!   above an unranked backlog.
 //!
 //! - The tickets: an RFD is in development while its tracking ticket, the one
 //!   labelled `type=tracking` that implements it, is In Progress.
@@ -27,123 +17,25 @@
 
 use std::{
     collections::{BTreeSet, HashMap},
-    fs, io,
+    fs,
     path::MAIN_SEPARATOR,
 };
 
 use camino::Utf8Path;
 use serde::Serialize;
-use serde_json::Value;
 use ticket::{Status, store};
 
 use crate::{
     document::{Header, referenced_labels, title},
     id::{DRAFTS_DIR, RfdId},
+    priority::{self, Priority},
 };
-
-/// The board file, inside the RFD directory.
-pub(crate) const PRIORITY_FILE: &str = ".priority.json";
 
 /// The label marking a ticket as its RFD's tracking ticket.
 const TRACKING_LABEL: (&str, &str) = ("type", "tracking");
 
 /// Statuses that take an RFD off the board, which ranks open work only.
-const TERMINAL_STATUSES: [&str; 3] = ["Implemented", "Superseded", "Abandoned"];
-
-/// One milestone group of the planned list: the RFDs ranked above that
-/// milestone's marker, in order.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Group {
-    /// `None` for the planned RFDs no milestone claims, which sit below the
-    /// last marker.
-    pub milestone: Option<String>,
-    pub ids: Vec<String>,
-}
-
-/// The board file, normalized.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Priority {
-    /// The planned groups in board order, always ending with the unassigned
-    /// (`milestone: None`) group.
-    pub planned: Vec<Group>,
-
-    /// The unranked backlog below the planned list.
-    pub backlog: Vec<String>,
-}
-
-impl Default for Priority {
-    fn default() -> Self {
-        Self::normalize(&Value::Null)
-    }
-}
-
-impl Priority {
-    /// Read a board file's contents into a fixed shape.
-    ///
-    /// The older shape, a flat `order` array in place of `planned`, reads as a
-    /// single unassigned group.
-    /// Missing or malformed fields read as empty, the way a missing file is an
-    /// empty board.
-    #[must_use]
-    pub(crate) fn normalize(raw: &Value) -> Self {
-        let mut planned: Vec<Group> = match raw.get("planned").and_then(Value::as_array) {
-            Some(groups) => groups
-                .iter()
-                .map(|group| Group {
-                    milestone: group.get("milestone").and_then(text),
-                    ids: ids(group.get("ids")),
-                })
-                .collect(),
-            None => vec![Group {
-                milestone: None,
-                ids: ids(raw.get("order")),
-            }],
-        };
-
-        if planned.last().is_none_or(|group| group.milestone.is_some()) {
-            planned.push(Group {
-                milestone: None,
-                ids: vec![],
-            });
-        }
-
-        Self {
-            planned,
-            backlog: ids(raw.get("backlog")),
-        }
-    }
-
-    /// The planned ids, flattened in board order.
-    ///
-    /// Its length is the cutoff: a position below it is planned, one at or past
-    /// it is in the backlog.
-    #[must_use]
-    pub(crate) fn order(&self) -> Vec<&str> {
-        self.planned
-            .iter()
-            .flat_map(|group| group.ids.iter().map(String::as_str))
-            .collect()
-    }
-}
-
-/// An id list from the board file.
-/// Numbers are read as their digits, since the file is hand-editable.
-fn ids(value: Option<&Value>) -> Vec<String> {
-    value
-        .and_then(Value::as_array)
-        .map(|values| values.iter().filter_map(text).collect())
-        .unwrap_or_default()
-}
-
-/// A string or a number from the board file, as text; `None` for anything else,
-/// `null` included.
-fn text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::Number(number) => Some(number.to_string()),
-        _ => None,
-    }
-}
+pub(crate) const TERMINAL_STATUSES: [&str; 3] = ["Implemented", "Superseded", "Abandoned"];
 
 /// One RFD file, read.
 #[derive(Debug, Clone)]
@@ -461,22 +353,10 @@ pub(crate) fn load(root: &Utf8Path, dir: &Utf8Path, tickets: &Utf8Path) -> Resul
         vec![]
     };
 
-    let priority_path = dir.join(PRIORITY_FILE);
-    let priority = match fs::read_to_string(&priority_path) {
-        Ok(source) => match serde_json::from_str::<Value>(&source) {
-            Ok(raw) => Priority::normalize(&raw),
-            Err(error) => {
-                warnings.push(format!(
-                    "{priority_path} is not valid JSON ({error}); every RFD reads as unranked."
-                ));
-                Priority::default()
-            }
-        },
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Priority::default(),
+    let priority = match priority::read(dir) {
+        Ok(priority) => priority.unwrap_or_default(),
         Err(error) => {
-            warnings.push(format!(
-                "{priority_path} could not be read ({error}); every RFD reads as unranked."
-            ));
+            warnings.push(format!("{error}; every RFD reads as unranked."));
             Priority::default()
         }
     };

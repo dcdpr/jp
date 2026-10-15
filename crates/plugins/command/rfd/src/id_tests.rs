@@ -139,6 +139,62 @@ fn resolve_refuses_an_id_two_files_share() {
 }
 
 #[test]
+fn the_next_draft_slot_is_the_first_one_free() {
+    let dir = Utf8TempDir::new().unwrap();
+    assert_eq!(next_draft_slot(dir.path()), Ok(RfdId::Draft(1)));
+
+    fs::create_dir_all(dir.path().join("drafts")).unwrap();
+    for name in ["D01-a.md", "D02-b.md", "D04-d.md", "D03-notes.txt"] {
+        fs::write(dir.path().join("drafts").join(name), "").unwrap();
+    }
+    // A draft misplaced among the published RFDs doesn't take a slot.
+    fs::write(dir.path().join("D03-misplaced.md"), "").unwrap();
+
+    assert_eq!(next_draft_slot(dir.path()), Ok(RfdId::Draft(3)));
+}
+
+#[test]
+fn every_draft_slot_taken_is_an_error() {
+    let dir = Utf8TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join("drafts")).unwrap();
+    for slot in 1..=99 {
+        fs::write(dir.path().join(format!("drafts/D{slot:02}-x.md")), "").unwrap();
+    }
+
+    assert_eq!(
+        next_draft_slot(dir.path()),
+        Err("No draft slots available (D01-D99 all in use).".to_owned())
+    );
+}
+
+/// The lowest gap wins over one past the highest, and the templates' `000`
+/// takes no number.
+#[test]
+fn the_next_number_fills_the_lowest_gap() {
+    let dir = Utf8TempDir::new().unwrap();
+    assert_eq!(next_number(dir.path()), Ok(RfdId::Published(1)));
+
+    for name in ["000-design-template.md", "001-a.md", "002-b.md", "004-d.md"] {
+        fs::write(dir.path().join(name), "").unwrap();
+    }
+    assert_eq!(next_number(dir.path()), Ok(RfdId::Published(3)));
+
+    fs::write(dir.path().join("003-c.md"), "").unwrap();
+    assert_eq!(next_number(dir.path()), Ok(RfdId::Published(5)));
+}
+
+#[test]
+fn a_slug_keeps_letters_digits_and_dashes() {
+    assert_eq!(
+        slug("Shareable RFD, Ticket, and Site Tooling"),
+        "shareable-rfd-ticket-and-site-tooling"
+    );
+    assert_eq!(slug("Built-in `ask_user` Tool"), "built-in-ask_user-tool");
+    assert_eq!(slug("Déjà Vu  Twice"), "dj-vu--twice");
+    assert_eq!(slug("!!!"), "");
+}
+
+#[test]
 fn resolve_reads_only_markdown_files() {
     let dir = Utf8TempDir::new().unwrap();
     fs::write(dir.path().join("042-notes.txt"), "").unwrap();

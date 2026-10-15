@@ -1,8 +1,9 @@
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::*;
+use crate::priority::PRIORITY_FILE;
 
 /// An RFD document carrying `fields` in its metadata block.
 fn rfd(heading: &str, fields: &[(&str, &str)]) -> String {
@@ -65,70 +66,6 @@ fn ticket(status: &str, implements: Option<&str>, labels: &[&str]) -> String {
     }
 
     out
-}
-
-#[test]
-fn the_board_file_reads_into_milestone_groups_and_a_backlog() {
-    let priority = Priority::normalize(&json!({
-        "planned": [
-            { "milestone": "First", "ids": ["090", "D63"] },
-            { "milestone": null, "ids": ["053"] }
-        ],
-        "backlog": ["010"]
-    }));
-
-    assert_eq!(priority.planned, [
-        Group {
-            milestone: Some("First".to_owned()),
-            ids: vec!["090".to_owned(), "D63".to_owned()],
-        },
-        Group {
-            milestone: None,
-            ids: vec!["053".to_owned()],
-        },
-    ]);
-    assert_eq!(priority.order(), ["090", "D63", "053"]);
-    assert_eq!(priority.backlog, ["010"]);
-}
-
-/// The planned RFDs no milestone claims sit below the last marker, so that
-/// group always exists, even when the file names none.
-#[test]
-fn the_unassigned_group_is_always_last() {
-    let priority = Priority::normalize(&json!({
-        "planned": [{ "milestone": "First", "ids": ["090"] }]
-    }));
-
-    assert_eq!(priority.planned.len(), 2);
-    assert_eq!(priority.planned[1], Group {
-        milestone: None,
-        ids: vec![],
-    });
-}
-
-#[test]
-fn the_older_flat_order_reads_as_one_unassigned_group() {
-    let priority = Priority::normalize(&json!({ "order": ["090", 53], "backlog": [10] }));
-
-    assert_eq!(priority.planned, [Group {
-        milestone: None,
-        ids: vec!["090".to_owned(), "53".to_owned()],
-    }]);
-    assert_eq!(priority.backlog, ["10"]);
-}
-
-#[test]
-fn a_malformed_board_file_reads_as_an_empty_board() {
-    for raw in [
-        json!(null),
-        json!([]),
-        json!({ "planned": "nope", "backlog": {} }),
-    ] {
-        let priority = Priority::normalize(&raw);
-
-        assert_eq!(priority, Priority::default(), "{raw}");
-        assert!(priority.order().is_empty());
-    }
 }
 
 #[test]

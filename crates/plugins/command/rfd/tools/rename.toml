@@ -1,0 +1,33 @@
+[conversation.tools.rfd_rename]
+source = "plugin.command.rfd.rename"
+summary = "Give an RFD a new title, moving its file to match."
+description = """
+Rewrites the document's heading and renames its file to the slug the new title
+produces. The id stays, so mentions of the RFD by id stay right; links name the
+file, so links to it in the documentation and the tickets are rewritten, and
+links anywhere else in the workspace are reported. Retitling a published RFD
+changes its site URL.
+"""
+
+examples = """
+```json
+{"id": "095", "title": "Reasoning Shading Across Tool Calls"}
+```
+"""
+
+run = "ask"
+
+[conversation.tools.rfd_rename.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.rfd_rename.parameters.id]
+type = "string"
+required = true
+summary = "The RFD: a number such as `42` or `042`, or a draft id such as `D05`."
+
+[conversation.tools.rfd_rename.parameters.title]
+type = "string"
+required = true
+summary = "The new title, without the `RFD <id>: ` prefix."

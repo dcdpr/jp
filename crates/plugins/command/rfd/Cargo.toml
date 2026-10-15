@@ -18,12 +18,15 @@ version.workspace = true
 # `$PATH`.
 
 [dependencies]
+comfort = { workspace = true }
 jp_plugin = { workspace = true }
 jp_tool = { workspace = true }
 ticket = { workspace = true }
 
 camino = { workspace = true, features = ["serde1"] }
+chrono = { workspace = true }
 clap = { workspace = true, features = ["derive", "error-context", "help", "std", "usage"] }
+ignore = { workspace = true }
 regex = { workspace = true, features = ["std", "perf", "unicode-perl"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }

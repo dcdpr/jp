@@ -7,7 +7,7 @@
 //! [`resolve`] finds the file an id names, and refuses when no file or more
 //! than one does.
 
-use std::{error, fmt, fs, io, str::FromStr};
+use std::{collections::HashSet, error, fmt, fs, io, str::FromStr};
 
 use camino::{Utf8Path, Utf8PathBuf};
 
@@ -238,6 +238,73 @@ pub(crate) fn resolve(dir: &Utf8Path, id: RfdId) -> Result<Utf8PathBuf, ResolveE
         1 => Ok(files.remove(0)),
         _ => Err(ResolveError::Ambiguous { id, files }),
     }
+}
+
+/// The ids the markdown files directly in `dir` open with.
+///
+/// A directory that doesn't exist holds none.
+fn taken(dir: &Utf8Path) -> Result<HashSet<RfdId>, String> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(HashSet::new()),
+        Err(error) => return Err(format!("{dir}: {error}")),
+    };
+
+    let mut taken = HashSet::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("{dir}: {error}"))?;
+        let Some(name) = entry.file_name().to_str().map(ToOwned::to_owned) else {
+            continue;
+        };
+        if Utf8Path::new(&name).extension() == Some("md")
+            && let Some(id) = RfdId::of_file(&name)
+        {
+            taken.insert(id);
+        }
+    }
+
+    Ok(taken)
+}
+
+/// The first draft slot no file in the drafts directory of the RFD directory
+/// `dir` takes.
+pub(crate) fn next_draft_slot(dir: &Utf8Path) -> Result<RfdId, String> {
+    let taken = taken(&dir.join(DRAFTS_DIR))?;
+
+    (1..=MAX_SLOT)
+        .map(RfdId::Draft)
+        .find(|id| !taken.contains(id))
+        .ok_or_else(|| "No draft slots available (D01-D99 all in use).".to_owned())
+}
+
+/// The first permanent number no file in the RFD directory `dir` takes: the
+/// lowest gap, or one past the highest.
+///
+/// Only the files here count, so a number taken on another branch is not seen.
+pub(crate) fn next_number(dir: &Utf8Path) -> Result<RfdId, String> {
+    let taken = taken(dir)?;
+
+    (1..=MAX_NUMBER)
+        .map(RfdId::Published)
+        .find(|id| !taken.contains(id))
+        .ok_or_else(|| "No permanent numbers available (001-999 all in use).".to_owned())
+}
+
+/// The file-name slug a title produces: lowercase, spaces as dashes, and every
+/// character but ASCII letters, digits, `_`, and `-` dropped.
+///
+/// `Shareable RFD, Ticket, and Site Tooling` becomes
+/// `shareable-rfd-ticket-and-site-tooling`.
+#[must_use]
+pub(crate) fn slug(title: &str) -> String {
+    title
+        .chars()
+        .filter_map(|c| match c.to_ascii_lowercase() {
+            ' ' => Some('-'),
+            c @ ('a'..='z' | '0'..='9' | '_' | '-') => Some(c),
+            _ => None,
+        })
+        .collect()
 }
 
 #[cfg(test)]

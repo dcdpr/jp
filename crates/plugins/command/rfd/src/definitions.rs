@@ -19,8 +19,16 @@ use crate::Output;
 
 /// The definitions `tools init` writes, by file name.
 pub(crate) const DEFINITIONS: &[(&str, &str)] = &[
+    ("abandon.toml", include_str!("../tools/abandon.toml")),
+    ("draft.toml", include_str!("../tools/draft.toml")),
+    ("extend.toml", include_str!("../tools/extend.toml")),
     ("list.toml", include_str!("../tools/list.toml")),
+    ("promote.toml", include_str!("../tools/promote.toml")),
+    ("rename.toml", include_str!("../tools/rename.toml")),
+    ("renumber.toml", include_str!("../tools/renumber.toml")),
+    ("require.toml", include_str!("../tools/require.toml")),
     ("show.toml", include_str!("../tools/show.toml")),
+    ("supersede.toml", include_str!("../tools/supersede.toml")),
 ];
 
 /// The file `tools sync` writes, inside the definitions directory.
@@ -45,7 +53,7 @@ const SYNCED_NOTES: &str = "\
 const PLUGIN: &str = "rfd";
 
 /// The tools that take a category, by the name a `source` gives them.
-const TAKES_A_CATEGORY: &[&str] = &["list"];
+const TAKES_A_CATEGORY: &[&str] = &["draft", "list"];
 
 /// Write the starting definitions into `dir`, creating it if needed.
 ///

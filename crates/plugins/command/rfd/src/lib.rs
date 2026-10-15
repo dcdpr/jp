@@ -10,16 +10,23 @@
 //! `init` message, so the commands work from any subdirectory.
 //!
 //! [`board`] reads the RFDs, the priority board, and the tracking tickets into
-//! one view; [`render`] prints it.
+//! one view, and [`render`] prints it.
+//! [`cmd`] holds the commands that change RFDs, which write every metadata
+//! change through [`document::Document`].
 //!
 //! See: `docs/rfd/001-jp-rfd-process.md`,
 //! `docs/rfd/116-shareable-rfd-ticket-and-site-tooling.md`
 
+mod author;
 mod board;
+mod cmd;
 mod definitions;
 mod document;
 mod id;
 mod options;
+mod paths;
+mod priority;
+mod references;
 mod render;
 mod tool;
 
@@ -29,17 +36,21 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
-use clap::{CommandFactory, Parser, Subcommand};
+use chrono::Local;
+use clap::{ArgGroup, CommandFactory, Parser, Subcommand};
 use jp_plugin::message::{
-    DescribeResponse, ExitMessage, HostToPlugin, InitMessage, LogMessage, PluginToHost,
-    PrintMessage, ToolCall, ToolOutcomeMessage,
+    DescribeResponse, ExitMessage, HostToPlugin, InitMessage, PluginToHost, PrintMessage, ToolCall,
+    ToolOutcomeMessage,
 };
 use serde_json::Value;
+use ticket::TicketId;
 
 use crate::{
     board::Loaded,
-    id::{RfdId, resolve},
+    cmd::{draft::Draft, rank::Place},
+    id::RfdId,
     options::{Options, ticket_dir},
+    paths::Paths,
     render::Sections,
 };
 
@@ -93,6 +104,121 @@ enum Command {
         json: bool,
     },
 
+    /// Create a draft from its category's template.
+    ///
+    /// The draft takes the first free slot in the drafts directory, and its
+    /// file is named after the title.
+    Draft {
+        /// The kind of document: one of
+        /// `plugins.command.rfd.options.categories`, `design`, `decision`,
+        /// `guide`, or `process` by default.
+        category: String,
+
+        /// The title, which also names the file.
+        /// With `--from-ticket`, it replaces the ticket's title.
+        #[arg(required_unless_present = "from_ticket")]
+        title: Vec<String>,
+
+        /// Seed the draft from this ticket's title and description, then record
+        /// on the ticket that it moved there and close it.
+        #[arg(long, value_name = "TICKET")]
+        from_ticket: Option<TicketId>,
+    },
+
+    /// Advance an RFD one status: Draft, Discussion, Accepted, Implemented.
+    ///
+    /// A draft gets the next permanent number, and every reference to its draft
+    /// id is rewritten.
+    Promote {
+        /// The RFD: a number (`42`, `042`) or a draft id (`D05`).
+        id: RfdId,
+    },
+
+    /// Record that one RFD builds on another's design.
+    Extend {
+        /// The RFD that extends the other.
+        id: RfdId,
+
+        /// The RFD it builds on.
+        target: RfdId,
+    },
+
+    /// Record that one RFD can't be accepted or implemented before another.
+    Require {
+        /// The RFD that depends on the other.
+        id: RfdId,
+
+        /// The RFD it depends on.
+        target: RfdId,
+    },
+
+    /// Record that one RFD replaces another.
+    Supersede {
+        /// The RFD being replaced, Accepted or Implemented.
+        id: RfdId,
+
+        /// The RFD that replaces it.
+        by: RfdId,
+    },
+
+    /// Set an RFD aside, keeping the document and the reason.
+    Abandon {
+        /// The RFD: a number (`42`, `042`) or a draft id (`D05`).
+        id: RfdId,
+
+        /// Why it was set aside.
+        #[arg(required = true)]
+        reason: Vec<String>,
+    },
+
+    /// Move an RFD to another id in its id space.
+    ///
+    /// A draft moves to another draft slot, and a published RFD to another
+    /// permanent number.
+    Renumber {
+        /// The RFD: an id, or its file name, which picks one of two files
+        /// sharing an id after a merge.
+        id: String,
+
+        /// The new id.
+        /// The next free one when left out; pass it when that one is taken on
+        /// another branch.
+        new: Option<String>,
+    },
+
+    /// Give an RFD a new title, moving its file to match.
+    Rename {
+        /// The RFD: a number (`42`, `042`) or a draft id (`D05`).
+        id: RfdId,
+
+        /// The new title, which also names the file.
+        #[arg(required = true)]
+        title: Vec<String>,
+    },
+
+    /// Move an RFD on the priority board.
+    #[command(group(ArgGroup::new("place").required(true)))]
+    Rank {
+        /// The RFD to move.
+        id: RfdId,
+
+        /// Place it directly above this RFD, in its milestone group.
+        #[arg(long, group = "place", value_name = "OTHER")]
+        before: Option<RfdId>,
+
+        /// Place it directly below this RFD, in its milestone group.
+        #[arg(long, group = "place", value_name = "OTHER")]
+        after: Option<RfdId>,
+
+        /// Move it to the backlog.
+        #[arg(long, group = "place")]
+        backlog: bool,
+    },
+
+    /// Set up the RFD directory: its drafts directory, a template for each
+    /// category, and an empty priority board.
+    Init,
+
     /// Write the tool definitions that offer the RFDs to the assistant.
     Tools {
         #[command(subcommand)]
@@ -123,7 +249,8 @@ enum ToolsCommand {
     },
 }
 
-/// What a subcommand produced: text for the user, warnings for the log.
+/// What a subcommand produced: text for the user, and warnings about what is
+/// left to check.
 ///
 /// Warnings stay out of the text so `--json` output survives a pipe into `jq`.
 #[derive(Debug, Default)]
@@ -143,14 +270,7 @@ impl From<String> for Output {
 
 /// What a command runs against.
 struct Context<'a> {
-    /// The workspace root, which every relative path resolves against.
-    root: &'a Utf8Path,
-
-    /// The RFD directory.
-    dir: Utf8PathBuf,
-
-    /// The ticket directory, which says what is in development.
-    tickets: Utf8PathBuf,
+    paths: Paths,
 
     /// The configuration the host resolved.
     config: &'a Value,
@@ -162,7 +282,7 @@ struct Context<'a> {
 impl Context<'_> {
     /// Read the board, the way every reading command starts.
     fn board(&self) -> Result<Loaded, String> {
-        board::load(self.root, &self.dir, &self.tickets)
+        board::load(&self.paths.root, &self.paths.rfds, &self.paths.tickets)
     }
 }
 
@@ -252,26 +372,18 @@ fn handle_command(init: &InitMessage, stdout: &mut impl Write) -> Result<(), Str
         Err(message) => return send_exit(stdout, 1, Some(&message)),
     };
 
-    let root = init.workspace.root.as_path();
     let ctx = Context {
-        root,
-        dir: resolve_dir(root, &options.dir),
-        tickets: resolve_dir(root, &tickets),
+        paths: Paths::new(&init.workspace.root, &options.dir, &tickets),
         config: &init.config,
         options: &options,
     };
 
     match execute(&ctx, args.command) {
         Ok(output) => {
+            // On stderr, which `--quiet` silences, rather than in the log,
+            // which only `-v` shows: a warning names something to check now.
             for warning in &output.warnings {
-                send(
-                    stdout,
-                    &PluginToHost::Log(LogMessage {
-                        level: "warn".to_owned(),
-                        message: warning.clone(),
-                        fields: serde_json::Map::new(),
-                    }),
-                )?;
+                print_to(stdout, &format!("{warning}\n"), "chrome")?;
             }
             if !output.text.is_empty() {
                 print(stdout, &output.text)?;
@@ -294,7 +406,14 @@ fn resolve_dir(root: &Utf8Path, dir: &Utf8Path) -> Utf8PathBuf {
     }
 }
 
+/// Today, as a new draft's `Date` reads.
+fn today() -> String {
+    Local::now().format("%Y-%m-%d").to_string()
+}
+
 fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
+    let paths = &ctx.paths;
+
     match command {
         Command::List {
             category,
@@ -317,8 +436,7 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
 
         Command::Show { id, json } => {
             let Loaded { board, warnings } = ctx.board()?;
-            let file = resolve(&ctx.dir, id).map_err(|error| error.to_string())?;
-            let file = board::relative(ctx.root, &file);
+            let file = paths.show(&paths.resolve(id)?);
             let entry = board
                 .entry(&file)
                 .ok_or_else(|| format!("{file} is not an RFD: its name has no slug."))?;
@@ -332,14 +450,66 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             Ok(Output { text, warnings })
         }
 
+        Command::Draft {
+            category,
+            title,
+            from_ticket,
+        } => {
+            let author = author::resolve(&paths.root, ctx.config)?;
+            let (date, title) = (today(), title.join(" "));
+            let draft = Draft {
+                category: &category,
+                title: &title,
+                author: &author,
+                date: &date,
+            };
+
+            match from_ticket {
+                Some(ticket) => {
+                    cmd::draft::from_ticket(paths, &ctx.options.categories, ticket, &draft)
+                }
+                None => cmd::draft::draft(paths, &ctx.options.categories, &draft),
+            }
+        }
+
+        Command::Promote { id } => cmd::promote::promote(paths, id),
+
+        Command::Extend { id, target } => cmd::relate::extend(paths, id, target),
+
+        Command::Require { id, target } => cmd::relate::require(paths, id, target),
+
+        Command::Supersede { id, by } => cmd::relate::supersede(paths, id, by),
+
+        Command::Abandon { id, reason } => cmd::abandon::abandon(paths, id, &reason.join(" ")),
+
+        Command::Renumber { id, new } => cmd::renumber::renumber(paths, &id, new.as_deref(), true),
+
+        Command::Rename { id, title } => cmd::rename::rename(paths, id, &title.join(" "), true),
+
+        Command::Rank {
+            id,
+            before,
+            after,
+            backlog: _,
+        } => {
+            let place = match (before, after) {
+                (Some(other), _) => Place::Before(other),
+                (_, Some(other)) => Place::After(other),
+                (None, None) => Place::Backlog,
+            };
+            cmd::rank::rank(paths, id, place)
+        }
+
+        Command::Init => cmd::init::init(paths, &ctx.options.categories),
+
         Command::Tools {
             command: ToolsCommand::Init { path },
-        } => definitions::init(&resolve_dir(ctx.root, &path)),
+        } => definitions::init(&resolve_dir(&paths.root, &path)),
 
         Command::Tools {
             command: ToolsCommand::Sync { path },
         } => definitions::sync(
-            &resolve_dir(ctx.root, &path),
+            &resolve_dir(&paths.root, &path),
             ctx.config,
             &ctx.options.categories,
         ),
@@ -364,11 +534,16 @@ fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
 }
 
 fn print(stdout: &mut impl Write, text: &str) -> Result<(), String> {
+    print_to(stdout, text, "content")
+}
+
+/// Print `text` on the host's output channel `channel`.
+fn print_to(stdout: &mut impl Write, text: &str, channel: &str) -> Result<(), String> {
     send(
         stdout,
         &PluginToHost::Print(PrintMessage {
             text: text.to_owned(),
-            channel: "content".into(),
+            channel: channel.to_owned(),
             format: "plain".into(),
             language: None,
         }),

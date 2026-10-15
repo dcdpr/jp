@@ -2,7 +2,7 @@
 enable = false
 run = "ask"
 source = "local"
-command = "just rfd-abandon {{tool.arguments.nnn}}"
+command = "just rfd-abandon {{tool.arguments.nnn}} {{tool.arguments.reason}}"
 description = "Abandon an RFD."
 
 [conversation.tools.rfd_abandon.style]
@@ -12,5 +12,10 @@ parameters = "function_call"
 
 [conversation.tools.rfd_abandon.parameters.nnn]
 description = "ID of the RFD to abandon."
+required = true
+type = "string"
+
+[conversation.tools.rfd_abandon.parameters.reason]
+description = "Why it was set aside, and what was carried forward and where, if anything."
 required = true
 type = "string"

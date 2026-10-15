@@ -2141,7 +2141,10 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "camino-tempfile",
+ "chrono",
  "clap",
+ "comfort",
+ "ignore",
  "jp_plugin",
  "jp_tool",
  "regex",

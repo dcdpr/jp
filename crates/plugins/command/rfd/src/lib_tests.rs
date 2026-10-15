@@ -1,6 +1,7 @@
 use std::fs;
 
 use camino_tempfile::Utf8TempDir;
+use chrono::NaiveDate;
 use clap::Error as ClapError;
 use jp_plugin::message::{OutputFormat, PathsInfo, ToolAction, WorkspaceInfo};
 use serde_json::{Map, json};
@@ -88,13 +89,15 @@ fn exchange(message: &HostToPlugin) -> Vec<PluginToHost> {
         .collect()
 }
 
-/// What a command printed and how it exited.
+/// What a command printed on stdout and how it exited.
 fn printed(messages: &[PluginToHost]) -> (String, u8, Option<String>) {
     let mut text = String::new();
     let mut exit = None;
     for message in messages {
         match message {
-            PluginToHost::Print(print) => text.push_str(&print.text),
+            PluginToHost::Print(print) if print.channel == "content" => {
+                text.push_str(&print.text);
+            }
             PluginToHost::Exit(done) => exit = Some((done.code, done.reason.clone())),
             _ => {}
         }
@@ -148,6 +151,78 @@ fn show_takes_an_id() {
         "{error}"
     );
     assert!(parse(&["show"]).is_err());
+}
+
+#[test]
+fn draft_takes_a_category_and_a_title_or_a_ticket() {
+    match parse(&["draft", "design", "My", "Feature"])
+        .unwrap()
+        .command
+    {
+        Command::Draft {
+            category,
+            title,
+            from_ticket,
+        } => {
+            assert_eq!(category, "design");
+            assert_eq!(title, ["My", "Feature"]);
+            assert_eq!(from_ticket, None);
+        }
+        other => panic!("expected draft, got {other:?}"),
+    }
+
+    match parse(&["draft", "design", "--from-ticket", "02wt0kx"])
+        .unwrap()
+        .command
+    {
+        Command::Draft {
+            title, from_ticket, ..
+        } => {
+            assert!(title.is_empty());
+            assert_eq!(from_ticket, Some("T-02wt0kx".parse().unwrap()));
+        }
+        other => panic!("expected draft, got {other:?}"),
+    }
+
+    assert!(parse(&["draft", "design"]).is_err());
+}
+
+/// `extend` and `require` read the same way: the first RFD holds the
+/// relationship.
+#[test]
+fn relationships_take_the_holding_rfd_first() {
+    match parse(&["extend", "116", "100"]).unwrap().command {
+        Command::Extend { id, target } => {
+            assert_eq!((id, target), (RfdId::Published(116), RfdId::Published(100)));
+        }
+        other => panic!("expected extend, got {other:?}"),
+    }
+    match parse(&["require", "116", "72"]).unwrap().command {
+        Command::Require { id, target } => {
+            assert_eq!((id, target), (RfdId::Published(116), RfdId::Published(72)));
+        }
+        other => panic!("expected require, got {other:?}"),
+    }
+}
+
+#[test]
+fn rank_takes_exactly_one_place() {
+    match parse(&["rank", "60", "--before", "50"]).unwrap().command {
+        Command::Rank {
+            id,
+            before,
+            after,
+            backlog,
+        } => {
+            assert_eq!(id, RfdId::Published(60));
+            assert_eq!(before, Some(RfdId::Published(50)));
+            assert!(after.is_none() && !backlog);
+        }
+        other => panic!("expected rank, got {other:?}"),
+    }
+
+    assert!(parse(&["rank", "60"]).is_err());
+    assert!(parse(&["rank", "60", "--before", "50", "--backlog"]).is_err());
 }
 
 #[test]
@@ -302,8 +377,19 @@ fn show_reports_an_rfd_that_isnt_there() {
     assert_eq!(reason.as_deref(), Some("No RFD found with number 043."));
 }
 
+/// What a command printed on stderr, one entry per print.
+fn chrome(messages: &[PluginToHost]) -> Vec<&str> {
+    messages
+        .iter()
+        .filter_map(|message| match message {
+            PluginToHost::Print(print) if print.channel == "chrome" => Some(print.text.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The board file is hand-editable; one that doesn't parse still lists, with a
-/// warning on the log rather than in the output, which a script may be reading.
+/// warning on stderr rather than in the output, which a script may be reading.
 #[test]
 fn a_broken_board_file_is_a_warning_not_a_failure() {
     let root = workspace();
@@ -311,19 +397,76 @@ fn a_broken_board_file_is_a_warning_not_a_failure() {
 
     let messages = exchange(&init(root.path(), &["list", "--json"]));
 
-    let warnings: Vec<&str> = messages
-        .iter()
-        .filter_map(|message| match message {
-            PluginToHost::Log(log) if log.level == "warn" => Some(log.message.as_str()),
-            _ => None,
-        })
-        .collect();
+    let warnings = chrome(&messages);
     assert_eq!(warnings.len(), 1, "{messages:?}");
     assert!(warnings[0].contains("is not valid JSON"), "{}", warnings[0]);
 
     let (text, code, _) = printed(&messages);
     assert_eq!(code, 0);
     serde_json::from_str::<Value>(&text).unwrap();
+}
+
+/// A draft is attributed to the user JP's configuration names, and dated the
+/// day it is filed.
+#[test]
+fn draft_writes_a_draft_by_the_configured_user() {
+    let root = workspace();
+    fs::write(
+        root.path().join("docs/rfd/000-design-template.md"),
+        "# RFD NNN: TITLE\n\n- **Status**: Draft\n- **Category**: Design\n- **Authors**: \
+         AUTHOR\n- **Date**: DATE\n",
+    )
+    .unwrap();
+    let mut message = init_message(root.path(), &["draft", "design", "My", "Feature"]);
+    message.config = json!({ "user": { "name": "Jane Doe <jane@example.com>" } });
+
+    let (text, code, reason) = printed(&exchange(&HostToPlugin::Init(Box::new(message))));
+
+    assert_eq!((code, reason), (0, None));
+    assert_eq!(text, "Created docs/rfd/drafts/D01-my-feature.md\n");
+    let draft = fs::read_to_string(root.path().join("docs/rfd/drafts/D01-my-feature.md")).unwrap();
+    assert!(
+        draft.contains("- **Authors**: Jane Doe <jane@example.com>\n"),
+        "{draft}"
+    );
+    let date = draft
+        .lines()
+        .find_map(|line| line.strip_prefix("- **Date**: "))
+        .unwrap();
+    assert!(
+        NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok(),
+        "{date}"
+    );
+}
+
+/// A warning names something to check now, so it goes to stderr, where the user
+/// sees it without `-v`, and stays out of what a script reads.
+#[test]
+fn a_commands_warnings_go_to_stderr() {
+    let root = workspace();
+    fs::write(
+        root.path().join("docs/rfd/043-depended-on.md"),
+        "# RFD 043: Depended On\n\n- **Status**: Accepted\n- **Required by**: [RFD \
+         050](050-x.md)\n",
+    )
+    .unwrap();
+
+    let messages = exchange(&init(root.path(), &["abandon", "43", "Not", "needed."]));
+
+    let (text, code, _) = printed(&messages);
+    assert_eq!(code, 0);
+    assert_eq!(
+        text,
+        "docs/rfd/043-depended-on.md: Abandoned (Accepted -> Abandoned)\n"
+    );
+    let warning = "Warning: the following RFDs depend on this one (Required by):\n  RFD \
+                   050\nTheir dependency on RFD 043 is now broken; review and update.\n";
+    assert_eq!(chrome(&messages), [warning]);
+    assert!(
+        fs::read_to_string(root.path().join("docs/rfd/043-depended-on.md"))
+            .unwrap()
+            .contains("> Not needed.\n")
+    );
 }
 
 #[test]

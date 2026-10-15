@@ -1,0 +1,34 @@
+[conversation.tools.rfd_supersede]
+source = "plugin.command.rfd.supersede"
+summary = "Record that one RFD replaces another."
+description = """
+`id` is marked Superseded and gets `Superseded by: RFD <by>`; `by` gets
+`Supersedes: RFD <id>`. `id` leaves the priority board.
+
+Only an Accepted or Implemented RFD can be superseded, and only by a published
+one: a draft replaced before it is published is abandoned or deleted instead.
+"""
+
+examples = """
+RFD 034 replaces RFD 033:
+```json
+{"id": "033", "by": "034"}
+```
+"""
+
+run = "ask"
+
+[conversation.tools.rfd_supersede.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.rfd_supersede.parameters.id]
+type = "string"
+required = true
+summary = "The RFD being replaced."
+
+[conversation.tools.rfd_supersede.parameters.by]
+type = "string"
+required = true
+summary = "The RFD that replaces it."

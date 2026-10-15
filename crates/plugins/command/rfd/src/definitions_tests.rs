@@ -134,7 +134,8 @@ fn init_refuses_to_overwrite_and_writes_nothing() {
 }
 
 /// Tools are found by their source, so a project that exposes `list` under a
-/// name of its own gets the categories under that name too.
+/// name of its own gets the categories under that name too, and a tool of the
+/// same name served by something else gets none.
 #[test]
 fn sync_offers_each_tool_the_categories_found_by_source() {
     let dir = Utf8TempDir::new().unwrap();
@@ -144,6 +145,7 @@ fn sync_offers_each_tool_the_categories_found_by_source() {
                 "*": { "run": "ask" },
                 "rfd_list": { "source": "plugin.command.rfd.list" },
                 "board": { "source": "plugin.command.rfd.list" },
+                "new_doc": { "source": "plugin.command.rfd.draft" },
                 "rfd_show": { "source": "plugin.command.rfd.show" },
                 "ticket_list": { "source": "plugin.command.ticket.list" },
                 "rfd_draft": { "source": "local" }
@@ -156,10 +158,16 @@ fn sync_offers_each_tool_the_categories_found_by_source() {
     let path = dir.path().join(SYNCED_FILE);
     assert_eq!(
         output.text,
-        format!("Wrote {path}, with categories for board, rfd_list\n")
+        format!("Wrote {path}, with categories for board, new_doc, rfd_list\n")
     );
     let lists = r#"
 [conversation.tools.board.parameters.category]
+enum = [
+  "design",
+  "guide",
+]
+
+[conversation.tools.new_doc.parameters.category]
 enum = [
   "design",
   "guide",
@@ -291,14 +299,16 @@ fn every_served_tool_has_a_starting_definition() {
     assert_category_tools_declare_the_parameter(&routed(&templates));
 }
 
-/// JP routes every tool this plugin serves, and nothing else: a definition
-/// naming a tool the plugin doesn't serve is an error at conversation time.
-/// The tools still backed by recipes are routed elsewhere and don't count.
+/// JP routes no tool this plugin doesn't serve: a definition naming one is an
+/// error at conversation time.
+/// The lifecycle tools still run through JP's recipes, which call `jp rfd`, so
+/// they are routed elsewhere and don't count.
 #[test]
-fn jp_routes_every_tool_this_plugin_serves() {
+fn jp_routes_only_tools_this_plugin_serves() {
     let routed = routed(&read_definitions(&jp_definitions()));
     let names: Vec<&str> = routed.iter().map(|(name, ..)| name.as_str()).collect();
 
-    assert_eq!(names, TOOLS);
+    assert_eq!(names, ["list", "show"]);
+    assert!(names.iter().all(|name| TOOLS.contains(name)), "{names:?}");
     assert_category_tools_declare_the_parameter(&routed);
 }

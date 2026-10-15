@@ -1,0 +1,33 @@
+[conversation.tools.rfd_promote]
+source = "plugin.command.rfd.promote"
+summary = "Advance an RFD one status: Draft, Discussion, Accepted, Implemented."
+description = """
+A draft is published under the next permanent number: its file moves out of the
+drafts directory, and every reference to its draft id in the RFDs, the drafts,
+and the tickets is rewritten. A draft that requires, extends, or mentions
+another draft is refused, since a published RFD may not name one.
+
+Discussion to Accepted, and Accepted to Implemented, wait until every RFD this
+one requires or extends has got that far. An Implemented RFD drops its
+`Requires` links in both directions, and leaves the priority board.
+
+The promoted file is reflowed the way the markdown formatter lays it out.
+"""
+
+examples = """
+```json
+{"id": "D05"}
+```
+"""
+
+run = "ask"
+
+[conversation.tools.rfd_promote.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.rfd_promote.parameters.id]
+type = "string"
+required = true
+summary = "The RFD: a number such as `42` or `042`, or a draft id such as `D05`."

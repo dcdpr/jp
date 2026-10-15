@@ -201,7 +201,8 @@ fn an_unknown_tool_names_the_ones_served() {
 
     assert_eq!(
         error_message(run_tool(&root, "frobnicate", json!({}))),
-        "`jp rfd` serves no tool named `frobnicate`. It serves: list, show."
+        "`jp rfd` serves no tool named `frobnicate`. It serves: abandon, draft, extend, list, \
+         promote, rename, renumber, require, show, supersede."
     );
 }
 
@@ -254,7 +255,7 @@ fn the_access_policy_has_to_allow_reading() {
 
     let message = error_message(with_access(&rfds_only));
     assert!(
-        message.starts_with("`list` can't read the ticket directory: access denied: read on"),
+        message.starts_with("`list` can't reach the ticket directory: access denied: read on"),
         "{message}"
     );
     assert!(content(with_access(&everything)).contains("042"));
@@ -331,6 +332,269 @@ fn a_directory_outside_the_workspace_is_refused() {
             elsewhere.path()
         )
     );
+}
+
+fn with_policy(name: &str, arguments: Value, rules: Vec<FsRule>) -> ToolCall {
+    let mut call = call(name, arguments);
+    call.access = Some(
+        serde_json::to_value(AccessPolicy {
+            fs: rules,
+            ..AccessPolicy::default()
+        })
+        .unwrap(),
+    );
+
+    call
+}
+
+/// The configuration a draft takes its author from.
+fn by_jane() -> Value {
+    json!({ "user": { "name": "Jane Doe <jane@example.com>" } })
+}
+
+fn with_template(root: &Utf8TempDir) {
+    fs::write(
+        root.path().join("docs/rfd/000-design-template.md"),
+        "# RFD NNN: TITLE\n\n- **Status**: Draft\n- **Category**: Design\n- **Authors**: \
+         AUTHOR\n- **Date**: DATE\n\n## Summary\n\nWhat.\n",
+    )
+    .unwrap();
+}
+
+#[test]
+fn draft_writes_a_draft() {
+    let root = workspace();
+    with_template(&root);
+
+    let out = content(run(
+        &init(&root, by_jane()),
+        &call(
+            "draft",
+            json!({ "category": "design", "title": "Tool Limits" }),
+        ),
+        &Options::default(),
+    ));
+
+    assert_eq!(out, "Created docs/rfd/drafts/D01-tool-limits.md\n");
+    let draft = fs::read_to_string(root.path().join("docs/rfd/drafts/D01-tool-limits.md")).unwrap();
+    assert!(
+        draft.contains("- **Authors**: Jane Doe <jane@example.com>\n"),
+        "{draft}"
+    );
+}
+
+/// Without a ticket the title is the draft's only source of one; with a ticket,
+/// the ticket's title serves.
+#[test]
+fn draft_needs_a_title_unless_it_has_a_ticket() {
+    let root = workspace();
+    with_template(&root);
+    let draft = |arguments: Value| {
+        run(
+            &init(&root, by_jane()),
+            &call("draft", arguments),
+            &Options::default(),
+        )
+    };
+
+    assert_eq!(
+        error_message(draft(json!({ "category": "design" }))),
+        "Missing argument `title`."
+    );
+    assert_eq!(
+        content(draft(json!({ "category": "design", "ticket": "02wt0k1" }))),
+        "Created docs/rfd/drafts/D01-ordered-things.md\ndocs/ticket/02wt0k1-track.md: promoted to \
+         D01, closed as Done\n"
+    );
+    assert_eq!(
+        error_message(draft(json!({ "category": "design", "ticket": "nope" }))),
+        "`nope` is not a ticket id (try T-02wt0kx)."
+    );
+}
+
+/// Drafting from a ticket writes to the ticket, which the policy has to allow.
+#[test]
+fn draft_from_a_ticket_has_to_be_allowed_to_write_it() {
+    let root = workspace();
+    with_template(&root);
+    let rules = vec![
+        FsRule::new("docs/rfd").with_read(true).with_write(true),
+        FsRule::new("docs/ticket").with_read(true),
+    ];
+
+    let message = error_message(run(
+        &init(&root, by_jane()),
+        &with_policy(
+            "draft",
+            json!({ "category": "design", "ticket": "02wt0k1" }),
+            rules,
+        ),
+        &Options::default(),
+    ));
+
+    assert!(
+        message.starts_with("`draft` can't reach the ticket directory: access denied: update on"),
+        "{message}"
+    );
+    assert!(
+        !root
+            .path()
+            .join("docs/rfd/drafts/D01-ordered-things.md")
+            .exists()
+    );
+}
+
+/// Publishing a draft moves its file; accepting or implementing an RFD only
+/// edits files.
+/// The policy is asked for what the step does.
+#[test]
+fn promote_asks_for_what_the_step_does() {
+    let root = workspace();
+    let edit_only = || {
+        vec![
+            FsRule::new("docs/rfd").with_read(true).with_update(true),
+            FsRule::new("docs/ticket").with_read(true).with_update(true),
+        ]
+    };
+
+    let message = error_message(run(
+        &init(&root, json!({})),
+        &with_policy("promote", json!({ "id": "D05" }), edit_only()),
+        &Options::default(),
+    ));
+    assert!(
+        message.starts_with("`promote` can't reach the RFD directory: access denied: create on"),
+        "{message}"
+    );
+
+    let out = content(run(
+        &init(&root, json!({})),
+        &with_policy("promote", json!({ "id": 42 }), edit_only()),
+        &Options::default(),
+    ));
+    assert_eq!(
+        out,
+        "docs/rfd/042-ordered-things.md: Accepted -> Implemented\n"
+    );
+}
+
+#[test]
+fn promote_publishes_a_draft() {
+    let root = workspace();
+
+    let out = content(run_tool(&root, "promote", json!({ "id": "D05" })));
+
+    assert_eq!(
+        out,
+        "docs/rfd/001-sketch.md: Draft -> Discussion (assigned 001)\n"
+    );
+    assert!(root.path().join("docs/rfd/001-sketch.md").exists());
+}
+
+/// The relationship tools take the RFD that holds the relationship as `id`, the
+/// way the commands take it first.
+#[test]
+fn relationship_tools_take_the_holding_rfd_as_id() {
+    let root = workspace();
+
+    assert_eq!(
+        content(run_tool(
+            &root,
+            "extend",
+            json!({ "id": "D05", "target": "042" })
+        )),
+        "docs/rfd/drafts/D05-sketch.md: Extends: RFD 042\ndocs/rfd/042-ordered-things.md: skipped \
+         Extended by: RFD D05 (suppressed: draft -> non-draft)\n"
+    );
+    assert_eq!(
+        error_message(run_tool(&root, "require", json!({ "id": "042" }))),
+        "Missing argument `target`."
+    );
+    assert_eq!(
+        error_message(run_tool(
+            &root,
+            "supersede",
+            json!({ "id": "042", "target": "043" })
+        )),
+        "Missing argument `by`."
+    );
+}
+
+/// What a command leaves for someone to check reaches the assistant with what
+/// it changed.
+#[test]
+fn warnings_follow_the_result() {
+    let root = workspace();
+    fs::write(
+        root.path().join("docs/rfd/043-depended-on.md"),
+        "# RFD 043: Depended On\n\n- **Status**: Accepted\n- **Required by**: [RFD \
+         050](050-x.md)\n",
+    )
+    .unwrap();
+
+    let out = content(run_tool(
+        &root,
+        "abandon",
+        json!({ "id": "043", "reason": "Not needed." }),
+    ));
+
+    assert_eq!(
+        out,
+        "docs/rfd/043-depended-on.md: Abandoned (Accepted -> Abandoned)\nWarning: the following \
+         RFDs depend on this one (Required by):\n  RFD 050\nTheir dependency on RFD 043 is now \
+         broken; review and update.\n"
+    );
+}
+
+#[test]
+fn rename_and_renumber_move_the_file() {
+    let root = workspace();
+
+    let renamed = content(run_tool(
+        &root,
+        "rename",
+        json!({ "id": "042", "title": "Kept in Order" }),
+    ));
+    assert!(
+        renamed.contains("042-ordered-things.md -> docs/rfd/042-kept-in-order.md\n"),
+        "{renamed}"
+    );
+
+    let renumbered = content(run_tool(
+        &root,
+        "renumber",
+        json!({ "id": "042", "new": 97 }),
+    ));
+    assert!(
+        renumbered.contains("042-kept-in-order.md -> docs/rfd/097-kept-in-order.md (042 -> 097)\n"),
+        "{renumbered}"
+    );
+}
+
+/// A call kept to the RFDs and the tickets can't search the rest of the
+/// workspace for references, and says so.
+#[test]
+fn renumber_without_the_workspace_says_what_went_unchecked() {
+    let root = workspace();
+    let rules = vec![
+        FsRule::new("docs/rfd").with_read(true).with_write(true),
+        FsRule::new("docs/ticket").with_read(true).with_write(true),
+    ];
+
+    let out = content(run(
+        &init(&root, json!({})),
+        &with_policy("renumber", json!({ "id": "D05", "new": "D07" }), rules),
+        &Options::default(),
+    ));
+
+    assert!(
+        out.ends_with(
+            "References outside docs/rfd/ and docs/ticket/ were not checked: the access policy \
+             doesn't allow reading the workspace.\n"
+        ),
+        "{out}"
+    );
+    assert!(root.path().join("docs/rfd/drafts/D07-sketch.md").exists());
 }
 
 /// The ticket directory follows `jp ticket`'s configuration.

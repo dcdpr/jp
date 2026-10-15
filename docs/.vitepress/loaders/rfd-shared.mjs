@@ -18,9 +18,9 @@ import { inDevelopmentRfds, loadTickets } from './ticket-shared.mjs'
 // duplicate ids, which abort either way).
 //
 // `assembleBoard` (bottom of this file) composes the building blocks into the
-// full priority board. Both the web board (`rfd-board.data.js`) and the
-// `just rfd-list` CLI (`../rfd-list.mjs`) go through it, so the two never
-// drift.
+// full priority board the web board (`rfd-board.data.js`) shows. `jp rfd list`
+// reads the same files in Rust (`crates/plugins/command/rfd/src/board.rs`), so
+// a change to how the board is read belongs in both.
 
 // Parse the inline metadata from an RFD markdown file.
 //

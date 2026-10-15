@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::board::{Priority, Source};
+use crate::{board::Source, priority::Priority};
 
 fn source(name: &str, fields: &[(&str, &str)]) -> Source {
     let (id, slug) = name.split_once('-').unwrap();
