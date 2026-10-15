@@ -299,17 +299,30 @@ fn every_served_tool_has_a_starting_definition() {
     assert_category_tools_declare_the_parameter(&routed(&templates));
 }
 
-/// JP routes no tool this plugin doesn't serve: a definition naming one is an
-/// error at conversation time.
-/// The lifecycle tools JP had before this plugin served them still run through
-/// JP's recipes, which call `jp rfd`, so they are routed elsewhere and don't
-/// count.
+/// JP routes every tool this plugin serves but `promote`, and nothing else: a
+/// definition naming a tool the plugin doesn't serve is an error at
+/// conversation time.
+/// `rfd_promote` runs JP's `just rfd-promote`, which calls `jp rfd promote` and
+/// then archives the conversations JP's own workflow keeps for a draft.
 #[test]
-fn jp_routes_only_tools_this_plugin_serves() {
+fn jp_routes_every_tool_this_plugin_serves_but_promote() {
     let routed = routed(&read_definitions(&jp_definitions()));
     let names: Vec<&str> = routed.iter().map(|(name, ..)| name.as_str()).collect();
 
-    assert_eq!(names, ["list", "show", "start", "stop", "track"]);
+    assert_eq!(names, [
+        "abandon",
+        "draft",
+        "extend",
+        "list",
+        "rename",
+        "renumber",
+        "require",
+        "show",
+        "start",
+        "stop",
+        "supersede",
+        "track",
+    ]);
     assert!(names.iter().all(|name| TOOLS.contains(name)), "{names:?}");
     assert_category_tools_declare_the_parameter(&routed);
 }

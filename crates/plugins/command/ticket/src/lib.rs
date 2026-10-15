@@ -341,8 +341,8 @@ enum ToolsCommand {
 /// One ticket in `show --json` output.
 #[derive(Serialize)]
 struct Detail<'a> {
-    /// Carried explicitly: the document has no id, and `just ticket-promote`
-    /// reads this field.
+    /// Carried explicitly: the document has no id of its own, and a caller that
+    /// reads one ticket needs it to name the ticket again.
     id: TicketId,
     #[serde(flatten)]
     ticket: &'a Ticket,

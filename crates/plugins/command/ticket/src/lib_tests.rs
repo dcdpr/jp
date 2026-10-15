@@ -1289,8 +1289,7 @@ fn rewriting_a_missing_or_binary_file_is_skipped() {
     assert!(!rewrite(&binary, "a", "b").unwrap());
 }
 
-/// `just ticket-promote` reads `.id` out of this, so the field has to survive
-/// the document losing its own.
+/// The ticket document has no id of its own, so the output has to carry it.
 #[test]
 fn show_json_carries_the_id() {
     let dir = Utf8TempDir::new().unwrap();

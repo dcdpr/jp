@@ -165,7 +165,7 @@ advances to Discussion, the original draft is **deleted**, not superseded.
 Supersedes-relationships only apply once an RFD has been promoted to Accepted or
 beyond — there is no design to preserve before that point.
 Drafts that the author has decided not to pursue can be either deleted (no
-rationale worth preserving) or abandoned via `just rfd-abandon` (rationale worth
+rationale worth preserving) or abandoned via `jp rfd abandon` (rationale worth
 preserving as a record of the rejected idea); the choice is the author's.
 
 ### Discussion
@@ -302,10 +302,10 @@ something entirely free-form.
 To create a new draft:
 
 ```sh
-just rfd-draft design "My Feature Title"        # design proposal
-just rfd-draft decision "Use TOML for Config"   # decision record
-just rfd-draft guide "Attachment Handler Guide" # how-to / reference
-just rfd-draft process "Release Process"        # workflow / policy
+jp rfd draft design "My Feature Title"        # design proposal
+jp rfd draft decision "Use TOML for Config"   # decision record
+jp rfd draft guide "Attachment Handler Guide" # how-to / reference
+jp rfd draft process "Release Process"        # workflow / policy
 ```
 
 This copies the appropriate template to
@@ -352,23 +352,24 @@ it lands.
 
 Accepting an RFD records an agreed direction, not a commitment to start
 building, which is why the ticket is offered rather than created.
-Decline the prompt and file it later with `just rfd-track NNN`, which is also
-what marking the RFD in development on the [priority board] runs.
+Decline the prompt and file it later with `jp rfd track NNN`.
+Marking the RFD in development, with `jp rfd start NNN` or on the [priority
+board], files it too.
 
 A handful of older RFDs still carry a `Tracking Issue` field pointing at a
 GitHub issue.
-The field is retired: nothing writes it, and the lifecycle recipes only read it
-to remind you to close the issue when such an RFD is superseded or abandoned.
+The field is retired: nothing writes it, and `jp rfd` only reads it to remind
+you to close the issue when such an RFD is superseded or abandoned.
 
 The `Extends` and `Extended by` fields capture design-lineage relationships:
 "this RFD builds on that one's design."
-They are maintained by `just rfd-extend`.
+They are maintained by `jp rfd extend`.
 Unlike `Supersedes`, an extending RFD builds on its predecessor — the original
 remains valid and in effect.
 
 The `Requires` and `Required by` fields capture hard dependencies: "this RFD
 cannot be Accepted (or Implemented) until that one is."
-They are maintained by `just rfd-require`.
+They are maintained by `jp rfd require`.
 
 `Requires` exists only to gate promotion on an unbuilt dependency.
 Once a target reaches `Implemented`, the dependency is satisfied for good and
@@ -401,7 +402,7 @@ Cycles in the union graph are refused at write time and by the docs build.
 implies the dependency, so listing the same target twice is redundant.
 Pick `Extends` when the relationship is design lineage; pick `Requires` when it
 is only execution prerequisite.
-The recipes refuse to write a duplicate, and the docs build refuses to publish
+`jp rfd` refuses to write a duplicate, and the docs build refuses to publish
 one.
 
 Drafts may participate in the dependency graph, but back-links from non-draft
@@ -455,7 +456,7 @@ gets its permanent number.
 ### Creating an RFD
 
 1. Create a branch for your work.
-2. Run `just rfd-draft CATEGORY Your Title` to generate the file from the
+2. Run `jp rfd draft CATEGORY Your Title` to generate the file from the
    appropriate template.
    Category is one of: `design`, `decision`, `guide`, `process`.
    The file is created under `docs/rfd/drafts/` with a `DNN` prefix (e.g.
@@ -495,51 +496,55 @@ gets its permanent number.
 - **Significant changes**: Write a new RFD that supersedes the original.
 - **Implementation complete**: Run `just rfd-promote NNN` to advance the status
   to **Implemented**.
-- **Design extended**: When a new RFD builds on this one, run `just rfd-extend
-  NNN MMM` to record the relationship in both documents.
+- **Design extended**: When a new RFD builds on this one, run `jp rfd extend MMM
+  NNN` (MMM extends NNN) to record the relationship in both documents.
 - **Design depended on**: When a new RFD requires this one as a hard
-  prerequisite, run `just rfd-require NNN MMM` (NNN requires MMM) to record the
+  prerequisite, run `jp rfd require NNN MMM` (NNN requires MMM) to record the
   dependency.
   The relationship gates promotion of the dependent RFD.
-- **Design superseded**: Write a new RFD, then run `just rfd-supersede NNN MMM`
-  to mark the old RFD as superseded and cross-link both documents.
-- **Idea abandoned**: Run `just rfd-abandon NNN "reason"` to mark the RFD as
+- **Design superseded**: Write a new RFD, then run `jp rfd supersede NNN MMM` to
+  mark the old RFD as superseded and cross-link both documents.
+- **Idea abandoned**: Run `jp rfd abandon NNN "reason"` to mark the RFD as
   abandoned with an explanation.
 
 ### Tooling
 
-All RFD commands are in the `rfd` group.
-Run `just --list --group rfd` to see them.
+The RFD commands are `jp rfd` subcommands, served by the `jp-rfd` command plugin
+([RFD 116]).
+Run `jp rfd --help` to see them all.
+Promotion goes through `just rfd-promote`, which runs `jp rfd promote` and, when
+it publishes a draft, archives the review and triage conversations titled after
+the draft id.
 
-| Command                         | Description                              |
-| ------------------------------- | ---------------------------------------- |
-| `just rfd-draft CATEGORY TITLE` | Create a new draft under `drafts/`.      |
-| `just rfd-promote NNN`          | Advance status. Draft → Discussion       |
-|                                 | assigns number; Discussion → Accepted    |
-|                                 | offers the tracking ticket.              |
-| `just rfd-track NNN`            | File or refresh the RFD's tracking       |
-|                                 | ticket, printing its id.                 |
-| `just rfd-start NNN`            | Mark the RFD in development: its         |
-|                                 | tracking ticket moves to In Progress.    |
-| `just rfd-stop NNN`             | Move that ticket back to Todo.           |
-| `just rfd-extend NNN MMM`       | Record that RFD MMM extends RFD NNN,     |
-|                                 | updating both. Accepts draft IDs (DNN)   |
-|                                 | on either side.                          |
-| `just rfd-require NNN MMM`      | Record that RFD NNN requires RFD MMM,    |
-|                                 | updating both. Cycles are refused.       |
-|                                 | Accepts draft IDs (DNN) on either side.  |
-| `just rfd-supersede NNN MMM`    | Mark RFD NNN as superseded by RFD MMM,   |
-|                                 | updating both.                           |
-| `just rfd-abandon NNN REASON`   | Mark RFD NNN as abandoned with the given |
-|                                 | reason.                                  |
-| `just rfd-renumber NNN [MMM]`   | Renumber an RFD (draft or published) to  |
-|                                 | `MMM`, or the next available id, and     |
-|                                 | rewrite all cross-references.            |
-| `just rfd-grep TERM`            | Search across all RFD documents using    |
-|                                 | `rg`.                                    |
-| `just rfd-list [CATEGORY]`      | List all RFDs (including DNN-prefixed    |
-|                                 | drafts), optionally filtered by          |
-|                                 | category.                                |
+| Command                       | Description                              |
+| ----------------------------- | ---------------------------------------- |
+| `jp rfd draft CATEGORY TITLE` | Create a new draft under `drafts/`.      |
+| `just rfd-promote NNN`        | Advance status. Draft → Discussion       |
+|                               | assigns number; Discussion → Accepted    |
+|                               | offers the tracking ticket.              |
+| `jp rfd track NNN`            | File or refresh the RFD's tracking       |
+|                               | ticket, printing its id.                 |
+| `jp rfd start NNN`            | Mark the RFD in development: its         |
+|                               | tracking ticket moves to In Progress.    |
+| `jp rfd stop NNN`             | Move that ticket back to Todo.           |
+| `jp rfd extend NNN MMM`       | Record that RFD NNN extends RFD MMM,     |
+|                               | updating both. Accepts draft IDs (DNN)   |
+|                               | on either side.                          |
+| `jp rfd require NNN MMM`      | Record that RFD NNN requires RFD MMM,    |
+|                               | updating both. Cycles are refused.       |
+|                               | Accepts draft IDs (DNN) on either side.  |
+| `jp rfd supersede NNN MMM`    | Mark RFD NNN as superseded by RFD MMM,   |
+|                               | updating both.                           |
+| `jp rfd abandon NNN REASON`   | Mark RFD NNN as abandoned with the given |
+|                               | reason.                                  |
+| `jp rfd renumber NNN [MMM]`   | Renumber an RFD (draft or published) to  |
+|                               | `MMM`, or the next available id, and     |
+|                               | rewrite all cross-references.            |
+| `just rfd-grep TERM`          | Search across all RFD documents using    |
+|                               | `rg`.                                    |
+| `jp rfd list [CATEGORY]`      | List RFDs in priority order, drafts      |
+|                               | included, optionally filtered by         |
+|                               | category.                                |
 
 ## Relationship to Architecture Documents
 

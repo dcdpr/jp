@@ -108,7 +108,7 @@ targets are still in Discussion or earlier; it cannot advance to \
 Implemented while any are still pre-Implementation. Cycles in the \
 union graph are refused. Don't list the same target under both \
 `Requires` and `Extends` — extension implies the dependency, so the \
-duplicate is redundant. Both recipes accept draft IDs (DNN) on \
+duplicate is redundant. Both tools accept draft IDs (DNN) on \
 either side.
 
 `fs_modify_file` is available but runs in confirmation mode — the user \

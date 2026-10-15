@@ -172,25 +172,22 @@ The shape, the key grammar, and the on-disk invariants come from [`jp_label`],
 the same `Labels` conversation labels use ([RFD 101]); the closed vocabulary
 below is the ticket board's own, declared through that crate's `Vocabulary`.
 
-The vocabulary is closed and lives in `docs/ticket/.labels.json`, next to the
-tickets and to `.board.json`.
-That file is the only source of truth for which labels exist; nothing here
+The vocabulary is closed and lives in the workspace configuration, under
+`plugins.command.ticket.options.labels` ([RFD 116]).
+That setting is the only source of truth for which labels exist; nothing here
 enumerates them.
 It declares one entry per key, with the values that key accepts:
 
-```json
-{
-  "<key>": {
-    "description": "<what the key covers>",
-    "values": ["<value>"],
-    "retired": ["<value>"]
-  }
-}
+```toml
+[plugins.command.ticket.options.labels.<key>]
+description = "<what the key covers>"
+values = ["<value>"]
+retired = ["<value>"]
 ```
 
 A closed set is the point.
 Free-text labels accumulate near-synonyms and grouping stops working.
-A write naming a key or value the file doesn't declare is refused, and the
+A write naming a key or value the vocabulary doesn't declare is refused, and the
 refusal names the ones that can be added.
 
 **Retiring is not deleting.** A retired value stays valid on a ticket that
@@ -220,12 +217,14 @@ the assistant is offered the set rather than guessing at it.
 `ticket_list` also get retired values, because replacing a whole set means
 naming a retired value to keep it, and finding what still carries one means
 filtering on it.
-The tool declarations cannot read `.labels.json` themselves, so the tokens are
-mirrored into `.jp/mcp/tools/ticket/labels.toml` by `just ticket-labels-sync`.
-The mirror is a hint rather than a contract: writes are validated against
-`.labels.json`, so a stale mirror degrades to a corrective round trip and never
-to a wrong write, and editing the vocabulary never fails a test.
-It is a stopgap, and goes when config values can reference a file directly.
+The tool declarations cannot read the vocabulary themselves, so `jp ticket tools
+sync` mirrors the tokens into a file it generates next to them,
+`.jp/mcp/tools/ticket/synced.toml` in JP.
+The mirror is a hint rather than a contract: writes are validated against the
+vocabulary, so a stale mirror degrades to a corrective round trip and never to a
+wrong write, and editing the vocabulary never fails a test.
+It is a stopgap, and goes once a plugin can describe the tools it serves ([RFD
+116]).
 
 An import never sets labels.
 The repository owns the metadata block, so an imported issue is labelled here by

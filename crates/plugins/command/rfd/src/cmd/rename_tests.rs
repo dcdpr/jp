@@ -64,7 +64,7 @@ fn a_new_title_moves_the_file_and_its_links() {
 }
 
 /// Links outside the docs tree are named, not rewritten.
-/// A link without `.md` is left as it is, the way `just rfd-rename` leaves it.
+/// A link without `.md` is left as it is.
 #[test]
 fn links_outside_the_docs_are_reported_and_links_without_md_are_kept() {
     let workspace = workspace();

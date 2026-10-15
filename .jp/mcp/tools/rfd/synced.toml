@@ -5,6 +5,14 @@
 # again after changing the categories or the tools: this file is rewritten
 # whole, and edits to it are lost.
 
+[conversation.tools.rfd_draft.parameters.category]
+enum = [
+  "design",
+  "decision",
+  "guide",
+  "process",
+]
+
 [conversation.tools.rfd_list.parameters.category]
 enum = [
   "design",

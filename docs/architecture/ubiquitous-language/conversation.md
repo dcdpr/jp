@@ -139,9 +139,9 @@ and serves as the conversation's name rather than a fact about it.
 Also not an **Attachment**, which is content added *to* a conversation.
 
 A **ticket** carries the same `Labels`, but its vocabulary is closed: a ticket
-label is checked against `docs/ticket/.labels.json`, which declares each key and
-the values it accepts, while a conversation label only has to match the key
-grammar.
+label is checked against the vocabulary configured under
+`plugins.command.ticket.options.labels`, which declares each key and the values
+it accepts, while a conversation label only has to match the key grammar.
 Closedness is a policy a consumer opts into through [`jp_label`]'s `Vocabulary`,
 not a difference in the concept.
 Where a label set is *stored* is each consumer's own business: a conversation

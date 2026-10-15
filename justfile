@@ -1729,50 +1729,6 @@ rfd-implement NNN *ARGS: _install-jp
             $args
     fi
 
-# Create a new RFD draft from its category's template. CATEGORY is 'design',
-# 'decision', 'guide', or 'process'.
-#
-# Drafts are created as docs/rfd/drafts/DNN-slug.md; a permanent number is
-# assigned and the file is moved up to docs/rfd/ at Discussion.
-[group('rfd')]
-rfd-draft CATEGORY +TITLE: _install-rfd
-    @jp rfd draft {{quote(CATEGORY)}} {{quote(TITLE)}}
-
-# Supersede RFD NNN with RFD MMM, updating both documents.
-#
-# Only an Accepted or Implemented RFD can be superseded. The superseded RFD
-# leaves the priority board; whether MMM belongs on it is a call for whoever
-# reorders it.
-[group('rfd')]
-rfd-supersede NNN MMM: _install-rfd
-    @jp rfd supersede {{quote(NNN)}} {{quote(MMM)}}
-
-# Record that RFD MMM extends RFD NNN, updating both documents.
-#
-# Both NNN and MMM may be permanent numbers (e.g. 042) or draft IDs (e.g. D05).
-# A published RFD never receives an `Extended by: RFD D«nn»` back-link from a
-# draft; the draft is linked when it is promoted.
-#
-# This recipe takes the extended RFD first; `jp rfd extend` takes the extending
-# one first, the same order as `rfd-require`.
-[group('rfd')]
-rfd-extend NNN MMM: _install-rfd
-    @jp rfd extend {{quote(MMM)}} {{quote(NNN)}}
-
-# Record that RFD NNN requires RFD MMM, updating both documents.
-#
-# Both NNN and MMM may be permanent numbers (e.g. 042) or draft IDs (e.g. D05).
-# A published RFD never receives a `Required by: RFD D«nn»` back-link from a
-# draft; the draft is linked when it is promoted.
-#
-# `Requires` participates in the promotion gate enforced by `rfd-promote`:
-# Discussion → Accepted requires every dependency to be Accepted, Implemented
-# or Superseded; Accepted → Implemented requires every dependency to be
-# Implemented or Superseded.
-[group('rfd')]
-rfd-require NNN MMM: _install-rfd
-    @jp rfd require {{quote(NNN)}} {{quote(MMM)}}
-
 # Advance an RFD's status: Draft -> Discussion -> Accepted -> Implemented.
 #
 # `jp rfd promote` does the promotion: a draft gets the next permanent number
@@ -1809,78 +1765,6 @@ rfd-promote NNN: _install-jp _install-rfd
         done
     fi
 
-# File or refresh an RFD's tracking ticket, printing its id on stdout.
-#
-# The tracking ticket stands for the RFD's implementation as a whole: one ticket
-# carrying `Implements: NNN` and the label `type=tracking`, holding the
-# Implementation Plan as its description. A phase that needs its own card is
-# filed separately and carries `Implements: NNN` without the label.
-#
-# Idempotent: an existing tracking ticket is reused, never duplicated. Reading
-# the plan needs a provider, so a run without one files the ticket with a
-# `<!-- rfd-plan: pending -->` marker in place of the plan, and the next run
-# fills it in.
-#
-# Only Accepted and Implemented RFDs carry a tracking ticket; anything earlier
-# is refused.
-[group('rfd')]
-rfd-track NNN: _install-jp _install-rfd
-    @jp rfd track {{quote(NNN)}}
-
-# Mark an RFD as in development.
-#
-# Files the RFD's tracking ticket if it has none, then moves that ticket to In
-# Progress, which is what the priority board reports as "in development". The
-# board's checkbox runs the same `jp rfd start`, so the first mark on an RFD
-# takes as long as reading its plan (see `rfd-track`).
-[group('rfd')]
-rfd-start NNN: _install-jp _install-rfd
-    @jp rfd start {{quote(NNN)}}
-
-# Mark an RFD as no longer in development.
-#
-# Moves the RFD's tracking ticket back to Todo, at any status of the RFD. Phase
-# tickets are left where they are, and an RFD without a tracking ticket is
-# already not in development, so nothing is filed.
-[group('rfd')]
-rfd-stop NNN: _install-jp _install-rfd
-    @jp rfd stop {{quote(NNN)}}
-
-# Renumber an RFD to a new id, updating every cross-reference.
-#
-# NNN is the RFD to renumber: a permanent number (95, 095), a draft ID (D24),
-# or a file name (`DNN-slug.md` or `NNN-slug.md`, with or without a directory
-# prefix and with `.md` optional). A file name is how to pick between two
-# documents that share an id after a branch merge, which a bare id refuses to
-# resolve.
-# MMM is the target id and must live in the same id-space as NNN (drafts
-# renumber to another draft slot, published RFDs to another permanent number;
-# moving between spaces is `rfd-promote`'s job). When MMM is omitted, the next
-# available id in that space is used. The scan only sees local files, so a
-# number taken on another branch must be avoided by passing MMM explicitly.
-#
-# References in the RFDs and the tickets are rewritten; references elsewhere
-# are reported but not rewritten. Renumbering a published RFD changes its site
-# URL.
-[group('rfd')]
-rfd-renumber NNN MMM="": _install-rfd
-    @jp rfd renumber {{quote(NNN)}} {{ if MMM == "" { "" } else { quote(MMM) } }}
-
-# Retitle an RFD, renaming its file to match.
-#
-# NNN is the RFD to retitle: a permanent number (95, 095) or a draft ID (D24).
-# TITLE is the new title, taken as the rest of the command line.
-#
-# Rewrites the document heading and moves the file to the slug the new title
-# produces. The id is kept, so `RFD <id>` mentions stay correct; `<id>-slug.md`
-# link targets under `docs/` are rewritten, and matches outside `docs/` are
-# reported but not rewritten.
-#
-# Retitling a published RFD changes its site URL.
-[group('rfd')]
-rfd-rename NNN +TITLE: _install-rfd
-    @jp rfd rename {{quote(NNN)}} {{quote(TITLE)}}
-
 # Internal: drop RFD ids from the priority board.
 #
 # IDS are canonical ids (`045`, `D12`), space-separated. Each is removed from
@@ -1907,8 +1791,8 @@ _rfd-priority-remove +IDS:
 #
 # The board ranks work that is still open, so an Implemented, Superseded, or
 # Abandoned RFD has no place on it and the docs build rejects one that lingers.
-# `rfd-promote`, `rfd-abandon`, and `rfd-supersede` prune the id as they change
-# the status; this recipe is the repair path for a status edited by hand.
+# `jp rfd promote`, `abandon`, and `supersede` prune the id as they change the
+# status; this recipe is the repair path for a status edited by hand.
 [group('rfd')]
 rfd-board-prune:
     #!/usr/bin/env sh
@@ -1950,32 +1834,10 @@ rfd-board-prune:
     just _rfd-priority-remove $stale
     echo "Pruned from the priority board:${stale}"
 
-# Mark an RFD as abandoned with the given reason.
-#
-# Accepts: a permanent number (41, 041) or a draft ID (D01). A draft the author
-# has decided not to pursue can be abandoned when the rationale is worth keeping
-# as a record, or simply deleted when it isn't (see RFD 001).
-[group('rfd')]
-rfd-abandon NNN +REASON: _install-rfd
-    @jp rfd abandon {{quote(NNN)}} {{quote(REASON)}}
-
 # Search across all RFD documents.
 [group('rfd')]
 rfd-grep +ARGS:
     @rg {{ARGS}} docs/rfd/
-
-# List RFDs in priority order, optionally filtered by category.
-#
-# Usage:
-#   just rfd-list                 # planned RFDs, in priority order (default)
-#   just rfd-list --backlog       # the unranked backlog instead
-#   just rfd-list --all           # planned + backlog + terminal/implemented
-#   just rfd-list --full          # add summaries and dependencies
-#   just rfd-list design          # filter to the "design" category
-#   just rfd-list --json          # every entry, tagged, for `jq` etc.
-[group('rfd')]
-rfd-list *ARGS: _install-rfd
-    @jp rfd list {{ARGS}}
 
 # File a ticket. KIND is 'bug', 'feature', or 'chore'.
 #
@@ -2134,20 +1996,6 @@ ticket-import NNN *ARGS: _install-ticket
 
     shift # remove NNN from positional params
     jp ticket import {{quote(NNN)}} --repo dcdpr/jp "$@"
-
-# Promote a ticket to an RFD draft. CATEGORY is 'design' (default), 'decision',
-# 'guide', or 'process'.
-#
-# A ticket whose discussion turned into a design question becomes an RFD: the
-# draft is seeded from the ticket's title and description, and the ticket closes
-# as Done with `Promoted to` naming the draft. The work item is finished; the
-# work moved.
-#
-# Idempotent: a ticket that already names an existing draft reports it and stops,
-# so a run that failed partway can simply be repeated.
-[group('ticket')]
-ticket-promote NNN CATEGORY="design": _install-rfd
-    @jp rfd draft {{quote(CATEGORY)}} --from-ticket {{quote(NNN)}}
 
 # Give a ticket a fresh id, after CI reports two files claiming one.
 #
@@ -2974,7 +2822,7 @@ _rfd-resolve NNN:
         echo "Ambiguous: ${2} files share ID ${1}:" >&2
         printf '%s\n' "$3" | sed 's/^/  /' >&2
         echo "Renumber or remove one before continuing; a rewrite keyed on" >&2
-        echo "${1} would corrupt the others. \`just rfd-renumber\` takes a file" >&2
+        echo "${1} would corrupt the others. \`jp rfd renumber\` takes a file" >&2
         echo "name in place of an id, to say which of them moves." >&2
         exit 1
     }
