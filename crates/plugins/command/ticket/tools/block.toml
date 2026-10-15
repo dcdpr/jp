@@ -1,0 +1,47 @@
+[conversation.tools.ticket_block]
+source = "plugin.command.ticket.block"
+summary = "Record what a ticket is waiting on, or clear it."
+description = """
+Set a ticket's `Blocked by` field: another ticket's id, or a few words naming
+what has to happen first. A blocked ticket stays in its column; the board shows
+the blocker next to it.
+
+Pass `clear: true` instead of `blocker` once the ticket no longer waits.
+"""
+
+examples = """
+Blocked by another ticket:
+```json
+{"id": "T-02wt0kx", "blocker": "T-02wt0m3"}
+```
+
+Blocked on something outside the board:
+```json
+{"id": "T-02wt0kx", "blocker": "the upstream release"}
+```
+
+No longer blocked:
+```json
+{"id": "T-02wt0kx", "clear": true}
+```
+"""
+
+[conversation.tools.ticket_block.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.ticket_block.parameters.id]
+type = "string"
+required = true
+summary = "The ticket that waits: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`."
+
+[conversation.tools.ticket_block.parameters.blocker]
+type = "string"
+required = false
+summary = "What it waits on: a ticket id, or a few words on one line."
+
+[conversation.tools.ticket_block.parameters.clear]
+type = "boolean"
+required = false
+summary = "Remove what it waits on. Pass this instead of `blocker`."

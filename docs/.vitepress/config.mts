@@ -388,13 +388,19 @@ const ticketWriter = {
                         args = ['add', text(parsed.kind), text(parsed.title),
                             ...flag('--body', parsed.body)]
                         break
-                    case 'edit':
+                    case 'edit': {
+                        // A title is set by `rename`, which also moves the
+                        // file to the new slug; the rest is one `edit`.
+                        if (text(parsed.title)) {
+                            const renamed = await run(['rename', text(parsed.id), text(parsed.title)])
+                            if (!renamed.ok) return json(res, 500, renamed)
+                        }
                         args = ['edit', text(parsed.id),
-                            ...flag('--title', parsed.title),
                             ...flag('--body', parsed.body),
                             ...flag('--kind', parsed.kind),
                             ...flag('--status', parsed.status)]
                         break
+                    }
                     case 'delete':
                         args = ['delete', text(parsed.id)]
                         break

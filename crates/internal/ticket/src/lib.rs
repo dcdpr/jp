@@ -31,8 +31,9 @@
 //!
 //! [`id`] defines the identifier, [`parse`] reads a document, [`render`] writes
 //! one, [`store`] holds the file operations (id allocation, create, comment,
-//! close, list, import), and [`import`] carries the rules for content that
-//! comes from upstream.
+//! close, list, import), [`board`] holds the order within each column of the
+//! board, and [`import`] carries the rules for content that comes from
+//! upstream.
 //!
 //! Labels are `key=value` annotations from [`jp_label`]; the board's vocabulary
 //! lives in `.labels.json` next to the ticket files and is read by
@@ -47,6 +48,7 @@ use std::{fmt, str::FromStr};
 
 use serde::Serialize;
 
+pub mod board;
 pub mod id;
 pub mod import;
 pub mod parse;

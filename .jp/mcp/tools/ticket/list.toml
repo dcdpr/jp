@@ -1,7 +1,6 @@
 [conversation.tools.ticket_list]
 enable = false
-source = "local"
-command = "just serve-tools {{context}} {{tool}}"
+source = "plugin.command.ticket.list"
 summary = "List the tickets in the repository, ordered by id."
 description = """
 One line per ticket: id, status, kind, title, labels, and comment count.
@@ -70,7 +69,7 @@ Retired values are accepted here, which is how you find the tickets still
 carrying one.
 """
 
-# The accepted values live in `labels.toml`, generated from
-# `docs/ticket/.labels.json` by `just ticket-labels-sync`.
+# The accepted values live in `synced.toml`, generated from
+# `docs/ticket/.labels.json` by `jp ticket tools sync .jp/mcp/tools/ticket`.
 [conversation.tools.ticket_list.parameters.labels.items]
 type = "string"

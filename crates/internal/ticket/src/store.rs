@@ -73,6 +73,19 @@ pub enum Error {
     Labels(vocabulary::Error),
     /// A write named labels the board won't accept.
     Rejected(jp_label::Rejected),
+    /// A ticket file that is there but isn't a well-formed ticket.
+    Malformed { id: TicketId, error: ParseError },
+    /// The board's order file can't be read as one.
+    Board { path: Utf8PathBuf, reason: String },
+    /// A ticket was ranked against itself.
+    SameTicket(TicketId),
+    /// Two tickets ranked against each other sit in different columns.
+    OtherColumn {
+        id: TicketId,
+        status: Status,
+        other: TicketId,
+        other_status: Status,
+    },
     /// The filesystem said no.
     Io(io::Error),
 }
@@ -107,6 +120,19 @@ impl fmt::Display for Error {
             ),
             Self::Labels(error) => error.fmt(f),
             Self::Rejected(error) => error.fmt(f),
+            Self::Malformed { id, error } => write!(f, "{id} is not a well-formed ticket: {error}"),
+            Self::Board { path, reason } => write!(f, "{path} is not a board order: {reason}."),
+            Self::SameTicket(id) => write!(f, "{id} can't be ranked against itself."),
+            Self::OtherColumn {
+                id,
+                status,
+                other,
+                other_status,
+            } => write!(
+                f,
+                "{id} is {status} and {other} is {other_status}; a ticket is ranked within its \
+                 own column."
+            ),
             Self::Io(error) => error.fmt(f),
         }
     }
@@ -115,7 +141,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Parse(error) => Some(error),
+            Self::Parse(error) | Self::Malformed { error, .. } => Some(error),
             Self::Labels(error) => Some(error),
             Self::Rejected(error) => Some(error),
             Self::Io(error) => Some(error),
@@ -447,15 +473,65 @@ pub fn import(dir: &Utf8Path, upstream: &Import<'_>) -> Result<Imported> {
 
 /// Mark a ticket as `Done`, returning its path and the status it held before.
 pub fn close(dir: &Utf8Path, id: TicketId) -> Result<(Utf8PathBuf, Status)> {
+    set_status(dir, id, Status::Done)
+}
+
+/// Move a ticket to the column `status` names, returning its path and the
+/// status it held before.
+///
+/// Its place within the new column is the board's: a ticket the board file
+/// doesn't rank there sorts below those it does.
+pub fn set_status(dir: &Utf8Path, id: TicketId, status: Status) -> Result<(Utf8PathBuf, Status)> {
     let path = locate(dir, id)?;
     let source = fs::read_to_string(&path)?;
     let previous = parse::document(&source)?.metadata.status;
 
-    if previous != Status::Done {
+    if previous != status {
         // The status line is required, and `parse::document` above rejected any
         // ticket that lacks one.
-        let updated = render::set_metadata(&source, "Status", &Status::Done.to_string())
+        let updated = render::set_metadata(&source, "Status", &status.to_string())
             .ok_or(ParseError::MissingField("Status"))?;
+        fs::write(&path, updated)?;
+    }
+
+    Ok((path, previous))
+}
+
+/// The metadata key naming what a ticket waits on.
+const BLOCKED_BY: &str = "Blocked by";
+
+/// Record what a ticket is waiting on, or clear it with `None`, returning its
+/// path and what it waited on before.
+///
+/// The blocker is another ticket's id or free text, and is written on one
+/// metadata line, so one that is blank or spans lines is refused.
+pub fn set_blocked_by(
+    dir: &Utf8Path,
+    id: TicketId,
+    blocker: Option<&str>,
+) -> Result<(Utf8PathBuf, Option<String>)> {
+    let blocker = blocker.map(str::trim);
+    if let Some(value) = blocker
+        && (value.is_empty() || value.chars().any(char::is_control))
+    {
+        return Err(ParseError::InvalidValue {
+            field: BLOCKED_BY,
+            value: value.to_owned(),
+        }
+        .into());
+    }
+
+    let path = locate(dir, id)?;
+    let source = fs::read_to_string(&path)?;
+    let previous = parse::document(&source)?.metadata.blocked_by;
+
+    let updated = match blocker {
+        Some(blocker) => render::set_metadata(&source, BLOCKED_BY, blocker),
+        None => render::remove_metadata(&source, BLOCKED_BY),
+    }
+    .ok_or(ParseError::MissingMetadata)?;
+
+    if updated != source {
         fs::write(&path, updated)?;
     }
 

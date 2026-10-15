@@ -1,0 +1,83 @@
+[conversation.tools.ticket_create]
+source = "plugin.command.ticket.create"
+summary = "File a work item as a ticket."
+description = """
+Create a ticket: a bug, a feature, or a chore, recorded as a markdown file in
+the repository and tracked on the board.
+
+Write a ticket when the work is clear enough to start, and a design document
+when it needs a decision first.
+
+The ticket opens at status `Todo`, draws a collision-resistant id, and is
+attributed to you. The title becomes the filename slug, so keep it short and
+specific: at most 60 characters, or the tool asks you for a shorter one before
+it files anything.
+"""
+
+examples = """
+File a bug with a description:
+```json
+{"kind": "bug", "title": "Tool call header misaligned", "body": "The header \
+renders one column left of the body when the terminal is narrower than 80 \
+columns."}
+```
+
+File a chore with no description:
+```json
+{"kind": "chore", "title": "Bump the deny list"}
+```
+"""
+
+# The tool previews the ticket it is about to write, and the preview has no side
+# effects, so it is drawn before the call is put to the user.
+format = "allow"
+
+# A title past the limit is put back as a question rather than an error, so the
+# ticket is retitled without the body being sent a second time. The assistant
+# wrote the title, so the assistant shortens it.
+questions.shorter_title.target = "assistant"
+
+[conversation.tools.ticket_create.style]
+parameters = "tool"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.ticket_create.parameters.kind]
+type = "string"
+required = true
+enum = ["bug", "feature", "chore"]
+summary = "What kind of work the ticket describes."
+
+[conversation.tools.ticket_create.parameters.title]
+type = "string"
+required = true
+summary = "One-line summary of the work, at most 60 characters. Becomes the heading and the filename slug."
+
+[conversation.tools.ticket_create.parameters.body]
+type = "string"
+required = false
+summary = "The description, as markdown. Omit for a ticket whose title says everything."
+
+[conversation.tools.ticket_create.parameters.implements]
+type = "string"
+required = false
+summary = "The design document this work comes from, e.g. `045`."
+
+[conversation.tools.ticket_create.parameters.labels]
+type = "array"
+required = false
+summary = "The areas of the system this ticket touches, as `key=value`."
+description = """
+Labels group tickets by area, orthogonally to `kind`: `kind` says what type of
+work it is, a label says what part of the system it lands in. Apply every label
+that fits, or none when nothing does.
+
+Each label is a `key=value` pair, and a key may be named more than once.
+
+The set is closed and defined by the board's vocabulary. A label outside it is
+refused, and the refusal names the ones you can use.
+"""
+
+# The accepted values are mirrored from the vocabulary by `jp ticket tools sync`.
+[conversation.tools.ticket_create.parameters.labels.items]
+type = "string"

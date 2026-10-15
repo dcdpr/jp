@@ -1,7 +1,6 @@
 [conversation.tools.ticket_rename]
 enable = false
-source = "local"
-command = "just serve-tools {{context}} {{tool}}"
+source = "plugin.command.ticket.rename"
 summary = "Give a ticket a new title, moving its file to match."
 description = """
 Rewrite a ticket's heading and rename its file to the slug the new title

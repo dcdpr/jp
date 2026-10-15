@@ -1,8 +1,7 @@
 [conversation.tools.ticket_comment]
 enable = false
-source = "local"
+source = "plugin.command.ticket.comment"
 format = "unattended"
-command = "just serve-tools {{context}} {{tool}}"
 summary = "Append a comment to a ticket."
 description = """
 Add a comment to a ticket's discussion, attributed to you (`jp`).
@@ -29,7 +28,7 @@ Reply to the first comment:
 """
 
 [conversation.tools.ticket_comment.style]
-parameters = "just serve-tools {{context}} {{tool}}"
+parameters = "tool"
 inline_results = "full"
 results_file_link = "off"
 

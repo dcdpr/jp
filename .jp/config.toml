@@ -29,9 +29,15 @@ arguments = [
 
 # `jp ticket` is served by a plugin in this repository, installed with
 # `just _install-ticket` and found on $PATH. It is deliberately absent from the
-# published registry, so approve it here rather than on every invocation.
+# published registry, so approve it here rather than on every invocation. The
+# binary is rebuilt often, and an approval is pinned to its contents.
 [plugins.command.ticket]
-run = "unattended"
+run = "allow"
+
+# Tickets and comments the assistant files through the `ticket_*` tools are
+# attributed to `jp`.
+[plugins.command.ticket.options]
+assistant = "jp"
 
 [providers.llm.aliases]
 # Anthropic aliases

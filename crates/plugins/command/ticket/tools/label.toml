@@ -1,0 +1,51 @@
+[conversation.tools.ticket_label]
+source = "plugin.command.ticket.label"
+summary = "Replace the labels on a ticket."
+description = """
+Set the areas of the system a ticket touches.
+
+Each label is a `key=value` pair, and a key may be named more than once.
+
+The whole set is written: pass every label the ticket should end up with, not
+just the new ones. An empty list clears them. Read the ticket first with
+`ticket_show` if you mean to keep the labels it already carries.
+
+The set is closed and defined by the board's vocabulary. A label outside it is
+refused, and the refusal names the ones you can use.
+
+A value the board has retired stays valid on a ticket that already carries it,
+so listing it again keeps it. It cannot be added to a ticket that doesn't have
+it, which is why the accepted values here include retired ones and
+`ticket_create`'s do not.
+"""
+
+examples = """
+Label a ticket, naming one key twice:
+```json
+{"id": "T-02wt0kx", "labels": ["area=cli", "area=config"]}
+```
+
+Clear every label:
+```json
+{"id": "T-02wt0kx", "labels": []}
+```
+"""
+
+[conversation.tools.ticket_label.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.ticket_label.parameters.id]
+type = "string"
+required = true
+summary = "Ticket id, e.g. `T-02wt0kx`."
+
+[conversation.tools.ticket_label.parameters.labels]
+type = "array"
+required = true
+summary = "Every `key=value` label the ticket should carry. An empty list clears them."
+
+# The accepted values are mirrored from the vocabulary by `jp ticket tools sync`.
+[conversation.tools.ticket_label.parameters.labels.items]
+type = "string"

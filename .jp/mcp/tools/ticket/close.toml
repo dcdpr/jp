@@ -1,7 +1,6 @@
 [conversation.tools.ticket_close]
 enable = false
-source = "local"
-command = "just serve-tools {{context}} {{tool}}"
+source = "plugin.command.ticket.close"
 summary = "Mark a ticket as Done."
 description = """
 Move a ticket to `Done`, taking it off the active board.

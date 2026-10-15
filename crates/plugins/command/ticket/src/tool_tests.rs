@@ -1,7 +1,6 @@
-use std::path::PathBuf;
-
 use camino_tempfile::Utf8TempDir;
-use jp_tool::{Action, Outcome};
+use jp_plugin::message::{OutputFormat, PathsInfo, WorkspaceInfo};
+use jp_tool::FsRule;
 use serde_json::json;
 
 use super::*;
@@ -12,58 +11,83 @@ const STAMP: &str = "2026-08-05T14:03:11Z";
 /// A ticket id the tests can name, since allocation draws unpredictable ones.
 const FIXED_ID: &str = "T-02wt0kx";
 
-/// The directory holding this module's tool declarations.
-fn declarations() -> PathBuf {
-    PathBuf::from("../../../.jp/mcp/tools/ticket")
+/// The workspace a call runs in, as the host describes it in `init`.
+fn init(root: &Utf8TempDir) -> InitMessage {
+    InitMessage {
+        version: jp_plugin::PROTOCOL_VERSION,
+        workspace: WorkspaceInfo {
+            root: root.path().to_path_buf(),
+            storage: root.path().join(".jp"),
+            id: "test".to_owned(),
+        },
+        paths: PathsInfo::default(),
+        config: json!({}),
+        options: Map::new(),
+        args: vec![],
+        log_level: 0,
+        output_format: OutputFormat::Text,
+        tool: None,
+    }
 }
 
-fn declaration(file: &str) -> toml::Value {
-    let path = declarations().join(file);
-    let content = std::fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
-
-    toml::from_str(&content).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+fn object(value: Value) -> Map<String, Value> {
+    match value {
+        Value::Object(map) => map,
+        _ => Map::new(),
+    }
 }
 
-fn advertised(file: &str, tool: &str, parameter: &str) -> Vec<String> {
-    enum_values(
-        &declaration(file)["conversation"]["tools"][tool]["parameters"][parameter],
-        &format!("{tool}.{parameter}"),
-    )
+/// The plugin's defaults, with the assistant named `jp` so the expected
+/// documents read like JP's own tickets.
+fn options() -> Options {
+    Options {
+        assistant: "jp".to_owned(),
+        ..Options::default()
+    }
 }
 
-fn enum_values(schema: &toml::Value, what: &str) -> Vec<String> {
-    schema["enum"]
-        .as_array()
-        .unwrap_or_else(|| panic!("{what} has no enum"))
-        .iter()
-        .map(|value| value.as_str().expect("string variant").to_owned())
-        .collect()
+/// Run one call the way the host does: the action, the arguments, the answers
+/// so far, and the tool's own options.
+fn dispatch(
+    dir: &Utf8TempDir,
+    action: ToolAction,
+    name: &str,
+    arguments: Value,
+    answers: Value,
+    tool_options: Value,
+) -> Outcome {
+    let call = ToolCall {
+        action,
+        name: name.to_owned(),
+        arguments: object(arguments),
+        answers: object(answers),
+        options: object(tool_options),
+        access: None,
+        conversation: "test".to_owned(),
+    };
+
+    run(&init(dir), &call, &options())
 }
 
-/// Drive a tool through the public `run` entry point, exercising argument
-/// parsing and dispatch.
-fn run_tool(dir: &Utf8TempDir, name: &str, args: Value) -> ToolResult {
-    dispatch(dir, Action::Run, name, args, json!({}), json!({}))
+fn run_tool(dir: &Utf8TempDir, name: &str, args: Value) -> Outcome {
+    dispatch(dir, ToolAction::Run, name, args, json!({}), json!({}))
 }
 
-/// Drive a tool the way JP re-executes it once a question has been answered.
-fn run_tool_with_answers(dir: &Utf8TempDir, name: &str, args: Value, answers: Value) -> ToolResult {
-    dispatch(dir, Action::Run, name, args, answers, json!({}))
+/// Run a tool the way JP runs it again once a question has been answered.
+fn run_tool_with_answers(dir: &Utf8TempDir, name: &str, args: Value, answers: Value) -> Outcome {
+    dispatch(dir, ToolAction::Run, name, args, answers, json!({}))
 }
 
-/// Drive a tool with the declaration-level options JP passes alongside the
-/// arguments.
-fn run_tool_with_options(dir: &Utf8TempDir, name: &str, args: Value, options: Value) -> ToolResult {
-    dispatch(dir, Action::Run, name, args, json!({}), options)
+/// Run a tool with the options its definition passes alongside the arguments.
+fn run_tool_with_options(dir: &Utf8TempDir, name: &str, args: Value, options: Value) -> Outcome {
+    dispatch(dir, ToolAction::Run, name, args, json!({}), options)
 }
 
-/// Drive a tool through the argument-formatting path JP takes before asking for
-/// approval.
-fn preview_tool(dir: &Utf8TempDir, name: &str, args: Value) -> ToolResult {
+/// Ask a tool to describe a call, as JP does before asking for approval.
+fn preview_tool(dir: &Utf8TempDir, name: &str, args: Value) -> Outcome {
     dispatch(
         dir,
-        Action::FormatArguments,
+        ToolAction::FormatArguments,
         name,
         args,
         json!({}),
@@ -71,44 +95,32 @@ fn preview_tool(dir: &Utf8TempDir, name: &str, args: Value) -> ToolResult {
     )
 }
 
-fn dispatch(
-    dir: &Utf8TempDir,
-    action: Action,
-    name: &str,
-    args: Value,
-    answers: Value,
-    options: Value,
-) -> ToolResult {
-    let ctx = Context {
-        root: dir.path().to_path_buf(),
-        action,
-        access: None,
-        workspace_id: "test".into(),
-        conversation_id: "test".into(),
-    };
-    let arguments = match args {
-        Value::Object(map) => map,
-        _ => serde_json::Map::new(),
-    };
-    let answers = match answers {
-        Value::Object(map) => map,
-        _ => serde_json::Map::new(),
-    };
-    let options = match options {
-        Value::Object(map) => map,
-        _ => serde_json::Map::new(),
+/// Run a call carrying an access policy.
+fn run_with_access(dir: &Utf8TempDir, name: &str, args: Value, access: &AccessPolicy) -> Outcome {
+    let call = ToolCall {
+        action: ToolAction::Run,
+        name: name.to_owned(),
+        arguments: object(args),
+        answers: Map::new(),
+        options: Map::new(),
+        access: Some(serde_json::to_value(access).unwrap()),
+        conversation: "test".to_owned(),
     };
 
-    run(ctx, Tool {
-        name: name.to_owned(),
-        arguments,
-        answers,
-        options,
-    })
+    run(&init(dir), &call, &options())
 }
 
-fn content(result: ToolResult) -> String {
-    match result.expect("tool result") {
+/// The ticket directory of a test workspace, for calling helpers directly.
+fn tickets(dir: &Utf8TempDir) -> Tickets<'_> {
+    Tickets {
+        root: dir.path(),
+        dir: dir.path().join(store::DEFAULT_DIR),
+        author: "jp",
+    }
+}
+
+fn content(outcome: Outcome) -> String {
+    match outcome {
         Outcome::Success { content } => content,
         other => panic!("expected success, got: {other:?}"),
     }
@@ -120,15 +132,15 @@ fn strip_ansi(rendered: String) -> String {
     String::from_utf8(bytes).expect("valid utf-8 after stripping ANSI")
 }
 
-fn error_message(result: ToolResult) -> String {
-    match result.expect("tool result") {
+fn error_message(outcome: Outcome) -> String {
+    match outcome {
         Outcome::Error { message, .. } => message,
         other => panic!("expected error, got: {other:?}"),
     }
 }
 
-fn question(result: ToolResult) -> Question {
-    match result.expect("tool result") {
+fn question(outcome: Outcome) -> Question {
+    match outcome {
         Outcome::NeedsInput { question } => question,
         other => panic!("expected a question, got: {other:?}"),
     }
@@ -137,7 +149,7 @@ fn question(result: ToolResult) -> Question {
 fn create_ticket(dir: &Utf8TempDir, title: &str) -> String {
     content(run_tool(
         dir,
-        "ticket_create",
+        "create",
         json!({
             "kind": "bug",
             "title": title,
@@ -151,7 +163,7 @@ fn draft<'a>(title: &'a str, labels: &'a Labels) -> NewTicket<'a> {
     NewTicket {
         kind: Kind::Bug,
         title,
-        authors: HANDLE,
+        authors: "jp",
         date: DATE,
         implements: None,
         labels,
@@ -164,8 +176,8 @@ fn draft<'a>(title: &'a str, labels: &'a Labels) -> NewTicket<'a> {
 fn write_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
     let id: TicketId = FIXED_ID.parse().unwrap();
     let tickets = dir.path().join(store::DEFAULT_DIR);
-    std::fs::create_dir_all(&tickets).unwrap();
-    std::fs::write(
+    fs::create_dir_all(&tickets).unwrap();
+    fs::write(
         tickets.join(format!("{}slug.md", id.file_prefix())),
         render::ticket(&draft(title, &Labels::default())),
     )
@@ -177,9 +189,9 @@ fn write_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
 /// Give a board a vocabulary, so label writes have something to check against.
 fn write_vocabulary(dir: &Utf8TempDir) {
     let tickets = dir.path().join(store::DEFAULT_DIR);
-    std::fs::create_dir_all(&tickets).unwrap();
-    std::fs::write(
-        tickets.join(::ticket::LABELS_FILE),
+    fs::create_dir_all(&tickets).unwrap();
+    fs::write(
+        tickets.join(LABELS_FILE),
         r#"{
             "client": {"description": "The client.", "values": ["cli", "macos"]},
             "package": {
@@ -216,16 +228,52 @@ fn create_reports_the_id_and_a_workspace_relative_path() {
     assert!(dir.path().join(&path).exists());
 }
 
+/// The ticket directory and the author come from the plugin's options, which
+/// the host resolves for the query making the call.
+#[test]
+fn create_writes_where_the_options_say_and_as_whom() {
+    let dir = Utf8TempDir::new().unwrap();
+    let call = ToolCall {
+        action: ToolAction::Run,
+        name: "create".to_owned(),
+        arguments: object(json!({ "kind": "chore", "title": "Bump the deny list" })),
+        answers: Map::new(),
+        options: Map::new(),
+        access: None,
+        conversation: "test".to_owned(),
+    };
+    let options = Options {
+        dir: Utf8PathBuf::from("work/items"),
+        assistant: "helper".to_owned(),
+        ..Options::default()
+    };
+
+    let out = content(run(&init(&dir), &call, &options));
+
+    let entries = store::list(&dir.path().join("work/items")).unwrap();
+    let [entry] = entries.as_slice() else {
+        panic!("expected one ticket, got {entries:?}");
+    };
+    assert_eq!(
+        out,
+        format!(
+            "Created {} at work/items/{}",
+            entry.id,
+            entry.path.file_name().unwrap()
+        )
+    );
+    let ticket = entry.ticket.as_ref().unwrap();
+    assert_eq!(ticket.metadata.authors, "helper");
+}
+
 #[test]
 fn create_preview_renders_the_file_that_will_be_written() {
-    let out = strip_ansi(preview_create(
-        Kind::Bug,
-        "Tool call header misaligned",
-        Some("045"),
-        &Labels::default(),
-        Some("The header renders one column left of the body."),
-        DATE,
-    ));
+    let labels = Labels::default();
+    let mut new = draft("Tool call header misaligned", &labels);
+    new.implements = Some("045");
+    new.description = "The header renders one column left of the body.";
+
+    let out = strip_ansi(preview_create(&new));
 
     // The preview is quoted, so the rail shows where the ticket ends and the
     // conversation resumes. Written line by line because the blank lines carry
@@ -255,7 +303,7 @@ fn create_preview_asks_before_drawing_a_title_that_will_change() {
 
     let question = question(preview_tool(
         &dir,
-        "ticket_create",
+        "create",
         json!({
             "kind": "chore",
             "title": "Make provider fixtures deterministic and sanitize recorded model output",
@@ -274,8 +322,8 @@ fn create_preview_draws_the_answered_title() {
 
     let out = strip_ansi(content(dispatch(
         &dir,
-        Action::FormatArguments,
-        "ticket_create",
+        ToolAction::FormatArguments,
+        "create",
         json!({
             "kind": "chore",
             "title": "Make provider fixtures deterministic and sanitize recorded model output",
@@ -300,7 +348,7 @@ fn create_preview_writes_nothing() {
 
     let out = strip_ansi(content(preview_tool(
         &dir,
-        "ticket_create",
+        "create",
         json!({
             "kind": "chore",
             "title": "Bump the deny list"
@@ -314,25 +362,45 @@ fn create_preview_writes_nothing() {
     assert_eq!(ids(&dir).len(), 2);
 }
 
+/// Only `create` and `comment` describe a call themselves; a definition that
+/// styles another tool `parameters = "tool"` is told what to do instead.
+#[test]
+fn a_tool_without_a_preview_says_so() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_ticket(&dir, "Tool call header misaligned");
+
+    let message = error_message(preview_tool(&dir, "close", json!({ "id": FIXED_ID })));
+
+    assert_eq!(
+        message,
+        "`close` has no preview of its own; style its parameters as `function_call` or `json` \
+         rather than `tool`."
+    );
+    let source = fs::read_to_string(store::locate_ticket(&tickets(&dir).dir, id).unwrap()).unwrap();
+    assert!(source.contains("- **Status**: Todo"), "{source}");
+}
+
 #[test]
 fn comment_preview_renders_the_block_under_the_ticket_it_lands_on() {
     let dir = Utf8TempDir::new().unwrap();
     let id = write_ticket(&dir, "Tool call header misaligned");
     // The reply target has to exist, or the preview rejects the call.
-    run_tool(
+    content(run_tool(
         &dir,
-        "ticket_comment",
+        "comment",
         json!({ "id": FIXED_ID, "body": "Reproduced at 72 columns." }),
-    )
-    .unwrap();
+    ));
 
-    let out = strip_ansi(content(preview_comment(
-        dir.path(),
-        id,
-        Some(1),
-        "The wrap calculation is off.",
-        STAMP,
-    )));
+    let out = strip_ansi(content(
+        preview_comment(
+            &tickets(&dir),
+            id,
+            Some(1),
+            "The wrap calculation is off.",
+            STAMP,
+        )
+        .unwrap(),
+    ));
 
     assert_eq!(
         out,
@@ -357,13 +425,16 @@ fn comment_preview_renders_the_block_under_the_ticket_it_lands_on() {
 fn comment_preview_rejects_a_missing_ticket() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let out = error_message(preview_comment(
-        dir.path(),
-        FIXED_ID.parse().unwrap(),
-        None,
-        "Reproduced at 72 columns.",
-        STAMP,
-    ));
+    let out = error_message(
+        preview_comment(
+            &tickets(&dir),
+            FIXED_ID.parse().unwrap(),
+            None,
+            "Reproduced at 72 columns.",
+            STAMP,
+        )
+        .unwrap(),
+    );
 
     assert_eq!(out, "No T-02wt0kx.");
 }
@@ -375,13 +446,16 @@ fn comment_preview_rejects_a_missing_reply_target() {
     let dir = Utf8TempDir::new().unwrap();
     let id = write_ticket(&dir, "Tool call header misaligned");
 
-    let out = error_message(preview_comment(
-        dir.path(),
-        id,
-        Some(3),
-        "The wrap calculation is off.",
-        STAMP,
-    ));
+    let out = error_message(
+        preview_comment(
+            &tickets(&dir),
+            id,
+            Some(3),
+            "The wrap calculation is off.",
+            STAMP,
+        )
+        .unwrap(),
+    );
 
     assert_eq!(out, "No comment #3 on T-02wt0kx.");
 }
@@ -392,7 +466,7 @@ fn comment_preview_rejects_a_missing_reply_target() {
 fn comment_preview_reports_a_duplicated_id() {
     let dir = Utf8TempDir::new().unwrap();
     let id = write_ticket(&dir, "Tool call header misaligned");
-    std::fs::write(
+    fs::write(
         dir.path()
             .join(store::DEFAULT_DIR)
             .join(format!("{}other.md", id.file_prefix())),
@@ -401,7 +475,7 @@ fn comment_preview_reports_a_duplicated_id() {
     .unwrap();
 
     let error =
-        preview_comment(dir.path(), id, None, "Reproduced at 72 columns.", STAMP).unwrap_err();
+        preview_comment(&tickets(&dir), id, None, "Reproduced at 72 columns.", STAMP).unwrap_err();
 
     assert!(
         error
@@ -417,22 +491,18 @@ fn comment_preview_reports_a_duplicated_id() {
 fn comment_preview_tolerates_a_malformed_header() {
     let dir = Utf8TempDir::new().unwrap();
     let id: TicketId = FIXED_ID.parse().unwrap();
-    let tickets = dir.path().join(store::DEFAULT_DIR);
-    std::fs::create_dir_all(&tickets).unwrap();
-    std::fs::write(
-        tickets.join(format!("{}slug.md", id.file_prefix())),
+    let dir_path = dir.path().join(store::DEFAULT_DIR);
+    fs::create_dir_all(&dir_path).unwrap();
+    fs::write(
+        dir_path.join(format!("{}slug.md", id.file_prefix())),
         "# Tool call header misaligned\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Date**: \
          2026-08-05\n\nSomething is wrong.\n",
     )
     .unwrap();
 
-    let out = strip_ansi(content(preview_comment(
-        dir.path(),
-        id,
-        None,
-        "Reproduced at 72 columns.",
-        STAMP,
-    )));
+    let out = strip_ansi(content(
+        preview_comment(&tickets(&dir), id, None, "Reproduced at 72 columns.", STAMP).unwrap(),
+    ));
 
     assert_eq!(
         out.lines().next(),
@@ -443,7 +513,7 @@ fn comment_preview_tolerates_a_malformed_header() {
     assert_eq!(
         content(run_tool(
             &dir,
-            "ticket_comment",
+            "comment",
             json!({ "id": FIXED_ID, "body": "Reproduced at 72 columns." })
         )),
         "Added T-02wt0kx#1"
@@ -459,7 +529,7 @@ fn preview_rejects_the_arguments_execution_would_reject() {
     assert_eq!(
         error_message(preview_tool(
             &dir,
-            "ticket_create",
+            "create",
             json!({ "kind": "chore", "title": "   " })
         )),
         "`title` must not be empty."
@@ -467,7 +537,7 @@ fn preview_rejects_the_arguments_execution_would_reject() {
     assert_eq!(
         error_message(preview_tool(
             &dir,
-            "ticket_comment",
+            "comment",
             json!({ "id": FIXED_ID, "body": "  \n " })
         )),
         "`body` must not be empty."
@@ -479,19 +549,18 @@ fn preview_rejects_the_arguments_execution_would_reject() {
 #[test]
 fn create_reflows_the_body_with_comfort() {
     let dir = Utf8TempDir::new().unwrap();
-    run_tool(
+    content(run_tool(
         &dir,
-        "ticket_create",
+        "create",
         json!({
             "kind": "bug",
             "title": "Wrapping is wrong",
             "body": "The first sentence. The second one, which the model wrote on the same line."
         }),
-    )
-    .unwrap();
+    ));
 
     let id = ids(&dir)[0];
-    let source = std::fs::read_to_string(dir.path().join(format!(
+    let source = fs::read_to_string(dir.path().join(format!(
         "docs/ticket/{}wrapping-is-wrong.md",
         id.file_prefix()
     )))
@@ -511,7 +580,7 @@ fn create_rejects_an_unknown_kind() {
 
     let out = error_message(run_tool(
         &dir,
-        "ticket_create",
+        "create",
         json!({
             "kind": "task",
             "title": "Title"
@@ -527,7 +596,7 @@ fn create_rejects_an_empty_title() {
 
     let out = error_message(run_tool(
         &dir,
-        "ticket_create",
+        "create",
         json!({
             "kind": "chore",
             "title": "   "
@@ -535,6 +604,22 @@ fn create_rejects_an_empty_title() {
     ));
 
     assert_eq!(out, "`title` must not be empty.");
+}
+
+/// The host validates arguments against the schema, but a definition can mark
+/// one optional by mistake; the tool still names what it needs.
+#[test]
+fn a_missing_argument_is_named() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    assert_eq!(
+        error_message(run_tool(&dir, "create", json!({ "title": "Title" }))),
+        "Missing argument `kind`."
+    );
+    assert_eq!(
+        error_message(run_tool(&dir, "show", json!({}))),
+        "Missing argument `id`."
+    );
 }
 
 /// A title past the slug budget loses its tail in the filename, so it is put
@@ -545,7 +630,7 @@ fn create_asks_for_a_shorter_title() {
 
     let question = question(run_tool(
         &dir,
-        "ticket_create",
+        "create",
         json!({
             "kind": "chore",
             "title": "Make provider fixtures deterministic and sanitize recorded model output",
@@ -587,7 +672,7 @@ fn a_shorter_title_answer_files_the_ticket() {
 
     let out = content(run_tool_with_answers(
         &dir,
-        "ticket_create",
+        "create",
         json!({
             "kind": "chore",
             "title": "Make provider fixtures deterministic and sanitize recorded model output",
@@ -602,11 +687,7 @@ fn a_shorter_title_answer_files_the_ticket() {
     );
 
     let id = ids(&dir).pop().expect("one ticket");
-    let ticket = content(run_tool(
-        &dir,
-        "ticket_show",
-        json!({ "id": id.to_string() }),
-    ));
+    let ticket = content(run_tool(&dir, "show", json!({ "id": id.to_string() })));
     assert!(
         ticket.starts_with(&format!(
             "```markdown\n# {id}: Sanitize recorded model output in fixtures\n"
@@ -625,7 +706,7 @@ fn a_shorter_title_answer_that_still_does_not_fit_ends_the_call() {
 
     let out = error_message(run_tool_with_answers(
         &dir,
-        "ticket_create",
+        "create",
         json!({ "kind": "chore", "title": "A title that does not fit" }),
         json!({
             "shorter_title":
@@ -647,7 +728,7 @@ fn an_empty_shorter_title_answer_ends_the_call() {
 
     let out = error_message(run_tool_with_answers(
         &dir,
-        "ticket_create",
+        "create",
         json!({ "kind": "chore", "title": "A title that does not fit" }),
         json!({ "shorter_title": "  " }),
     ));
@@ -678,39 +759,12 @@ fn the_title_limit_is_configurable() {
 
     let question = question(run_tool_with_options(
         &dir,
-        "ticket_create",
+        "create",
         json!({ "kind": "chore", "title": "Bump the deny list" }),
         json!({ "max_title_length": 10 }),
     ));
 
     assert_eq!(question.text, "Shorter title, at most 10 characters?");
-}
-
-/// The declaration routes the question and advertises the limit, both by hand,
-/// so both have to be checked against what the tool does.
-#[test]
-fn create_declares_the_question_and_the_limit_it_enforces() {
-    let declaration = declaration("create.toml");
-    let tool = &declaration["conversation"]["tools"]["ticket_create"];
-
-    assert_eq!(
-        tool["questions"][SHORTER_TITLE]["target"].as_str(),
-        Some("assistant"),
-        "the retitle question is not routed to the assistant"
-    );
-
-    let limit = format!("{DEFAULT_MAX_TITLE_LENGTH} characters");
-    for field in [
-        tool["description"].as_str().expect("description"),
-        tool["parameters"]["title"]["summary"]
-            .as_str()
-            .expect("title summary"),
-    ] {
-        assert!(
-            field.contains(&limit),
-            "ticket_create does not advertise the limit `{limit}`: {field}"
-        );
-    }
 }
 
 #[test]
@@ -722,7 +776,7 @@ fn comments_are_attributed_to_the_assistant_and_numbered() {
 
     let first = content(run_tool(
         &dir,
-        "ticket_comment",
+        "comment",
         json!({
             "id": id.as_str(),
             "body": "Reproduced at 72 columns."
@@ -730,7 +784,7 @@ fn comments_are_attributed_to_the_assistant_and_numbered() {
     ));
     let second = content(run_tool(
         &dir,
-        "ticket_comment",
+        "comment",
         json!({
             "id": id.to_string(),
             "re": 1,
@@ -741,11 +795,7 @@ fn comments_are_attributed_to_the_assistant_and_numbered() {
     assert_eq!(first, format!("Added {id}#1"));
     assert_eq!(second, format!("Added {id}#2"));
 
-    let shown = content(run_tool(
-        &dir,
-        "ticket_show",
-        json!({ "id": id.to_string() }),
-    ));
+    let shown = content(run_tool(&dir, "show", json!({ "id": id.to_string() })));
     assert!(shown.contains(&format!("### {id}#1 — jp at ")), "{shown}");
     assert!(
         shown.contains(&format!("### {id}#2 — jp at "))
@@ -762,17 +812,16 @@ fn comment_reflows_the_body_with_comfort() {
     create_ticket(&dir, "Wrapping is wrong");
     let id = ids(&dir)[0];
 
-    run_tool(
+    content(run_tool(
         &dir,
-        "ticket_comment",
+        "comment",
         json!({
             "id": id.to_string(),
             "body": "The first sentence. The second one, which the model wrote on the same line."
         }),
-    )
-    .unwrap();
+    ));
 
-    let source = std::fs::read_to_string(dir.path().join(format!(
+    let source = fs::read_to_string(dir.path().join(format!(
         "docs/ticket/{}wrapping-is-wrong.md",
         id.file_prefix()
     )))
@@ -795,7 +844,7 @@ fn a_reply_to_a_missing_comment_is_reported_to_the_model() {
 
     let out = error_message(run_tool(
         &dir,
-        "ticket_comment",
+        "comment",
         json!({
             "id": id.to_string(),
             "re": 3,
@@ -811,15 +860,15 @@ fn an_unusable_id_is_reported_to_the_model() {
     let dir = Utf8TempDir::new().unwrap();
 
     assert_eq!(
-        error_message(run_tool(&dir, "ticket_close", json!({ "id": "nope" }))),
+        error_message(run_tool(&dir, "close", json!({ "id": "nope" }))),
         "`nope` is not a ticket id (try T-02wt0kx)."
     );
     assert_eq!(
-        error_message(run_tool(&dir, "ticket_close", json!({ "id": 7 }))),
+        error_message(run_tool(&dir, "close", json!({ "id": 7 }))),
         "`7` is not a ticket id."
     );
     assert_eq!(
-        error_message(run_tool(&dir, "ticket_close", json!({ "id": "T-zzzzzzz" }))),
+        error_message(run_tool(&dir, "close", json!({ "id": "T-zzzzzzz" }))),
         "No T-zzzzzzz."
     );
 }
@@ -832,20 +881,158 @@ fn close_reports_the_transition_once() {
     let id = ids(&dir)[0];
 
     assert_eq!(
+        content(run_tool(&dir, "close", json!({ "id": id.to_string() }))),
+        format!("{id}: Todo -> Done")
+    );
+    assert_eq!(
+        content(run_tool(&dir, "close", json!({ "id": id.to_string() }))),
+        format!("{id} was already Done.")
+    );
+}
+
+#[test]
+fn status_moves_a_ticket_between_columns() {
+    let dir = Utf8TempDir::new().unwrap();
+    create_ticket(&dir, "Tool call header misaligned");
+    let id = ids(&dir)[0];
+
+    assert_eq!(
         content(run_tool(
             &dir,
-            "ticket_close",
-            json!({ "id": id.to_string() })
+            "status",
+            json!({ "id": id.to_string(), "status": "in progress" })
         )),
-        format!("{id}: Todo -> Done")
+        format!("{id}: Todo -> In Progress")
     );
     assert_eq!(
         content(run_tool(
             &dir,
-            "ticket_close",
-            json!({ "id": id.to_string() })
+            "status",
+            json!({ "id": id.to_string(), "status": "in progress" })
         )),
-        format!("{id} was already Done.")
+        format!("{id} was already In Progress.")
+    );
+    assert_eq!(
+        error_message(run_tool(
+            &dir,
+            "status",
+            json!({ "id": id.to_string(), "status": "blocked" })
+        )),
+        "`status` must be one of: todo, in progress, done."
+    );
+}
+
+#[test]
+fn block_records_and_clears_what_a_ticket_waits_on() {
+    let dir = Utf8TempDir::new().unwrap();
+    create_ticket(&dir, "Tool call header misaligned");
+    let id = ids(&dir)[0];
+
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "block",
+            json!({ "id": id.to_string(), "blocker": "T-02wt0m3" })
+        )),
+        format!("{id}: blocked by T-02wt0m3")
+    );
+    let listed = content(run_tool(&dir, "list", json!({})));
+    assert!(listed.contains("[blocked by T-02wt0m3]"), "{listed}");
+
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "block",
+            json!({ "id": id.to_string(), "clear": true })
+        )),
+        format!("{id}: no longer blocked by T-02wt0m3")
+    );
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "block",
+            json!({ "id": id.to_string(), "clear": true })
+        )),
+        format!("{id} was not blocked.")
+    );
+}
+
+/// Clearing has to be asked for: a call that left `blocker` out by mistake must
+/// not remove what the ticket waits on.
+#[test]
+fn block_needs_a_blocker_or_an_explicit_clear() {
+    let dir = Utf8TempDir::new().unwrap();
+    create_ticket(&dir, "Tool call header misaligned");
+    let id = ids(&dir)[0];
+
+    assert_eq!(
+        error_message(run_tool(&dir, "block", json!({ "id": id.to_string() }))),
+        "Pass `blocker`, naming what the ticket waits on, or `clear: true` to remove it."
+    );
+    assert_eq!(
+        error_message(run_tool(
+            &dir,
+            "block",
+            json!({ "id": id.to_string(), "blocker": "T-02wt0m3", "clear": true })
+        )),
+        "Pass `blocker` or `clear`, not both."
+    );
+    assert_eq!(
+        error_message(run_tool(
+            &dir,
+            "block",
+            json!({ "id": id.to_string(), "blocker": "one\ntwo" })
+        )),
+        "`blocker` must be one line of text: a ticket id, or a few words."
+    );
+}
+
+#[test]
+fn edit_replaces_the_description_and_keeps_the_rest() {
+    let dir = Utf8TempDir::new().unwrap();
+    create_ticket(&dir, "Wrapping is wrong");
+    let id = ids(&dir)[0];
+    content(run_tool(
+        &dir,
+        "comment",
+        json!({ "id": id.to_string(), "body": "Reproduced at 72 columns." }),
+    ));
+
+    let out = content(run_tool(
+        &dir,
+        "edit",
+        json!({
+            "id": id.to_string(),
+            "body": "The first sentence. The second one, which the model wrote on the same line."
+        }),
+    ));
+
+    assert_eq!(out, format!("Replaced the description of {id}."));
+    let entries = store::list(&tickets(&dir).dir).unwrap();
+    let ticket = entries[0].ticket.as_ref().unwrap();
+    assert_eq!(ticket.title, "Wrapping is wrong");
+    assert_eq!(
+        ticket.description,
+        "The first sentence.\nThe second one, which the model wrote on the same line."
+    );
+    assert_eq!(ticket.comments.len(), 1);
+}
+
+/// The write replaces the old description outright, so an empty one is more
+/// likely a slip than a request.
+#[test]
+fn edit_refuses_an_empty_description() {
+    let dir = Utf8TempDir::new().unwrap();
+    create_ticket(&dir, "Wrapping is wrong");
+    let id = ids(&dir)[0];
+
+    assert_eq!(
+        error_message(run_tool(
+            &dir,
+            "edit",
+            json!({ "id": id.to_string(), "body": "  " })
+        )),
+        "`body` must not be empty."
     );
 }
 
@@ -860,7 +1047,7 @@ fn rename_moves_the_file_and_reports_both_paths() {
 
     let out = content(run_tool(
         &dir,
-        "ticket_rename",
+        "rename",
         json!({ "id": id.to_string(), "title": "The wrap calculation is off" }),
     ));
 
@@ -877,11 +1064,7 @@ fn rename_moves_the_file_and_reports_both_paths() {
             .exists()
     );
 
-    let shown = content(run_tool(
-        &dir,
-        "ticket_show",
-        json!({ "id": id.to_string() }),
-    ));
+    let shown = content(run_tool(&dir, "show", json!({ "id": id.to_string() })));
     assert!(
         shown.contains(&format!("# {id}: The wrap calculation is off")),
         "{shown}"
@@ -899,7 +1082,7 @@ fn rename_within_one_slug_reports_the_unchanged_path() {
 
     let out = content(run_tool(
         &dir,
-        "ticket_rename",
+        "rename",
         json!({ "id": id.to_string(), "title": "Wrapping is wrong!" }),
     ));
 
@@ -921,7 +1104,7 @@ fn rename_rejects_an_empty_title() {
     assert_eq!(
         error_message(run_tool(
             &dir,
-            "ticket_rename",
+            "rename",
             json!({ "id": id.to_string(), "title": "   " })
         )),
         "`title` must not be empty."
@@ -935,7 +1118,7 @@ fn rename_reports_a_missing_ticket() {
     assert_eq!(
         error_message(run_tool(
             &dir,
-            "ticket_rename",
+            "rename",
             json!({ "id": "T-zzzzzzz", "title": "Anything" })
         )),
         "No T-zzzzzzz."
@@ -950,9 +1133,13 @@ fn list_shows_one_line_per_ticket_and_filters() {
     let [open, finished] = ids(&dir)[..] else {
         panic!("expected two tickets")
     };
-    run_tool(&dir, "ticket_close", json!({ "id": finished.to_string() })).unwrap();
+    content(run_tool(
+        &dir,
+        "close",
+        json!({ "id": finished.to_string() }),
+    ));
 
-    let all = content(run_tool(&dir, "ticket_list", json!({})));
+    let all = content(run_tool(&dir, "list", json!({})));
     assert_eq!(
         all,
         format!(
@@ -960,10 +1147,10 @@ fn list_shows_one_line_per_ticket_and_filters() {
         )
     );
 
-    let todo = content(run_tool(&dir, "ticket_list", json!({ "status": "todo" })));
+    let todo = content(run_tool(&dir, "list", json!({ "status": "todo" })));
     assert_eq!(todo, format!("{open} Todo         Bug      Still open\n"));
 
-    let chores = content(run_tool(&dir, "ticket_list", json!({ "kind": "chore" })));
+    let chores = content(run_tool(&dir, "list", json!({ "kind": "chore" })));
     assert_eq!(chores, "No tickets match.\n");
 }
 
@@ -973,13 +1160,13 @@ fn list_names_the_files_it_could_not_read() {
     create_ticket(&dir, "Readable");
     let id = ids(&dir)[0];
     // Sorts after the readable ticket, so listing order is stable.
-    std::fs::write(
+    fs::write(
         dir.path().join("docs/ticket/zzzzzzz-mangled.md"),
         "no heading here\n",
     )
     .unwrap();
 
-    let out = content(run_tool(&dir, "ticket_list", json!({})));
+    let out = content(run_tool(&dir, "list", json!({})));
 
     assert!(out.starts_with(&format!("{id} Todo")), "{out}");
     assert!(
@@ -994,11 +1181,7 @@ fn show_renders_metadata_and_the_description() {
     create_ticket(&dir, "Tool call header misaligned");
 
     let id = ids(&dir)[0];
-    let out = content(run_tool(
-        &dir,
-        "ticket_show",
-        json!({ "id": id.to_string() }),
-    ));
+    let out = content(run_tool(&dir, "show", json!({ "id": id.to_string() })));
 
     // Fenced as markdown: the terminal renderer keys syntax highlighting off
     // the leading fence.
@@ -1027,7 +1210,7 @@ fn show_reports_a_missing_ticket() {
     let dir = Utf8TempDir::new().unwrap();
 
     assert_eq!(
-        error_message(run_tool(&dir, "ticket_show", json!({ "id": "T-zzzzzzz" }))),
+        error_message(run_tool(&dir, "show", json!({ "id": "T-zzzzzzz" }))),
         "No T-zzzzzzz."
     );
 }
@@ -1045,92 +1228,34 @@ fn ids_are_read_from_every_accepted_spelling() {
     assert!(id_arg(&json!(null)).is_err());
 }
 
+/// A definition whose `source` names a tool the plugin doesn't serve is a
+/// configuration mistake; the outcome lists what it does serve.
 #[test]
-fn an_unknown_ticket_tool_is_an_error() {
+fn an_unknown_tool_names_the_ones_served() {
     let dir = Utf8TempDir::new().unwrap();
 
-    assert!(run_tool(&dir, "ticket_frobnicate", json!({})).is_err());
+    assert_eq!(
+        error_message(run_tool(&dir, "frobnicate", json!({}))),
+        "`jp ticket` serves no tool named `frobnicate`. It serves: block, close, comment, create, \
+         edit, label, labels, list, rename, show, status."
+    );
 }
 
-/// Every tool declared under `.jp/mcp/tools/ticket/` must be one this module
-/// dispatches.
-///
-/// A declared tool that `run` doesn't know is an "Unknown tool" at conversation
-/// time, and a file that doesn't parse takes the whole workspace config with
-/// it.
+/// Every name in `TOOLS` is one the plugin answers, and every one of them has
+/// an access requirement.
 #[test]
-fn every_declared_tool_is_dispatched() {
+fn every_served_tool_is_dispatched() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let mut declared: Vec<String> = vec![];
-    for entry in std::fs::read_dir(declarations()).expect("ticket tool declarations") {
-        let file = entry.unwrap().file_name().to_string_lossy().into_owned();
-        let value = declaration(&file);
-        let tools = value["conversation"]["tools"]
-            .as_table()
-            .unwrap_or_else(|| panic!("{file} declares no tools"));
+    for name in TOOLS {
+        assert!(capabilities(name).is_some(), "{name} has no capabilities");
 
-        declared.extend(tools.keys().cloned());
-    }
-    declared.sort();
-    // A tool can be declared across more than one file: `labels.toml` carries
-    // the generated label enums for three of them.
-    declared.dedup();
-
-    assert_eq!(declared, [
-        "ticket_close",
-        "ticket_comment",
-        "ticket_create",
-        "ticket_label",
-        "ticket_list",
-        "ticket_rename",
-        "ticket_show",
-    ]);
-
-    for name in &declared {
-        if let Err(error) = run_tool(&dir, name, json!({})) {
+        if let Outcome::Error { message, .. } = run_tool(&dir, name, json!({})) {
             assert!(
-                !error.to_string().starts_with("Unknown tool"),
-                "{name} is declared but not dispatched"
+                !message.contains("serves no tool named"),
+                "{name} is listed but not dispatched"
             );
         }
-    }
-}
-
-/// The values the tools advertise must be values the parser accepts, in both
-/// directions: nothing advertised that is rejected, nothing accepted that is
-/// hidden.
-#[test]
-fn advertised_values_match_the_parser() {
-    for (file, tool) in [
-        ("create.toml", "ticket_create"),
-        ("list.toml", "ticket_list"),
-    ] {
-        let kinds = advertised(file, tool, "kind");
-        for value in &kinds {
-            value
-                .parse::<Kind>()
-                .unwrap_or_else(|_| panic!("{tool} advertises `{value}`, which is not a kind"));
-        }
-        for kind in [Kind::Bug, Kind::Feature, Kind::Chore] {
-            assert!(
-                kinds.iter().any(|value| value.parse() == Ok(kind)),
-                "{tool} does not advertise {kind}"
-            );
-        }
-    }
-
-    let statuses = advertised("list.toml", "ticket_list", "status");
-    for value in &statuses {
-        value
-            .parse::<Status>()
-            .unwrap_or_else(|_| panic!("ticket_list advertises `{value}`, which is not a status"));
-    }
-    for status in [Status::Todo, Status::InProgress, Status::Done] {
-        assert!(
-            statuses.iter().any(|value| value.parse() == Ok(status)),
-            "ticket_list does not advertise {status}"
-        );
     }
 }
 
@@ -1141,7 +1266,7 @@ fn create_writes_labels_and_list_shows_them() {
 
     content(run_tool(
         &dir,
-        "ticket_create",
+        "create",
         json!({
             "kind": "bug",
             "title": "Flag parsing drops the last value",
@@ -1150,7 +1275,7 @@ fn create_writes_labels_and_list_shows_them() {
     ));
 
     let id = ids(&dir)[0];
-    let listed = content(run_tool(&dir, "ticket_list", json!({})));
+    let listed = content(run_tool(&dir, "list", json!({})));
 
     assert_eq!(
         listed,
@@ -1173,14 +1298,14 @@ fn list_narrows_to_tickets_carrying_every_label() {
     ] {
         content(run_tool(
             &dir,
-            "ticket_create",
+            "create",
             json!({ "kind": "bug", "title": title, "labels": labels }),
         ));
     }
 
     let listed = content(run_tool(
         &dir,
-        "ticket_list",
+        "list",
         json!({ "labels": ["package=jp_cli", "client=cli"] }),
     ));
 
@@ -1201,26 +1326,26 @@ fn label_replaces_the_whole_set() {
 
     let out = content(run_tool(
         &dir,
-        "ticket_label",
+        "label",
         json!({ "id": FIXED_ID, "labels": ["package=jp_config", "client=cli"] }),
     ));
     assert_eq!(out, format!("{id}: client=cli, package=jp_config"));
 
     let out = content(run_tool(
         &dir,
-        "ticket_label",
+        "label",
         json!({ "id": FIXED_ID, "labels": ["client=cli"] }),
     ));
     assert_eq!(out, format!("{id}: client=cli"));
 
     let out = content(run_tool(
         &dir,
-        "ticket_label",
+        "label",
         json!({ "id": FIXED_ID, "labels": [] }),
     ));
     assert_eq!(out, format!("Cleared the labels on {id}."));
 
-    let shown = content(run_tool(&dir, "ticket_show", json!({ "id": FIXED_ID })));
+    let shown = content(run_tool(&dir, "show", json!({ "id": FIXED_ID })));
     assert!(!shown.contains("Labels"), "{shown}");
 }
 
@@ -1236,15 +1361,15 @@ fn a_null_label_list_is_refused_and_writes_nothing() {
 
     content(run_tool(
         &dir,
-        "ticket_label",
+        "label",
         json!({ "id": FIXED_ID, "labels": ["client=cli", "package=jp_config"] }),
     ));
-    let path = store::locate_ticket(&dir.path().join(store::DEFAULT_DIR), id).unwrap();
-    let before = std::fs::read_to_string(&path).unwrap();
+    let path = store::locate_ticket(&tickets(&dir).dir, id).unwrap();
+    let before = fs::read_to_string(&path).unwrap();
 
     let message = error_message(run_tool(
         &dir,
-        "ticket_label",
+        "label",
         json!({ "id": FIXED_ID, "labels": null }),
     ));
 
@@ -1252,30 +1377,7 @@ fn a_null_label_list_is_refused_and_writes_nothing() {
         message,
         "`labels` must be an array. Pass `[]` to clear the labels."
     );
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
-}
-
-/// Clearing stays reachable, so the refusal above costs nothing a caller
-/// actually wanted.
-#[test]
-fn an_empty_label_list_still_clears() {
-    let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
-    let id = write_ticket(&dir, "Tool call header misaligned");
-
-    content(run_tool(
-        &dir,
-        "ticket_label",
-        json!({ "id": FIXED_ID, "labels": ["client=cli"] }),
-    ));
-
-    let out = content(run_tool(
-        &dir,
-        "ticket_label",
-        json!({ "id": FIXED_ID, "labels": [] }),
-    ));
-
-    assert_eq!(out, format!("Cleared the labels on {id}."));
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
 }
 
 /// A typo names the vocabulary, so the assistant can fix the call rather than
@@ -1287,7 +1389,7 @@ fn an_unknown_label_is_refused_with_the_known_set() {
 
     let message = error_message(run_tool(
         &dir,
-        "ticket_create",
+        "create",
         json!({ "kind": "bug", "title": "Typo", "labels": ["client=clii"] }),
     ));
 
@@ -1307,12 +1409,12 @@ fn a_retired_label_already_on_a_ticket_can_be_kept() {
     let dir = Utf8TempDir::new().unwrap();
     write_vocabulary(&dir);
 
-    // Written by hand: `legacy-ui` can no longer be applied through the tool,
+    // Written by hand: `jp_legacy` can no longer be applied through the tool,
     // which is exactly the situation an old ticket is in.
     let id = write_ticket(&dir, "Old ticket");
-    let path = store::locate_ticket(&dir.path().join(store::DEFAULT_DIR), id).unwrap();
-    let source = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(
+    let path = store::locate_ticket(&tickets(&dir).dir, id).unwrap();
+    let source = fs::read_to_string(&path).unwrap();
+    fs::write(
         &path,
         render::set_repeated_metadata(&source, "Label", &["package=jp_legacy".to_owned()]).unwrap(),
     )
@@ -1320,7 +1422,7 @@ fn a_retired_label_already_on_a_ticket_can_be_kept() {
 
     let out = content(run_tool(
         &dir,
-        "ticket_label",
+        "label",
         json!({ "id": FIXED_ID, "labels": ["package=jp_legacy", "client=cli"] }),
     ));
 
@@ -1335,7 +1437,7 @@ fn a_retired_label_cannot_be_added_fresh() {
 
     let message = error_message(run_tool(
         &dir,
-        "ticket_label",
+        "label",
         json!({ "id": FIXED_ID, "labels": ["package=jp_legacy"] }),
     ));
 
@@ -1356,7 +1458,7 @@ fn an_unknown_label_is_refused_before_the_preview() {
 
     let message = error_message(preview_tool(
         &dir,
-        "ticket_create",
+        "create",
         json!({ "kind": "bug", "title": "Typo", "labels": ["client=clii"] }),
     ));
 
@@ -1374,24 +1476,117 @@ fn labelling_a_missing_ticket_says_so() {
 
     let message = error_message(run_tool(
         &dir,
-        "ticket_label",
+        "label",
         json!({ "id": FIXED_ID, "labels": ["client=cli"] }),
     ));
 
     assert_eq!(message, format!("No {FIXED_ID}."));
 }
 
-/// The board's vocabulary has to parse, whatever it currently holds.
-///
-/// Deliberately not a comparison against the enums the tools advertise: those
-/// are a mirror kept by `just ticket-labels-sync`, and adding a label should
-/// never turn a second file into a failing test.
 #[test]
-fn the_board_vocabulary_parses() {
-    let path = PathBuf::from("../../../docs/ticket").join(::ticket::LABELS_FILE);
-    let source = std::fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+fn labels_describes_the_vocabulary() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
 
-    ::ticket::Vocabulary::parse(&source)
-        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    assert_eq!(
+        content(run_tool(&dir, "labels", json!({}))),
+        "client  The client.\n  client=cli\n  client=macos\n\npackage  The crate.\n  \
+         package=jp_cli\n  package=jp_config\n  package=jp_legacy  (retired)\n\nA retired label \
+         stays on a ticket that carries it, but can't be added.\n"
+    );
+}
+
+/// The path is the one the assistant can open, relative to the workspace.
+#[test]
+fn labels_on_a_board_without_a_vocabulary_says_where_to_define_one() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    assert_eq!(
+        content(run_tool(&dir, "labels", json!({}))),
+        "This board defines no labels. Add them to docs/ticket/.labels.json.\n"
+    );
+}
+
+/// The host compiles the call's access grants and the plugin enforces them: a
+/// policy that only lets the tool read refuses a write before anything lands.
+#[test]
+fn a_write_the_access_policy_denies_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    let read_only = AccessPolicy {
+        fs: vec![FsRule::new("").with_read(true)],
+        ..AccessPolicy::default()
+    };
+
+    let message = error_message(run_with_access(
+        &dir,
+        "create",
+        json!({ "kind": "chore", "title": "Bump the deny list" }),
+        &read_only,
+    ));
+
+    assert!(
+        message.starts_with("`create` can't reach the ticket directory: access denied: create on"),
+        "{message}"
+    );
+    assert!(ids(&dir).is_empty(), "a denied write filed a ticket");
+
+    // Reading is what the policy grants, so a read goes through.
+    assert_eq!(
+        content(run_with_access(&dir, "list", json!({}), &read_only)),
+        "No tickets match.\n"
+    );
+}
+
+/// A tool reaches only the workspace, policy or not, so a ticket directory
+/// configured outside it is refused.
+#[test]
+fn a_ticket_directory_outside_the_workspace_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    let elsewhere = Utf8TempDir::new().unwrap();
+    let call = ToolCall {
+        action: ToolAction::Run,
+        name: "list".to_owned(),
+        arguments: Map::new(),
+        answers: Map::new(),
+        options: Map::new(),
+        access: None,
+        conversation: "test".to_owned(),
+    };
+    let options = Options {
+        dir: elsewhere.path().to_path_buf(),
+        ..Options::default()
+    };
+
+    let message = error_message(run(&init(&dir), &call, &options));
+
+    assert_eq!(
+        message,
+        format!(
+            "The ticket directory {} is outside the workspace, which is all a tool reaches.",
+            elsewhere.path()
+        )
+    );
+}
+
+/// A policy the plugin can't read refuses the call rather than reading as
+/// unrestricted.
+#[test]
+fn an_unreadable_access_policy_refuses_the_call() {
+    let dir = Utf8TempDir::new().unwrap();
+    let call = ToolCall {
+        action: ToolAction::Run,
+        name: "list".to_owned(),
+        arguments: Map::new(),
+        answers: Map::new(),
+        options: Map::new(),
+        access: Some(json!({ "fs": "everything" })),
+        conversation: "test".to_owned(),
+    };
+
+    let message = error_message(run(&init(&dir), &call, &options()));
+
+    assert!(
+        message.starts_with("The access policy for this call can't be read: "),
+        "{message}"
+    );
 }

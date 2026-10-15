@@ -1,7 +1,6 @@
 [conversation.tools.ticket_label]
 enable = false
-source = "local"
-command = "just serve-tools {{context}} {{tool}}"
+source = "plugin.command.ticket.label"
 summary = "Replace the labels on a ticket."
 description = """
 Set the areas of the system a ticket touches.
@@ -48,7 +47,7 @@ type = "array"
 required = true
 summary = "Every `key=value` label the ticket should carry. An empty list clears them."
 
-# The accepted values live in `labels.toml`, generated from
-# `docs/ticket/.labels.json` by `just ticket-labels-sync`.
+# The accepted values live in `synced.toml`, generated from
+# `docs/ticket/.labels.json` by `jp ticket tools sync .jp/mcp/tools/ticket`.
 [conversation.tools.ticket_label.parameters.labels.items]
 type = "string"

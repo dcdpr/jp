@@ -1,0 +1,23 @@
+[conversation.tools.ticket_labels]
+source = "plugin.command.ticket.labels"
+summary = "List the labels the board defines, with what each one covers."
+description = """
+Print every label key the board's vocabulary defines, what it covers, and the
+values it accepts, retired ones marked.
+
+The label parameters of the other ticket tools already list the accepted
+values; this explains what each key is for.
+"""
+
+examples = """
+```json
+{}
+```
+"""
+
+run = "allow"
+
+[conversation.tools.ticket_labels.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"

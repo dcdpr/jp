@@ -257,7 +257,7 @@ export function findLegacyIds(files) {
 
     return `Tickets still in the pre-RFD-102 id format:\n` +
         legacy.map(f => `  ${f}`).join('\n') + '\n\n' +
-        `Run \`just ticket-migrate\` on this branch to convert them.`
+        `Rename them to the \`<id>-slug.md\` form RFD 102 defines.`
 }
 
 // Ids claimed by more than one file.

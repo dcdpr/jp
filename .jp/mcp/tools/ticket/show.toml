@@ -1,7 +1,6 @@
 [conversation.tools.ticket_show]
 enable = false
-source = "local"
-command = "just serve-tools {{context}} {{tool}}"
+source = "plugin.command.ticket.show"
 summary = "Read one ticket: its metadata, description, and full discussion."
 description = """
 Print a ticket with its comments numbered, so a reply can name the comment it

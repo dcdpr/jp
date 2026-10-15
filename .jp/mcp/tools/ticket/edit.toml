@@ -1,0 +1,34 @@
+[conversation.tools.ticket_edit]
+enable = false
+source = "plugin.command.ticket.edit"
+summary = "Replace a ticket's description."
+description = """
+Rewrite the description of a ticket, keeping its title, metadata, and comments.
+
+The new description replaces the old one outright, so pass all of it, not just
+what changed. Read the ticket first with `ticket_show`. To add to the discussion
+instead, use `ticket_comment`; to change the title, `ticket_rename`.
+"""
+
+examples = """
+```json
+{"id": "T-02wt0kx", "body": "The header renders one column left of the body \
+when `style.parameters` is `function_call` and the terminal is narrower than 80 \
+columns."}
+```
+"""
+
+[conversation.tools.ticket_edit.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.ticket_edit.parameters.id]
+type = "string"
+required = true
+summary = "The ticket to edit: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`."
+
+[conversation.tools.ticket_edit.parameters.body]
+type = "string"
+required = true
+summary = "The new description, as markdown."

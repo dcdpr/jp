@@ -2162,12 +2162,17 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "clap",
+ "comfort",
  "jp_github",
+ "jp_md",
  "jp_plugin",
+ "jp_tool",
  "serde",
  "serde_json",
+ "strip-ansi-escapes",
  "ticket",
  "tokio",
+ "toml",
 ]
 
 [[package]]
@@ -5108,7 +5113,6 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "clean-path",
- "comfort",
  "convert_case 0.11.0",
  "crossbeam-channel",
  "crossterm",
@@ -5138,7 +5142,6 @@ dependencies = [
  "similar",
  "strip-ansi-escapes",
  "test-log",
- "ticket",
  "tokio",
  "toml",
  "url",

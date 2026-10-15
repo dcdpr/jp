@@ -832,6 +832,79 @@ fn a_rejected_relabel_writes_nothing() {
 }
 
 #[test]
+fn set_status_moves_a_ticket_and_reports_where_it_was() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = new_ticket(&dir, "Moving");
+
+    let (path, previous) = set_status(dir.path(), id, Status::InProgress).unwrap();
+
+    assert_eq!(previous, Status::Todo);
+    let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(ticket.metadata.status, Status::InProgress);
+}
+
+/// A move to the status a ticket already holds is reported, not written, so it
+/// leaves no diff behind.
+#[test]
+fn set_status_to_the_current_status_writes_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = new_ticket(&dir, "Staying");
+    let path = locate(dir.path(), id).unwrap();
+    let before = fs::read_to_string(&path).unwrap();
+
+    let (_, previous) = set_status(dir.path(), id, Status::Todo).unwrap();
+
+    assert_eq!(previous, Status::Todo);
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
+}
+
+#[test]
+fn set_blocked_by_records_and_clears_the_blocker() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = new_ticket(&dir, "Waiting");
+
+    let (path, previous) = set_blocked_by(dir.path(), id, Some(" T-02wt0m3 ")).unwrap();
+    assert_eq!(previous, None);
+    let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(ticket.metadata.blocked_by.as_deref(), Some("T-02wt0m3"));
+
+    let (path, previous) = set_blocked_by(dir.path(), id, None).unwrap();
+    assert_eq!(previous.as_deref(), Some("T-02wt0m3"));
+    let source = fs::read_to_string(&path).unwrap();
+    assert!(!source.contains("Blocked by"), "{source}");
+    assert_eq!(
+        parse::document(&source).unwrap().description,
+        "Description."
+    );
+}
+
+/// The blocker is one metadata line, so text that would end it early, or say
+/// nothing at all, is refused before the file is touched.
+#[test]
+fn set_blocked_by_refuses_a_blank_or_multi_line_blocker() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = new_ticket(&dir, "Waiting");
+    let path = locate(dir.path(), id).unwrap();
+    let before = fs::read_to_string(&path).unwrap();
+
+    for blocker in ["  ", "T-02wt0m3\nand more"] {
+        let error = set_blocked_by(dir.path(), id, Some(blocker)).unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                Error::Parse(ParseError::InvalidValue {
+                    field: "Blocked by",
+                    ..
+                })
+            ),
+            "{error}"
+        );
+    }
+
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
+}
+
+#[test]
 fn slugs_are_lowercase_and_hyphenated() {
     assert_eq!(
         slug("Tool call header misaligned"),

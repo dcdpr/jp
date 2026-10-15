@@ -16,11 +16,11 @@ version.workspace = true
 camino = { workspace = true }
 jp_label = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 camino-tempfile = { workspace = true }
 indoc = { workspace = true }
-serde_json = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true

@@ -1,0 +1,34 @@
+[conversation.tools.ticket_status]
+source = "plugin.command.ticket.status"
+summary = "Move a ticket to another column of the board."
+description = """
+Set a ticket's status: `todo`, `in progress`, or `done`.
+
+Move a ticket to `in progress` when work on it starts, and back to `todo` when
+it stops before it is finished. `ticket_close` is the same as moving it to
+`done`.
+
+The ticket joins its new column below the tickets ranked there.
+"""
+
+examples = """
+```json
+{"id": "T-02wt0kx", "status": "in progress"}
+```
+"""
+
+[conversation.tools.ticket_status.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.ticket_status.parameters.id]
+type = "string"
+required = true
+summary = "The ticket to move: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`."
+
+[conversation.tools.ticket_status.parameters.status]
+type = "string"
+required = true
+enum = ["todo", "in progress", "done"]
+summary = "The column to move it to."
