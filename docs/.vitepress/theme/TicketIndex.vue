@@ -58,7 +58,9 @@ async function openEdit(ticket) {
         const res = await fetch(`${ENDPOINT}?id=${encodeURIComponent(ticket.id)}`)
         const detail = await res.json()
         if (detail?.ok && form.value?.id === ticket.id) {
-            form.value.body = detail.ticket?.description ?? ''
+            // `show --json` flattens the ticket into the top level, next to its
+            // `id` and `path`.
+            form.value.body = detail.description ?? ''
         } else if (!detail?.ok) {
             notice.value = detail?.output ?? 'could not read the ticket'
         }
