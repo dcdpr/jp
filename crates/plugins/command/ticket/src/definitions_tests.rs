@@ -198,6 +198,11 @@ fn init_refuses_to_overwrite_and_writes_nothing() {
     assert!(!dir.path().join("show.toml").exists());
 }
 
+/// A definition declaring the `labels` parameter, served as `source`.
+fn labelled(source: &str) -> Value {
+    json!({ "source": source, "parameters": { "labels": { "type": "array" } } })
+}
+
 /// Tools are found by their source, so a project that exposes `create` under a
 /// name of its own gets the labels under that name too.
 #[test]
@@ -207,10 +212,10 @@ fn sync_offers_each_tool_its_labels_found_by_source() {
         "conversation": {
             "tools": {
                 "*": { "run": "ask" },
-                "ticket_create": { "source": "plugin.command.ticket.create" },
-                "track": { "source": "plugin.command.ticket.create" },
-                "ticket_label": { "source": "plugin.command.ticket.label" },
-                "list": { "source": "plugin.command.ticket" },
+                "ticket_create": labelled("plugin.command.ticket.create"),
+                "track": labelled("plugin.command.ticket.create"),
+                "ticket_label": labelled("plugin.command.ticket.label"),
+                "list": labelled("plugin.command.ticket"),
                 "ticket_show": { "source": "plugin.command.ticket.show" },
                 "fs_read_file": { "source": "local" },
                 "rfd_list": { "source": "plugin.command.rfd.list" }
@@ -274,11 +279,11 @@ enum = [
 fn sync_drops_a_tool_no_longer_configured() {
     let dir = Utf8TempDir::new().unwrap();
     let both = json!({ "conversation": { "tools": {
-        "ticket_create": { "source": "plugin.command.ticket.create" },
-        "ticket_list": { "source": "plugin.command.ticket.list" }
+        "ticket_create": labelled("plugin.command.ticket.create"),
+        "ticket_list": labelled("plugin.command.ticket.list")
     }}});
     let one = json!({ "conversation": { "tools": {
-        "ticket_list": { "source": "plugin.command.ticket.list" }
+        "ticket_list": labelled("plugin.command.ticket.list")
     }}});
 
     sync(dir.path(), &both, &vocabulary()).unwrap();
@@ -287,6 +292,53 @@ fn sync_drops_a_tool_no_longer_configured() {
     let synced = fs::read_to_string(dir.path().join(SYNCED_FILE)).unwrap();
     assert!(synced.contains("ticket_list"), "{synced}");
     assert!(!synced.contains("ticket_create"), "{synced}");
+}
+
+/// A tool whose definition leaves the parameter out is left out too, rather
+/// than given a parameter with no type, which would drop the tool from every
+/// conversation.
+/// The values an earlier sync wrote don't declare it.
+#[test]
+fn sync_leaves_out_a_tool_that_declares_no_labels() {
+    let dir = Utf8TempDir::new().unwrap();
+    let config = json!({ "conversation": { "tools": {
+        "ticket_create": labelled("plugin.command.ticket.create"),
+        "ticket_list": {
+            "source": "plugin.command.ticket.list",
+            "parameters": { "labels": { "items": { "enum": ["client=cli"] } } }
+        },
+        "ticket_label": { "source": "plugin.command.ticket.label" }
+    }}});
+
+    let output = sync(dir.path(), &config, &vocabulary()).unwrap();
+
+    let path = dir.path().join(SYNCED_FILE);
+    assert_eq!(
+        output.text,
+        format!(
+            "Wrote {path}, with labels for ticket_create\nLeft out ticket_label, ticket_list: \
+             their definitions declare no `labels` parameter.\n"
+        )
+    );
+    let synced = fs::read_to_string(&path).unwrap();
+    assert!(!synced.contains("ticket_list"), "{synced}");
+    assert!(!synced.contains("ticket_label"), "{synced}");
+}
+
+/// JP's definitions declare the parameter in every tool `sync` writes labels
+/// into, so none of them is left out.
+#[test]
+fn jp_definitions_declare_the_labels_parameter() {
+    for (name, key, tool) in routed(&read_definitions(&jp_definitions())) {
+        if !matches!(name.as_str(), "create" | "label" | "list") {
+            continue;
+        }
+
+        assert!(
+            tool["parameters"]["labels"].get("type").is_some(),
+            "{key} declares no `labels` parameter"
+        );
+    }
 }
 
 /// A file in the synced file's place that `sync` didn't write is someone's, and
@@ -315,7 +367,7 @@ fn sync_leaves_a_file_it_did_not_write_alone() {
 fn sync_with_an_empty_vocabulary_offers_no_lists() {
     let dir = Utf8TempDir::new().unwrap();
     let config = json!({ "conversation": { "tools": {
-        "ticket_create": { "source": "plugin.command.ticket.create" }
+        "ticket_create": labelled("plugin.command.ticket.create")
     }}});
 
     sync(dir.path(), &config, &Vocabulary::default()).unwrap();

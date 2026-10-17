@@ -551,7 +551,10 @@ fn tools_sync_writes_the_configured_categories() {
     let mut message = init_message(root.path(), &["tools", "sync", "tools"]);
     message.options = Map::from_iter([("categories".to_owned(), json!(["design", "adr"]))]);
     message.config = json!({ "conversation": { "tools": {
-        "rfd_list": { "source": "plugin.command.rfd.list" }
+        "rfd_list": {
+            "source": "plugin.command.rfd.list",
+            "parameters": { "category": { "type": "string" } }
+        }
     }}});
 
     let (_, code, reason) = printed(&exchange(&HostToPlugin::Init(Box::new(message))));

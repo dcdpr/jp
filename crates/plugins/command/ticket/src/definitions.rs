@@ -105,6 +105,9 @@ pub(crate) fn init(dir: &Utf8Path) -> Result<Output, String> {
 ///
 /// Tools are found by their `source` in `config`, not by their key, so a tool
 /// renamed in configuration still gets its labels under the name it has there.
+/// A tool whose definition leaves out the `labels` parameter gets none: the
+/// synced file adds only the accepted values, and values alone would make a
+/// parameter without a type, which leaves the tool out of every conversation.
 pub(crate) fn sync(
     dir: &Utf8Path,
     config: &Value,
@@ -127,21 +130,44 @@ pub(crate) fn sync(
         Err(error) => return Err(format!("{path}: {error}")),
     }
 
-    let tools: Vec<(String, String)> = served_tools(config)
+    let (tools, undeclared): (Vec<_>, Vec<_>) = served_tools(config)
         .into_iter()
         .filter(|(_, tool)| tokens(tool, vocabulary).is_some())
-        .collect();
+        .partition(|(key, _)| declares(config, key, "labels"));
 
     fs::write(&path, synced(&tools, vocabulary))
         .map_err(|error| format!("failed to write {path}: {error}"))?;
 
     let keys: Vec<&str> = tools.iter().map(|(key, _)| key.as_str()).collect();
-    Ok(if keys.is_empty() {
+    let mut text = if keys.is_empty() {
         format!("Wrote {path}; no configured tool takes labels from `jp ticket`.\n")
     } else {
         format!("Wrote {path}, with labels for {}\n", keys.join(", "))
+    };
+    if !undeclared.is_empty() {
+        let keys: Vec<&str> = undeclared.iter().map(|(key, _)| key.as_str()).collect();
+        text.push_str(&format!(
+            "Left out {}: their definitions declare no `labels` parameter.\n",
+            keys.join(", ")
+        ));
     }
-    .into())
+
+    Ok(text.into())
+}
+
+/// Whether the configured tool `key` declares the parameter `name`, with a
+/// type.
+///
+/// The values a previous sync wrote don't count: they carry no type.
+fn declares(config: &Value, key: &str, name: &str) -> bool {
+    config
+        .get("conversation")
+        .and_then(|conversation| conversation.get("tools"))
+        .and_then(|tools| tools.get(key))
+        .and_then(|tool| tool.get("parameters"))
+        .and_then(|parameters| parameters.get(name))
+        .and_then(|parameter| parameter.get("type"))
+        .is_some_and(|kind| !kind.is_null())
 }
 
 /// The configured tools this plugin serves, as `(key, tool)` pairs ordered by

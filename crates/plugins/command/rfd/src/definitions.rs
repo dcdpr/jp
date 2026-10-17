@@ -105,6 +105,9 @@ pub(crate) fn init(dir: &Utf8Path) -> Result<Output, String> {
 /// Tools are found by their `source` in `config`, not by their key, so a tool
 /// renamed in configuration still gets the categories under the name it has
 /// there.
+/// A tool whose definition leaves out the `category` parameter gets none: the
+/// synced file adds only the accepted values, and values alone would make a
+/// parameter without a type, which leaves the tool out of every conversation.
 pub(crate) fn sync(
     dir: &Utf8Path,
     config: &Value,
@@ -127,21 +130,43 @@ pub(crate) fn sync(
         Err(error) => return Err(format!("{path}: {error}")),
     }
 
-    let keys: Vec<String> = served_tools(config)
+    let (keys, undeclared): (Vec<String>, Vec<String>) = served_tools(config)
         .into_iter()
         .filter(|(_, tool)| TAKES_A_CATEGORY.contains(&tool.as_str()))
         .map(|(key, _)| key)
-        .collect();
+        .partition(|key| declares(config, key, "category"));
 
     fs::write(&path, synced(&keys, categories))
         .map_err(|error| format!("failed to write {path}: {error}"))?;
 
-    Ok(if keys.is_empty() {
+    let mut text = if keys.is_empty() {
         format!("Wrote {path}; no configured tool takes a category from `jp rfd`.\n")
     } else {
         format!("Wrote {path}, with categories for {}\n", keys.join(", "))
+    };
+    if !undeclared.is_empty() {
+        text.push_str(&format!(
+            "Left out {}: their definitions declare no `category` parameter.\n",
+            undeclared.join(", ")
+        ));
     }
-    .into())
+
+    Ok(text.into())
+}
+
+/// Whether the configured tool `key` declares the parameter `name`, with a
+/// type.
+///
+/// The values a previous sync wrote don't count: they carry no type.
+fn declares(config: &Value, key: &str, name: &str) -> bool {
+    config
+        .get("conversation")
+        .and_then(|conversation| conversation.get("tools"))
+        .and_then(|tools| tools.get(key))
+        .and_then(|tool| tool.get("parameters"))
+        .and_then(|parameters| parameters.get(name))
+        .and_then(|parameter| parameter.get("type"))
+        .is_some_and(|kind| !kind.is_null())
 }
 
 /// The configured tools this plugin serves, as `(key, tool)` pairs ordered by

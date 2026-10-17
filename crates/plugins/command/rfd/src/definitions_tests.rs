@@ -133,6 +133,11 @@ fn init_refuses_to_overwrite_and_writes_nothing() {
     assert!(!dir.path().join("list.toml").exists());
 }
 
+/// A definition declaring the `category` parameter, served as `source`.
+fn categorized(source: &str) -> serde_json::Value {
+    json!({ "source": source, "parameters": { "category": { "type": "string" } } })
+}
+
 /// Tools are found by their source, so a project that exposes `list` under a
 /// name of its own gets the categories under that name too, and a tool of the
 /// same name served by something else gets none.
@@ -143,12 +148,12 @@ fn sync_offers_each_tool_the_categories_found_by_source() {
         "conversation": {
             "tools": {
                 "*": { "run": "ask" },
-                "rfd_list": { "source": "plugin.command.rfd.list" },
-                "board": { "source": "plugin.command.rfd.list" },
-                "new_doc": { "source": "plugin.command.rfd.draft" },
+                "rfd_list": categorized("plugin.command.rfd.list"),
+                "board": categorized("plugin.command.rfd.list"),
+                "new_doc": categorized("plugin.command.rfd.draft"),
                 "rfd_show": { "source": "plugin.command.rfd.show" },
-                "ticket_list": { "source": "plugin.command.ticket.list" },
-                "rfd_draft": { "source": "local" }
+                "ticket_list": categorized("plugin.command.ticket.list"),
+                "rfd_draft": categorized("local")
             }
         }
     });
@@ -191,7 +196,7 @@ enum = [
 fn sync_drops_a_tool_no_longer_configured() {
     let dir = Utf8TempDir::new().unwrap();
     let configured = json!({ "conversation": { "tools": {
-        "rfd_list": { "source": "plugin.command.rfd.list" }
+        "rfd_list": categorized("plugin.command.rfd.list")
     }}});
 
     sync(dir.path(), &configured, &categories()).unwrap();
@@ -206,6 +211,76 @@ fn sync_drops_a_tool_no_longer_configured() {
         fs::read_to_string(&path).unwrap(),
         format!("{SYNCED_HEADER}\n{SYNCED_NOTES}")
     );
+}
+
+/// A tool whose definition leaves the parameter out is left out too, rather
+/// than given a parameter with no type, which would drop the tool from every
+/// conversation.
+/// The values an earlier sync wrote don't declare it.
+#[test]
+fn sync_leaves_out_a_tool_that_declares_no_category() {
+    let dir = Utf8TempDir::new().unwrap();
+    let config = json!({ "conversation": { "tools": {
+        "rfd_list": categorized("plugin.command.rfd.list"),
+        "rfd_draft": {
+            "source": "plugin.command.rfd.draft",
+            "parameters": { "category": { "enum": ["design"] } }
+        }
+    }}});
+
+    let output = sync(dir.path(), &config, &categories()).unwrap();
+
+    let path = dir.path().join(SYNCED_FILE);
+    assert_eq!(
+        output.text,
+        format!(
+            "Wrote {path}, with categories for rfd_list\nLeft out rfd_draft: their definitions \
+             declare no `category` parameter.\n"
+        )
+    );
+    assert!(!fs::read_to_string(&path).unwrap().contains("rfd_draft"));
+}
+
+/// `sync` reads a declared parameter's type under `type`, which is how the host
+/// sends the configuration.
+#[test]
+fn the_host_sends_a_declared_parameter_with_its_type() {
+    let partial: jp_config::PartialAppConfig = toml::from_str(
+        r#"
+        [conversation.tools.rfd_list]
+        source = "plugin.command.rfd.list"
+
+        [conversation.tools.rfd_list.parameters.category]
+        type = "string"
+
+        [conversation.tools.rfd_draft]
+        source = "plugin.command.rfd.draft"
+
+        [conversation.tools.rfd_draft.parameters.category]
+        enum = ["design"]
+        "#,
+    )
+    .unwrap();
+    let config = serde_json::to_value(&partial).unwrap();
+
+    assert!(declares(&config, "rfd_list", "category"), "{config:#}");
+    assert!(!declares(&config, "rfd_draft", "category"), "{config:#}");
+}
+
+/// JP's definitions declare the parameter in every tool `sync` writes
+/// categories into, so none of them is left out.
+#[test]
+fn jp_definitions_declare_the_category_parameter() {
+    for (name, key, tool) in routed(&read_definitions(&jp_definitions())) {
+        if !TAKES_A_CATEGORY.contains(&name.as_str()) {
+            continue;
+        }
+
+        assert!(
+            tool["parameters"]["category"].get("type").is_some(),
+            "{key} declares no `category` parameter"
+        );
+    }
 }
 
 /// A file in the synced file's place that `sync` didn't write is someone's, and
