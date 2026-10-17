@@ -11,21 +11,21 @@ attachments = [
 [conversation.tools]
 markdown_format = { enable = true }
 
-rfd_list = { enable = true, run = "unattended" }
-rfd_show = { enable = true, run = "unattended" }
-rfd_draft = { enable = true, run = "unattended" }
-rfd_promote = { enable = true, run = "unattended" }
-rfd_renumber = { enable = true, run = "unattended" }
-rfd_rename = { enable = true, run = "unattended" }
-rfd_supersede = { enable = true, run = "unattended" }
-rfd_abandon = { enable = true, run = "unattended" }
-rfd_extend = { enable = true, run = "unattended" }
-rfd_require = { enable = true, run = "unattended" }
-rfd_track = { enable = true, run = "unattended" }
-rfd_start = { enable = true, run = "unattended" }
-rfd_stop = { enable = true, run = "unattended" }
+rfd_list = { enable = true, run = "allow" }
+rfd_show = { enable = true, run = "allow" }
+rfd_draft = { enable = true, run = "allow" }
+rfd_promote = { enable = true, run = "allow" }
+rfd_renumber = { enable = true, run = "allow" }
+rfd_rename = { enable = true, run = "allow" }
+rfd_supersede = { enable = true, run = "allow" }
+rfd_abandon = { enable = true, run = "allow" }
+rfd_extend = { enable = true, run = "allow" }
+rfd_require = { enable = true, run = "allow" }
+rfd_track = { enable = true, run = "allow" }
+rfd_start = { enable = true, run = "allow" }
+rfd_stop = { enable = true, run = "allow" }
 
-fs_modify_file = { enable = true, run = "unattended" }
+fs_modify_file = { enable = true, run = "allow" }
 fs_create_file.questions.overwrite_file.answer = true
 
 [[assistant.system_prompt_sections]]
