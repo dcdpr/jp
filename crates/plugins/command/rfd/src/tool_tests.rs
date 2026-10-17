@@ -163,6 +163,30 @@ fn show_prints_one_rfd_as_markdown() {
     );
 }
 
+/// The document's sections follow the metadata, inside a fence longer than any
+/// the document holds, so a code block in the RFD doesn't end the result.
+#[test]
+fn show_with_the_body_fences_it_past_its_own_code_blocks() {
+    let root = workspace();
+    fs::write(
+        root.path().join("docs/rfd/042-ordered-things.md"),
+        "# RFD 042: Ordered Things\n\n- **Status**: Accepted\n\n## Design\n\n```sh\njp rfd \
+         list\n```\n",
+    )
+    .unwrap();
+
+    let out = content(run_tool(&root, "show", json!({ "id": "42", "body": true })));
+
+    assert!(
+        out.starts_with("````markdown\n# RFD 042: Ordered Things\n"),
+        "{out}"
+    );
+    assert!(
+        out.ends_with("- **In development**: yes\n\n## Design\n\n```sh\njp rfd list\n```\n````"),
+        "{out}"
+    );
+}
+
 /// A model passes `42` as a number as readily as a string, and a draft by its
 /// slot.
 #[test]

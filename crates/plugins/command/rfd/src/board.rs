@@ -51,7 +51,7 @@ pub(crate) struct Source {
 
 /// One RFD and where it stands.
 ///
-/// Serialized as one entry of `jp rfd list --json`.
+/// Serialized as one entry of `jp -F json rfd list`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Entry {

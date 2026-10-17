@@ -1,13 +1,14 @@
 [conversation.tools.rfd_show]
 source = "plugin.command.rfd.show"
-summary = "Read one RFD's metadata and where it stands on the priority board."
+summary = "Read one RFD: its metadata, its place on the priority board, and optionally the document."
 description = """
 Print an RFD's file, status, category, authors, and date, the RFDs it requires,
 extends, or supersedes and those that do the same to it, its place on the
 priority board, whether it is in development, which RFDs link to it, and its
 summary.
 
-The document itself is not included; read the file it names for that.
+Pass `body: true` to add the document's sections after that: the design itself,
+its alternatives, and its Implementation Plan.
 """
 
 examples = """
@@ -15,9 +16,9 @@ examples = """
 {"id": "042"}
 ```
 
-A draft:
+A draft, with its sections:
 ```json
-{"id": "D05"}
+{"id": "D05", "body": true}
 ```
 """
 
@@ -32,3 +33,8 @@ results_file_link = "off"
 type = "string"
 required = true
 summary = "The RFD: a number such as `42` or `042`, or a draft id such as `D05`."
+
+[conversation.tools.rfd_show.parameters.body]
+type = "boolean"
+required = false
+summary = "Add the document's sections after its metadata."

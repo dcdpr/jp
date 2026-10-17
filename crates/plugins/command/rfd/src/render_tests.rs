@@ -330,7 +330,7 @@ fn show_prints_an_rfds_metadata_and_board_position() {
     let board = board();
 
     assert_eq!(
-        show_text(&board, entry(&board, "044")),
+        show_text(&board, entry(&board, "044"), None),
         "\
 # RFD 044: Init
 
@@ -351,7 +351,7 @@ fn show_says_where_an_rfd_off_the_planned_list_stands() {
     let board = board();
 
     assert_eq!(
-        show_text(&board, entry(&board, "010")),
+        show_text(&board, entry(&board, "010"), None),
         "\
 # RFD 010: Pty
 
@@ -363,7 +363,7 @@ fn show_says_where_an_rfd_off_the_planned_list_stands() {
 "
     );
     assert_eq!(
-        show_text(&board, entry(&board, "014")),
+        show_text(&board, entry(&board, "014"), None),
         "\
 # RFD 014: Guide
 
@@ -375,7 +375,9 @@ fn show_says_where_an_rfd_off_the_planned_list_stands() {
 - **In development**: no
 "
     );
-    assert!(show_text(&board, entry(&board, "053")).contains("- **Board**: planned, rank 3\n"));
+    assert!(
+        show_text(&board, entry(&board, "053"), None).contains("- **Board**: planned, rank 3\n")
+    );
 }
 
 #[test]
@@ -390,9 +392,9 @@ fn show_names_the_rfds_that_link_to_this_one() {
     let board = Board::assemble(&published, &[], Priority::default(), &BTreeSet::new());
 
     assert!(
-        show_text(&board, entry(&board, "001")).contains("- **Referenced by**: RFD 002\n"),
+        show_text(&board, entry(&board, "001"), None).contains("- **Referenced by**: RFD 002\n"),
         "{}",
-        show_text(&board, entry(&board, "001"))
+        show_text(&board, entry(&board, "001"), None)
     );
 }
 
@@ -400,7 +402,7 @@ fn show_names_the_rfds_that_link_to_this_one() {
 fn show_json_is_the_listing_entry() {
     let board = board();
     let shown: Value =
-        serde_json::from_str(&show_json(&board, entry(&board, "D50")).unwrap()).unwrap();
+        serde_json::from_str(&show_json(&board, entry(&board, "D50"), None).unwrap()).unwrap();
     let listed: Value = serde_json::from_str(&list_json(&board, None).unwrap()).unwrap();
 
     assert_eq!(shown, listed[1]);

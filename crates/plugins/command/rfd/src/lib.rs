@@ -43,7 +43,7 @@ use chrono::Local;
 use clap::{ArgGroup, CommandFactory, Parser, Subcommand};
 use jp_plugin::message::{
     ComposeMode, ComposeOption, ComposeRequest, DescribeResponse, ExitMessage, HostToPlugin,
-    InitMessage, PluginToHost, PrintMessage, ToolCall, ToolOutcomeMessage,
+    InitMessage, OutputFormat, PluginToHost, PrintMessage, ToolCall, ToolOutcomeMessage,
 };
 use serde_json::Value;
 use ticket::TicketId;
@@ -90,6 +90,8 @@ enum Command {
     /// List RFDs in priority order, optionally of one category.
     ///
     /// Only the planned RFDs are listed unless a section is named.
+    /// With `jp -F json`, every RFD is printed, tagged with its section and
+    /// rank.
     List {
         /// Only RFDs of this category, such as `design`.
         category: Option<String>,
@@ -109,10 +111,6 @@ enum Command {
         /// Add each RFD's summary and the RFDs it depends on.
         #[arg(long)]
         full: bool,
-
-        /// Print every RFD as JSON, tagged with its section and rank.
-        #[arg(long)]
-        json: bool,
     },
 
     /// Show one RFD's metadata and where it stands on the priority board.
@@ -120,9 +118,9 @@ enum Command {
         /// The RFD: a number (`42`, `042`) or a draft id (`D05`).
         id: RfdId,
 
-        /// Print it as JSON.
+        /// Add the document's sections after its metadata.
         #[arg(long)]
-        json: bool,
+        body: bool,
     },
 
     /// Create a draft from its category's template.
@@ -305,12 +303,16 @@ enum ToolsCommand {
 
 /// What a subcommand produced.
 ///
-/// Notes and warnings stay out of the text so `--json` output survives a pipe
-/// into `jq`.
+/// Notes and warnings stay out of the text so `jp -F json` output survives a
+/// pipe into `jq`.
 #[derive(Debug, Default)]
 struct Output {
     /// What a script reads, on stdout.
     text: String,
+
+    /// Whether `text` is one JSON value, which a JSON output format prints as a
+    /// record of its own.
+    json: bool,
 
     /// What the command did, on stderr.
     notes: Vec<String>,
@@ -356,7 +358,9 @@ impl<R: BufRead, W: Write> Session<'_, R, W> {
         for line in output.notes.iter().chain(&output.warnings) {
             print_to(self.stdout, &format!("{line}\n"), "chrome")?;
         }
-        if !output.text.is_empty() {
+        if output.json {
+            print_json(self.stdout, &output.text)?;
+        } else if !output.text.is_empty() {
             print(self.stdout, &output.text)?;
         }
 
@@ -409,6 +413,9 @@ struct Context<'a> {
 
     /// The plugin's own settings.
     options: &'a Options,
+
+    /// How `jp` was asked to print: `-F json` makes a listing JSON.
+    format: OutputFormat,
 }
 
 impl Context<'_> {
@@ -514,6 +521,7 @@ fn handle_command<R: BufRead, W: Write>(
         paths: Paths::new(&init.workspace.root, &options.dir, &tickets),
         config: &init.config,
         options: &options,
+        format: init.output_format,
     };
 
     match execute(&ctx, args.command, session) {
@@ -542,6 +550,36 @@ fn today() -> String {
     Local::now().format("%Y-%m-%d").to_string()
 }
 
+/// Show one RFD, with its sections when `body` asks for them.
+fn show(ctx: &Context<'_>, id: RfdId, body: bool) -> Result<Output, String> {
+    let paths = &ctx.paths;
+    let Loaded { board, warnings } = ctx.board()?;
+    let path = paths.resolve(id)?;
+    let file = paths.show(&path);
+    let entry = board
+        .entry(&file)
+        .ok_or_else(|| format!("{file} is not an RFD: its name has no slug."))?;
+    let body = if body {
+        Some(document::body(&paths::read(&path)?))
+    } else {
+        None
+    };
+
+    let json = ctx.format.is_json();
+    let text = if json {
+        render::show_json(&board, entry, body.as_deref())?
+    } else {
+        render::show_text(&board, entry, body.as_deref())
+    };
+
+    Ok(Output {
+        text,
+        json,
+        warnings,
+        ..Output::default()
+    })
+}
+
 fn execute<R: BufRead, W: Write>(
     ctx: &Context<'_>,
     command: Command,
@@ -556,9 +594,9 @@ fn execute<R: BufRead, W: Write>(
             backlog,
             all,
             full,
-            json,
         } => {
             let Loaded { board, warnings } = ctx.board()?;
+            let json = ctx.format.is_json();
             let text = if json {
                 render::list_json(&board, category.as_deref())?
             } else {
@@ -568,30 +606,13 @@ fn execute<R: BufRead, W: Write>(
 
             Ok(Output {
                 text,
+                json,
                 warnings,
                 ..Output::default()
             })
         }
 
-        Command::Show { id, json } => {
-            let Loaded { board, warnings } = ctx.board()?;
-            let file = paths.show(&paths.resolve(id)?);
-            let entry = board
-                .entry(&file)
-                .ok_or_else(|| format!("{file} is not an RFD: its name has no slug."))?;
-
-            let text = if json {
-                render::show_json(&board, entry)?
-            } else {
-                render::show_text(&board, entry)
-            };
-
-            Ok(Output {
-                text,
-                warnings,
-                ..Output::default()
-            })
-        }
+        Command::Show { id, body } => show(ctx, id, body),
 
         Command::Draft {
             category,
@@ -800,6 +821,19 @@ fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
 
 fn print(stdout: &mut impl Write, text: &str) -> Result<(), String> {
     print_to(stdout, text, "content")
+}
+
+/// Print `text`, one JSON value, for the host to emit as a record of its own.
+fn print_json(stdout: &mut impl Write, text: &str) -> Result<(), String> {
+    send(
+        stdout,
+        &PluginToHost::Print(PrintMessage {
+            text: text.to_owned(),
+            channel: "content".to_owned(),
+            format: "json".into(),
+            language: None,
+        }),
+    )
 }
 
 /// Print `text` on the host's output channel `channel`.

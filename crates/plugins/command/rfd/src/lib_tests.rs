@@ -78,6 +78,14 @@ fn init(root: &Utf8Path, args: &[&str]) -> HostToPlugin {
     HostToPlugin::Init(Box::new(init_message(root, args)))
 }
 
+/// The init for running `args` under `jp -F json`.
+fn init_json(root: &Utf8Path, args: &[&str]) -> HostToPlugin {
+    let mut message = init_message(root, args);
+    message.output_format = OutputFormat::Json;
+
+    HostToPlugin::Init(Box::new(message))
+}
+
 /// Drive the plugin the way the host does: one JSON message in, the reply
 /// stream out.
 fn exchange(message: &HostToPlugin) -> Vec<PluginToHost> {
@@ -155,10 +163,9 @@ fn list_takes_a_category_and_the_section_flags() {
             backlog,
             all,
             full,
-            json,
         } => {
             assert_eq!(category.as_deref(), Some("design"));
-            assert!(!planned && backlog && !all && full && !json);
+            assert!(!planned && backlog && !all && full);
         }
         other => panic!("expected list, got {other:?}"),
     }
@@ -167,9 +174,9 @@ fn list_takes_a_category_and_the_section_flags() {
 #[test]
 fn show_takes_an_id() {
     match parse(&["show", "d5"]).unwrap().command {
-        Command::Show { id, json } => {
+        Command::Show { id, body } => {
             assert_eq!(id, RfdId::Draft(5));
-            assert!(!json);
+            assert!(!body);
         }
         other => panic!("expected show, got {other:?}"),
     }
@@ -332,9 +339,16 @@ fn list_prints_the_board() {
 fn list_json_parses_and_carries_every_rfd() {
     let root = workspace();
 
-    let (text, code, _) = printed(&exchange(&init(root.path(), &["list", "--json"])));
+    let messages = exchange(&init_json(root.path(), &["list"]));
+    let (text, code, _) = printed(&messages);
 
     assert_eq!(code, 0);
+    assert!(
+        messages
+            .iter()
+            .any(|message| matches!(message, PluginToHost::Print(print) if print.format == "json")),
+        "the listing isn't printed as JSON: {messages:?}"
+    );
     let entries: Value = serde_json::from_str(&text).unwrap();
     let nums: Vec<&str> = entries
         .as_array()
@@ -388,7 +402,7 @@ fn show_prints_one_rfd() {
 fn show_json_is_one_tagged_entry() {
     let root = workspace();
 
-    let (text, code, _) = printed(&exchange(&init(root.path(), &["show", "042", "--json"])));
+    let (text, code, _) = printed(&exchange(&init_json(root.path(), &["show", "042"])));
 
     assert_eq!(code, 0);
     let entry: Value = serde_json::from_str(&text).unwrap();
@@ -396,6 +410,32 @@ fn show_json_is_one_tagged_entry() {
     assert_eq!(entry["group"], "planned");
     assert_eq!(entry["rank"], 1);
     assert_eq!(entry["inDevelopment"], true);
+    assert!(entry.get("body").is_none(), "{entry}");
+}
+
+/// `--body` adds the document's sections, after its metadata, in text and in
+/// JSON alike.
+#[test]
+fn show_body_adds_the_documents_sections() {
+    let root = workspace();
+    fs::write(
+        root.path().join("docs/rfd/042-ordered-things.md"),
+        "# RFD 042: Ordered Things\n\n- **Status**: Accepted\n\n## Summary\n\nThings, in order.\n",
+    )
+    .unwrap();
+
+    let (text, code, _) = printed(&exchange(&init(root.path(), &["show", "42", "--body"])));
+    assert_eq!(code, 0);
+    assert!(
+        text.ends_with("- **In development**: yes\n\n## Summary\n\nThings, in order.\n"),
+        "{text}"
+    );
+
+    let (text, _, _) = printed(&exchange(&init_json(root.path(), &[
+        "show", "42", "--body",
+    ])));
+    let entry: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(entry["body"], "## Summary\n\nThings, in order.");
 }
 
 #[test]
@@ -426,7 +466,7 @@ fn a_broken_board_file_is_a_warning_not_a_failure() {
     let root = workspace();
     fs::write(root.path().join("docs/rfd/.priority.json"), "{ nope").unwrap();
 
-    let messages = exchange(&init(root.path(), &["list", "--json"]));
+    let messages = exchange(&init_json(root.path(), &["list"]));
 
     let warnings = chrome(&messages);
     assert_eq!(warnings.len(), 1, "{messages:?}");

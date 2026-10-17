@@ -106,6 +106,10 @@ struct Tagged<'a> {
     entry: &'a Entry,
     group: Section,
     rank: Option<usize>,
+
+    /// The document's sections, when they were asked for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    body: Option<&'a str>,
 }
 
 /// List the board as text.
@@ -241,16 +245,19 @@ pub(crate) fn list_json(board: &Board, category: Option<&str>) -> Result<String,
             entry,
             group: Section::Planned,
             rank: Some(index + 1),
+            body: None,
         })
         .chain(grouped.backlog.iter().map(|entry| Tagged {
             entry,
             group: Section::Backlog,
             rank: None,
+            body: None,
         }))
         .chain(grouped.other.iter().map(|entry| Tagged {
             entry,
             group: Section::Other,
             rank: None,
+            body: None,
         }))
         .collect();
 
@@ -276,11 +283,11 @@ fn placement(board: &Board, entry: &Entry) -> (Section, Option<usize>) {
 }
 
 /// Show one RFD as markdown: its heading, its metadata, where it stands on the
-/// board, and its summary.
+/// board, and its summary, then `body`, the document's sections, when given.
 ///
 /// `entry` has to be one of `board`'s entries.
 #[must_use]
-pub(crate) fn show_text(board: &Board, entry: &Entry) -> String {
+pub(crate) fn show_text(board: &Board, entry: &Entry, body: Option<&str>) -> String {
     let mut out = format!("# RFD {}: {}\n\n", entry.num, entry.title);
 
     let mut field = |key: &str, value: &str| out.push_str(&format!("- **{key}**: {value}\n"));
@@ -338,16 +345,28 @@ pub(crate) fn show_text(board: &Board, entry: &Entry) -> String {
     if let Some(summary) = &entry.summary {
         out.push_str(&format!("\n{summary}\n"));
     }
+    if let Some(body) = body.filter(|body| !body.is_empty()) {
+        out.push_str(&format!("\n{body}\n"));
+    }
 
     out
 }
 
-/// Show one RFD as JSON: the entry `list --json` prints for it, tagged the same
-/// way.
-pub(crate) fn show_json(board: &Board, entry: &Entry) -> Result<String, String> {
+/// Show one RFD as JSON: the entry a JSON listing holds for it, tagged the same
+/// way, with `body`, the document's sections, when given.
+pub(crate) fn show_json(
+    board: &Board,
+    entry: &Entry,
+    body: Option<&str>,
+) -> Result<String, String> {
     let (group, rank) = placement(board, entry);
 
-    json(&Tagged { entry, group, rank })
+    json(&Tagged {
+        entry,
+        group,
+        rank,
+        body,
+    })
 }
 
 /// Pretty-printed JSON with a trailing newline.

@@ -1744,7 +1744,7 @@ rfd-promote NNN: _install-jp _install-rfd
     set -eu
 
     # The status before the promotion says which step it takes.
-    before=$(jp rfd show {{quote(NNN)}} --json)
+    before=$(jp -F json rfd show {{quote(NNN)}})
     rfd_id=$(echo "$before" | jq -r '.num')
     status=$(echo "$before" | jq -r '.status // empty')
 

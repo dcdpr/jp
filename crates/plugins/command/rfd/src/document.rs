@@ -59,6 +59,26 @@ pub(crate) fn title(content: &str) -> Option<String> {
     })
 }
 
+/// The document's sections: what follows its heading and its metadata block,
+/// without the blank lines around it.
+///
+/// A document without a metadata block has everything after its heading.
+#[must_use]
+pub(crate) fn body(content: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let block = block(&lines);
+    let start = if block.is_empty() {
+        lines
+            .iter()
+            .position(|line| line.starts_with(HEADING))
+            .map_or(0, |heading| heading + 1)
+    } else {
+        block.end
+    };
+
+    lines[start..].join("\n").trim().to_owned()
+}
+
 /// The metadata block of `lines`: the run of lines from the first `- **` line
 /// to the blank line that closes it.
 ///

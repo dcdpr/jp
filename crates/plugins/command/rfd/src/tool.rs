@@ -32,7 +32,7 @@ use crate::{
         draft::Draft,
         track::{Filer, Plan},
     },
-    document::Document,
+    document::{self, Document},
     id::RfdId,
     options::{self, Options, ticket_dir},
     paths::{self, Paths},
@@ -379,19 +379,39 @@ fn show(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
     place.require_tickets(&[Capability::Read])?;
 
     let id = args.id("id")?;
+    let with_body = args.flag("body")?;
     let board = place.board()?;
-    let file = place.paths.show(&place.paths.resolve(id)?);
+    let path = place.paths.resolve(id)?;
+    let file = place.paths.show(&path);
     let Some(entry) = board.entry(&file) else {
         return Err(Refusal(format!(
             "{file} is not an RFD: its name has no slug."
         )));
     };
+    let body = if with_body {
+        Some(document::body(&paths::read(&path)?))
+    } else {
+        None
+    };
 
-    let shown = render::show_text(&board, entry);
+    let shown = render::show_text(&board, entry, body.as_deref());
     // The terminal keys syntax highlighting off a leading code fence, so the
     // fence is what gets the RFD displayed as markdown rather than as a flat
     // wall of text.
-    Ok(format!("```markdown\n{}\n```", shown.trim_end()).into())
+    Ok(fenced(shown.trim_end()).into())
+}
+
+/// `text` in a markdown code fence longer than any run of backticks inside it,
+/// so a fence in an RFD's body doesn't close the outer one.
+fn fenced(text: &str) -> String {
+    let longest = text
+        .split(|c| c != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or_default();
+    let fence = "`".repeat(longest.max(2) + 1);
+
+    format!("{fence}markdown\n{text}\n{fence}")
 }
 
 /// Write a new draft, from a ticket when the call names one.
