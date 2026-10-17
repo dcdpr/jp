@@ -1809,3 +1809,34 @@ fn unreadable_tickets_are_warned_about_separately() {
     assert_eq!(listed.warnings.len(), 1);
     assert!(listed.warnings[0].contains("zzzzzzz-mangled.md"));
 }
+
+/// A warning names something to check now, so it is printed on stderr rather
+/// than logged, where only `-v` would show it.
+#[test]
+fn warnings_are_printed_on_stderr() {
+    let root = Utf8TempDir::new().unwrap();
+    let dir = root.path().join("docs/ticket");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("zzzzzzz-mangled.md"), "no heading here\n").unwrap();
+
+    let messages = exchange(&init(root.path(), &["list"]));
+
+    let stderr: Vec<&str> = messages
+        .iter()
+        .filter_map(|message| match message {
+            PluginToHost::Print(print) if print.channel == "chrome" => Some(print.text.as_str()),
+            _ => None,
+        })
+        .collect();
+    let [warning] = stderr[..] else {
+        panic!("expected one warning: {messages:?}");
+    };
+    assert!(warning.starts_with("Warning: "), "{warning}");
+    assert!(warning.contains("zzzzzzz-mangled.md"), "{warning}");
+    assert!(
+        !messages
+            .iter()
+            .any(|message| matches!(message, PluginToHost::Log(_))),
+        "{messages:?}"
+    );
+}

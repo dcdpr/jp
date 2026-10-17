@@ -31,7 +31,7 @@ use clap::{ArgGroup, CommandFactory, Parser, Subcommand};
 use jp_github::models::issues::{Comment as IssueComment, Issue};
 use jp_plugin::message::{
     ComposeMode, ComposeOption, ComposeRequest, DescribeResponse, ExitMessage, HostToPlugin,
-    InitMessage, LogMessage, PluginToHost, PrintMessage, ToolCall, ToolOutcomeMessage,
+    InitMessage, PluginToHost, PrintMessage, ToolCall, ToolOutcomeMessage,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -500,15 +500,10 @@ fn handle_command(
 
     match execute(&ctx, command) {
         Ok(output) => {
+            // On stderr, which `--quiet` silences, rather than in the log,
+            // which only `-v` shows: a warning names something to check now.
             for warning in &output.warnings {
-                send(
-                    stdout,
-                    &PluginToHost::Log(LogMessage {
-                        level: "warn".to_owned(),
-                        message: warning.clone(),
-                        fields: serde_json::Map::new(),
-                    }),
-                )?;
+                print_to(stdout, &format!("Warning: {warning}\n"), "chrome")?;
             }
             if !output.text.is_empty() {
                 print(stdout, &output.text)?;
@@ -1921,11 +1916,16 @@ fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
 }
 
 fn print(stdout: &mut impl Write, text: &str) -> Result<(), String> {
+    print_to(stdout, text, "content")
+}
+
+/// Print `text` on the host's output channel `channel`.
+fn print_to(stdout: &mut impl Write, text: &str, channel: &str) -> Result<(), String> {
     send(
         stdout,
         &PluginToHost::Print(PrintMessage {
             text: text.to_owned(),
-            channel: "content".into(),
+            channel: channel.to_owned(),
             format: "plain".into(),
             language: None,
         }),
