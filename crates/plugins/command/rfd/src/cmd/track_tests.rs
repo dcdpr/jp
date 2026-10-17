@@ -283,6 +283,100 @@ fn a_plan_still_pending_leaves_the_ticket_as_it_was() {
     assert_eq!(tracked.report.warnings.len(), 1);
 }
 
+/// Text written around the marker is the project's, and stays.
+#[test]
+fn only_the_marker_is_replaced() {
+    let workspace = workspace();
+    filed(
+        &workspace,
+        "Todo",
+        &format!("Tracking ticket.\n\n{PENDING}\n\nNotes added by hand."),
+    );
+
+    track(
+        &workspace.paths,
+        &vocabulary(),
+        id("116"),
+        &filer(),
+        &mut |_| Ok(phases()),
+    )
+    .unwrap();
+
+    let text = workspace.read("docs/ticket/02wt0k1-shareable-tooling.md");
+    let description = "\
+Tracking ticket.
+
+## Implementation plan
+
+- **Configure tickets**: Reads the options.
+- **Read RFDs**: Lists them, on two lines.
+
+Notes added by hand.
+";
+    assert!(text.ends_with(description), "{text}");
+}
+
+/// Reading the plan takes a while; a ticket filled in the meantime, by another
+/// run or by hand, is not filled again.
+#[test]
+fn a_ticket_filled_while_the_plan_was_read_is_left_alone() {
+    let workspace = workspace();
+    filed(
+        &workspace,
+        "Todo",
+        &format!("Tracking ticket.\n\n{PENDING}"),
+    );
+    let path = workspace
+        .paths
+        .root
+        .join("docs/ticket/02wt0k1-shareable-tooling.md");
+
+    let tracked = track(
+        &workspace.paths,
+        &vocabulary(),
+        id("116"),
+        &filer(),
+        &mut |_| {
+            let text = fs::read_to_string(&path).unwrap();
+            fs::write(&path, text.replace(PENDING, "Filed by another run.")).unwrap();
+            Ok(phases())
+        },
+    )
+    .unwrap();
+
+    assert!(
+        workspace
+            .read("docs/ticket/02wt0k1-shareable-tooling.md")
+            .ends_with("Tracking ticket.\n\nFiled by another run.\n")
+    );
+    let note = "docs/ticket/02wt0k1-shareable-tooling.md (T-02wt0k1) already holds the \
+                Implementation Plan of RFD 116.";
+    assert_eq!(tracked.report.notes, [note]);
+}
+
+/// A plan left for later is a note, not a warning: nothing went wrong.
+#[test]
+fn a_deferred_plan_files_the_ticket_with_the_marker() {
+    let workspace = workspace();
+
+    let tracked = track(
+        &workspace.paths,
+        &vocabulary(),
+        id("116"),
+        &filer(),
+        &mut |_| Ok(Plan::Deferred),
+    )
+    .unwrap();
+
+    assert!(read_ticket(&workspace, tracked.ticket).ends_with(&format!("{PENDING}\n")));
+    assert!(tracked.report.warnings.is_empty());
+    assert_eq!(
+        tracked.report.notes[0],
+        "The tracking ticket holds `<!-- rfd-plan: pending -->` in place of the Implementation \
+         Plan of RFD 116 until `jp rfd track 116` reads it."
+    );
+}
+
 /// Phase tickets name the RFD they belong to without the tracking label.
 #[test]
 fn a_phase_ticket_is_not_the_tracking_ticket() {

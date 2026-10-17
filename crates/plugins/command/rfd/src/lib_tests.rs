@@ -618,7 +618,15 @@ fn track_start_and_stop_take_an_id() {
     assert!(matches!(
         parse(&["start", "116"]).unwrap().command,
         Command::Start {
-            id: RfdId::Published(116)
+            id: RfdId::Published(116),
+            no_plan: false,
+        }
+    ));
+    assert!(matches!(
+        parse(&["start", "116", "--no-plan"]).unwrap().command,
+        Command::Start {
+            id: RfdId::Published(116),
+            no_plan: true,
         }
     ));
     assert!(matches!(
@@ -948,4 +956,40 @@ fn start_and_stop_move_the_tracking_ticket() {
     assert_eq!(code, 0);
     assert!(text.ends_with(": In Progress -> Todo\n"), "{text}");
     assert!(queries(&stopped).is_empty());
+}
+
+/// `--no-plan` files the ticket without waiting on a model, and a later `track`
+/// reads the plan into it.
+#[test]
+fn start_without_the_plan_leaves_it_for_track() {
+    let root = trackable();
+
+    let started = exchange(&init_by_jane(root.path(), &["start", "43", "--no-plan"]));
+    assert!(queries(&started).is_empty(), "{started:?}");
+    let (text, code, _) = printed(&started);
+    assert_eq!(code, 0);
+    assert!(text.ends_with(": Todo -> In Progress\n"), "{text}");
+    let note = "The tracking ticket holds `<!-- rfd-plan: pending -->` in place of the \
+                Implementation Plan of RFD 043 until `jp rfd track 043` reads it.\n";
+    assert!(chrome(&started).contains(&note), "{started:?}");
+    assert!(
+        tracking_ticket(&root)
+            .unwrap()
+            .ends_with("<!-- rfd-plan: pending -->\n")
+    );
+
+    let [created, complete] = plan_answered(one_phase());
+    let tracked = exchange_all(&[
+        init_by_jane(root.path(), &["track", "43"]),
+        created,
+        complete,
+    ]);
+    assert_eq!(printed(&tracked).1, 0);
+
+    let ticket = tracking_ticket(&root).unwrap();
+    assert!(ticket.contains("- **Status**: In Progress\n"), "{ticket}");
+    assert!(
+        ticket.ends_with("## Implementation plan\n\n- **Order things**: Keeps them in order.\n"),
+        "{ticket}"
+    );
 }

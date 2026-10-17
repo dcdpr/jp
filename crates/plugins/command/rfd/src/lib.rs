@@ -173,6 +173,12 @@ enum Command {
     Start {
         /// The RFD: a number (`42`, `042`).
         id: RfdId,
+
+        /// Don't read the Implementation Plan now.
+        /// A ticket without it holds a marker in its place until `jp rfd track`
+        /// reads it, so this returns without waiting on a model.
+        #[arg(long)]
+        no_plan: bool,
     },
 
     /// Mark an RFD as no longer in development, moving its tracking ticket back
@@ -606,10 +612,14 @@ fn execute<R: BufRead, W: Write>(
             Ok(output)
         }
 
-        Command::Start { id } => {
+        Command::Start { id, no_plan } => {
             let vocabulary = ticket_vocabulary(ctx.config)?;
             track::start(paths, &vocabulary, id, &user(ctx)?, &mut |request| {
-                session.read_plan(request)
+                if no_plan {
+                    Ok(Plan::Deferred)
+                } else {
+                    session.read_plan(request)
+                }
             })
         }
 

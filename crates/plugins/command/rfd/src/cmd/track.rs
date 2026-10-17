@@ -9,16 +9,16 @@
 //!
 //! `track` files the ticket, or finds the one already filed.
 //! The plan is read out of the document by a model, since the phases differ per
-//! RFD; when it can't be read, the marker [`PENDING`] stands in for it and the
+//! RFD; when it isn't read, the marker [`PENDING`] stands in for it and the
 //! next `track` reads it again.
-//! Only a description still carrying the marker is rewritten: past that, the
-//! description is the project's to edit.
+//! Only the marker is ever replaced: the rest of the description is the
+//! project's to edit.
 
 use camino::{Utf8Path, Utf8PathBuf};
 use jp_plugin::message::QueryRequest;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-use ticket::{Kind, Labels, NewTicket, Status, Ticket, TicketId, Vocabulary, store};
+use ticket::{Kind, Labels, NewTicket, Status, Ticket, TicketId, Vocabulary, parse, store};
 
 use crate::{
     Output,
@@ -65,6 +65,9 @@ pub(crate) enum Plan {
 
     /// The plan couldn't be read, for the reason given.
     Unavailable(String),
+
+    /// The plan wasn't read, on purpose: a later `track` reads it.
+    Deferred,
 }
 
 /// The RFD a plan is read from.
@@ -149,17 +152,7 @@ pub(crate) fn track(
                 paths.show(path)
             ));
         } else if let Some(phases) = phases(id, read_plan(&request)?, &mut report) {
-            let edited = store::edit(
-                &paths.tickets,
-                ticket,
-                None,
-                Some(&description(id, &link, Some(&phases))),
-            )
-            .map_err(|error| error.to_string())?;
-            report.notes.push(format!(
-                "Read the Implementation Plan of RFD {id} into {} ({ticket}).",
-                paths.show(&edited.to)
-            ));
+            fill(paths, id, ticket, &phases, &mut report)?;
         }
 
         return Ok(Tracked { ticket, report });
@@ -314,6 +307,43 @@ fn the_one<'a>(
     found.into_iter().next()
 }
 
+/// Put `phases` in place of the marker on `ticket`.
+///
+/// The ticket is read again first: reading the plan can take a minute, and in
+/// that time the description may have been edited, or filled by another run.
+/// One that no longer carries the marker is left alone.
+fn fill(
+    paths: &Paths,
+    id: RfdId,
+    ticket: TicketId,
+    phases: &[Phase],
+    report: &mut Output,
+) -> Result<(), String> {
+    let path = store::locate_ticket(&paths.tickets, ticket).map_err(|error| error.to_string())?;
+    let current = parse::document(&paths::read(&path)?)
+        .map_err(|error| format!("{}: {error}", paths.show(&path)))?;
+
+    if !current.description.contains(PENDING) {
+        report.notes.push(format!(
+            "{} ({ticket}) already holds the Implementation Plan of RFD {id}.",
+            paths.show(&path)
+        ));
+        return Ok(());
+    }
+
+    let description = current
+        .description
+        .replacen(PENDING, &plan_section(phases), 1);
+    let edited = store::edit(&paths.tickets, ticket, None, Some(&description))
+        .map_err(|error| error.to_string())?;
+    report.notes.push(format!(
+        "Read the Implementation Plan of RFD {id} into {} ({ticket}).",
+        paths.show(&edited.to)
+    ));
+
+    Ok(())
+}
+
 /// The phases a tracking ticket lists, or `None` when the plan stays pending,
 /// which is reported.
 fn phases(id: RfdId, plan: Plan, report: &mut Output) -> Option<Vec<Phase>> {
@@ -322,6 +352,13 @@ fn phases(id: RfdId, plan: Plan, report: &mut Output) -> Option<Vec<Phase>> {
         Plan::Phases(_) => format!("No Implementation Plan was found in RFD {id}."),
         Plan::Unavailable(reason) => {
             format!("The Implementation Plan of RFD {id} could not be read: {reason}.")
+        }
+        Plan::Deferred => {
+            report.notes.push(format!(
+                "The tracking ticket holds `{PENDING}` in place of the Implementation Plan of RFD \
+                 {id} until `jp rfd track {id}` reads it."
+            ));
+            return None;
         }
     };
 
@@ -339,18 +376,22 @@ fn description(id: RfdId, link: &str, phases: Option<&[Phase]>) -> String {
     let mut text = format!("Tracking ticket for [RFD {id}]({link}).\n\n");
 
     match phases {
-        Some(phases) => {
-            text.push_str("## Implementation plan\n");
-            text.push('\n');
-            for phase in phases {
-                text.push_str(&format!(
-                    "- **{}**: {}\n",
-                    one_line(&phase.title),
-                    one_line(&phase.summary)
-                ));
-            }
-        }
+        Some(phases) => text.push_str(&plan_section(phases)),
         None => text.push_str(PENDING),
+    }
+
+    text.trim_end().to_owned()
+}
+
+/// The plan as a tracking ticket lists it: a heading, then one item per phase.
+fn plan_section(phases: &[Phase]) -> String {
+    let mut text = String::from("## Implementation plan\n\n");
+    for phase in phases {
+        text.push_str(&format!(
+            "- **{}**: {}\n",
+            one_line(&phase.title),
+            one_line(&phase.summary)
+        ));
     }
 
     text.trim_end().to_owned()
