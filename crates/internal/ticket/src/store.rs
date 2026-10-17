@@ -561,7 +561,7 @@ fn locate(dir: &Utf8Path, id: TicketId) -> Result<Utf8PathBuf> {
     claiming.pop().ok_or(Error::NoSuchTicket(id))
 }
 
-/// Every `NNNN-slug.md` in `dir`, paired with its id and ordered by it.
+/// Every ticket file in `dir`, paired with its id and ordered by it.
 fn files(dir: &Utf8Path) -> Result<Vec<(TicketId, Utf8PathBuf)>> {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
@@ -593,13 +593,8 @@ fn files(dir: &Utf8Path) -> Result<Vec<(TicketId, Utf8PathBuf)>> {
     Ok(files)
 }
 
-/// The reference token and slug of `path`, when it is a ticket file directly
-/// inside `dir`.
-///
-/// The token is the id as other documents write it: `T-02wt0kx` now, `T0005`
-/// for a ticket left in the pre-RFD-102 format, which is exactly what a
-/// migration reassigns.
-fn ticket_filename<'a>(dir: &Utf8Path, path: &'a Utf8Path) -> Option<(String, &'a str)> {
+/// The id and slug of `path`, when it is a ticket file directly inside `dir`.
+fn ticket_filename<'a>(dir: &Utf8Path, path: &'a Utf8Path) -> Option<(TicketId, &'a str)> {
     if !same_directory(dir, path.parent()?) || path.extension() != Some("md") {
         return None;
     }
@@ -609,11 +604,7 @@ fn ticket_filename<'a>(dir: &Utf8Path, path: &'a Utf8Path) -> Option<(String, &'
         return None;
     }
 
-    if id.len() == 4 && id.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Some((format!("T{id}"), slug));
-    }
-
-    id.parse::<TicketId>().ok().map(|id| (id.to_string(), slug))
+    id.parse::<TicketId>().ok().map(|id| (id, slug))
 }
 
 /// Whether two paths name the same directory.
@@ -705,12 +696,8 @@ pub fn bucket_at(unix_seconds: u64) -> Result<u32> {
 /// What a reassignment changed.
 #[derive(Debug)]
 pub struct Reassigned {
-    /// The reference token the ticket is leaving behind, as other documents
-    /// write it.
-    ///
-    /// A string rather than a [`TicketId`], so a ticket from an older format
-    /// can report `T0005`.
-    pub old: String,
+    /// The id the ticket is leaving behind.
+    pub old: TicketId,
     pub new: TicketId,
     pub path: Utf8PathBuf,
 }

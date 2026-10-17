@@ -1044,6 +1044,7 @@ fn refresh(dir: &Utf8Path, path: &Utf8Path, base: &str) -> Result<Output, String
     let done = store::reassign(dir, &path, bucket).map_err(|error| error.to_string())?;
     let mut output = Output::from(format!("{} -> {} at {}\n", done.old, done.new, done.path));
 
+    let old = done.old.to_string();
     let new = done.new.to_string();
     let mut ambiguous = vec![];
 
@@ -1054,7 +1055,7 @@ fn refresh(dir: &Utf8Path, path: &Utf8Path, base: &str) -> Result<Output, String
     // The rename put this file here a line ago, so a read failure is not one of
     // the expected cases `rewrite` tolerates.
     match std::fs::read_to_string(&done.path) {
-        Ok(source) if source.contains(&done.old) => ambiguous.push(done.path.clone()),
+        Ok(source) if source.contains(&old) => ambiguous.push(done.path.clone()),
         Ok(_) => {}
         Err(error) => return Err(format!("{}: {error}", done.path)),
     }
@@ -1063,11 +1064,11 @@ fn refresh(dir: &Utf8Path, path: &Utf8Path, base: &str) -> Result<Output, String
         if *file == path {
             continue;
         }
-        if names_on_base(dir, base, file, &done.old) {
+        if names_on_base(dir, base, file, &old) {
             ambiguous.push(file.clone());
             continue;
         }
-        if rewrite(file, &done.old, &new)? {
+        if rewrite(file, &old, &new)? {
             output.text.push_str(&format!("  rewrote {file}\n"));
         }
     }
@@ -1079,9 +1080,8 @@ fn refresh(dir: &Utf8Path, path: &Utf8Path, base: &str) -> Result<Output, String
             .collect::<Vec<_>>()
             .join(", ");
         output.warnings.push(format!(
-            "{} already appeared in these files on {base}, so the occurrence may belong to the \
-             ticket that kept the id. Left alone for you to sort out: {names}.",
-            done.old
+            "{old} already appeared in these files on {base}, so the occurrence may belong to the \
+             ticket that kept the id. Left alone for you to sort out: {names}."
         ));
     }
 

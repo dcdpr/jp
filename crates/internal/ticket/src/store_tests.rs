@@ -537,7 +537,7 @@ fn reassign_renames_the_file_and_rewrites_the_heading() {
 
     let done = reassign(dir.path(), &path, id.bucket() + 1).unwrap();
 
-    assert_eq!(done.old, id.to_string());
+    assert_eq!(done.old, id);
     assert_ne!(done.new, id);
     assert!(!path.exists());
     assert_eq!(
@@ -550,54 +550,17 @@ fn reassign_renames_the_file_and_rewrites_the_heading() {
     assert_eq!(ticket.description, "Description.");
 }
 
-/// Reassigning is a rename: the document is untouched, so a pre-RFD-102 heading
-/// survives verbatim and stripping it is the migration's job.
+/// A file named in the pre-RFD-102 `NNNN-slug.md` form is not a ticket file.
 #[test]
-fn reassign_renames_a_legacy_file_without_touching_it() {
+fn reassign_refuses_a_four_digit_file_name() {
     let dir = Utf8TempDir::new().unwrap();
     let path = dir.path().join("0005-old-ticket.md");
-    fs::write(
-        &path,
-        "# T0005: Old ticket\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- \
-         **Date**: 2026-08-05\n\nBody.\n",
-    )
-    .unwrap();
+    fs::write(&path, "# T0005: Old ticket\n\n- **Status**: Todo\n").unwrap();
 
-    let done = reassign(dir.path(), &path, 4_200).unwrap();
+    let error = reassign(dir.path(), &path, 4_200).unwrap_err();
 
-    assert_eq!(done.old, "T0005");
-    assert_eq!(done.new.bucket(), 4_200);
-    assert!(!path.exists());
-
-    let source = fs::read_to_string(&done.path).unwrap();
-    assert!(source.starts_with("# T0005: Old ticket\n"), "{source}");
-
-    let stripped = render::strip_ids(&source, &done.old);
-    let ticket = parse::document(&stripped).unwrap();
-    assert_eq!(ticket.title, "Old ticket");
-    assert_eq!(ticket.description, "Body.");
-}
-
-/// A title that merely contains a colon is not an id prefix, and a reply naming
-/// another ticket is not this one's to rewrite.
-#[test]
-fn stripping_ids_leaves_unrelated_colons_and_replies_alone() {
-    let document = "# Fix: the wrap calculation\n\n- **Status**: Todo\n\n- **Re**: T0009#2\n";
-
-    assert_eq!(render::strip_ids(document, "T0005"), document);
-}
-
-/// The old format embedded the id in the reply target too, so a migration has
-/// to convert both or the document goes on naming itself.
-#[test]
-fn stripping_ids_converts_the_heading_and_its_own_replies() {
-    let document = "# T0005: Old ticket\n\n- **Status**: Todo\n\n-----\n\n- **From**: jp\n- \
-                    **Re**: T0005#1\n\nBody.\n";
-
-    assert_eq!(
-        render::strip_ids(document, "T0005"),
-        "# Old ticket\n\n- **Status**: Todo\n\n-----\n\n- **From**: jp\n- **Re**: #1\n\nBody.\n"
-    );
+    assert!(matches!(error, Error::NotATicketFile(_)), "{error}");
+    assert!(path.exists());
 }
 
 #[test]
