@@ -57,26 +57,26 @@ fn a_new_title_moves_the_file_and_its_links() {
     );
     assert_eq!(
         output.text,
-        "  updated link targets in docs/rfd/050-later.md\n  updated link targets in \
+        "  updated link targets in docs/architecture.md\n  updated link targets in \
+         docs/rfd/050-later.md\n  updated link targets in \
          docs/ticket/02wt0kx-x.md\n042-ordered-things.md -> \
-         docs/rfd/042-kept-in-order.md\nUpdated 2 file(s) with link targets.\n"
+         docs/rfd/042-kept-in-order.md\nUpdated 3 file(s) with link targets.\n"
     );
 }
 
+/// A link without `.md` reaches the same page, so it moves too.
 /// Links outside the docs tree are named, not rewritten.
-/// A link without `.md` is left as it is.
 #[test]
-fn links_outside_the_docs_are_reported_and_links_without_md_are_kept() {
+fn links_without_md_are_rewritten_and_links_outside_the_docs_reported() {
     let workspace = workspace();
 
     let output = rename(&workspace.paths, id("042"), "Kept in Order", true).unwrap();
 
     assert_eq!(
         workspace.read("docs/architecture.md"),
-        "Ordering is [RFD 042](rfd/042-ordered-things).\n"
+        "Ordering is [RFD 042](rfd/042-kept-in-order).\n"
     );
-    let warning =
-        "Warning: references outside docs/ still name 042-ordered-things.md:\n  crates/x.rs";
+    let warning = "Warning: references outside docs/ still name 042-ordered-things:\n  crates/x.rs";
     assert_eq!(output.warnings, [warning]);
     assert_eq!(
         workspace.read("crates/x.rs"),
@@ -93,6 +93,23 @@ fn links_elsewhere_go_unchecked_when_the_workspace_is_out_of_reach() {
     let warning = "References outside docs/ were not checked: the access policy doesn't allow \
                    reading the workspace.";
     assert_eq!(output.warnings, [warning]);
+}
+
+/// A longer slug that starts with the old one names another file.
+#[test]
+fn a_longer_slug_is_left_alone() {
+    let workspace = workspace();
+    workspace.write(
+        "docs/notes.md",
+        "[A](rfd/042-ordered-things-revisited.md)\n",
+    );
+
+    rename(&workspace.paths, id("042"), "Kept in Order", true).unwrap();
+
+    assert_eq!(
+        workspace.read("docs/notes.md"),
+        "[A](rfd/042-ordered-things-revisited.md)\n"
+    );
 }
 
 #[test]

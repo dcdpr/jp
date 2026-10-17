@@ -14,9 +14,6 @@ use ignore::WalkBuilder;
 /// One substitution over a document's text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Rule {
-    /// Every occurrence of `from`.
-    Literal { from: String, to: String },
-
     /// `RFD <old>` where no digit follows: `RFD 042` but not `RFD 0420`.
     Citation { old: String, new: String },
 
@@ -33,16 +30,15 @@ pub(crate) enum Rule {
 impl Rule {
     fn apply(&self, text: &str) -> String {
         match self {
-            Self::Literal { from, to } => text.replace(from, to),
             Self::Citation { old, new } => replace_where(
                 text,
                 &format!("RFD {old}"),
                 &format!("RFD {new}"),
                 |_, after| !after.is_some_and(|c| c.is_ascii_digit()),
             ),
-            Self::Stem { stem, to } => replace_where(text, stem, to, |_, after| {
-                !after.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-            }),
+            Self::Stem { stem, to } => {
+                replace_where(text, stem, to, |_, after| !after.is_some_and(is_slug))
+            }
             Self::Token { old, new } => replace_where(text, old, new, |before, after| {
                 !before.is_some_and(is_word) && !after.is_some_and(is_word)
             }),
@@ -53,6 +49,11 @@ impl Rule {
 /// Whether `c` continues a word, the way a regex `\w` reads ASCII text.
 fn is_word(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_'
+}
+
+/// Whether `c` continues a file name's slug.
+fn is_slug(c: char) -> bool {
+    is_word(c) || c == '-'
 }
 
 /// Replace each occurrence of `from` that `keep` accepts, given the characters
@@ -108,6 +109,14 @@ pub(crate) fn cites(text: &str, id: &str) -> bool {
             .next()
             .is_some_and(is_word)
     })
+}
+
+/// Whether `text` names the file stem `stem` where no slug character follows:
+/// `042-slug` in `042-slug.md` and in `(042-slug)`, but not in `042-slug-two`.
+#[must_use]
+pub(crate) fn names_stem(text: &str, stem: &str) -> bool {
+    text.match_indices(stem)
+        .any(|(at, _)| !text[at + stem.len()..].chars().next().is_some_and(is_slug))
 }
 
 /// The markdown files directly in `dir`, by name.

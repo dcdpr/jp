@@ -75,16 +75,12 @@ fn rules_apply_in_order() {
 }
 
 #[test]
-fn a_literal_replaces_every_occurrence() {
-    let rule = Rule::Literal {
-        from: "042-old.md".to_owned(),
-        to: "042-new.md".to_owned(),
-    };
-
-    assert_eq!(
-        apply("[a](042-old.md) [b](../rfd/042-old.md)", &[rule]),
-        "[a](042-new.md) [b](../rfd/042-new.md)"
-    );
+fn names_stem_reads_a_whole_stem() {
+    assert!(names_stem("[a](042-old.md)", "042-old"));
+    assert!(names_stem("[a](rfd/042-old)", "042-old"));
+    assert!(names_stem("[a](042-old#anchor)", "042-old"));
+    assert!(!names_stem("[a](042-old-two.md)", "042-old"));
+    assert!(!names_stem("[a](042-older.md)", "042-old"));
 }
 
 #[test]

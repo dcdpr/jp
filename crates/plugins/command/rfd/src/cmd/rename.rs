@@ -1,9 +1,9 @@
 //! `jp rfd rename`: retitle an RFD and move its file to the slug the new title
 //! produces.
 //!
-//! The id stays, so `RFD <id>` mentions stay right; links name the file, so
-//! every one under the documentation tree the RFD directory sits in, and in the
-//! ticket directory, is rewritten.
+//! The id stays, so `RFD <id>` mentions stay right; links name the file, with
+//! or without `.md`, so every one under the documentation tree the RFD
+//! directory sits in, and in the ticket directory, is rewritten.
 //! Links elsewhere are reported, not rewritten.
 
 use std::fs;
@@ -35,8 +35,9 @@ pub(crate) fn rename(
     let file = paths.resolve(id)?;
     let dir = id.directory(&paths.rfds);
     let old_name = file.file_name().unwrap_or_default().to_owned();
-    let new_name = format!("{id}-{}.md", id::slug(title));
-    let new_file = dir.join(&new_name);
+    let old_stem = file.file_stem().unwrap_or_default().to_owned();
+    let new_stem = format!("{id}-{}", id::slug(title));
+    let new_file = dir.join(format!("{new_stem}.md"));
     if new_file != file && new_file.exists() {
         return Err(format!("{} already exists.", paths.show(&new_file)));
     }
@@ -60,10 +61,12 @@ pub(crate) fn rename(
 
     fs::rename(&file, &new_file).map_err(|error| format!("{file}: {error}"))?;
 
+    // The stem, so a link written without `.md` moves too; a longer slug that
+    // starts with this one is a different file and stays.
     let linking = paths.linking();
-    let rules = [Rule::Literal {
-        from: old_name.clone(),
-        to: new_name.clone(),
+    let rules = [Rule::Stem {
+        stem: old_stem.clone(),
+        to: new_stem,
     }];
     let mut updated = 0;
     for other in linking.iter().flat_map(|dir| references::walk(dir)) {
@@ -93,11 +96,13 @@ pub(crate) fn rename(
     let leftovers = Leftovers {
         covered: &covered,
         scope: format!("outside {}", scope.join(" and ")),
-        finding: format!("still name {old_name}"),
+        finding: format!("still name {old_stem}"),
     };
     output
         .warnings
-        .extend(leftovers.report(paths, scan_workspace, |text| text.contains(&old_name)));
+        .extend(leftovers.report(paths, scan_workspace, |text| {
+            references::names_stem(text, &old_stem)
+        }));
 
     Ok(output)
 }
