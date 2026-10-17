@@ -277,8 +277,8 @@ fn sync_writes_the_site_files_and_check_agrees() {
         text.contains("  write   docs/.vitepress/jp-vite/config.mjs\n"),
         "{text}"
     );
-    assert!(text.contains("  write   docs/rfd/index.md\n"), "{text}");
-    assert!(text.contains("  write   docs/ticket/board.md\n"), "{text}");
+    assert!(text.contains("  create  docs/rfd/index.md\n"), "{text}");
+    assert!(text.contains("  create  docs/ticket/board.md\n"), "{text}");
     assert!(text.ends_with("`git diff` shows what changed.\n"), "{text}");
 
     assert!(
@@ -289,7 +289,7 @@ fn sync_writes_the_site_files_and_check_agrees() {
     assert!(
         fs::read_to_string(root.path().join("docs/rfd/priority.md"))
             .unwrap()
-            .contains("from '../.vitepress/jp-vite/loaders/rfd-board.data.js'")
+            .contains("\n<RfdBoard />\n")
     );
 
     let (text, code, _) = printed(&exchange(&[init(root.path(), &["sync", "--check"])]));
@@ -304,7 +304,12 @@ fn sync_writes_the_site_files_and_check_agrees() {
 fn check_names_the_files_that_differ() {
     let root = project();
     exchange(&[init(root.path(), &["sync", "--yes"])]);
-    fs::write(root.path().join("docs/ticket/board.md"), "Edited").unwrap();
+    fs::write(
+        root.path().join("docs/.vitepress/jp-vite/config.mjs"),
+        "Edited",
+    )
+    .unwrap();
+    fs::remove_file(root.path().join("docs/ticket/board.md")).unwrap();
 
     let (_, code, reason) = printed(&exchange(&[init(root.path(), &["sync", "--check"])]));
 
@@ -312,9 +317,38 @@ fn check_names_the_files_that_differ() {
     assert_eq!(
         reason.as_deref(),
         Some(
-            "These files aren't the ones `jp vite sync` writes:\n  write   \
-             docs/ticket/board.md\nRun `jp vite sync` to write them."
+            "`jp vite sync` would make these changes:\n  write   \
+             docs/.vitepress/jp-vite/config.mjs\n  create  docs/ticket/board.md\nRun `jp vite \
+             sync` to make them."
         )
+    );
+}
+
+/// A page is the project's once it exists: sync never rewrites it, and check
+/// doesn't compare it.
+#[test]
+fn a_page_the_project_wrote_is_left_alone() {
+    let root = project();
+    exchange(&[init(root.path(), &["sync", "--yes"])]);
+    commit(root.path());
+    fs::write(
+        root.path().join("docs/rfd/index.md"),
+        "# Our RFDs\n\n<RfdIndex />\n",
+    )
+    .unwrap();
+
+    let (text, code, _) = printed(&exchange(&[init(root.path(), &["sync", "--check"])]));
+    assert_eq!(code, 0);
+    assert_eq!(
+        text,
+        "The site's files are the ones `jp vite sync` writes.\n"
+    );
+
+    let (_, code, _) = printed(&exchange(&[init(root.path(), &["sync", "--yes"])]));
+    assert_eq!(code, 0);
+    assert_eq!(
+        fs::read_to_string(root.path().join("docs/rfd/index.md")).unwrap(),
+        "# Our RFDs\n\n<RfdIndex />\n"
     );
 }
 
@@ -325,7 +359,8 @@ fn sync_refuses_to_overwrite_what_git_has_not_recorded() {
     let root = project();
     exchange(&[init(root.path(), &["sync", "--yes"])]);
     commit(root.path());
-    fs::write(root.path().join("docs/ticket/board.md"), "Edited").unwrap();
+    let config = root.path().join("docs/.vitepress/jp-vite/config.mjs");
+    fs::write(&config, "Edited").unwrap();
     fs::write(
         root.path().join("docs/.vitepress/jp-vite/stray.mjs"),
         "Stray",
@@ -339,24 +374,18 @@ fn sync_refuses_to_overwrite_what_git_has_not_recorded() {
         reason.as_deref(),
         Some(
             "Git couldn't restore these files, so `jp vite sync` leaves them:\n  \
-             docs/.vitepress/jp-vite/stray.mjs (not tracked)\n  docs/ticket/board.md (changed \
-             since the last commit)\nCommit them, or run `jp vite sync --force` to overwrite them \
-             anyway."
+             docs/.vitepress/jp-vite/config.mjs (changed since the last commit)\n  \
+             docs/.vitepress/jp-vite/stray.mjs (not tracked)\nCommit them, or run `jp vite sync \
+             --force` to overwrite them anyway."
         )
     );
-    assert_eq!(
-        fs::read_to_string(root.path().join("docs/ticket/board.md")).unwrap(),
-        "Edited"
-    );
+    assert_eq!(fs::read_to_string(&config).unwrap(), "Edited");
 
     let (_, code, _) = printed(&exchange(&[init(root.path(), &[
         "sync", "--yes", "--force",
     ])]));
     assert_eq!(code, 0);
-    assert_ne!(
-        fs::read_to_string(root.path().join("docs/ticket/board.md")).unwrap(),
-        "Edited"
-    );
+    assert_ne!(fs::read_to_string(&config).unwrap(), "Edited");
     assert!(
         !root
             .path()
@@ -484,7 +513,7 @@ fn jp_site_is_synced() {
     let options = Options::from_config(&config).unwrap();
     let settings = snapshot(&root, &options, &config, None).unwrap();
     let owned_dir = site::owned_dir(&settings);
-    let changes = sync::plan(&root, site::owned(&settings), &owned_dir).unwrap();
+    let changes = changes(&root, &settings).unwrap();
 
     if env::var_os("JP_VITE_BLESS").is_some() {
         sync::apply(&root, &changes, &owned_dir).unwrap();

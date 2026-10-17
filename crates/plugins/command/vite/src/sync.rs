@@ -1,8 +1,9 @@
 //! What syncing changes in a project: the owned files that are missing or
-//! differ from what the binary writes, and the files under
-//! `.vitepress/jp-vite/` the binary no longer has.
+//! differ from what the binary writes, the files under `.vitepress/jp-vite/`
+//! the binary no longer has, and the starting pages the project doesn't have.
 //!
-//! [`plan`] reads the project and changes nothing; [`apply`] writes the plan.
+//! [`plan`] and [`missing`] read the project and change nothing; [`apply`]
+//! writes what they found.
 //! Whether the project may be written at all is [`crate::git`]'s to say.
 
 use std::{collections::BTreeSet, fs, io};
@@ -14,8 +15,11 @@ use crate::site::Owned;
 /// One change syncing makes, to a path relative to the workspace root.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Change {
-    /// Write a file that is missing or differs.
+    /// Write an owned file that is missing or differs.
     Write(Owned),
+
+    /// Create a page the project doesn't have.
+    Create(Owned),
 
     /// Remove a file under `.vitepress/jp-vite/` the binary doesn't have.
     Remove(Utf8PathBuf),
@@ -25,7 +29,7 @@ impl Change {
     /// The path the change touches.
     pub(crate) fn path(&self) -> &Utf8Path {
         match self {
-            Self::Write(owned) => &owned.path,
+            Self::Write(owned) | Self::Create(owned) => &owned.path,
             Self::Remove(path) => path,
         }
     }
@@ -67,6 +71,17 @@ pub(crate) fn plan(
     Ok(changes)
 }
 
+/// The pages among `pages` that the project at `root` doesn't have.
+///
+/// A page that exists is the project's, whatever it holds.
+pub(crate) fn missing(root: &Utf8Path, pages: Vec<Owned>) -> Vec<Change> {
+    pages
+        .into_iter()
+        .filter(|page| !root.join(&page.path).exists())
+        .map(Change::Create)
+        .collect()
+}
+
 /// Make the changes, creating directories as needed.
 ///
 /// A directory a removal empties is removed with it, up to `owned_dir`.
@@ -78,7 +93,7 @@ pub(crate) fn apply(
     for change in changes {
         let path = root.join(change.path());
         match change {
-            Change::Write(owned) => {
+            Change::Write(owned) | Change::Create(owned) => {
                 if let Some(parent) = path.parent() {
                     fs::create_dir_all(parent).map_err(|error| format!("{parent}: {error}"))?;
                 }

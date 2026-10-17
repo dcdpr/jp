@@ -11,13 +11,6 @@ They carry a temporary `DNN` id and may change substantially — or be abandoned
 — before promotion.
 See the [published RFDs] for accepted and implemented proposals.
 
-<script setup>
-import { data } from '@@jp-vite@@/loaders/rfd-drafts.data.js'
-import settings from '@@jp-vite@@/settings.json'
-import { problem } from '@@jp-vite@@/theme/problem.mjs'
-import DocIndex from '@@jp-vite@@/theme/DocIndex.vue'
-</script>
-
-<DocIndex v-if="!problem" :entries="data" :filters="settings.rfd.categories" :show-status="false" storage-key="rfd-drafts" />
+<RfdDraftIndex />
 
 [published RFDs]: ../

@@ -1,13 +1,15 @@
-//! The files `jp vite` owns in a project, built from the binary.
+//! The files `jp vite` writes in a project, built from the binary.
 //!
 //! The binary carries the crate's `site/` directory ([`FILES`]).
-//! `jp-vite/` is written as it is to the project's `.vitepress/jp-vite/`, and
-//! each page in `pages/` to the directory of the workflow it belongs to:
-//! `pages/rfd/` to the RFD directory and `pages/ticket/` to the ticket
+//! `jp-vite/` is owned: it is written as it is to the project's
+//! `.vitepress/jp-vite/`, together with the settings snapshot, and every sync
+//! rewrites it.
+//! `pages/` holds a starting page for each list the workflows show:
+//! `pages/rfd/` goes to the RFD directory and `pages/ticket/` to the ticket
 //! directory, for the workflows the project has.
-//! A page names `.vitepress/jp-vite` as `@@jp-vite@@`, which is replaced with
-//! the path from the page to it, since that depends on how deep the page sits.
-//! The settings snapshot joins them as `.vitepress/jp-vite/settings.json`.
+//! A page is written only where there is none, and is the project's from then
+//! on: it renders its list with one tag, such as `<RfdIndex />`, which the
+//! theme entry registers.
 
 use camino::Utf8PathBuf;
 
@@ -31,10 +33,7 @@ pub(crate) const OWNED_DIR: &str = ".vitepress/jp-vite";
 /// The snapshot's name in [`OWNED_DIR`].
 pub(crate) const SETTINGS_FILE: &str = "settings.json";
 
-/// What a page writes in place of the path from it to [`OWNED_DIR`].
-const PLACEHOLDER: &str = "@@jp-vite@@";
-
-/// One file `jp vite` owns, and what it holds.
+/// One file `jp vite` writes, and what it holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Owned {
     /// Where it goes, relative to the workspace root.
@@ -59,28 +58,19 @@ pub(crate) fn settings_path(settings: &Settings) -> Utf8PathBuf {
 }
 
 /// Every file `jp vite` owns in a project with these settings, ordered by path:
-/// the files under [`OWNED_DIR`], the snapshot among them, and the pages of the
-/// workflows the project has.
+/// the files under [`OWNED_DIR`], the snapshot among them.
 pub(crate) fn owned(settings: &Settings) -> Vec<Owned> {
     let dir = owned_dir(settings);
-    let mut owned = vec![];
-
-    for (path, contents) in FILES {
-        if let Some(rest) = path.strip_prefix("jp-vite/") {
-            owned.push(Owned {
+    let mut owned: Vec<Owned> = FILES
+        .iter()
+        .filter_map(|(path, contents)| {
+            let rest = path.strip_prefix("jp-vite/")?;
+            Some(Owned {
                 path: dir.join(rest),
                 contents: contents.to_vec(),
-            });
-        } else if let Some(rest) = path.strip_prefix("pages/rfd/")
-            && let Some(rfd) = &settings.rfd
-        {
-            owned.push(page(&rfd.dir, &rfd.route, rest, contents));
-        } else if let Some(rest) = path.strip_prefix("pages/ticket/")
-            && let Some(ticket) = &settings.ticket
-        {
-            owned.push(page(&ticket.dir, &ticket.route, rest, contents));
-        }
-    }
+            })
+        })
+        .collect();
 
     owned.push(Owned {
         path: settings_path(settings),
@@ -91,19 +81,29 @@ pub(crate) fn owned(settings: &Settings) -> Vec<Owned> {
     owned
 }
 
-/// The page at `rest` in a workflow's directory, `dir` on disk and `route` on
-/// the site, pointing at [`OWNED_DIR`] from where it sits.
-fn page(dir: &str, route: &str, rest: &str, contents: &[u8]) -> Owned {
-    // The page's own directory is `route/rest` without its last component.
-    let depth = route.split('/').count() + rest.split('/').count() - 1;
-    let path_to_owned = format!("{}{OWNED_DIR}", "../".repeat(depth));
+/// The starting pages of the workflows the project has, ordered by path.
+pub(crate) fn pages(settings: &Settings) -> Vec<Owned> {
+    let mut pages: Vec<Owned> = FILES
+        .iter()
+        .filter_map(|(path, contents)| {
+            let (dir, rest) = if let Some(rest) = path.strip_prefix("pages/rfd/") {
+                (&settings.rfd.as_ref()?.dir, rest)
+            } else {
+                (
+                    &settings.ticket.as_ref()?.dir,
+                    path.strip_prefix("pages/ticket/")?,
+                )
+            };
 
-    Owned {
-        path: Utf8PathBuf::from(dir).join(rest),
-        contents: String::from_utf8_lossy(contents)
-            .replace(PLACEHOLDER, &path_to_owned)
-            .into_bytes(),
-    }
+            Some(Owned {
+                path: Utf8PathBuf::from(dir).join(rest),
+                contents: contents.to_vec(),
+            })
+        })
+        .collect();
+    pages.sort_by(|a, b| a.path.cmp(&b.path));
+
+    pages
 }
 
 #[cfg(test)]

@@ -14,13 +14,7 @@ untriaged work alike.
 whatever stage it reached.
 Done shows only the head of the column — the [full list] has the rest.
 
-<script setup>
-import { data } from '@@jp-vite@@/loaders/tickets.data.js'
-import { problem } from '@@jp-vite@@/theme/problem.mjs'
-import TicketBoard from '@@jp-vite@@/theme/TicketBoard.vue'
-</script>
-
-<TicketBoard v-if="!problem" :columns="data.columns" />
+<TicketBoard />
 
 Status lives in the ticket file; the order within a column lives in the board
 file, `.board.json`, next to the tickets.

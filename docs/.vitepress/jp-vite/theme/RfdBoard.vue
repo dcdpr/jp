@@ -1,16 +1,17 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 
+import { data } from '../loaders/rfd-board.data.js'
 import { normalizePriority, TERMINAL_STATUSES } from '../loaders/rfd-priority.mjs'
 import settings from '../settings.json'
 import { createSortable, isDev, loadBoard, postBoard, saveBoard } from './board.mjs'
+import { problem } from './problem.mjs'
 
-const props = defineProps({
-    entries: { type: Array, required: true },
-    // Raw board layout, in priority.json's shape: `planned` milestone groups
-    // and `backlog`.
-    priority: { type: Object, required: true },
-})
+// The RFD priority board, which a page renders with `<RfdBoard />`.
+//
+// `data` holds every open RFD (`entries`) and the raw board layout
+// (`priority`), in `.priority.json`'s shape: `planned` milestone groups and
+// `backlog`.
 
 // Dragging only exists on the dev server (see `board.mjs`), so the production
 // bundle never includes SortableJS and the list renders read-only — the
@@ -31,13 +32,13 @@ function cutoffRow() {
     return { marker: true, name: null, num: CUTOFF_NUM, slug: CUTOFF_NUM }
 }
 
-const byNum = new Map(props.entries.map(e => [e.num, e]))
+const byNum = new Map(data.entries.map(e => [e.num, e]))
 
 // Every RFD's hard dependencies (Requires ∪ Extends). A dependency must sit
 // above its dependent in the list.
 const depMap = computed(() => {
     const m = new Map()
-    for (const e of props.entries) m.set(e.num, new Set(e.dependsOn ?? []))
+    for (const e of data.entries) m.set(e.num, new Set(e.dependsOn ?? []))
     return m
 })
 
@@ -90,7 +91,7 @@ function buildRows(p) {
     }
     rows.push(cutoffRow())
     p.backlog.forEach(push)
-    const rest = props.entries
+    const rest = data.entries
         .filter(e => isActive(e) && !placed.has(e.num))
         .sort((a, b) => a.num.localeCompare(b.num))
     rows.push(...rest)
@@ -104,7 +105,7 @@ const items = ref([])
 // place as the checkbox writes, because the data loader caches for the dev
 // server's lifetime and `entries` never carries a write back.
 const inDev = ref(
-    new Set(props.entries.filter(e => e.inDevelopment).map(e => e.num))
+    new Set(data.entries.filter(e => e.inDevelopment).map(e => e.num))
 )
 
 // Statuses whose RFDs can be marked in development. `jp rfd start` refuses
@@ -119,9 +120,8 @@ function canToggleDev(rfd) {
     return TRACKABLE_STATUSES.has(rfd.status) || inDev.value.has(rfd.num)
 }
 
-// RFDs with a checkbox write in flight. The first mark on an RFD files its
-// tracking ticket, which reads the RFD's implementation plan through a model
-// and can take a minute or more.
+// RFDs with a checkbox write in flight, so a second click doesn't race the
+// first.
 const devPending = ref(new Set())
 
 // Mark an RFD as in development, or stop it, by moving its tracking ticket.
@@ -136,23 +136,10 @@ async function toggleDev(rfd, event) {
     const active = !inDev.value.has(rfd.num)
     devPending.value = new Set(devPending.value).add(rfd.num)
 
-    // The elapsed time shows the request is still open, and for how long.
-    const started = Date.now()
-    const progress = () => {
-        const seconds = Math.floor((Date.now() - started) / 1000)
-        const doing = active
-            ? `RFD ${rfd.num}: starting its tracking ticket…`
-            : `RFD ${rfd.num}: moving its tracking ticket back to Todo…`
-        setNotice(seconds ? `${doing} ${seconds}s` : doing, 'warn')
-    }
-    progress()
-    const ticker = setInterval(progress, 1000)
-
     const { ok, output } = await postBoard('/__rfd-development', {
         num: rfd.num,
         active,
     })
-    clearInterval(ticker)
 
     const pending = new Set(devPending.value)
     pending.delete(rfd.num)
@@ -173,7 +160,7 @@ async function toggleDev(rfd, event) {
 
 // Initial board state from the build-time data. On the dev server the same
 // function rebuilds it from a fresh fetch on mount.
-applyPriority(props.priority)
+applyPriority(data.priority)
 
 // RFD numbers currently on the board (marker rows excluded).
 const rfdNums = computed(() => new Set(
@@ -571,7 +558,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-<div class="rfd-board">
+<div v-if="!problem" class="rfd-board">
     <div v-if="isDev" class="rfd-board-status">
         <span v-if="notice" :class="'rfd-board-' + notice.kind">{{ notice.text }}</span>
         <span v-else class="rfd-board-hint">Drag a row to reorder; hover the gap between rows to add a milestone; tick <code>dev</code> to start an RFD. Changes save automatically.</span>

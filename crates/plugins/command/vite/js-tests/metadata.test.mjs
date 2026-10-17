@@ -32,9 +32,27 @@ test('wrappedField reads a value that does not wrap', () => {
 })
 
 test('wrappedField stops at the next field', () => {
-    // `Date` sits directly above `Extended by`, which is not indented and so
-    // is not a continuation of it.
+    // `Date` sits directly above `Extended by`, which starts a field of its
+    // own and so is not a continuation of it.
     assert.equal(wrappedField(RFD, 'Date'), '2026-01-01')
+})
+
+test('wrappedField reads a value continued on unindented lines', () => {
+    // A line at the margin continues the value too, as markdown reads a list
+    // item.
+    const margin = `# RFD 042: Tool Options
+
+- **Status**: Implemented
+- **Summary**: Introduces per-tool options for static user-defined
+configuration passed to tools at runtime.
+
+## Summary
+`
+
+    assert.equal(
+        wrappedField(margin, 'Summary'),
+        'Introduces per-tool options for static user-defined configuration passed to tools at runtime.',
+    )
 })
 
 test('wrappedField stops at the blank line closing the block', () => {

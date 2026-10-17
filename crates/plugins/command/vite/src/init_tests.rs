@@ -96,11 +96,12 @@ fn writing_creates_the_files_and_their_directories() {
         "docs/.vitepress/theme/index.js",
         "docs/index.md",
     ]);
+    let theme = fs::read_to_string(site.join(".vitepress/theme/index.js")).unwrap();
     assert!(
-        fs::read_to_string(site.join(".vitepress/theme/index.js"))
-            .unwrap()
-            .contains("import { docBefore } from '../jp-vite/theme/index.mjs'")
+        theme.contains("import { docBefore, enhanceApp } from '../jp-vite/theme/index.mjs'"),
+        "{theme}"
     );
+    assert!(theme.contains("    enhanceApp,\n"), "{theme}");
 }
 
 /// A file that appeared after the templates were picked is not replaced.

@@ -77,9 +77,11 @@ fn the_owned_directory_is_written_as_it_is() {
     }
 }
 
+/// Pages are the project's once written, so `jp vite` owns only its own
+/// directory.
 #[test]
-fn a_project_without_workflows_gets_no_pages() {
-    let owned = owned(&settings(None, None));
+fn only_the_owned_directory_is_owned() {
+    let owned = owned(&settings(Some("rfd"), Some("ticket")));
 
     assert!(
         paths(&owned)
@@ -91,14 +93,15 @@ fn a_project_without_workflows_gets_no_pages() {
 }
 
 #[test]
-fn each_workflow_gets_its_pages() {
-    let owned = owned(&settings(Some("rfd"), Some("ticket")));
-    let pages: Vec<&str> = paths(&owned)
-        .into_iter()
-        .filter(|path| !path.starts_with("docs/.vitepress/"))
-        .collect();
+fn a_project_without_workflows_gets_no_pages() {
+    assert!(pages(&settings(None, None)).is_empty());
+}
 
-    assert_eq!(pages, [
+#[test]
+fn each_workflow_gets_its_pages() {
+    let pages = pages(&settings(Some("rfd"), Some("ticket")));
+
+    assert_eq!(paths(&pages), [
         "docs/rfd/drafts/index.md",
         "docs/rfd/index.md",
         "docs/rfd/priority.md",
@@ -107,31 +110,45 @@ fn each_workflow_gets_its_pages() {
     ]);
 }
 
-/// A page imports from `.vitepress/jp-vite` by a path relative to where it
-/// sits.
+/// A page renders its list with a tag the theme registers, so it reads the same
+/// wherever the workflow's directory sits.
 #[test]
-fn a_page_points_at_the_owned_directory_from_where_it_sits() {
-    let owned = owned(&settings(Some("design/rfd"), Some("ticket")));
+fn a_page_renders_its_list_with_a_registered_tag() {
+    let pages = pages(&settings(Some("design/rfd"), Some("ticket")));
 
-    assert!(
-        contents(&owned, "docs/design/rfd/index.md")
-            .contains("from '../../.vitepress/jp-vite/loaders/rfds.data.js'")
-    );
-    assert!(
-        contents(&owned, "docs/design/rfd/drafts/index.md")
-            .contains("from '../../../.vitepress/jp-vite/loaders/rfd-drafts.data.js'")
-    );
-    assert!(
-        contents(&owned, "docs/ticket/board.md")
-            .contains("from '../.vitepress/jp-vite/loaders/tickets.data.js'")
-    );
-
-    for file in &owned {
-        let text = String::from_utf8_lossy(&file.contents);
+    for (path, tag) in [
+        ("docs/design/rfd/index.md", "<RfdIndex />"),
+        ("docs/design/rfd/drafts/index.md", "<RfdDraftIndex />"),
+        ("docs/design/rfd/priority.md", "<RfdBoard />"),
+        ("docs/ticket/index.md", "<TicketIndex />"),
+        ("docs/ticket/board.md", "<TicketBoard />"),
+    ] {
         assert!(
-            !text.contains(PLACEHOLDER),
-            "{} keeps the placeholder",
-            file.path
+            contents(&pages, path).contains(&format!("\n{tag}\n")),
+            "{path} renders no {tag}"
+        );
+    }
+}
+
+/// Every tag a starting page uses is one the theme registers.
+#[test]
+fn the_theme_registers_every_tag_the_pages_use() {
+    let theme = FILES
+        .iter()
+        .find(|(path, _)| *path == "jp-vite/theme/index.mjs")
+        .map(|(_, contents)| String::from_utf8_lossy(contents).into_owned())
+        .unwrap();
+
+    for tag in [
+        "RfdIndex",
+        "RfdDraftIndex",
+        "RfdBoard",
+        "TicketIndex",
+        "TicketBoard",
+    ] {
+        assert!(
+            theme.contains(&format!("app.component('{tag}'")),
+            "{tag} isn't registered"
         );
     }
 }

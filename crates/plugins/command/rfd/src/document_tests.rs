@@ -80,12 +80,12 @@ fn citations_are_read_across_wrapped_lines_in_order() {
     assert!(header.citations("Required by").is_empty());
 }
 
-/// Older RFDs, written before `comfort` reflowed them, continue a wrapped value
-/// without indenting it; markdown reads that as the same paragraph.
+/// A line at the margin continues the field above it, as markdown reads a list
+/// item.
 #[test]
 fn an_unindented_continuation_belongs_to_the_field_above_it() {
     let text = "\
-# RFD 014: Guide
+# RFD 042: Guide
 
 - **Status**: Superseded
 - **Extended by**: [RFD 015], [RFD 016],
@@ -115,7 +115,7 @@ methods, registration, and conventions.
     assert_eq!(
         document.render(),
         "\
-# RFD 014: Guide
+# RFD 042: Guide
 
 - **Status**: Superseded
 - **Extended by**: [RFD 015], [RFD 017], [RFD 018]

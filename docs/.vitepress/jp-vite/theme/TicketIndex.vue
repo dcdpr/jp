@@ -1,20 +1,18 @@
 <script setup>
 import { nextTick, ref } from 'vue'
 
+import { data } from '../loaders/tickets.data.js'
 import DocIndex from './DocIndex.vue'
 import { isDev } from './board.mjs'
+import { problem } from './problem.mjs'
 
-// The ticket index: the shared document table, plus add / edit / delete on the
-// dev server.
+// The ticket index, which a page renders with `<TicketIndex />`: the shared
+// document table, plus add / edit / delete on the dev server.
 //
 // Every write goes through `jp ticket`, so the browser never has to know what a
 // ticket file looks like. The page reloads afterwards: the list comes from a
 // build-time data loader, and a reload is the honest way to pick up what changed
 // on disk.
-
-const props = defineProps({
-    tickets: { type: Array, required: true },
-})
 
 const KINDS = ['bug', 'feature', 'chore']
 const STATUSES = ['Todo', 'In Progress', 'Done']
@@ -113,6 +111,7 @@ async function remove(ticket) {
 </script>
 
 <template>
+<template v-if="!problem">
 <!-- Above the table: on a long list, a form appended at the bottom is a scroll
      away from the row whose Edit button opened it. -->
 <div v-if="isDev" ref="panel" class="ticket-admin">
@@ -150,7 +149,7 @@ async function remove(ticket) {
 </div>
 
 <DocIndex
-    :entries="props.tickets"
+    :entries="data.tickets"
     storage-key="ticket"
     id-label="Ticket"
     id-field="num"
@@ -178,6 +177,7 @@ async function remove(ticket) {
         >✕</button>
     </template>
 </DocIndex>
+</template>
 </template>
 
 <style>

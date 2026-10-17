@@ -7,11 +7,12 @@
 //! both document kinds, the components, the styles, the dev-server middleware,
 //! and a configuration fragment, which go to the project's
 //! `.vitepress/jp-vite/` with a snapshot of the settings they read
-//! ([`settings`]), and the index and board pages of the RFD and ticket
+//! ([`settings`]); and a starting index and board page for the RFD and ticket
 //! directories.
 //! `init` writes the files that stay the project's own ([`init`]); `sync`
-//! rewrites the owned ones ([`sync`]), only where git can restore what it
-//! overwrites ([`git`]); and `serve` runs the dev server ([`serve`]).
+//! rewrites the owned ones and creates the pages a project doesn't have
+//! ([`sync`]), only where git can restore what it overwrites ([`git`]); and
+//! `serve` runs the dev server ([`serve`]).
 //!
 //! Settings come from `plugins.command.vite.options`, and from `jp rfd`'s and
 //! `jp ticket`'s options ([`options`]).
@@ -88,8 +89,9 @@ enum Command {
     /// Write the site's own files from this binary.
     ///
     /// They are the loaders, components, styles, and dev-server middleware in
-    /// `.vitepress/jp-vite/`, the settings they read, and the index and board
-    /// pages of the RFD and ticket directories.
+    /// `.vitepress/jp-vite/`, and the settings they read.
+    /// The index and board pages of the RFD and ticket directories are created
+    /// where they are missing, and are never changed once they exist.
     /// Lists what it will change and asks once.
     /// Refuses to overwrite a file git couldn't restore, unless `--force`.
     Sync {
@@ -370,15 +372,14 @@ fn sync_site<R: BufRead, W: Write>(
     let origin = git::origin(root);
     let settings = snapshot(root, options, config, origin.as_deref())?;
     let owned_dir = site::owned_dir(&settings);
-    let changes = sync::plan(root, site::owned(&settings), &owned_dir)?;
+    let changes = changes(root, &settings)?;
 
     if changes.is_empty() {
         return Ok("The site's files are the ones `jp vite sync` writes.\n".to_owned());
     }
     if flags.check {
         return Err(format!(
-            "These files aren't the ones `jp vite sync` writes:\n{}Run `jp vite sync` to write \
-             them.",
+            "`jp vite sync` would make these changes:\n{}Run `jp vite sync` to make them.",
             listing(&changes)
         ));
     }
@@ -422,6 +423,16 @@ fn sync_site<R: BufRead, W: Write>(
     ))
 }
 
+/// What syncing changes in the project at `root`: the owned files it rewrites
+/// or removes, and the pages it creates, ordered by path.
+fn changes(root: &Utf8Path, settings: &settings::Settings) -> Result<Vec<Change>, String> {
+    let mut changes = sync::plan(root, site::owned(settings), &site::owned_dir(settings))?;
+    changes.extend(sync::missing(root, site::pages(settings)));
+    changes.sort_by(|a, b| a.path().cmp(b.path()));
+
+    Ok(changes)
+}
+
 /// Refuse when a file a change would overwrite or remove holds something git
 /// couldn't restore.
 ///
@@ -459,6 +470,7 @@ fn listing(changes: &[Change]) -> String {
         .iter()
         .map(|change| match change {
             Change::Write(owned) => format!("  write   {}\n", owned.path),
+            Change::Create(page) => format!("  create  {}\n", page.path),
             Change::Remove(path) => format!("  remove  {path}\n"),
         })
         .collect()

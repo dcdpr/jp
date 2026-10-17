@@ -1,12 +1,14 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
+import { data } from '../loaders/tickets.data.js'
 import { createSortable, isDev, loadBoard, saveBoard } from './board.mjs'
+import { problem } from './problem.mjs'
 
-const props = defineProps({
-    // Columns in flow order, each already ordered and (for Done) capped.
-    columns: { type: Array, required: true },
-})
+// The ticket board, which a page renders with `<TicketBoard />`.
+//
+// `data.columns` holds the columns in flow order, each already ordered and, for
+// Done, capped.
 
 const ENDPOINT = '/__ticket-board'
 const LABELS = { todo: 'Todo', in_progress: 'In Progress', done: 'Done' }
@@ -15,7 +17,7 @@ const LABELS = { todo: 'Todo', in_progress: 'In Progress', done: 'Done' }
 // one drag group.
 const GROUP = 'ticket-board'
 
-const columns = ref(props.columns.map(column => ({ ...column, tickets: [...column.tickets] })))
+const columns = ref(data.columns.map(column => ({ ...column, tickets: [...column.tickets] })))
 const listRefs = ref([])
 const notice = ref(null)
 let sortables = []
@@ -104,7 +106,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-<div class="ticket-board">
+<div v-if="!problem" class="ticket-board">
     <section v-for="(column, index) in columns" :key="column.key" class="ticket-column">
         <h2 class="ticket-column-head">
             {{ LABELS[column.key] ?? column.status }}

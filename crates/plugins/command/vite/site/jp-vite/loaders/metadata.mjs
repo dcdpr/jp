@@ -39,11 +39,12 @@ export function field(content, key) {
 // Read one field whose value is long enough to wrap.
 //
 // `comfort` reflows a metadata value like any other paragraph, continuing it on
-// lines indented past the list marker. Those lines are folded back into a
-// single space-separated string, so a caller sees the value the author wrote
-// rather than the shape the formatter left it in.
+// lines indented past the list marker. A line at the margin continues it too,
+// as markdown reads a list item, so every line up to the next field counts.
+// They are folded back into a single space-separated string, so a caller sees
+// the value the author wrote rather than the shape the formatter left it in.
 export function wrappedField(content, key) {
-    const pattern = `^- \\*\\*${key}\\*\\*:\\s*(.+(?:\\n +\\S.*)*)`
+    const pattern = `^- \\*\\*${key}\\*\\*:\\s*(.+(?:\\n(?!- \\*\\*).+)*)`
     const value = header(content).match(new RegExp(pattern, 'm'))?.[1]
     return value?.replace(/\s+/g, ' ').trim() ?? null
 }

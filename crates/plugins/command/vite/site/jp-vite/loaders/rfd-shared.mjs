@@ -37,12 +37,10 @@ export function parseMeta(content, filename) {
         status: field(content, 'Status'),
         category: field(content, 'Category'),
         // The RFD number that superseded this one, if any (e.g. `033` -> `034`).
-        supersededBy:
-            content.match(/^- \*\*Superseded by\*\*:.*?\bRFD\s+(\d{3}|D\d{2})\b/m)?.[1]
-            ?? null,
+        supersededBy: parseField(content, 'Superseded by')[0] ?? null,
         authors: field(content, 'Authors'),
         date: field(content, 'Date'),
-        // Long enough to wrap, unlike every other field here.
+        // Long enough to wrap.
         summary: wrappedField(content, 'Summary'),
         slug: filename.replace(/\.md$/, ''),
     }
@@ -446,11 +444,11 @@ export function findUndefinedRefLinks(dir, files) {
         `rewrite the text so it is not a reference.`
 }
 
-// Extract a `- **Field**: ...` line and pull the RFD ids out of it.
+// The RFD ids a relationship field in the metadata block cites, wrapped lines
+// included.
 function parseField(content, field) {
-    const re = new RegExp(`^- \\*\\*${field}\\*\\*:\\s*(.+)$`, 'm')
-    const line = content.match(re)?.[1] ?? ''
-    return [...line.matchAll(/\bRFD\s+(\d{3}|D\d{2})\b/g)].map(m => m[1])
+    const value = wrappedField(content, field) ?? ''
+    return [...value.matchAll(/\bRFD\s+(\d{3}|D\d{2})\b/g)].map(m => m[1])
 }
 
 // Parse the `Requires` / `Extends` relationship metadata into a small graph

@@ -92,8 +92,8 @@ fn block<S: AsRef<str>>(lines: &[S]) -> Range<usize> {
 /// The lines the field `key` spans in `lines`: its own line, and the lines a
 /// value long enough to wrap continues on, up to the next field.
 ///
-/// `comfort` indents a continuation past the list marker; older documents
-/// continue unindented, which markdown reads as the same paragraph.
+/// `comfort` indents a continuation past the list marker; a line at the margin
+/// continues the value too, as markdown reads a list item.
 fn field_lines<S: AsRef<str>>(lines: &[S], key: &str) -> Option<Range<usize>> {
     let block = block(lines);
     let first = block

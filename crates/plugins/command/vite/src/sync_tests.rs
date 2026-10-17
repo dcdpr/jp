@@ -20,6 +20,7 @@ fn paths(changes: &[Change]) -> Vec<String> {
         .iter()
         .map(|change| match change {
             Change::Write(owned) => format!("write {}", owned.path),
+            Change::Create(page) => format!("create {}", page.path),
             Change::Remove(path) => format!("remove {path}"),
         })
         .collect()
@@ -64,6 +65,31 @@ fn a_file_already_written_is_left_alone() {
     .unwrap();
 
     assert_eq!(paths(&changes), ["write docs/rfd/index.md"]);
+}
+
+/// A page is created where there is none, and left as it is where there is one,
+/// whatever it holds.
+#[test]
+fn only_missing_pages_are_created() {
+    let root = Utf8TempDir::new().unwrap();
+    write(&root, "docs/rfd/index.md", "Our own index");
+
+    let changes = missing(root.path(), vec![
+        owned("docs/rfd/index.md", "Index"),
+        owned("docs/rfd/priority.md", "Priorities"),
+    ]);
+
+    assert_eq!(paths(&changes), ["create docs/rfd/priority.md"]);
+
+    apply(root.path(), &changes, Utf8Path::new(OWNED)).unwrap();
+    assert_eq!(
+        fs::read_to_string(root.path().join("docs/rfd/priority.md")).unwrap(),
+        "Priorities"
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join("docs/rfd/index.md")).unwrap(),
+        "Our own index"
+    );
 }
 
 /// The owned directory is the binary's whole: a file a newer release dropped

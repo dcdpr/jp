@@ -29,6 +29,15 @@ export function writeRefusal() {
     return null
 }
 
+// How long a `jp` command a request waits on may run. None of them waits on a
+// model, and each takes a second or two, so one still running after this is
+// stuck.
+const COMMAND_TIMEOUT = 15 * 1000
+
+// How long reading an RFD's Implementation Plan may run. It waits on a model,
+// and runs in the background, so nothing waits on it.
+const PLAN_TIMEOUT = 5 * 60 * 1000
+
 // Run `jp` with `args`, the site's directories pinned with `--cfg`.
 //
 // It runs in the workspace root `jp vite serve` named, or in the VitePress
@@ -40,9 +49,9 @@ export function writeRefusal() {
 // nothing would resume it. There is nobody to answer a prompt either, hence
 // `--no-interactive` and no stdin.
 //
-// `timeout` bounds a command that waits on a provider; `0` waits as long as it
-// takes. A command still running then is killed with its whole process group.
-function jp(args, timeout = 0) {
+// A command still running after `timeout` is killed with its whole process
+// group.
+function jp(args, timeout = COMMAND_TIMEOUT) {
     const settings = readSettings()
     const pinned = ['--no-interactive']
     if (settings.rfd) pinned.push('--cfg', `plugins.command.rfd.options.dir=${settings.rfd.dir}`)
@@ -65,7 +74,7 @@ function jp(args, timeout = 0) {
             settled = true
             clearTimeout(timer)
             if (!ok) console.warn(`[jp-vite] ${command} failed:\n${output}`)
-            done({ ok, output: output.trim() })
+            done({ ok, output: output.trim(), notes: stderr.trim() })
         }
 
         const child = spawn('jp', [...pinned, ...args], {
@@ -77,12 +86,10 @@ function jp(args, timeout = 0) {
         child.stdout.setEncoding('utf-8').on('data', (chunk) => { stdout += chunk })
         child.stderr.setEncoding('utf-8').on('data', (chunk) => { stderr += chunk })
 
-        if (timeout > 0) {
-            timer = setTimeout(() => {
-                timedOut = true
-                killGroup(child)
-            }, timeout)
-        }
+        timer = setTimeout(() => {
+            timedOut = true
+            killGroup(child)
+        }, timeout)
 
         child.on('error', (err) => finish(false, `${command}: ${err.message ?? err}`))
         child.on('close', (code) => {
@@ -366,12 +373,34 @@ const ticketWriter = {
     },
 }
 
+// The RFDs whose Implementation Plan is being read in the background, so marking
+// one again while its read runs doesn't start a second.
+const planReads = new Set()
+
+// Read RFD `num`'s Implementation Plan into its tracking ticket, in the
+// background.
+//
+// `jp rfd track` asks a model for the plan, which takes a minute or more, and
+// does nothing when the ticket holds one already. Nobody waits on it: the board
+// has moved on, so what it did goes to the dev server's console.
+function readPlanInBackground(num) {
+    if (planReads.has(num)) return
+    planReads.add(num)
+
+    jp(['rfd', 'track', num], PLAN_TIMEOUT)
+        .then(({ ok, notes }) => {
+            if (ok && notes) console.info(`[jp-vite] RFD ${num}: ${notes}`)
+        })
+        .finally(() => planReads.delete(num))
+}
+
 // An RFD's in-development state (`/rfd/priority`).
 //
 // The state lives on the RFD's tracking ticket, so a write shells out to
 // `jp rfd start` / `jp rfd stop` rather than touching a file. Marking an RFD
-// files that ticket when it has none, which reads the RFD's implementation plan
-// through a provider.
+// files that ticket when it has none; the ticket is filed with a marker in place
+// of the plan, and the plan is read in the background, so the request answers
+// without waiting on a model.
 const rfdDevelopmentWriter = {
     name: 'rfd-development-writer',
     configureServer(server) {
@@ -408,10 +437,13 @@ const rfdDevelopmentWriter = {
                 return refuse(res, 400, 'expected { num: "NNN", active: boolean }')
             }
 
-            // Reading the plan goes to a provider; with no timeout, a wedged
-            // run would hold the request open forever.
-            const command = parsed.active ? 'start' : 'stop'
-            const { ok, output } = await jp(['rfd', command, parsed.num], 5 * 60 * 1000)
+            if (!parsed.active) {
+                const { ok, output } = await jp(['rfd', 'stop', parsed.num])
+                return reply(res, ok ? 200 : 500, { ok, output })
+            }
+
+            const { ok, output } = await jp(['rfd', 'start', parsed.num, '--no-plan'])
+            if (ok) readPlanInBackground(parsed.num)
             reply(res, ok ? 200 : 500, { ok, output })
         }))
     },
