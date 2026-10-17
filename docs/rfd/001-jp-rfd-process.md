@@ -638,8 +638,9 @@ The steps are:
 1. Create the `docs/rfd/` directory.
 2. Add `000-design-template.md`, `000-decision-template.md`,
    `000-guide-template.md`, and `000-process-template.md`.
-3. Add `just` tasks for the RFD lifecycle: `rfd-draft`, `rfd-promote`,
-   `rfd-supersede`, `rfd-abandon`, and `rfd-grep`.
+3. Provide the lifecycle commands: `jp rfd` ([RFD 116]) to draft, promote,
+   relate, supersede, abandon, and track RFDs.
+   JP's justfile keeps `just rfd-promote` and `just rfd-grep`.
 4. Add this document as `001-jp-rfd-process.md`.
 5. Merge via pull request after discussion.
 6. Future RFDs follow the process described here.
