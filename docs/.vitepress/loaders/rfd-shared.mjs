@@ -412,11 +412,13 @@ export function findUndefinedRefLinks(dir, files) {
         `rewrite the text so it is not a reference.`
 }
 
-// Extract a `- **Field**: ...` line and pull the RFD ids out of it.
+// Pull the RFD ids out of a `- **Field**: ...` relationship field.
+//
+// Read through `wrappedField`, so ids on the lines `comfort` wraps a long field
+// onto count, and a field quoted further down the document does not.
 function parseField(content, field) {
-    const re = new RegExp(`^- \\*\\*${field}\\*\\*:\\s*(.+)$`, 'm')
-    const line = content.match(re)?.[1] ?? ''
-    return [...line.matchAll(/\bRFD\s+(\d{3}|D\d{2})\b/g)].map(m => m[1])
+    const value = wrappedField(content, field) ?? ''
+    return [...value.matchAll(/\bRFD\s+(\d{3}|D\d{2})\b/g)].map(m => m[1])
 }
 
 // Parse the `Requires` / `Extends` relationship metadata into a small graph

@@ -1773,7 +1773,7 @@ rfd-draft CATEGORY +TITLE:
 
 # Supersede RFD NNN with RFD MMM, updating both documents.
 [group('rfd')]
-rfd-supersede NNN MMM:
+rfd-supersede NNN MMM: _install-comfort
     #!/usr/bin/env sh
     set -eu
 
@@ -1804,6 +1804,12 @@ rfd-supersede NNN MMM:
     new_basename=$(basename "$new_file")
     old_basename=$(basename "$old_file")
 
+    # One field per line, so replacing a field below replaces all of it.
+    for f in "$old_file" "$new_file"; do
+        just _rfd-meta-unwrap "$f" > "${f}.tmp"
+        mv "${f}.tmp" "$f"
+    done
+
     # Update old RFD: status -> Superseded, add/update "Superseded by" link.
     awk -v new="RFD ${new_num}" -v new_file="${new_basename}" '
         /^- \*\*Status\*\*:/ { print "- **Status**: Superseded"; next }
@@ -1820,6 +1826,9 @@ rfd-supersede NNN MMM:
         { print }
     ' "$new_file" > "${new_file}.tmp"
     mv "${new_file}.tmp" "$new_file"
+
+    # Wrap the fields again and move the new links to reference style.
+    just _rfd-fmt "$old_file" "$new_file"
 
     # The superseded RFD is no longer work to prioritise; the replacement
     # carries it. Whether MMM belongs on the board is a call for whoever
@@ -1842,7 +1851,7 @@ rfd-supersede NNN MMM:
 # never receives a `Extended by: RFD D«nn»` back-link from a draft (would
 # violate the no-link-from-published-to-draft rule).
 [group('rfd')]
-rfd-extend NNN MMM:
+rfd-extend NNN MMM: _install-comfort
     #!/usr/bin/env sh
     set -eu
 
@@ -1882,7 +1891,7 @@ rfd-extend NNN MMM:
 # or Superseded; Accepted → Implemented requires every dependency to be
 # Implemented or Superseded.
 [group('rfd')]
-rfd-require NNN MMM:
+rfd-require NNN MMM: _install-comfort
     #!/usr/bin/env sh
     set -eu
 
@@ -1953,51 +1962,6 @@ _rfd-link SOURCE TARGET FORWARD INVERSE:
         fi
     }
 
-    # Add a `- **FIELD**: LINK` entry to FILE for an entry referring to ID.
-    # Skips if the entry is already present (idempotent).
-    # Returns 0 if added, 1 if skipped.
-    #
-    # All operations are scoped to the metadata header (lines before the first
-    # `## ` heading). RFDs may include metadata-shaped examples inside code
-    # blocks (RFD 001 in particular), and we must not read or write against
-    # those.
-    add_link() {
-        f="$1"; field="$2"; link="$3"; id="$4"
-
-        first_heading=$(grep -n '^## ' "$f" | head -1 | cut -d: -f1)
-        header_end="${first_heading:-9999}"
-
-        existing=$(head -n "$header_end" "$f" | sed -n "s/^- \\*\\*${field}\\*\\*: //p" | head -1)
-        if echo "$existing" | grep -qE "RFD ${id}([^0-9]|\$)"; then
-            return 1
-        fi
-
-        if [ -n "$existing" ]; then
-            # Append to the existing header line, scoped to the header range.
-            sed "1,${header_end}s|^- \\*\\*${field}\\*\\*: .*|&, ${link}|" "$f" > "$f.tmp"
-            mv "$f.tmp" "$f"
-        else
-            # Insert after the metadata block's last line, which is not the
-            # same as its last `- **` line: a value long enough to wrap
-            # continues on indented lines, and splicing between them would
-            # strand the remainder as prose. The block runs from its first
-            # entry to the blank line that closes it, and `Summary` keeps the
-            # bottom of it.
-            last_meta=$(head -n "$header_end" "$f" | awk '
-                !start && /^- \*\*/ { start = NR; next }
-                start && /^- \*\*Summary\*\*:/ { print NR - 1; found = 1; exit }
-                start && /^[[:space:]]*$/ { print NR - 1; found = 1; exit }
-                END { if (!found && start) print NR }
-            ')
-            awk -v ln="$last_meta" -v entry="- **${field}**: ${link}" '
-                NR == ln { print; print entry; next }
-                { print }
-            ' "$f" > "$f.tmp"
-            mv "$f.tmp" "$f"
-        fi
-        return 0
-    }
-
     # --- Resolve source and target ---
 
     src_id=$(display_id "{{SOURCE}}")
@@ -2031,7 +1995,7 @@ _rfd-link SOURCE TARGET FORWARD INVERSE:
     esac
 
     if [ -n "$other_forward" ]; then
-        other_line=$(sed -n "s/^- \\*\\*${other_forward}\\*\\*: //p" "$src_file" | head -1)
+        other_line=$(just _rfd-meta-get "$src_file" "$other_forward")
         if echo "$other_line" | grep -qE "RFD ${tgt_id}([^0-9]|\$)"; then
             echo "Refused: RFD ${src_id} already lists RFD ${tgt_id} under '${other_forward}'." >&2
             echo "Extension implies dependency; don't list the same target under both. Drop one entry first." >&2
@@ -2062,7 +2026,7 @@ _rfd-link SOURCE TARGET FORWARD INVERSE:
             [ -z "$cur_file" ] && continue
 
             for cyc_field in Requires Extends; do
-                line=$(sed -n "s/^- \\*\\*${cyc_field}\\*\\*: //p" "$cur_file" | head -1)
+                line=$(just _rfd-meta-get "$cur_file" "$cyc_field")
                 ids=$(echo "$line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}')
                 for id in $ids; do
                     next_frontier="$next_frontier $id"
@@ -2072,13 +2036,11 @@ _rfd-link SOURCE TARGET FORWARD INVERSE:
         frontier="$next_frontier"
     done
 
-    # --- Compute display links and write metadata ---
-
-    fwd_link="[RFD ${tgt_id}]($(relative_link "$src_file" "$tgt_file"))"
-    inv_link="[RFD ${src_id}]($(relative_link "$tgt_file" "$src_file"))"
+    # --- Write metadata ---
 
     # Write FORWARD on source.
-    if add_link "$src_file" "{{FORWARD}}" "$fwd_link" "$tgt_id"; then
+    added=$(just _rfd-meta-add "$src_file" "{{FORWARD}}" "$tgt_id" "$(relative_link "$src_file" "$tgt_file")")
+    if [ "$added" = added ]; then
         echo "${src_file}: {{FORWARD}}: RFD ${tgt_id}"
     else
         echo "${src_file}: already lists RFD ${tgt_id} under {{FORWARD}}"
@@ -2088,7 +2050,8 @@ _rfd-link SOURCE TARGET FORWARD INVERSE:
     if is_draft "$src_id" && ! is_draft "$tgt_id"; then
         echo "${tgt_file}: skipped {{INVERSE}}: RFD ${src_id} (suppressed: draft → non-draft)"
     else
-        if add_link "$tgt_file" "{{INVERSE}}" "$inv_link" "$src_id"; then
+        added=$(just _rfd-meta-add "$tgt_file" "{{INVERSE}}" "$src_id" "$(relative_link "$tgt_file" "$src_file")")
+        if [ "$added" = added ]; then
             echo "${tgt_file}: {{INVERSE}}: RFD ${src_id}"
         else
             echo "${tgt_file}: already lists RFD ${src_id} under {{INVERSE}}"
@@ -2166,7 +2129,7 @@ rfd-promote NNN MMM="": _install-jp _install-comfort _install-ticket
     # fail the next docs build).
     if [ "$current" = "Draft" ]; then
         for field in Requires Extends; do
-            line=$(sed -n "s/^- \\*\\*${field}\\*\\*: //p" "$file" | head -1)
+            line=$(just _rfd-meta-get "$file" "$field")
             if echo "$line" | grep -qE 'RFD D[0-9]+'; then
                 echo "Cannot promote: '${field}' on $(basename "$file") contains draft references." >&2
                 echo "  ${line}" >&2
@@ -2179,9 +2142,13 @@ rfd-promote NNN MMM="": _install-jp _install-comfort _install-ticket
         # RFD's body, so refuse while the document references other drafts.
         # Exempt: this draft's own id (the cross-reference pass below
         # rewrites it to the permanent number) and the `Required by` /
-        # `Extended by` metadata lines (draft back-links are stripped
-        # automatically further down).
-        stray=$(grep -v -e '^- \*\*Required by\*\*: ' -e '^- \*\*Extended by\*\*: ' "$file" \
+        # `Extended by` fields, with the definitions of their draft links
+        # (draft back-links are stripped automatically further down). Fields
+        # are read whole, so a back-link on a wrapped field's continuation line
+        # is exempt too.
+        stray=$(just _rfd-meta-unwrap "$file" \
+            | grep -v -e '^- \*\*Required by\*\*: ' -e '^- \*\*Extended by\*\*: ' \
+                -e '^\[RFD D[0-9][0-9]\]: ' \
             | grep -oE '(^|[^A-Za-z0-9_])D[0-9][0-9]([^A-Za-z0-9_]|$)' \
             | grep -oE 'D[0-9][0-9]' | sort -u | grep -v "^${rfd_id}\$" || true)
         if [ -n "$stray" ]; then
@@ -2209,7 +2176,7 @@ rfd-promote NNN MMM="": _install-jp _install-comfort _install-ticket
         # is a kind of dependency, both participate).
         deps=""
         for field in Requires Extends; do
-            line=$(sed -n "s/^- \\*\\*${field}\\*\\*: //p" "$file" | head -1)
+            line=$(just _rfd-meta-get "$file" "$field")
             field_deps=$(echo "$line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}')
             deps="$deps $field_deps"
         done
@@ -2342,26 +2309,8 @@ rfd-promote NNN MMM="": _install-jp _install-comfort _install-ticket
         # promoted file. These are bookkeeping artefacts of the bidirectional
         # draft-draft policy; the file is now published and cannot carry
         # draft back-links.
-        promoted_head=$(grep -n '^## ' "$new_file" | head -1 | cut -d: -f1)
-        promoted_head="${promoted_head:-9999}"
         for field in "Required by" "Extended by"; do
-            awk -v field="$field" -v header_end="$promoted_head" '
-                BEGIN { search = "^- \\*\\*" field "\\*\\*: " }
-                NR <= header_end && $0 ~ search {
-                    sub(search, "", $0)
-                    n = split($0, entries, /, /)
-                    new = ""
-                    for (i = 1; i <= n; i++) {
-                        if (entries[i] !~ /RFD D[0-9]+/) {
-                            new = (new == "") ? entries[i] : new ", " entries[i]
-                        }
-                    }
-                    if (new != "") print "- **" field "**: " new
-                    next
-                }
-                { print }
-            ' "$new_file" > "${new_file}.tmp"
-            mv "${new_file}.tmp" "$new_file"
+            just _rfd-meta-remove "$new_file" "$field" 'RFD D[0-9]+'
         done
 
         # Backfill: for each entry in `Requires` and `Extends`, ensure the
@@ -2372,7 +2321,7 @@ rfd-promote NNN MMM="": _install-jp _install-comfort _install-ticket
             forward=$(echo "$pair" | cut -d: -f1)
             inverse=$(echo "$pair" | cut -d: -f2)
 
-            line=$(sed -n "s/^- \\*\\*${forward}\\*\\*: //p" "$new_file" | head -1)
+            line=$(just _rfd-meta-get "$new_file" "$forward")
             [ -z "$line" ] && continue
 
             for dep in $(echo "$line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}'); do
@@ -2383,41 +2332,15 @@ rfd-promote NNN MMM="": _install-jp _install-comfort _install-ticket
                 fi
                 [ -z "$dep_file" ] && continue
 
-                # Scoped to the metadata header, like `add_link` in `_rfd-link`.
-                # RFDs that document these fields carry metadata-shaped examples
-                # in fenced blocks — 001 and 041 both do, and they are the most
-                # likely extension targets. Reading unscoped finds the example and
-                # concludes a header line exists; writing unscoped appends to the
-                # example instead of the header.
-                dep_head=$(grep -n '^## ' "$dep_file" | head -1 | cut -d: -f1)
-                dep_head="${dep_head:-9999}"
-
-                existing=$(head -n "$dep_head" "$dep_file" \
-                    | sed -n "s/^- \\*\\*${inverse}\\*\\*: //p" | head -1)
-                if echo "$existing" | grep -qE "RFD ${num}([^0-9]|\$)"; then
-                    continue
-                fi
-
                 dep_dir=$(dirname "$dep_file")
                 if [ "$dep_dir" = "docs/rfd/drafts" ]; then
                     rel="../${new_basename}"
                 else
                     rel="${new_basename}"
                 fi
-                link="[RFD ${num}](${rel})"
 
-                if [ -n "$existing" ]; then
-                    sed "1,${dep_head}s|^- \\*\\*${inverse}\\*\\*: .*|&, ${link}|" \
-                        "$dep_file" > "${dep_file}.tmp"
-                    mv "${dep_file}.tmp" "$dep_file"
-                else
-                    last_meta=$(head -n "$dep_head" "$dep_file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
-                    awk -v ln="$last_meta" -v entry="- **${inverse}**: ${link}" '
-                        NR == ln { print; print entry; next }
-                        { print }
-                    ' "$dep_file" > "${dep_file}.tmp"
-                    mv "${dep_file}.tmp" "$dep_file"
-                fi
+                added=$(just _rfd-meta-add "$dep_file" "$inverse" "$num" "$rel")
+                [ "$added" = added ] || continue
                 echo "  backfilled ${inverse}: RFD ${num} into ${dep_file}"
             done
         done
@@ -2486,10 +2409,8 @@ rfd-promote NNN MMM="": _install-jp _install-comfort _install-ticket
         # former target.
         this_n=$(basename "$file" | sed 's/^\([0-9]*\)-.*/\1/; s/^0*//')
         this_n=${this_n:-0}
-        requires_line=$(sed -n 's/^- \*\*Requires\*\*: //p' "$file" | head -1)
-
-        sed '/^- \*\*Requires\*\*: /d' "$file" > "${file}.tmp"
-        mv "${file}.tmp" "$file"
+        requires_line=$(just _rfd-meta-get "$file" Requires)
+        just _rfd-meta-remove "$file" Requires .
 
         if [ -n "$requires_line" ]; then
             for dep in $(echo "$requires_line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}'); do
@@ -2500,23 +2421,7 @@ rfd-promote NNN MMM="": _install-jp _install-comfort _install-ticket
                 fi
                 [ -z "$dep_file" ] && continue
 
-                awk -v num="$this_n" '
-                    BEGIN { search = "^- \\*\\*Required by\\*\\*: " }
-                    $0 ~ search {
-                        sub(search, "", $0)
-                        n = split($0, entries, /, /)
-                        new = ""
-                        for (i = 1; i <= n; i++) {
-                            if (entries[i] !~ ("RFD 0*" num "([^0-9]|$)")) {
-                                new = (new == "") ? entries[i] : new ", " entries[i]
-                            }
-                        }
-                        if (new != "") print "- **Required by**: " new
-                        next
-                    }
-                    { print }
-                ' "$dep_file" > "${dep_file}.tmp"
-                mv "${dep_file}.tmp" "$dep_file"
+                just _rfd-meta-remove "$dep_file" "Required by" "RFD 0*${this_n}([^0-9]|\$)"
                 echo "  stripped Required by: RFD ${this_n} from ${dep_file}"
             done
         fi
@@ -2526,10 +2431,8 @@ rfd-promote NNN MMM="": _install-jp _install-comfort _install-ticket
         # Implemented dependency, which the docs build rejects (see
         # `checkRequiresOnImplemented`). Drop this file's `Required by` line and
         # the matching `Requires: RFD <this>` entry from each dependent.
-        required_by_line=$(sed -n 's/^- \*\*Required by\*\*: //p' "$file" | head -1)
-
-        sed '/^- \*\*Required by\*\*: /d' "$file" > "${file}.tmp"
-        mv "${file}.tmp" "$file"
+        required_by_line=$(just _rfd-meta-get "$file" "Required by")
+        just _rfd-meta-remove "$file" "Required by" .
 
         if [ -n "$required_by_line" ]; then
             for dependent in $(echo "$required_by_line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}'); do
@@ -2540,23 +2443,7 @@ rfd-promote NNN MMM="": _install-jp _install-comfort _install-ticket
                 fi
                 [ -z "$dep_file" ] && continue
 
-                awk -v num="$this_n" '
-                    BEGIN { search = "^- \\*\\*Requires\\*\\*: " }
-                    $0 ~ search {
-                        sub(search, "", $0)
-                        n = split($0, entries, /, /)
-                        new = ""
-                        for (i = 1; i <= n; i++) {
-                            if (entries[i] !~ ("RFD 0*" num "([^0-9]|$)")) {
-                                new = (new == "") ? entries[i] : new ", " entries[i]
-                            }
-                        }
-                        if (new != "") print "- **Requires**: " new
-                        next
-                    }
-                    { print }
-                ' "$dep_file" > "${dep_file}.tmp"
-                mv "${dep_file}.tmp" "$dep_file"
+                just _rfd-meta-remove "$dep_file" Requires "RFD 0*${this_n}([^0-9]|\$)"
                 echo "  stripped Requires: RFD ${this_n} from ${dep_file}"
             done
         fi
@@ -2568,10 +2455,11 @@ rfd-promote NNN MMM="": _install-jp _install-comfort _install-ticket
         echo "${file}: Accepted -> Implemented"
     fi
 
-    # Reflow the promoted file: wrap prose with semantic line breaks and
-    # consolidate reference-style link definitions at the bottom, matching the
-    # markdown formatting CI enforces (`fmt-markdown-ci`).
-    comfort --language markdown --format-markdown --reference-links "$final_file"
+    # Reflow the promoted file: wrap prose with semantic line breaks,
+    # consolidate reference-style link definitions at the bottom, and drop the
+    # ones a stripped relationship left behind, matching the markdown formatting
+    # CI enforces (`fmt-markdown-ci`).
+    just _rfd-fmt "$final_file"
 
 # File or refresh an RFD's tracking ticket, printing its id on stdout.
 #
@@ -3105,6 +2993,149 @@ _rfd-next-number:
     done
     printf "%03d\n" "$next_num"
 
+# Internal: print FILE with each metadata field on a single line.
+#
+# `comfort` wraps a metadata value like any other paragraph once it outgrows the
+# line, continuing it on lines indented past the list marker. Here each
+# continuation is joined onto its field with one space, so the line-oriented
+# edits in the RFD recipes always see a whole field: a field inserted after a
+# wrapped `Summary`'s first line would split it, and deleting a field's first
+# line would leave its continuation attached to the field above.
+#
+# Only the header changes, up to the first `## ` heading; the body passes
+# through as is. A caller that writes the result back runs `_rfd-fmt` after,
+# which wraps the fields again.
+[no-exit-message]
+[private]
+[positional-arguments]
+_rfd-meta-unwrap FILE:
+    #!/usr/bin/env sh
+    set -eu
+
+    awk '
+        /^## / { body = 1 }
+        !body && /^- \*\*/ { if (held != "") print held; held = $0; next }
+        !body && held != "" && /^[[:blank:]]+[^[:blank:]]/ {
+            sub(/^[[:blank:]]+/, "")
+            held = held " " $0
+            next
+        }
+        held != "" { print held; held = "" }
+        { print }
+        END { if (held != "") print held }
+    ' "$1"
+
+# Internal: print the value of metadata FIELD in FILE, on one line.
+#
+# Reads the header only, so a field quoted in the body (RFD 001 documents the
+# format in a code block) is never taken for the document's own. Prints nothing
+# when FILE has no such field.
+[no-exit-message]
+[private]
+[positional-arguments]
+_rfd-meta-get FILE FIELD:
+    #!/usr/bin/env sh
+    set -eu
+
+    content=$(just _rfd-meta-unwrap "$1")
+    printf '%s\n' "$content" | awk -v prefix="- **$2**: " '
+        /^## / { exit }
+        index($0, prefix) == 1 { print substr($0, length(prefix) + 1); exit }
+    '
+
+# Internal: add `[RFD ID]`, linked to TARGET, to metadata FIELD in FILE.
+#
+# The id is appended to the field when FILE has one. Otherwise the field is
+# inserted above `Summary`, which RFD 001 keeps last, or at the end of the
+# metadata block when there is no `Summary` yet, as in a draft. The link is
+# written inline, and `_rfd-fmt` turns it into the reference-style link and
+# definition every RFD uses.
+#
+# Prints `present` and leaves FILE untouched when the field already lists the
+# id, and `added` otherwise. Callers depend on `_install-comfort`.
+[no-exit-message]
+[private]
+[positional-arguments]
+_rfd-meta-add FILE FIELD ID TARGET:
+    #!/usr/bin/env sh
+    set -eu
+
+    f="$1"; field="$2"; id="$3"; target="$4"
+
+    existing=$(just _rfd-meta-get "$f" "$field")
+    if printf '%s\n' "$existing" | grep -qE "RFD ${id}([^0-9]|\$)"; then
+        echo present
+        exit 0
+    fi
+    if [ -n "$existing" ]; then exists=1; else exists=0; fi
+
+    just _rfd-meta-unwrap "$f" > "${f}.tmp"
+    awk -v prefix="- **${field}**: " -v link="[RFD ${id}](${target})" -v exists="$exists" '
+        done { print; next }
+        exists && index($0, prefix) == 1 { print $0 ", " link; done = 1; next }
+        !exists && !meta && /^- \*\*/ { meta = 1 }
+        !exists && meta && (index($0, "- **Summary**: ") == 1 || /^[[:space:]]*$/ || /^## /) {
+            print prefix link
+            done = 1
+        }
+        { print }
+        END { if (!done && meta) print prefix link }
+    ' "${f}.tmp" > "$f"
+    rm "${f}.tmp"
+
+    just _rfd-fmt "$f"
+    echo added
+
+# Internal: remove the entries of metadata FIELD in FILE that match PATTERN.
+#
+# PATTERN is an extended regular expression tested against each comma-separated
+# entry, and the field goes once no entry is left, so `.` removes it whole. FILE
+# is left untouched when it has no such field. Callers depend on
+# `_install-comfort`.
+[no-exit-message]
+[private]
+[positional-arguments]
+_rfd-meta-remove FILE FIELD PATTERN:
+    #!/usr/bin/env sh
+    set -eu
+
+    f="$1"
+    [ -n "$(just _rfd-meta-get "$f" "$2")" ] || exit 0
+
+    just _rfd-meta-unwrap "$f" > "${f}.tmp"
+    awk -v prefix="- **$2**: " -v pattern="$3" '
+        done { print; next }
+        /^## / { done = 1; print; next }
+        index($0, prefix) == 1 {
+            n = split(substr($0, length(prefix) + 1), entries, /, /)
+            kept = ""
+            for (i = 1; i <= n; i++) {
+                if (entries[i] !~ pattern) {
+                    kept = (kept == "") ? entries[i] : kept ", " entries[i]
+                }
+            }
+            if (kept != "") print prefix kept
+            done = 1
+            next
+        }
+        { print }
+    ' "${f}.tmp" > "$f"
+    rm "${f}.tmp"
+
+    just _rfd-fmt "$f"
+
+# Internal: format RFD files the way CI checks them.
+#
+# Wraps metadata and prose again after the line-oriented edits above, turns
+# inline links into reference-style ones with their definitions at the bottom,
+# and drops definitions nothing cites any more. The flags match
+# `fmt-markdown-ci`, so a file the RFD recipes write passes it. Callers depend on
+# `_install-comfort`.
+[private]
+[positional-arguments]
+_rfd-fmt +FILES:
+    @comfort --language markdown --format-markdown --reference-links --prune-reference-links "$@"
+
 # Internal: rewrite an RFD id in the priority board.
 #
 # `priority.json` stores RFD ids; substitute OLD for NEW wherever the id
@@ -3237,7 +3268,7 @@ rfd-abandon NNN +REASON:
     # abandonment doesn't auto-cascade or auto-fix; the dependents need
     # manual review. The check uses this RFD's own `Required by` field as
     # the source of truth (assumes `rfd-require` was used to maintain it).
-    required_by_line=$(sed -n 's/^- \*\*Required by\*\*: //p' "$file" | head -1)
+    required_by_line=$(just _rfd-meta-get "$file" "Required by")
     if [ -n "$required_by_line" ]; then
         echo "" >&2
         echo "Warning: the following RFDs depend on this one (Required by):" >&2
