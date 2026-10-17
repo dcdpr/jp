@@ -2455,17 +2455,15 @@ test-ci SCOPE="workspace": (_install "cargo-nextest@" + nextest_version) _instal
 # Check on CI that the site's own files are the ones `jp vite sync` writes from
 # this checkout and its configuration.
 #
-# Fails on a site file changed in `crates/plugins/command/vite/site/`, or a
-# label vocabulary changed in `.jp/config.toml`, without `jp vite sync` run.
-# Both binaries are rebuilt, as debug builds: the runner restores `~/.cargo/bin`
-# from a cache, which may hold older ones.
+# Runs `jp-vite`'s tests. `jp_site_is_synced` fails on a site file changed in
+# `crates/plugins/command/vite/site/`, or a label vocabulary changed in
+# `.jp/config.toml`, without `jp vite sync` run; the others check the site files
+# the binary carries, which the Rust workflow doesn't test when only those
+# files change. It builds `jp-vite` rather than `jp`, so the check doesn't pay
+# for the whole workspace.
 [group('ci')]
 site-ci:
-    #!/usr/bin/env sh
-    set -eu
-    JP_INSTALL=1 just _install-jp --debug
-    JP_INSTALL=1 just _install-vite
-    jp --no-interactive vite sync --check
+    cargo test --locked -p jp-vite
 
 # Generate documentation on CI.
 [group('ci')]

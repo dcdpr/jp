@@ -50,15 +50,19 @@ jobs:
           # artifact regardless of what changed.
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "sync=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           # The site is assembled from `docs/`, by recipes in the justfile, by
-          # this workflow. Its RFD and ticket pages are synced from the
-          # `jp-vite` crate, with settings read from `.jp/config.toml`. The
-          # change log is generated from git tags, which a pull request cannot
-          # move.
-          sources='^docs/|^justfile$|^\.github/workflows/docs\.yml$|^crates/plugins/command/vite/|^\.jp/config\.toml$'
+          # this workflow. The change log is generated from git tags, which a
+          # pull request cannot move.
+          sources='^docs/|^justfile$|^\.github/workflows/docs\.yml$'
+
+          # The site's RFD and ticket files are synced from the `jp-vite`
+          # crate, with settings read from `.jp/config.toml`. A change to
+          # either can leave JP's copy behind without touching `docs/`.
+          synced='^crates/plugins/command/vite/|^docs/\.vitepress/jp-vite/|^\.jp/config\.toml$|^justfile$|^\.github/workflows/docs\.yml$'
 
           # Via a file rather than a pipe: `grep -q` exits on the first match,
           # and the resulting SIGPIPE would trip `pipefail`, turning a match
@@ -71,7 +75,14 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "Skipping the site build because no site sources changed."
           fi
-      - if: ${{ steps.task.outputs.run == 'true' }}
+
+          if grep -Eq "$synced" "$RUNNER_TEMP/changed-files.txt"; then
+            echo "sync=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sync=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping the synced-files check because nothing it compares changed."
+          fi
+      - if: ${{ steps.task.outputs.run == 'true' || steps.task.outputs.sync == 'true' }}
         uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         id: cache
         with:
@@ -85,24 +96,24 @@ jobs:
           # previous entry instead of reinstalling every binary from source.
           restore-keys: |
             toolchain-site-
-      - if: ${{ steps.task.outputs.run == 'true' }}
+      - if: ${{ steps.task.outputs.run == 'true' || steps.task.outputs.sync == 'true' }}
         uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
-      - if: ${{ steps.task.outputs.run == 'true' }}
+      - if: ${{ steps.task.outputs.run == 'true' || steps.task.outputs.sync == 'true' }}
         uses: Swatinem/rust-cache@7e1e2d0a10862b34e5df481373b2b0f295d1a2ef # v2
         with:
           cache-bin: false
           cache-workspace-crates: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      # The RFD and ticket pages read files `jp vite sync` writes; a site file or
+      # a label changed without the sync would publish stale ones.
+      - if: ${{ steps.task.outputs.sync == 'true' }}
+        run: just site-ci
       - if: ${{ steps.task.outputs.run == 'true' }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
       - if: ${{ steps.task.outputs.run == 'true' }}
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
       - if: ${{ steps.task.outputs.run == 'true' }}
         run: corepack enable
-      # The RFD and ticket pages read files `jp vite sync` writes; a site file or
-      # a label changed without the sync would publish stale ones.
-      - if: ${{ steps.task.outputs.run == 'true' }}
-        run: just site-ci
       - if: ${{ steps.task.outputs.run == 'true' }}
         run: just build-changelog > change-log.md
       # Fetch the plugin registry before the build so VitePress copies it from
@@ -111,7 +122,7 @@ jobs:
         run: just plugin-registry-fetch
       - if: ${{ steps.task.outputs.run == 'true' }}
         run: just build-docs
-      - if: ${{ steps.task.outputs.run == 'true' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true' }}
+      - if: ${{ (steps.task.outputs.run == 'true' || steps.task.outputs.sync == 'true') && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
           path: |
