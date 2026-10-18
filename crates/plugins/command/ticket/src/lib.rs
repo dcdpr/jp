@@ -31,7 +31,7 @@ use clap::{ArgGroup, CommandFactory, Parser, Subcommand};
 use jp_github::models::issues::{Comment as IssueComment, Issue};
 use jp_plugin::message::{
     ComposeMode, ComposeOption, ComposeRequest, DescribeResponse, ExitMessage, HostToPlugin,
-    InitMessage, PluginToHost, PrintMessage, ToolCall, ToolOutcomeMessage,
+    InitMessage, OutputFormat, PluginToHost, PrintMessage, ToolCall, ToolOutcomeMessage,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -214,14 +214,12 @@ enum Command {
     },
 
     /// Read one ticket, with its comments numbered for replies.
+    ///
+    /// With `jp -F json`, the ticket is printed as JSON.
     Show {
         /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
         /// Omit it to choose.
         id: Option<TicketId>,
-
-        /// Print JSON instead of markdown.
-        #[arg(long)]
-        json: bool,
     },
 
     /// Print the board: Todo, In Progress, and Done, each in board order.
@@ -287,6 +285,8 @@ enum Command {
     },
 
     /// List tickets, ordered by id.
+    ///
+    /// With `jp -F json`, the tickets are printed as JSON.
     List {
         /// Only tickets at this status: `todo`, `in progress`, or `done`.
         #[arg(long)]
@@ -300,10 +300,6 @@ enum Command {
         /// Repeat to require several.
         #[arg(long = "label")]
         labels: Vec<String>,
-
-        /// Print JSON instead of a table.
-        #[arg(long)]
-        json: bool,
     },
 
     /// Create the ticket directory.
@@ -338,7 +334,7 @@ enum ToolsCommand {
     },
 }
 
-/// One ticket in `show --json` output.
+/// One ticket in `jp -F json ticket show` output.
 #[derive(Serialize)]
 struct Detail<'a> {
     /// Carried explicitly: the document has no id of its own, and a caller that
@@ -349,7 +345,7 @@ struct Detail<'a> {
     path: &'a str,
 }
 
-/// One ticket in `list --json` output.
+/// One ticket in `jp -F json ticket list` output.
 #[derive(Serialize)]
 struct Row<'a> {
     id: TicketId,
@@ -360,12 +356,18 @@ struct Row<'a> {
     path: &'a str,
 }
 
-/// What a subcommand produced: text for the user, warnings for the log.
+/// What a subcommand produced: text for the user, and warnings.
 ///
-/// Warnings stay out of the text so `--json` output survives a pipe into `jq`.
+/// Warnings stay out of the text so `jp -F json` output survives a pipe into
+/// `jq`.
 #[derive(Debug, Default)]
 struct Output {
     text: String,
+
+    /// Whether `text` is one JSON value, which a JSON output format prints as a
+    /// record of its own.
+    json: bool,
+
     warnings: Vec<String>,
 }
 
@@ -373,7 +375,7 @@ impl From<String> for Output {
     fn from(text: String) -> Self {
         Self {
             text,
-            warnings: vec![],
+            ..Self::default()
         }
     }
 }
@@ -392,6 +394,9 @@ struct Context<'a> {
 
     /// The plugin's own settings.
     options: &'a Options,
+
+    /// How `jp` was asked to print: `-F json` makes `show` and `list` JSON.
+    format: OutputFormat,
 }
 
 /// Serve one plugin session: read the host's first message and answer it.
@@ -496,6 +501,7 @@ fn handle_command(
         root: &init.workspace.root,
         config: &init.config,
         options: &options,
+        format: init.output_format,
     };
 
     match execute(&ctx, command) {
@@ -505,7 +511,9 @@ fn handle_command(
             for warning in &output.warnings {
                 print_to(stdout, &format!("Warning: {warning}\n"), "chrome")?;
             }
-            if !output.text.is_empty() {
+            if output.json {
+                print_json(stdout, &output.text)?;
+            } else if !output.text.is_empty() {
                 print(stdout, &output.text)?;
             }
             send_exit(stdout, 0, None)
@@ -639,9 +647,8 @@ fn compose_missing(
             id: Some(pick_ticket(dir, stdin, stdout, "Close", true)?),
         }),
 
-        Command::Show { id: None, json } => Ok(Command::Show {
+        Command::Show { id: None } => Ok(Command::Show {
             id: Some(pick_ticket(dir, stdin, stdout, "Show", false)?),
-            json,
         }),
 
         Command::Edit {
@@ -1293,7 +1300,7 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
 
         Command::Rename { id, title } => rename(dir, id, &title),
 
-        Command::Show { id, json } => show(dir, required(id, "ticket id")?, json),
+        Command::Show { id } => show(dir, required(id, "ticket id")?, ctx.format.is_json()),
 
         Command::Edit {
             id,
@@ -1353,8 +1360,7 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             status,
             kind,
             labels,
-            json,
-        } => list(dir, status, kind, &labels, json),
+        } => list(dir, status, kind, &labels, ctx.format.is_json()),
 
         Command::Init => init_dir(dir),
 
@@ -1477,6 +1483,7 @@ fn show_board(dir: &Utf8Path, done_limit: usize) -> Result<Output, String> {
     Ok(Output {
         text: columns.join("\n"),
         warnings,
+        ..Output::default()
     })
 }
 
@@ -1792,7 +1799,11 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
         })
         .map_err(|error| format!("failed to serialize {id}: {error}"))?;
 
-        return Ok(format!("{json}\n").into());
+        return Ok(Output {
+            text: format!("{json}\n"),
+            json: true,
+            ..Output::default()
+        });
     }
 
     // The rendered view names the ticket even though the file doesn't: the id
@@ -1873,7 +1884,11 @@ fn list(
             .collect()
     };
 
-    Ok(Output { text, warnings })
+    Ok(Output {
+        text,
+        json,
+        warnings,
+    })
 }
 
 /// One line of the human-readable listing.
@@ -1917,6 +1932,19 @@ fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
 
 fn print(stdout: &mut impl Write, text: &str) -> Result<(), String> {
     print_to(stdout, text, "content")
+}
+
+/// Print `text`, one JSON value, for the host to emit as a record of its own.
+fn print_json(stdout: &mut impl Write, text: &str) -> Result<(), String> {
+    send(
+        stdout,
+        &PluginToHost::Print(PrintMessage {
+            text: text.to_owned(),
+            channel: "content".to_owned(),
+            format: "json".into(),
+            language: None,
+        }),
+    )
 }
 
 /// Print `text` on the host's output channel `channel`.

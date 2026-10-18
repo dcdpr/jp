@@ -316,7 +316,7 @@ const ticketWriter = {
                 const id = new URL(req.url, 'http://localhost').searchParams.get('id')
                 if (!id) return reply(res, 400, { ok: false, output: 'missing id' })
 
-                const { ok, output } = await jp(['ticket', 'show', id, '--json'])
+                const { ok, output } = await jp(['-F', 'json', 'ticket', 'show', id])
                 if (!ok) return reply(res, 500, { ok, output })
 
                 try {

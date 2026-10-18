@@ -46,6 +46,20 @@ fn run_in(dir: &Utf8Path, command: Command) -> Result<Output, String> {
 }
 
 fn run_with_options(dir: &Utf8Path, command: Command, options: &Options) -> Result<Output, String> {
+    run_with(dir, command, options, OutputFormat::default())
+}
+
+/// [`run_command`], as `jp -F json` runs it.
+fn run_json(dir: &Utf8TempDir, command: Command) -> Result<Output, String> {
+    run_with(dir.path(), command, &labelled(), OutputFormat::Json)
+}
+
+fn run_with(
+    dir: &Utf8Path,
+    command: Command,
+    options: &Options,
+    format: OutputFormat,
+) -> Result<Output, String> {
     let config = serde_json::json!({
       "user": {
         "name": "tester"
@@ -58,6 +72,7 @@ fn run_with_options(dir: &Utf8Path, command: Command, options: &Options) -> Resu
             root: dir,
             config: &config,
             options,
+            format,
         },
         command,
     )
@@ -317,17 +332,11 @@ fn a_bare_id_is_a_show() {
         "t-02WT0KX",
     ]] {
         match parse(args).unwrap().command {
-            Command::Show { id, json } => {
+            Command::Show { id } => {
                 assert_eq!(id, Some("T-02wt0kx".parse().unwrap()), "{args:?}");
-                assert!(!json);
             }
             other => panic!("expected show for {args:?}, got {other:?}"),
         }
-    }
-
-    match parse(&["T-02wt0kx", "--json"]).unwrap().command {
-        Command::Show { json, .. } => assert!(json),
-        other => panic!("expected show, got {other:?}"),
     }
 }
 
@@ -493,12 +502,10 @@ fn list_filters_are_optional() {
             status,
             kind,
             labels,
-            json,
         } => {
             assert_eq!(status, Some(Status::InProgress));
             assert_eq!(kind, None);
             assert!(labels.is_empty());
-            assert!(!json);
         }
         other => panic!("expected list, got {other:?}"),
     }
@@ -764,7 +771,6 @@ fn block_records_and_clears_what_a_ticket_waits_on() {
         status: None,
         kind: None,
         labels: vec![],
-        json: false,
     })
     .unwrap();
     assert_eq!(
@@ -985,7 +991,6 @@ fn commands_run_against_the_resolved_directory() {
         status: None,
         kind: None,
         labels: vec![],
-        json: false,
     })
     .unwrap();
     assert_eq!(
@@ -996,13 +1001,13 @@ fn commands_run_against_the_resolved_directory() {
     let closed = run_command(&dir, Command::Close { id: Some(id) }).unwrap();
     assert!(closed.text.contains("Todo -> Done"), "{}", closed.text);
 
-    let json = run_command(&dir, Command::List {
+    let json = run_json(&dir, Command::List {
         status: Some(Status::Done),
         kind: None,
         labels: vec![],
-        json: true,
     })
     .unwrap();
+    assert!(json.json);
     let rows: Vec<serde_json::Value> = serde_json::from_str(&json.text).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["id"], id.to_string());
@@ -1304,12 +1309,9 @@ fn show_json_carries_the_id() {
     .unwrap();
     let id = store::list(dir.path()).unwrap()[0].id;
 
-    let out = run_command(&dir, Command::Show {
-        id: Some(id),
-        json: true,
-    })
-    .unwrap();
+    let out = run_json(&dir, Command::Show { id: Some(id) }).unwrap();
 
+    assert!(out.json);
     let detail: serde_json::Value = serde_json::from_str(&out.text).unwrap();
     assert_eq!(detail["id"], id.to_string());
     assert_eq!(detail["title"], "Tool call header misaligned");
@@ -1540,7 +1542,6 @@ fn labels_survive_the_round_trip_and_show_in_the_listing() {
         status: None,
         kind: None,
         labels: vec![],
-        json: false,
     })
     .unwrap();
 
@@ -1564,7 +1565,6 @@ fn listing_narrows_to_tickets_carrying_every_label() {
         status: None,
         kind: None,
         labels: vec!["package=jp_cli".to_owned(), "client=macos".to_owned()],
-        json: false,
     })
     .unwrap();
 
@@ -1587,7 +1587,6 @@ fn listing_narrows_on_a_bare_key() {
         status: None,
         kind: None,
         labels: vec!["client".to_owned()],
-        json: false,
     })
     .unwrap();
 
@@ -1780,8 +1779,8 @@ fn a_broken_vocabulary_fails_only_what_labels() {
     .unwrap();
 }
 
-/// An unreadable ticket is reported to the log, not mixed into stdout where it
-/// would corrupt `--json`.
+/// An unreadable ticket is a warning, not mixed into stdout where it would
+/// corrupt `jp -F json`.
 #[test]
 fn unreadable_tickets_are_warned_about_separately() {
     let dir = Utf8TempDir::new().unwrap();
@@ -1796,11 +1795,10 @@ fn unreadable_tickets_are_warned_about_separately() {
     .unwrap();
     std::fs::write(dir.path().join("zzzzzzz-mangled.md"), "no heading here\n").unwrap();
 
-    let listed = run_command(&dir, Command::List {
+    let listed = run_json(&dir, Command::List {
         status: None,
         kind: None,
         labels: vec![],
-        json: true,
     })
     .unwrap();
 
@@ -1808,6 +1806,30 @@ fn unreadable_tickets_are_warned_about_separately() {
     assert_eq!(rows.len(), 1);
     assert_eq!(listed.warnings.len(), 1);
     assert!(listed.warnings[0].contains("zzzzzzz-mangled.md"));
+}
+
+/// `jp -F json` reaches the plugin as the output format, and the listing is one
+/// JSON value the host prints as a record of its own.
+#[test]
+fn a_json_output_format_prints_the_listing_as_json() {
+    let root = Utf8TempDir::new().unwrap();
+    let mut message = init_message(jp_plugin::PROTOCOL_VERSION, root.path(), &["list"]);
+    message.output_format = OutputFormat::Json;
+
+    let messages = exchange(&HostToPlugin::Init(Box::new(message)));
+
+    let prints: Vec<&PrintMessage> = messages
+        .iter()
+        .filter_map(|message| match message {
+            PluginToHost::Print(print) => Some(print),
+            _ => None,
+        })
+        .collect();
+    let [print] = prints[..] else {
+        panic!("expected one print: {messages:?}");
+    };
+    assert_eq!(print.format, "json");
+    assert_eq!(print.text, "[]\n");
 }
 
 /// A warning names something to check now, so it is printed on stderr rather
