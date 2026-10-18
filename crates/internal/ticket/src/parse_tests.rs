@@ -67,7 +67,6 @@ fn reads_optional_metadata_fields() {
 
     assert_eq!(ticket.metadata.status, Status::InProgress);
     assert_eq!(ticket.metadata.implements.as_deref(), Some("095"));
-    assert_eq!(ticket.metadata.blocked_by, None);
     assert_eq!(ticket.metadata.github, None);
     assert!(ticket.metadata.labels.is_empty());
 }
@@ -405,8 +404,8 @@ fn locates_the_metadata_block() {
 #[test]
 fn splits_metadata_lines() {
     assert_eq!(
-        meta_line("- **Blocked by**: T-02wt0m3"),
-        Some(("Blocked by", "T-02wt0m3"))
+        meta_line("- **Promoted to**: RFD 042"),
+        Some(("Promoted to", "RFD 042"))
     );
     assert_eq!(meta_line("- **Re**:"), Some(("Re", "")));
     assert_eq!(meta_line("- not metadata"), None);

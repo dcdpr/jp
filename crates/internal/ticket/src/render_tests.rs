@@ -267,11 +267,15 @@ fn adds_a_field_the_ticket_lacks() {
 #[test]
 fn reports_a_document_with_no_metadata_block() {
     assert_eq!(set_metadata("# Bare\n\nProse.\n", "Status", "Done"), None);
-    assert_eq!(remove_metadata("# Bare\n\nProse.\n", "Label"), None);
+    assert_eq!(
+        set_repeated_metadata("# Bare\n\nProse.\n", "Label", &[]),
+        None
+    );
 }
 
+/// No values is how labels are cleared.
 #[test]
-fn removing_a_repeated_field_drops_every_line() {
+fn writing_no_values_drops_every_line() {
     let document = indoc! {"
         # Tool call header misaligned
 
@@ -285,7 +289,7 @@ fn removing_a_repeated_field_drops_every_line() {
         Description.
     "};
 
-    let out = remove_metadata(document, "Label").unwrap();
+    let out = set_repeated_metadata(document, "Label", &[]).unwrap();
 
     assert_eq!(out, indoc! {"
             # Tool call header misaligned
@@ -302,7 +306,7 @@ fn removing_a_repeated_field_drops_every_line() {
 /// Clearing labels on a ticket that has none is not an error, so a caller
 /// doesn't have to read the ticket first to know which write to make.
 #[test]
-fn removing_a_field_the_ticket_lacks_changes_nothing() {
+fn writing_no_values_to_a_field_the_ticket_lacks_changes_nothing() {
     let document = indoc! {"
         # Tool call header misaligned
 
@@ -314,7 +318,10 @@ fn removing_a_field_the_ticket_lacks_changes_nothing() {
         Description.
     "};
 
-    assert_eq!(remove_metadata(document, "Label").unwrap(), document);
+    assert_eq!(
+        set_repeated_metadata(document, "Label", &[]).unwrap(),
+        document
+    );
 }
 
 /// The replacement lands where the old run was, so relabelling doesn't shuffle

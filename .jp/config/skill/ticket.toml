@@ -12,19 +12,15 @@ count. Filter by status, kind, or label.
 - ticket_create: File a new ticket, at status Todo.
 - ticket_comment: Append a comment to a ticket's discussion, optionally \
 replying to an earlier one.
-- ticket_rename: Give a ticket a new title, moving its file to match.
-- ticket_edit: Replace a ticket's description.
-- ticket_label: Replace the labels on an existing ticket.
+- ticket_edit: Change a ticket's title, description, kind, status, or labels, \
+any of them in one call. Status `done` closes it.
 - ticket_labels: List the labels the board defines, and what each covers.
-- ticket_status: Move a ticket to another column: Todo, In Progress, or Done.
-- ticket_block: Record what a ticket is waiting on, or clear it.
-- ticket_close: Mark a ticket Done.
 
 Labels group tickets by area of the system, orthogonally to kind. Each one is a \
 `key=value` pair (`client=cli`, `package=jp_config`), and a key may be named \
 more than once, which is how a ticket spanning two crates says so. The set is \
 closed and lives in `plugins.command.ticket.options.labels`; the tools \
-advertise it, and a label outside it is refused. `ticket_label` writes the \
+advertise it, and a label outside it is refused. `ticket_edit` writes the \
 whole set, so read the ticket first when you mean to keep the labels it \
 already carries.
 
@@ -49,12 +45,7 @@ ticket_show = { enable = true, run = "unattended", result = "unattended", style.
 ticket_labels = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 
 # The writing tools inherit the workspace's `run = "ask"` default: filing,
-# commenting, renaming, and closing all leave a diff someone has to review.
+# commenting, and editing all leave a diff someone has to review.
 ticket_create = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 ticket_comment = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-ticket_rename = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 ticket_edit = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-ticket_status = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-ticket_block = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-ticket_close = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-ticket_label = { enable = true, result = "unattended", style.inline_results = "off", style.error.inline_results = "full", style.results_file_link = "off" }

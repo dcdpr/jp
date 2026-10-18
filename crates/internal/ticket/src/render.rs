@@ -152,19 +152,6 @@ pub fn set_metadata(document: &str, key: &str, value: &str) -> Option<String> {
     Some(out)
 }
 
-/// Drop a field from the ticket's metadata block, returning the new document.
-///
-/// Every occurrence of the field goes, so this also clears a repeated one.
-/// Returns `None` when the document has no metadata block; a document that
-/// doesn't carry the field comes back unchanged.
-///
-/// Only the header block is considered, so a line quoted in a comment is left
-/// alone.
-#[must_use]
-pub fn remove_metadata(document: &str, key: &str) -> Option<String> {
-    set_repeated_metadata(document, key, &[])
-}
-
 /// Replace every occurrence of a repeated metadata field with `values`, one
 /// line each.
 ///

@@ -41,7 +41,6 @@ export function parseTicket(content, filename) {
         kind: field(content, 'Kind'),
         authors: field(content, 'Authors'),
         date: field(content, 'Date'),
-        blockedBy: field(content, 'Blocked by'),
         labels: readLabels(content),
         implements: field(content, 'Implements'),
         promotedTo: field(content, 'Promoted to'),

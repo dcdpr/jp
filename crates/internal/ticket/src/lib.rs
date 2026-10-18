@@ -154,7 +154,6 @@ pub struct Metadata {
     pub labels: Labels,
     pub authors: String,
     pub date: String,
-    pub blocked_by: Option<String>,
     pub implements: Option<String>,
     pub promoted_to: Option<String>,
     pub github: Option<String>,

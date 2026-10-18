@@ -9,9 +9,6 @@ next: false
 Columns are stages of work; priority is the vertical order within a column.
 Todo is therefore the work queue, read top-down, and it holds triaged and
 untriaged work alike.
-
-**Blocked** is a badge rather than a column: a blocked ticket is still at
-whatever stage it reached.
 Done shows only the head of the column — the [full list] has the rest.
 
 <TicketBoard />

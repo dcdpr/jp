@@ -470,47 +470,6 @@ pub fn set_status(dir: &Utf8Path, id: TicketId, status: Status) -> Result<(Utf8P
     Ok((path, previous))
 }
 
-/// The metadata key naming what a ticket waits on.
-const BLOCKED_BY: &str = "Blocked by";
-
-/// Record what a ticket is waiting on, or clear it with `None`, returning its
-/// path and what it waited on before.
-///
-/// The blocker is another ticket's id or free text, and is written on one
-/// metadata line, so one that is blank or spans lines is refused.
-pub fn set_blocked_by(
-    dir: &Utf8Path,
-    id: TicketId,
-    blocker: Option<&str>,
-) -> Result<(Utf8PathBuf, Option<String>)> {
-    let blocker = blocker.map(str::trim);
-    if let Some(value) = blocker
-        && (value.is_empty() || value.chars().any(char::is_control))
-    {
-        return Err(ParseError::InvalidValue {
-            field: BLOCKED_BY,
-            value: value.to_owned(),
-        }
-        .into());
-    }
-
-    let path = locate(dir, id)?;
-    let source = fs::read_to_string(&path)?;
-    let previous = parse::document(&source)?.metadata.blocked_by;
-
-    let updated = match blocker {
-        Some(blocker) => render::set_metadata(&source, BLOCKED_BY, blocker),
-        None => render::remove_metadata(&source, BLOCKED_BY),
-    }
-    .ok_or(ParseError::MissingMetadata)?;
-
-    if updated != source {
-        fs::write(&path, updated)?;
-    }
-
-    Ok((path, previous))
-}
-
 /// Read every ticket in `dir`, ordered by id.
 ///
 /// A directory that doesn't exist yet holds no tickets.

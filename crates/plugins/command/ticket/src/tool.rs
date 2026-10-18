@@ -47,10 +47,10 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 type Answer = Result<Outcome, Error>;
 
 /// The tools this plugin serves, by the name a `source` gives them.
-pub(crate) const TOOLS: &[&str] = &[
-    "block", "close", "comment", "create", "edit", "label", "labels", "list", "rename", "show",
-    "status",
-];
+///
+/// Few, because every tool a model is offered costs context on every turn:
+/// `edit` changes any part of a ticket in one call.
+pub(crate) const TOOLS: &[&str] = &["comment", "create", "edit", "labels", "list", "show"];
 
 /// The longest title `create` accepts, in characters, unless the tool's
 /// `options.max_title_length` overrides it.
@@ -78,7 +78,7 @@ pub(crate) fn run(init: &InitMessage, call: &ToolCall, options: &Options) -> Out
 }
 
 fn answer(init: &InitMessage, call: &ToolCall, options: &Options) -> Answer {
-    let Some(capabilities) = capabilities(&call.name) else {
+    let Some(capabilities) = capabilities(call) else {
         return refuse(format!(
             "`jp ticket` serves no tool named `{}`. It serves: {}.",
             call.name,
@@ -104,13 +104,8 @@ fn answer(init: &InitMessage, call: &ToolCall, options: &Options) -> Answer {
     match call.name.as_str() {
         "create" => create(&tickets, &args, call, preview),
         "comment" => comment(&tickets, &args, preview),
-        "label" => label(&tickets, &args),
-        "labels" => labels(&tickets),
-        "rename" => rename(&tickets, &args),
         "edit" => edit(&tickets, &args),
-        "status" => status(&tickets, &args),
-        "block" => block(&tickets, &args),
-        "close" => close(&tickets, &args),
+        "labels" => labels(&tickets),
         "show" => show(&tickets, &args),
         "list" => list(&tickets, &args),
         // `capabilities` above answers for exactly the names in `TOOLS`.
@@ -118,23 +113,26 @@ fn answer(init: &InitMessage, call: &ToolCall, options: &Options) -> Answer {
     }
 }
 
-/// What a tool does in the ticket directory, in the access policy's terms.
+/// What a call does in the ticket directory, in the access policy's terms.
 ///
 /// `None` for a name this plugin serves no tool under.
-fn capabilities(tool: &str) -> Option<&'static [Capability]> {
-    Some(match tool {
+fn capabilities(call: &ToolCall) -> Option<&'static [Capability]> {
+    let retitles = call
+        .arguments
+        .get("title")
+        .is_some_and(|title| !title.is_null());
+
+    Some(match call.name.as_str() {
         "show" | "list" | "labels" => &[Capability::Read],
         "create" => &[Capability::Read, Capability::Create],
-        "comment" | "label" | "edit" | "status" | "block" | "close" => {
-            &[Capability::Read, Capability::Update]
-        }
         // A new title moves the file: one name goes and another is created.
-        "rename" => &[
+        "edit" if retitles => &[
             Capability::Read,
             Capability::Update,
             Capability::Create,
             Capability::Delete,
         ],
+        "comment" | "edit" => &[Capability::Read, Capability::Update],
         _ => return None,
     })
 }
@@ -433,33 +431,6 @@ fn resolve_labels(
         .map_err(|refusal| refusal.to_string()))
 }
 
-/// Replace a ticket's labels.
-///
-/// Checked against the ticket rather than against the vocabulary alone, so a
-/// retired label the ticket already carries can be listed again and kept.
-fn label(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
-    let id = match args.id()? {
-        Ok(id) => id,
-        Err(refusal) => return refuse(refusal),
-    };
-    // A missing or null `labels` is refused rather than read as an empty set:
-    // this write replaces the whole set, so treating the absent case as "clear"
-    // would drop every label a call meant to leave alone, and the result line
-    // saying so is styled off.
-    let Some(requested) = args.optional::<Vec<String>>("labels")? else {
-        return refuse("`labels` must be an array. Pass `[]` to clear the labels.");
-    };
-
-    let vocabulary = tickets.options.vocabulary()?;
-    match store::set_labels(&tickets.dir, id, &vocabulary, &requested) {
-        Ok((_, applied)) if applied.is_empty() => Ok(format!("Cleared the labels on {id}.").into()),
-        Ok((_, applied)) => Ok(format!("{id}: {applied}").into()),
-        Err(store::Error::NoSuchTicket(_)) => refuse(format!("No {id}.")),
-        Err(store::Error::Rejected(refusal)) => refuse(refusal.to_string()),
-        Err(other) => Err(other.into()),
-    }
-}
-
 /// List the labels the board defines, with what each one covers.
 fn labels(tickets: &Tickets<'_>) -> Answer {
     let vocabulary = tickets.options.vocabulary()?;
@@ -544,128 +515,120 @@ fn preview_comment(
     Ok(preview(&format!("{heading}\n\n{}", render::comment(&comment))).into())
 }
 
-fn rename(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
-    let id = match args.id()? {
-        Ok(id) => id,
-        Err(refusal) => return refuse(refusal),
-    };
-    let title = args.required::<String>("title")?;
-
-    if title.trim().is_empty() {
-        return refuse("`title` must not be empty.");
-    }
-
-    match store::edit(&tickets.dir, id, Some(title.trim()), None) {
-        Ok(store::Edited { from, to }) if from == to => {
-            Ok(format!("{id} retitled, still at {}", tickets.relative(&to)).into())
-        }
-        Ok(store::Edited { from, to }) => Ok(format!(
-            "{id} renamed: {} -> {}",
-            tickets.relative(&from),
-            tickets.relative(&to)
-        )
-        .into()),
-        Err(store::Error::NoSuchTicket(id)) => refuse(format!("No {id}.")),
-        Err(other) => Err(other.into()),
-    }
-}
-
-/// Replace a ticket's description, keeping its title, metadata, and comments.
+/// Change any of a ticket's title, description, kind, status, and labels in one
+/// call, leaving the rest as it is.
+///
+/// Every argument is checked before anything is written.
+/// The labels, which the vocabulary can still refuse, are written first, so a
+/// refused call changes nothing; the title last, since it moves the file.
 fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     let id = match args.id()? {
         Ok(id) => id,
         Err(refusal) => return refuse(refusal),
     };
-    let body = args.required::<String>("body")?;
+    let title = args.optional::<String>("title")?;
+    let description = args.optional::<String>("description")?;
+    let kind = match args
+        .optional::<String>("kind")?
+        .map(|kind| kind.parse::<Kind>())
+    {
+        Some(Err(_)) => return refuse("`kind` must be one of: bug, feature, chore."),
+        Some(Ok(kind)) => Some(kind),
+        None => None,
+    };
+    let status = match args
+        .optional::<String>("status")?
+        .map(|status| status.parse::<Status>())
+    {
+        Some(Err(_)) => return refuse("`status` must be one of: todo, in progress, done."),
+        Some(Ok(status)) => Some(status),
+        None => None,
+    };
+    let labels = args.optional::<Vec<String>>("labels")?;
 
+    if title.is_none()
+        && description.is_none()
+        && kind.is_none()
+        && status.is_none()
+        && labels.is_none()
+    {
+        return refuse(
+            "Name what to change: `title`, `description`, `kind`, `status`, or `labels`.",
+        );
+    }
+    if title
+        .as_deref()
+        .is_some_and(|title| title.trim().is_empty())
+    {
+        return refuse("`title` must not be empty.");
+    }
     // An empty description is more likely a slip than a request, and the write
     // replaces the old one outright.
-    if body.trim().is_empty() {
-        return refuse("`body` must not be empty.");
-    }
-
-    match store::edit(&tickets.dir, id, None, Some(&body)) {
-        Ok(store::Edited { to, .. }) => {
-            reflow(&to)?;
-            Ok(format!("Replaced the description of {id}.").into())
-        }
-        Err(store::Error::NoSuchTicket(id)) => refuse(format!("No {id}.")),
-        Err(other) => Err(other.into()),
-    }
-}
-
-/// Move a ticket to another column of the board.
-fn status(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
-    let id = match args.id()? {
-        Ok(id) => id,
-        Err(refusal) => return refuse(refusal),
-    };
-    let Ok(status) = args.required::<String>("status")?.parse::<Status>() else {
-        return refuse("`status` must be one of: todo, in progress, done.");
-    };
-
-    match store::set_status(&tickets.dir, id, status) {
-        Ok((_, previous)) if previous == status => Ok(format!("{id} was already {status}.").into()),
-        Ok((_, previous)) => Ok(format!("{id}: {previous} -> {status}").into()),
-        Err(store::Error::NoSuchTicket(id)) => refuse(format!("No {id}.")),
-        Err(other) => Err(other.into()),
-    }
-}
-
-/// Record what a ticket waits on, or clear it.
-///
-/// Clearing takes `clear: true` rather than an absent `blocker`: a call that
-/// left the argument out by mistake would otherwise remove what the ticket
-/// waits on.
-fn block(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
-    let id = match args.id()? {
-        Ok(id) => id,
-        Err(refusal) => return refuse(refusal),
-    };
-    let blocker = args.optional::<String>("blocker")?;
-    let clear = args.optional::<bool>("clear")?.unwrap_or(false);
-
-    let blocker = match (blocker, clear) {
-        (Some(_), true) => return refuse("Pass `blocker` or `clear`, not both."),
-        (None, false) => {
-            return refuse(
-                "Pass `blocker`, naming what the ticket waits on, or `clear: true` to remove it.",
-            );
-        }
-        (Some(blocker), false) => Some(blocker.trim().to_owned()),
-        (None, true) => None,
-    };
-
-    if let Some(blocker) = &blocker
-        && (blocker.is_empty() || blocker.chars().any(char::is_control))
+    if description
+        .as_deref()
+        .is_some_and(|description| description.trim().is_empty())
     {
-        return refuse("`blocker` must be one line of text: a ticket id, or a few words.");
+        return refuse("`description` must not be empty.");
     }
 
-    match store::set_blocked_by(&tickets.dir, id, blocker.as_deref()) {
-        Ok((_, previous)) => Ok(match (blocker, previous) {
-            (Some(blocker), _) => format!("{id}: blocked by {blocker}"),
-            (None, Some(previous)) => format!("{id}: no longer blocked by {previous}"),
-            (None, None) => format!("{id} was not blocked."),
+    match store::locate_ticket(&tickets.dir, id) {
+        Ok(_) => {}
+        Err(store::Error::NoSuchTicket(_)) => return refuse(format!("No {id}.")),
+        Err(other) => return Err(other.into()),
+    }
+
+    let mut changed = vec![];
+    if let Some(requested) = &labels {
+        let vocabulary = tickets.options.vocabulary()?;
+        match store::set_labels(&tickets.dir, id, &vocabulary, requested) {
+            Ok((_, applied)) if applied.is_empty() => changed.push("labels cleared".to_owned()),
+            Ok((_, applied)) => changed.push(format!("labels: {applied}")),
+            Err(store::Error::Rejected(refusal)) => return refuse(refusal.to_string()),
+            Err(other) => return Err(other.into()),
         }
-        .into()),
-        Err(store::Error::NoSuchTicket(id)) => refuse(format!("No {id}.")),
-        Err(other) => Err(other.into()),
     }
-}
-
-fn close(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
-    let id = match args.id()? {
-        Ok(id) => id,
-        Err(refusal) => return refuse(refusal),
-    };
-
-    match store::close(&tickets.dir, id) {
-        Ok((_, Status::Done)) => Ok(format!("{id} was already Done.").into()),
-        Ok((_, previous)) => Ok(format!("{id}: {previous} -> Done").into()),
-        Err(store::Error::NoSuchTicket(id)) => refuse(format!("No {id}.")),
-        Err(other) => Err(other.into()),
+    if let Some(kind) = kind {
+        store::set_field(&tickets.dir, id, "Kind", &kind.to_string())?;
+        changed.push(format!("kind: {kind}"));
     }
+    if let Some(status) = status {
+        let (_, previous) = store::set_status(&tickets.dir, id, status)?;
+        changed.push(if previous == status {
+            format!("status: already {status}")
+        } else {
+            format!("status: {previous} -> {status}")
+        });
+    }
+    if title.is_some() || description.is_some() {
+        let store::Edited { from, to } = store::edit(
+            &tickets.dir,
+            id,
+            title.as_deref().map(str::trim),
+            description.as_deref(),
+        )?;
+        if description.is_some() {
+            reflow(&to)?;
+            changed.push("description replaced".to_owned());
+        }
+        if title.is_some() {
+            changed.push(if from == to {
+                format!("title changed, still at {}", tickets.relative(&to))
+            } else {
+                format!(
+                    "title changed, moved {} -> {}",
+                    tickets.relative(&from),
+                    tickets.relative(&to)
+                )
+            });
+        }
+    }
+
+    let mut text = format!("Edited {id}:\n");
+    for change in changed {
+        text.push_str(&format!("- {change}\n"));
+    }
+
+    Ok(text.into())
 }
 
 fn show(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
@@ -809,11 +772,6 @@ fn render_list(tickets: &[(TicketId, &Ticket)], unreadable: &[String]) -> String
             0 => String::new(),
             count => format!(" ({count} comments)"),
         };
-        let blocked = ticket
-            .metadata
-            .blocked_by
-            .as_deref()
-            .map_or_else(String::new, |by| format!(" [blocked by {by}]"));
         let labels = if ticket.metadata.labels.is_empty() {
             String::new()
         } else {
@@ -821,7 +779,7 @@ fn render_list(tickets: &[(TicketId, &Ticket)], unreadable: &[String]) -> String
         };
 
         out.push_str(&format!(
-            "{id:<9} {status:<12} {kind:<8} {}{labels}{blocked}{comments}\n",
+            "{id:<9} {status:<12} {kind:<8} {}{labels}{comments}\n",
             ticket.title
         ));
     }
@@ -840,7 +798,7 @@ fn render_list(tickets: &[(TicketId, &Ticket)], unreadable: &[String]) -> String
 fn render_ticket(id: TicketId, ticket: &Ticket, path: &str) -> String {
     let metadata = &ticket.metadata;
     // The rendered view names the ticket even though the file doesn't: the id
-    // is what a `Blocked by` or a later reference has to quote.
+    // is what a reply or a later reference has to quote.
     let mut out = format!("# {id}: {}\n\n", ticket.title);
 
     out.push_str(&format!("- **Path**: {path}\n"));
@@ -852,7 +810,6 @@ fn render_ticket(id: TicketId, ticket: &Ticket, path: &str) -> String {
     out.push_str(&format!("- **Authors**: {}\n", metadata.authors));
     out.push_str(&format!("- **Date**: {}\n", metadata.date));
     for (label, value) in [
-        ("Blocked by", &metadata.blocked_by),
         ("Implements", &metadata.implements),
         ("Promoted to", &metadata.promoted_to),
         ("GitHub", &metadata.github),

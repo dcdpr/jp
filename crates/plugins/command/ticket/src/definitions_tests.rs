@@ -100,8 +100,7 @@ fn assert_advertised_values_match_the_parser(routed: &[(String, String, toml::Va
     for (name, key, tool) in routed {
         let parameters: &[&str] = match name.as_str() {
             "create" => &["kind"],
-            "list" => &["kind", "status"],
-            "status" => &["status"],
+            "edit" | "list" => &["kind", "status"],
             _ => continue,
         };
 
@@ -214,7 +213,7 @@ fn sync_offers_each_tool_its_labels_found_by_source() {
                 "*": { "run": "ask" },
                 "ticket_create": labelled("plugin.command.ticket.create"),
                 "track": labelled("plugin.command.ticket.create"),
-                "ticket_label": labelled("plugin.command.ticket.label"),
+                "ticket_edit": labelled("plugin.command.ticket.edit"),
                 "list": labelled("plugin.command.ticket"),
                 "ticket_show": { "source": "plugin.command.ticket.show" },
                 "fs_read_file": { "source": "local" },
@@ -228,7 +227,7 @@ fn sync_offers_each_tool_its_labels_found_by_source() {
     let path = dir.path().join(SYNCED_FILE);
     assert_eq!(
         output.text,
-        format!("Wrote {path}, with labels for list, ticket_create, ticket_label, track\n")
+        format!("Wrote {path}, with labels for list, ticket_create, ticket_edit, track\n")
     );
     let lists = r#"
 [conversation.tools.list.parameters.labels.items]
@@ -250,7 +249,7 @@ enum = [
   "triaged",
 ]
 
-[conversation.tools.ticket_label.parameters.labels.items]
+[conversation.tools.ticket_edit.parameters.labels.items]
 enum = [
   "client=cli",
   "client=macos",
@@ -307,7 +306,7 @@ fn sync_leaves_out_a_tool_that_declares_no_labels() {
             "source": "plugin.command.ticket.list",
             "parameters": { "labels": { "items": { "enum": ["client=cli"] } } }
         },
-        "ticket_label": { "source": "plugin.command.ticket.label" }
+        "ticket_edit": { "source": "plugin.command.ticket.edit" }
     }}});
 
     let output = sync(dir.path(), &config, &vocabulary()).unwrap();
@@ -316,13 +315,13 @@ fn sync_leaves_out_a_tool_that_declares_no_labels() {
     assert_eq!(
         output.text,
         format!(
-            "Wrote {path}, with labels for ticket_create\nLeft out ticket_label, ticket_list: \
+            "Wrote {path}, with labels for ticket_create\nLeft out ticket_edit, ticket_list: \
              their definitions declare no `labels` parameter.\n"
         )
     );
     let synced = fs::read_to_string(&path).unwrap();
     assert!(!synced.contains("ticket_list"), "{synced}");
-    assert!(!synced.contains("ticket_label"), "{synced}");
+    assert!(!synced.contains("ticket_edit"), "{synced}");
 }
 
 /// JP's definitions declare the parameter in every tool `sync` writes labels
@@ -330,7 +329,7 @@ fn sync_leaves_out_a_tool_that_declares_no_labels() {
 #[test]
 fn jp_definitions_declare_the_labels_parameter() {
     for (name, key, tool) in routed(&read_definitions(&jp_definitions())) {
-        if !matches!(name.as_str(), "create" | "label" | "list") {
+        if !matches!(name.as_str(), "create" | "edit" | "list") {
             continue;
         }
 

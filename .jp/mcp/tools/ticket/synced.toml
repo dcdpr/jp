@@ -5,7 +5,7 @@
 # after changing the labels or the tools: this file is rewritten whole, and
 # edits to it are lost.
 #
-# The lists differ. `create` is offered the labels it may add. `label` also
+# The lists differ. `create` is offered the labels it may add. `edit` also
 # gets retired ones, because replacing a ticket's whole set means naming a
 # retired label to keep it. `list` also gets a bare key per facet, which is how
 # a filter asks for any value under it.
@@ -75,7 +75,7 @@ enum = [
   "type=tracking",
 ]
 
-[conversation.tools.ticket_label.parameters.labels.items]
+[conversation.tools.ticket_edit.parameters.labels.items]
 enum = [
   "client=cli",
   "client=macos",

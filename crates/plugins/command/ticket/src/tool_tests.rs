@@ -369,11 +369,15 @@ fn a_tool_without_a_preview_says_so() {
     let dir = Utf8TempDir::new().unwrap();
     let id = write_ticket(&dir, "Tool call header misaligned");
 
-    let message = error_message(preview_tool(&dir, "close", json!({ "id": FIXED_ID })));
+    let message = error_message(preview_tool(
+        &dir,
+        "edit",
+        json!({ "id": FIXED_ID, "status": "done" }),
+    ));
 
     assert_eq!(
         message,
-        "`close` has no preview of its own; style its parameters as `function_call` or `json` \
+        "`edit` has no preview of its own; style its parameters as `function_call` or `json` \
          rather than `tool`."
     );
     let source = fs::read_to_string(store::locate_ticket(&tickets(&dir).dir, id).unwrap()).unwrap();
@@ -860,131 +864,145 @@ fn an_unusable_id_is_reported_to_the_model() {
     let dir = Utf8TempDir::new().unwrap();
 
     assert_eq!(
-        error_message(run_tool(&dir, "close", json!({ "id": "nope" }))),
+        error_message(run_tool(
+            &dir,
+            "edit",
+            json!({ "id": "nope", "status": "done" })
+        )),
         "`nope` is not a ticket id (try T-02wt0kx)."
     );
     assert_eq!(
-        error_message(run_tool(&dir, "close", json!({ "id": 7 }))),
+        error_message(run_tool(&dir, "edit", json!({ "id": 7, "status": "done" }))),
         "`7` is not a ticket id."
-    );
-    assert_eq!(
-        error_message(run_tool(&dir, "close", json!({ "id": "T-zzzzzzz" }))),
-        "No T-zzzzzzz."
-    );
-}
-
-#[test]
-fn close_reports_the_transition_once() {
-    let dir = Utf8TempDir::new().unwrap();
-    create_ticket(&dir, "Tool call header misaligned");
-
-    let id = ids(&dir)[0];
-
-    assert_eq!(
-        content(run_tool(&dir, "close", json!({ "id": id.to_string() }))),
-        format!("{id}: Todo -> Done")
-    );
-    assert_eq!(
-        content(run_tool(&dir, "close", json!({ "id": id.to_string() }))),
-        format!("{id} was already Done.")
-    );
-}
-
-#[test]
-fn status_moves_a_ticket_between_columns() {
-    let dir = Utf8TempDir::new().unwrap();
-    create_ticket(&dir, "Tool call header misaligned");
-    let id = ids(&dir)[0];
-
-    assert_eq!(
-        content(run_tool(
-            &dir,
-            "status",
-            json!({ "id": id.to_string(), "status": "in progress" })
-        )),
-        format!("{id}: Todo -> In Progress")
-    );
-    assert_eq!(
-        content(run_tool(
-            &dir,
-            "status",
-            json!({ "id": id.to_string(), "status": "in progress" })
-        )),
-        format!("{id} was already In Progress.")
     );
     assert_eq!(
         error_message(run_tool(
             &dir,
-            "status",
+            "edit",
+            json!({ "id": "T-zzzzzzz", "status": "done" })
+        )),
+        "No T-zzzzzzz."
+    );
+}
+
+/// Moving a ticket between columns, closing it included, is one more thing
+/// `edit` changes.
+#[test]
+fn edit_moves_a_ticket_between_columns() {
+    let dir = Utf8TempDir::new().unwrap();
+    create_ticket(&dir, "Tool call header misaligned");
+    let id = ids(&dir)[0];
+
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "edit",
+            json!({ "id": id.to_string(), "status": "in progress" })
+        )),
+        format!("Edited {id}:\n- status: Todo -> In Progress\n")
+    );
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "edit",
+            json!({ "id": id.to_string(), "status": "done" })
+        )),
+        format!("Edited {id}:\n- status: In Progress -> Done\n")
+    );
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "edit",
+            json!({ "id": id.to_string(), "status": "done" })
+        )),
+        format!("Edited {id}:\n- status: already Done\n")
+    );
+    assert_eq!(
+        error_message(run_tool(
+            &dir,
+            "edit",
             json!({ "id": id.to_string(), "status": "blocked" })
         )),
         "`status` must be one of: todo, in progress, done."
     );
 }
 
+/// Several changes land in one call, and the result names each.
 #[test]
-fn block_records_and_clears_what_a_ticket_waits_on() {
+fn edit_changes_several_things_at_once() {
     let dir = Utf8TempDir::new().unwrap();
-    create_ticket(&dir, "Tool call header misaligned");
-    let id = ids(&dir)[0];
+    let id = write_ticket(&dir, "Wrapping is wrong");
+    let prefix = id.file_prefix();
+
+    let out = content(run_tool(
+        &dir,
+        "edit",
+        json!({
+            "id": FIXED_ID,
+            "title": "The wrap calculation is off",
+            "description": "Off by one at 80 columns.",
+            "kind": "feature",
+            "status": "in progress",
+            "labels": ["client=cli"]
+        }),
+    ));
 
     assert_eq!(
-        content(run_tool(
-            &dir,
-            "block",
-            json!({ "id": id.to_string(), "blocker": "T-02wt0m3" })
-        )),
-        format!("{id}: blocked by T-02wt0m3")
+        out,
+        format!(
+            "Edited {id}:\n- labels: client=cli\n- kind: Feature\n- status: Todo -> In \
+             Progress\n- description replaced\n- title changed, moved docs/ticket/{prefix}slug.md \
+             -> docs/ticket/{prefix}the-wrap-calculation-is-off.md\n"
+        )
     );
-    let listed = content(run_tool(&dir, "list", json!({})));
-    assert!(listed.contains("[blocked by T-02wt0m3]"), "{listed}");
+    let entries = store::list(&tickets(&dir).dir).unwrap();
+    let ticket = entries[0].ticket.as_ref().unwrap();
+    assert_eq!(ticket.title, "The wrap calculation is off");
+    assert_eq!(ticket.description, "Off by one at 80 columns.");
+    assert_eq!(ticket.metadata.kind, Kind::Feature);
+    assert_eq!(ticket.metadata.status, Status::InProgress);
+    assert_eq!(ticket.metadata.labels.to_tokens(), ["client=cli"]);
+}
+
+/// A call that changes nothing is a call that forgot something.
+#[test]
+fn edit_needs_something_to_change() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "Wrapping is wrong");
 
     assert_eq!(
-        content(run_tool(
-            &dir,
-            "block",
-            json!({ "id": id.to_string(), "clear": true })
-        )),
-        format!("{id}: no longer blocked by T-02wt0m3")
+        error_message(run_tool(&dir, "edit", json!({ "id": FIXED_ID }))),
+        "Name what to change: `title`, `description`, `kind`, `status`, or `labels`."
     );
     assert_eq!(
-        content(run_tool(
+        error_message(run_tool(
             &dir,
-            "block",
-            json!({ "id": id.to_string(), "clear": true })
+            "edit",
+            json!({ "id": FIXED_ID, "labels": null })
         )),
-        format!("{id} was not blocked.")
+        "Name what to change: `title`, `description`, `kind`, `status`, or `labels`."
     );
 }
 
-/// Clearing has to be asked for: a call that left `blocker` out by mistake must
-/// not remove what the ticket waits on.
+/// A refused label stops the whole call, so nothing else it asked for lands.
 #[test]
-fn block_needs_a_blocker_or_an_explicit_clear() {
+fn a_refused_label_changes_nothing() {
     let dir = Utf8TempDir::new().unwrap();
-    create_ticket(&dir, "Tool call header misaligned");
-    let id = ids(&dir)[0];
+    let id = write_ticket(&dir, "Wrapping is wrong");
+    let path = store::locate_ticket(&tickets(&dir).dir, id).unwrap();
+    let before = fs::read_to_string(&path).unwrap();
 
-    assert_eq!(
-        error_message(run_tool(&dir, "block", json!({ "id": id.to_string() }))),
-        "Pass `blocker`, naming what the ticket waits on, or `clear: true` to remove it."
+    let message = error_message(run_tool(
+        &dir,
+        "edit",
+        json!({ "id": FIXED_ID, "status": "done", "labels": ["client=clii"] }),
+    ));
+
+    assert!(
+        message.starts_with("`client=clii` is not a known label."),
+        "{message}"
     );
-    assert_eq!(
-        error_message(run_tool(
-            &dir,
-            "block",
-            json!({ "id": id.to_string(), "blocker": "T-02wt0m3", "clear": true })
-        )),
-        "Pass `blocker` or `clear`, not both."
-    );
-    assert_eq!(
-        error_message(run_tool(
-            &dir,
-            "block",
-            json!({ "id": id.to_string(), "blocker": "one\ntwo" })
-        )),
-        "`blocker` must be one line of text: a ticket id, or a few words."
-    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
 }
 
 #[test]
@@ -1003,11 +1021,11 @@ fn edit_replaces_the_description_and_keeps_the_rest() {
         "edit",
         json!({
             "id": id.to_string(),
-            "body": "The first sentence. The second one, which the model wrote on the same line."
+            "description": "The first sentence. The second one, which the model wrote on the same line."
         }),
     ));
 
-    assert_eq!(out, format!("Replaced the description of {id}."));
+    assert_eq!(out, format!("Edited {id}:\n- description replaced\n"));
     let entries = store::list(&tickets(&dir).dir).unwrap();
     let ticket = entries[0].ticket.as_ref().unwrap();
     assert_eq!(ticket.title, "Wrapping is wrong");
@@ -1030,16 +1048,16 @@ fn edit_refuses_an_empty_description() {
         error_message(run_tool(
             &dir,
             "edit",
-            json!({ "id": id.to_string(), "body": "  " })
+            json!({ "id": id.to_string(), "description": "  " })
         )),
-        "`body` must not be empty."
+        "`description` must not be empty."
     );
 }
 
-/// A rename reports both paths: the assistant is holding the old one, and the
-/// file it names is gone.
+/// A new title reports both paths: the assistant is holding the old one, and
+/// the file it names is gone.
 #[test]
-fn rename_moves_the_file_and_reports_both_paths() {
+fn a_new_title_moves_the_file_and_reports_both_paths() {
     let dir = Utf8TempDir::new().unwrap();
     create_ticket(&dir, "Wrapping is wrong");
     let id = ids(&dir)[0];
@@ -1047,15 +1065,15 @@ fn rename_moves_the_file_and_reports_both_paths() {
 
     let out = content(run_tool(
         &dir,
-        "rename",
+        "edit",
         json!({ "id": id.to_string(), "title": "The wrap calculation is off" }),
     ));
 
     assert_eq!(
         out,
         format!(
-            "{id} renamed: docs/ticket/{prefix}wrapping-is-wrong.md -> \
-             docs/ticket/{prefix}the-wrap-calculation-is-off.md"
+            "Edited {id}:\n- title changed, moved docs/ticket/{prefix}wrapping-is-wrong.md -> \
+             docs/ticket/{prefix}the-wrap-calculation-is-off.md\n"
         )
     );
     assert!(
@@ -1075,28 +1093,28 @@ fn rename_moves_the_file_and_reports_both_paths() {
 /// A retitle the slug does not notice still says where the ticket is, without
 /// claiming a move that did not happen.
 #[test]
-fn rename_within_one_slug_reports_the_unchanged_path() {
+fn a_title_within_one_slug_reports_the_unchanged_path() {
     let dir = Utf8TempDir::new().unwrap();
     create_ticket(&dir, "Wrapping is wrong");
     let id = ids(&dir)[0];
 
     let out = content(run_tool(
         &dir,
-        "rename",
+        "edit",
         json!({ "id": id.to_string(), "title": "Wrapping is wrong!" }),
     ));
 
     assert_eq!(
         out,
         format!(
-            "{id} retitled, still at docs/ticket/{}wrapping-is-wrong.md",
+            "Edited {id}:\n- title changed, still at docs/ticket/{}wrapping-is-wrong.md\n",
             id.file_prefix()
         )
     );
 }
 
 #[test]
-fn rename_rejects_an_empty_title() {
+fn edit_rejects_an_empty_title() {
     let dir = Utf8TempDir::new().unwrap();
     create_ticket(&dir, "Wrapping is wrong");
     let id = ids(&dir)[0];
@@ -1104,25 +1122,42 @@ fn rename_rejects_an_empty_title() {
     assert_eq!(
         error_message(run_tool(
             &dir,
-            "rename",
+            "edit",
             json!({ "id": id.to_string(), "title": "   " })
         )),
         "`title` must not be empty."
     );
 }
 
+/// Retitling moves the file, so only an edit that names a title needs the
+/// policy to let it create and delete files there.
 #[test]
-fn rename_reports_a_missing_ticket() {
+fn only_a_new_title_needs_to_move_files() {
     let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "Wrapping is wrong");
+    let update_only = AccessPolicy {
+        fs: vec![FsRule::new("").with_read(true).with_update(true)],
+        ..AccessPolicy::default()
+    };
 
-    assert_eq!(
-        error_message(run_tool(
-            &dir,
-            "rename",
-            json!({ "id": "T-zzzzzzz", "title": "Anything" })
-        )),
-        "No T-zzzzzzz."
+    let message = error_message(run_with_access(
+        &dir,
+        "edit",
+        json!({ "id": FIXED_ID, "title": "Something else" }),
+        &update_only,
+    ));
+    assert!(
+        message.starts_with("`edit` can't reach the ticket directory: access denied: create on"),
+        "{message}"
     );
+
+    let out = content(run_with_access(
+        &dir,
+        "edit",
+        json!({ "id": FIXED_ID, "status": "done" }),
+        &update_only,
+    ));
+    assert_eq!(out, format!("Edited {FIXED_ID}:\n- status: Todo -> Done\n"));
 }
 
 #[test]
@@ -1135,8 +1170,8 @@ fn list_shows_one_line_per_ticket_and_filters() {
     };
     content(run_tool(
         &dir,
-        "close",
-        json!({ "id": finished.to_string() }),
+        "edit",
+        json!({ "id": finished.to_string(), "status": "done" }),
     ));
 
     let all = content(run_tool(&dir, "list", json!({})));
@@ -1236,8 +1271,8 @@ fn an_unknown_tool_names_the_ones_served() {
 
     assert_eq!(
         error_message(run_tool(&dir, "frobnicate", json!({}))),
-        "`jp ticket` serves no tool named `frobnicate`. It serves: block, close, comment, create, \
-         edit, label, labels, list, rename, show, status."
+        "`jp ticket` serves no tool named `frobnicate`. It serves: comment, create, edit, labels, \
+         list, show."
     );
 }
 
@@ -1248,7 +1283,16 @@ fn every_served_tool_is_dispatched() {
     let dir = Utf8TempDir::new().unwrap();
 
     for name in TOOLS {
-        assert!(capabilities(name).is_some(), "{name} has no capabilities");
+        let call = ToolCall {
+            action: ToolAction::Run,
+            name: (*name).to_owned(),
+            arguments: Map::new(),
+            answers: Map::new(),
+            options: Map::new(),
+            access: None,
+            conversation: "test".to_owned(),
+        };
+        assert!(capabilities(&call).is_some(), "{name} has no capabilities");
 
         if let Outcome::Error { message, .. } = run_tool(&dir, name, json!({})) {
             assert!(
@@ -1317,63 +1361,64 @@ fn list_narrows_to_tickets_carrying_every_label() {
 /// The whole set is written, so a retried call lands the same way twice and a
 /// label left off the call is a label removed.
 #[test]
-fn label_replaces_the_whole_set() {
+fn labels_replace_the_whole_set() {
     let dir = Utf8TempDir::new().unwrap();
     let id = write_ticket(&dir, "Tool call header misaligned");
 
     let out = content(run_tool(
         &dir,
-        "label",
+        "edit",
         json!({ "id": FIXED_ID, "labels": ["package=jp_config", "client=cli"] }),
     ));
-    assert_eq!(out, format!("{id}: client=cli, package=jp_config"));
+    assert_eq!(
+        out,
+        format!("Edited {id}:\n- labels: client=cli, package=jp_config\n")
+    );
 
     let out = content(run_tool(
         &dir,
-        "label",
+        "edit",
         json!({ "id": FIXED_ID, "labels": ["client=cli"] }),
     ));
-    assert_eq!(out, format!("{id}: client=cli"));
+    assert_eq!(out, format!("Edited {id}:\n- labels: client=cli\n"));
 
     let out = content(run_tool(
         &dir,
-        "label",
+        "edit",
         json!({ "id": FIXED_ID, "labels": [] }),
     ));
-    assert_eq!(out, format!("Cleared the labels on {id}."));
+    assert_eq!(out, format!("Edited {id}:\n- labels cleared\n"));
 
     let shown = content(run_tool(&dir, "show", json!({ "id": FIXED_ID })));
     assert!(!shown.contains("Labels"), "{shown}");
 }
 
 /// A null `labels` is the shape a model reaches for when it means "leave them
-/// alone", and this write replaces the whole set.
-/// Refusing it is what stops a call that named no labels from dropping the ones
-/// already there.
+/// alone", so it leaves them alone; `[]` is what clears them.
 #[test]
-fn a_null_label_list_is_refused_and_writes_nothing() {
+fn a_null_label_list_leaves_the_labels_alone() {
     let dir = Utf8TempDir::new().unwrap();
     let id = write_ticket(&dir, "Tool call header misaligned");
 
     content(run_tool(
         &dir,
-        "label",
+        "edit",
         json!({ "id": FIXED_ID, "labels": ["client=cli", "package=jp_config"] }),
     ));
-    let path = store::locate_ticket(&tickets(&dir).dir, id).unwrap();
-    let before = fs::read_to_string(&path).unwrap();
 
-    let message = error_message(run_tool(
+    let out = content(run_tool(
         &dir,
-        "label",
-        json!({ "id": FIXED_ID, "labels": null }),
+        "edit",
+        json!({ "id": FIXED_ID, "labels": null, "kind": "chore" }),
     ));
 
-    assert_eq!(
-        message,
-        "`labels` must be an array. Pass `[]` to clear the labels."
-    );
-    assert_eq!(fs::read_to_string(&path).unwrap(), before);
+    assert_eq!(out, format!("Edited {id}:\n- kind: Chore\n"));
+    let entries = store::list(&tickets(&dir).dir).unwrap();
+    let ticket = entries[0].ticket.as_ref().unwrap();
+    assert_eq!(ticket.metadata.labels.to_tokens(), [
+        "client=cli",
+        "package=jp_config"
+    ]);
 }
 
 /// A typo names the vocabulary, so the assistant can fix the call rather than
@@ -1416,11 +1461,14 @@ fn a_retired_label_already_on_a_ticket_can_be_kept() {
 
     let out = content(run_tool(
         &dir,
-        "label",
+        "edit",
         json!({ "id": FIXED_ID, "labels": ["package=jp_legacy", "client=cli"] }),
     ));
 
-    assert_eq!(out, format!("{id}: client=cli, package=jp_legacy"));
+    assert_eq!(
+        out,
+        format!("Edited {id}:\n- labels: client=cli, package=jp_legacy\n")
+    );
 }
 
 #[test]
@@ -1430,7 +1478,7 @@ fn a_retired_label_cannot_be_added_fresh() {
 
     let message = error_message(run_tool(
         &dir,
-        "label",
+        "edit",
         json!({ "id": FIXED_ID, "labels": ["package=jp_legacy"] }),
     ));
 
@@ -1467,7 +1515,7 @@ fn labelling_a_missing_ticket_says_so() {
 
     let message = error_message(run_tool(
         &dir,
-        "label",
+        "edit",
         json!({ "id": FIXED_ID, "labels": ["client=cli"] }),
     ));
 

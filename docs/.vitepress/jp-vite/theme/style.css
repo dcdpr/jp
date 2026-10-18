@@ -94,14 +94,6 @@
     background: color-mix(in srgb, #10b981 25%, transparent);
     color: #6ee7b7;
 }
-.doc-badge--blocked {
-    background: color-mix(in srgb, #f59e0b 20%, transparent);
-    color: #d97706;
-}
-.dark .doc-badge--blocked {
-    background: color-mix(in srgb, #f59e0b 25%, transparent);
-    color: #fcd34d;
-}
 
 /* Labels group tickets by area. Deliberately quieter than the status and kind
    badges next to them: a ticket can carry several, and they should read as

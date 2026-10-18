@@ -20,17 +20,12 @@ use crate::Output;
 
 /// The definitions `tools init` writes, by file name.
 pub(crate) const DEFINITIONS: &[(&str, &str)] = &[
-    ("block.toml", include_str!("../tools/block.toml")),
-    ("close.toml", include_str!("../tools/close.toml")),
     ("comment.toml", include_str!("../tools/comment.toml")),
     ("create.toml", include_str!("../tools/create.toml")),
     ("edit.toml", include_str!("../tools/edit.toml")),
-    ("label.toml", include_str!("../tools/label.toml")),
     ("labels.toml", include_str!("../tools/labels.toml")),
     ("list.toml", include_str!("../tools/list.toml")),
-    ("rename.toml", include_str!("../tools/rename.toml")),
     ("show.toml", include_str!("../tools/show.toml")),
-    ("status.toml", include_str!("../tools/status.toml")),
 ];
 
 /// The file `tools sync` writes, inside the definitions directory.
@@ -50,7 +45,7 @@ const SYNCED_NOTES: &str = "\
 # after changing the labels or the tools: this file is rewritten whole, and
 # edits to it are lost.
 #
-# The lists differ. `create` is offered the labels it may add. `label` also
+# The lists differ. `create` is offered the labels it may add. `edit` also
 # gets retired ones, because replacing a ticket's whole set means naming a
 # retired label to keep it. `list` also gets a bare key per facet, which is how
 # a filter asks for any value under it.
@@ -201,14 +196,14 @@ pub(crate) fn served_tools(config: &Value) -> Vec<(String, String)> {
 /// The labels a tool is offered, or `None` for a tool that takes none.
 ///
 /// `create` gets the values it may add.
-/// `label` also gets retired ones, because replacing a ticket's whole set means
+/// `edit` also gets retired ones, because replacing a ticket's whole set means
 /// naming a retired value to keep it.
 /// `list` also gets a bare key per facet, which is how a filter asks for any
 /// value under it.
 fn tokens(tool: &str, vocabulary: &Vocabulary) -> Option<Vec<String>> {
     match tool {
         "create" => Some(vocabulary.tokens()),
-        "label" => Some(vocabulary.tokens_including_retired()),
+        "edit" => Some(vocabulary.tokens_including_retired()),
         "list" => {
             let mut tokens = vocabulary.tokens_including_retired();
             tokens.extend(vocabulary.keys().map(ToOwned::to_owned));

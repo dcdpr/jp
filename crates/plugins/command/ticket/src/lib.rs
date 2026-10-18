@@ -189,20 +189,6 @@ enum Command {
         status: Option<Status>,
     },
 
-    /// Record what a ticket is waiting on.
-    Block {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
-        id: TicketId,
-
-        /// What it waits on: another ticket's id, or a few words.
-        #[arg(required_unless_present = "clear")]
-        blocker: Option<String>,
-
-        /// Remove what it waits on instead.
-        #[arg(long, conflicts_with = "blocker")]
-        clear: bool,
-    },
-
     /// Delete a ticket outright.
     ///
     /// Its id is not retired: a later creation in the same time bucket can draw
@@ -1315,8 +1301,6 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             status,
         ),
 
-        Command::Block { id, blocker, clear } => block(dir, id, blocker.as_deref(), clear),
-
         Command::Board => show_board(dir, ctx.options.board.done_limit),
 
         Command::Rank { id, before, after } => rank(dir, id, before, after),
@@ -1409,30 +1393,6 @@ fn rename(dir: &Utf8Path, id: TicketId, title: &str) -> Result<Output, String> {
     .into())
 }
 
-/// Record what a ticket waits on, or clear it.
-fn block(
-    dir: &Utf8Path,
-    id: TicketId,
-    blocker: Option<&str>,
-    clear: bool,
-) -> Result<Output, String> {
-    let blocker = match (clear, blocker) {
-        (true, _) => None,
-        (false, Some(blocker)) => Some(blocker),
-        (false, None) => return Err("Name what the ticket waits on, or pass --clear.".to_owned()),
-    };
-
-    let (path, previous) =
-        store::set_blocked_by(dir, id, blocker).map_err(|error| error.to_string())?;
-
-    Ok(match (blocker.map(str::trim), previous) {
-        (Some(blocker), _) => format!("{path}: blocked by {blocker}\n"),
-        (None, Some(previous)) => format!("{path}: no longer blocked by {previous}\n"),
-        (None, None) => format!("{path}: was not blocked\n"),
-    }
-    .into())
-}
-
 /// Print the board, one column after another.
 ///
 /// Stacked rather than side by side, which would wrap on a narrow terminal.
@@ -1491,18 +1451,13 @@ fn show_board(dir: &Utf8Path, done_limit: usize) -> Result<Output, String> {
 fn board_row(id: TicketId, ticket: &Ticket) -> String {
     let id = id.to_string();
     let kind = ticket.metadata.kind.to_string();
-    let blocked = ticket
-        .metadata
-        .blocked_by
-        .as_deref()
-        .map_or_else(String::new, |by| format!(" (blocked by {by})"));
     let labels = if ticket.metadata.labels.is_empty() {
         String::new()
     } else {
         format!(" [{}]", ticket.metadata.labels)
     };
 
-    format!("{id:<9} {kind:<8} {}{labels}{blocked}\n", ticket.title)
+    format!("{id:<9} {kind:<8} {}{labels}\n", ticket.title)
 }
 
 /// Move a ticket directly above or below another in its column.
@@ -1810,7 +1765,7 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
     }
 
     // The rendered view names the ticket even though the file doesn't: the id
-    // is what a reply or a `Blocked by` has to quote.
+    // is what a reply or a later reference has to quote.
     let mut out = format!("# {}: {}\n\n", entry.id, ticket.title);
     out.push_str(&format!("- **Path**: {}\n", entry.path));
     out.push_str(&format!("- **Status**: {}\n", ticket.metadata.status));
@@ -1899,21 +1854,13 @@ fn row(id: TicketId, ticket: &Ticket) -> String {
     let id = id.to_string();
     let status = ticket.metadata.status.to_string();
     let kind = ticket.metadata.kind.to_string();
-    let blocked = ticket
-        .metadata
-        .blocked_by
-        .as_deref()
-        .map_or_else(String::new, |by| format!(" (blocked by {by})"));
     let labels = if ticket.metadata.labels.is_empty() {
         String::new()
     } else {
         format!(" [{}]", ticket.metadata.labels)
     };
 
-    format!(
-        "{id:<9} {status:<12} {kind:<8} {}{labels}{blocked}\n",
-        ticket.title
-    )
+    format!("{id:<9} {status:<12} {kind:<8} {}{labels}\n", ticket.title)
 }
 
 /// The usage text, rendered from the same clap definition the commands parse.

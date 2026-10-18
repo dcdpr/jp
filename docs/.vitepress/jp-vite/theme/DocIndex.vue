@@ -220,7 +220,6 @@ const filtered = computed(() => {
     <td>{{ entry[idField] }}</td>
     <td>
         <a :href="entry.path">{{ entry.title }}</a>
-        <span v-if="entry.blockedBy" class="doc-badge doc-badge--blocked">blocked by {{ entry.blockedBy }}</span>
         <span v-for="label in entry.labels ?? []" :key="label" class="doc-badge doc-badge--label">{{ label }}</span>
         <div v-if="showSummaries && entry.summary" class="doc-summary">{{ entry.summary }}</div>
     </td>

@@ -126,9 +126,6 @@ onBeforeUnmount(() => {
                 </div>
                 <a :href="ticket.path" class="ticket-card-title">{{ ticket.title }}</a>
                 <div class="ticket-card-foot">
-                    <span v-if="ticket.blockedBy" class="ticket-badge doc-badge--blocked">
-                        blocked by {{ ticket.blockedBy }}
-                    </span>
                     <span
                         v-for="label in ticket.labels ?? []"
                         :key="label"

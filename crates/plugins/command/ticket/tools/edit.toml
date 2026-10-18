@@ -1,18 +1,36 @@
 [conversation.tools.ticket_edit]
 source = "plugin.command.ticket.edit"
-summary = "Replace a ticket's description."
+summary = "Change a ticket's title, description, kind, status, or labels."
 description = """
-Rewrite the description of a ticket, keeping its title, metadata, and comments.
+Change any part of a ticket in one call: pass what changes, and the rest stays
+as it is.
 
-The new description replaces the old one outright, so pass all of it, not just
-what changed. Read the ticket first with `ticket_show`. To add to the
-discussion instead, use `ticket_comment`.
+- `title` renames the ticket and moves its file to match.
+- `description` replaces the old one outright, so pass all of it, not just what
+  changed. Read the ticket first with `ticket_show`.
+- `status` moves it between `todo`, `in progress`, and `done`; `done` closes
+  it.
+- `labels` replaces the whole set: pass every label the ticket should end up
+  with, or `[]` to clear them. A value the board has retired stays valid on a
+  ticket that already carries it, so listing it again keeps it.
+
+To add to the discussion instead, use `ticket_comment`.
 """
 
 examples = """
+Start work on a ticket:
 ```json
-{"id": "T-02wt0kx", "body": "The header renders one column left of the body \
-when the terminal is narrower than 80 columns."}
+{"id": "T-02wt0kx", "status": "in progress"}
+```
+
+Close it:
+```json
+{"id": "T-02wt0kx", "status": "done"}
+```
+
+Retitle and relabel it:
+```json
+{"id": "T-02wt0kx", "title": "Header misaligned below 80 columns", "labels": ["client=cli"]}
 ```
 """
 
@@ -24,9 +42,34 @@ results_file_link = "off"
 [conversation.tools.ticket_edit.parameters.id]
 type = "string"
 required = true
-summary = "The ticket to edit: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`."
+summary = "The ticket to change: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`."
 
-[conversation.tools.ticket_edit.parameters.body]
+[conversation.tools.ticket_edit.parameters.title]
 type = "string"
-required = true
-summary = "The new description, as markdown."
+required = false
+summary = "A new one-line title. The file moves to match."
+
+[conversation.tools.ticket_edit.parameters.description]
+type = "string"
+required = false
+summary = "The whole new description, as markdown."
+
+[conversation.tools.ticket_edit.parameters.kind]
+type = "string"
+required = false
+enum = ["bug", "feature", "chore"]
+summary = "The new kind."
+
+[conversation.tools.ticket_edit.parameters.status]
+type = "string"
+required = false
+enum = ["todo", "in progress", "done"]
+summary = "The column to move it to; `done` closes it."
+
+[conversation.tools.ticket_edit.parameters.labels]
+type = "array"
+required = false
+summary = "Every `key=value` label the ticket should carry. `[]` clears them."
+
+[conversation.tools.ticket_edit.parameters.labels.items]
+type = "string"

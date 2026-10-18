@@ -354,7 +354,7 @@ fn subcommands_are_not_mistaken_for_ids() {
 
     for name in [
         "add", "comment", "close", "show", "promote", "import", "list", "status", "rename",
-        "block", "board", "rank", "init", "tools",
+        "board", "rank", "init", "tools",
     ] {
         assert_eq!(
             with_show_alias(&[name.to_owned()]),
@@ -751,57 +751,6 @@ fn status_takes_the_id_and_the_column() {
     }
 
     assert!(parse(&["status", "T-02wt0kx"]).is_err());
-}
-
-#[test]
-fn block_records_and_clears_what_a_ticket_waits_on() {
-    let dir = Utf8TempDir::new().unwrap();
-    let id = write_ticket(dir.path(), "02wt0kx", "Waiting", Status::Todo);
-    let path = dir.path().join("02wt0kx-slug.md");
-
-    let blocked = run_command(&dir, Command::Block {
-        id,
-        blocker: Some("T-02wt0m3".to_owned()),
-        clear: false,
-    })
-    .unwrap();
-    assert_eq!(blocked.text, format!("{path}: blocked by T-02wt0m3\n"));
-
-    let listed = run_command(&dir, Command::List {
-        status: None,
-        kind: None,
-        labels: vec![],
-    })
-    .unwrap();
-    assert_eq!(
-        listed.text,
-        "T-02wt0kx Todo         Bug      Waiting (blocked by T-02wt0m3)\n"
-    );
-
-    let cleared = run_command(&dir, Command::Block {
-        id,
-        blocker: None,
-        clear: true,
-    })
-    .unwrap();
-    assert_eq!(
-        cleared.text,
-        format!("{path}: no longer blocked by T-02wt0m3\n")
-    );
-}
-
-#[test]
-fn block_takes_a_blocker_or_clear_but_not_both() {
-    assert!(parse(&["block", "T-02wt0kx"]).is_err());
-    assert!(parse(&["block", "T-02wt0kx", "T-02wt0m3", "--clear"]).is_err());
-
-    match parse(&["block", "T-02wt0kx", "--clear"]).unwrap().command {
-        Command::Block { blocker, clear, .. } => {
-            assert_eq!(blocker, None);
-            assert!(clear);
-        }
-        other => panic!("expected block, got {other:?}"),
-    }
 }
 
 /// The board reads each column in board order, then the tickets nobody ranked;

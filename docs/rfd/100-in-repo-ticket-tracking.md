@@ -133,7 +133,6 @@ parses with a three-line regex and renders as visible content.
 | `Kind`        | yes      | `Bug`, `Feature`, `Chore`        |
 | `Authors`     | yes      |                                  |
 | `Date`        | yes      | `YYYY-MM-DD`                     |
-| `Blocked by`  | no       | `T-02wt0m3`, or free text        |
 | `Implements`  | no       | The RFD this ticket implements   |
 | `Promoted to` | no       | The RFD this ticket became       |
 | `GitHub`      | no       | `#123`, set by import            |
@@ -215,10 +214,9 @@ retired value the ticket already has is how you keep it.
 
 The `ticket_*` tools advertise the accepted tokens as a JSON Schema `enum`, so
 the assistant is offered the set rather than guessing at it.
-`ticket_create` is offered only what it may add; `ticket_label` and
-`ticket_list` also get retired values, because replacing a whole set means
-naming a retired value to keep it, and finding what still carries one means
-filtering on it.
+`ticket_create` is offered only what it may add; `ticket_edit` and `ticket_list`
+also get retired values, because replacing a whole set means naming a retired
+value to keep it, and finding what still carries one means filtering on it.
 The tool declarations cannot read the vocabulary themselves, so `jp ticket tools
 sync` mirrors the tokens into a file it generates next to them,
 `.jp/mcp/tools/ticket/synced.toml` in JP.
@@ -278,8 +276,9 @@ Todo is therefore the prioritized work queue, read top-down, and it holds
 triaged and untriaged work alike — an imported bug report that may not be a bug
 still belongs there.
 
-`Blocked` is a metadata field rendered as a badge, not a column: a blocked
-ticket is still at whatever stage it reached, and a column would lose that.
+Blocking is not part of the format, and the board has no column or badge for it:
+a project that marks blocked tickets does it with a label, which the board shows
+like any other.
 
 Done is ordered like any other column, newest first, and the board view shows
 only the head of it.
@@ -376,7 +375,7 @@ They are imported as tickets, one way only.
 Each import replaces the ticket's content — title, description, comments —
 wholesale, and never touches the metadata block.
 GitHub owns what was written on GitHub; the repository owns `Status`, `Kind`,
-`Blocked by`, and `Implements`, so an imported ticket can be triaged and moved
+`Implements`, and the labels, so an imported ticket can be triaged and moved
 across the board without the next import undoing it.
 
 Imported tickets are read-only for discussion: replies go on GitHub and arrive
