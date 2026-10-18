@@ -944,7 +944,12 @@ fn a_declined_or_unanswerable_offer_files_nothing() {
 fn a_tracking_ticket_that_cannot_be_filed_leaves_the_promotion() {
     let root = trackable();
     let mut unlabelled = init_message(root.path(), &["promote", "44"]);
-    unlabelled.config = json!({ "user": { "name": "Jane Doe <jane@example.com>" } });
+    unlabelled.config = json!({
+        "user": { "name": "Jane Doe <jane@example.com>" },
+        "plugins": { "command": { "ticket": { "options": {
+            "labels": { "type": { "description": "The type", "values": ["bug"] } }
+        } } } }
+    });
 
     let messages = exchange_all(&[
         HostToPlugin::Init(Box::new(unlabelled)),
@@ -957,9 +962,8 @@ fn a_tracking_ticket_that_cannot_be_filed_leaves_the_promotion() {
 
     let (_, code, _) = printed(&messages);
     assert_eq!(code, 0);
-    let warning = "Could not file the tracking ticket: Tracking tickets carry the label \
-                   `type=tracking`, which the ticket vocabulary doesn't define. Add `tracking` to \
-                   the values of `plugins.command.ticket.options.labels.type`.\nRun `jp rfd track \
+    let warning = "Could not file the tracking ticket: Tracking label missing. Add `\"tracking\"` \
+                   to `plugins.command.ticket.options.labels.type.values`.\nRun `jp rfd track \
                    044` to retry.\n";
     assert_eq!(chrome(&messages), [warning]);
 }

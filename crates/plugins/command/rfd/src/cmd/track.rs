@@ -257,23 +257,21 @@ fn needs_tickets(paths: &Paths) -> Result<(), String> {
 
 /// The tracking label, as the ticket vocabulary spells it, or a refusal naming
 /// the entry to add.
+///
+/// A board that defines no labels takes any, the tracking label among them.
 fn tracking_labels(vocabulary: &Vocabulary) -> Result<Labels, String> {
     let (key, value) = TRACKING_LABEL;
+    let entry = format!("{TICKET_LABELS_KEY}.{key}");
 
     vocabulary
         .resolve(&[format!("{key}={value}")])
         .map_err(|rejected| {
             if rejected.retired.is_empty() {
-                format!(
-                    "Tracking tickets carry the label `{key}={value}`, which the ticket \
-                     vocabulary doesn't define. Add `{value}` to the values of \
-                     `{TICKET_LABELS_KEY}.{key}`."
-                )
+                format!("Tracking label missing. Add `\"{value}\"` to `{entry}.values`.")
             } else {
                 format!(
-                    "Tracking tickets carry the label `{key}={value}`, which the ticket \
-                     vocabulary retires. Move `{value}` back to the values of \
-                     `{TICKET_LABELS_KEY}.{key}`."
+                    "Tracking label retired. Move `\"{value}\"` from `{entry}.retired` to \
+                     `{entry}.values`."
                 )
             }
         })

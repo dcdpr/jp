@@ -83,8 +83,7 @@ export function readLabels(content) {
 
 // The labels the board defines, as a map of key to `{ values, retired }`.
 //
-// A board that configures none defines none, which is a board that hasn't
-// started using them.
+// A board that configures none defines none, and takes any label.
 export function loadVocabulary(settings = readSettings()) {
     const labels = settings.ticket?.labels ?? {}
     const isMap = v => v !== undefined && v !== null
@@ -117,8 +116,11 @@ function knownTokens(vocabulary) {
 // Labels used on a ticket that the vocabulary doesn't define.
 //
 // A typo in a hand-edited ticket would otherwise sit there silently, grouping
-// with nothing and showing up as its own one-ticket category.
+// with nothing and showing up as its own one-ticket category. A board that
+// defines no labels takes any, so it has none to report.
 export function findUnknownLabels(tickets, vocabulary) {
+    if (Object.keys(vocabulary).length === 0) return null
+
     const known = knownTokens(vocabulary)
     const offenders = tickets
         .map(ticket => [ticket.id, ticket.labels.filter(label => !known.has(label))])

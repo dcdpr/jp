@@ -278,19 +278,31 @@ fn tokens_including_retired_add_the_keepable_ones() {
     ]);
 }
 
-/// A consumer that hasn't declared anything should say so, rather than listing
-/// an empty set and leaving the caller to guess where labels come from.
+/// A consumer that declares no keys has no closed set to hold a label to, so
+/// every well-formed label goes through, spelled as given and in a fixed order.
 #[test]
-fn an_empty_vocabulary_refuses_everything() {
+fn an_empty_vocabulary_accepts_any_label() {
+    let labels = Vocabulary::default()
+        .resolve(&owned(&["Client=CLI", "area=ui", "triaged", "area=docs"]))
+        .unwrap();
+
+    assert_eq!(labels.to_tokens(), [
+        "Client=CLI",
+        "area=docs",
+        "area=ui",
+        "triaged"
+    ]);
+}
+
+/// Only the shape of a label is checked without a vocabulary.
+#[test]
+fn an_empty_vocabulary_refuses_a_malformed_label() {
     let error = Vocabulary::default()
-        .resolve(&owned(&["client=cli"]))
+        .resolve(&owned(&["area=ui", "=ui"]))
         .unwrap_err();
 
-    assert_eq!(error.unknown_keys, ["client"]);
-    assert_eq!(
-        error.to_string(),
-        "`client` is not a known label key. This vocabulary defines no labels."
-    );
+    assert_eq!(error.malformed, ["=ui"]);
+    assert_eq!(error.to_string(), "`=ui` is not a `key=value` label.");
 }
 
 /// A configuration file declares the vocabulary as a table, which reaches the

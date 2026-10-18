@@ -375,8 +375,8 @@ fn sync_with_an_empty_vocabulary_offers_no_lists() {
     assert_eq!(
         fs::read_to_string(dir.path().join(SYNCED_FILE)).unwrap(),
         format!(
-            "{SYNCED_HEADER}\n{SYNCED_NOTES}#\n# The board defines no labels, so no tool is \
-             offered any.\n"
+            "{SYNCED_HEADER}\n{SYNCED_NOTES}#\n# The board defines no labels, so the tools take \
+             any label.\n"
         )
     );
 }

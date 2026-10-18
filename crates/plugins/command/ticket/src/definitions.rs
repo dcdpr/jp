@@ -226,7 +226,7 @@ fn synced(tools: &[(String, String)], vocabulary: &Vocabulary) -> String {
     let mut out = format!("{SYNCED_HEADER}\n{SYNCED_NOTES}");
 
     if vocabulary.is_empty() {
-        out.push_str("#\n# The board defines no labels, so no tool is offered any.\n");
+        out.push_str("#\n# The board defines no labels, so the tools take any label.\n");
         return out;
     }
 

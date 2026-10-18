@@ -185,10 +185,12 @@ values = ["<value>"]
 retired = ["<value>"]
 ```
 
-A closed set is the point.
+A closed set is the point of declaring one.
 Free-text labels accumulate near-synonyms and grouping stops working.
 A write naming a key or value the vocabulary doesn't declare is refused, and the
 refusal names the ones that can be added.
+A board that declares no vocabulary has no set to hold a label to, so it takes
+any well-formed `key` or `key=value` label as written.
 
 **Retiring is not deleting.** A retired value stays valid on a ticket that
 already carries it and can be listed again on a write to that ticket, so

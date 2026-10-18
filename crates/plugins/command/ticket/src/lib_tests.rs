@@ -1722,7 +1722,8 @@ fn a_board_without_a_vocabulary_says_where_to_define_one() {
 
     assert_eq!(
         out.text,
-        "This board defines no labels. Add them to `plugins.command.ticket.options.labels`.\n"
+        "This board defines no labels, so a ticket takes any `key` or `key=value` label. List \
+         them in `plugins.command.ticket.options.labels` to hold tickets to a fixed set.\n"
     );
 }
 
@@ -1738,9 +1739,9 @@ fn a_leftover_labels_file_is_pointed_out() {
     assert_eq!(
         out.text,
         format!(
-            "This board defines no labels. Add them to \
-             `plugins.command.ticket.options.labels`.\n{} is no longer read: move its keys \
-             there.\n",
+            "This board defines no labels, so a ticket takes any `key` or `key=value` label. List \
+             them in `plugins.command.ticket.options.labels` to hold tickets to a fixed set.\n{} \
+             is no longer read: move its keys there.\n",
             dir.path().join(".labels.json")
         )
     );

@@ -1725,7 +1725,10 @@ fn vocabulary_listing(dir: &Utf8Path, options: &Options) -> Result<Output, Strin
 /// into its options, for a board that defines none and still has it.
 fn describe_vocabulary(vocabulary: &Vocabulary, leftover: Option<&str>) -> String {
     if vocabulary.is_empty() {
-        let mut text = format!("This board defines no labels. Add them to `{LABELS_KEY}`.\n");
+        let mut text = format!(
+            "This board defines no labels, so a ticket takes any `key` or `key=value` label. List \
+             them in `{LABELS_KEY}` to hold tickets to a fixed set.\n"
+        );
         if let Some(file) = leftover {
             text.push_str(&format!("{file} is no longer read: move its keys there.\n"));
         }

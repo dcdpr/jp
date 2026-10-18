@@ -487,43 +487,50 @@ fn tracking_needs_a_ticket_directory() {
 }
 
 #[test]
-fn the_vocabulary_has_to_define_the_tracking_label() {
+fn a_vocabulary_has_to_define_the_tracking_label() {
     let workspace = workspace();
 
     let without =
         Vocabulary::parse(r#"{"type": {"description": "The type", "values": ["bug"]}}"#).unwrap();
-    let error = "Tracking tickets carry the label `type=tracking`, which the ticket vocabulary \
-                 doesn't define. Add `tracking` to the values of \
-                 `plugins.command.ticket.options.labels.type`.";
     assert_eq!(
         track(&workspace.paths, &without, id("116"), &filer(), &mut unread).unwrap_err(),
-        error
+        "Tracking label missing. Add `\"tracking\"` to \
+         `plugins.command.ticket.options.labels.type.values`."
     );
 
     let retired = Vocabulary::parse(
         r#"{"type": {"description": "The type", "values": ["bug"], "retired": ["tracking"]}}"#,
     )
     .unwrap();
-    let error = "Tracking tickets carry the label `type=tracking`, which the ticket vocabulary \
-                 retires. Move `tracking` back to the values of \
-                 `plugins.command.ticket.options.labels.type`.";
     assert_eq!(
         track(&workspace.paths, &retired, id("116"), &filer(), &mut unread).unwrap_err(),
-        error
+        "Tracking label retired. Move `\"tracking\"` from \
+         `plugins.command.ticket.options.labels.type.retired` to \
+         `plugins.command.ticket.options.labels.type.values`."
     );
 
-    assert!(
-        track(
-            &workspace.paths,
-            &Vocabulary::default(),
-            id("116"),
-            &filer(),
-            &mut unread
-        )
-        .unwrap_err()
-        .starts_with("Tracking tickets carry the label `type=tracking`, which the ticket")
-    );
     assert!(ticket_files(&workspace).is_empty());
+}
+
+/// A board that defines no labels takes any, so it takes the tracking label.
+#[test]
+fn a_board_without_labels_takes_the_tracking_label() {
+    let workspace = workspace();
+
+    let tracked = track(
+        &workspace.paths,
+        &Vocabulary::default(),
+        id("116"),
+        &filer(),
+        &mut |_| Ok(phases()),
+    )
+    .unwrap();
+
+    assert!(
+        read_ticket(&workspace, tracked.ticket).contains("- **Label**: type=tracking\n"),
+        "{}",
+        read_ticket(&workspace, tracked.ticket)
+    );
 }
 
 /// An interrupted read must not file a ticket without its plan.

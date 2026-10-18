@@ -1507,7 +1507,8 @@ fn labels_on_a_board_without_a_vocabulary_says_where_to_define_one() {
 
     assert_eq!(
         content(run_labels_unlabelled(&dir)),
-        "This board defines no labels. Add them to `plugins.command.ticket.options.labels`.\n"
+        "This board defines no labels, so a ticket takes any `key` or `key=value` label. List \
+         them in `plugins.command.ticket.options.labels` to hold tickets to a fixed set.\n"
     );
 }
 
@@ -1521,9 +1522,9 @@ fn labels_points_out_a_leftover_labels_file() {
 
     assert_eq!(
         content(run_labels_unlabelled(&dir)),
-        "This board defines no labels. Add them to \
-         `plugins.command.ticket.options.labels`.\ndocs/ticket/.labels.json is no longer read: \
-         move its keys there.\n"
+        "This board defines no labels, so a ticket takes any `key` or `key=value` label. List \
+         them in `plugins.command.ticket.options.labels` to hold tickets to a fixed \
+         set.\ndocs/ticket/.labels.json is no longer read: move its keys there.\n"
     );
 }
 

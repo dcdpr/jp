@@ -94,7 +94,8 @@ impl Facet {
 
 /// The keys a consumer defines, each with the values it accepts.
 ///
-/// An empty vocabulary defines nothing: it reads fine and refuses every label.
+/// An empty vocabulary declares no closed set, so it accepts every well-formed
+/// label as written.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Vocabulary(BTreeMap<String, Facet>);
 
@@ -264,6 +265,8 @@ impl Vocabulary {
     /// That is what lets a label be added to an old item without first
     /// stripping the retired values it happens to carry.
     ///
+    /// An empty vocabulary accepts every well-formed token, spelled as given.
+    ///
     /// # Errors
     ///
     /// Returns every rejected token at once, so a caller fixing them doesn't
@@ -273,6 +276,10 @@ impl Vocabulary {
         requested: &[String],
         current: &Labels,
     ) -> Result<Labels, Rejected> {
+        if self.is_empty() {
+            return free_form(requested);
+        }
+
         // Staged in the vocabulary's own order rather than the caller's, so a
         // resolved set is the same whichever order the tokens arrived in and a
         // relabel produces no spurious diff.
@@ -341,6 +348,47 @@ impl Vocabulary {
             .find(|(known, _)| known.eq_ignore_ascii_case(key))
             .map(|(known, facet)| (known.as_str(), facet))
     }
+}
+
+/// Every token in `requested`, as written: what a vocabulary that declares no
+/// keys accepts.
+///
+/// Staged sorted, as a vocabulary's resolution is, so the result is the same
+/// whichever order the tokens arrived in.
+fn free_form(requested: &[String]) -> Result<Labels, Rejected> {
+    let mut accepted: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut malformed = vec![];
+
+    for token in requested {
+        match parse_token(token) {
+            Ok((key, value)) => {
+                accepted
+                    .entry(key)
+                    .or_default()
+                    .insert(value.unwrap_or_default());
+            }
+            Err(_) => malformed.push(token.clone()),
+        }
+    }
+
+    if !malformed.is_empty() {
+        return Err(Rejected {
+            malformed,
+            unknown_keys: vec![],
+            unknown_values: vec![],
+            retired: vec![],
+            addable: vec![],
+        });
+    }
+
+    let mut labels = Labels::default();
+    for (key, values) in accepted {
+        for value in values {
+            labels.insert(key.clone(), value);
+        }
+    }
+
+    Ok(labels)
 }
 
 /// The entry in `candidates` matching `name`, ignoring case.
@@ -463,7 +511,7 @@ impl fmt::Display for Rejected {
         }
 
         if self.addable.is_empty() {
-            return write!(f, " This vocabulary defines no labels.");
+            return Ok(());
         }
 
         write!(f, " Labels you can add: {}.", self.addable.join(", "))

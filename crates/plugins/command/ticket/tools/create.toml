@@ -74,8 +74,9 @@ that fits, or none when nothing does.
 
 Each label is a `key=value` pair, and a key may be named more than once.
 
-The set is closed and defined by the board's vocabulary. A label outside it is
-refused, and the refusal names the ones you can use.
+When the board defines labels, only those are accepted: a label outside them is
+refused, and the refusal names the ones you can use. A board that defines none
+takes any.
 """
 
 # The accepted values are mirrored from the vocabulary by `jp ticket tools sync`.
