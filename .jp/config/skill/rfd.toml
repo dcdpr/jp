@@ -109,11 +109,7 @@ Implemented while any are still pre-Implementation. Cycles in the \
 union graph are refused. Don't list the same target under both \
 `Requires` and `Extends` — extension implies the dependency, so the \
 duplicate is redundant. Both tools accept draft IDs (DNN) on \
-either side.
-
-`fs_modify_file` is available but runs in confirmation mode — the user \
-sees a diff and approves or rejects each edit. Make targeted, minimal \
-changes rather than rewriting entire sections.\
+either side.\
 """
 
 [[assistant.system_prompt_sections]]
@@ -145,8 +141,8 @@ the contributor can edit. Keep the voice direct and factual. Avoid \
 hedging language and filler.
 
 7. **Apply edits**: When the contributor asks you to apply changes to \
-an RFD, use `fs_modify_file` to make targeted edits. The user will be \
-asked to confirm each modification before it is applied.
+an RFD, use `fs_modify_file` to make targeted, minimal edits rather than \
+rewriting entire sections.
 
 8. **Keep the summary honest**: An RFD's `- **Summary**:` field is the \
 sentence the index pages and the priority board show. The build only \
