@@ -1,7 +1,7 @@
 [conversation.tools.ticket_comment]
 enable = false
 source = "plugin.command.ticket.comment"
-format = "unattended"
+format = "allow"
 summary = "Append a comment to a ticket."
 description = """
 Add a comment to a ticket's discussion, attributed to you (`jp`).

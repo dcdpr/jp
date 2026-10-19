@@ -21,7 +21,7 @@ extends = [
 reasoning.display = "full"
 
 [conversation.tools]
-'*'.run = "unattended"
+'*'.run = "allow"
 
 [assistant]
 name = "Software Architect"

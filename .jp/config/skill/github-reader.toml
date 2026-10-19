@@ -18,10 +18,10 @@ The following tools help you with this:
 """
 
 [conversation.tools]
-github_code_search = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-github_issues = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-github_pulls = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-github_pr_diff = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-github_pr_commits = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-github_commit = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-github_read_file = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+github_code_search = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+github_issues = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+github_pulls = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+github_pr_diff = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+github_pr_commits = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+github_commit = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+github_read_file = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }

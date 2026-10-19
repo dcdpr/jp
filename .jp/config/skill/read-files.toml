@@ -12,7 +12,7 @@ current project. The following tools help you with this:
 """
 
 [conversation.tools]
-fs_read_file = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-fs_list_files = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-fs_grep_files = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-fs_grep_user_docs = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+fs_read_file = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+fs_list_files = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+fs_grep_files = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+fs_grep_user_docs = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }

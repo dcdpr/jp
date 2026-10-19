@@ -1,7 +1,7 @@
 [conversation.tools.ticket_create]
 enable = false
 source = "plugin.command.ticket.create"
-format = "unattended"
+format = "allow"
 summary = "File a work item as a ticket under docs/ticket/."
 description = """
 Create a ticket: a bug, a feature, or a chore, recorded as a markdown file in

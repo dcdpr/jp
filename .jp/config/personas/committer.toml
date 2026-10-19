@@ -20,7 +20,7 @@ follows the rules as described in your system prompt.
 
 [conversation]
 title.generate.auto = false
-tools.'*' = { enable = false, run = "unattended" }
+tools.'*' = { enable = false, run = "allow" }
 attachments = [
     "cmd:git branch --show-current?description=Current branch name",
     "cmd:git diff-index --cached --ita-invisible-in-index -p HEAD -- . :^crates/jp_llm/tests/fixtures :^Cargo.lock :^.jp/conversations?description=Diff of current cached/changed hunks (excluding test fixtures and Cargo.lock)",

@@ -40,12 +40,12 @@ ticket's whole description; a small change in place is still `fs_modify_file`.
 """
 
 [conversation.tools]
-ticket_list = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-ticket_show = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-ticket_labels = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+ticket_list = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+ticket_show = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+ticket_labels = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
 
 # The writing tools inherit the workspace's `run = "ask"` default: filing,
 # commenting, and editing all leave a diff someone has to review.
-ticket_create = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-ticket_comment = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-ticket_edit = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+ticket_create = { enable = true, result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+ticket_comment = { enable = true, result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+ticket_edit = { enable = true, result = "allow", style.inline_results = "full", style.results_file_link = "off" }

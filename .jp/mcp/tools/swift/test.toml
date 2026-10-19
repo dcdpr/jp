@@ -1,6 +1,6 @@
 [conversation.tools.swift_test]
 enable = false
-run = "unattended"
+run = "allow"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "Run the fast Swift test suites: the macOS app's unit tests, and the `jpdrive` accessibility driver package. Unit tests link the `jp_ffi` static library and call it, so a failure there can mean either the Swift or the FFI boundary is broken. Builds the library and regenerates the Xcode project first, so no setup step is needed. The driver package needs neither, and runs first because it is fast. The app's UI tests are deliberately out of reach here — they launch the app and take over the screen; use `swift_test_ui` and name the ones you want."

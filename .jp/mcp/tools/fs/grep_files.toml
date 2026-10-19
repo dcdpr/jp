@@ -1,6 +1,6 @@
 [conversation.tools.fs_grep_files]
 enable = false
-run = "unattended"
+run = "allow"
 
 # Paths this tool may read but never returns. Their contents would either flood
 # the response or expose something the model has no business seeing. Reading them

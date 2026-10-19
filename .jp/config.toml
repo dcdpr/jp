@@ -194,17 +194,17 @@ run = "ask"
 [conversation.labels.branch]
 value.cmd = "git branch --show-current"
 apply_on = { new = true, fork = true }
-run = "unattended"
+run = "allow"
 optional = true
 
 [conversation.labels.commit]
 value.cmd = "git rev-parse --short HEAD"
 apply_on = { new = true, fork = true }
-run = "unattended"
+run = "allow"
 optional = true
 
 [conversation.labels.worktree]
 value.cmd = { program = 'basename "$(git rev-parse --show-toplevel)"', shell = true }
 apply_on = { new = true, fork = true }
-run = "unattended"
+run = "allow"
 optional = true
