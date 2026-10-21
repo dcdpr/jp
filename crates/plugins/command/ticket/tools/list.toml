@@ -1,8 +1,11 @@
 [conversation.tools.ticket_list]
 source = "plugin.command.ticket.list"
-summary = "List the tickets in the repository, ordered by id."
+summary = "List the tickets in the repository, in board order."
 description = """
 One line per ticket: id, status, kind, title, labels, and comment count.
+
+Tickets come in board order: Todo, In Progress, then Done, each column top
+first. The first Todo ticket is the next one to work on.
 
 Use it to find what is open before filing something new, and to resolve a title
 you half-remember into an id for `ticket_show`. Filter by status to read one

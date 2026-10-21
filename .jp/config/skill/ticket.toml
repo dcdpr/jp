@@ -6,8 +6,9 @@ You have been given the ticket skill. Tickets are work items — bugs, features,
 chores — tracked as markdown files under `docs/ticket/`, alongside the RFDs. \
 The following tools help you with this:
 
-- ticket_list: List tickets by id, with status, kind, labels, and comment \
-count. Filter by status, kind, or label.
+- ticket_list: List tickets in board order, Todo first and the top of each \
+column first, with status, kind, labels, and comment count. Filter by \
+status, kind, or label.
 - ticket_show: Read one ticket's metadata; ask for its description or its \
 comments, numbered for replies, when you need them.
 - ticket_create: File a new ticket, at status Todo.

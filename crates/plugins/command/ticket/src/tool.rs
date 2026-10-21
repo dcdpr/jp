@@ -17,7 +17,7 @@
 //! runs: the directory has to be inside the workspace, and the policy has to
 //! grant what the tool does there.
 
-use std::{fs, io, path::MAIN_SEPARATOR};
+use std::{collections::HashMap, fs, io, path::MAIN_SEPARATOR};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{Local, SecondsFormat, Utc};
@@ -31,8 +31,9 @@ use jp_tool::{AccessPolicy, Action, Capability, Context, FsAccessError, Outcome,
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 use ticket::{
-    Comment, Kind, Labels, NewTicket, ParseError, Selector, Status, Ticket, TicketId, parse,
-    render, store,
+    Comment, Kind, Labels, NewTicket, ParseError, Selector, Status, Ticket, TicketId,
+    board::{self, Order},
+    parse, render, store,
 };
 
 use crate::options::Options;
@@ -655,6 +656,8 @@ fn show(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
 
 /// List the board, filtered by whatever the caller named.
 ///
+/// Tickets come in board order: Todo, In Progress, then Done, each column top
+/// first, so the first Todo line is the next thing to work on.
 /// Labels are matched as written on the ticket rather than through the
 /// vocabulary, so a ticket carrying a label the board has since dropped can
 /// still be found.
@@ -696,7 +699,49 @@ fn list(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
             && ticket.metadata.labels.matches(&selectors)
     });
 
-    Ok(render_list(&found, &unreadable).into())
+    // An order file that can't be read costs the order, not the listing: the
+    // columns fall back to id order, and the reader is told why.
+    let order = match board::read(&tickets.dir) {
+        Ok(order) => order,
+        Err(problem) => {
+            let file = tickets.relative(&tickets.dir.join(board::BOARD_FILE));
+            let reason = match problem {
+                store::Error::Board { reason, .. } => reason,
+                other => other.to_string(),
+            };
+            unreadable.push(format!("{file}: {reason} (columns are listed by id)"));
+            Order::default()
+        }
+    };
+
+    Ok(render_list(&in_board_order(&found, &order), &unreadable).into())
+}
+
+/// `found` laid out the way the board shows it: Todo, In Progress, then Done,
+/// each column in `order`.
+fn in_board_order<'a>(
+    found: &[(TicketId, &'a Ticket)],
+    order: &Order,
+) -> Vec<(TicketId, &'a Ticket)> {
+    let by_id: HashMap<TicketId, &Ticket> = found.iter().copied().collect();
+
+    let mut laid_out = Vec::with_capacity(found.len());
+    for status in [Status::Todo, Status::InProgress, Status::Done] {
+        let column: Vec<TicketId> = found
+            .iter()
+            .filter(|(_, ticket)| ticket.metadata.status == status)
+            .map(|(id, _)| *id)
+            .collect();
+
+        laid_out.extend(
+            order
+                .arrange(status, &column)
+                .into_iter()
+                .filter_map(|id| by_id.get(&id).map(|ticket| (id, *ticket))),
+        );
+    }
+
+    laid_out
 }
 
 /// Lay out a markdown file the way `comfort` does.
@@ -779,7 +824,7 @@ fn render_list(tickets: &[(TicketId, &Ticket)], unreadable: &[String]) -> String
     }
 
     if !unreadable.is_empty() {
-        out.push_str("\nUnreadable ticket files:\n");
+        out.push_str("\nCould not read:\n");
         for problem in unreadable {
             out.push_str(&format!("- {problem}\n"));
         }

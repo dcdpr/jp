@@ -192,7 +192,12 @@ fn draft<'a>(title: &'a str, labels: &'a Labels) -> NewTicket<'a> {
 /// File a ticket under [`FIXED_ID`], bypassing allocation so the test can
 /// assert against the id it will read back.
 fn write_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
-    let id: TicketId = FIXED_ID.parse().unwrap();
+    write_ticket_as(dir, FIXED_ID, title)
+}
+
+/// File a ticket under `id`, so a test can lay several out in a known order.
+fn write_ticket_as(dir: &Utf8TempDir, id: &str, title: &str) -> TicketId {
+    let id: TicketId = id.parse().unwrap();
     let tickets = dir.path().join(store::DEFAULT_DIR);
     fs::create_dir_all(&tickets).unwrap();
     fs::write(
@@ -1199,6 +1204,47 @@ fn list_shows_one_line_per_ticket_and_filters() {
 
     let chores = content(run_tool(&dir, "list", json!({ "kind": "chore" })));
     assert_eq!(chores, "No tickets match.\n");
+}
+
+/// The first Todo line is the next thing to work on: each column comes in the
+/// order the board ranks it, Todo first, rather than by id.
+#[test]
+fn list_follows_the_board_order() {
+    let dir = Utf8TempDir::new().unwrap();
+    let first = write_ticket_as(&dir, "T-02wt0k1", "Filed first");
+    let second = write_ticket_as(&dir, "T-02wt0k2", "Filed second");
+    let started = write_ticket_as(&dir, "T-02wt0k3", "Started");
+    let tickets = dir.path().join(store::DEFAULT_DIR);
+    store::set_status(&tickets, started, Status::InProgress).unwrap();
+    board::rank(&tickets, second, board::Place::Before, first).unwrap();
+
+    let out = content(run_tool(&dir, "list", json!({})));
+
+    assert_eq!(
+        out,
+        "T-02wt0k2 Todo         Bug      Filed second\nT-02wt0k1 Todo         Bug      Filed \
+         first\nT-02wt0k3 In Progress  Bug      Started\n"
+    );
+}
+
+/// An order file that can't be read costs the order, not the listing.
+#[test]
+fn an_unreadable_board_order_lists_each_column_by_id() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket_as(&dir, "T-02wt0k1", "Filed first");
+    write_ticket_as(&dir, "T-02wt0k2", "Filed second");
+    fs::write(dir.path().join("docs/ticket/.board.json"), "not an order").unwrap();
+
+    let out = content(run_tool(&dir, "list", json!({})));
+
+    assert!(
+        out.starts_with(
+            "T-02wt0k1 Todo         Bug      Filed first\nT-02wt0k2 Todo         Bug      Filed \
+             second\n\nCould not read:\n- docs/ticket/.board.json: "
+        ),
+        "{out}"
+    );
+    assert!(out.ends_with(" (columns are listed by id)\n"), "{out}");
 }
 
 #[test]
