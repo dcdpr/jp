@@ -725,6 +725,8 @@ fn status_moves_a_ticket_to_any_column() {
     let moved = run_command(&dir, Command::Status {
         id,
         status: Status::InProgress,
+        before: None,
+        after: None,
     })
     .unwrap();
     assert_eq!(moved.text, format!("{path}: Todo -> In Progress\n"));
@@ -732,9 +734,73 @@ fn status_moves_a_ticket_to_any_column() {
     let again = run_command(&dir, Command::Status {
         id,
         status: Status::InProgress,
+        before: None,
+        after: None,
     })
     .unwrap();
     assert_eq!(again.text, format!("{path}: already In Progress\n"));
+}
+
+/// A drag on the site's board is this one command: the column and the place in
+/// it change together.
+#[test]
+fn status_places_the_ticket_next_to_its_neighbour() {
+    let dir = Utf8TempDir::new().unwrap();
+    let root = dir.path();
+    let moving = write_ticket(root, "02wt0k1", "Moving", Status::Todo);
+    let started = write_ticket(root, "02wt0k2", "Started", Status::InProgress);
+    write_ticket(root, "02wt0k3", "Also started", Status::InProgress);
+
+    let moved = run_in(root, Command::Status {
+        id: moving,
+        status: Status::InProgress,
+        before: None,
+        after: Some(started),
+    })
+    .unwrap();
+    assert_eq!(
+        moved.text,
+        format!(
+            "{}: Todo -> In Progress, below T-02wt0k2\n",
+            root.join("02wt0k1-slug.md")
+        )
+    );
+
+    let board = run_in(root, Command::Board).unwrap();
+    assert!(
+        board.text.contains(
+            "In Progress (3)\nT-02wt0k2 Bug      Started\nT-02wt0k1 Bug      Moving\nT-02wt0k3 \
+             Bug      Also started\n"
+        ),
+        "{}",
+        board.text
+    );
+}
+
+/// The neighbour is checked before the ticket moves, so a drop next to a card
+/// that has since left the column changes nothing.
+#[test]
+fn status_refuses_a_neighbour_outside_the_column() {
+    let dir = Utf8TempDir::new().unwrap();
+    let root = dir.path();
+    let moving = write_ticket(root, "02wt0k1", "Moving", Status::Todo);
+    let done = write_ticket(root, "02wt0k2", "Finished", Status::Done);
+
+    let error = run_in(root, Command::Status {
+        id: moving,
+        status: Status::InProgress,
+        before: Some(done),
+        after: None,
+    })
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        "T-02wt0k2 is Done, not In Progress; a ticket is placed next to one in the column it \
+         moves to."
+    );
+    let source = std::fs::read_to_string(root.join("02wt0k1-slug.md")).unwrap();
+    assert!(source.contains("- **Status**: Todo"), "{source}");
 }
 
 #[test]
@@ -743,14 +809,33 @@ fn status_takes_the_id_and_the_column() {
         .unwrap()
         .command
     {
-        Command::Status { id, status } => {
+        Command::Status {
+            id,
+            status,
+            before,
+            after,
+        } => {
             assert_eq!(id, "T-02wt0kx".parse().unwrap());
             assert_eq!(status, Status::InProgress);
+            assert_eq!((before, after), (None, None));
         }
         other => panic!("expected status, got {other:?}"),
     }
 
     assert!(parse(&["status", "T-02wt0kx"]).is_err());
+    assert!(parse(&["status", "T-02wt0kx", "done", "--after", "T-02wt0k2"]).is_ok());
+    assert!(
+        parse(&[
+            "status",
+            "T-02wt0kx",
+            "done",
+            "--before",
+            "T-02wt0k1",
+            "--after",
+            "T-02wt0k2"
+        ])
+        .is_err()
+    );
 }
 
 /// The board reads each column in board order, then the tickets nobody ranked;

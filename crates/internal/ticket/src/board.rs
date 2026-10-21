@@ -18,7 +18,7 @@
 //! order file until something is ranked.
 //!
 //! [`Order`] is the file's contents and the pure operations on them; [`read`],
-//! [`write`], and [`rank`] touch the disk.
+//! [`write`], [`rank`], and [`move_to`] touch the disk.
 
 use std::{
     cmp::Ordering,
@@ -26,7 +26,7 @@ use std::{
     fs, io,
 };
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -210,24 +210,8 @@ pub fn rank(dir: &Utf8Path, id: TicketId, place: Place, other: TicketId) -> Resu
     }
 
     let entries = store::list(dir)?;
-    let status_of = |wanted: TicketId| {
-        let entry = entries
-            .iter()
-            .find(|entry| entry.id == wanted)
-            .ok_or(Error::NoSuchTicket(wanted))?;
-
-        entry
-            .ticket
-            .as_ref()
-            .map(|ticket| ticket.metadata.status)
-            .map_err(|error| Error::Malformed {
-                id: wanted,
-                error: error.clone(),
-            })
-    };
-
-    let status = status_of(id)?;
-    let other_status = status_of(other)?;
+    let status = status_of(&entries, id)?;
+    let other_status = status_of(&entries, other)?;
     if status != other_status {
         return Err(Error::OtherColumn {
             id,
@@ -254,6 +238,89 @@ pub fn rank(dir: &Utf8Path, id: TicketId, place: Place, other: TicketId) -> Resu
     write(dir, &order)?;
 
     Ok(status)
+}
+
+/// A ticket [`move_to`] moved: where it is, and the status it held before.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Moved {
+    pub path: Utf8PathBuf,
+    pub previous: Status,
+}
+
+/// Move `id` to the column `status` names, directly before or after another
+/// ticket there when `at` names one.
+///
+/// Every check runs before anything is written, so a refused move changes
+/// nothing: the ticket to place next to has to be another readable ticket
+/// already at `status`, and the order file has to be readable.
+/// Without `at`, the ticket joins the column below the tickets ranked there,
+/// and the order file is neither read nor written.
+pub fn move_to(
+    dir: &Utf8Path,
+    id: TicketId,
+    status: Status,
+    at: Option<(Place, TicketId)>,
+) -> Result<Moved, Error> {
+    let Some((place, other)) = at else {
+        let (path, previous) = store::set_status(dir, id, status)?;
+        return Ok(Moved { path, previous });
+    };
+
+    if id == other {
+        return Err(Error::SameTicket(id));
+    }
+
+    let entries = store::list(dir)?;
+    status_of(&entries, id)?;
+    let other_status = status_of(&entries, other)?;
+    if other_status != status {
+        return Err(Error::NotInColumn {
+            other,
+            other_status,
+            status,
+        });
+    }
+
+    let mut order = read(dir)?;
+    let (path, previous) = store::set_status(dir, id, status)?;
+
+    // The column as it stands once `id` has joined it.
+    let column: Vec<TicketId> = entries
+        .iter()
+        .filter(|entry| {
+            entry.id == id
+                || entry
+                    .ticket
+                    .as_ref()
+                    .is_ok_and(|ticket| ticket.metadata.status == status)
+        })
+        .map(|entry| entry.id)
+        .collect();
+
+    // Both tickets were just found at `status`, so the move always lands.
+    order.rank(status, &column, id, place, other);
+    write(dir, &order)?;
+
+    Ok(Moved { path, previous })
+}
+
+/// The status of the ticket `wanted` among `entries`.
+///
+/// A ticket that isn't there, or doesn't parse, is an error naming it.
+fn status_of(entries: &[store::Entry], wanted: TicketId) -> Result<Status, Error> {
+    let entry = entries
+        .iter()
+        .find(|entry| entry.id == wanted)
+        .ok_or(Error::NoSuchTicket(wanted))?;
+
+    entry
+        .ticket
+        .as_ref()
+        .map(|ticket| ticket.metadata.status)
+        .map_err(|error| Error::Malformed {
+            id: wanted,
+            error: error.clone(),
+        })
 }
 
 #[cfg(test)]

@@ -40,9 +40,8 @@ function kindClass(kind) {
 /// way round, which keeps Vue from fighting the drag.
 ///
 /// One drag is one move: the ticket, the column it landed in, and the cards
-/// directly above and below it there. The dev server turns that into
-/// `jp ticket status` when it changed column, and `jp ticket rank` against a
-/// neighbour.
+/// directly above and below it there. The dev server turns that into one
+/// `jp ticket status`, placing the ticket next to a neighbour.
 async function onDrop(event) {
     const byId = new Map(
         columns.value.flatMap(column => column.tickets).map(ticket => [ticket.id, ticket]))

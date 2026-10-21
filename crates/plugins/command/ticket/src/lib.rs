@@ -150,13 +150,24 @@ enum Command {
 
     /// Move a ticket to another column of the board.
     ///
-    /// It joins the column below the tickets ranked there; `rank` places it.
+    /// Without `--before` or `--after` it joins the column below the tickets
+    /// ranked there.
+    /// With one, it lands next to that ticket, which has to be in the column
+    /// already; that is checked before anything changes.
     Status {
         /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
         id: TicketId,
 
         /// The column: `todo`, `in progress`, or `done`.
         status: Status,
+
+        /// Place it directly above this ticket.
+        #[arg(long, conflicts_with = "after")]
+        before: Option<TicketId>,
+
+        /// Place it directly below this ticket.
+        #[arg(long)]
+        after: Option<TicketId>,
     },
 
     /// Give a ticket a new title, moving its file to match.
@@ -1280,9 +1291,14 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
 
         Command::Labels => vocabulary_listing(dir, ctx.options),
 
-        Command::Close { id } => move_ticket(dir, required(id, "ticket id")?, Status::Done),
+        Command::Close { id } => move_ticket(dir, required(id, "ticket id")?, Status::Done, None),
 
-        Command::Status { id, status } => move_ticket(dir, id, status),
+        Command::Status {
+            id,
+            status,
+            before,
+            after,
+        } => move_ticket(dir, id, status, placement(before, after)),
 
         Command::Rename { id, title } => rename(dir, id, &title),
 
@@ -1352,16 +1368,39 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
     }
 }
 
-/// Move a ticket to the column `status` names.
-fn move_ticket(dir: &Utf8Path, id: TicketId, status: Status) -> Result<Output, String> {
-    let (path, previous) = store::set_status(dir, id, status).map_err(|error| error.to_string())?;
+/// Move a ticket to the column `status` names, next to the ticket `at` names.
+fn move_ticket(
+    dir: &Utf8Path,
+    id: TicketId,
+    status: Status,
+    at: Option<(Place, TicketId)>,
+) -> Result<Output, String> {
+    let board::Moved { path, previous } =
+        board::move_to(dir, id, status, at).map_err(|error| error.to_string())?;
+    let next_to = at.map(|(place, other)| format!("{} {other}", relation(place)));
 
-    Ok(if previous == status {
-        format!("{path}: already {status}\n")
-    } else {
-        format!("{path}: {previous} -> {status}\n")
+    Ok(match next_to {
+        None if previous == status => format!("{path}: already {status}\n"),
+        None => format!("{path}: {previous} -> {status}\n"),
+        Some(next_to) if previous == status => format!("{path}: {next_to} in {status}\n"),
+        Some(next_to) => format!("{path}: {previous} -> {status}, {next_to}\n"),
     }
     .into())
+}
+
+/// The place `--before` or `--after` names, if either does.
+fn placement(before: Option<TicketId>, after: Option<TicketId>) -> Option<(Place, TicketId)> {
+    before
+        .map(|other| (Place::Before, other))
+        .or(after.map(|other| (Place::After, other)))
+}
+
+/// How a ticket placed at `place` sits relative to the one it is placed by.
+fn relation(place: Place) -> &'static str {
+    match place {
+        Place::Before => "above",
+        Place::After => "below",
+    }
 }
 
 /// Write the tool definitions, or what they mirror from configuration.
@@ -1467,19 +1506,12 @@ fn rank(
     before: Option<TicketId>,
     after: Option<TicketId>,
 ) -> Result<Output, String> {
-    let (place, other) = match (before, after) {
-        (Some(other), None) => (Place::Before, other),
-        (None, Some(other)) => (Place::After, other),
-        _ => return Err("Pass one of --before or --after.".to_owned()),
-    };
+    let (place, other) =
+        placement(before, after).ok_or("Pass one of --before or --after.".to_owned())?;
 
     let status = board::rank(dir, id, place, other).map_err(|error| error.to_string())?;
-    let relation = match place {
-        Place::Before => "above",
-        Place::After => "below",
-    };
 
-    Ok(format!("{id} now sits {relation} {other} in {status}\n").into())
+    Ok(format!("{id} now sits {} {other} in {status}\n", relation(place)).into())
 }
 
 /// Create the ticket directory.

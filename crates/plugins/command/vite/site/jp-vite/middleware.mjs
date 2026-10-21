@@ -246,8 +246,9 @@ const rfdPriorityWriter = {
 // Two pieces of state, kept apart (see RFD 100): the order within a column
 // lives in the board file, `.board.json`, and a ticket's status lives in the
 // ticket file. A drag posts one move — the ticket, the column it landed in, and
-// its neighbours there — which becomes `jp ticket status` when it changed
-// column and `jp ticket rank` against a neighbour.
+// its neighbours there — which becomes one `jp ticket status` naming the
+// neighbour it landed next to. That neighbour is checked before anything
+// changes, so a refused drop leaves the board as it was.
 const ticketBoardWriter = {
     name: 'ticket-board-writer',
     configureServer(server) {
@@ -280,23 +281,17 @@ const ticketBoardWriter = {
                 return refuse(res, 400, 'expected { id, status, moved, after, before }')
             }
 
-            const said = []
-            if (parsed.moved === true) {
-                const moved = await jp(['ticket', 'status', id, column.status])
-                if (!moved.ok) return reply(res, 500, moved)
-                said.push(moved.output)
+            // Placed below the ticket above it, or above the one below when it
+            // landed at the top. Alone in its column, it needs no place.
+            const place = after ? ['--after', after] : before ? ['--before', before] : []
+            if (parsed.moved !== true && place.length === 0) {
+                return reply(res, 200, { ok: true, output: '' })
             }
 
-            // Ranked against the ticket above it, or the one below when it
-            // landed at the top. Alone in its column, it needs no rank.
-            const place = after ? ['--after', after] : before ? ['--before', before] : null
-            if (place) {
-                const ranked = await jp(['ticket', 'rank', id, ...place])
-                if (!ranked.ok) return reply(res, 500, ranked)
-                said.push(ranked.output)
-            }
+            const moved = await jp(['ticket', 'status', id, column.status, ...place])
+            if (!moved.ok) return reply(res, 500, moved)
 
-            reply(res, 200, { ok: true, output: said.join('\n') })
+            reply(res, 200, { ok: true, output: moved.output })
         }))
     },
 }

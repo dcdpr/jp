@@ -82,6 +82,12 @@ pub enum Error {
         other: TicketId,
         other_status: Status,
     },
+    /// A ticket was to be placed next to one outside the column it moves to.
+    NotInColumn {
+        other: TicketId,
+        other_status: Status,
+        status: Status,
+    },
     /// The filesystem said no.
     Io(io::Error),
 }
@@ -127,6 +133,15 @@ impl fmt::Display for Error {
                 f,
                 "{id} is {status} and {other} is {other_status}; a ticket is ranked within its \
                  own column."
+            ),
+            Self::NotInColumn {
+                other,
+                other_status,
+                status,
+            } => write!(
+                f,
+                "{other} is {other_status}, not {status}; a ticket is placed next to one in the \
+                 column it moves to."
             ),
             Self::Io(error) => error.fmt(f),
         }

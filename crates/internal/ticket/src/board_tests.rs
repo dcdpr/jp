@@ -255,6 +255,123 @@ fn rank_refuses_tickets_in_different_columns() {
     assert!(!dir.path().join(BOARD_FILE).exists());
 }
 
+/// The column a ticket is in, read back from its file.
+fn status_on_disk(dir: &Utf8TempDir, body: &str) -> Status {
+    status_of(&store::list(dir.path()).unwrap(), id(body)).unwrap()
+}
+
+/// A move that names its neighbour changes the column and the order together.
+#[test]
+fn move_to_places_the_ticket_next_to_its_neighbour() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "02wt0k1", Status::Todo);
+    write_ticket(&dir, "02wt0k2", Status::InProgress);
+    write_ticket(&dir, "02wt0k3", Status::InProgress);
+
+    let moved = move_to(
+        dir.path(),
+        id("02wt0k1"),
+        Status::InProgress,
+        Some((Place::After, id("02wt0k2"))),
+    )
+    .unwrap();
+
+    assert_eq!(moved, Moved {
+        path: dir.path().join("02wt0k1-slug.md"),
+        previous: Status::Todo,
+    });
+    assert_eq!(status_on_disk(&dir, "02wt0k1"), Status::InProgress);
+    assert_eq!(
+        read(dir.path())
+            .unwrap()
+            .arrange(Status::InProgress, &ids(&["02wt0k1", "02wt0k2", "02wt0k3"])),
+        ids(&["02wt0k2", "02wt0k1", "02wt0k3"])
+    );
+}
+
+/// The neighbour is checked before anything is written, so a refused move
+/// leaves the ticket where it was.
+#[test]
+fn move_to_refuses_a_neighbour_outside_the_column_and_changes_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "02wt0k1", Status::Todo);
+    write_ticket(&dir, "02wt0k2", Status::Done);
+
+    let error = move_to(
+        dir.path(),
+        id("02wt0k1"),
+        Status::InProgress,
+        Some((Place::Before, id("02wt0k2"))),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "T-02wt0k2 is Done, not In Progress; a ticket is placed next to one in the column it \
+         moves to."
+    );
+    assert_eq!(status_on_disk(&dir, "02wt0k1"), Status::Todo);
+    assert!(!dir.path().join(BOARD_FILE).exists());
+}
+
+/// The order file is read before the status changes, so an unreadable one
+/// refuses the move rather than leaving it half done.
+#[test]
+fn move_to_refuses_an_unreadable_order_file_before_moving() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "02wt0k1", Status::Todo);
+    write_ticket(&dir, "02wt0k2", Status::Done);
+    fs::write(dir.path().join(BOARD_FILE), "not json").unwrap();
+
+    let error = move_to(
+        dir.path(),
+        id("02wt0k1"),
+        Status::Done,
+        Some((Place::After, id("02wt0k2"))),
+    )
+    .unwrap_err();
+
+    assert!(
+        error.to_string().contains(" is not a board order: "),
+        "{error}"
+    );
+    assert_eq!(status_on_disk(&dir, "02wt0k1"), Status::Todo);
+}
+
+/// Without a neighbour the ticket joins the column below the ranked ones, and
+/// the order file isn't touched.
+#[test]
+fn move_to_without_a_neighbour_changes_only_the_status() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "02wt0k1", Status::Todo);
+
+    let moved = move_to(dir.path(), id("02wt0k1"), Status::Done, None).unwrap();
+
+    assert_eq!(moved.previous, Status::Todo);
+    assert_eq!(status_on_disk(&dir, "02wt0k1"), Status::Done);
+    assert!(!dir.path().join(BOARD_FILE).exists());
+}
+
+#[test]
+fn move_to_refuses_a_ticket_placed_next_to_itself() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "02wt0k1", Status::Todo);
+
+    let error = move_to(
+        dir.path(),
+        id("02wt0k1"),
+        Status::Done,
+        Some((Place::Before, id("02wt0k1"))),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "T-02wt0k1 can't be ranked against itself."
+    );
+    assert_eq!(status_on_disk(&dir, "02wt0k1"), Status::Todo);
+}
+
 #[test]
 fn rank_refuses_a_ticket_against_itself_and_a_missing_one() {
     let dir = Utf8TempDir::new().unwrap();
