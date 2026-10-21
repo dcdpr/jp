@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.6519302292023524,
-  "iosp_score": 0.8120950323974082,
+  "quality_score": 0.6525493395791738,
+  "iosp_score": 0.8125,
   "violations": 870,
-  "total": 6496,
+  "total": 6511,
   "complexity_warnings": 0,
   "magic_number_warnings": 0,
   "nesting_depth_warnings": 0,
@@ -11,7 +11,7 @@
   "unsafe_warnings": 0,
   "error_handling_warnings": 0,
   "duplicate_groups": 29,
-  "dead_code_warnings": 262,
+  "dead_code_warnings": 263,
   "dead_type_warnings": 28,
   "fragment_groups": 58,
   "boilerplate_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 0,
   "structural_coupling_warnings": 0,
-  "total_findings": 1292,
+  "total_findings": 1293,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -723,7 +723,7 @@
     {
       "name": "render_available",
       "file": "crates/jp_config/src/types/api_key_env.rs",
-      "line": 63
+      "line": 133
     },
     {
       "name": "PartialInterruptConfig::assign",
@@ -783,22 +783,22 @@
     {
       "name": "PartialGoogleConfig::assign",
       "file": "crates/jp_config/src/providers/llm/google.rs",
-      "line": 75
+      "line": 83
     },
     {
       "name": "PartialOpenrouterConfig::assign",
       "file": "crates/jp_config/src/providers/llm/openrouter.rs",
-      "line": 84
+      "line": 92
     },
     {
       "name": "PartialVllmConfig::assign",
       "file": "crates/jp_config/src/providers/llm/vllm.rs",
-      "line": 87
+      "line": 95
     },
     {
       "name": "PartialCerebrasConfig::assign",
       "file": "crates/jp_config/src/providers/llm/cerebras.rs",
-      "line": 99
+      "line": 107
     },
     {
       "name": "PartialOllamaConfig::assign",
@@ -813,17 +813,17 @@
     {
       "name": "PartialDeepseekConfig::assign",
       "file": "crates/jp_config/src/providers/llm/deepseek.rs",
-      "line": 75
+      "line": 83
     },
     {
       "name": "PartialAnthropicConfig::assign",
       "file": "crates/jp_config/src/providers/llm/anthropic.rs",
-      "line": 157
+      "line": 165
     },
     {
       "name": "PartialOpenaiConfig::assign",
       "file": "crates/jp_config/src/providers/llm/openai.rs",
-      "line": 122
+      "line": 130
     },
     {
       "name": "PartialStdioConfig::assign",
@@ -2423,12 +2423,12 @@
     {
       "name": "read_setup_token",
       "file": "crates/jp_cli/src/cmd/provider.rs",
-      "line": 1041
+      "line": 1054
     },
     {
       "name": "humanize",
       "file": "crates/jp_cli/src/cmd/provider.rs",
-      "line": 1136
+      "line": 1149
     },
     {
       "name": "Composer::ask",
@@ -2763,17 +2763,17 @@
     {
       "name": "build_inquiry_backend",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1096
+      "line": 1112
     },
     {
       "name": "build_inquiry_overrides",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1195
+      "line": 1211
     },
     {
       "name": "commit_tool_responses",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
-      "line": 1310
+      "line": 1326
     },
     {
       "name": "build_execution_plan",
@@ -2793,112 +2793,112 @@
     {
       "name": "stderr_sink",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 245
+      "line": 260
     },
     {
       "name": "ToolCoordinator::pre_render_for_prompt",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 672
+      "line": 692
     },
     {
       "name": "ToolCoordinator::render_executor",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 692
+      "line": 712
     },
     {
       "name": "ToolCoordinator::abandon",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 790
+      "line": 810
     },
     {
       "name": "ToolCoordinator::decide_permission",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 885
+      "line": 905
     },
     {
       "name": "ToolCoordinator::submit",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 974
+      "line": 994
     },
     {
       "name": "ToolCoordinator::add_call",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1015
+      "line": 1035
     },
     {
       "name": "ToolCoordinator::finish",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1092
+      "line": 1112
     },
     {
       "name": "ToolCoordinator::dispatch",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1332
+      "line": 1356
     },
     {
       "name": "ToolCoordinator::on_step",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1441
+      "line": 1482
     },
     {
       "name": "ToolCoordinator::on_permission",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1491
+      "line": 1546
     },
     {
       "name": "ToolCoordinator::pump",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1525
+      "line": 1580
     },
     {
       "name": "ToolCoordinator::decide",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1583
+      "line": 1638
     },
     {
       "name": "ToolCoordinator::announce",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1636
+      "line": 1691
     },
     {
       "name": "ToolCoordinator::release",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1658
+      "line": 1713
     },
     {
       "name": "ToolCoordinator::route",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1732
+      "line": 1787
     },
     {
       "name": "ToolCoordinator::answer",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1830
+      "line": 1885
     },
     {
       "name": "ToolCoordinator::serve",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1844
+      "line": 1899
     },
     {
       "name": "ToolCoordinator::deliver",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1932
+      "line": 1987
     },
     {
       "name": "ToolCoordinator::close",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1983
+      "line": 2038
     },
     {
       "name": "ToolCoordinator::render_result",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 2225
+      "line": 2282
     },
     {
       "name": "ToolCoordinator::preset_answer",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 2319
+      "line": 2418
     },
     {
       "name": "route",
