@@ -35,10 +35,7 @@ use ticket::{
     render, store,
 };
 
-use crate::{
-    describe_vocabulary,
-    options::{Options, leftover_labels_file},
-};
+use crate::options::Options;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -50,7 +47,7 @@ type Answer = Result<Outcome, Error>;
 ///
 /// Few, because every tool a model is offered costs context on every turn:
 /// `edit` changes any part of a ticket in one call.
-pub(crate) const TOOLS: &[&str] = &["comment", "create", "edit", "labels", "list", "show"];
+pub(crate) const TOOLS: &[&str] = &["comment", "create", "edit", "list", "show"];
 
 /// The longest title `create` accepts, in characters, unless the tool's
 /// `options.max_title_length` overrides it.
@@ -105,7 +102,6 @@ fn answer(init: &InitMessage, call: &ToolCall, options: &Options) -> Answer {
         "create" => create(&tickets, &args, call, preview),
         "comment" => comment(&tickets, &args, preview),
         "edit" => edit(&tickets, &args),
-        "labels" => labels(&tickets),
         "show" => show(&tickets, &args),
         "list" => list(&tickets, &args),
         // `capabilities` above answers for exactly the names in `TOOLS`.
@@ -123,7 +119,7 @@ fn capabilities(call: &ToolCall) -> Option<&'static [Capability]> {
         .is_some_and(|title| !title.is_null());
 
     Some(match call.name.as_str() {
-        "show" | "list" | "labels" => &[Capability::Read],
+        "show" | "list" => &[Capability::Read],
         "create" => &[Capability::Read, Capability::Create],
         // A new title moves the file: one name goes and another is created.
         "edit" if retitles => &[
@@ -431,14 +427,6 @@ fn resolve_labels(
         .map_err(|refusal| refusal.to_string()))
 }
 
-/// List the labels the board defines, with what each one covers.
-fn labels(tickets: &Tickets<'_>) -> Answer {
-    let vocabulary = tickets.options.vocabulary()?;
-    let leftover = leftover_labels_file(&tickets.dir).map(|path| tickets.relative(&path));
-
-    Ok(describe_vocabulary(&vocabulary, leftover.as_deref()).into())
-}
-
 fn comment(tickets: &Tickets<'_>, args: &Arguments<'_>, preview: bool) -> Answer {
     let id = match args.id()? {
         Ok(id) => id,
@@ -631,10 +619,16 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     Ok(text.into())
 }
 
+/// Read one ticket: its metadata, and the description and comments when the
+/// call asks for them.
 fn show(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     let id = match args.id()? {
         Ok(id) => id,
         Err(refusal) => return refuse(refusal),
+    };
+    let parts = Parts {
+        description: args.optional("description")?.unwrap_or(false),
+        comments: args.optional("comments")?.unwrap_or(false),
     };
 
     let entries = store::list(&tickets.dir)?;
@@ -649,7 +643,7 @@ fn show(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
 
     match entry.ticket {
         Ok(ticket) => {
-            let rendered = render_ticket(entry.id, &ticket, &tickets.relative(&entry.path));
+            let rendered = render_ticket(entry.id, &ticket, &tickets.relative(&entry.path), parts);
             // The terminal keys syntax highlighting off a leading code fence,
             // so the fence is what gets a ticket displayed as markdown rather
             // than as a flat wall of text.
@@ -794,8 +788,19 @@ fn render_list(tickets: &[(TicketId, &Ticket)], unreadable: &[String]) -> String
     out
 }
 
-/// Render one ticket, numbering the comments so a reply can name its target.
-fn render_ticket(id: TicketId, ticket: &Ticket, path: &str) -> String {
+/// What `show` prints besides a ticket's metadata.
+#[derive(Debug, Clone, Copy, Default)]
+struct Parts {
+    description: bool,
+    comments: bool,
+}
+
+/// Render one ticket's metadata, and the parts `parts` asks for.
+///
+/// Comments are numbered so a reply can name its target.
+/// A part left out that the ticket has is named at the end, with the argument
+/// that shows it, so the reader knows there is more without asking.
+fn render_ticket(id: TicketId, ticket: &Ticket, path: &str, parts: Parts) -> String {
     let metadata = &ticket.metadata;
     // The rendered view names the ticket even though the file doesn't: the id
     // is what a reply or a later reference has to quote.
@@ -819,17 +824,31 @@ fn render_ticket(id: TicketId, ticket: &Ticket, path: &str) -> String {
         }
     }
 
-    if !ticket.description.is_empty() {
+    if parts.description && !ticket.description.is_empty() {
         out.push_str(&format!("\n{}\n", ticket.description));
     }
 
-    if ticket.comments.is_empty() {
-        out.push_str("\nNo comments yet.\n");
-        return out;
+    if parts.comments {
+        push_comments(&mut out, id, &ticket.comments);
     }
 
-    out.push_str(&format!("\n## Comments ({})\n", ticket.comments.len()));
-    for (index, comment) in ticket.comments.iter().enumerate() {
+    let left_out = left_out(ticket, parts);
+    if !left_out.is_empty() {
+        out.push_str(&format!("\nNot shown: {left_out}.\n"));
+    }
+
+    out
+}
+
+/// Append a ticket's discussion to `out`, each comment under its position.
+fn push_comments(out: &mut String, id: TicketId, comments: &[Comment]) {
+    if comments.is_empty() {
+        out.push_str("\nNo comments yet.\n");
+        return;
+    }
+
+    out.push_str(&format!("\n## Comments ({})\n", comments.len()));
+    for (index, comment) in comments.iter().enumerate() {
         // Stored as `#1`, shown with the id so the reference matches the
         // comment headings around it and can be quoted straight back.
         let re = comment.re.as_deref().map_or_else(String::new, |re| {
@@ -848,8 +867,26 @@ fn render_ticket(id: TicketId, ticket: &Ticket, path: &str) -> String {
             comment.body
         ));
     }
+}
 
-    out
+/// The parts of `ticket` that `parts` leaves out and the ticket has, each with
+/// the argument that shows it.
+///
+/// Empty when nothing was left out.
+fn left_out(ticket: &Ticket, parts: Parts) -> String {
+    let mut left_out = vec![];
+    if !parts.description && !ticket.description.is_empty() {
+        left_out.push("the description (`description: true`)".to_owned());
+    }
+    if !parts.comments {
+        match ticket.comments.len() {
+            0 => {}
+            1 => left_out.push("1 comment (`comments: true`)".to_owned()),
+            count => left_out.push(format!("{count} comments (`comments: true`)")),
+        }
+    }
+
+    left_out.join(" and ")
 }
 
 /// Read a ticket id from a tool argument.

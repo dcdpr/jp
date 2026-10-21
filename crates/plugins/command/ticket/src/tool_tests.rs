@@ -691,7 +691,11 @@ fn a_shorter_title_answer_files_the_ticket() {
     );
 
     let id = ids(&dir).pop().expect("one ticket");
-    let ticket = content(run_tool(&dir, "show", json!({ "id": id.to_string() })));
+    let ticket = content(run_tool(
+        &dir,
+        "show",
+        json!({ "id": id.to_string(), "description": true }),
+    ));
     assert!(
         ticket.starts_with(&format!(
             "```markdown\n# {id}: Sanitize recorded model output in fixtures\n"
@@ -799,7 +803,11 @@ fn comments_are_attributed_to_the_assistant_and_numbered() {
     assert_eq!(first, format!("Added {id}#1"));
     assert_eq!(second, format!("Added {id}#2"));
 
-    let shown = content(run_tool(&dir, "show", json!({ "id": id.to_string() })));
+    let shown = content(run_tool(
+        &dir,
+        "show",
+        json!({ "id": id.to_string(), "comments": true }),
+    ));
     assert!(shown.contains(&format!("### {id}#1 — jp at ")), "{shown}");
     assert!(
         shown.contains(&format!("### {id}#2 — jp at "))
@@ -1082,7 +1090,11 @@ fn a_new_title_moves_the_file_and_reports_both_paths() {
             .exists()
     );
 
-    let shown = content(run_tool(&dir, "show", json!({ "id": id.to_string() })));
+    let shown = content(run_tool(
+        &dir,
+        "show",
+        json!({ "id": id.to_string(), "description": true }),
+    ));
     assert!(
         shown.contains(&format!("# {id}: The wrap calculation is off")),
         "{shown}"
@@ -1210,34 +1222,100 @@ fn list_names_the_files_it_could_not_read() {
     );
 }
 
+/// By default a ticket is its metadata.
+/// What was left out is named at the end with the argument that shows it, so
+/// the assistant knows there is more without having to ask.
+///
+/// Fenced as markdown: the terminal renderer keys syntax highlighting off the
+/// leading fence.
 #[test]
-fn show_renders_metadata_and_the_description() {
+fn show_prints_the_metadata_and_names_what_it_left_out() {
     let dir = Utf8TempDir::new().unwrap();
-    create_ticket(&dir, "Tool call header misaligned");
+    write_ticket(&dir, "Tool call header misaligned");
+    for body in ["Reproduced at 72 columns.", "Not at 80."] {
+        content(run_tool(
+            &dir,
+            "comment",
+            json!({ "id": FIXED_ID, "body": body }),
+        ));
+    }
 
-    let id = ids(&dir)[0];
-    let out = content(run_tool(&dir, "show", json!({ "id": id.to_string() })));
+    let out = content(run_tool(&dir, "show", json!({ "id": FIXED_ID })));
 
-    // Fenced as markdown: the terminal renderer keys syntax highlighting off
-    // the leading fence.
+    assert_eq!(
+        out,
+        r"```markdown
+# T-02wt0kx: Tool call header misaligned
+
+- **Path**: docs/ticket/02wt0kx-slug.md
+- **Status**: Todo
+- **Kind**: Bug
+- **Authors**: jp
+- **Date**: 2026-08-05
+
+Not shown: the description (`description: true`) and 2 comments (`comments: true`).
+```"
+    );
+}
+
+/// Asked for everything on a ticket nobody has commented on, `show` says there
+/// is no discussion rather than leaving the reader to wonder.
+#[test]
+fn show_prints_everything_asked_for() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "Tool call header misaligned");
+
+    let out = content(run_tool(
+        &dir,
+        "show",
+        json!({ "id": FIXED_ID, "description": true, "comments": true }),
+    ));
+
+    assert_eq!(
+        out,
+        r"```markdown
+# T-02wt0kx: Tool call header misaligned
+
+- **Path**: docs/ticket/02wt0kx-slug.md
+- **Status**: Todo
+- **Kind**: Bug
+- **Authors**: jp
+- **Date**: 2026-08-05
+
+Something is wrong.
+
+No comments yet.
+```"
+    );
+}
+
+#[test]
+fn show_adds_the_comments_when_asked() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "Tool call header misaligned");
+    content(run_tool(
+        &dir,
+        "comment",
+        json!({ "id": FIXED_ID, "body": "Reproduced at 72 columns." }),
+    ));
+
+    let out = content(run_tool(
+        &dir,
+        "show",
+        json!({ "id": FIXED_ID, "comments": true }),
+    ));
+
     assert!(
-        out.starts_with(&format!(
-            "```markdown\n# {id}: Tool call header misaligned\n"
-        )),
+        out.contains("\n## Comments (1)\n\n### T-02wt0kx#1 — jp at "),
         "{out}"
     );
-    assert!(out.ends_with("\n```"), "{out}");
+    assert!(!out.contains("Something is wrong."), "{out}");
     assert!(
-        out.contains(&format!(
-            "- **Path**: docs/ticket/{}tool-call-header-misaligned.md",
-            id.file_prefix()
-        )),
+        out.ends_with(
+            "Reproduced at 72 columns.\n\nNot shown: the description (`description: true`).\n```"
+        ),
         "{out}"
     );
-    assert!(out.contains("- **Status**: Todo"), "{out}");
-    assert!(out.contains("- **Authors**: jp"), "{out}");
-    assert!(out.contains("Something is wrong."), "{out}");
-    assert!(out.contains("No comments yet."), "{out}");
 }
 
 #[test]
@@ -1271,8 +1349,8 @@ fn an_unknown_tool_names_the_ones_served() {
 
     assert_eq!(
         error_message(run_tool(&dir, "frobnicate", json!({}))),
-        "`jp ticket` serves no tool named `frobnicate`. It serves: comment, create, edit, labels, \
-         list, show."
+        "`jp ticket` serves no tool named `frobnicate`. It serves: comment, create, edit, list, \
+         show."
     );
 }
 
@@ -1520,60 +1598,6 @@ fn labelling_a_missing_ticket_says_so() {
     ));
 
     assert_eq!(message, format!("No {FIXED_ID}."));
-}
-
-#[test]
-fn labels_describes_the_vocabulary() {
-    let dir = Utf8TempDir::new().unwrap();
-
-    assert_eq!(
-        content(run_tool(&dir, "labels", json!({}))),
-        "client  The client.\n  client=cli\n  client=macos\n\npackage  The crate.\n  \
-         package=jp_cli\n  package=jp_config\n  package=jp_legacy  (retired)\n\nA retired label \
-         stays on a ticket that carries it, but can't be added.\n"
-    );
-}
-
-/// Run `labels` on a board whose options define no vocabulary.
-fn run_labels_unlabelled(dir: &Utf8TempDir) -> Outcome {
-    let call = ToolCall {
-        action: ToolAction::Run,
-        name: "labels".to_owned(),
-        arguments: Map::new(),
-        answers: Map::new(),
-        options: Map::new(),
-        access: None,
-        conversation: "test".to_owned(),
-    };
-
-    run(&init(dir), &call, &Options::default())
-}
-
-#[test]
-fn labels_on_a_board_without_a_vocabulary_says_where_to_define_one() {
-    let dir = Utf8TempDir::new().unwrap();
-
-    assert_eq!(
-        content(run_labels_unlabelled(&dir)),
-        "This board defines no labels, so a ticket takes any `key` or `key=value` label. List \
-         them in `plugins.command.ticket.options.labels` to hold tickets to a fixed set.\n"
-    );
-}
-
-/// The path is the one the assistant can open, relative to the workspace.
-#[test]
-fn labels_points_out_a_leftover_labels_file() {
-    let dir = Utf8TempDir::new().unwrap();
-    let tickets = dir.path().join(store::DEFAULT_DIR);
-    fs::create_dir_all(&tickets).unwrap();
-    fs::write(tickets.join(".labels.json"), "{}").unwrap();
-
-    assert_eq!(
-        content(run_labels_unlabelled(&dir)),
-        "This board defines no labels, so a ticket takes any `key` or `key=value` label. List \
-         them in `plugins.command.ticket.options.labels` to hold tickets to a fixed \
-         set.\ndocs/ticket/.labels.json is no longer read: move its keys there.\n"
-    );
 }
 
 /// The host compiles the call's access grants and the plugin enforces them: a

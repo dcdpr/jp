@@ -8,13 +8,13 @@ The following tools help you with this:
 
 - ticket_list: List tickets by id, with status, kind, labels, and comment \
 count. Filter by status, kind, or label.
-- ticket_show: Read one ticket in full, with its comments numbered for replies.
+- ticket_show: Read one ticket's metadata; ask for its description or its \
+comments, numbered for replies, when you need them.
 - ticket_create: File a new ticket, at status Todo.
 - ticket_comment: Append a comment to a ticket's discussion, optionally \
 replying to an earlier one.
 - ticket_edit: Change a ticket's title, description, kind, status, or labels, \
 any of them in one call. Status `done` closes it.
-- ticket_labels: List the labels the board defines, and what each covers.
 
 Labels group tickets by area of the system, orthogonally to kind. Each one is a \
 `key=value` pair (`client=cli`, `package=jp_config`), and a key may be named \
@@ -42,7 +42,6 @@ ticket's whole description; a small change in place is still `fs_modify_file`.
 [conversation.tools]
 ticket_list = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
 ticket_show = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
-ticket_labels = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
 
 # The writing tools inherit the workspace's `run = "ask"` default: filing,
 # commenting, and editing all leave a diff someone has to review.

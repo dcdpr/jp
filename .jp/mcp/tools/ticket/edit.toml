@@ -8,7 +8,7 @@ as it is.
 
 - `title` renames the ticket and moves its file to match.
 - `description` replaces the old one outright, so pass all of it, not just what
-  changed. Read the ticket first with `ticket_show`.
+  changed. Read it first with `ticket_show`, passing `description: true`.
 - `status` moves it between `todo`, `in progress`, and `done`; `done` closes
   it. Move a ticket to `in progress` when work on it starts, and back to `todo`
   when it stops before it is finished.

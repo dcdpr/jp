@@ -1,18 +1,27 @@
 [conversation.tools.ticket_show]
 enable = false
 source = "plugin.command.ticket.show"
-summary = "Read one ticket: its metadata, description, and full discussion."
+summary = "Read one ticket's metadata, and its description and discussion when asked."
 description = """
-Print a ticket with its comments numbered, so a reply can name the comment it
-answers (`ticket_comment` takes that number as `re`).
+Print a ticket's metadata: its title, path, status, kind, labels, authors, and
+date. Pass `description` or `comments` to add those; the result names anything
+it left out.
 
-The whole discussion comes back in one call — there is no pagination, because a
-ticket that needs it should have been closed and split.
+Comments are numbered so a reply can name the comment it answers
+(`ticket_comment` takes that number as `re`). The whole discussion comes back in
+one call — there is no pagination, because a ticket that needs it should have
+been closed and split.
 """
 
 examples = """
+Check a ticket's status and labels:
 ```json
 {"id": "T-02wt0kx"}
+```
+
+Read the whole ticket before replying to it:
+```json
+{"id": "T-02wt0kx", "description": true, "comments": true}
 ```
 """
 
@@ -25,3 +34,13 @@ results_file_link = "off"
 type = "string"
 required = true
 summary = "The ticket to read: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`."
+
+[conversation.tools.ticket_show.parameters.description]
+type = "boolean"
+required = false
+summary = "Add the ticket's description."
+
+[conversation.tools.ticket_show.parameters.comments]
+type = "boolean"
+required = false
+summary = "Add the discussion, each comment numbered for replies."

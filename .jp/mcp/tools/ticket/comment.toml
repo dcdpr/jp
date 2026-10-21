@@ -8,7 +8,7 @@ Add a comment to a ticket's discussion, attributed to you (`jp`).
 
 Comments are append-only: they are never removed or reordered, so write what you
 mean. The reply target is a comment's 1-based position, which `ticket_show`
-prints next to each comment (`T-02wt0kx#1`).
+prints next to each comment when asked for `comments` (`T-02wt0kx#1`).
 
 Findings, reproductions, and links to the code belong here. A comment that turns
 the ticket into a design argument is a signal the work wants an RFD instead.
@@ -45,4 +45,4 @@ summary = "The comment, as markdown."
 [conversation.tools.ticket_comment.parameters.re]
 type = "integer"
 required = false
-summary = "1-based position of the comment being replied to, as shown by `ticket_show`."
+summary = "1-based position of the comment being replied to, as `ticket_show` numbers them."

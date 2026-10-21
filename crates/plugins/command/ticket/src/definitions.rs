@@ -23,7 +23,6 @@ pub(crate) const DEFINITIONS: &[(&str, &str)] = &[
     ("comment.toml", include_str!("../tools/comment.toml")),
     ("create.toml", include_str!("../tools/create.toml")),
     ("edit.toml", include_str!("../tools/edit.toml")),
-    ("labels.toml", include_str!("../tools/labels.toml")),
     ("list.toml", include_str!("../tools/list.toml")),
     ("show.toml", include_str!("../tools/show.toml")),
 ];
