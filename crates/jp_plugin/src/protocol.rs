@@ -21,7 +21,8 @@ use crate::message::{ExitMessage, ReadyMessage};
 /// | 10      | `reload` on `read_config`, reading the configuration again.     |
 /// | 11      | `schema` and `expires_in` on `query`, `data` on its reply.      |
 /// | 12      | `tool` on `init`, answered with `tool_outcome`.                 |
-pub const PROTOCOL_VERSION: u32 = 12;
+/// | 13      | `edit_files`, answered with `edited`.                           |
+pub const PROTOCOL_VERSION: u32 = 13;
 
 /// Answer a host's `init`, refusing it when it is too old to serve this plugin.
 ///

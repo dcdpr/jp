@@ -2,6 +2,7 @@ use camino_tempfile::{Utf8TempDir, tempdir};
 #[cfg(unix)]
 use chrono::Utc;
 use jp_conversation::{Conversation, ConversationId, event::ChatResponse};
+use jp_editor::MockEditorBackend;
 #[cfg(unix)]
 use jp_plugin::registry::ApprovedPlugin;
 use jp_plugin::{
@@ -34,6 +35,98 @@ fn conversation_id(secs: u64) -> ConversationId {
         chrono::DateTime::<chrono::Utc>::UNIX_EPOCH + std::time::Duration::from_secs(secs),
     )
     .unwrap()
+}
+
+/// A composer with `editor` configured, and a terminal behind it when
+/// `interactive` says so.
+fn editing_composer(editor: Option<MockEditorBackend>, interactive: bool) -> Composer {
+    Composer {
+        printer: Arc::new(Printer::sink()),
+        prompts: Arc::new(TerminalPromptBackend),
+        editor: editor.map(|editor| Arc::new(editor) as Arc<dyn EditorBackend>),
+        edit_mode: ReplyEditMode::default(),
+        interactive,
+    }
+}
+
+fn edit_request(path: impl Into<Utf8PathBuf>) -> EditFilesRequest {
+    EditFilesRequest {
+        id: Some("1".to_owned()),
+        paths: vec![path.into()],
+    }
+}
+
+/// A file under the temporary directory, which is absolute on every platform.
+fn absolute(name: &str) -> Utf8PathBuf {
+    Utf8PathBuf::try_from(std::env::temp_dir())
+        .unwrap()
+        .join(name)
+}
+
+fn edit_refused(message: &str) -> HostToPlugin {
+    HostToPlugin::Error(ErrorResponse {
+        id: Some("1".to_owned()),
+        request: Some("edit_files".to_owned()),
+        message: message.to_owned(),
+    })
+}
+
+#[test]
+fn edit_files_answers_once_the_editor_exits() {
+    let composer = editing_composer(Some(MockEditorBackend::always("")), true);
+
+    assert_eq!(
+        composer.edit_files(&edit_request(absolute("02wt0kx-slug.md"))),
+        HostToPlugin::Edited(EditedResponse {
+            id: Some("1".to_owned()),
+            saved: true,
+        })
+    );
+}
+
+/// An editor nobody can close would block the plugin forever.
+#[test]
+fn edit_files_is_refused_without_a_terminal() {
+    let composer = editing_composer(Some(MockEditorBackend::always("")), false);
+
+    assert_eq!(
+        composer.edit_files(&edit_request(absolute("02wt0kx-slug.md"))),
+        edit_refused("there is no terminal to open an editor on")
+    );
+}
+
+#[test]
+fn edit_files_is_refused_without_an_editor() {
+    let composer = editing_composer(None, true);
+
+    assert_eq!(
+        composer.edit_files(&edit_request(absolute("02wt0kx-slug.md"))),
+        edit_refused(
+            "no editor is configured: set `editor.cmd`, or one of the `JP_EDITOR`, `VISUAL`, or \
+             `EDITOR` variables"
+        )
+    );
+}
+
+/// The editor starts in the host's directory, which need not be the plugin's.
+#[test]
+fn edit_files_refuses_a_relative_path() {
+    let composer = editing_composer(Some(MockEditorBackend::always("")), true);
+
+    assert_eq!(
+        composer.edit_files(&edit_request("docs/ticket/02wt0kx-slug.md")),
+        edit_refused("`docs/ticket/02wt0kx-slug.md` is not an absolute path")
+    );
+}
+
+#[test]
+fn edit_files_reports_an_editor_that_fails_to_start() {
+    let composer = editing_composer(Some(MockEditorBackend::failing()), true);
+
+    assert_eq!(
+        composer.edit_files(&edit_request(absolute("02wt0kx-slug.md"))),
+        edit_refused("failed to run the editor: failed to spawn editor: mock editor failure")
+    );
 }
 
 /// The turn is told to stop whether or not anything is listening to logs.
