@@ -302,6 +302,25 @@ pub fn edit(
     Ok(Edited { from, to })
 }
 
+/// Move a ticket's file to the name its title produces, after the file was
+/// edited by hand.
+///
+/// The id half of the name is kept, so references to the ticket still resolve.
+/// `from` and `to` are the same when the title still produces the old name.
+pub fn rename_to_title(dir: &Utf8Path, id: TicketId) -> Result<Edited> {
+    let from = locate(dir, id)?;
+    let ticket = parse::document(&fs::read_to_string(&from)?)?;
+
+    let to = dir.join(format!("{}{}.md", id.file_prefix(), slug(&ticket.title)));
+    // As in `edit`: the target carries this id's prefix, and `locate` refused
+    // above if a second file claimed it.
+    if to != from {
+        fs::rename(&from, &to)?;
+    }
+
+    Ok(Edited { from, to })
+}
+
 /// Set one metadata field on a ticket.
 ///
 /// The field is created if the ticket doesn't carry it yet.

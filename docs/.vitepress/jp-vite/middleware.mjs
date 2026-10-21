@@ -343,16 +343,15 @@ const ticketWriter = {
                         ...flag('--body', parsed.body)]
                     break
                 case 'edit': {
-                    // A title is set by `rename`, which also moves the file to
-                    // the new slug; the rest is one `edit`.
-                    if (text(parsed.title)) {
-                        const renamed = await jp(['ticket', 'rename', text(parsed.id), text(parsed.title)])
-                        if (!renamed.ok) return reply(res, 500, renamed)
-                    }
+                    // One `edit`; a new title also moves the file to its slug.
                     args = ['ticket', 'edit', text(parsed.id),
+                        ...flag('--title', parsed.title),
                         ...flag('--body', parsed.body),
                         ...flag('--kind', parsed.kind),
                         ...flag('--status', parsed.status)]
+                    // With nothing to change, `jp ticket edit` opens an editor,
+                    // which a dev-server request has no terminal for.
+                    if (args.length === 3) return reply(res, 200, { ok: true, output: '' })
                     break
                 }
                 case 'delete':

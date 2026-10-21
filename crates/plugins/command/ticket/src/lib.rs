@@ -17,6 +17,7 @@
 //! `docs/rfd/116-shareable-rfd-ticket-and-site-tooling.md`
 
 mod definitions;
+mod edit;
 mod options;
 mod tool;
 
@@ -179,13 +180,19 @@ enum Command {
         title: String,
     },
 
-    /// Rewrite a ticket's description, kind, or status.
+    /// Change a ticket's title, description, kind, status, or labels.
     ///
-    /// Metadata and comments the flags don't name are left alone.
+    /// Without any of those flags, opens the ticket's file in your editor: the
+    /// one `editor.cmd` names, or `JP_EDITOR`, `VISUAL`, or `EDITOR`.
+    /// What the flags don't name is left alone.
     Edit {
         /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
         /// Omit it to choose.
         id: Option<TicketId>,
+
+        /// New one-line summary; the file moves to match, as with `rename`.
+        #[arg(long)]
+        title: Option<String>,
 
         /// New description, replacing the old one.
         #[arg(long)]
@@ -198,6 +205,11 @@ enum Command {
         /// New status: `todo`, `in progress`, or `done`.
         #[arg(long)]
         status: Option<Status>,
+
+        /// A `key=value` label; the ticket ends up with exactly the ones named.
+        /// Repeat for more than one.
+        #[arg(long = "label")]
+        labels: Vec<String>,
     },
 
     /// Delete a ticket outright.
@@ -460,6 +472,24 @@ fn answer_tool_call(
     send_exit(stdout, 0, None)
 }
 
+impl Command {
+    /// The ticket an `edit` opens in the editor: one that names a ticket and
+    /// nothing to change.
+    fn opens_editor(&self) -> Option<TicketId> {
+        match self {
+            Self::Edit {
+                id: Some(id),
+                title: None,
+                body: None,
+                kind: None,
+                status: None,
+                labels,
+            } if labels.is_empty() => Some(*id),
+            _ => None,
+        }
+    }
+}
+
 fn handle_command(
     init: &InitMessage,
     stdin: &mut impl BufRead,
@@ -501,7 +531,14 @@ fn handle_command(
         format: init.output_format,
     };
 
-    match execute(&ctx, command) {
+    let result = match command.opens_editor() {
+        // The editor runs on the host, so this one command needs the protocol
+        // stream that `execute` doesn't get.
+        Some(id) => edit::through_host(init.version, &ctx.dir, id, &options, stdin, stdout),
+        None => execute(&ctx, command),
+    };
+
+    match result {
         Ok(output) => {
             // On stderr, which `--quiet` silences, rather than in the log,
             // which only `-v` shows: a warning names something to check now.
@@ -650,14 +687,18 @@ fn compose_missing(
 
         Command::Edit {
             id: None,
+            title,
             body,
             kind,
             status,
+            labels,
         } => Ok(Command::Edit {
             id: Some(pick_ticket(dir, stdin, stdout, "Edit", false)?),
+            title,
             body,
             kind,
             status,
+            labels,
         }),
 
         Command::Label { id: None, labels } => Ok(Command::Label {
@@ -1306,16 +1347,18 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
 
         Command::Edit {
             id,
+            title,
             body,
             kind,
             status,
-        } => edit(
-            dir,
-            required(id, "ticket id")?,
-            body.as_deref(),
+            labels,
+        } => edit(dir, ctx.options, required(id, "ticket id")?, &Changes {
+            title,
+            body,
             kind,
             status,
-        ),
+            labels,
+        }),
 
         Command::Board => show_board(dir, ctx.options.board.done_limit),
 
@@ -1741,26 +1784,54 @@ fn describe_vocabulary(vocabulary: &Vocabulary, leftover: Option<&str>) -> Strin
     out
 }
 
-/// Apply an edit, touching only the parts the caller named.
-fn edit(
-    dir: &Utf8Path,
-    id: TicketId,
-    body: Option<&str>,
+/// What `edit` changes; `None`, or no labels, leaves that part as it is.
+struct Changes {
+    title: Option<String>,
+    body: Option<String>,
     kind: Option<Kind>,
     status: Option<Status>,
+    labels: Vec<String>,
+}
+
+/// Apply an edit, touching only the parts the caller named.
+///
+/// Labels are written first: the vocabulary can still refuse them, and a
+/// refused edit should change nothing.
+/// The title goes last, since it moves the file.
+fn edit(
+    dir: &Utf8Path,
+    options: &Options,
+    id: TicketId,
+    changes: &Changes,
 ) -> Result<Output, String> {
     let failed = |error: store::Error| error.to_string();
 
-    let mut path = match body {
-        Some(body) => store::edit(dir, id, None, Some(body)).map_err(failed)?.to,
-        None => store::locate_ticket(dir, id).map_err(failed)?,
-    };
+    if changes
+        .title
+        .as_deref()
+        .is_some_and(|title| title.trim().is_empty())
+    {
+        return Err("Refusing to give a ticket an empty title.".to_owned());
+    }
 
-    if let Some(kind) = kind {
+    let mut path = store::locate_ticket(dir, id).map_err(failed)?;
+    if !changes.labels.is_empty() {
+        let vocabulary = options.vocabulary()?;
+        path = store::set_labels(dir, id, &vocabulary, &changes.labels)
+            .map_err(failed)?
+            .0;
+    }
+    if let Some(kind) = changes.kind {
         path = store::set_field(dir, id, "Kind", &kind.to_string()).map_err(failed)?;
     }
-    if let Some(status) = status {
-        path = store::set_field(dir, id, "Status", &status.to_string()).map_err(failed)?;
+    if let Some(status) = changes.status {
+        path = store::set_status(dir, id, status).map_err(failed)?.0;
+    }
+    if changes.title.is_some() || changes.body.is_some() {
+        let title = changes.title.as_deref().map(str::trim);
+        path = store::edit(dir, id, title, changes.body.as_deref())
+            .map_err(failed)?
+            .to;
     }
 
     Ok(format!("Edited {path}\n").into())

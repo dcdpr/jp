@@ -454,6 +454,44 @@ fn editing_only_the_description_leaves_the_filename_alone() {
     assert_eq!(ticket.description, "Revised body.");
 }
 
+/// A heading changed in an editor takes the file name with it, keeping the id
+/// half and every byte of the file.
+#[test]
+fn renaming_to_the_title_follows_a_hand_edited_heading() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = new_ticket(&dir, "Original title");
+    let before = locate(dir.path(), id).unwrap();
+    let edited = fs::read_to_string(&before)
+        .unwrap()
+        .replace("# Original title", "# Tool call header misaligned");
+    fs::write(&before, &edited).unwrap();
+
+    let done = rename_to_title(dir.path(), id).unwrap();
+
+    assert_eq!(done.from, before);
+    assert_eq!(
+        done.to,
+        dir.path().join(format!(
+            "{}tool-call-header-misaligned.md",
+            id.file_prefix()
+        ))
+    );
+    assert!(!before.exists());
+    assert_eq!(fs::read_to_string(&done.to).unwrap(), edited);
+}
+
+#[test]
+fn renaming_to_an_unchanged_title_leaves_the_file_where_it_is() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = new_ticket(&dir, "Header misaligned");
+    let path = locate(dir.path(), id).unwrap();
+
+    let done = rename_to_title(dir.path(), id).unwrap();
+
+    assert_eq!((&done.from, &done.to), (&path, &path));
+    assert!(path.exists());
+}
+
 #[test]
 fn editing_a_missing_ticket_is_refused() {
     let dir = Utf8TempDir::new().unwrap();

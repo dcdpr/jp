@@ -1,6 +1,8 @@
 use camino_tempfile::Utf8TempDir;
 use clap::CommandFactory;
-use jp_plugin::message::{OutputFormat, ToolAction, WorkspaceInfo};
+use jp_plugin::message::{
+    EditFilesRequest, EditedResponse, ErrorResponse, OutputFormat, ToolAction, WorkspaceInfo,
+};
 use serde_json::{Map, json};
 
 use super::*;
@@ -687,12 +689,27 @@ fn rename_moves_the_file() {
     assert_eq!(retitled.text, format!("Retitled {after}\n"));
 }
 
-/// `rename` is how a title changes, so `edit` no longer takes one.
 #[test]
-fn edit_takes_no_title() {
-    let error = parse(&["edit", "T-02wt0kx", "--title", "New"]).unwrap_err();
+fn edit_takes_every_part_of_a_ticket() {
+    let args = parse(&[
+        "edit",
+        "T-02wt0kx",
+        "--title",
+        "New",
+        "--label",
+        "client=cli",
+        "--label",
+        "package=jp_cli",
+    ])
+    .unwrap();
 
-    assert!(error.use_stderr(), "{error}");
+    match args.command {
+        Command::Edit { title, labels, .. } => {
+            assert_eq!(title.as_deref(), Some("New"));
+            assert_eq!(labels, ["client=cli", "package=jp_cli"]);
+        }
+        other => panic!("expected edit, got {other:?}"),
+    }
 }
 
 #[test]
@@ -702,9 +719,11 @@ fn edit_rewrites_the_description_and_keeps_the_title() {
 
     let edited = run_command(&dir, Command::Edit {
         id: Some(id),
+        title: None,
         body: Some("A new description.".to_owned()),
         kind: Some(Kind::Chore),
         status: None,
+        labels: vec![],
     })
     .unwrap();
 
@@ -714,6 +733,122 @@ fn edit_rewrites_the_description_and_keeps_the_title() {
     assert_eq!(ticket.title, "Kept title");
     assert_eq!(ticket.description, "A new description.");
     assert_eq!(ticket.metadata.kind, Kind::Chore);
+}
+
+/// A new title moves the file, as `rename` does, and the labels named are the
+/// ones the ticket ends up with.
+#[test]
+fn edit_changes_the_title_and_the_labels_at_once() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_ticket(dir.path(), "02wt0kx", "Wrapping is wrong", Status::Todo);
+
+    let edited = run_command(&dir, Command::Edit {
+        id: Some(id),
+        title: Some("The wrap calculation is off".to_owned()),
+        body: None,
+        kind: None,
+        status: None,
+        labels: vec!["client=cli".to_owned()],
+    })
+    .unwrap();
+
+    let path = dir.path().join("02wt0kx-the-wrap-calculation-is-off.md");
+    assert_eq!(edited.text, format!("Edited {path}\n"));
+    let ticket = ticket::parse::document(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(ticket.title, "The wrap calculation is off");
+    assert_eq!(ticket.metadata.labels.to_tokens(), ["client=cli"]);
+}
+
+/// Labels are checked before anything is written, so a refused one leaves the
+/// title, and the file's name, as they were.
+#[test]
+fn edit_refuses_a_label_before_changing_anything() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_ticket(dir.path(), "02wt0kx", "Wrapping is wrong", Status::Todo);
+    let path = dir.path().join("02wt0kx-slug.md");
+    let before = std::fs::read_to_string(&path).unwrap();
+
+    let error = run_command(&dir, Command::Edit {
+        id: Some(id),
+        title: Some("The wrap calculation is off".to_owned()),
+        body: None,
+        kind: None,
+        status: None,
+        labels: vec!["client=windows".to_owned()],
+    })
+    .unwrap_err();
+
+    assert!(error.contains("client=windows"), "{error}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+}
+
+/// With nothing to change, `edit` asks the host to open the ticket's file, and
+/// reads it back once the editor closes.
+#[test]
+fn edit_with_nothing_to_change_opens_the_editor_through_the_host() {
+    let dir = Utf8TempDir::new().unwrap();
+    let tickets = dir.path().join("docs/ticket");
+    write_ticket(&tickets, "02wt0kx", "Wrapping is wrong", Status::Todo);
+    let path = tickets.join("02wt0kx-slug.md");
+
+    let messages = exchange_with(&init(dir.path(), &["edit", "T-02wt0kx"]), &[
+        HostToPlugin::Edited(EditedResponse {
+            id: None,
+            saved: true,
+        }),
+    ]);
+
+    assert!(
+        messages.contains(&PluginToHost::EditFiles(EditFilesRequest {
+            id: None,
+            paths: vec![path.clone()],
+        })),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|message| matches!(
+            message,
+            PluginToHost::Print(print) if print.text == format!("{path}: unchanged\n")
+        )),
+        "{messages:?}"
+    );
+    assert!(
+        matches!(messages.last(), Some(PluginToHost::Exit(exit)) if exit.code == 0),
+        "{messages:?}"
+    );
+}
+
+/// A host that can't open an editor says why, and the flags are named as the
+/// way to make the same change without one.
+#[test]
+fn edit_without_an_editor_names_the_flags() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(
+        &dir.path().join("docs/ticket"),
+        "02wt0kx",
+        "Wrapping is wrong",
+        Status::Todo,
+    );
+
+    let messages = exchange_with(&init(dir.path(), &["edit", "T-02wt0kx"]), &[
+        HostToPlugin::Error(ErrorResponse {
+            id: None,
+            request: Some("edit_files".to_owned()),
+            message: "there is no terminal to open an editor on".to_owned(),
+        }),
+    ]);
+
+    assert_eq!(
+        messages.last(),
+        Some(&PluginToHost::Exit(ExitMessage {
+            code: 1,
+            reason: Some(
+                "Couldn't open an editor: there is no terminal to open an editor on. Pass what to \
+                 change instead: --title, --body, --kind, --status, or --label."
+                    .to_owned()
+            ),
+        }))
+    );
 }
 
 #[test]
