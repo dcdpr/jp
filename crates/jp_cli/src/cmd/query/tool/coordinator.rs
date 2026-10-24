@@ -1108,6 +1108,9 @@ impl ToolCoordinator {
     /// `interrupts` carries interrupts from a client driving the turn from
     /// outside the process; one is taken per call, and the rest stay queued.
     ///
+    /// A prompt still open once every call is settled is waited for: it owns
+    /// the terminal until answered, and its answer changes nothing.
+    ///
     /// [`submit`]: Self::submit
     pub(crate) async fn finish(
         &mut self,
@@ -1140,7 +1143,11 @@ impl ToolCoordinator {
         let mut outcome = ExecutionOutcome::Completed;
         let mut stop = Stop::default();
 
-        while !batch.settled() {
+        // A call can be settled while its prompt is open, as when the
+        // connection is lost or a client stops the calls. The prompt runs on a
+        // blocking thread nothing can stop, so it is waited for here rather
+        // than left on screen past the batch it reports to.
+        while !batch.settled() || batch.prompting {
             // One client interrupt per phase. Once the calls are being
             // cancelled, the answer they give back is settled, and a second
             // reply taken here would replace the first after both were reported
@@ -1366,6 +1373,10 @@ impl ToolCoordinator {
             }
             ToolEvent::Permission { call, result } => {
                 batch.prompting = false;
+                // Settled while its prompt was open; the answer comes too late.
+                if matches!(batch.calls[call].wait, Wait::Done) {
+                    return;
+                }
                 self.on_permission(batch, call, result, host);
             }
             ToolEvent::Answered {
@@ -1450,10 +1461,7 @@ impl ToolCoordinator {
             }
             ToolEvent::Reviewed { call, review } => {
                 batch.prompting = false;
-                let tool_name = batch.calls[call].tool_name.clone();
-                host.renderer.focus(&batch.calls[call].tool_id);
-                self.render_result(&tool_name, &review.response, host.renderer);
-                self.settle(batch, call, review, host);
+                self.on_reviewed(batch, call, review, host);
             }
             ToolEvent::Folded {
                 group,
@@ -1461,6 +1469,25 @@ impl ToolCoordinator {
                 connection_lost,
             } => self.on_folded(batch, group, review, connection_lost, host),
         }
+    }
+
+    /// Take what the user settled on in a call's result review.
+    fn on_reviewed(
+        &mut self,
+        batch: &mut Batch,
+        index: usize,
+        review: Review,
+        host: &mut Host<'_>,
+    ) {
+        // Settled while its review was open; the response it was settled with
+        // stands.
+        if matches!(batch.calls[index].wait, Wait::Done) {
+            return;
+        }
+        let tool_name = batch.calls[index].tool_name.clone();
+        host.renderer.focus(&batch.calls[index].tool_id);
+        self.render_result(&tool_name, &review.response, host.renderer);
+        self.settle(batch, index, review, host);
     }
 
     /// Take the response a fanned-out call is recorded with.

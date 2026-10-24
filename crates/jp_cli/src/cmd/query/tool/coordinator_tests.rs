@@ -746,11 +746,15 @@ async fn a_fanned_out_call_asks_about_each_operation_and_records_once() {
     );
 }
 
-/// A call that finds the Host's connection to the JP MCP Server gone as soon as
-/// it is submitted.
+/// A call that finds the Host's connection to the JP MCP Server gone when it is
+/// submitted.
 struct Disconnected {
     tool_id: String,
     tool_name: String,
+
+    /// What the call waits for before reporting the lost connection, if
+    /// anything.
+    after: Option<Arc<Notify>>,
 }
 
 #[async_trait]
@@ -774,6 +778,9 @@ impl Executor for Disconnected {
     fn set_arguments(&self, _: Value) {}
 
     async fn prepare(&self, _: bool, _: CancellationToken) -> ExecutorResult {
+        if let Some(after) = &self.after {
+            after.notified().await;
+        }
         ExecutorResult::Failed(ExecutorError::ConnectionLost(Box::new(io::Error::other(
             "Session expired (HTTP 404)",
         ))))
@@ -811,6 +818,7 @@ async fn a_lost_connection_settles_every_call_without_asking() {
             Box::new(Disconnected {
                 tool_id: request.id,
                 tool_name: request.name,
+                after: None,
             })
         })
         .with_executor("my_tool", |request| {
@@ -883,6 +891,120 @@ async fn a_lost_connection_settles_every_call_without_asking() {
     );
     printer.flush();
     assert_eq!(strip_ansi(&stderr.lock()), "");
+}
+
+/// A prompt already open when the connection is lost is waited for before the
+/// calls are handed back, and its answer changes nothing.
+///
+/// The prompt runs on a thread of its own and owns the terminal until it is
+/// answered.
+/// Returning while it is open would leave it on screen over the turn's error,
+/// with its answer sent to a batch that no longer exists.
+#[tokio::test]
+async fn a_lost_connection_waits_for_an_open_prompt() {
+    let mut tools = ask_tools();
+    tools.insert(
+        "lost_tool".to_owned(),
+        ToolConfig::from_partial(
+            serde_json::from_value(json!({"source": "builtin", "run": "allow"})).unwrap(),
+            vec![],
+        )
+        .unwrap(),
+    );
+    let (answer, answers) = std::sync::mpsc::channel();
+    let prompts = Arc::new(HeldPromptBackend::new(answers));
+    // The connection is lost only once the first call's approval prompt is
+    // open, so the loss always lands while it is waiting for an answer.
+    let opened = Arc::clone(&prompts.opened);
+    let source = TestExecutorSource::new()
+        .with_executor("my_tool", |request| {
+            Box::new(
+                MockExecutor::completed(&request.id, &request.name, "ran").with_permission_info(
+                    PermissionInfo {
+                        tool_id: request.id.clone(),
+                        state_key: request.id.clone(),
+                        tool_name: request.name.clone(),
+                        tool_source: ToolSource::Builtin { tool: None },
+                        run_mode: RunMode::Ask,
+                        arguments: Value::Object(Map::new()),
+                    },
+                ),
+            )
+        })
+        .with_executor("lost_tool", move |request| {
+            Box::new(Disconnected {
+                tool_id: request.id,
+                tool_name: request.name,
+                after: Some(Arc::clone(&opened)),
+            })
+        });
+    let mut coordinator = ToolCoordinator::new(tools, Box::new(source));
+    let printer = Arc::new(Printer::sink());
+    let (_workspace, lock) = test_lock();
+    let conv = lock.as_mut();
+    let mut turn_state = TurnState::default();
+
+    let driving = drive(
+        &mut coordinator,
+        vec![
+            ToolCallRequest {
+                id: "call_1".into(),
+                name: "my_tool".into(),
+                arguments: Map::new(),
+            },
+            ToolCallRequest {
+                id: "call_2".into(),
+                name: "lost_tool".into(),
+                arguments: Map::new(),
+            },
+        ],
+        prompts.clone(),
+        Arc::new(MockInquiryBackend::new(HashMap::new())),
+        &mut turn_state,
+        &conv,
+        &printer,
+    );
+    tokio::pin!(driving);
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), &mut driving)
+            .await
+            .is_err(),
+        "the calls were handed back while the approval prompt was still open"
+    );
+    answer.send('y').unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(5), driving)
+        .await
+        .expect("answering the prompt lets the calls be handed back");
+
+    assert_eq!(result.outcome, ExecutionOutcome::ConnectionLost);
+    assert_eq!(
+        result
+            .reviews
+            .iter()
+            .map(|(id, review)| (id.as_str(), review.response.result.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "call_1",
+                Err(
+                    "Tool 'my_tool' was not executed: JP could not complete the call. You may \
+                     retry it."
+                        .to_owned()
+                )
+            ),
+            (
+                "call_2",
+                Err(
+                    "Tool 'lost_tool' was not executed: JP could not complete the call. You may \
+                     retry it."
+                        .to_owned()
+                )
+            ),
+        ],
+        "approving the call after the connection was lost does not run it"
+    );
+    assert_eq!(prompts.shown.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
 /// Tools named `name` whose calls an argument formatter describes, and which
@@ -1305,9 +1427,7 @@ async fn a_remembered_no_stops_a_later_calls_formatter() {
         drive(
             &mut coordinator,
             requests,
-            Arc::new(HeldPromptBackend {
-                answers: std::sync::Mutex::new(answers),
-            }),
+            Arc::new(HeldPromptBackend::new(answers)),
             Arc::new(MockInquiryBackend::new(HashMap::new())),
             &mut TurnState::default(),
             &lock.as_mut(),
@@ -1462,6 +1582,22 @@ async fn an_unanswered_formatter_question_settles_the_call() {
 /// that fails the test if anything else is asked.
 struct HeldPromptBackend {
     answers: std::sync::Mutex<std::sync::mpsc::Receiver<char>>,
+
+    /// Notified each time an inline select opens.
+    opened: Arc<Notify>,
+
+    /// How many inline selects have opened.
+    shown: std::sync::atomic::AtomicUsize,
+}
+
+impl HeldPromptBackend {
+    fn new(answers: std::sync::mpsc::Receiver<char>) -> Self {
+        Self {
+            answers: std::sync::Mutex::new(answers),
+            opened: Arc::new(Notify::new()),
+            shown: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
 }
 
 impl PromptBackend for HeldPromptBackend {
@@ -1472,6 +1608,8 @@ impl PromptBackend for HeldPromptBackend {
         _default: Option<char>,
         _writer: &mut dyn std::io::Write,
     ) -> Result<char, InquireError> {
+        self.shown.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.opened.notify_one();
         self.answers
             .lock()
             .unwrap()
@@ -1690,9 +1828,7 @@ async fn a_remembered_no_while_a_later_call_asks(
     });
 
     let (answer, answers) = std::sync::mpsc::channel();
-    let prompts: Arc<dyn PromptBackend> = Arc::new(HeldPromptBackend {
-        answers: std::sync::Mutex::new(answers),
-    });
+    let prompts: Arc<dyn PromptBackend> = Arc::new(HeldPromptBackend::new(answers));
     let assistant = Arc::new(SilentAssistant::default());
     let inquiry_backend: Arc<dyn InquiryBackend> = assistant.clone();
     let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
