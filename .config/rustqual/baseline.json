@@ -1,13 +1,13 @@
 {
   "version": 2,
-  "quality_score": 0.705261627659666,
-  "iosp_score": 0.9144580696202531,
+  "quality_score": 0.7057826797144976,
+  "iosp_score": 0.9146353498470344,
   "violations": 865,
-  "total": 13949,
+  "total": 13978,
   "complexity_warnings": 163,
   "magic_number_warnings": 238,
   "nesting_depth_warnings": 27,
-  "function_length_warnings": 430,
+  "function_length_warnings": 431,
   "unsafe_warnings": 74,
   "error_handling_warnings": 194,
   "duplicate_groups": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 48,
   "structural_coupling_warnings": 8,
-  "total_findings": 2816,
+  "total_findings": 2817,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -158,7 +158,7 @@
     {
       "name": "StoredEvent::deserialize",
       "file": "crates/jp_conversation/src/stream/entry.rs",
-      "line": 305
+      "line": 326
     },
     {
       "name": "EventId::random",
@@ -723,7 +723,7 @@
     {
       "name": "render_available",
       "file": "crates/jp_config/src/types/api_key_env.rs",
-      "line": 63
+      "line": 133
     },
     {
       "name": "PartialInterruptConfig::assign",
@@ -783,22 +783,22 @@
     {
       "name": "PartialGoogleConfig::assign",
       "file": "crates/jp_config/src/providers/llm/google.rs",
-      "line": 75
+      "line": 83
     },
     {
       "name": "PartialOpenrouterConfig::assign",
       "file": "crates/jp_config/src/providers/llm/openrouter.rs",
-      "line": 84
+      "line": 92
     },
     {
       "name": "PartialVllmConfig::assign",
       "file": "crates/jp_config/src/providers/llm/vllm.rs",
-      "line": 87
+      "line": 95
     },
     {
       "name": "PartialCerebrasConfig::assign",
       "file": "crates/jp_config/src/providers/llm/cerebras.rs",
-      "line": 99
+      "line": 107
     },
     {
       "name": "PartialOllamaConfig::assign",
@@ -813,17 +813,17 @@
     {
       "name": "PartialDeepseekConfig::assign",
       "file": "crates/jp_config/src/providers/llm/deepseek.rs",
-      "line": 75
+      "line": 83
     },
     {
       "name": "PartialAnthropicConfig::assign",
       "file": "crates/jp_config/src/providers/llm/anthropic.rs",
-      "line": 157
+      "line": 165
     },
     {
       "name": "PartialOpenaiConfig::assign",
       "file": "crates/jp_config/src/providers/llm/openai.rs",
-      "line": 122
+      "line": 130
     },
     {
       "name": "PartialStdioConfig::assign",
@@ -2423,12 +2423,12 @@
     {
       "name": "read_setup_token",
       "file": "crates/jp_cli/src/cmd/provider.rs",
-      "line": 1041
+      "line": 1054
     },
     {
       "name": "humanize",
       "file": "crates/jp_cli/src/cmd/provider.rs",
-      "line": 1136
+      "line": 1149
     },
     {
       "name": "Composer::ask",
