@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.6525493395791738,
-  "iosp_score": 0.8125,
-  "violations": 870,
-  "total": 6511,
+  "quality_score": 0.6522887459652152,
+  "iosp_score": 0.8123249299719888,
+  "violations": 871,
+  "total": 6512,
   "complexity_warnings": 0,
   "magic_number_warnings": 0,
   "nesting_depth_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 0,
   "structural_coupling_warnings": 0,
-  "total_findings": 1293,
+  "total_findings": 1294,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -2828,77 +2828,82 @@
     {
       "name": "ToolCoordinator::finish",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1112
+      "line": 1115
     },
     {
       "name": "ToolCoordinator::dispatch",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1356
+      "line": 1363
+    },
+    {
+      "name": "ToolCoordinator::on_reviewed",
+      "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
+      "line": 1475
     },
     {
       "name": "ToolCoordinator::on_step",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1482
+      "line": 1509
     },
     {
       "name": "ToolCoordinator::on_permission",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1546
+      "line": 1573
     },
     {
       "name": "ToolCoordinator::pump",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1580
+      "line": 1607
     },
     {
       "name": "ToolCoordinator::decide",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1638
+      "line": 1665
     },
     {
       "name": "ToolCoordinator::announce",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1691
+      "line": 1718
     },
     {
       "name": "ToolCoordinator::release",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1713
+      "line": 1740
     },
     {
       "name": "ToolCoordinator::route",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1787
+      "line": 1814
     },
     {
       "name": "ToolCoordinator::answer",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1885
+      "line": 1912
     },
     {
       "name": "ToolCoordinator::serve",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1899
+      "line": 1926
     },
     {
       "name": "ToolCoordinator::deliver",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 1987
+      "line": 2014
     },
     {
       "name": "ToolCoordinator::close",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 2038
+      "line": 2065
     },
     {
       "name": "ToolCoordinator::render_result",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 2282
+      "line": 2309
     },
     {
       "name": "ToolCoordinator::preset_answer",
       "file": "crates/jp_cli/src/cmd/query/tool/coordinator.rs",
-      "line": 2418
+      "line": 2445
     },
     {
       "name": "route",
