@@ -72,7 +72,7 @@ use crate::{
         tool::{
             ToolCoordinator,
             executor::{
-                Executor, ExecutorResult, ExecutorSource, PermissionInfo,
+                Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo,
                 mock::{
                     MockExecutor, TestExecutorSource, asking_formatter, asking_formatter_runner,
                     no_commands,
@@ -2204,6 +2204,111 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
     .await;
 
     assert!(test_result.is_ok(), "Test timed out after 10 seconds");
+}
+
+/// A tool call that loses the Host's connection to the JP MCP Server ends the
+/// turn with an error naming that, instead of handing the failure to the
+/// assistant as a tool result to retry against a connection that is gone.
+///
+/// The call's response is still recorded, so the request stays paired, and no
+/// follow-up request is sent.
+#[tokio::test]
+async fn a_lost_connection_ends_the_turn_with_an_error() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let mut config = AppConfig::new_test();
+    config.conversation.tools.insert(
+        "lost_tool".to_string(),
+        ToolConfig::from_partial(
+            serde_json::from_value(json!({"source": "builtin", "run": "allow"})).unwrap(),
+            vec![],
+        )
+        .unwrap(),
+    );
+
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+        .unwrap();
+    let conv_id = lock.id();
+
+    let provider = Arc::new(SequentialMockProvider::with_tool_then_message(
+        "call_lost",
+        "lost_tool",
+        "This follow-up should never be requested.",
+    ));
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let (router, _signals) = test_router();
+
+    let executor_source = TestExecutorSource::new().with_executor("lost_tool", |request| {
+        Box::new(MockExecutor::ending_with(
+            &request.id,
+            &request.name,
+            ExecutorResult::OutcomeUnknown(ExecutorError::ConnectionLost(Box::new(
+                std::io::Error::other("Session expired (HTTP 404)"),
+            ))),
+        ))
+    });
+
+    let result = timeout(
+        Duration::from_secs(10),
+        run_turn_loop(
+            Arc::clone(&provider) as Arc<dyn Provider>,
+            &model,
+            &config,
+            &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            Arc::new(printer),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            ChatRequest::from("Please use a tool"),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
+        ),
+    )
+    .await
+    .expect("the turn ends");
+
+    assert!(
+        matches!(result, Err(Error::McpConnectionLost)),
+        "expected the lost connection to end the turn, got {result:?}"
+    );
+    assert_eq!(
+        provider.call_index.load(Ordering::SeqCst),
+        1,
+        "a lost connection must not trigger a follow-up request"
+    );
+    assert!(
+        !router.shutdown_token().is_cancelled(),
+        "a lost connection ends the turn, not the process"
+    );
+
+    // Tool response content is base64-encoded in the raw events file.
+    let content = fs
+        .read_test_events_raw(&conv_id)
+        .expect("events should be persisted");
+    let recorded = STANDARD.encode(
+        "Tool 'lost_tool' may have run, but JP lost the call before its result arrived. Check \
+         whether its effects took place before calling it again.",
+    );
+    assert!(
+        content.contains(&recorded),
+        "the lost call's response must be recorded.\nFile contents:\n{content}"
+    );
 }
 
 /// A Ctrl-C pressed while a tool question prompt is active is declined by the

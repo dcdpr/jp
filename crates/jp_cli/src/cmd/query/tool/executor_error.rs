@@ -2,6 +2,7 @@
 
 use std::error::Error as StdError;
 
+use rmcp::ServiceError as McpCallError;
 use serde_json::Error as JsonError;
 use tokio::task::JoinError;
 
@@ -34,6 +35,13 @@ pub(crate) enum ExecutorError {
     /// An MCP request failed.
     #[error("{0}")]
     Transport(#[source] Box<dyn StdError + Send + Sync>),
+
+    /// The Host's connection to the JP MCP Server failed.
+    ///
+    /// Every call the Host submits travels on that one connection, so none
+    /// submitted after this can complete either.
+    #[error("Lost the connection to the JP MCP Server: {0}")]
+    ConnectionLost(#[source] Box<dyn StdError + Send + Sync>),
 
     /// The call stopped before the Host's reply reached the service.
     ///
@@ -78,6 +86,25 @@ pub(crate) enum ExecutorError {
 }
 
 impl ExecutorError {
+    /// Classify a failed MCP request the Host submitted.
+    ///
+    /// A request that could not be sent, or a connection that closed under it,
+    /// means the connection is gone.
+    /// Anything else is this request failing.
+    pub(crate) fn from_mcp_call(error: McpCallError) -> Self {
+        match error {
+            McpCallError::TransportSend(_) | McpCallError::TransportClosed => {
+                Self::ConnectionLost(Box::new(error))
+            }
+            error => Self::Transport(Box::new(error)),
+        }
+    }
+
+    /// Whether the Host lost its connection to the JP MCP Server.
+    pub(crate) fn is_connection_lost(&self) -> bool {
+        matches!(self, Self::ConnectionLost(_))
+    }
+
     /// Whether this belongs in the conversation as the call's outcome.
     ///
     /// A user stopping a tool is something that happened to the call, and the
