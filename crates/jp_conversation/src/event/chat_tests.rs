@@ -62,6 +62,35 @@ fn untagged_deserialization_distinguishes_variants() {
 }
 
 #[test]
+fn every_variant_serializes_with_a_listed_content_key() {
+    let responses = [
+        ChatResponse::message("hello"),
+        ChatResponse::reasoning("let me think"),
+        ChatResponse::structured(json!({"key": "value"})),
+    ];
+
+    for response in responses {
+        // Exhaustive, so a new variant stops compiling here until it has a
+        // sample above and a key in `CONTENT_KEYS`.
+        let key = match &response {
+            ChatResponse::Message { .. } => "message",
+            ChatResponse::Reasoning { .. } => "reasoning",
+            ChatResponse::Structured { .. } => "data",
+        };
+
+        let json = serde_json::to_value(&response).unwrap();
+        assert!(
+            json.get(key).is_some(),
+            "{response:?} is not stored under {key:?}"
+        );
+        assert!(
+            ChatResponse::CONTENT_KEYS.contains(&key),
+            "{key:?} is missing from CONTENT_KEYS"
+        );
+    }
+}
+
+#[test]
 fn structured_within_event_kind_roundtrip() {
     let kind = EventKind::ChatResponse(ChatResponse::structured(json!([1, 2, 3])));
     let json = serde_json::to_value(&kind).unwrap();

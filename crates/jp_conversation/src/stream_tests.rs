@@ -3096,6 +3096,68 @@ fn test_from_parts_tolerates_unknown_event_kind() {
     );
 }
 
+#[test]
+fn test_internal_event_preserves_unknown_chat_response_verbatim() {
+    // A chat response written by a newer jp, selected by a content key this
+    // build doesn't know.
+    let raw = serde_json::json!({
+        "event_id": "future1",
+        "type": "chat_response",
+        "timestamp": "2025-01-01 00:00:00.0",
+        "commentary": "Found it. Editing the parser next.",
+        "metadata": { "foo": "YmFy" }
+    });
+
+    let internal = serde_json::from_value::<StoredEvent>(raw.clone())
+        .unwrap()
+        .into_entry();
+    assert!(matches!(&internal.payload, EventPayload::Unknown(_)));
+
+    let serialized = serde_json::to_value(&internal).unwrap();
+    assert_eq!(serialized, raw);
+}
+
+#[test]
+fn test_from_parts_tolerates_unknown_chat_response() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+
+    let (base_config, mut events) = stream.to_parts().unwrap();
+
+    let unknown = serde_json::json!({
+        "event_id": "future1",
+        "type": "chat_response",
+        "timestamp": "2025-01-01 00:01:00.0",
+        "commentary": "Found it. Editing the parser next."
+    });
+    events.push(unknown.clone());
+
+    let result =
+        ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty()).unwrap();
+
+    // TurnStart + ChatRequest; the unknown chat response is not an event here.
+    assert_eq!(result.len(), 2);
+
+    let (_, round_tripped) = result.to_parts().unwrap();
+    assert!(
+        round_tripped.contains(&unknown),
+        "unknown chat response must round-trip through to_parts"
+    );
+}
+
+#[test]
+fn test_malformed_known_chat_response_fails_deserialization() {
+    // A known content key with a value of the wrong type is corruption, not a
+    // newer format, and keeps failing loudly.
+    let raw = serde_json::json!({
+        "type": "chat_response",
+        "timestamp": "2025-01-01 00:00:00.0",
+        "message": 5
+    });
+
+    assert!(serde_json::from_value::<StoredEvent>(raw).is_err());
+}
+
 /// Characterization test: extending an empty stream from a source stream
 /// reproduces the source's observed iter sequence and serialized shape.
 ///
