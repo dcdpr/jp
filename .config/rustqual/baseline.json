@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.7058772822297027,
-  "iosp_score": 0.9146377525874815,
+  "quality_score": 0.7063115932162358,
+  "iosp_score": 0.914797323888233,
   "violations": 866,
-  "total": 13997,
+  "total": 14021,
   "complexity_warnings": 163,
   "magic_number_warnings": 238,
   "nesting_depth_warnings": 27,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 48,
   "structural_coupling_warnings": 8,
-  "total_findings": 2819,
+  "total_findings": 2820,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -2308,87 +2308,87 @@
     {
       "name": "Query::run_locked",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 457
+      "line": 460
     },
     {
       "name": "Query::conversation_load_request",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 886
+      "line": 889
     },
     {
       "name": "Query::build_conversation",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 903
+      "line": 906
     },
     {
       "name": "Query::create_new_conversation",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 1001
+      "line": 1004
     },
     {
       "name": "Query::run_turn",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 1174
+      "line": 1177
     },
     {
       "name": "Query::acquire_lock",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 1388
+      "line": 1391
     },
     {
       "name": "persist_config_reset",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2020
+      "line": 2023
     },
     {
       "name": "turn_config_delta",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2049
+      "line": 2052
     },
     {
       "name": "Query::apply_cli_config",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2070
+      "line": 2073
     },
     {
       "name": "build_sections",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2170
+      "line": 2173
     },
     {
       "name": "build_thread",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2198
+      "line": 2201
     },
     {
       "name": "apply_mounts",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2594
+      "line": 2597
     },
     {
       "name": "inject_mounts",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2612
+      "line": 2624
     },
     {
       "name": "create_mount_effects",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2678
+      "line": 2691
     },
     {
       "name": "PendingStreamTrim::apply",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2857
+      "line": 2887
     },
     {
       "name": "mount_access_seed",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 3016
+      "line": 3054
     },
     {
       "name": "read_piped_stdin",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 3121
+      "line": 3159
     },
     {
       "name": "Login::run_with_auth",
