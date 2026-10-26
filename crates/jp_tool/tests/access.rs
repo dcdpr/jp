@@ -186,6 +186,54 @@ fn external_rule_permits_resolution_within_approved_target() {
 
 #[cfg(unix)]
 #[test]
+fn external_mount_of_workspace_parent_cannot_widen_in_workspace_access() {
+    use std::os::unix::fs::symlink;
+
+    // <parent>/ws is the workspace, <parent>/sibling is outside it, and
+    // <ws>/up -> <parent> loops back over the workspace.
+    let parent = camino_tempfile::tempdir().unwrap();
+    let parent_canonical = parent.path().canonicalize_utf8().unwrap();
+    let root = parent_canonical.join("ws");
+    std::fs::create_dir_all(root.join("secret")).unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::create_dir_all(parent_canonical.join("sibling")).unwrap();
+    std::fs::write(root.join("secret/f.txt"), "x").unwrap();
+    std::fs::write(root.join("src/lib.rs"), "x").unwrap();
+    std::fs::write(parent_canonical.join("sibling/f.txt"), "x").unwrap();
+    symlink(&parent_canonical, root.join("up")).unwrap();
+
+    let policy = AccessPolicy {
+        fs: vec![
+            FsRule::new(".").with_read(true),
+            FsRule::new("secret").with_read(false),
+            FsRule::new("up")
+                .with_external(true)
+                .with_approved_target(Some(parent_canonical.clone()))
+                .with_read(true)
+                .with_write(true),
+        ],
+        ..AccessPolicy::default()
+    };
+    let ctx = ctx(root, Some(policy));
+
+    // The mount does reach outside the workspace, read-write.
+    assert!(ctx.check_update("up/sibling/f.txt".into()).is_ok());
+
+    // Re-entering the workspace through the mount lands on the workspace's own
+    // rules, not the mount's: `src` stays read-only and `secret` stays denied.
+    assert!(ctx.check_read("up/ws/src/lib.rs".into()).is_ok());
+    assert!(matches!(
+        ctx.check_update("up/ws/src/lib.rs".into()),
+        Err(FsAccessError::Denied { .. })
+    ));
+    assert!(matches!(
+        ctx.check_read("up/ws/secret/f.txt".into()),
+        Err(FsAccessError::Denied { .. })
+    ));
+}
+
+#[cfg(unix)]
+#[test]
 fn external_rule_blocks_nested_escape() {
     use std::os::unix::fs::symlink;
 

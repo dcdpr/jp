@@ -378,13 +378,42 @@ They reject with a clear error.
 If the user genuinely needs the nested target, they create a second explicit
 symlink at the workspace level with its own rule and approval.
 
+#### Targets that contain the workspace
+
+An approved target may be an ancestor of the workspace: from a workspace at
+`~/w/a/b`, `--mount ..` approves `up -> ~/w/a` so the assistant can reach the
+rest of the repository the workspace sits in.
+The workspace itself is not part of what the mount grants.
+The approved area is the target minus the workspace, and a path that
+canonicalises back into the workspace is matched against the workspace's own
+rules, never the mount's:
+
+- Tool call: `up/c/lib.rs`.
+  Canonicalises to `~/w/a/c/lib.rs`, outside the workspace.
+  Matched against `up` (the mount rule).
+- Tool call: `up/b/src/lib.rs`.
+  Canonicalises to `~/w/a/b/src/lib.rs`, inside the workspace.
+  Matched against `src`, exactly as `src/lib.rs` would be; a read-write mount
+  does not make a read-only `src` writable.
+
+The cooperative checker gets this for free: in-workspace targets are always
+matched on their canonical workspace-relative form.
+The OS sandbox has to build the exclusion explicitly (see [OS-sandbox
+integration](#os-sandbox-integration)).
+
+Targets that *equal* the workspace root, or lie inside it, are still rejected
+(see [Rule-path
+canonicalisation](#rule-path-canonicalisation-amendment-to-rfd-076)).
+
 ### `--mount` and `--no-mount`
 
 A CLI shortcut on `jp q` creates the symlink and writes the access grant in one
 step.
-The `--mount` value has the form `[TOOL:]NAME=PATH[:MODE]`:
+The `--mount` value has the form `[TOOL:][NAME=]PATH[:MODE]`:
 
 ```sh
+jp q --mount ~/code/forks/serde-yaml               # NAME defaults to serde-yaml
+jp q --mount fs_modify_file:~/code/forks/x:rw      # NAME defaults to x, one tool
 jp q --mount fork=~/code/forks/serde-yaml          # all enabled local tools, :ro default
 jp q --mount fork=~/code/forks/serde-yaml:ro       # same, explicit
 jp q --mount fs_modify_file:fork=~/code/forks/x:rw # one tool, read-write
@@ -396,6 +425,18 @@ Parsing rules:
 
 - Split on the first `=`.
   The left side is `[TOOL:]NAME`; the right side is `PATH[:MODE]`.
+  Without an `=`, the value is `[TOOL:]PATH[:MODE]` and `PATH` must exist.
+  `NAME` is the final segment of `PATH`, normalized lexically against the
+  current directory, so `.` and `..` take the name of the directory they reach
+  and a symlinked `PATH` keeps the name as typed.
+  A `PATH` with no final segment (`/`) is an error.
+- A leading `TOOL:` without an `=` is ambiguous with a path containing `:`.
+  It is a tool prefix only if the rest of the value exists on disk and the whole
+  value does not; if both exist, the mount is rejected and the user writes
+  `NAME=PATH` or `TOOL:NAME=PATH` instead.
+  A single-letter prefix is never a tool prefix in this form: it is read as a
+  Windows drive letter, since `\code\x` resolves on the current drive just as
+  `c:\code\x` does.
 - On the left, if a `:` is present, the part before it is the tool name; the
   part after is the mount name.
   Without `:`, the entire left side is the mount name and the grant applies to
@@ -403,10 +444,11 @@ Parsing rules:
 - On the right, peel a trailing `:ro` or `:rw`.
   The remainder is the path.
 
-Tool names are identifiers (`[a-z_][a-z0-9_]*`), so the optional `TOOL:` prefix
-is unambiguous.
-Windows drive letters (`C:`) appear only on the right side, after the first `=`,
-where the mode is peeled from the tail rather than split from the head.
+With an `=`, the optional `TOOL:` prefix is unambiguous: tool names are
+identifiers (`[a-z_][a-z0-9_]*`), and Windows drive letters (`C:`) appear only
+on the right side, where the mode is peeled from the tail rather than split from
+the head.
+Without an `=`, the disk settles the ambiguity as described above.
 
 #### Mode rules
 
@@ -422,6 +464,10 @@ Least-privilege defaults at every step:
 
 The user opts into write access *twice*: by typing `:rw` explicitly and by
 naming the specific tool that may write.
+
+Each form also accepts a bare `PATH` in place of `NAME=PATH`, under the same
+mode rules: `--mount PATH`, `--mount PATH:rw` (error), `--mount TOOL:PATH:rw`.
+`NAME` is then derived from `PATH`.
 
 #### NAME grammar
 
@@ -475,8 +521,15 @@ Three stages happen at different points in the CLI pipeline:
 1. **Config build / schema validation.** `apply_cli_config` (before final
    `AppConfig` is built) mutates the partial to include the new `access.fs`
    rule.
-   This is pure data manipulation — `external = true` is accepted syntactically
+   This is data manipulation — `external = true` is accepted syntactically
    without checking whether the symlink exists.
+   The one filesystem read is for a bare `PATH`: the stage checks that `PATH`
+   exists, and uses that to settle a leading `TOOL:`.
+   The two runs of this stage and stage 2 each read the disk, so a `PATH`
+   created or removed between them can make stage 1 grant a different name than
+   stage 2 links.
+   That fails closed: the rule then names a path with no symlink behind it, and
+   stage 3 drops it.
    The mutation is idempotent; `apply_cli_config` runs twice in the current
    pipeline (default conversation resolution, then final config), and both runs
    must produce the same partial.
@@ -562,7 +615,13 @@ along or the mount would silently widen `T` back to whatever it had before the
 ```sh
 jp q --no-mount             # remove all mounts (symlinks + access rules)
 jp q --no-mount fork        # remove only `fork`
+jp q --no-mount ~/code/x    # remove the mount `--mount ~/code/x` created
 ```
+
+`--no-mount` accepts a `PATH` in place of a name and derives the name the same
+way `--mount` does, so a user who never typed `NAME` can still remove the mount.
+A value that names an existing mount is taken as that name first, so a nested
+name like `vendor/openssl` is not reduced to `openssl`.
 
 A mount is identified by the marker `external = true` on its `access.fs` rule.
 `--no-mount` finds all such rules referencing the named path (or all such rules,
@@ -594,7 +653,26 @@ With approved external rules, profile generation emits allow-entries for both
 the workspace-relative path (the symlink itself, harmless) and the rule's
 `approved_target` as a directory boundary.
 
-No change to profile shape, only to the set of paths a profile contains.
+When `approved_target` contains the workspace, the allow-entry must exclude the
+workspace, or a read-write mount of an ancestor would grant write access to the
+whole workspace at the syscall layer, whatever the workspace's own rules say.
+
+- **macOS.** The profile follows the mount's allow with a deny for the workspace
+  path, then re-adds the workspace's own rules after it.
+  This relies on later `sandbox-exec` rules taking precedence over earlier ones,
+  which needs confirming when [RFD 075] is built.
+- **Linux.** Landlock can only add access, never carve it out.
+  The ruleset instead grants each entry along the way from the target down to
+  the workspace, except the next directory toward the workspace.
+  For `up -> ~/w/a` and a workspace at `~/w/a/b`, that is every entry of `~/w/a`
+  except `b`.
+  Two limits follow, and both fail closed: an entry created in `~/w/a` after the
+  tool starts is not reachable, and creating entries directly in `~/w/a` cannot
+  be granted, because a create right on a directory covers its whole subtree,
+  workspace included.
+
+Other external rules need no change to profile shape, only to the set of paths a
+profile contains.
 
 This section applies once [RFD 075] is implemented.
 The cooperative layer in this RFD ships independently and degrades cleanly on
@@ -649,6 +727,16 @@ by `--no-mount`.
 The replace-snapshot also disconnects the affected tools from future
 workspace-config changes to `access.fs`.
 Both refine cleanly once [RFD 070] lands.
+
+**Ancestor mounts create a symlink cycle.** A mount whose target contains the
+workspace makes the workspace reachable at `up/b`, `up/b/up/b`, and so on.
+Access checks are unaffected (every path through the cycle lands on the
+workspace's own rules), and JP's own code never follows symlinks while walking
+the tree.
+A third-party tool that follows links during a walk sees the workspace again;
+most walkers detect the cycle or stop at the kernel's symlink limit (`ELOOP`),
+but one that steps a level at a time without cycle detection can run long.
+JP logs a warning-level trace when such a mount is created.
 
 **Symlinks tracked by VCS expose absolute targets.** If a user commits a
 workspace symlink to git (or any VCS), the target string is in the commit.
@@ -885,8 +973,9 @@ Coordinates with [RFD 075]'s implementation phases.
 ### Phase 5: `--mount` and `--no-mount` CLI
 
 Add the flags to `jp q`.
-Implement parsing for `[TOOL:]NAME=PATH[:MODE]`, including the `--attach`-style
-`NAME` resolution and the mode rules table.
+Implement parsing for `[TOOL:][NAME=]PATH[:MODE]`, including the
+`--attach`-style `NAME` resolution, `NAME` derivation for a bare `PATH`, and the
+mode rules table.
 Split config mutation (in `apply_cli_config`, idempotent) from symlink creation
 and conversation persistence (in `Query::run`).
 Implement the case-based default-deny preservation.

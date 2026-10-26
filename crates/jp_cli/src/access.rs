@@ -5,7 +5,7 @@
 //! compiling `access.fs` config into the [`jp_tool::AccessPolicy`] the tool
 //! receives in its context.
 //!
-//! - [`mount`] parses `[TOOL:]NAME=PATH[:MODE]` specs and builds the config
+//! - [`mount`] parses `[TOOL:][NAME=]PATH[:MODE]` specs and builds the config
 //!   rules a mount injects.
 //! - [`approvals`] is the user-local trust-on-first-use store binding a mount
 //!   path to a canonical target.

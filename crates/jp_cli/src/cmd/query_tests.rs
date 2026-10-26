@@ -278,6 +278,7 @@ fn a_bare_mount_reaches_every_enabled_subprocess_tool() {
         &["notes=/elsewhere/notes".to_owned()],
         Utf8Path::new("/ws"),
         Utf8Path::new("/ws"),
+        |_| None,
         None,
     )
     .unwrap();
@@ -300,6 +301,49 @@ fn a_bare_mount_reaches_every_enabled_subprocess_tool() {
     granted.sort_unstable();
 
     assert_eq!(granted, ["local_tool", "plugin_tool"]);
+}
+
+/// A name derived from a bare `--mount PATH` often collides with something
+/// already in the workspace, so the error says how to pick another name.
+#[test]
+fn mount_onto_an_existing_entry_suggests_naming_it() {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let link = tmp.path().join("src");
+    let target = tmp.path().join("target");
+    std::fs::create_dir(&link).unwrap();
+    std::fs::create_dir(&target).unwrap();
+
+    let error = create_workspace_symlink(&link, &target).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "CLI Config error: cannot create mount: '{link}' already exists and is not a symlink; \
+             choose another name with NAME=PATH"
+        )
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn mount_onto_a_symlink_pointing_elsewhere_suggests_naming_it() {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let link = tmp.path().join("src");
+    let elsewhere = tmp.path().join("elsewhere");
+    let target = tmp.path().join("target");
+    std::fs::create_dir(&elsewhere).unwrap();
+    std::fs::create_dir(&target).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+
+    let error = create_workspace_symlink(&link, &target).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "CLI Config error: mount '{link}' already exists as a symlink pointing elsewhere; \
+             choose another name with NAME=PATH"
+        )
+    );
 }
 
 fn make_id(secs: u64) -> ConversationId {

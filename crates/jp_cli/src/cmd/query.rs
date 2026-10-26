@@ -141,7 +141,7 @@ use crate::{
     access::{
         approvals::{APPROVALS_FILE, ApprovalLookup, ApprovalStore},
         compile::{ApprovalDecision, compile_policy},
-        mount::{MountMode, MountSpec},
+        mount::{MountMode, MountSpec, absolute_target},
     },
     cmd::{
         self,
@@ -386,13 +386,16 @@ pub(crate) struct Query {
     /// Mount an external path into the workspace as a symlink and grant the
     /// assistant access to it.
     ///
-    /// Form: `[TOOL:]NAME=PATH[:MODE]`.
+    /// Form: `[TOOL:][NAME=]PATH[:MODE]`.
     /// `NAME` is the workspace-relative location for the symlink, `PATH` is the
     /// external target, and `MODE` is `ro` (default) or `rw`.
+    /// Without `NAME=`, `PATH` must exist and the symlink is named after its
+    /// last segment; a leading `TOOL:` is then a tool only if the rest of the
+    /// path exists and the whole value does not.
     /// `rw` requires a `TOOL:` prefix; without a `TOOL:` prefix the grant
     /// applies to all enabled local and command plugin tools.
     /// Repeat the flag to mount several paths.
-    #[arg(long = "mount", value_name = "[TOOL:]NAME=PATH[:MODE]", action = ArgAction::Append)]
+    #[arg(long = "mount", value_name = "[TOOL:][NAME=]PATH[:MODE]", action = ArgAction::Append)]
     mount: Vec<String>,
 }
 
@@ -2604,16 +2607,26 @@ fn apply_mounts(
     let workspace = workspace.ok_or("`--mount` requires a workspace")?;
     let cwd = current_dir_utf8()?;
 
-    inject_mounts(partial, mounts, workspace.root(), &cwd, merged_config)
+    inject_mounts(
+        partial,
+        mounts,
+        workspace.root(),
+        &cwd,
+        existing_mount_target(&cwd),
+        merged_config,
+    )
 }
 
 /// The pure half of [`apply_mounts`]: add the grants `mounts` name to
 /// `partial`, resolving each `NAME` against `cwd` inside `root`.
+///
+/// `resolve` answers whether a bare `PATH` exists (see [`MountSpec::parse`]).
 fn inject_mounts(
     partial: &mut PartialAppConfig,
     mounts: &[String],
     root: &Utf8Path,
     cwd: &Utf8Path,
+    resolve: impl Fn(&str) -> Option<Utf8PathBuf>,
     merged_config: Option<&PartialAppConfig>,
 ) -> BoxedResult<()> {
     // Resolve the tool set and the global enable default from the merged
@@ -2624,7 +2637,7 @@ fn inject_mounts(
 
     let mut plans = Vec::new();
     for spec in mounts {
-        let spec = MountSpec::parse(spec)?;
+        let spec = MountSpec::parse(spec, &resolve)?;
         let rule_path = spec.resolve_name(cwd, root)?.as_str().to_owned();
 
         let targets = match &spec.tool {
@@ -2695,9 +2708,10 @@ fn create_mount_effects(
         .map(ApprovalStore::load)
         .unwrap_or_default();
 
+    let resolve = existing_mount_target(&cwd);
     let mut rules = Vec::new();
     for spec in mounts {
-        let spec = MountSpec::parse(spec).map_err(|e| Error::CliConfig(e.to_string()))?;
+        let spec = MountSpec::parse(spec, &resolve).map_err(|e| Error::CliConfig(e.to_string()))?;
         let rule_path = spec
             .resolve_name(&cwd, &root)
             .map_err(|e| Error::CliConfig(e.to_string()))?;
@@ -2725,6 +2739,20 @@ fn create_mount_effects(
         // same regardless of where it sits and matches the recorded approval
         // (a relative target would resolve against the link's parent instead).
         create_workspace_symlink(&link, &canonical)?;
+
+        // A mount of an ancestor is allowed: tools re-entering the workspace
+        // through it are checked against the workspace's own rules. It does
+        // put a symlink cycle in the tree. The equal case was rejected above.
+        if root_canonical.starts_with(&canonical) {
+            warn!(
+                mount = %rule_path,
+                target = %canonical,
+                workspace = %root_canonical,
+                tip = "Filesystem tools that follow symlinks may find workspace files twice.",
+                "Mount target contains the workspace."
+            );
+        }
+
         store.record(rule_path.as_str(), canonical, now);
         rules.push(spec.rule(rule_path.as_str()));
     }
@@ -2773,13 +2801,15 @@ fn create_workspace_symlink(link: &Utf8Path, target: &Utf8Path) -> Result<()> {
             return Ok(());
         }
         return Err(Error::CliConfig(format!(
-            "mount '{link}' already exists as a symlink pointing elsewhere"
+            "mount '{link}' already exists as a symlink pointing elsewhere; choose another name \
+             with NAME=PATH"
         )));
     }
 
     if link.exists() {
         return Err(Error::CliConfig(format!(
-            "cannot create mount: '{link}' already exists and is not a symlink"
+            "cannot create mount: '{link}' already exists and is not a symlink; choose another \
+             name with NAME=PATH"
         )));
     }
 
@@ -2985,6 +3015,14 @@ fn remove_empty_conversation_dir(fs_backend: Option<&FsStorageBackend>, id: &Con
     if fs::remove_dir(&dir).is_ok() {
         debug!(path = %dir, "Removed an empty conversation directory.");
     }
+}
+
+/// Resolve a mount `PATH` as typed against `cwd`, if something exists there.
+///
+/// Existence follows symlinks, so a dangling symlink counts as missing.
+fn existing_mount_target(cwd: &Utf8Path) -> impl Fn(&str) -> Option<Utf8PathBuf> + '_ {
+    let home = env::var("HOME").ok();
+    move |path| absolute_target(path, cwd, home.as_deref()).filter(|target| target.exists())
 }
 
 fn current_dir_utf8() -> BoxedResult<Utf8PathBuf> {
