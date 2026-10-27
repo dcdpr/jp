@@ -428,7 +428,7 @@ fn sync_describes_open_and_unique_keys_in_words() {
 summary = "One `key=value` label: type=bug, or rfd=<value> with any value. Only one ticket carries each `rfd` value."
 
 [conversation.tools.ticket_list.parameters.labels.items]
-summary = "One `key=value` label: rfd, type, type=bug, or rfd=<value> with any value."
+summary = "One `key=value` label, or a bare `key` for any value under it: rfd, type, type=bug, or rfd=<value> with any value."
 "#;
     assert_eq!(
         fs::read_to_string(dir.path().join(SYNCED_FILE)).unwrap(),

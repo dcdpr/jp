@@ -252,7 +252,7 @@ fn synced(tools: &[(String, String)], vocabulary: &Vocabulary) -> String {
         out.push_str(&format!(
             "\n[conversation.tools.{key}.parameters.labels.items]\n"
         ));
-        if let Some(summary) = summary(&tokens, &open, rules) {
+        if let Some(summary) = summary(&tokens, &open, rules, tool == "list") {
             out.push_str(&format!("summary = {}\n", toml_string(&summary)));
         }
         if !open.is_empty() {
@@ -272,12 +272,17 @@ fn synced(tools: &[(String, String)], vocabulary: &Vocabulary) -> String {
 /// accepted values says all there is.
 ///
 /// With `open` keys there is no list, so the labels are named here instead.
-fn summary(tokens: &[String], open: &[&str], rules: Option<&str>) -> Option<String> {
+/// A `filter` also takes a bare key, for any value under it.
+fn summary(tokens: &[String], open: &[&str], rules: Option<&str>, filter: bool) -> Option<String> {
     if open.is_empty() && rules.is_none() {
         return None;
     }
 
-    let mut summary = "One `key=value` label".to_owned();
+    let mut summary = if filter {
+        "One `key=value` label, or a bare `key` for any value under it".to_owned()
+    } else {
+        "One `key=value` label".to_owned()
+    };
     if !open.is_empty() {
         let any = open
             .iter()
