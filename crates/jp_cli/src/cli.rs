@@ -67,6 +67,35 @@ pub(crate) fn subcommand_of(matches: &ArgMatches) -> Result<(&str, &ArgMatches),
     })
 }
 
+/// The value of the required argument `id`.
+///
+/// # Errors
+///
+/// Returns an error when the argument is missing, which clap only lets through
+/// when it is not declared as required.
+pub(crate) fn required<T>(matches: &ArgMatches, id: &str) -> Result<T, clap::Error>
+where
+    T: Clone + Send + Sync + 'static,
+{
+    matches.get_one::<T>(id).cloned().ok_or_else(|| {
+        clap::Error::raw(
+            clap::error::ErrorKind::MissingRequiredArgument,
+            format!("the argument '{id}' is required\n"),
+        )
+    })
+}
+
+/// Every value of the argument `id`, in command-line order.
+pub(crate) fn many<T>(matches: &ArgMatches, id: &str) -> Vec<T>
+where
+    T: Clone + Send + Sync + 'static,
+{
+    matches
+        .get_many::<T>(id)
+        .map(|values| values.cloned().collect())
+        .unwrap_or_default()
+}
+
 /// The error for a subcommand name a command declares but does not read.
 pub(crate) fn unread_subcommand(name: &str) -> clap::Error {
     clap::Error::raw(

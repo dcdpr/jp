@@ -15,31 +15,59 @@ mod show;
 pub(crate) mod target;
 mod use_;
 
+use clap::{ArgMatches, Command};
 use jp_printer::Printer;
 use jp_workspace::session::Session;
 use target::{TargetEnv, WorkspaceTarget};
 
-use crate::cmd::{self, Output};
+use crate::{
+    cli::{CommandArgs, subcommand_of, unread_subcommand},
+    cmd::{self, Output},
+};
 
-/// Manage workspaces.
-#[derive(Debug, clap::Args)]
+/// `jp workspace`: manage workspaces.
+#[derive(Debug)]
 pub(crate) struct Workspace {
-    #[command(subcommand)]
     command: Commands,
 }
 
-#[derive(Debug, clap::Subcommand)]
+impl CommandArgs for Workspace {
+    fn augment(cmd: Command) -> Command {
+        cmd.subcommand_required(true)
+            .arg_required_else_help(true)
+            .subcommand(
+                use_::Use::augment(Command::new("use"))
+                    .about("Select the session's active workspace")
+                    .visible_alias("u"),
+            )
+            .subcommand(
+                ls::Ls::augment(Command::new("ls"))
+                    .about("List known workspaces and their checkouts")
+                    .alias("list"),
+            )
+            .subcommand(
+                show::Show::augment(Command::new("show"))
+                    .about("Show a workspace: identity, checkouts, and how it resolves")
+                    .visible_alias("s"),
+            )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        let command = match subcommand_of(matches)? {
+            ("use", sub) => Commands::Use(use_::Use::from_matches(sub)?),
+            ("ls", sub) => Commands::Ls(ls::Ls::from_matches(sub)?),
+            ("show", sub) => Commands::Show(show::Show::from_matches(sub)?),
+            (name, _) => return Err(unread_subcommand(name)),
+        };
+
+        Ok(Self { command })
+    }
+}
+
+#[derive(Debug)]
 enum Commands {
-    /// Select the session's active workspace.
-    #[command(name = "use", visible_alias = "u")]
     Use(use_::Use),
-
-    /// List known workspaces and their checkouts.
-    #[command(name = "ls", alias = "list")]
     Ls(ls::Ls),
-
-    /// Show a workspace: identity, checkouts, and how it resolves.
-    #[command(name = "show", visible_alias = "s")]
     Show(show::Show),
 }
 

@@ -1400,7 +1400,6 @@ hidden: false
 external_subcommands: None
 set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp attachment [OPTIONS] <COMMAND>
-group Attachment: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -1433,7 +1432,6 @@ hidden: false
 external_subcommands: None
 set: ["arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp attachment add [OPTIONS] [ATTACHMENTS]...
-group Add: ["attachments"] required=false multiple=true
 
 ### attachments
 short: None
@@ -1486,7 +1484,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp attachment rm [OPTIONS] [ATTACHMENTS]...
-group Rm: ["attachments"] required=false multiple=true
 
 ### attachments
 short: None
@@ -1539,7 +1536,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp attachment ls [OPTIONS]
-group Ls: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -1572,7 +1568,6 @@ hidden: false
 external_subcommands: None
 set: ["arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp attachment print [OPTIONS] <ATTACHMENT>
-group Print: ["attachment"] required=false multiple=true
 
 ### attachment
 short: None
@@ -1625,7 +1620,6 @@ hidden: true
 external_subcommands: None
 set: ["arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp aa [OPTIONS] [ATTACHMENTS]...
-group Add: ["attachments"] required=false multiple=true
 
 ### attachments
 short: None
@@ -4414,7 +4408,6 @@ hidden: false
 external_subcommands: None
 set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp plugin [OPTIONS] <COMMAND>
-group PluginManagement: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -4447,7 +4440,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp plugin list [OPTIONS]
-group List: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -4480,7 +4472,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp plugin install [OPTIONS] <NAME>
-group Install: ["name"] required=false multiple=true
 
 ### name
 short: None
@@ -4533,7 +4524,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp plugin uninstall [OPTIONS] <NAME>
-group Uninstall: ["name"] required=false multiple=true
 
 ### name
 short: None
@@ -4586,7 +4576,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp plugin update [OPTIONS]
-group Update: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -4619,7 +4608,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp plugin approve [OPTIONS] <PATH>
-group Approve: ["path"] required=false multiple=true
 
 ### path
 short: None
@@ -4672,7 +4660,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp plugin revoke [OPTIONS] <NAME>
-group Revoke: ["name"] required=false multiple=true
 
 ### name
 short: None
@@ -4725,7 +4712,6 @@ hidden: false
 external_subcommands: None
 set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp workspace [OPTIONS] <COMMAND>
-group Workspace: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -4758,7 +4744,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp workspace use [OPTIONS] [TARGET]
-group Use: ["target", "always"] required=false multiple=true
 
 ### target
 short: None
@@ -4791,7 +4776,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["ALWAYS"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -4831,7 +4816,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp workspace ls [OPTIONS]
-group Ls: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -4864,7 +4848,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp workspace show [OPTIONS] [TARGET]
-group Show: ["target"] required=false multiple=true
 
 ### target
 short: None
@@ -4917,7 +4900,6 @@ hidden: false
 external_subcommands: None
 set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp provider [OPTIONS] <COMMAND>
-group Provider: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -4950,7 +4932,6 @@ hidden: false
 external_subcommands: None
 set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp provider llm [OPTIONS] <COMMAND>
-group Llm: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -4983,7 +4964,6 @@ hidden: false
 external_subcommands: None
 set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp provider llm auth [OPTIONS] <COMMAND>
-group Auth: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -5016,7 +4996,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp provider llm auth login [OPTIONS] <TARGET>
-group Login: ["target", "name", "device_auth", "import_codex", "setup_token", "direct", "config_dir"] required=false multiple=true
 
 ### target
 short: None
@@ -5069,7 +5048,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["DEVICE_AUTH"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -5089,7 +5068,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["IMPORT_CODEX"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -5109,7 +5088,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["SETUP_TOKEN"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -5129,7 +5108,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["DIRECT"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -5189,7 +5168,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp provider llm auth list [OPTIONS]
-group List: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -5222,7 +5200,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp provider llm auth logout [OPTIONS] <TARGET>
-group Logout: ["target", "name"] required=false multiple=true
 
 ### target
 short: None

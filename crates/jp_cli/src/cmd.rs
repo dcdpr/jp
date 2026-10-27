@@ -90,12 +90,12 @@ impl Commands<Parsed> {
                     .visible_alias("q"),
             )
             .subcommand(
-                subcommand::<attachment::Attachment>("attachment", Some("Manage attachments"))
+                mounted::<attachment::Attachment>("attachment", Some("Manage attachments"))
                     .visible_alias("a")
                     .alias("attachments"),
             )
             // TODO: Remove once we have proper customizable "command aliases".
-            .subcommand(subcommand::<attachment::add::Add>("aa", None).hide(true))
+            .subcommand(mounted::<attachment::add::Add>("aa", None).hide(true))
             .subcommand(
                 subcommand::<conversation::Conversation>(
                     "conversation",
@@ -104,16 +104,16 @@ impl Commands<Parsed> {
                 .visible_alias("c")
                 .alias("conversations"),
             )
-            .subcommand(subcommand::<plugin::PluginManagement>(
+            .subcommand(mounted::<plugin::PluginManagement>(
                 "plugin",
                 Some("Manage plugins"),
             ))
             .subcommand(
-                subcommand::<workspace::Workspace>("workspace", Some("Manage workspaces"))
+                mounted::<workspace::Workspace>("workspace", Some("Manage workspaces"))
                     .visible_alias("w")
                     .alias("workspaces"),
             )
-            .subcommand(subcommand::<provider::Provider>(
+            .subcommand(mounted::<provider::Provider>(
                 "provider",
                 Some("Manage provider credentials"),
             ))
@@ -140,12 +140,12 @@ impl Commands<Parsed> {
             "init" => Self::Init(init::Init::from_matches(sub)?),
             "config" => Self::Config(config::Config::from_matches(sub)?),
             "query" => Self::Query(query::Query::from_matches(sub, spelling)?),
-            "attachment" => Self::Attachment(FromArgMatches::from_arg_matches(sub)?),
-            "aa" => Self::AttachmentAdd(FromArgMatches::from_arg_matches(sub)?),
+            "attachment" => Self::Attachment(attachment::Attachment::from_matches(sub)?),
+            "aa" => Self::AttachmentAdd(attachment::add::Add::from_matches(sub)?),
             "conversation" => Self::Conversation(FromArgMatches::from_arg_matches(sub)?),
-            "plugin" => Self::Plugin(FromArgMatches::from_arg_matches(sub)?),
-            "workspace" => Self::Workspace(FromArgMatches::from_arg_matches(sub)?),
-            "provider" => Self::Provider(FromArgMatches::from_arg_matches(sub)?),
+            "plugin" => Self::Plugin(plugin::PluginManagement::from_matches(sub)?),
+            "workspace" => Self::Workspace(workspace::Workspace::from_matches(sub)?),
+            "provider" => Self::Provider(provider::Provider::from_matches(sub)?),
 
             // Only a plugin's command carries the unnamed argument that clap
             // collects everything after an unknown subcommand into. Without

@@ -1,9 +1,21 @@
+use clap::{ArgMatches, Command};
 use jp_term::table::{DetailItem, Details};
 
-use crate::{cmd::Output, ctx::Ctx, output::print_details};
+use crate::{cli::CommandArgs, cmd::Output, ctx::Ctx, output::print_details};
 
-#[derive(Debug, clap::Args)]
+/// `jp attachment ls`.
+#[derive(Debug)]
 pub(crate) struct Ls {}
+
+impl CommandArgs for Ls {
+    fn augment(cmd: Command) -> Command {
+        cmd
+    }
+
+    fn from_matches(_: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {})
+    }
+}
 
 impl Ls {
     #[expect(clippy::unused_self)]
