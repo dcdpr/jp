@@ -197,6 +197,9 @@ Policy compilation:
    true`, the host runs the approval lifecycle (see below) before activation:
    - Approved: `lexical_path = lexical workspace-relative form of the rule's
      path`, `approved_target = the canonical absolute path`.
+     If the target contains the workspace, a deny-all rule is added where the
+     workspace reappears inside the mount (see [Targets that contain the
+     workspace](#targets-that-contain-the-workspace)).
    - Not approved (and no interactive approval possible): the rule is dropped
      from the compiled policy.
      Tool calls matching its lexical prefix fall through to default-deny.
@@ -381,24 +384,32 @@ symlink at the workspace level with its own rule and approval.
 #### Targets that contain the workspace
 
 An approved target may be an ancestor of the workspace: from a workspace at
-`~/w/a/b`, `--mount ..` approves `up -> ~/w/a` so the assistant can reach the
-rest of the repository the workspace sits in.
-The workspace itself is not part of what the mount grants.
-The approved area is the target minus the workspace, and a path that
-canonicalises back into the workspace is matched against the workspace's own
-rules, never the mount's:
+`~/w/a/b`, `--mount up=..` approves `up -> ~/w/a` so the assistant can reach
+the rest of the repository the workspace sits in.
+The mount grants the target minus the workspace.
+Policy compilation adds a deny-all rule at the path where the workspace
+reappears inside the mount (`up/b`), next to the mount rule:
 
 - Tool call: `up/c/lib.rs`.
   Canonicalises to `~/w/a/c/lib.rs`, outside the workspace.
   Matched against `up` (the mount rule).
 - Tool call: `up/b/src/lib.rs`.
-  Canonicalises to `~/w/a/b/src/lib.rs`, inside the workspace.
-  Matched against `src`, exactly as `src/lib.rs` would be; a read-write mount
-  does not make a read-only `src` writable.
+  Canonicalises back into the workspace through the mount.
+  The cooperative checker rejects it and names `src/lib.rs` as the path to use,
+  so a workspace file is reached through its workspace path only.
+- Tool call: move or delete `up/b` (or `top/a`, for a mount `top=../..`).
+  A directory mutation covers everything beneath it, and the deny-all rule
+  sits beneath it.
+  Rejected: a mount cannot move or delete the workspace, or a directory that
+  holds it.
+  Files in those directories stay reachable through the mount rule.
 
-The cooperative checker gets this for free: in-workspace targets are always
-matched on their canonical workspace-relative form.
-The OS sandbox has to build the exclusion explicitly (see [OS-sandbox
+The deny-all rule covers tools that match paths as typed, such as a walk over
+the mount, which would otherwise find workspace files under `up/b` and check
+them against `up`.
+A tool that canonicalises paths itself and matches the canonical form lands on
+the workspace's own rules instead, which grants nothing the workspace does not.
+The OS sandbox builds the same exclusion (see [OS-sandbox
 integration](#os-sandbox-integration)).
 
 Targets that *equal* the workspace root, or lie inside it, are still rejected
@@ -730,9 +741,8 @@ Both refine cleanly once [RFD 070] lands.
 
 **Ancestor mounts create a symlink cycle.** A mount whose target contains the
 workspace makes the workspace reachable at `up/b`, `up/b/up/b`, and so on.
-Access checks are unaffected (every path through the cycle lands on the
-workspace's own rules), and JP's own code never follows symlinks while walking
-the tree.
+Access checks are unaffected (a path through the cycle back into the workspace
+is rejected), and JP's own code never follows symlinks while walking the tree.
 A third-party tool that follows links during a walk sees the workspace again;
 most walkers detect the cycle or stop at the kernel's symlink limit (`ELOOP`),
 but one that steps a level at a time without cycle detection can run long.

@@ -5,6 +5,9 @@
 //! Tools call [`Context::check_read`] and friends before touching the
 //! filesystem; each check canonicalizes the requested path and evaluates it
 //! against the policy's [`FsRule`]s.
+//! A tool that acts on a symlink entry rather than its target, or that needs
+//! the entry's kind, uses [`resolve_path`] and [`AccessPolicy::authorize`]
+//! directly.
 //!
 //! Two boundaries are enforced, in order:
 //!
@@ -21,7 +24,10 @@
 //! [`Context::check_read`]: crate::Context::check_read
 //! [`Context`]: crate::Context
 
+mod resolve;
+
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
+pub use resolve::{EntryKind, Resolve, ResolvedPath, entry_kind, resolve_path};
 use serde::{Deserialize, Serialize};
 
 /// The finalized access grant set for a single tool invocation.
@@ -389,6 +395,26 @@ impl FsRule {
         self.approved_target.as_deref()
     }
 
+    /// The deny-all rule that keeps this mount out of the workspace, when its
+    /// approved target contains the workspace.
+    ///
+    /// `root_canonical` is the canonical workspace root.
+    /// The rule sits where the workspace reappears inside the mount, so every
+    /// directory between the target and the workspace stays reachable, while
+    /// moving or deleting one of them (which would take the workspace along) is
+    /// refused.
+    /// Returns `None` for any other rule.
+    #[must_use]
+    pub fn workspace_exclusion(&self, root_canonical: &Utf8Path) -> Option<Self> {
+        let target = self.approved_target()?;
+        let inner = root_canonical.strip_prefix(target).ok()?;
+        if inner.as_str().is_empty() {
+            return None;
+        }
+
+        Some(Self::new(self.lexical_path.join(inner)))
+    }
+
     /// Whether the rule grants read access.
     #[must_use]
     pub fn read(&self) -> bool {
@@ -498,6 +524,13 @@ pub enum FsAccessError {
     #[error("path escapes the workspace: {0}")]
     InputEscape(Utf8PathBuf),
 
+    /// A symlink on the path points at nothing, so there is no target to keep
+    /// inside the workspace.
+    ///
+    /// Holds the workspace-relative path of the link itself.
+    #[error("symlink has a missing target: {0}")]
+    DanglingSymlink(Utf8PathBuf),
+
     /// The resolved (canonical) target lands outside the workspace and no
     /// `external` rule permits it.
     #[error("path resolves outside the workspace: {0}")]
@@ -514,6 +547,21 @@ pub enum FsAccessError {
         grants: Vec<Utf8PathBuf>,
     },
 
+    /// The path enters a mount and resolves back into the workspace.
+    ///
+    /// A workspace file is reached through its workspace path only.
+    #[error(
+        "'{path}' reaches the workspace through mount '{mount}'; use '{workspace_path}' instead"
+    )]
+    ThroughMount {
+        /// The requested path.
+        path: Utf8PathBuf,
+        /// The mount the path enters.
+        mount: Utf8PathBuf,
+        /// The workspace path of the same target (`.` for the root).
+        workspace_path: Utf8PathBuf,
+    },
+
     /// Resolving the path failed (e.g. an unreadable ancestor directory).
     #[error("failed to resolve path {path}: {message}")]
     Io {
@@ -522,158 +570,6 @@ pub enum FsAccessError {
         /// The underlying I/O error message.
         message: String,
     },
-}
-
-/// Outcome of resolving and matching a target path against the policy.
-struct Resolved<'a> {
-    /// The resolved absolute path (symlinks followed on existing ancestors).
-    canonical: Utf8PathBuf,
-    /// Whether the canonical path is inside the workspace root.
-    inside: bool,
-    /// The matching rule, if any.
-    rule: Option<&'a FsRule>,
-    /// The form rules were matched against: the canonical workspace-relative
-    /// path for in-workspace targets, the lexical path for external ones.
-    match_key: Utf8PathBuf,
-}
-
-impl crate::Context {
-    /// Check read access to `input`, returning the resolved absolute path.
-    ///
-    /// `input` must be workspace-relative; the check joins it against the
-    /// workspace root and canonicalizes it itself.
-    /// Do not pre-resolve paths against the root before calling.
-    pub fn check_read(&self, input: &Utf8Path) -> Result<Utf8PathBuf, FsAccessError> {
-        self.check_capability(input, Capability::Read)
-    }
-
-    /// Check create access to `input`, returning the resolved absolute path.
-    pub fn check_create(&self, input: &Utf8Path) -> Result<Utf8PathBuf, FsAccessError> {
-        self.check_capability(input, Capability::Create)
-    }
-
-    /// Check update access to `input`, returning the resolved absolute path.
-    pub fn check_update(&self, input: &Utf8Path) -> Result<Utf8PathBuf, FsAccessError> {
-        self.check_capability(input, Capability::Update)
-    }
-
-    /// Check delete access to `input`, returning the resolved absolute path.
-    pub fn check_delete(&self, input: &Utf8Path) -> Result<Utf8PathBuf, FsAccessError> {
-        self.check_capability(input, Capability::Delete)
-    }
-
-    /// Check execute access to `input`, returning the resolved absolute path.
-    pub fn check_execute(&self, input: &Utf8Path) -> Result<Utf8PathBuf, FsAccessError> {
-        self.check_capability(input, Capability::Execute)
-    }
-
-    fn check_capability(
-        &self,
-        input: &Utf8Path,
-        capability: Capability,
-    ) -> Result<Utf8PathBuf, FsAccessError> {
-        // Pre-canonical invariant: the tool may only express workspace-relative
-        // paths. Reject absolute and rooted paths and `..`-escapes before any
-        // I/O so the LLM's expressible reach is decoupled from the on-disk
-        // layout.
-        //
-        // `has_root` catches inputs that `is_absolute` misses on Windows, where
-        // a leading-slash path like `/etc/passwd` is rooted but not absolute (a
-        // Windows absolute path needs a drive prefix). Both are non-relative
-        // and must be rejected on every platform.
-        if input.is_absolute() || input.has_root() {
-            return Err(FsAccessError::Absolute(input.to_owned()));
-        }
-        let lexical =
-            normalize_lexical(input).ok_or_else(|| FsAccessError::InputEscape(input.to_owned()))?;
-
-        let rules = self.access.as_ref().map_or(&[][..], |a| a.fs.as_slice());
-
-        let Resolved {
-            canonical,
-            inside,
-            rule,
-            match_key,
-        } = self.resolve(&lexical, rules)?;
-
-        // Post-canonical boundary: a target that escapes the workspace is only
-        // allowed through an approved external rule whose approved target
-        // contains the resolved path (nested-escape boundary).
-        if !inside {
-            let permitted = rule.is_some_and(|r| {
-                r.external()
-                    && r.approved_target()
-                        .is_some_and(|target| canonical.starts_with(target))
-            });
-            if !permitted {
-                return Err(FsAccessError::Escape(canonical));
-            }
-        }
-
-        // Grant decision via the single matcher shared with the in-tree fs
-        // tools (`AccessPolicy::permits_entry`), so the rule-matching and
-        // capability logic can't drift between the two call sites. An absent
-        // (or unrestricted) policy permits everything.
-        //
-        // A path that does not exist yet is not a directory, so a fresh target
-        // is asked about as the single entry it is.
-        let is_dir = canonical.is_dir();
-        let granted = self
-            .access
-            .as_ref()
-            .is_none_or(|policy| policy.permits_entry(capability, &match_key, is_dir));
-        if granted {
-            Ok(canonical)
-        } else {
-            Err(FsAccessError::Denied {
-                capability: capability.as_str(),
-                target: match_key,
-                grants: rules.iter().map(|r| r.lexical_path.clone()).collect(),
-            })
-        }
-    }
-
-    fn resolve<'a>(
-        &self,
-        lexical: &Utf8Path,
-        rules: &'a [FsRule],
-    ) -> Result<Resolved<'a>, FsAccessError> {
-        let root_canonical = self
-            .root
-            .canonicalize_utf8()
-            .map_err(|e| FsAccessError::Io {
-                path: self.root.clone(),
-                message: e.to_string(),
-            })?;
-
-        let canonical = canonicalize_workspace_target(&root_canonical, lexical).map_err(|e| {
-            FsAccessError::Io {
-                path: self.root.join(lexical),
-                message: e.to_string(),
-            }
-        })?;
-
-        // Match in-workspace targets on their canonical workspace-relative form
-        // so an in-workspace symlink can't dodge a more specific rule (a target
-        // reached via `alias/` where `alias -> secret` matches the `secret`
-        // rule, not whatever `alias` would match lexically). External targets
-        // (canonical outside the workspace) can't be stripped to a
-        // workspace-relative form, so they match on the lexical mount prefix;
-        // the approved-target boundary is enforced in `check_capability`.
-        let (inside, match_key) = match canonical.strip_prefix(&root_canonical) {
-            Ok(relative) => (true, relative.to_owned()),
-            Err(_) => (false, lexical.to_owned()),
-        };
-
-        let rule = find_matching_rule(rules, &match_key);
-
-        Ok(Resolved {
-            canonical,
-            inside,
-            rule,
-            match_key,
-        })
-    }
 }
 
 /// Normalize a relative path lexically, collapsing `.` and `..` without
@@ -714,8 +610,15 @@ fn normalize_lexical(input: &Utf8Path) -> Option<Utf8PathBuf> {
 /// root, following symlinks on the deepest existing ancestor and re-appending
 /// any not-yet-created suffix.
 ///
-/// The host reuses this so compiled rule paths and tool-call targets are
-/// reduced to the same canonical form before matching.
+/// The host uses this to reduce compiled rule paths to the canonical form
+/// [`resolve_path`] gives tool-call targets.
+/// A rule may name a path that does not exist yet, so a dangling symlink here
+/// counts as a missing component rather than an error.
+///
+/// # Errors
+///
+/// Returns the I/O error when the deepest existing ancestor cannot be
+/// canonicalized.
 pub fn canonicalize_workspace_target(
     root_canonical: &Utf8Path,
     lexical: &Utf8Path,
@@ -759,6 +662,15 @@ fn find_matching_rule<'a>(rules: &'a [FsRule], target: &Utf8Path) -> Option<&'a 
         }
     }
     best.map(|(_, index)| &rules[index])
+}
+
+/// The approved external rule whose path `lexical` passes through, if any.
+fn mount_entered<'a>(rules: &'a [FsRule], lexical: &Utf8Path) -> Option<&'a FsRule> {
+    rules.iter().find(|rule| {
+        rule.external()
+            && rule.approved_target().is_some()
+            && prefix_specificity(rule.lexical_path(), lexical).is_some()
+    })
 }
 
 /// Whether `candidate` lies strictly below `ancestor`.
@@ -1085,6 +997,41 @@ mod tests {
         assert!(Capability::Delete.mutates());
         assert!(!Capability::Read.mutates());
         assert!(!Capability::Execute.mutates());
+    }
+
+    fn mount_on(target: &str) -> FsRule {
+        FsRule::new("up")
+            .with_external(true)
+            .with_approved_target(Some(target.into()))
+            .with_read(true)
+    }
+
+    #[test]
+    fn exclusion_sits_where_the_workspace_reappears_in_the_mount() {
+        let root = Utf8Path::new("/w/a/b");
+        assert_eq!(
+            mount_on("/w/a").workspace_exclusion(root),
+            Some(FsRule::new("up/b"))
+        );
+        assert_eq!(
+            mount_on("/w").workspace_exclusion(root),
+            Some(FsRule::new("up/a/b"))
+        );
+    }
+
+    #[test]
+    fn no_exclusion_for_a_target_that_does_not_contain_the_workspace() {
+        let root = Utf8Path::new("/w/a/b");
+        // `/w/a/b` itself is rejected at compile time; `/w/ab` only shares a
+        // name prefix.
+        for target in ["/w/a/b", "/w/a/sibling", "/w/ab", "/elsewhere"] {
+            assert_eq!(
+                mount_on(target).workspace_exclusion(root),
+                None,
+                "target: {target}"
+            );
+        }
+        assert_eq!(FsRule::new("src").workspace_exclusion(root), None);
     }
 
     #[test]

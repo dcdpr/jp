@@ -11,8 +11,9 @@ mod error;
 pub mod schema;
 
 pub use access::{
-    AccessPolicy, Capability, EnvRule, FsAccessError, FsRule, NetRule,
-    canonicalize_workspace_target, lexical_workspace_relative,
+    AccessPolicy, Capability, EntryKind, EnvRule, FsAccessError, FsRule, NetRule, Resolve,
+    ResolvedPath, canonicalize_workspace_target, entry_kind, lexical_workspace_relative,
+    resolve_path,
 };
 pub use content::{ContentBlock, InputRequest, Resource, ResourceContent, ToolResult};
 pub use definition::{ParameterDocs, ToolDefinition, ToolDocs};

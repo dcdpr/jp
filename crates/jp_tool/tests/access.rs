@@ -184,52 +184,96 @@ fn external_rule_permits_resolution_within_approved_target() {
     assert!(ctx.check_update("fork/lib.rs".into()).is_ok());
 }
 
+/// A mount whose target contains the workspace, as `--mount up=../..` from
+/// `<grand>/a/ws` creates.
 #[cfg(unix)]
-#[test]
-fn external_mount_of_workspace_parent_cannot_widen_in_workspace_access() {
+fn ancestor_mount() -> (camino_tempfile::Utf8TempDir, Context) {
     use std::os::unix::fs::symlink;
 
-    // <parent>/ws is the workspace, <parent>/sibling is outside it, and
-    // <ws>/up -> <parent> loops back over the workspace.
-    let parent = camino_tempfile::tempdir().unwrap();
-    let parent_canonical = parent.path().canonicalize_utf8().unwrap();
-    let root = parent_canonical.join("ws");
-    std::fs::create_dir_all(root.join("secret")).unwrap();
+    let grand = camino_tempfile::tempdir().unwrap();
+    let grand_canonical = grand.path().canonicalize_utf8().unwrap();
+    let root = grand_canonical.join("a/ws");
     std::fs::create_dir_all(root.join("src")).unwrap();
-    std::fs::create_dir_all(parent_canonical.join("sibling")).unwrap();
-    std::fs::write(root.join("secret/f.txt"), "x").unwrap();
+    std::fs::create_dir_all(grand_canonical.join("sibling")).unwrap();
     std::fs::write(root.join("src/lib.rs"), "x").unwrap();
-    std::fs::write(parent_canonical.join("sibling/f.txt"), "x").unwrap();
-    symlink(&parent_canonical, root.join("up")).unwrap();
+    std::fs::write(grand_canonical.join("sibling/f.txt"), "x").unwrap();
+    symlink(&grand_canonical, root.join("up")).unwrap();
 
+    let mount = FsRule::new("up")
+        .with_external(true)
+        .with_approved_target(Some(grand_canonical))
+        .with_read(true)
+        .with_write(true);
+    let exclusion = mount.workspace_exclusion(&root).unwrap();
+    assert_eq!(exclusion, FsRule::new("up/a/ws"));
+
+    // The workspace itself is fully read-write, so nothing below is refused
+    // for lack of a workspace grant.
     let policy = AccessPolicy {
         fs: vec![
-            FsRule::new(".").with_read(true),
-            FsRule::new("secret").with_read(false),
-            FsRule::new("up")
-                .with_external(true)
-                .with_approved_target(Some(parent_canonical.clone()))
-                .with_read(true)
-                .with_write(true),
+            FsRule::new(".").with_read(true).with_write(true),
+            mount,
+            exclusion,
         ],
         ..AccessPolicy::default()
     };
-    let ctx = ctx(root, Some(policy));
 
-    // The mount does reach outside the workspace, read-write.
+    (grand, ctx(root, Some(policy)))
+}
+
+#[cfg(unix)]
+#[test]
+fn a_mount_containing_the_workspace_still_reaches_what_is_beside_it() {
+    let (_grand, ctx) = ancestor_mount();
+
     assert!(ctx.check_update("up/sibling/f.txt".into()).is_ok());
+    // A file in a directory on the way down to the workspace.
+    assert!(ctx.check_create("up/a/new.txt".into()).is_ok());
+    // The workspace's own paths keep the workspace's own rules.
+    assert!(ctx.check_update("src/lib.rs".into()).is_ok());
+}
 
-    // Re-entering the workspace through the mount lands on the workspace's own
-    // rules, not the mount's: `src` stays read-only and `secret` stays denied.
-    assert!(ctx.check_read("up/ws/src/lib.rs".into()).is_ok());
-    assert!(matches!(
-        ctx.check_update("up/ws/src/lib.rs".into()),
-        Err(FsAccessError::Denied { .. })
-    ));
-    assert!(matches!(
-        ctx.check_read("up/ws/secret/f.txt".into()),
-        Err(FsAccessError::Denied { .. })
-    ));
+/// Moving or deleting a directory on the way down to the workspace takes the
+/// workspace along, so the mount must not grant it.
+#[cfg(unix)]
+#[test]
+fn a_mount_cannot_move_the_workspace_or_a_directory_holding_it() {
+    let (_grand, ctx) = ancestor_mount();
+
+    for path in ["up", "up/a"] {
+        assert!(
+            matches!(
+                ctx.check_delete(path.into()),
+                Err(FsAccessError::Denied { .. })
+            ),
+            "path: {path}"
+        );
+    }
+}
+
+/// A workspace file has one path: going through the mount to reach it is
+/// refused, and the error names the path that works.
+#[cfg(unix)]
+#[test]
+fn a_mount_does_not_reach_back_into_the_workspace() {
+    let (_grand, ctx) = ancestor_mount();
+
+    assert_eq!(
+        ctx.check_read("up/a/ws/src/lib.rs".into()),
+        Err(FsAccessError::ThroughMount {
+            path: "up/a/ws/src/lib.rs".into(),
+            mount: "up".into(),
+            workspace_path: "src/lib.rs".into(),
+        })
+    );
+    assert_eq!(
+        ctx.check_delete("up/a/ws".into()),
+        Err(FsAccessError::ThroughMount {
+            path: "up/a/ws".into(),
+            mount: "up".into(),
+            workspace_path: ".".into(),
+        })
+    );
 }
 
 #[cfg(unix)]
@@ -266,6 +310,31 @@ fn external_rule_blocks_nested_escape() {
         ctx.check_read("fork/secrets/passwd".into()),
         Err(FsAccessError::Escape(_))
     ));
+}
+
+/// A dangling symlink has no target to bound, and creating a file through it
+/// would land wherever it points.
+#[cfg(unix)]
+#[test]
+fn dangling_symlink_pointing_outside_is_rejected() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = camino_tempfile::tempdir().unwrap();
+    let outside = camino_tempfile::tempdir().unwrap();
+    let root = workspace.path().canonicalize_utf8().unwrap();
+    let missing = outside.path().canonicalize_utf8().unwrap().join("missing");
+    symlink(&missing, root.join("link")).unwrap();
+
+    let ctx = ctx(root, None);
+
+    for path in ["link", "link/child.rs"] {
+        assert_eq!(
+            ctx.check_create(path.into()),
+            Err(FsAccessError::DanglingSymlink("link".into())),
+            "path: {path}"
+        );
+    }
+    assert!(!missing.exists());
 }
 
 #[cfg(unix)]
