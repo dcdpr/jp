@@ -16,7 +16,7 @@ pub(crate) mod workspace;
 
 use std::{fmt, iter, num::NonZeroU8};
 
-use clap::{ArgMatches, Args, Command, FromArgMatches, error::ErrorKind, value_parser};
+use clap::{ArgMatches, Command, error::ErrorKind, value_parser};
 use jp_config::PartialAppConfig;
 use jp_workspace::Workspace;
 use serde_json::Value;
@@ -57,17 +57,6 @@ fn mounted<T: CommandArgs>(name: &'static str, about: Option<&'static str>) -> C
     T::augment(Command::new(name)).about(about)
 }
 
-/// A subcommand named `name`, declaring the derived arguments of `T` and
-/// described in help by `about`.
-fn subcommand<T: Args>(name: &'static str, about: Option<&'static str>) -> Command {
-    // A derived argument struct describes the command with its own Rust doc
-    // comment, and so does every struct flattened into it. Those are written
-    // for contributors, so both descriptions are set here, the long one empty.
-    T::augment_args(Command::new(name))
-        .about(about)
-        .long_about(None)
-}
-
 impl Commands<Parsed> {
     /// Mount every subcommand on `cmd`.
     ///
@@ -97,12 +86,9 @@ impl Commands<Parsed> {
             // TODO: Remove once we have proper customizable "command aliases".
             .subcommand(mounted::<attachment::add::Add>("aa", None).hide(true))
             .subcommand(
-                subcommand::<conversation::Conversation>(
-                    "conversation",
-                    Some("Manage conversations"),
-                )
-                .visible_alias("c")
-                .alias("conversations"),
+                mounted::<conversation::Conversation>("conversation", Some("Manage conversations"))
+                    .visible_alias("c")
+                    .alias("conversations"),
             )
             .subcommand(mounted::<plugin::PluginManagement>(
                 "plugin",
@@ -142,7 +128,7 @@ impl Commands<Parsed> {
             "query" => Self::Query(query::Query::from_matches(sub, spelling)?),
             "attachment" => Self::Attachment(attachment::Attachment::from_matches(sub)?),
             "aa" => Self::AttachmentAdd(attachment::add::Add::from_matches(sub)?),
-            "conversation" => Self::Conversation(FromArgMatches::from_arg_matches(sub)?),
+            "conversation" => Self::Conversation(conversation::Conversation::from_matches(sub)?),
             "plugin" => Self::Plugin(plugin::PluginManagement::from_matches(sub)?),
             "workspace" => Self::Workspace(workspace::Workspace::from_matches(sub)?),
             "provider" => Self::Provider(provider::Provider::from_matches(sub)?),

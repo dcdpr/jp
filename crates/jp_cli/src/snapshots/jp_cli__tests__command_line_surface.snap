@@ -1672,7 +1672,6 @@ hidden: false
 external_subcommands: None
 set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp conversation [OPTIONS] <COMMAND>
-group Conversation: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -1705,9 +1704,7 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation rm [OPTIONS] [id]...
-group Rm: [] required=false multiple=true
 group creation_range: ["created_since", "created_before"] required=false multiple=true
-group ConfirmFlag: ["confirm", "no_confirm"] required=false multiple=true
 
 ### id
 short: None
@@ -1780,7 +1777,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["CONFIRM"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -1800,7 +1797,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["NO_CONFIRM"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -1840,7 +1837,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation ls [OPTIONS] [id]...
-group Ls: [] required=false multiple=true
 
 ### id
 short: None
@@ -1893,7 +1889,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["DESCENDING"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -1933,7 +1929,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["FULL"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -1953,7 +1949,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["LOCAL"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -1973,7 +1969,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["ARCHIVED"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -2033,7 +2029,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation show [OPTIONS] [id]...
-group Show: [] required=false multiple=true
 
 ### id
 short: None
@@ -2086,7 +2081,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation use [OPTIONS] [id]
-group Use: [] required=false multiple=true
 group creation_range: ["created_since", "created_before"] required=false multiple=true
 
 ### id
@@ -2200,7 +2194,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation edit [OPTIONS] [id]...
-group Edit: [] required=false multiple=true
 group property: ["local", "pin", "expires_at", "no_expires_at", "title", "no_title"] required=false multiple=false
 group file: ["events", "metadata", "base_config"] required=false multiple=false
 
@@ -2233,7 +2226,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: bool
+value_type: jp_cli::cli::flag::Word<bool>
 possible_values: ["true", "false"]
 value_names: Some(["LOCAL"])
 value_delimiter: None
@@ -2253,7 +2246,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: bool
+value_type: jp_cli::cli::flag::Word<bool>
 possible_values: ["true", "false"]
 value_names: Some(["PIN"])
 value_delimiter: None
@@ -2273,7 +2266,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: jp_cli::cmd::conversation::edit::ExpirationDuration
+value_type: jp_cli::cli::flag::Word<jp_cli::cmd::conversation::edit::ExpirationDuration>
 possible_values: []
 value_names: Some(["EXPIRES_AT"])
 value_delimiter: None
@@ -2295,7 +2288,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["NO_EXPIRES_AT"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -2313,7 +2306,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: alloc::string::String
+value_type: jp_cli::cli::flag::Word<alloc::string::String>
 possible_values: []
 value_names: Some(["TITLE"])
 value_delimiter: None
@@ -2335,7 +2328,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["NO_TITLE"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -2355,7 +2348,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["EVENTS"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -2375,7 +2368,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["METADATA"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -2395,7 +2388,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["BASE_CONFIG"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -2435,8 +2428,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation fork [OPTIONS] [id]...
-group Fork: [] required=false multiple=true
-group TurnSelection: ["first", "last", "turn", "from", "to", "keep_first", "keep_last"] required=false multiple=true
 
 ### id
 short: None
@@ -2469,7 +2460,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["ACTIVATE"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -2487,7 +2478,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: usize
+value_type: jp_cli::cli::flag::Word<usize>
 possible_values: []
 value_names: Some(["FIRST"])
 value_delimiter: None
@@ -2507,7 +2498,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: usize
+value_type: jp_cli::cli::flag::Word<usize>
 possible_values: []
 value_names: Some(["LAST"])
 value_delimiter: None
@@ -2629,7 +2620,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["NO_TURNS"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -2709,8 +2700,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation compact [OPTIONS] [id]...
-group Compact: [] required=false multiple=true
-group TurnSelection: ["first", "last", "turn", "from", "to", "keep_first", "keep_last"] required=false multiple=true
 
 ### id
 short: None
@@ -2741,7 +2730,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: usize
+value_type: jp_cli::cli::flag::Word<usize>
 possible_values: []
 value_names: Some(["FIRST"])
 value_delimiter: None
@@ -2761,7 +2750,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: usize
+value_type: jp_cli::cli::flag::Word<usize>
 possible_values: []
 value_names: Some(["LAST"])
 value_delimiter: None
@@ -2883,7 +2872,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["REASONING"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -2901,7 +2890,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: jp_config::conversation::compaction::ToolCallsMode
+value_type: jp_cli::cli::flag::Word<jp_config::conversation::compaction::ToolCallsMode>
 possible_values: []
 value_names: Some(["TOOLS"])
 value_delimiter: None
@@ -2910,7 +2899,7 @@ help_heading: None
 conflicts: ["compact"]
 set: []
 help: Some("Strip tool call content from the compacted range")
-long_help: Some("Strip tool call content from the compacted range.\n\nUsed without a value, strips both requests and responses. Otherwise one of (with short aliases):\n\n- `strip` (`s`): strip request arguments and response content - `strip-requests` (`sreq`): strip request arguments only - `strip-responses` (`sres`): strip response content only - `omit` (`o`): remove tool call pairs entirely")
+long_help: Some("Strip tool call content from the compacted range.\n\nUsed without a value, strips both requests and responses. Otherwise one of (with short aliases):\n\n- `strip` (`s`): strip request arguments and response content\n- `strip-requests` (`sreq`): strip request arguments only\n- `strip-responses` (`sres`): strip response content only\n- `omit` (`o`): remove tool call pairs entirely")
 
 ### summary
 short: Some('s')
@@ -2921,7 +2910,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: alloc::string::String
+value_type: jp_cli::cli::flag::Word<alloc::string::String>
 possible_values: []
 value_names: Some(["SUMMARY"])
 value_delimiter: None
@@ -3003,7 +2992,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["DRY_RUN"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -3021,7 +3010,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: usize
+value_type: jp_cli::cli::flag::Word<usize>
 possible_values: []
 value_names: Some(["INDEX"])
 value_delimiter: None
@@ -3083,7 +3072,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation title [OPTIONS] [id]...
-group Title: [] required=false multiple=true
 
 ### id
 short: None
@@ -3156,7 +3144,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["DRY_RUN"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -3196,7 +3184,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation grep [OPTIONS] [PATTERN]...
-group Grep: [] required=false multiple=true
 
 ### pattern
 short: None
@@ -3249,7 +3236,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["ALL_MATCH"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -3289,7 +3276,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["IGNORE_CASE"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -3309,7 +3296,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["CASE_SENSITIVE"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -3369,7 +3356,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["DESCENDING"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -3389,7 +3376,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["REGEX"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -3416,7 +3403,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("What to emit for each conversation that contains a match")
-long_help: Some("What to emit for each conversation that contains a match.\n\n- `hits`: the matching lines with their coordinates. - `ids`: the conversation ID only. - `count`: the conversation ID and its number of matching lines. - `text`: the matched and context lines with no coordinates.")
+long_help: Some("What to emit for each conversation that contains a match.\n\n- `hits`: the matching lines with their coordinates.\n- `ids`: the conversation ID only.\n- `count`: the conversation ID and its number of matching lines.\n- `text`: the matched and context lines with no coordinates.")
 
 ### heading
 short: None
@@ -3429,7 +3416,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["HEADING"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -3449,7 +3436,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["NO_HEADING"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -3469,7 +3456,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["WRAP"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -3589,7 +3576,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation label [OPTIONS] [COMMAND]
-group Label: [] required=false multiple=true
 
 ### id
 short: Some('i')
@@ -3642,7 +3628,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation label add [OPTIONS] <KEY[=VALUE]|:NAME>...
-group Values: ["labels"] required=false multiple=true
 
 ### labels
 short: None
@@ -3695,7 +3680,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation label set [OPTIONS] <KEY[=VALUE]|:NAME>...
-group Values: ["labels"] required=false multiple=true
 
 ### labels
 short: None
@@ -3748,7 +3732,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation label rm [OPTIONS] [KEY[=VALUE]]...
-group Rm: ["labels"] required=false multiple=true
 
 ### labels
 short: None
@@ -3833,8 +3816,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation print [OPTIONS] [id]...
-group Print: [] required=false multiple=true
-group TurnSelection: ["first", "last", "turn", "from", "to", "keep_first", "keep_last"] required=false multiple=true
 
 ### id
 short: None
@@ -3865,7 +3846,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: usize
+value_type: jp_cli::cli::flag::Word<usize>
 possible_values: []
 value_names: Some(["FIRST"])
 value_delimiter: None
@@ -3885,7 +3866,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: usize
+value_type: jp_cli::cli::flag::Word<usize>
 possible_values: []
 value_names: Some(["LAST"])
 value_delimiter: None
@@ -4007,7 +3988,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["CURRENT_CONFIG"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -4034,7 +4015,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("Output style preset")
-long_help: Some("Output style preset.\n\n- `user`: Show only user messages. Hides assistant messages, reasoning, and tool calls entirely. - `chat`: Show only user and assistant messages. Hides reasoning and tool calls entirely. - `brief`: Hide reasoning, tool arguments, and tool results. Shows only user messages, assistant messages, and tool call headers. - `full`: Show everything including reasoning, tool arguments, and untruncated tool results.")
+long_help: Some("Output style preset.\n\n- `user`: Show only user messages. Hides assistant messages, reasoning, and tool calls entirely.\n- `chat`: Show only user and assistant messages. Hides reasoning and tool calls entirely.\n- `brief`: Hide reasoning, tool arguments, and tool results. Shows only user messages, assistant messages, and tool call headers.\n- `full`: Show everything including reasoning, tool arguments, and untruncated tool results.")
 
 ### compacted
 short: None
@@ -4047,7 +4028,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["COMPACTED"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -4087,7 +4068,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation path [OPTIONS] [id]...
-group Path: [] required=false multiple=true
 
 ### id
 short: None
@@ -4120,7 +4100,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["EVENTS"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -4140,7 +4120,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["METADATA"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -4160,7 +4140,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["BASE_CONFIG"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -4200,9 +4180,7 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation archive [OPTIONS] [id]...
-group Archive: [] required=false multiple=true
 group creation_range: ["created_since", "created_before"] required=false multiple=true
-group ConfirmFlag: ["confirm", "no_confirm"] required=false multiple=true
 
 ### id
 short: None
@@ -4295,7 +4273,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["CONFIRM"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -4315,7 +4293,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["NO_CONFIRM"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -4355,7 +4333,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation unarchive [OPTIONS] [id]...
-group Unarchive: [] required=false multiple=true
 
 ### id
 short: None

@@ -1,7 +1,9 @@
+use clap::{ArgMatches, Command};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 
 use crate::{
+    cli::CommandArgs,
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::{ConversationIds as _, PositionalIds},
@@ -14,10 +16,21 @@ use crate::{
 ///
 /// Without IDs, shows a picker of archived conversations to restore.
 /// With IDs, unarchives each one (non-archived IDs are skipped with a warning).
-#[derive(Debug, clap::Args)]
+#[derive(Debug)]
 pub(crate) struct Unarchive {
-    #[command(flatten)]
     target: PositionalIds<false, true>,
+}
+
+impl CommandArgs for Unarchive {
+    fn augment(cmd: Command) -> Command {
+        PositionalIds::<false, true>::augment(cmd)
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            target: PositionalIds::from_matches(matches)?,
+        })
+    }
 }
 
 impl Unarchive {

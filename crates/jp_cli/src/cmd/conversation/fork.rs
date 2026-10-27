@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use jp_conversation::{ConversationId, ConversationStream, Error as ConversationError};
 use jp_inquire::prompt::TerminalPromptBackend;
 use jp_printer::Printer;
@@ -9,8 +10,10 @@ use serde_json::Value;
 use tracing::debug;
 
 use crate::{
+    cli::CommandArgs,
     cmd::{
         ConversationLoadRequest, Output,
+        compact_flag::CompactFlag,
         conversation_id::PositionalIds,
         label::resolve::{Resolver, Trigger},
         turn_selection::TurnSelection,
@@ -19,12 +22,12 @@ use crate::{
     output::{notice_sink, print_json},
 };
 
-#[derive(Debug, clap::Args)]
+/// `jp conversation fork`.
+#[derive(Debug)]
 pub(crate) struct Fork {
-    #[command(flatten)]
     target: PositionalIds<true, true>,
 
-    #[arg(short, long, default_value = "false")]
+    /// Make the fork the session's active conversation.
     activate: bool,
 
     /// Which turns the fork inherits.
@@ -35,32 +38,70 @@ pub(crate) struct Fork {
     /// drop the turns in between); `--turn N` inherits a single turn, or
     /// `--turn A..B` an inclusive range.
     /// `--keep-first`/`--keep-last` drop turns at either end of the selection.
-    #[command(flatten)]
     range: TurnSelection,
 
     /// Fork without inheriting any turns.
-    ///
-    /// The fork keeps the source conversation's full effective configuration
-    /// (base config plus every config delta) but starts with zero turns —
-    /// equivalent to a fresh conversation whose config matches the source's
-    /// current config.
-    /// Cannot be combined with the turn-selection or `--compact` flags.
-    #[arg(
-        short = 'N',
-        long,
-        conflicts_with_all = [
-            "from", "to", "turn", "first", "last", "keep_first", "keep_last", "compact",
-        ]
-    )]
     no_turns: bool,
 
     /// Compact the forked conversation.
-    #[command(flatten)]
-    compact: crate::cmd::compact_flag::CompactFlag,
+    compact: CompactFlag,
 
-    /// Set a custom title for the forked conversation.
-    #[arg(long, short)]
+    /// A custom title for the forked conversation.
     title: Option<String>,
+}
+
+impl CommandArgs for Fork {
+    fn augment(cmd: Command) -> Command {
+        let cmd = PositionalIds::<true, true>::augment(cmd).arg(
+            Arg::new("activate")
+                .short('a')
+                .long("activate")
+                .action(ArgAction::SetTrue),
+        );
+        let cmd = TurnSelection::augment(cmd).arg(
+            Arg::new("no_turns")
+                .short('N')
+                .long("no-turns")
+                .action(ArgAction::SetTrue)
+                .conflicts_with_all([
+                    "from",
+                    "to",
+                    "turn",
+                    "first",
+                    "last",
+                    "keep_first",
+                    "keep_last",
+                    "compact",
+                ])
+                .help("Fork without inheriting any turns")
+                .long_help(
+                    "Fork without inheriting any turns.\n\nThe fork keeps the source \
+                     conversation's full effective configuration (base config plus every config \
+                     delta) but starts with zero turns — equivalent to a fresh conversation whose \
+                     config matches the source's current config. Cannot be combined with the \
+                     turn-selection or `--compact` flags.",
+                ),
+        );
+
+        CompactFlag::augment(cmd).arg(
+            Arg::new("title")
+                .short('t')
+                .long("title")
+                .value_name("TITLE")
+                .help("Set a custom title for the forked conversation"),
+        )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            target: PositionalIds::from_matches(matches)?,
+            activate: matches.get_flag("activate"),
+            range: TurnSelection::from_matches(matches)?,
+            no_turns: matches.get_flag("no_turns"),
+            compact: CompactFlag::from_matches(matches)?,
+            title: matches.get_one("title").cloned(),
+        })
+    }
 }
 
 impl Fork {

@@ -1,7 +1,9 @@
+use clap::{ArgMatches, Command};
 use jp_conversation::ConversationId;
 use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
+    cli::CommandArgs,
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
@@ -12,14 +14,13 @@ use crate::{
     shared::confirm::{ConfirmFlag, ConversationAction, confirm_conversation_action},
 };
 
-#[derive(Debug, clap::Args)]
+/// `jp conversation rm`.
+#[derive(Debug)]
 pub(crate) struct Rm {
-    #[command(flatten)]
     target: PositionalIds<true, true>,
 
     /// Remove all conversations created in a `[--created-since,
     /// --created-before)` range.
-    #[command(flatten)]
     range: CreationRange,
 
     /// Confirmation prompting: `--confirm`, `--no-confirm`, or `--yes`.
@@ -27,8 +28,23 @@ pub(crate) struct Rm {
     /// Removal always prompts by default; `--no-confirm` / `--yes` skips it.
     /// With no user available to answer — no terminal, or `--no-interactive`
     /// — removal fails unless `--no-confirm` was passed.
-    #[command(flatten)]
     confirm: ConfirmFlag,
+}
+
+impl CommandArgs for Rm {
+    fn augment(cmd: Command) -> Command {
+        let cmd = PositionalIds::<true, true>::augment(cmd);
+        let cmd = CreationRange::<true>::augment(cmd);
+        ConfirmFlag::augment(cmd)
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            target: PositionalIds::from_matches(matches)?,
+            range: CreationRange::from_matches(matches)?,
+            confirm: ConfirmFlag::from_matches(matches)?,
+        })
+    }
 }
 
 impl Rm {

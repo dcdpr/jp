@@ -15,7 +15,10 @@ use jp_config::{
     types::{byte_size::ByteSize, policy_spec::PolicySpec},
 };
 
-use crate::cli::flag::{Claim, Flag, FlagValues, OptionalValue, flag_arg};
+use crate::cli::{
+    CommandArgs,
+    flag::{Claim, Flag, FlagValues, OptionalValue, flag_arg},
+};
 
 /// Shared compaction flag that can be embedded in any command.
 ///
@@ -152,24 +155,13 @@ impl OptionalValue for Compact {
     }
 }
 
-impl clap::Args for CompactFlag {
-    fn augment_args(cmd: Command) -> Command {
+impl CommandArgs for CompactFlag {
+    fn augment(cmd: Command) -> Command {
         cmd.arg(flag_arg::<Compact>())
     }
 
-    fn augment_args_for_update(cmd: Command) -> Command {
-        Self::augment_args(cmd)
-    }
-}
-
-impl clap::FromArgMatches for CompactFlag {
-    fn from_arg_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
         Flag::<Compact>::strict(matches)
-    }
-
-    fn update_from_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), clap::Error> {
-        *self = Self::from_arg_matches(matches)?;
-        Ok(())
     }
 }
 

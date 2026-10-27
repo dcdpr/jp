@@ -1,9 +1,11 @@
+use clap::{Arg, ArgMatches, Command};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_workspace::{ConversationHandle, LockResult};
 use tracing::{debug, warn};
 
 use crate::{
+    cli::CommandArgs,
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::{ConversationIds as _, PositionalIds},
@@ -26,27 +28,45 @@ use crate::{
 /// `--grep` and `--created-since`/`--created-before` restrict the picker's
 /// candidate set; when the combined filter leaves a single conversation, it is
 /// activated directly without prompting.
-#[derive(Debug, clap::Args)]
+#[derive(Debug)]
 pub(crate) struct Use {
-    #[command(flatten)]
     target: PositionalIds<true, false>,
 
     /// Restrict picker candidates to conversations containing the pattern.
-    ///
-    /// Substring match against the title, labels, chat text, reasoning,
-    /// structured output, tool calls, tool results, and inquiry questions.
-    /// A label is matched as `key=value`, or as a bare key when it holds no
-    /// value.
-    /// Case-insensitive unless the pattern contains an uppercase character
-    /// (smart-case).
-    /// Composable with target keywords (`?`, `?p`, `?s`, `?a`) and with
-    /// `--created-since` / `--created-before`.
-    #[arg(long)]
     grep: Option<String>,
 
     /// Restrict picker candidates to a creation-date range.
-    #[command(flatten)]
     range: CreationRange<false>,
+}
+
+impl CommandArgs for Use {
+    fn augment(cmd: Command) -> Command {
+        let cmd = PositionalIds::<true, false>::augment(cmd).arg(
+            Arg::new("grep")
+                .long("grep")
+                .value_name("GREP")
+                .help("Restrict picker candidates to conversations containing the pattern")
+                .long_help(
+                    "Restrict picker candidates to conversations containing the \
+                     pattern.\n\nSubstring match against the title, labels, chat text, reasoning, \
+                     structured output, tool calls, tool results, and inquiry questions. A label \
+                     is matched as `key=value`, or as a bare key when it holds no value. \
+                     Case-insensitive unless the pattern contains an uppercase character \
+                     (smart-case). Composable with target keywords (`?`, `?p`, `?s`, `?a`) and \
+                     with `--created-since` / `--created-before`.",
+                ),
+        );
+
+        CreationRange::<false>::augment(cmd)
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            target: PositionalIds::from_matches(matches)?,
+            grep: matches.get_one("grep").cloned(),
+            range: CreationRange::from_matches(matches)?,
+        })
+    }
 }
 
 impl Use {

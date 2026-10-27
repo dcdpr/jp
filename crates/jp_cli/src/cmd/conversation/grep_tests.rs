@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use camino_tempfile::tempdir;
 use chrono::{TimeZone as _, Utc};
-use clap::Parser as _;
 use jp_config::AppConfig;
 use jp_conversation::{
     Conversation, ConversationEvent, ConversationId, Labels,
@@ -16,6 +15,7 @@ use strip_ansi_escapes::strip_str;
 use super::*;
 use crate::{
     Globals,
+    cli::parse_args,
     cmd::{conversation_id::FlagIds, target::ConversationTarget},
 };
 
@@ -2796,15 +2796,7 @@ fn json_submatches_cover_every_pattern_in_order_of_position() {
 // --- flags ------------------------------------------------------------------
 
 fn parse(args: &[&str]) -> Result<Grep, clap::Error> {
-    #[derive(clap::Parser)]
-    struct TestCli {
-        #[command(flatten)]
-        grep: Grep,
-    }
-
-    let mut argv = vec!["grep"];
-    argv.extend_from_slice(args);
-    TestCli::try_parse_from(argv).map(|cli| cli.grep)
+    parse_args(args)
 }
 
 #[test]

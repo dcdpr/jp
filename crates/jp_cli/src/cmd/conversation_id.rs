@@ -1,4 +1,4 @@
-//! Shared clap argument types for conversation targeting.
+//! Shared argument types for conversation targeting.
 //!
 //! Two generic types handle all commands:
 //!
@@ -10,14 +10,11 @@
 //! - `SESSION`: whether the `session` keyword is accepted
 //! - `MULTI`: whether multiple IDs are accepted
 //!
-//! Because clap's derive macro doesn't evaluate const generics in `#[arg]`
-//! attributes, both types implement [`clap::Args`] and [`clap::FromArgMatches`]
-//! manually.
 //! The const generics control parser selection, help text, and validation.
 
 use std::{borrow::Cow, ffi::OsStr};
 
-use clap::{Arg, ArgAction, ArgMatches, Command, FromArgMatches, builder::TypedValueParser};
+use clap::{Arg, ArgAction, ArgMatches, Command, builder::TypedValueParser};
 use crossterm::style::Stylize as _;
 
 use super::target::{ConversationTarget, PickerFilter};
@@ -172,28 +169,6 @@ impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> ConversationIds
 
 impl<const SESSION: bool, const MULTI: bool> CommandArgs for PositionalIds<SESSION, MULTI> {
     fn augment(cmd: Command) -> Command {
-        <Self as clap::Args>::augment_args(cmd)
-    }
-
-    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
-        <Self as FromArgMatches>::from_arg_matches(matches)
-    }
-}
-
-impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> CommandArgs
-    for FlagIds<SESSION, MULTI, GLOBAL>
-{
-    fn augment(cmd: Command) -> Command {
-        cmd.arg(flag_arg::<Ids<SESSION, MULTI, GLOBAL>>())
-    }
-
-    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
-        Flag::<Ids<SESSION, MULTI, GLOBAL>>::strict(matches)
-    }
-}
-
-impl<const SESSION: bool, const MULTI: bool> clap::Args for PositionalIds<SESSION, MULTI> {
-    fn augment_args(cmd: Command) -> Command {
         let mut arg = Arg::new("id")
             .value_parser(TargetParser::<SESSION>)
             .help(short_help())
@@ -208,47 +183,22 @@ impl<const SESSION: bool, const MULTI: bool> clap::Args for PositionalIds<SESSIO
         cmd.arg(arg)
     }
 
-    fn augment_args_for_update(cmd: Command) -> Command {
-        Self::augment_args(cmd)
-    }
-}
-
-impl<const SESSION: bool, const MULTI: bool> FromArgMatches for PositionalIds<SESSION, MULTI> {
-    fn from_arg_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
         let ids = read_ids(matches);
         validate_multi::<MULTI>(&ids)?;
         Ok(Self { ids })
     }
-
-    fn update_from_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), clap::Error> {
-        self.ids = read_ids(matches);
-        validate_multi::<MULTI>(&self.ids)?;
-        Ok(())
-    }
 }
 
-impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> clap::Args
+impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> CommandArgs
     for FlagIds<SESSION, MULTI, GLOBAL>
 {
-    fn augment_args(cmd: Command) -> Command {
+    fn augment(cmd: Command) -> Command {
         cmd.arg(flag_arg::<Ids<SESSION, MULTI, GLOBAL>>())
     }
 
-    fn augment_args_for_update(cmd: Command) -> Command {
-        Self::augment_args(cmd)
-    }
-}
-
-impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> FromArgMatches
-    for FlagIds<SESSION, MULTI, GLOBAL>
-{
-    fn from_arg_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
         Flag::<Ids<SESSION, MULTI, GLOBAL>>::strict(matches)
-    }
-
-    fn update_from_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), clap::Error> {
-        *self = Self::from_arg_matches(matches)?;
-        Ok(())
     }
 }
 

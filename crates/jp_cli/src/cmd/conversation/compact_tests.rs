@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use camino_tempfile::{Utf8TempDir, tempdir};
 use chrono::{DateTime, Utc};
-use clap::Parser as _;
+use clap::error::ErrorKind;
 use jp_config::{
     AppConfig, PartialAppConfig,
     conversation::compaction::{
@@ -30,21 +30,19 @@ use super::{
 };
 use crate::{
     Globals,
+    cli::parse_args,
     cmd::{conversation_id::ConversationIds as _, target::ConversationTarget},
     ctx::Ctx,
 };
 
 /// Parse a `Compact` from `jp conversation compact <args>` for flag tests.
 fn parse_compact(args: &[&str]) -> Compact {
-    #[derive(clap::Parser)]
-    struct TestCli {
-        #[command(flatten)]
-        compact: Compact,
-    }
+    parse_args(args).unwrap()
+}
 
-    let mut argv = vec!["compact"];
-    argv.extend_from_slice(args);
-    TestCli::try_parse_from(argv).unwrap().compact
+/// How clap rejects `args` to `jp conversation compact`.
+fn rejection(args: &[&str]) -> ErrorKind {
+    parse_args::<Compact>(args).unwrap_err().kind()
 }
 
 /// A rule that summarizes the whole selection, with both keep bounds open so
@@ -129,13 +127,10 @@ fn over_without_a_policy_is_rejected() {
 fn over_conflicts_with_summarize() {
     // A summary replaces its whole range rather than acting per item, so it
     // ignores the mechanical policies a threshold would narrow.
-    #[derive(clap::Parser)]
-    struct TestCli {
-        #[command(flatten)]
-        compact: Compact,
-    }
-
-    assert!(TestCli::try_parse_from(["compact", "--summarize", "--over", "1mb"]).is_err());
+    assert_eq!(
+        rejection(&["--summary", "--over", "1mb"]),
+        ErrorKind::ArgumentConflict
+    );
 }
 
 #[test]
@@ -144,13 +139,10 @@ fn over_conflicts_with_reset() {
     // list the pair reaches `validate()`, which reports the wrong problem
     // ("--over needs a policy to narrow") for a combination clap should refuse
     // outright, and which no added policy flag could satisfy anyway.
-    #[derive(clap::Parser)]
-    struct TestCli {
-        #[command(flatten)]
-        compact: Compact,
-    }
-
-    assert!(TestCli::try_parse_from(["compact", "--reset", "--over", "1mb"]).is_err());
+    assert_eq!(
+        rejection(&["--reset", "--over", "1mb"]),
+        ErrorKind::ArgumentConflict
+    );
 }
 
 #[test]
@@ -314,17 +306,9 @@ fn model_flag_leaves_summaryless_rules_untouched() {
 fn policy_flag_conflicts_with_dsl_spec() {
     // Dedicated policy flags and the `-k` DSL are mutually exclusive: combining
     // them is a parse error rather than silently dropping one side.
-    #[derive(clap::Parser)]
-    struct TestCli {
-        #[command(flatten)]
-        compact: Compact,
-    }
-
-    let result = TestCli::try_parse_from(["compact", "--reasoning", "-k", "s:..-3"]);
-    assert!(
-        result.is_err(),
-        "--reasoning and -k DSL must conflict, got {:?}",
-        result.map(|c| c.compact.compact_flag.specs)
+    assert_eq!(
+        rejection(&["--reasoning", "-k", "s:..-3"]),
+        ErrorKind::ArgumentConflict
     );
 }
 
@@ -333,35 +317,24 @@ fn reset_conflicts_with_selection_flags() {
     // `--reset` undoes compaction; combining it with policy/range/DSL flags is a
     // parse error rather than silently dropping them on the early-return reset
     // path.
-    #[derive(clap::Parser)]
-    struct TestCli {
-        #[command(flatten)]
-        compact: Compact,
-    }
-
     for args in [
-        &["compact", "--reset", "--reasoning"][..],
-        &["compact", "--reset", "-k", "s:..-3"][..],
-        &["compact", "--reset", "--keep-last", "5"][..],
+        &["--reset", "--reasoning"][..],
+        &["--reset", "-k", "s:..-3"][..],
+        &["--reset", "--keep-last", "5"][..],
     ] {
-        assert!(
-            TestCli::try_parse_from(args.iter().copied()).is_err(),
+        assert_eq!(
+            rejection(args),
+            ErrorKind::ArgumentConflict,
             "--reset must conflict with selection flags: {args:?}"
         );
     }
 
     // `--reset --dry-run` stays valid: it previews the removal.
-    assert!(TestCli::try_parse_from(["compact", "--reset", "--dry-run"]).is_ok());
+    assert!(parse_args::<Compact>(&["--reset", "--dry-run"]).is_ok());
 }
 
 #[test]
 fn reset_takes_an_optional_compaction_index() {
-    #[derive(clap::Parser)]
-    struct TestCli {
-        #[command(flatten)]
-        compact: Compact,
-    }
-
     assert_eq!(parse_compact(&["--reset"]).reset, Some(None));
     assert_eq!(parse_compact(&["--reset=2"]).reset, Some(Some(2)));
     assert_eq!(parse_compact(&[]).reset, None);
@@ -374,8 +347,8 @@ fn reset_takes_an_optional_compaction_index() {
     assert_eq!(compact.target.ids(), [ConversationTarget::Recent]);
 
     // Indices are 1-based, so `0` names nothing.
-    assert!(TestCli::try_parse_from(["compact", "--reset=0"]).is_err());
-    assert!(TestCli::try_parse_from(["compact", "--reset=x"]).is_err());
+    assert_eq!(rejection(&["--reset=0"]), ErrorKind::ValueValidation);
+    assert_eq!(rejection(&["--reset=x"]), ErrorKind::ValueValidation);
 }
 
 #[test]

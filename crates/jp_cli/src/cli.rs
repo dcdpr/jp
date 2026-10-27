@@ -104,6 +104,33 @@ pub(crate) fn unread_subcommand(name: &str) -> clap::Error {
     )
 }
 
+/// Two sets of arguments declared on the same command.
+#[cfg(test)]
+impl<A: CommandArgs, B: CommandArgs> CommandArgs for (A, B) {
+    fn augment(cmd: Command) -> Command {
+        B::augment(A::augment(cmd))
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok((A::from_matches(matches)?, B::from_matches(matches)?))
+    }
+}
+
+/// Parse `args` into `T`, on a command named `test` declaring nothing else.
+///
+/// # Errors
+///
+/// Returns clap's error for arguments that do not match, or the error `T`
+/// reports reading them back.
+#[cfg(test)]
+pub(crate) fn parse_args<T: CommandArgs>(args: &[&str]) -> Result<T, clap::Error> {
+    let argv = ["test"].into_iter().chain(args.iter().copied());
+    let mut cmd = T::augment(Command::new("test"));
+    let matches = cmd.try_get_matches_from_mut(argv)?;
+
+    T::from_matches(&matches).map_err(|error| error.format(&mut cmd))
+}
+
 /// A parsed `jp` invocation.
 pub(crate) struct Cli {
     pub(crate) globals: Globals,

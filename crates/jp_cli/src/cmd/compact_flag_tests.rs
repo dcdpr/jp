@@ -1,21 +1,15 @@
 use super::*;
+use crate::{cli::parse_args, cmd::conversation_id::PositionalIds};
 
 /// A command like `jp c fork`: `-k` beside positional conversation IDs, and no
 /// query words to give a value back to.
-#[derive(Debug, clap::Parser)]
-struct WithoutQuery {
-    #[command(flatten)]
-    compact: CompactFlag,
-
-    ids: Vec<String>,
-}
+type WithoutQuery = (CompactFlag, PositionalIds<true, true>);
 
 // Only `jp query` has words to give a value back to; elsewhere a value that is
 // no spec is a mistake to report, even when a positional follows it.
 #[test]
 fn a_command_without_query_words_rejects_a_word_that_is_no_spec() {
-    let error = <WithoutQuery as clap::Parser>::try_parse_from(["fork", "-k", "what", "jp-c1"])
-        .unwrap_err();
+    let error = parse_args::<WithoutQuery>(&["-k", "what", "recent"]).unwrap_err();
 
     assert_eq!(
         error.render().to_string(),

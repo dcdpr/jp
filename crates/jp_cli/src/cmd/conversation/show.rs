@@ -1,8 +1,10 @@
+use clap::{ArgMatches, Command};
 use jp_conversation::Error as ConversationError;
 use jp_storage::backend::StoragePresence;
 use jp_workspace::ConversationHandle;
 
 use crate::{
+    cli::CommandArgs,
     cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
     ctx::Ctx,
     format::{
@@ -12,10 +14,22 @@ use crate::{
     output::{print_details, print_json},
 };
 
-#[derive(Debug, clap::Args)]
+/// `jp conversation show`.
+#[derive(Debug)]
 pub(crate) struct Show {
-    #[command(flatten)]
     target: PositionalIds<true, true>,
+}
+
+impl CommandArgs for Show {
+    fn augment(cmd: Command) -> Command {
+        PositionalIds::<true, true>::augment(cmd)
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            target: PositionalIds::from_matches(matches)?,
+        })
+    }
 }
 
 impl Show {
