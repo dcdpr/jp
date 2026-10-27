@@ -547,6 +547,17 @@ pub enum FsAccessError {
         grants: Vec<Utf8PathBuf>,
     },
 
+    /// A mutating capability was requested on a directory the workspace lies
+    /// inside, which would move, delete, or rewrite the workspace along with
+    /// it.
+    #[error("cannot {capability} '{path}': it contains the workspace")]
+    HoldsWorkspace {
+        /// The capability that was requested.
+        capability: &'static str,
+        /// The path the directory was named by.
+        path: Utf8PathBuf,
+    },
+
     /// The path enters a mount and resolves back into the workspace.
     ///
     /// A workspace file is reached through its workspace path only.

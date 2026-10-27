@@ -100,6 +100,13 @@ pub struct ResolvedPath {
 
     /// What sits at `absolute`, or `None` when nothing does yet.
     pub kind: Option<EntryKind>,
+
+    /// Whether `absolute` is a directory the workspace lies inside.
+    ///
+    /// Only reachable through a mount whose target contains the workspace.
+    /// Moving or deleting such a directory takes the workspace along, whatever
+    /// path named it.
+    pub holds_workspace: bool,
 }
 
 impl ResolvedPath {
@@ -210,12 +217,18 @@ pub fn resolve_path(
     }
 
     let kind = entry_kind(&absolute).map_err(|e| io_error(&absolute, &e))?;
+    // Read off the real location, not the path given, which may reach it
+    // through an alias the mount's workspace exclusion does not sit under.
+    let holds_workspace = kind == Some(EntryKind::Dir)
+        && root_canonical != absolute
+        && root_canonical.starts_with(&absolute);
 
     Ok(ResolvedPath {
         absolute,
         relative,
         lexical,
         kind,
+        holds_workspace,
     })
 }
 
@@ -224,16 +237,26 @@ impl AccessPolicy {
     ///
     /// A mutating capability on a directory is checked for everything beneath
     /// it, since renaming or removing a directory takes its contents along.
+    /// On a directory the workspace lies inside, it is refused outright, so no
+    /// rule can grant moving or deleting the workspace through a mount.
     ///
     /// # Errors
     ///
-    /// Returns [`FsAccessError::Denied`], listing the paths that do grant the
-    /// capability.
+    /// Returns [`FsAccessError::HoldsWorkspace`] for a mutating capability on a
+    /// directory holding the workspace, and [`FsAccessError::Denied`], listing
+    /// the paths that do grant the capability, when no rule grants it.
     pub fn authorize(
         &self,
         capability: Capability,
         target: &ResolvedPath,
     ) -> Result<(), FsAccessError> {
+        if capability.mutates() && target.holds_workspace {
+            return Err(FsAccessError::HoldsWorkspace {
+                capability: capability.as_str(),
+                path: target.relative.clone(),
+            });
+        }
+
         self.authorize_entry(capability, &target.relative, target.is_dir())
     }
 

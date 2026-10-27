@@ -96,6 +96,7 @@ mod input {
             relative: "a/c.rs".into(),
             lexical: "a/c.rs".into(),
             kind: None,
+            holds_workspace: false,
         });
     }
 
@@ -243,6 +244,7 @@ mod entry {
             relative: "link.txt".into(),
             lexical: "link.txt".into(),
             kind: Some(EntryKind::Symlink),
+            holds_workspace: false,
         });
     }
 

@@ -2,7 +2,9 @@
 //! symlink resolution and nested-escape boundary introduced by RFD D43.
 
 use camino::Utf8PathBuf;
-use jp_tool::{AccessPolicy, Action, Capability, Context, FsAccessError, FsRule};
+use jp_tool::{
+    AccessPolicy, Action, Capability, Context, EntryKind, FsAccessError, FsRule, Resolve,
+};
 
 fn ctx(root: Utf8PathBuf, access: Option<AccessPolicy>) -> Context {
     Context {
@@ -197,6 +199,9 @@ fn ancestor_mount() -> (camino_tempfile::Utf8TempDir, Context) {
     std::fs::create_dir_all(grand_canonical.join("sibling")).unwrap();
     std::fs::write(root.join("src/lib.rs"), "x").unwrap();
     std::fs::write(grand_canonical.join("sibling/f.txt"), "x").unwrap();
+    // An alias for a directory holding the workspace, as a `current ->
+    // releases/vN` checkout has.
+    symlink(grand_canonical.join("a"), grand_canonical.join("current")).unwrap();
     symlink(&grand_canonical, root.join("up")).unwrap();
 
     let mount = FsRule::new("up")
@@ -234,21 +239,35 @@ fn a_mount_containing_the_workspace_still_reaches_what_is_beside_it() {
 }
 
 /// Moving or deleting a directory on the way down to the workspace takes the
-/// workspace along, so the mount must not grant it.
+/// workspace along, so the mount must not grant it, under any name.
 #[cfg(unix)]
 #[test]
 fn a_mount_cannot_move_the_workspace_or_a_directory_holding_it() {
     let (_grand, ctx) = ancestor_mount();
 
-    for path in ["up", "up/a"] {
-        assert!(
-            matches!(
-                ctx.check_delete(path.into()),
-                Err(FsAccessError::Denied { .. })
-            ),
+    for path in ["up", "up/a", "up/current"] {
+        assert_eq!(
+            ctx.check_delete(path.into()),
+            Err(FsAccessError::HoldsWorkspace {
+                capability: "delete",
+                path: path.into(),
+            }),
             "path: {path}"
         );
     }
+}
+
+/// A symlink to a directory holding the workspace is only a link: removing or
+/// renaming it leaves the directory where it is.
+#[cfg(unix)]
+#[test]
+fn a_mount_can_remove_a_link_to_a_directory_holding_the_workspace() {
+    let (_grand, ctx) = ancestor_mount();
+
+    let link = ctx.resolve("up/current".into(), Resolve::Entry).unwrap();
+
+    assert_eq!(link.kind, Some(EntryKind::Symlink));
+    assert_eq!(ctx.authorize(Capability::Delete, &link), Ok(()));
 }
 
 /// A workspace file has one path: going through the mount to reach it is

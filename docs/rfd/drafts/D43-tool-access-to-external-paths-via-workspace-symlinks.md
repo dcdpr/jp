@@ -398,15 +398,18 @@ reappears inside the mount (`up/b`), next to the mount rule:
   The cooperative checker rejects it and names `src/lib.rs` as the path to use,
   so a workspace file is reached through its workspace path only.
 - Tool call: move or delete `up/b` (or `top/a`, for a mount `top=../..`).
-  A directory mutation covers everything beneath it, and the deny-all rule
-  sits beneath it.
-  Rejected: a mount cannot move or delete the workspace, or a directory that
-  holds it.
-  Files in those directories stay reachable through the mount rule.
+  Rejected: a mount cannot move, delete, or write as a whole any directory
+  the workspace lies inside.
+  The check is made on the canonical location, so an alias inside the target
+  (`up/current/...` with `current -> releases/v1`) is rejected the same way.
+  A symlink to such a directory can itself be moved or deleted, and files in
+  those directories stay reachable through the mount rule.
 
 The deny-all rule covers tools that match paths as typed, such as a walk over
 the mount, which would otherwise find workspace files under `up/b` and check
 them against `up`.
+Walks do not follow symlinks, so they reach the workspace only through its real
+path, which is where the rule sits.
 A tool that canonicalises paths itself and matches the canonical form lands on
 the workspace's own rules instead, which grants nothing the workspace does not.
 The OS sandbox builds the same exclusion (see [OS-sandbox

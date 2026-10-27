@@ -100,7 +100,9 @@ pub fn authorize(
     capability: Capability,
     target: &ResolvedPath,
 ) -> Result<(), String> {
-    authorize_entry(access, capability, &target.relative, target.is_dir())
+    access
+        .map_or(Ok(()), |policy| policy.authorize(capability, target))
+        .map_err(describe)
 }
 
 /// Enforce a capability on a path the caller derived rather than resolved.
@@ -306,6 +308,9 @@ fn describe(error: FsAccessError) -> String {
                 "Access denied: cannot {capability} '{target}'. Paths granting {capability}: \
                  [{grants}]. If required, ask the user for explicit access."
             )
+        }
+        FsAccessError::HoldsWorkspace { capability, path } => {
+            format!("Access denied: cannot {capability} '{path}': it contains the workspace.")
         }
         FsAccessError::Io { path, message } => {
             format!("Failed to resolve path '{path}': {message}")
