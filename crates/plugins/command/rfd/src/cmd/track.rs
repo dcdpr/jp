@@ -254,8 +254,8 @@ fn needs_tickets(paths: &Paths) -> Result<(), String> {
     ))
 }
 
-/// The tracking label, as the ticket vocabulary spells it, or a refusal naming
-/// the entry to add.
+/// The labels a tracking ticket is filed with, as the ticket vocabulary spells
+/// them, or a refusal naming what to change.
 ///
 /// A board that defines no labels takes any, the tracking label among them.
 fn tracking_labels(vocabulary: &Vocabulary) -> Result<Labels, String> {
@@ -265,12 +265,19 @@ fn tracking_labels(vocabulary: &Vocabulary) -> Result<Labels, String> {
     vocabulary
         .resolve(&[format!("{key}={value}")])
         .map_err(|rejected| {
-            if rejected.retired.is_empty() {
-                format!("Tracking label missing. Add `\"{value}\"` to `{entry}.values`.")
-            } else {
+            if !rejected.retired.is_empty() {
                 format!(
                     "Tracking label retired. Move `\"{value}\"` from `{entry}.retired` to \
                      `{entry}.values`."
+                )
+            } else if !rejected.unknown_keys.is_empty() || !rejected.unknown_values.is_empty() {
+                format!("Tracking label missing. Add `\"{value}\"` to `{entry}.values`.")
+            } else {
+                // The label resolved, and the board's bounds ask for more than
+                // the one label a tracking ticket is filed with.
+                format!(
+                    "A tracking ticket is filed with only `{key}={value}`, and this board needs \
+                     more. {rejected}"
                 )
             }
         })

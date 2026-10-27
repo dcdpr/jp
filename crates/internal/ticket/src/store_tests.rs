@@ -291,6 +291,31 @@ fn an_import_creates_a_ticket_linked_to_its_issue() {
     assert_eq!(ticket.comments[0].from, "gh:someone");
 }
 
+/// An issue is found by the `GitHub` field its import wrote, so a caller can
+/// tell a first import from a refresh before fetching anything.
+#[test]
+fn an_imported_issue_is_found_by_its_number() {
+    let dir = Utf8TempDir::new().unwrap();
+    assert!(imported(dir.path(), 123).unwrap().is_none());
+
+    let first = import(dir.path(), &Import {
+        number: 123,
+        title: "Crash",
+        description: "",
+        comments: vec![],
+        labels: &Labels::default(),
+        authors: "gh:someone",
+        date: "2026-08-05",
+    })
+    .unwrap();
+
+    assert_eq!(
+        imported(dir.path(), 123).unwrap().map(|entry| entry.id),
+        Some(first.id)
+    );
+    assert!(imported(dir.path(), 12).unwrap().is_none());
+}
+
 /// GitHub owns the content; the repository owns the metadata.
 /// A second import refreshes one and leaves the other alone.
 #[test]

@@ -349,6 +349,60 @@ fn sync_leaves_a_file_it_did_not_write_alone() {
     assert_eq!(fs::read_to_string(&path).unwrap(), "# mine\n");
 }
 
+/// A bounded key is described beside the lists that write a ticket's labels,
+/// and a key a ticket needs makes `create`'s labels required, so the assistant
+/// knows before its first call.
+/// A filter is held to neither.
+#[test]
+fn sync_describes_the_bounds_to_the_tools_that_write_labels() {
+    let dir = Utf8TempDir::new().unwrap();
+    let config = json!({ "conversation": { "tools": {
+        "ticket_create": labelled("plugin.command.ticket.create"),
+        "ticket_edit": labelled("plugin.command.ticket.edit"),
+        "ticket_list": labelled("plugin.command.ticket.list")
+    }}});
+    let vocabulary = Vocabulary::parse(
+        r#"{
+            "type": {"values": ["bug"], "min": 1, "max": 1},
+            "team": {"values": ["core"], "max": 1}
+        }"#,
+    )
+    .unwrap();
+
+    sync(dir.path(), &config, &vocabulary).unwrap();
+
+    let lists = r#"
+[conversation.tools.ticket_create.parameters.labels]
+required = true
+
+[conversation.tools.ticket_create.parameters.labels.items]
+summary = "One `key=value` label. A ticket carries at most one label under `team` and exactly one label under `type`."
+enum = [
+  "team=core",
+  "type=bug",
+]
+
+[conversation.tools.ticket_edit.parameters.labels.items]
+summary = "One `key=value` label. A ticket carries at most one label under `team` and exactly one label under `type`."
+enum = [
+  "team=core",
+  "type=bug",
+]
+
+[conversation.tools.ticket_list.parameters.labels.items]
+enum = [
+  "team",
+  "team=core",
+  "type",
+  "type=bug",
+]
+"#;
+    assert_eq!(
+        fs::read_to_string(dir.path().join(SYNCED_FILE)).unwrap(),
+        format!("{SYNCED_HEADER}\n{SYNCED_NOTES}{lists}")
+    );
+}
+
 /// An empty `enum` accepts nothing, which some providers refuse outright, so a
 /// board without labels writes no lists at all.
 #[test]

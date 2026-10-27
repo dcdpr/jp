@@ -40,7 +40,7 @@ mod labels;
 pub mod vocabulary;
 
 pub use labels::Labels;
-pub use vocabulary::{Rejected, Vocabulary};
+pub use vocabulary::{Miscount, Rejected, Vocabulary};
 
 /// The label key grammar, in words.
 ///

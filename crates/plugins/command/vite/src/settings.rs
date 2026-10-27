@@ -88,6 +88,24 @@ pub(crate) struct Label {
     /// The values a ticket that already carries one may keep.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub retired: Vec<String>,
+
+    /// The fewest of the key's values a ticket carries; left out when it may
+    /// carry none.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub min: usize,
+
+    /// The most of the key's values a ticket carries; left out when there is no
+    /// limit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<usize>,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde passes a reference"
+)]
+fn is_zero(count: &usize) -> bool {
+    *count == 0
 }
 
 impl Settings {
@@ -135,6 +153,8 @@ pub(crate) fn snapshot(
                         description: facet.description().to_owned(),
                         values: facet.values().map(ToOwned::to_owned).collect(),
                         retired: facet.retired().map(ToOwned::to_owned).collect(),
+                        min: facet.min(),
+                        max: facet.max(),
                     })
                 })
                 .collect(),

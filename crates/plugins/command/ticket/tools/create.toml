@@ -57,9 +57,10 @@ type = "string"
 required = false
 summary = "The design document this work comes from, e.g. `045`."
 
+# Not marked required here: `jp ticket tools sync` marks it when the board
+# requires a label, and a value set here would compete with that one.
 [conversation.tools.ticket_create.parameters.labels]
 type = "array"
-required = false
 summary = "What kind of work this is and where it lands, as `key=value` labels."
 description = """
 Labels classify a ticket: what kind of work it is, which part of the system it
@@ -70,6 +71,9 @@ Each label is a `key=value` pair, and a key may be named more than once.
 When the board defines labels, only those are accepted: a label outside them is
 refused, and the refusal names the ones you can use. A board that defines none
 takes any.
+
+A board can also require a key, or hold a ticket to one value of it. A call
+that doesn't meet that is refused, naming the labels to add.
 """
 
 # The accepted values are mirrored from the vocabulary by `jp ticket tools sync`.

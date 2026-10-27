@@ -147,8 +147,9 @@ A label is a `key=value` annotation classifying a ticket: what type of work it
 is, and what part of the system it lands in.
 JP's board says the first with `type` and the second with keys such as `client`
 and `package`; another board picks its own.
-A ticket carries any number of them, or none, and a key may repeat: a ticket
-spanning two crates carries `package=jp_cli` and `package=jp_config`.
+A ticket carries any number of them, or none, unless the board bounds a key (see
+below), and a key may repeat: a ticket spanning two crates carries
+`package=jp_cli` and `package=jp_config`.
 
 The field is written once per pair rather than joining them onto one line:
 
@@ -182,7 +183,19 @@ It declares one entry per key, with the values that key accepts:
 description = "<what the key covers>"
 values = ["<value>"]
 retired = ["<value>"]
+min = 1
+max = 1
 ```
+
+`min` and `max` bound how many of the key's values one ticket carries.
+Left out, a ticket carries any number of them, or none.
+`min = 1, max = 1` makes a key every ticket carries exactly once, which is how
+JP's board makes `type` say what kind of work every ticket is; `max = 1` alone
+makes one optional, but never repeated.
+Every label write is held to them, and the refusal names the values to choose
+from; the docs build reports a ticket that breaks them, such as one edited by
+hand.
+A key without values is present or absent, so it takes neither.
 
 A closed set is the point of declaring one.
 Free-text labels accumulate near-synonyms and grouping stops working.

@@ -544,6 +544,7 @@ fn labelling_without_an_id_offers_the_picker() {
 
     let error = compose_missing(
         dir.path(),
+        &labelled(),
         Command::Label {
             id: None,
             labels: vec!["client=cli".to_owned()],
@@ -1932,25 +1933,22 @@ fn a_leftover_labels_file_is_pointed_out() {
     );
 }
 
-/// A vocabulary that doesn't parse fails the commands that label, named by
-/// where it is configured, and no others.
+/// A vocabulary that doesn't parse fails the commands that label or file a
+/// ticket, named by where it is configured, and no others.
+/// Filing reads it even with no labels named, since a board can require some.
 #[test]
-fn a_broken_vocabulary_fails_only_what_labels() {
+fn a_broken_vocabulary_fails_what_labels_or_files() {
     let dir = Utf8TempDir::new().unwrap();
     let Value::Object(options) = json!({ "labels": { "client": "The client." } }) else {
         unreachable!("options are an object");
     };
     let options = Options::read(&options).unwrap();
+    let broken = "`plugins.command.ticket.options.labels`: The label vocabulary is not a map";
 
     let error = run_with_options(dir.path(), Command::Labels, &options).unwrap_err();
-    assert!(
-        error.starts_with(
-            "`plugins.command.ticket.options.labels`: The label vocabulary is not a map"
-        ),
-        "{error}"
-    );
+    assert!(error.starts_with(broken), "{error}");
 
-    run_with_options(
+    let error = run_with_options(
         dir.path(),
         Command::Add {
             title: Some("Unlabelled".to_owned()),
@@ -1961,7 +1959,153 @@ fn a_broken_vocabulary_fails_only_what_labels() {
         },
         &options,
     )
+    .unwrap_err();
+    assert!(error.starts_with(broken), "{error}");
+
+    run_with_options(
+        dir.path(),
+        Command::List {
+            status: None,
+            labels: vec![],
+            query: None,
+        },
+        &options,
+    )
     .unwrap();
+}
+
+/// A board where every ticket carries exactly one `type`.
+fn typed() -> Options {
+    let Value::Object(options) = json!({ "labels": {
+        "type": { "description": "The type", "values": ["bug", "feature"], "min": 1, "max": 1 },
+        "client": { "description": "The client.", "values": ["cli"] }
+    } }) else {
+        unreachable!("options are an object");
+    };
+
+    Options::read(&options).unwrap()
+}
+
+/// A ticket filed without a label the board requires is refused, naming the key
+/// and the values to choose from, and nothing is written.
+#[test]
+fn adding_a_ticket_without_a_required_label_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    let add = |labels: &[&str]| {
+        run_with_options(
+            dir.path(),
+            Command::Add {
+                title: Some("Header misaligned".to_owned()),
+                author: Some("john".to_owned()),
+                body: None,
+                implements: None,
+                labels: labels.iter().map(|label| (*label).to_owned()).collect(),
+            },
+            &typed(),
+        )
+    };
+
+    assert_eq!(
+        add(&["client=cli"]).unwrap_err(),
+        "`type` label missing: add one of type=bug, type=feature."
+    );
+    assert!(store::list(dir.path()).unwrap().is_empty());
+
+    add(&["client=cli", "type=bug"]).unwrap();
+    assert_eq!(store::list(dir.path()).unwrap().len(), 1);
+}
+
+/// Composing a ticket the board would refuse would throw away what the user
+/// typed, so the labels are checked before the composer opens.
+#[test]
+fn the_labels_are_checked_before_the_composer_opens() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let error = compose_missing(
+        dir.path(),
+        &typed(),
+        Command::Add {
+            title: None,
+            author: None,
+            body: None,
+            implements: None,
+            labels: vec![],
+        },
+        &mut &b""[..],
+        &mut Vec::new(),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        "`type` label missing: add one of type=bug, type=feature."
+    );
+}
+
+/// Relabelling replaces the whole set, so dropping the required key is refused
+/// and the ticket keeps the labels it had.
+#[test]
+fn relabelling_cannot_drop_a_required_label() {
+    let dir = Utf8TempDir::new().unwrap();
+    run_with_options(
+        dir.path(),
+        Command::Add {
+            title: Some("Header misaligned".to_owned()),
+            author: Some("john".to_owned()),
+            body: None,
+            implements: None,
+            labels: vec!["type=bug".to_owned()],
+        },
+        &typed(),
+    )
+    .unwrap();
+    let id = store::list(dir.path()).unwrap()[0].id;
+
+    let error = run_with_options(
+        dir.path(),
+        Command::Label {
+            id: Some(id),
+            labels: vec!["client=cli".to_owned()],
+        },
+        &typed(),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        "`type` label missing: add one of type=bug, type=feature."
+    );
+    let ticket = store::list(dir.path()).unwrap().remove(0).ticket.unwrap();
+    assert_eq!(ticket.metadata.labels.to_tokens(), ["type=bug"]);
+}
+
+/// An issue imported for the first time needs the labels the board requires,
+/// and is refused before anything is fetched from GitHub.
+#[test]
+fn importing_a_new_issue_without_required_labels_fetches_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+    let refused = Err("`type` label missing: add one of type=bug, type=feature.".to_owned());
+
+    let error = import_all(dir.path(), &[123], "dcdpr/jp", &refused).unwrap_err();
+
+    assert_eq!(
+        error,
+        "`type` label missing: add one of type=bug, type=feature."
+    );
+}
+
+/// `jp ticket labels` says how many of a bounded key a ticket carries.
+#[test]
+fn the_label_listing_names_each_bound() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let out = run_with_options(dir.path(), Command::Labels, &typed()).unwrap();
+
+    assert_eq!(
+        out.text,
+        "client  The client.\n  client=cli\n\ntype  The type (exactly one label per ticket)\n  \
+         type=bug\n  type=feature\n\n"
+    );
 }
 
 /// An unreadable ticket is a warning, not mixed into stdout where it would

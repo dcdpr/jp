@@ -95,7 +95,8 @@ enum Command {
         implements: Option<String>,
 
         /// A `key=value` label from the board's vocabulary.
-        /// Repeat for more than one.
+        /// Repeat for more than one; `jp ticket labels` lists the ones the
+        /// board requires.
         #[arg(long = "label")]
         labels: Vec<String>,
     },
@@ -511,7 +512,7 @@ fn handle_command(
         args.dir.as_deref().unwrap_or(&options.dir),
     );
 
-    let command = match compose_missing(&dir, args.command, stdin, stdout) {
+    let command = match compose_missing(&dir, &options, args.command, stdin, stdout) {
         Ok(command) => command,
         Err(message) => return send_exit(stdout, 1, Some(&message)),
     };
@@ -605,6 +606,7 @@ const UNTITLED: &str = "untitled";
 /// the host owns the terminal and the editor the `Ctrl+X` escape opens.
 fn compose_missing(
     dir: &Utf8Path,
+    options: &Options,
     command: Command,
     stdin: &mut impl BufRead,
     stdout: &mut impl Write,
@@ -617,6 +619,9 @@ fn compose_missing(
             implements,
             labels,
         } => {
+            // Checked before composing, so labels the board refuses don't cost
+            // the user what they typed.
+            resolve_labels(options, &labels)?;
             let (title, body) = compose_add(body, stdin, stdout)?;
 
             Ok(Command::Add {
@@ -635,6 +640,7 @@ fn compose_missing(
             body,
         } => compose_missing(
             dir,
+            options,
             Command::Comment {
                 id: Some(pick_ticket(dir, stdin, stdout, "Comment on", false)?),
                 author,
@@ -1324,7 +1330,7 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             numbers,
             repo,
             labels,
-        } => import_all(dir, &numbers, &repo, &resolve_labels(ctx.options, &labels)?),
+        } => import_all(dir, &numbers, &repo, &resolve_labels(ctx.options, &labels)),
 
         Command::List {
             status,
@@ -1527,12 +1533,14 @@ fn init_dir(dir: &Utf8Path) -> Result<Output, String> {
 
 /// Import each of `numbers` from `repo`, stopping at the first that fails.
 ///
-/// A ticket the import creates is filed with `labels`.
+/// A ticket the import creates is filed with `labels`, which are needed only
+/// then: a ticket refreshed from upstream keeps its own, so a refusal of them
+/// stops only an issue imported for the first time.
 fn import_all(
     dir: &Utf8Path,
     numbers: &[u64],
     repo: &str,
-    labels: &Labels,
+    labels: &Result<Labels, String>,
 ) -> Result<Output, String> {
     if numbers.is_empty() {
         return Err("No issue numbers given, and no terminal to ask for one.".to_owned());
@@ -1540,9 +1548,14 @@ fn import_all(
 
     let mut output = Output::default();
     for &number in numbers {
+        // Decided before anything is fetched, so a refusal costs no request.
+        let labels = match store::imported(dir, number).map_err(|error| error.to_string())? {
+            Some(_) => Labels::default(),
+            None => labels.clone()?,
+        };
         output
             .text
-            .push_str(&import(dir, number, repo, labels)?.text);
+            .push_str(&import(dir, number, repo, &labels)?.text);
     }
 
     Ok(output)
@@ -1700,15 +1713,11 @@ fn relabel(
 
 /// Check labels for a ticket being filed.
 ///
-/// Both the refusal and the vocabulary's own error carry enough to act on, so
-/// they are handed to the user as they are.
-/// A ticket filed without labels doesn't read the vocabulary at all, so a board
-/// with a broken vocabulary can still file unlabelled tickets.
+/// The vocabulary is read even when no labels are named, since it can require
+/// some.
+/// Both its refusal and its own error carry enough to act on, so they are
+/// handed to the user as they are.
 fn resolve_labels(options: &Options, requested: &[String]) -> Result<Labels, String> {
-    if requested.is_empty() {
-        return Ok(Labels::default());
-    }
-
     options
         .vocabulary()?
         .resolve(requested)
@@ -1741,7 +1750,11 @@ fn describe_vocabulary(vocabulary: &Vocabulary, leftover: Option<&str>) -> Strin
 
     let mut out = String::new();
     for (key, facet) in vocabulary.facets() {
-        out.push_str(&format!("{key}  {}\n", facet.description()));
+        let bound = facet
+            .bound()
+            .map(|bound| format!(" ({bound} per ticket)"))
+            .unwrap_or_default();
+        out.push_str(&format!("{key}  {}{bound}\n", facet.description()));
         for value in facet.values() {
             out.push_str(&format!("  {key}={value}\n"));
         }

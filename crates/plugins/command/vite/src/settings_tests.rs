@@ -28,7 +28,13 @@ fn both_workflows_are_read_where_the_plugins_keep_them() {
         "plugins": { "command": { "ticket": { "options": {
             "board": { "done_limit": 3 },
             "labels": {
-                "type": { "description": "The type", "values": ["bug"], "retired": ["chore"] },
+                "type": {
+                    "description": "The type",
+                    "values": ["bug"],
+                    "retired": ["chore"],
+                    "min": 1,
+                    "max": 1
+                },
                 "triaged": { "description": "Looked at" }
             }
         } } } }
@@ -59,11 +65,15 @@ fn both_workflows_are_read_where_the_plugins_keep_them() {
                     description: "Looked at".to_owned(),
                     values: vec![],
                     retired: vec![],
+                    min: 0,
+                    max: None,
                 }),
                 ("type".to_owned(), Label {
                     description: "The type".to_owned(),
                     values: vec!["bug".to_owned()],
                     retired: vec!["chore".to_owned()],
+                    min: 1,
+                    max: Some(1),
                 }),
             ]),
         }),
@@ -206,11 +216,22 @@ fn the_snapshot_renders_in_a_fixed_shape() {
             dir: "docs/ticket".to_owned(),
             route: "ticket".to_owned(),
             done_limit: 8,
-            labels: BTreeMap::from([("type".to_owned(), Label {
-                description: "The type".to_owned(),
-                values: vec!["bug".to_owned()],
-                retired: vec![],
-            })]),
+            labels: BTreeMap::from([
+                ("type".to_owned(), Label {
+                    description: "The type".to_owned(),
+                    values: vec!["bug".to_owned()],
+                    retired: vec![],
+                    min: 1,
+                    max: Some(1),
+                }),
+                ("area".to_owned(), Label {
+                    description: "The area".to_owned(),
+                    values: vec!["cli".to_owned()],
+                    retired: vec![],
+                    min: 0,
+                    max: None,
+                }),
+            ]),
         }),
     };
 
@@ -226,11 +247,19 @@ fn the_snapshot_renders_in_a_fixed_shape() {
     "route": "ticket",
     "doneLimit": 8,
     "labels": {
+      "area": {
+        "description": "The area",
+        "values": [
+          "cli"
+        ]
+      },
       "type": {
         "description": "The type",
         "values": [
           "bug"
-        ]
+        ],
+        "min": 1,
+        "max": 1
       }
     }
   }

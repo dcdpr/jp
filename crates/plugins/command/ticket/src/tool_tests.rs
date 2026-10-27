@@ -572,6 +572,42 @@ fn create_reflows_the_body_with_comfort() {
     );
 }
 
+/// A board can require a label, so a call naming none still reads the
+/// vocabulary, and the refusal names what to add.
+#[test]
+fn create_needs_the_labels_the_board_requires() {
+    let dir = Utf8TempDir::new().unwrap();
+    let Value::Object(options) = json!({ "labels": {
+        "type": { "description": "The type", "values": ["bug", "task"], "min": 1, "max": 1 }
+    } }) else {
+        unreachable!("options are an object");
+    };
+    let options = Options::read(&options).unwrap();
+    let create = |arguments: Value| {
+        let call = ToolCall {
+            action: ToolAction::Run,
+            name: "create".to_owned(),
+            arguments: object(arguments),
+            answers: Map::new(),
+            options: Map::new(),
+            access: None,
+            conversation: "test".to_owned(),
+        };
+        run(&init(&dir), &call, &options)
+    };
+
+    assert_eq!(
+        error_message(create(json!({ "title": "Bump the deny list" }))),
+        "`type` label missing: add one of type=bug, type=task."
+    );
+    assert!(ids(&dir).is_empty(), "a refused ticket was filed");
+
+    content(create(
+        json!({ "title": "Bump the deny list", "labels": ["type=task"] }),
+    ));
+    assert_eq!(ids(&dir).len(), 1);
+}
+
 #[test]
 fn create_rejects_an_empty_title() {
     let dir = Utf8TempDir::new().unwrap();

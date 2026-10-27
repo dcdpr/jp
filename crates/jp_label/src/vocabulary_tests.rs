@@ -305,6 +305,172 @@ fn an_empty_vocabulary_refuses_a_malformed_label() {
     assert_eq!(error.to_string(), "`=ui` is not a `key=value` label.");
 }
 
+/// A board where every item carries exactly one `type`, at least one `area`,
+/// and at most one `team`.
+fn bounded() -> Vocabulary {
+    Vocabulary::parse(
+        r#"{
+            "type": {"values": ["bug", "feature"], "retired": ["chore"], "min": 1, "max": 1},
+            "area": {"values": ["cli", "docs", "llm"], "min": 1},
+            "team": {"values": ["core", "web"], "max": 1},
+            "draft": {}
+        }"#,
+    )
+    .unwrap()
+}
+
+#[test]
+fn reads_the_bounds_of_a_key() {
+    let vocabulary = bounded();
+    let type_ = vocabulary.facet("type").unwrap();
+
+    assert_eq!(type_.min(), 1);
+    assert_eq!(type_.max(), Some(1));
+    assert_eq!(type_.bound().as_deref(), Some("exactly one label"));
+    assert_eq!(
+        vocabulary.facet("area").unwrap().bound().as_deref(),
+        Some("at least one label")
+    );
+    assert_eq!(
+        vocabulary.facet("team").unwrap().bound().as_deref(),
+        Some("at most one label")
+    );
+    assert_eq!(vocabulary.facet("draft").unwrap().bound(), None);
+    assert!(!vocabulary.facet("draft").unwrap().is_bounded());
+}
+
+#[test]
+fn an_item_meeting_every_bound_resolves() {
+    let labels = bounded()
+        .resolve(&owned(&["type=bug", "area=cli", "area=docs", "team=core"]))
+        .unwrap();
+
+    assert_eq!(labels.to_tokens(), [
+        "area=cli",
+        "area=docs",
+        "team=core",
+        "type=bug"
+    ]);
+}
+
+/// The refusal names the missing key and offers its values, so the caller can
+/// fix the call without looking anything up.
+#[test]
+fn a_required_key_left_out_is_refused_with_its_values() {
+    let error = bounded().resolve(&owned(&["area=cli"])).unwrap_err();
+
+    assert_eq!(error.miscounted.len(), 1);
+    assert_eq!(error.miscounted[0].key, "type");
+    assert_eq!(
+        error.to_string(),
+        "`type` label missing: add one of type=bug, type=feature."
+    );
+}
+
+#[test]
+fn more_values_than_a_key_takes_are_refused() {
+    let error = bounded()
+        .resolve(&owned(&[
+            "type=bug",
+            "type=feature",
+            "area=cli",
+            "team=core",
+            "team=web",
+        ]))
+        .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "`team` takes at most one label, and 2 are given: team=core, team=web. `type` takes \
+         exactly one label, and 2 are given: type=bug, type=feature."
+    );
+}
+
+#[test]
+fn fewer_values_than_a_key_needs_are_refused() {
+    let vocabulary =
+        Vocabulary::parse(r#"{"area": {"values": ["cli", "docs", "llm"], "min": 2}}"#).unwrap();
+
+    let error = vocabulary.resolve(&owned(&["area=cli"])).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "`area` takes at least 2 labels, and 1 is given: add from area=cli, area=docs, area=llm."
+    );
+}
+
+/// A refused value doesn't count toward its key, and the whole set is offered
+/// for it ahead of what the bounds need.
+#[test]
+fn a_refused_value_counts_as_missing() {
+    let error = bounded()
+        .resolve(&owned(&["type=bugg", "area=cli"]))
+        .unwrap_err();
+
+    assert_eq!(error.unknown_values, ["type=bugg"]);
+    assert_eq!(
+        error.to_string(),
+        "`type=bugg` is not a known label. Labels you can add: area=cli, area=docs, area=llm, \
+         draft, team=core, team=web, type=bug, type=feature. `type` label missing: add one of \
+         type=bug, type=feature."
+    );
+}
+
+/// A retired value the item keeps is still one of its values, so it counts
+/// toward the key's `max`.
+#[test]
+fn a_kept_retired_value_counts_toward_the_bound() {
+    let current = Labels::from_tokens(["type=chore", "area=cli"]).unwrap();
+
+    let kept = bounded()
+        .resolve_against(&owned(&["type=chore", "area=cli"]), &current)
+        .unwrap();
+    assert_eq!(kept.to_tokens(), ["area=cli", "type=chore"]);
+
+    let error = bounded()
+        .resolve_against(&owned(&["type=chore", "type=bug", "area=cli"]), &current)
+        .unwrap_err();
+    assert_eq!(error.miscounted[0].given, ["bug", "chore"]);
+}
+
+#[test]
+fn a_bound_on_a_key_without_values_is_an_error() {
+    assert_eq!(
+        Vocabulary::parse(r#"{"draft": {"min": 1}}"#),
+        Err(Error::BoundOnBareKey {
+            key: "draft".to_owned()
+        })
+    );
+}
+
+/// Bounds no item could meet are refused where they are declared, rather than
+/// refusing every write later.
+#[test]
+fn bounds_no_item_can_meet_are_an_error() {
+    assert_eq!(
+        Vocabulary::parse(r#"{"type": {"values": ["bug"], "max": 0}}"#),
+        Err(Error::ZeroMax {
+            key: "type".to_owned()
+        })
+    );
+    assert_eq!(
+        Vocabulary::parse(r#"{"type": {"values": ["bug", "feature"], "min": 2, "max": 1}}"#),
+        Err(Error::MinAboveMax {
+            key: "type".to_owned(),
+            min: 2,
+            max: 1
+        })
+    );
+    assert_eq!(
+        Vocabulary::parse(r#"{"type": {"values": ["bug"], "retired": ["chore"], "min": 2}}"#),
+        Err(Error::MinAboveValues {
+            key: "type".to_owned(),
+            min: 2,
+            values: 1
+        })
+    );
+}
+
 /// A configuration file declares the vocabulary as a table, which reaches the
 /// reader already parsed.
 #[test]

@@ -48,6 +48,10 @@ const SYNCED_NOTES: &str = "\
 # gets retired ones, because replacing a ticket's whole set means naming a
 # retired label to keep it. `list` also gets a bare key per facet, which is how
 # a filter asks for any value under it.
+#
+# A key the board bounds with `min` or `max` is described beside the lists of
+# `create` and `edit`, and `create` requires labels when a key needs one, so
+# the assistant knows before its first call.
 ";
 
 /// The plugin a tool's `source` has to name for the tool to be one of ours.
@@ -224,15 +228,29 @@ fn synced(tools: &[(String, String)], vocabulary: &Vocabulary) -> String {
         return out;
     }
 
+    let bounds = bounds(vocabulary);
+    let required = vocabulary.facets().any(|(_, facet)| facet.min() > 0);
+
     for (key, tool) in tools {
         let Some(tokens) = tokens(tool, vocabulary) else {
             continue;
         };
+        let key = toml_key(key);
+        // A filter names no ticket's whole set, so the bounds don't apply to it.
+        let writes = tool != "list";
 
+        if tool == "create" && required {
+            out.push_str(&format!(
+                "\n[conversation.tools.{key}.parameters.labels]\nrequired = true\n"
+            ));
+        }
         out.push_str(&format!(
-            "\n[conversation.tools.{}.parameters.labels.items]\nenum = [\n",
-            toml_key(key)
+            "\n[conversation.tools.{key}.parameters.labels.items]\n"
         ));
+        if writes && let Some(bounds) = &bounds {
+            out.push_str(&format!("summary = {}\n", toml_string(bounds)));
+        }
+        out.push_str("enum = [\n");
         for token in tokens {
             out.push_str(&format!("  {},\n", toml_string(&token)));
         }
@@ -240,6 +258,24 @@ fn synced(tools: &[(String, String)], vocabulary: &Vocabulary) -> String {
     }
 
     out
+}
+
+/// What the board's bounded keys ask of a ticket, as the description of one
+/// label in a tool's schema, or `None` when no key is bounded.
+fn bounds(vocabulary: &Vocabulary) -> Option<String> {
+    let parts: Vec<String> = vocabulary
+        .facets()
+        .filter_map(|(key, facet)| facet.bound().map(|bound| format!("{bound} under `{key}`")))
+        .collect();
+
+    let (last, rest) = parts.split_last()?;
+    let all = if rest.is_empty() {
+        last.clone()
+    } else {
+        format!("{} and {last}", rest.join(", "))
+    };
+
+    Some(format!("One `key=value` label. A ticket carries {all}."))
 }
 
 /// A TOML key: bare when it can be, quoted otherwise.

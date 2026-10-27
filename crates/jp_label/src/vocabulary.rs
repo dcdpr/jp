@@ -23,6 +23,24 @@
 //! }
 //! ```
 //!
+//! A key with values can bound how many of them one item carries, with `min`
+//! and `max`:
+//!
+//! ```json
+//! {
+//!   "type": {
+//!     "description": "What kind of work it is.",
+//!     "values": ["bug", "feature"],
+//!     "min": 1,
+//!     "max": 1
+//!   }
+//! }
+//! ```
+//!
+//! Every label write is held to them, so an item can be required to carry a
+//! key, or held to one value of it.
+//! A key without values is present or absent, and takes neither.
+//!
 //! Retiring a value is not deleting it.
 //! A retired value stays readable and stays writable on an item that already
 //! carries it, so relabelling something old doesn't force its history to be
@@ -57,6 +75,10 @@ struct Entry {
     values: BTreeSet<String>,
     #[serde(default)]
     retired: BTreeSet<String>,
+    #[serde(default)]
+    min: Option<usize>,
+    #[serde(default)]
+    max: Option<usize>,
 }
 
 /// One key of a vocabulary: what it means, and what it accepts.
@@ -65,6 +87,8 @@ pub struct Facet {
     description: String,
     active: BTreeSet<String>,
     retired: BTreeSet<String>,
+    min: usize,
+    max: Option<usize>,
 }
 
 impl Facet {
@@ -90,6 +114,79 @@ impl Facet {
     pub fn is_bare(&self) -> bool {
         self.active.is_empty() && self.retired.is_empty()
     }
+
+    /// The fewest values of this key an item carries; `0` when it may carry
+    /// none.
+    #[must_use]
+    pub fn min(&self) -> usize {
+        self.min
+    }
+
+    /// The most values of this key an item carries, or `None` for no limit.
+    #[must_use]
+    pub fn max(&self) -> Option<usize> {
+        self.max
+    }
+
+    /// Whether `min` or `max` holds an item to some number of this key's
+    /// values.
+    #[must_use]
+    pub fn is_bounded(&self) -> bool {
+        self.min > 0 || self.max.is_some()
+    }
+
+    /// How many of this key's values an item carries, in words: `exactly one
+    /// label`, `at least 2 labels`, `at most one label`.
+    ///
+    /// `None` for a key with no bounds.
+    #[must_use]
+    pub fn bound(&self) -> Option<String> {
+        bound(self.min, self.max)
+    }
+}
+
+/// `min` and `max` in words, or `None` when neither holds an item to anything.
+fn bound(min: usize, max: Option<usize>) -> Option<String> {
+    let labels = |count: usize| match count {
+        1 => "one label".to_owned(),
+        count => format!("{count} labels"),
+    };
+
+    match (min, max) {
+        (0, None) => None,
+        (min, Some(max)) if min == max => Some(format!("exactly {}", labels(min))),
+        (0, Some(max)) => Some(format!("at most {}", labels(max))),
+        (min, None) => Some(format!("at least {}", labels(min))),
+        (min, Some(max)) => Some(format!("between {min} and {max} labels")),
+    }
+}
+
+/// Check an entry's `min` and `max` describe a count an item can reach.
+fn bounds(key: &str, entry: &Entry) -> Result<(), Error> {
+    let key = key.to_owned();
+    let bare = entry.values.is_empty() && entry.retired.is_empty();
+    if bare && (entry.min.is_some() || entry.max.is_some()) {
+        return Err(Error::BoundOnBareKey { key });
+    }
+
+    let min = entry.min.unwrap_or(0);
+    match entry.max {
+        Some(0) => return Err(Error::ZeroMax { key }),
+        Some(max) if min > max => return Err(Error::MinAboveMax { key, min, max }),
+        _ => {}
+    }
+
+    // A retired value can't be added, so only the active ones can make up the
+    // count on a new item.
+    if min > entry.values.len() {
+        return Err(Error::MinAboveValues {
+            key,
+            min,
+            values: entry.values.len(),
+        });
+    }
+
+    Ok(())
 }
 
 /// The keys a consumer defines, each with the values it accepts.
@@ -172,10 +269,14 @@ impl Vocabulary {
                 }
             }
 
+            bounds(&key, &entry)?;
+
             facets.insert(key, Facet {
                 description: entry.description,
                 active: entry.values,
                 retired: entry.retired,
+                min: entry.min.unwrap_or(0),
+                max: entry.max,
             });
         }
 
@@ -265,6 +366,9 @@ impl Vocabulary {
     /// That is what lets a label be added to an old item without first
     /// stripping the retired values it happens to carry.
     ///
+    /// The tokens are the item's whole set, so each key's `min` and `max` are
+    /// checked against them.
+    ///
     /// An empty vocabulary accepts every well-formed token, spelled as given.
     ///
     /// # Errors
@@ -324,21 +428,54 @@ impl Vocabulary {
             }
         }
 
+        let miscounted = self.miscounted(&accepted);
+
         if !malformed.is_empty()
             || !unknown_keys.is_empty()
             || !unknown_values.is_empty()
             || !retired.is_empty()
+            || !miscounted.is_empty()
         {
             return Err(Rejected {
                 malformed,
                 unknown_keys,
                 unknown_values,
                 retired,
+                miscounted,
                 addable: self.tokens(),
             });
         }
 
         Ok(accepted.into_iter().collect())
+    }
+
+    /// The bounded keys `accepted` carries too few or too many values of.
+    ///
+    /// Counted on what resolved, so a value the vocabulary refused counts as
+    /// missing rather than as given.
+    fn miscounted(&self, accepted: &BTreeMap<&str, BTreeSet<&str>>) -> Vec<Miscount> {
+        self.0
+            .iter()
+            .filter(|(_, facet)| facet.is_bounded())
+            .filter_map(|(key, facet)| {
+                let given: Vec<String> = accepted
+                    .get(key.as_str())
+                    .into_iter()
+                    .flatten()
+                    .map(|value| (*value).to_owned())
+                    .collect();
+                let fits =
+                    given.len() >= facet.min && facet.max.is_none_or(|max| given.len() <= max);
+
+                (!fits).then(|| Miscount {
+                    key: key.clone(),
+                    min: facet.min,
+                    max: facet.max,
+                    given,
+                    values: facet.active.iter().cloned().collect(),
+                })
+            })
+            .collect()
     }
 
     /// The vocabulary's own spelling of a key, matched without case.
@@ -377,6 +514,7 @@ fn free_form(requested: &[String]) -> Result<Labels, Rejected> {
             unknown_keys: vec![],
             unknown_values: vec![],
             retired: vec![],
+            miscounted: vec![],
             addable: vec![],
         });
     }
@@ -416,6 +554,18 @@ pub enum Error {
         first: String,
         second: String,
     },
+    /// `min` or `max` on a key that takes no value.
+    BoundOnBareKey { key: String },
+    /// `max = 0`, which no item carrying the key could meet.
+    ZeroMax { key: String },
+    /// `min` above `max`.
+    MinAboveMax { key: String, min: usize, max: usize },
+    /// `min` above the number of values the key defines.
+    MinAboveValues {
+        key: String,
+        min: usize,
+        values: usize,
+    },
 }
 
 impl fmt::Display for Error {
@@ -424,7 +574,7 @@ impl fmt::Display for Error {
             Self::Malformed(reason) => write!(
                 f,
                 "The label vocabulary is not a map of each key to a `description`, `values`, and \
-                 optional `retired`: {reason}"
+                 the optional `retired`, `min`, and `max`: {reason}"
             ),
             Self::Name(error) => write!(f, "The label vocabulary is unusable: {error}."),
             Self::EmptyValue { key } => {
@@ -438,6 +588,24 @@ impl fmt::Display for Error {
                 f,
                 "`{first}` and `{second}` under `{key}` in the label vocabulary are the same \
                  value."
+            ),
+            Self::BoundOnBareKey { key } => write!(
+                f,
+                "`{key}` in the label vocabulary takes no value, so it has no `min` or `max`."
+            ),
+            Self::ZeroMax { key } => write!(
+                f,
+                "`{key}` in the label vocabulary has `max = 0`, which no item carrying it meets; \
+                 retire its values instead."
+            ),
+            Self::MinAboveMax { key, min, max } => write!(
+                f,
+                "`{key}` in the label vocabulary has `min = {min}` above `max = {max}`."
+            ),
+            Self::MinAboveValues { key, min, values } => write!(
+                f,
+                "`{key}` in the label vocabulary has `min = {min}`, but only {values} values to \
+                 choose from."
             ),
         }
     }
@@ -467,8 +635,62 @@ pub struct Rejected {
     pub unknown_values: Vec<String>,
     /// Retired, and not already on the item.
     pub retired: Vec<String>,
+    /// Keys the item would carry too few or too many values of.
+    pub miscounted: Vec<Miscount>,
     /// The tokens a write may add.
     pub addable: Vec<String>,
+}
+
+/// A bounded key an item would carry too few or too many values of.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Miscount {
+    pub key: String,
+    pub min: usize,
+    pub max: Option<usize>,
+    /// The values of the key the item would carry.
+    pub given: Vec<String>,
+    /// The values the key accepts, so a refusal for too few can offer them.
+    pub values: Vec<String>,
+}
+
+impl fmt::Display for Miscount {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let key = &self.key;
+        let bound = bound(self.min, self.max).unwrap_or_default();
+        let tokens = |values: &[String]| {
+            values
+                .iter()
+                .map(|value| format!("{key}={value}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
+        if self.given.len() >= self.min {
+            return write!(
+                f,
+                "`{key}` takes {bound}, and {} are given: {}.",
+                self.given.len(),
+                tokens(&self.given)
+            );
+        }
+
+        let offered = tokens(&self.values);
+        match self.given.len() {
+            0 if self.min == 1 => write!(f, "`{key}` label missing: add one of {offered}."),
+            0 => write!(
+                f,
+                "`{key}` takes {bound}, and none is given: add from {offered}."
+            ),
+            1 => write!(
+                f,
+                "`{key}` takes {bound}, and 1 is given: add from {offered}."
+            ),
+            count => write!(
+                f,
+                "`{key}` takes {bound}, and {count} are given: add from {offered}."
+            ),
+        }
+    }
 }
 
 impl fmt::Display for Rejected {
@@ -510,11 +732,24 @@ impl fmt::Display for Rejected {
             )?;
         }
 
-        if self.addable.is_empty() {
-            return Ok(());
+        // The whole set is offered only for a label the vocabulary refused; a
+        // miscount offers the values of its own key.
+        let refused = !self.malformed.is_empty()
+            || !self.unknown_keys.is_empty()
+            || !self.unknown_values.is_empty()
+            || !self.retired.is_empty();
+        if refused && !self.addable.is_empty() {
+            sentence(
+                f,
+                format!("Labels you can add: {}.", self.addable.join(", ")),
+            )?;
         }
 
-        write!(f, " Labels you can add: {}.", self.addable.join(", "))
+        for miscount in &self.miscounted {
+            sentence(f, miscount.to_string())?;
+        }
+
+        Ok(())
     }
 }
 

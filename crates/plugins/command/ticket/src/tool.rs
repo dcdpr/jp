@@ -407,24 +407,20 @@ fn option_or<T: DeserializeOwned>(options: &Map<String, Value>, key: &str, defau
         .unwrap_or(default)
 }
 
-/// Check labels against the board's vocabulary.
+/// Check labels for a ticket being filed against the board's vocabulary.
 ///
+/// The vocabulary is read even for a call that names no labels, since it can
+/// require some.
 /// The outer error is the vocabulary being unreadable, which is the board's
-/// problem; the inner one is a label the board doesn't define, which is the
-/// caller's and comes back as a refusal naming the known set.
+/// problem; the inner one is a set of labels the board refuses, which is the
+/// caller's and comes back as a refusal naming what it takes.
 fn resolve_labels(
     options: &Options,
     requested: Option<&[String]>,
 ) -> Result<Result<Labels, String>, Error> {
-    // A call that names no labels doesn't read the vocabulary at all, so a
-    // board with a broken vocabulary can still file unlabelled tickets.
-    let Some(requested) = requested else {
-        return Ok(Ok(Labels::default()));
-    };
-
     Ok(options
         .vocabulary()?
-        .resolve(requested)
+        .resolve(requested.unwrap_or_default())
         .map_err(|refusal| refusal.to_string()))
 }
 

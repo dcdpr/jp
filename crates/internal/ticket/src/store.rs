@@ -19,7 +19,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use crate::{
     Comment, LABEL_KEY, Labels, NewTicket, ParseError, Status, Ticket, TicketId, Vocabulary,
     id::{MAX_BUCKET, TAIL_SPACE},
-    import::{Import, escaped},
+    import::{Import, escaped, github_marker},
     parse, render,
 };
 
@@ -422,6 +422,19 @@ pub struct Imported {
     pub comments: usize,
 }
 
+/// The ticket an earlier import of upstream issue `number` created, found by
+/// its `GitHub` field.
+pub fn imported(dir: &Utf8Path, number: u64) -> Result<Option<Entry>> {
+    let marker = github_marker(number);
+
+    Ok(list(dir)?.into_iter().find(|entry| {
+        entry
+            .ticket
+            .as_ref()
+            .is_ok_and(|ticket| ticket.metadata.github.as_deref() == Some(marker.as_str()))
+    }))
+}
+
 /// Replace a ticket's content from an upstream issue, creating it if this is
 /// the first import.
 ///
@@ -433,12 +446,7 @@ pub fn import(dir: &Utf8Path, upstream: &Import<'_>) -> Result<Imported> {
     let marker = upstream.marker();
     let (title, description, comments) = escaped(upstream);
 
-    let existing = list(dir)?.into_iter().find(|entry| {
-        entry
-            .ticket
-            .as_ref()
-            .is_ok_and(|ticket| ticket.metadata.github.as_deref() == Some(marker.as_str()))
-    });
+    let existing = imported(dir, upstream.number)?;
 
     let (id, path, created) = if let Some(entry) = existing {
         (entry.id, entry.path, false)

@@ -34,8 +34,13 @@ impl Import<'_> {
     /// The `GitHub` metadata value that links a ticket to this issue.
     #[must_use]
     pub fn marker(&self) -> String {
-        format!("#{}", self.number)
+        github_marker(self.number)
     }
+}
+
+/// The `GitHub` metadata value that links a ticket to upstream issue `number`.
+pub(crate) fn github_marker(number: u64) -> String {
+    format!("#{number}")
 }
 
 /// Neutralise untrusted markdown so the site renders it as content.

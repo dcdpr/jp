@@ -79,7 +79,8 @@ export function readLabels(content) {
         .sort()
 }
 
-// The labels the board defines, as a map of key to `{ values, retired }`.
+// The labels the board defines, as a map of key to `{ values, retired, min,
+// max }`.
 //
 // A board that configures none defines none, and takes any label.
 export function loadVocabulary(settings = readSettings()) {
@@ -132,6 +133,46 @@ export function findUnknownLabels(tickets, vocabulary) {
     return `Tickets carry labels the vocabulary doesn't define:\n${report}\n\n` +
         `Add them to \`plugins.command.ticket.options.labels\`, or fix the tickets ` +
         `(\`jp ticket label <id> --label key=value\`).`
+}
+
+// Tickets carrying too few or too many values of a key the vocabulary bounds
+// with `min` or `max`.
+//
+// Every label write `jp ticket` makes is held to the bounds; this catches a
+// ticket edited by hand, or one filed before a bound was added.
+export function findMiscountedLabels(tickets, vocabulary) {
+    const bounded = Object.entries(vocabulary)
+        .map(([key, entry]) => [key, entry?.min ?? 0, entry?.max ?? Infinity])
+        .filter(([, min, max]) => min > 0 || max !== Infinity)
+    if (bounded.length === 0) return null
+
+    const offenders = []
+    for (const ticket of tickets) {
+        const problems = []
+        for (const [key, min, max] of bounded) {
+            const count = ticket.labels
+                .filter(label => label === key || label.startsWith(`${key}=`))
+                .length
+            if (count < min || count > max) {
+                problems.push(`${count} \`${key}\` (needs ${describeBound(min, max)})`)
+            }
+        }
+        if (problems.length > 0) offenders.push(`  ${ticket.id}: ${problems.join(', ')}`)
+    }
+
+    if (offenders.length === 0) return null
+
+    return `Tickets carry too few or too many labels of one key:\n${offenders.join('\n')}\n\n` +
+        `Fix the tickets (\`jp ticket label <id> --label key=value\`), or change the key's ` +
+        `\`min\` and \`max\` in \`plugins.command.ticket.options.labels\`.`
+}
+
+// A key's bounds in words, as the count they ask for.
+function describeBound(min, max) {
+    if (min === max) return `exactly ${min}`
+    if (max === Infinity) return `at least ${min}`
+    if (min === 0) return `at most ${max}`
+    return `${min} to ${max}`
 }
 
 // Count the comments in a ticket.
@@ -305,8 +346,11 @@ export function loadTickets(settings = readSettings()) {
         path: `${route}/${f.replace(/\.md$/, '')}`,
     }))
 
-    const unknown = findUnknownLabels(tickets, loadVocabulary(settings))
+    const vocabulary = loadVocabulary(settings)
+    const unknown = findUnknownLabels(tickets, vocabulary)
     if (unknown) throw new Error(unknown)
+    const miscounted = findMiscountedLabels(tickets, vocabulary)
+    if (miscounted) throw new Error(miscounted)
 
     return tickets
 }

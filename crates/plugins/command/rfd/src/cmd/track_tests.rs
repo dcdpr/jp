@@ -511,6 +511,35 @@ fn a_vocabulary_has_to_define_the_tracking_label() {
     assert!(ticket_files(&workspace).is_empty());
 }
 
+/// A tracking ticket is filed with the tracking label alone, so a board that
+/// requires another key is told why it can't take one, rather than that the
+/// tracking label is missing.
+#[test]
+fn a_board_requiring_another_label_is_named_as_the_reason() {
+    let workspace = workspace();
+    let vocabulary = Vocabulary::parse(
+        r#"{
+            "type": {"values": ["tracking"], "min": 1, "max": 1},
+            "area": {"values": ["cli"], "min": 1}
+        }"#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        track(
+            &workspace.paths,
+            &vocabulary,
+            id("116"),
+            &filer(),
+            &mut unread
+        )
+        .unwrap_err(),
+        "A tracking ticket is filed with only `type=tracking`, and this board needs more. `area` \
+         label missing: add one of area=cli."
+    );
+    assert!(ticket_files(&workspace).is_empty());
+}
+
 /// A board that defines no labels takes any, so it takes the tracking label.
 #[test]
 fn a_board_without_labels_takes_the_tracking_label() {
