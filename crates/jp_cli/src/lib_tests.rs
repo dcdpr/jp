@@ -2,7 +2,7 @@ use std::{env, fmt::Write as _, fs, sync::Arc};
 
 use camino::Utf8PathBuf;
 use camino_tempfile::tempdir;
-use clap::{Arg, Command, CommandFactory};
+use clap::{Arg, Command, CommandFactory, builder::ValueParser};
 use jp_config::{
     AppConfig, PartialAppConfig,
     model::id::{PartialModelIdConfig, ProviderId},
@@ -336,14 +336,56 @@ fn describe_command(out: &mut String, cmd: &Command, path: &str, inherited: &[St
     writeln!(out, "hidden: {}", cmd.is_hide_set()).unwrap();
     writeln!(
         out,
-        "external_subcommands: {}",
-        cmd.is_allow_external_subcommands_set()
+        "external_subcommands: {:?}",
+        cmd.is_allow_external_subcommands_set().then(|| cmd
+            .get_external_subcommand_value_parser()
+            .map(ValueParser::type_id))
     )
     .unwrap();
+
+    // The version and author come from the package, so only their presence is
+    // pinned: a release must not change the snapshot.
+    let settings = [
+        ("version", cmd.get_version().is_some()),
+        ("long_version", cmd.get_long_version().is_some()),
+        ("author", cmd.get_author().is_some()),
+        ("subcommand_required", cmd.is_subcommand_required_set()),
+        (
+            "arg_required_else_help",
+            cmd.is_arg_required_else_help_set(),
+        ),
+        (
+            "disable_help_subcommand",
+            cmd.is_disable_help_subcommand_set(),
+        ),
+        ("propagate_version", cmd.is_propagate_version_set()),
+        (
+            "subcommand_negates_reqs",
+            cmd.is_subcommand_negates_reqs_set(),
+        ),
+        (
+            "args_conflicts_with_subcommands",
+            cmd.is_args_conflicts_with_subcommands_set(),
+        ),
+        ("flatten_help", cmd.is_flatten_help_set()),
+    ];
+    let set: Vec<_> = settings
+        .iter()
+        .filter(|(_, on)| *on)
+        .map(|(name, _)| *name)
+        .collect();
+    writeln!(out, "set: {set:?}").unwrap();
     writeln!(out, "usage: {}", cmd.clone().render_usage()).unwrap();
     for group in cmd.get_groups() {
         let args: Vec<_> = group.get_args().map(ToString::to_string).collect();
-        writeln!(out, "group {}: {args:?}", group.get_id()).unwrap();
+        writeln!(
+            out,
+            "group {}: {args:?} required={} multiple={}",
+            group.get_id(),
+            group.is_required_set(),
+            group.clone().is_multiple()
+        )
+        .unwrap();
     }
     writeln!(out).unwrap();
 

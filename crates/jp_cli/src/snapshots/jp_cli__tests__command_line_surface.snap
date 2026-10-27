@@ -10,11 +10,12 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: true
+external_subcommands: Some(Some(alloc::string::String))
+set: ["version", "long_version", "author", "subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp [OPTIONS] <COMMAND>
-group Cli: []
-group Globals: ["config", "no_config", "verbose", "quiet", "no_interactive", "format", "persist", "workspace", "width", "log_format", "log_file", "log"]
-group RootOpts: ["threads"]
+group Cli: [] required=false multiple=true
+group Globals: ["config", "no_config", "verbose", "quiet", "no_interactive", "format", "persist", "workspace", "width", "log_format", "log_file", "log"] required=false multiple=true
+group RootOpts: ["threads"] required=false multiple=true
 
 ### config
 short: Some('c')
@@ -324,9 +325,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp init [OPTIONS] [PATH]
-group Init: ["path"]
+group Init: ["path"] required=false multiple=true
 
 ### path
 short: None
@@ -376,9 +378,10 @@ after_long_help: None
 visible_aliases: ["cfg"]
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp config [OPTIONS] <COMMAND>
-group Config: []
+group Config: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -408,9 +411,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp config show [OPTIONS]
-group Show: ["defaults", "themes"]
+group Show: ["defaults", "themes"] required=false multiple=true
 
 ### defaults
 short: None
@@ -480,10 +484,11 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp config set [OPTIONS]
-group Set: []
-group FileTarget: ["user_workspace", "user_global", "cwd"]
+group Set: [] required=false multiple=true
+group FileTarget: ["user_workspace", "user_global", "cwd"] required=false multiple=false
 
 ### user_workspace
 short: None
@@ -593,10 +598,11 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp config fmt [OPTIONS]
-group Fmt: []
-group Target: ["user_workspace", "user_global", "cwd"]
+group Fmt: [] required=false multiple=true
+group Target: ["user_workspace", "user_global", "cwd"] required=false multiple=false
 
 ### user_workspace
 short: None
@@ -726,11 +732,12 @@ after_long_help: None
 visible_aliases: ["q"]
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp query [OPTIONS] [QUERY]...
-group Query: []
-group QueryInputArgs: ["query", "escaped_query", "quote"]
-group new: ["new_conversation"]
+group Query: [] required=false multiple=true
+group QueryInputArgs: ["query", "escaped_query", "quote"] required=false multiple=true
+group new: ["new_conversation"] required=false multiple=false
 
 ### template
 short: Some('%')
@@ -1400,9 +1407,10 @@ after_long_help: None
 visible_aliases: ["a"]
 hidden_aliases: ["attachments"]
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp attachment [OPTIONS] <COMMAND>
-group Attachment: []
+group Attachment: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -1432,9 +1440,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: ["a"]
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp attachment add [OPTIONS] [ATTACHMENTS]...
-group Add: ["attachments"]
+group Add: ["attachments"] required=false multiple=true
 
 ### attachments
 short: None
@@ -1484,9 +1493,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: ["r"]
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp attachment rm [OPTIONS] [ATTACHMENTS]...
-group Rm: ["attachments"]
+group Rm: ["attachments"] required=false multiple=true
 
 ### attachments
 short: None
@@ -1536,9 +1546,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: ["l"]
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp attachment ls [OPTIONS]
-group Ls: []
+group Ls: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -1568,9 +1579,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: ["p"]
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp attachment print [OPTIONS] <ATTACHMENT>
-group Print: ["attachment"]
+group Print: ["attachment"] required=false multiple=true
 
 ### attachment
 short: None
@@ -1620,9 +1632,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: true
-external_subcommands: false
+external_subcommands: None
+set: ["arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp aa [OPTIONS] [ATTACHMENTS]...
-group Add: ["attachments"]
+group Add: ["attachments"] required=false multiple=true
 
 ### attachments
 short: None
@@ -1672,9 +1685,10 @@ after_long_help: None
 visible_aliases: ["c"]
 hidden_aliases: ["conversations"]
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp conversation [OPTIONS] <COMMAND>
-group Conversation: []
+group Conversation: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -1704,11 +1718,12 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: ["remove", "rem", "delete", "del"]
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation rm [OPTIONS] [id]...
-group Rm: []
-group creation_range: ["created_since", "created_before"]
-group ConfirmFlag: ["confirm", "no_confirm"]
+group Rm: [] required=false multiple=true
+group creation_range: ["created_since", "created_before"] required=false multiple=true
+group ConfirmFlag: ["confirm", "no_confirm"] required=false multiple=true
 
 ### id
 short: None
@@ -1838,9 +1853,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: ["list"]
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation ls [OPTIONS] [id]...
-group Ls: []
+group Ls: [] required=false multiple=true
 
 ### id
 short: None
@@ -2030,9 +2046,10 @@ after_long_help: None
 visible_aliases: ["s"]
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation show [OPTIONS] [id]...
-group Show: []
+group Show: [] required=false multiple=true
 
 ### id
 short: None
@@ -2082,10 +2099,11 @@ after_long_help: None
 visible_aliases: ["u"]
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation use [OPTIONS] [id]
-group Use: []
-group creation_range: ["created_since", "created_before"]
+group Use: [] required=false multiple=true
+group creation_range: ["created_since", "created_before"] required=false multiple=true
 
 ### id
 short: None
@@ -2195,11 +2213,12 @@ after_long_help: None
 visible_aliases: ["e"]
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation edit [OPTIONS] [id]...
-group Edit: []
-group property: ["local", "pin", "expires_at", "no_expires_at", "title", "no_title"]
-group file: ["events", "metadata", "base_config"]
+group Edit: [] required=false multiple=true
+group property: ["local", "pin", "expires_at", "no_expires_at", "title", "no_title"] required=false multiple=false
+group file: ["events", "metadata", "base_config"] required=false multiple=false
 
 ### id
 short: None
@@ -2429,10 +2448,11 @@ after_long_help: None
 visible_aliases: ["f"]
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation fork [OPTIONS] [id]...
-group Fork: []
-group TurnSelection: ["first", "last", "turn", "from", "to", "keep_first", "keep_last"]
+group Fork: [] required=false multiple=true
+group TurnSelection: ["first", "last", "turn", "from", "to", "keep_first", "keep_last"] required=false multiple=true
 
 ### id
 short: None
@@ -2702,10 +2722,11 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation compact [OPTIONS] [id]...
-group Compact: []
-group TurnSelection: ["first", "last", "turn", "from", "to", "keep_first", "keep_last"]
+group Compact: [] required=false multiple=true
+group TurnSelection: ["first", "last", "turn", "from", "to", "keep_first", "keep_last"] required=false multiple=true
 
 ### id
 short: None
@@ -3075,9 +3096,10 @@ after_long_help: None
 visible_aliases: ["t"]
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation title [OPTIONS] [id]...
-group Title: []
+group Title: [] required=false multiple=true
 
 ### id
 short: None
@@ -3187,9 +3209,10 @@ after_long_help: None
 visible_aliases: ["g"]
 hidden_aliases: ["rg"]
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation grep [OPTIONS] [PATTERN]...
-group Grep: []
+group Grep: [] required=false multiple=true
 
 ### pattern
 short: None
@@ -3579,9 +3602,10 @@ after_long_help: None
 visible_aliases: ["l"]
 hidden_aliases: ["labels"]
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation label [OPTIONS] [COMMAND]
-group Label: []
+group Label: [] required=false multiple=true
 
 ### id
 short: Some('i')
@@ -3631,9 +3655,10 @@ after_long_help: None
 visible_aliases: ["a"]
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation label add [OPTIONS] <KEY[=VALUE]|:NAME>...
-group Values: ["labels"]
+group Values: ["labels"] required=false multiple=true
 
 ### labels
 short: None
@@ -3683,9 +3708,10 @@ after_long_help: None
 visible_aliases: ["s"]
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation label set [OPTIONS] <KEY[=VALUE]|:NAME>...
-group Values: ["labels"]
+group Values: ["labels"] required=false multiple=true
 
 ### labels
 short: None
@@ -3735,9 +3761,10 @@ after_long_help: None
 visible_aliases: ["r"]
 hidden_aliases: ["remove", "del", "delete"]
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation label rm [OPTIONS] [KEY[=VALUE]]...
-group Rm: ["labels"]
+group Rm: ["labels"] required=false multiple=true
 
 ### labels
 short: None
@@ -3787,7 +3814,8 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: ["list"]
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation label ls [OPTIONS]
 
 ### help
@@ -3818,10 +3846,11 @@ after_long_help: None
 visible_aliases: ["p"]
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation print [OPTIONS] [id]...
-group Print: []
-group TurnSelection: ["first", "last", "turn", "from", "to", "keep_first", "keep_last"]
+group Print: [] required=false multiple=true
+group TurnSelection: ["first", "last", "turn", "from", "to", "keep_first", "keep_last"] required=false multiple=true
 
 ### id
 short: None
@@ -4071,9 +4100,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation path [OPTIONS] [id]...
-group Path: []
+group Path: [] required=false multiple=true
 
 ### id
 short: None
@@ -4183,11 +4213,12 @@ after_long_help: None
 visible_aliases: ["a"]
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation archive [OPTIONS] [id]...
-group Archive: []
-group creation_range: ["created_since", "created_before"]
-group ConfirmFlag: ["confirm", "no_confirm"]
+group Archive: [] required=false multiple=true
+group creation_range: ["created_since", "created_before"] required=false multiple=true
+group ConfirmFlag: ["confirm", "no_confirm"] required=false multiple=true
 
 ### id
 short: None
@@ -4337,9 +4368,10 @@ after_long_help: None
 visible_aliases: ["ua"]
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp conversation unarchive [OPTIONS] [id]...
-group Unarchive: []
+group Unarchive: [] required=false multiple=true
 
 ### id
 short: None
@@ -4389,9 +4421,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp plugin [OPTIONS] <COMMAND>
-group PluginManagement: []
+group PluginManagement: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -4421,9 +4454,10 @@ after_long_help: None
 visible_aliases: ["ls"]
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp plugin list [OPTIONS]
-group List: []
+group List: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -4453,9 +4487,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp plugin install [OPTIONS] <NAME>
-group Install: ["name"]
+group Install: ["name"] required=false multiple=true
 
 ### name
 short: None
@@ -4505,9 +4540,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp plugin uninstall [OPTIONS] <NAME>
-group Uninstall: ["name"]
+group Uninstall: ["name"] required=false multiple=true
 
 ### name
 short: None
@@ -4557,9 +4593,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp plugin update [OPTIONS]
-group Update: []
+group Update: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -4589,9 +4626,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp plugin approve [OPTIONS] <PATH>
-group Approve: ["path"]
+group Approve: ["path"] required=false multiple=true
 
 ### path
 short: None
@@ -4641,9 +4679,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp plugin revoke [OPTIONS] <NAME>
-group Revoke: ["name"]
+group Revoke: ["name"] required=false multiple=true
 
 ### name
 short: None
@@ -4693,9 +4732,10 @@ after_long_help: None
 visible_aliases: ["w"]
 hidden_aliases: ["workspaces"]
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp workspace [OPTIONS] <COMMAND>
-group Workspace: []
+group Workspace: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -4725,9 +4765,10 @@ after_long_help: None
 visible_aliases: ["u"]
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp workspace use [OPTIONS] [TARGET]
-group Use: ["target", "always"]
+group Use: ["target", "always"] required=false multiple=true
 
 ### target
 short: None
@@ -4797,9 +4838,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: ["list"]
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp workspace ls [OPTIONS]
-group Ls: []
+group Ls: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -4829,9 +4871,10 @@ after_long_help: None
 visible_aliases: ["s"]
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp workspace show [OPTIONS] [TARGET]
-group Show: ["target"]
+group Show: ["target"] required=false multiple=true
 
 ### target
 short: None
@@ -4881,9 +4924,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp provider [OPTIONS] <COMMAND>
-group Provider: []
+group Provider: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -4913,9 +4957,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp provider llm [OPTIONS] <COMMAND>
-group Llm: []
+group Llm: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -4945,9 +4990,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp provider llm auth [OPTIONS] <COMMAND>
-group Auth: []
+group Auth: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -4977,9 +5023,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp provider llm auth login [OPTIONS] <TARGET>
-group Login: ["target", "name", "device_auth", "import_codex", "setup_token", "direct", "config_dir"]
+group Login: ["target", "name", "device_auth", "import_codex", "setup_token", "direct", "config_dir"] required=false multiple=true
 
 ### target
 short: None
@@ -5149,9 +5196,10 @@ after_long_help: None
 visible_aliases: ["ls"]
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp provider llm auth list [OPTIONS]
-group List: []
+group List: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -5181,9 +5229,10 @@ after_long_help: None
 visible_aliases: []
 hidden_aliases: []
 hidden: false
-external_subcommands: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
 usage: Usage: jp provider llm auth logout [OPTIONS] <TARGET>
-group Logout: ["target", "name"]
+group Logout: ["target", "name"] required=false multiple=true
 
 ### target
 short: None
