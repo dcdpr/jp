@@ -1,7 +1,7 @@
 use camino_tempfile::Utf8TempDir;
 
 use super::*;
-use crate::{Kind, Labels, NewTicket, render};
+use crate::{Labels, NewTicket, render};
 
 fn id(body: &str) -> TicketId {
     body.parse().unwrap()
@@ -24,7 +24,6 @@ fn order(todo: &[&str], in_progress: &[&str], done: &[&str]) -> Order {
 /// Write a ticket under a fixed id, so a test can name it in the order file.
 fn write_ticket(dir: &Utf8TempDir, body: &str, status: Status) {
     let document = render::ticket(&NewTicket {
-        kind: Kind::Bug,
         title: body,
         authors: "john",
         date: "2026-08-05",

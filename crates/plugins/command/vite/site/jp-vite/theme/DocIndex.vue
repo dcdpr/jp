@@ -17,7 +17,8 @@ const props = defineProps({
     idLabel: { type: String, default: 'RFD' },
     idField: { type: String, default: 'num' },
     // The toolbar's filter buttons, and the entry field they match against.
-    // `all` is prepended.
+    // `all` is prepended; with none, the toolbar has no buttons and the table no
+    // column for the field.
     filters: { type: Array, default: () => ['design', 'decision', 'guide', 'process'] },
     filterField: { type: String, default: 'category' },
     // Whether entries carry a one-line summary worth toggling.
@@ -51,8 +52,10 @@ const sortKey = ref(props.idField)
 const sortAsc = ref(false)
 const categories = computed(() => ['all', ...props.filters])
 
-const urlFilter = fromUrl('filter')
-const filter = ref(categories.value.includes(urlFilter) ? urlFilter : stored(k('filter'), 'all'))
+// A filter from a shared link or an earlier visit counts only while this index
+// still offers it.
+const offered = (value) => (categories.value.includes(value) ? value : null)
+const filter = ref(offered(fromUrl('filter')) ?? offered(stored(k('filter'), 'all')) ?? 'all')
 const search = ref(fromUrl('search') ?? stored(k('search'), ''))
 const showSummaries = ref(stored(k('summaries'), 'true') === 'true')
 
@@ -78,12 +81,17 @@ watch(showSummaries, v => { try { sessionStorage.setItem(k('summaries'), String(
 // address bar always matches what's on screen.
 onMounted(syncUrl)
 
-const showCategory = computed(() => filter.value === 'all')
+const showCategory = computed(() => props.filters.length > 0 && filter.value === 'all')
+
+// A status the placeholder can suggest, taken from the entries so it is one
+// this index has. `status:` takes a single word, so `In Progress` can't serve.
+const exampleStatus = computed(() => props.entries
+    .map(entry => entry.status?.toLowerCase())
+    .find(status => status && !/\s/.test(status)))
 
 // `optional` columns are the ones a narrow screen drops. Header cells and body
 // cells both take the class from here, so the two can't disagree about which
-// columns exist — keying the CSS off the field name meant `kind` never matched
-// the rule written for `category`.
+// columns exist.
 const columns = computed(() => {
     const cols = [
         { key: props.idField, label: props.idLabel },
@@ -175,7 +183,7 @@ const filtered = computed(() => {
 
 <template>
 <div class="doc-toolbar">
-    <div class="doc-filters">
+    <div v-if="filters.length" class="doc-filters">
         <button
             v-for="cat in categories"
             :key="cat"
@@ -188,7 +196,7 @@ const filtered = computed(() => {
             v-model="search"
             class="doc-search"
             type="text"
-            :placeholder="showStatus ? 'Filter… e.g. status:' + (filters[0] ?? '') : 'Filter…'"
+            :placeholder="showStatus && exampleStatus ? 'Filter… e.g. status:' + exampleStatus : 'Filter…'"
         />
         <button v-if="search" class="doc-search-clear" @click="search = ''" title="Clear">&times;</button>
     </div>

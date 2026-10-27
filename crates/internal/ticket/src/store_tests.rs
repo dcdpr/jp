@@ -1,7 +1,6 @@
 use camino_tempfile::Utf8TempDir;
 
 use super::*;
-use crate::Kind;
 
 const DATE: &str = "2026-08-05";
 const STAMP: &str = "2026-08-05T14:03:11Z";
@@ -10,7 +9,6 @@ const STAMP: &str = "2026-08-05T14:03:11Z";
 /// it cares about.
 fn draft<'a>(title: &'a str, labels: &'a Labels) -> NewTicket<'a> {
     NewTicket {
-        kind: Kind::Bug,
         title,
         authors: "john",
         date: DATE,
@@ -50,7 +48,6 @@ fn create_writes_a_file_named_for_its_id() {
     let dir = Utf8TempDir::new().unwrap();
 
     let (id, path) = create(dir.path(), &NewTicket {
-        kind: Kind::Bug,
         title: "Tool call header misaligned",
         authors: "John Doe",
         date: DATE,
@@ -68,7 +65,6 @@ fn create_writes_a_file_named_for_its_id() {
     let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(ticket.title, "Tool call header misaligned");
     assert_eq!(ticket.metadata.status, Status::Todo);
-    assert_eq!(ticket.metadata.kind, Kind::Bug);
 }
 
 /// Tickets created back to back land in one bucket, where the tail increments
@@ -261,9 +257,12 @@ fn list_of_a_missing_directory_is_empty() {
     assert!(list(&dir.path().join("nope")).unwrap().is_empty());
 }
 
+/// A new ticket takes its labels from whoever imports it, since upstream's are
+/// not the board's.
 #[test]
 fn an_import_creates_a_ticket_linked_to_its_issue() {
     let dir = Utf8TempDir::new().unwrap();
+    let labels = test_vocabulary().resolve(&owned(&["client=cli"])).unwrap();
 
     let imported = import(dir.path(), &Import {
         number: 123,
@@ -275,7 +274,7 @@ fn an_import_creates_a_ticket_linked_to_its_issue() {
             re: None,
             body: "Still happens on main.".to_owned(),
         }],
-        kind: Kind::Bug,
+        labels: &labels,
         authors: "gh:someone",
         date: "2026-08-05",
     })
@@ -287,7 +286,7 @@ fn an_import_creates_a_ticket_linked_to_its_issue() {
     let ticket = parse::document(&fs::read_to_string(&imported.path).unwrap()).unwrap();
     assert_eq!(ticket.title, "Crash on empty input");
     assert_eq!(ticket.metadata.github.as_deref(), Some("#123"));
-    assert_eq!(ticket.metadata.kind, Kind::Bug);
+    assert_eq!(ticket.metadata.labels.to_tokens(), ["client=cli"]);
     assert_eq!(ticket.comments.len(), 1);
     assert_eq!(ticket.comments[0].from, "gh:someone");
 }
@@ -297,12 +296,13 @@ fn an_import_creates_a_ticket_linked_to_its_issue() {
 #[test]
 fn re_importing_replaces_content_and_keeps_triage() {
     let dir = Utf8TempDir::new().unwrap();
+    let unlabelled = Labels::default();
     let upstream = |title: &'static str, body: &'static str| Import {
         number: 123,
         title,
         description: body,
         comments: vec![],
-        kind: Kind::Bug,
+        labels: &unlabelled,
         authors: "gh:someone",
         date: "2026-08-05",
     };
@@ -337,7 +337,7 @@ fn imported_content_is_escaped_on_the_way_in() {
         title: "<script>x</script>",
         description: "Uses {{ interpolation }}.",
         comments: vec![],
-        kind: Kind::Bug,
+        labels: &Labels::default(),
         authors: "gh:someone",
         date: "2026-08-05",
     })
@@ -433,7 +433,6 @@ fn editing_only_the_description_leaves_the_filename_alone() {
     fs::write(
         &path,
         render::ticket(&NewTicket {
-            kind: Kind::Bug,
             title: "A quite different title",
             authors: "john",
             date: DATE,

@@ -55,7 +55,6 @@ fn entry<'a>(board: &'a Board, num: &str) -> &'a Entry {
 /// A ticket file, as `jp ticket` writes one.
 fn ticket(status: &str, implements: Option<&str>, labels: &[&str]) -> String {
     let mut out = format!("# A ticket\n\n- **Status**: {status}\n");
-    out.push_str("- **Kind**: Feature\n");
     out.push_str("- **Authors**: jp\n");
     out.push_str("- **Date**: 2026-08-05\n");
     if let Some(implements) = implements {

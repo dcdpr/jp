@@ -23,8 +23,7 @@ use crate::{Output, compose, options::Options, read_message, send};
 pub(crate) const EDIT_FILES_PROTOCOL: u32 = 13;
 
 /// What to tell someone who can't get an editor: the flags do the same.
-const USE_THE_FLAGS: &str =
-    "Pass what to change instead: --title, --body, --kind, --status, or --label.";
+const USE_THE_FLAGS: &str = "Pass what to change instead: --title, --body, --status, or --label.";
 
 /// How an edit reaches the user while the ticket is open.
 pub(crate) trait Editing {

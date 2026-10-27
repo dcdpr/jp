@@ -2,8 +2,9 @@
 source = "plugin.command.ticket.create"
 summary = "File a work item as a ticket."
 description = """
-Create a ticket: a bug, a feature, or a chore, recorded as a markdown file in
-the repository and tracked on the board.
+Create a ticket: a work item recorded as a markdown file in the repository and
+tracked on the board. Its labels say what kind of work it is and which part of
+the system it lands in.
 
 Write a ticket when the work is clear enough to start, and a design document
 when it needs a decision first.
@@ -15,16 +16,15 @@ it files anything.
 """
 
 examples = """
-File a bug with a description:
+File a ticket with a description:
 ```json
-{"kind": "bug", "title": "Tool call header misaligned", "body": "The header \
-renders one column left of the body when the terminal is narrower than 80 \
-columns."}
+{"title": "Tool call header misaligned", "body": "The header renders one \
+column left of the body when the terminal is narrower than 80 columns."}
 ```
 
-File a chore with no description:
+File one with no description:
 ```json
-{"kind": "chore", "title": "Bump the deny list"}
+{"title": "Bump the deny list"}
 ```
 """
 
@@ -41,12 +41,6 @@ questions.shorter_title.target = "assistant"
 parameters = "tool"
 inline_results = "full"
 results_file_link = "off"
-
-[conversation.tools.ticket_create.parameters.kind]
-type = "string"
-required = true
-enum = ["bug", "feature", "chore"]
-summary = "What kind of work the ticket describes."
 
 [conversation.tools.ticket_create.parameters.title]
 type = "string"
@@ -66,11 +60,10 @@ summary = "The design document this work comes from, e.g. `045`."
 [conversation.tools.ticket_create.parameters.labels]
 type = "array"
 required = false
-summary = "The areas of the system this ticket touches, as `key=value`."
+summary = "What kind of work this is and where it lands, as `key=value` labels."
 description = """
-Labels group tickets by area, orthogonally to `kind`: `kind` says what type of
-work it is, a label says what part of the system it lands in. Apply every label
-that fits, or none when nothing does.
+Labels classify a ticket: what kind of work it is, which part of the system it
+lands in. Apply every label that fits.
 
 Each label is a `key=value` pair, and a key may be named more than once.
 

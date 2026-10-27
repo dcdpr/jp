@@ -31,7 +31,7 @@ use jp_tool::{AccessPolicy, Action, Capability, Context, FsAccessError, Outcome,
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 use ticket::{
-    Comment, Kind, Labels, NewTicket, ParseError, Selector, Status, Ticket, TicketId,
+    Comment, Labels, NewTicket, ParseError, Selector, Status, Ticket, TicketId,
     board::{self, Order},
     parse, render, store,
 };
@@ -288,9 +288,6 @@ fn refuse(message: impl Into<String>) -> Answer {
 }
 
 fn create(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall, preview: bool) -> Answer {
-    let Ok(kind) = args.required::<String>("kind")?.parse::<Kind>() else {
-        return refuse("`kind` must be one of: bug, feature, chore.");
-    };
     let title = args.required::<String>("title")?;
     let implements = args.optional::<String>("implements")?;
     let body = args.optional::<String>("body")?;
@@ -318,7 +315,6 @@ fn create(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall, preview:
 
     let date = Local::now().format("%Y-%m-%d").to_string();
     let new = NewTicket {
-        kind,
         title: &title,
         authors: tickets.author,
         date: &date,
@@ -508,8 +504,8 @@ fn preview_comment(
     Ok(preview(&format!("{heading}\n\n{}", render::comment(&comment))).into())
 }
 
-/// Change any of a ticket's title, description, kind, status, and labels in one
-/// call, leaving the rest as it is.
+/// Change any of a ticket's title, description, status, and labels in one call,
+/// leaving the rest as it is.
 ///
 /// Every argument is checked before anything is written.
 /// The labels, which the vocabulary can still refuse, are written first, so a
@@ -521,14 +517,6 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     };
     let title = args.optional::<String>("title")?;
     let description = args.optional::<String>("description")?;
-    let kind = match args
-        .optional::<String>("kind")?
-        .map(|kind| kind.parse::<Kind>())
-    {
-        Some(Err(_)) => return refuse("`kind` must be one of: bug, feature, chore."),
-        Some(Ok(kind)) => Some(kind),
-        None => None,
-    };
     let status = match args
         .optional::<String>("status")?
         .map(|status| status.parse::<Status>())
@@ -539,15 +527,8 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     };
     let labels = args.optional::<Vec<String>>("labels")?;
 
-    if title.is_none()
-        && description.is_none()
-        && kind.is_none()
-        && status.is_none()
-        && labels.is_none()
-    {
-        return refuse(
-            "Name what to change: `title`, `description`, `kind`, `status`, or `labels`.",
-        );
+    if title.is_none() && description.is_none() && status.is_none() && labels.is_none() {
+        return refuse("Name what to change: `title`, `description`, `status`, or `labels`.");
     }
     if title
         .as_deref()
@@ -579,10 +560,6 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
             Err(store::Error::Rejected(refusal)) => return refuse(refusal.to_string()),
             Err(other) => return Err(other.into()),
         }
-    }
-    if let Some(kind) = kind {
-        store::set_field(&tickets.dir, id, "Kind", &kind.to_string())?;
-        changed.push(format!("kind: {kind}"));
     }
     if let Some(status) = status {
         let (_, previous) = store::set_status(&tickets.dir, id, status)?;
@@ -674,11 +651,6 @@ fn list(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall) -> Answer 
         Some(Ok(status)) => Some(status),
         None => None,
     };
-    let kind = match args.optional::<String>("kind")?.map(|k| k.parse::<Kind>()) {
-        Some(Err(_)) => return refuse("`kind` must be one of: bug, feature, chore."),
-        Some(Ok(kind)) => Some(kind),
-        None => None,
-    };
     let labels = args.optional::<Vec<String>>("labels")?.unwrap_or_default();
     let query = args
         .optional::<String>("query")?
@@ -708,7 +680,6 @@ fn list(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall) -> Answer 
     };
     found.retain(|(_, ticket)| {
         status.is_none_or(|status| status == ticket.metadata.status)
-            && kind.is_none_or(|kind| kind == ticket.metadata.kind)
             && ticket.metadata.labels.matches(&selectors)
             && query.as_deref().is_none_or(|query| ticket.mentions(query))
     });
@@ -842,7 +813,6 @@ fn render_list(
     for (id, ticket) in tickets {
         let id = id.to_string();
         let status = ticket.metadata.status.to_string();
-        let kind = ticket.metadata.kind.to_string();
         let comments = match ticket.comments.len() {
             0 => String::new(),
             1 => " (1 comment)".to_owned(),
@@ -855,7 +825,7 @@ fn render_list(
         };
 
         out.push_str(&format!(
-            "{id:<9} {status:<12} {kind:<8} {}{labels}{comments}\n",
+            "{id:<9} {status:<12} {}{labels}{comments}\n",
             ticket.title
         ));
     }
@@ -894,7 +864,6 @@ fn render_ticket(id: TicketId, ticket: &Ticket, path: &str, parts: Parts) -> Str
 
     out.push_str(&format!("- **Path**: {path}\n"));
     out.push_str(&format!("- **Status**: {}\n", metadata.status));
-    out.push_str(&format!("- **Kind**: {}\n", metadata.kind));
     for token in metadata.labels.to_tokens() {
         out.push_str(&format!("- **Label**: {token}\n"));
     }

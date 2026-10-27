@@ -38,7 +38,6 @@ export function parseTicket(content, filename) {
         num: id,
         title,
         status: field(content, 'Status'),
-        kind: field(content, 'Kind'),
         authors: field(content, 'Authors'),
         date: field(content, 'Date'),
         labels: readLabels(content),

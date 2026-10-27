@@ -443,15 +443,14 @@ pub fn import(dir: &Utf8Path, upstream: &Import<'_>) -> Result<Imported> {
     let (id, path, created) = if let Some(entry) = existing {
         (entry.id, entry.path, false)
     } else {
-        // No labels: the repository owns the metadata block, so an imported
-        // issue is labelled here by whoever triages it, not from upstream.
+        // The repository owns the metadata block, so the labels are the
+        // importer's, not upstream's.
         let (id, path) = create(dir, &NewTicket {
-            kind: upstream.kind,
             title: &title,
             authors: upstream.authors,
             date: upstream.date,
             implements: None,
-            labels: &Labels::default(),
+            labels: upstream.labels,
             description: "",
         })?;
 

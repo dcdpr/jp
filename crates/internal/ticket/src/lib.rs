@@ -7,9 +7,9 @@
 //! # Tool call header misaligned
 //!
 //! - **Status**: Todo
-//! - **Kind**: Bug
 //! - **Authors**: John Doe
 //! - **Date**: 2026-08-05
+//! - **Label**: type=bug
 //!
 //! The header renders one column left of the body below 80 columns.
 //!
@@ -35,7 +35,9 @@
 //! board, and [`import`] carries the rules for content that comes from
 //! upstream.
 //!
-//! Labels are `key=value` annotations from [`jp_label`].
+//! Labels are `key=value` annotations from [`jp_label`], and are how a board
+//! classifies its tickets: what kind of work a ticket is, which part of the
+//! system it touches.
 //! The board's vocabulary is the caller's to read, from wherever it keeps its
 //! configuration, and a label write takes it as a [`Vocabulary`].
 //!
@@ -104,40 +106,6 @@ impl FromStr for Status {
     }
 }
 
-/// What kind of work a ticket describes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub enum Kind {
-    Bug,
-    Feature,
-    Chore,
-}
-
-impl fmt::Display for Kind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Bug => "Bug",
-            Self::Feature => "Feature",
-            Self::Chore => "Chore",
-        })
-    }
-}
-
-impl FromStr for Kind {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "bug" => Ok(Self::Bug),
-            "feature" => Ok(Self::Feature),
-            "chore" => Ok(Self::Chore),
-            _ => Err(ParseError::InvalidValue {
-                field: "Kind",
-                value: s.to_owned(),
-            }),
-        }
-    }
-}
-
 /// A ticket's metadata block.
 ///
 /// The repository owns every field here: a GitHub import replaces the title,
@@ -145,7 +113,6 @@ impl FromStr for Kind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Metadata {
     pub status: Status,
-    pub kind: Kind,
     /// The labels the ticket carries.
     ///
     /// Read as written, without checking them against the vocabulary: a
@@ -164,7 +131,6 @@ pub struct Metadata {
 /// A struct rather than a run of positional arguments: five of these are
 /// strings, and at a call site nothing would catch two of them being swapped.
 pub struct NewTicket<'a> {
-    pub kind: Kind,
     pub title: &'a str,
     pub authors: &'a str,
     pub date: &'a str,

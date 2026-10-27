@@ -1,7 +1,7 @@
 [conversation.tools.ticket_edit]
 enable = false
 source = "plugin.command.ticket.edit"
-summary = "Change a ticket's title, description, kind, status, or labels."
+summary = "Change a ticket's title, description, status, or labels."
 description = """
 Change any part of a ticket in one call: pass what changes, and the rest stays
 as it is.
@@ -58,12 +58,6 @@ summary = "A new one-line title. The file moves to match."
 type = "string"
 required = false
 summary = "The whole new description, as markdown."
-
-[conversation.tools.ticket_edit.parameters.kind]
-type = "string"
-required = false
-enum = ["bug", "feature", "chore"]
-summary = "The new kind."
 
 [conversation.tools.ticket_edit.parameters.status]
 type = "string"

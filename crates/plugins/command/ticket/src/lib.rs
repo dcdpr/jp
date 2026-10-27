@@ -37,7 +37,7 @@ use jp_plugin::message::{
 use serde::Serialize;
 use serde_json::Value;
 use ticket::{
-    Comment, Kind, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId, Vocabulary,
+    Comment, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId, Vocabulary,
     board::{self, Place},
     import::Import,
     store,
@@ -77,10 +77,6 @@ struct Args {
 enum Command {
     /// File a ticket, at status Todo.
     Add {
-        /// Kind of work: `bug`, `feature`, or `chore`.
-        /// Omit it to choose.
-        kind: Option<Kind>,
-
         /// One-line summary of the work.
         /// Omit it to compose the ticket inline.
         title: Option<String>,
@@ -180,7 +176,7 @@ enum Command {
         title: String,
     },
 
-    /// Change a ticket's title, description, kind, status, or labels.
+    /// Change a ticket's title, description, status, or labels.
     ///
     /// Without any of those flags, opens the ticket's file in your editor: the
     /// one `editor.cmd` names, or `JP_EDITOR`, `VISUAL`, or `EDITOR`.
@@ -197,10 +193,6 @@ enum Command {
         /// New description, replacing the old one.
         #[arg(long)]
         body: Option<String>,
-
-        /// New kind: `bug`, `feature`, or `chore`.
-        #[arg(long)]
-        kind: Option<Kind>,
 
         /// New status: `todo`, `in progress`, or `done`.
         #[arg(long)]
@@ -288,9 +280,10 @@ enum Command {
         #[arg(long)]
         repo: String,
 
-        /// Kind to file a newly imported issue under.
-        #[arg(long, default_value = "bug")]
-        kind: Kind,
+        /// A `key=value` label each newly imported issue is filed with.
+        /// Repeat for more than one; a refreshed ticket keeps its own.
+        #[arg(long = "label")]
+        labels: Vec<String>,
     },
 
     /// List tickets, ordered by id.
@@ -300,10 +293,6 @@ enum Command {
         /// Only tickets at this status: `todo`, `in progress`, or `done`.
         #[arg(long)]
         status: Option<Status>,
-
-        /// Only tickets of this kind: `bug`, `feature`, or `chore`.
-        #[arg(long)]
-        kind: Option<Kind>,
 
         /// Only tickets carrying this label, as `key` or `key=value`.
         /// Repeat to require several.
@@ -486,7 +475,6 @@ impl Command {
                 id: Some(id),
                 title: None,
                 body: None,
-                kind: None,
                 status: None,
                 labels,
             } if labels.is_empty() => Some(*id),
@@ -623,17 +611,15 @@ fn compose_missing(
 ) -> Result<Command, String> {
     match command {
         Command::Add {
-            kind,
-            title,
+            title: None,
             author,
             body,
             implements,
             labels,
-        } if kind.is_none() || title.is_none() => {
-            let (kind, title, body) = compose_add(kind, title, body, stdin, stdout)?;
+        } => {
+            let (title, body) = compose_add(body, stdin, stdout)?;
 
             Ok(Command::Add {
-                kind: Some(kind),
                 title: Some(title),
                 author,
                 body,
@@ -694,14 +680,12 @@ fn compose_missing(
             id: None,
             title,
             body,
-            kind,
             status,
             labels,
         } => Ok(Command::Edit {
             id: Some(pick_ticket(dir, stdin, stdout, "Edit", false)?),
             title,
             body,
-            kind,
             status,
             labels,
         }),
@@ -724,11 +708,11 @@ fn compose_missing(
         Command::Import {
             numbers,
             repo,
-            kind,
+            labels,
         } if numbers.is_empty() => Ok(Command::Import {
             numbers: pick_issues(&repo, stdin, stdout)?,
             repo,
-            kind,
+            labels,
         }),
 
         other => Ok(other),
@@ -782,29 +766,6 @@ fn pick_issues(
         .collect()
 }
 
-/// Ask which kind of work a ticket describes.
-fn pick_kind(stdin: &mut impl BufRead, stdout: &mut impl Write) -> Result<Kind, String> {
-    let chosen = compose(stdin, stdout, ComposeRequest {
-        id: None,
-        message: "Kind of work".to_owned(),
-        mode: ComposeMode::Select {
-            options: [Kind::Bug, Kind::Feature, Kind::Chore]
-                .into_iter()
-                .map(|kind| ComposeOption {
-                    value: kind.to_string(),
-                    label: kind.to_string(),
-                })
-                .collect(),
-            default: None,
-        },
-        help: None,
-    })?;
-
-    chosen
-        .parse()
-        .map_err(|_| format!("`{chosen}` is not a kind."))
-}
-
 /// Ask for a one-line title on its own.
 ///
 /// For when the description is already settled and only the summary is missing.
@@ -826,16 +787,12 @@ fn ask_title(stdin: &mut impl BufRead, stdout: &mut impl Write) -> Result<String
 /// Compose a ticket's title and description, asking for the title separately
 /// when the text has no subject line.
 fn compose_ticket(
-    kind: Option<Kind>,
     stdin: &mut impl BufRead,
     stdout: &mut impl Write,
 ) -> Result<(String, Option<String>), String> {
     let composed = compose(stdin, stdout, ComposeRequest {
         id: None,
-        message: kind.map_or_else(
-            || "New ticket".to_owned(),
-            |kind| format!("New {kind} ticket"),
-        ),
+        message: "New ticket".to_owned(),
         mode: ComposeMode::Buffer { initial_text: None },
         help: Some("First line is the title, then a blank line, then the description.".to_owned()),
     })?;
@@ -850,32 +807,21 @@ fn compose_ticket(
     }
 }
 
-/// Ask for the kind, title, and description a new ticket is missing.
+/// Ask for the title, and the description when there is none either, of a
+/// ticket filed without a title.
 fn compose_add(
-    kind: Option<Kind>,
-    title: Option<String>,
     body: Option<String>,
     stdin: &mut impl BufRead,
     stdout: &mut impl Write,
-) -> Result<(Kind, String, Option<String>), String> {
-    // Kind first: it frames what you're about to write. The title is read out
-    // of the composed text, or asked for last.
-    let kind = match kind {
-        Some(kind) => kind,
-        None => pick_kind(stdin, stdout)?,
-    };
-
+) -> Result<(String, Option<String>), String> {
     // A description given on the command line is a description, not a draft of
     // the whole ticket. Composing from it would read its one line back as a
     // title and file the ticket with no description at all, quietly turning an
     // explicit `--body` into something else.
-    let (title, body) = match (title, body) {
-        (Some(title), body) => (title, body),
-        (None, Some(body)) => (ask_title(stdin, stdout)?, Some(body)),
-        (None, None) => compose_ticket(Some(kind), stdin, stdout)?,
-    };
-
-    Ok((kind, title, body))
+    match body {
+        Some(body) => Ok((ask_title(stdin, stdout)?, Some(body))),
+        None => compose_ticket(stdin, stdout),
+    }
 }
 
 /// Ask which ticket to act on.
@@ -1295,7 +1241,6 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
 
     match command {
         Command::Add {
-            kind,
             title,
             author,
             body,
@@ -1303,7 +1248,6 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             labels,
         } => add(
             dir,
-            required(kind, "kind")?,
             &required(title, "title")?,
             &resolve_author(author, config)?,
             body.as_deref().unwrap_or_default(),
@@ -1347,13 +1291,11 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             id,
             title,
             body,
-            kind,
             status,
             labels,
         } => edit(dir, ctx.options, required(id, "ticket id")?, &Changes {
             title,
             body,
-            kind,
             status,
             labels,
         }),
@@ -1381,19 +1323,17 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
         Command::Import {
             numbers,
             repo,
-            kind,
-        } => import_all(dir, &numbers, &repo, kind),
+            labels,
+        } => import_all(dir, &numbers, &repo, &resolve_labels(ctx.options, &labels)?),
 
         Command::List {
             status,
-            kind,
             labels,
             query,
         } => list(
             dir,
             &Filter {
                 status,
-                kind,
                 labels: &labels,
                 query: query.as_deref(),
             },
@@ -1546,14 +1486,13 @@ fn show_board(dir: &Utf8Path, done_limit: usize) -> Result<Output, String> {
 /// One line of a board column: the status is the column's, so it is left out.
 fn board_row(id: TicketId, ticket: &Ticket) -> String {
     let id = id.to_string();
-    let kind = ticket.metadata.kind.to_string();
     let labels = if ticket.metadata.labels.is_empty() {
         String::new()
     } else {
         format!(" [{}]", ticket.metadata.labels)
     };
 
-    format!("{id:<9} {kind:<8} {}{labels}\n", ticket.title)
+    format!("{id:<9} {}{labels}\n", ticket.title)
 }
 
 /// Move a ticket directly above or below another in its column.
@@ -1587,14 +1526,23 @@ fn init_dir(dir: &Utf8Path) -> Result<Output, String> {
 }
 
 /// Import each of `numbers` from `repo`, stopping at the first that fails.
-fn import_all(dir: &Utf8Path, numbers: &[u64], repo: &str, kind: Kind) -> Result<Output, String> {
+///
+/// A ticket the import creates is filed with `labels`.
+fn import_all(
+    dir: &Utf8Path,
+    numbers: &[u64],
+    repo: &str,
+    labels: &Labels,
+) -> Result<Output, String> {
     if numbers.is_empty() {
         return Err("No issue numbers given, and no terminal to ask for one.".to_owned());
     }
 
     let mut output = Output::default();
     for &number in numbers {
-        output.text.push_str(&import(dir, number, repo, kind)?.text);
+        output
+            .text
+            .push_str(&import(dir, number, repo, labels)?.text);
     }
 
     Ok(output)
@@ -1604,7 +1552,7 @@ fn import_all(dir: &Utf8Path, numbers: &[u64], repo: &str, kind: Kind) -> Result
 ///
 /// One way only: replies belong on GitHub and arrive on the next import, so
 /// nothing is ever written back.
-fn import(dir: &Utf8Path, number: u64, repo: &str, kind: Kind) -> Result<Output, String> {
+fn import(dir: &Utf8Path, number: u64, repo: &str, labels: &Labels) -> Result<Output, String> {
     let (owner, name) = repo
         .split_once('/')
         .ok_or_else(|| format!("`{repo}` is not an `owner/name` pair."))?;
@@ -1637,7 +1585,7 @@ fn import(dir: &Utf8Path, number: u64, repo: &str, kind: Kind) -> Result<Output,
         title: &issue.title,
         description: issue.body.as_deref().unwrap_or_default(),
         comments,
-        kind,
+        labels,
         authors: &format!("gh:{}", issue.user.login),
         date: &issue.created_at.format("%Y-%m-%d").to_string(),
     })
@@ -1707,7 +1655,6 @@ fn token() -> Option<String> {
 /// File a ticket at `Todo`.
 fn add(
     dir: &Utf8Path,
-    kind: Kind,
     title: &str,
     author: &str,
     body: &str,
@@ -1717,7 +1664,6 @@ fn add(
     let date = Local::now().format("%Y-%m-%d").to_string();
 
     let (id, path) = store::create(dir, &NewTicket {
-        kind,
         title,
         authors: author,
         date: &date,
@@ -1816,7 +1762,6 @@ fn describe_vocabulary(vocabulary: &Vocabulary, leftover: Option<&str>) -> Strin
 struct Changes {
     title: Option<String>,
     body: Option<String>,
-    kind: Option<Kind>,
     status: Option<Status>,
     labels: Vec<String>,
 }
@@ -1848,9 +1793,6 @@ fn edit(
         path = store::set_labels(dir, id, &vocabulary, &changes.labels)
             .map_err(failed)?
             .0;
-    }
-    if let Some(kind) = changes.kind {
-        path = store::set_field(dir, id, "Kind", &kind.to_string()).map_err(failed)?;
     }
     if let Some(status) = changes.status {
         path = store::set_status(dir, id, status).map_err(failed)?.0;
@@ -1900,7 +1842,6 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
     let mut out = format!("# {}: {}\n\n", entry.id, ticket.title);
     out.push_str(&format!("- **Path**: {}\n", entry.path));
     out.push_str(&format!("- **Status**: {}\n", ticket.metadata.status));
-    out.push_str(&format!("- **Kind**: {}\n", ticket.metadata.kind));
     for token in ticket.metadata.labels.to_tokens() {
         out.push_str(&format!("- **Label**: {token}\n"));
     }
@@ -1924,7 +1865,6 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
 /// What `list` narrows the tickets to; `None`, or no labels, keeps them all.
 struct Filter<'a> {
     status: Option<Status>,
-    kind: Option<Kind>,
     labels: &'a [String],
     query: Option<&'a str>,
 }
@@ -1954,7 +1894,6 @@ fn list(dir: &Utf8Path, filter: &Filter<'_>, json: bool) -> Result<Output, Strin
         filter
             .status
             .is_none_or(|status| status == ticket.metadata.status)
-            && filter.kind.is_none_or(|kind| kind == ticket.metadata.kind)
             && ticket.metadata.labels.matches(&selectors)
             && query.is_none_or(|query| ticket.mentions(query))
     });
@@ -1993,14 +1932,13 @@ fn list(dir: &Utf8Path, filter: &Filter<'_>, json: bool) -> Result<Output, Strin
 fn row(id: TicketId, ticket: &Ticket) -> String {
     let id = id.to_string();
     let status = ticket.metadata.status.to_string();
-    let kind = ticket.metadata.kind.to_string();
     let labels = if ticket.metadata.labels.is_empty() {
         String::new()
     } else {
         format!(" [{}]", ticket.metadata.labels)
     };
 
-    format!("{id:<9} {status:<12} {kind:<8} {}{labels}\n", ticket.title)
+    format!("{id:<9} {status:<12} {}{labels}\n", ticket.title)
 }
 
 /// The usage text, rendered from the same clap definition the commands parse.

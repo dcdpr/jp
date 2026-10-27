@@ -95,9 +95,9 @@
     color: #6ee7b7;
 }
 
-/* Labels group tickets by area. Deliberately quieter than the status and kind
-   badges next to them: a ticket can carry several, and they should read as
-   annotation rather than as state. */
+/* Labels classify tickets. Deliberately quieter than the status badge next to
+   them: a ticket can carry several, and they should read as annotation rather
+   than as state. */
 .doc-badge--label {
     background: color-mix(in srgb, var(--vp-c-text-1) 8%, transparent);
     color: var(--vp-c-text-2);

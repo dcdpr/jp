@@ -91,8 +91,8 @@ pub(super) fn ticket(
     description: &str,
 ) -> String {
     let mut text = format!(
-        "# {title}\n\n- **Status**: {status}\n- **Kind**: Feature\n- **Authors**: Jane \
-         <jane@example.com>\n- **Date**: 2026-08-05\n"
+        "# {title}\n\n- **Status**: {status}\n- **Authors**: Jane <jane@example.com>\n- **Date**: \
+         2026-08-05\n"
     );
     for (key, value) in extra {
         text.push_str(&format!("- **{key}**: {value}\n"));

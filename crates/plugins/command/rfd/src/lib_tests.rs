@@ -44,7 +44,6 @@ fn workspace() -> Utf8TempDir {
         concat!(
             "# Ordered things\n\n",
             "- **Status**: In Progress\n",
-            "- **Kind**: Feature\n",
             "- **Authors**: jp\n",
             "- **Date**: 2026-08-05\n",
             "- **Implements**: 042\n",

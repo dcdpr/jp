@@ -124,7 +124,6 @@ fn track_files_a_ticket_holding_the_plan() {
 # Shareable tooling
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: Jane Doe <jane@example.com>
 - **Date**: 2026-10-15
 - **Implements**: 116

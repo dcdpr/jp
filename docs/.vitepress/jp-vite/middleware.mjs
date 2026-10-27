@@ -333,22 +333,29 @@ const ticketWriter = {
             // request can only ask for what the CLI already offers.
             const text = (value) => (typeof value === 'string' ? value : '')
             const flag = (name, value) => (text(value) ? [name, text(value)] : [])
+            // One `--label` per label. `edit` replaces the whole set with them,
+            // so the index sends labels only when they changed.
+            const labels = (value) => (Array.isArray(value) ? value : [])
+                .map(text)
+                .filter(Boolean)
+                .flatMap(label => ['--label', label])
             let args
             switch (parsed.action) {
                 case 'add':
-                    if (!text(parsed.kind) || !text(parsed.title)) {
-                        return refuse(res, 400, 'add needs a kind and a title')
+                    if (!text(parsed.title)) {
+                        return refuse(res, 400, 'add needs a title')
                     }
-                    args = ['ticket', 'add', text(parsed.kind), text(parsed.title),
-                        ...flag('--body', parsed.body)]
+                    args = ['ticket', 'add', text(parsed.title),
+                        ...flag('--body', parsed.body),
+                        ...labels(parsed.labels)]
                     break
                 case 'edit': {
                     // One `edit`; a new title also moves the file to its slug.
                     args = ['ticket', 'edit', text(parsed.id),
                         ...flag('--title', parsed.title),
                         ...flag('--body', parsed.body),
-                        ...flag('--kind', parsed.kind),
-                        ...flag('--status', parsed.status)]
+                        ...flag('--status', parsed.status),
+                        ...labels(parsed.labels)]
                     // With nothing to change, `jp ticket edit` opens an editor,
                     // which a dev-server request has no terminal for.
                     if (args.length === 3) return reply(res, 200, { ok: true, output: '' })

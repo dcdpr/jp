@@ -18,7 +18,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use jp_plugin::message::QueryRequest;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-use ticket::{Kind, Labels, NewTicket, Status, Ticket, TicketId, Vocabulary, parse, store};
+use ticket::{Labels, NewTicket, Status, Ticket, TicketId, Vocabulary, parse, store};
 
 use crate::{
     Output,
@@ -163,7 +163,6 @@ pub(crate) fn track(
     let plan = phases(id, read_plan(&request)?, &mut report);
 
     let (ticket, path) = store::create(&paths.tickets, &NewTicket {
-        kind: Kind::Feature,
         title: &title,
         authors: &filer.author,
         date: &filer.date,

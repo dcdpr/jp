@@ -272,7 +272,6 @@ fn without_comments_heading(text: String) -> String {
 /// replaces the line it targets.
 fn metadata<'a>(pairs: impl Iterator<Item = (&'a str, &'a str)>) -> Result<Metadata, ParseError> {
     let mut status = None;
-    let mut kind = None;
     let mut label_tokens = vec![];
     let mut authors = None;
     let mut date = None;
@@ -283,7 +282,6 @@ fn metadata<'a>(pairs: impl Iterator<Item = (&'a str, &'a str)>) -> Result<Metad
     for (key, value) in pairs {
         match key.to_ascii_lowercase().as_str() {
             "status" => status = Some(value.parse()?),
-            "kind" => kind = Some(value.parse()?),
             // Repeated once per pair, so every occurrence contributes rather
             // than the last one winning.
             "label" => label_tokens.push(unescaped(value)),
@@ -298,7 +296,6 @@ fn metadata<'a>(pairs: impl Iterator<Item = (&'a str, &'a str)>) -> Result<Metad
 
     Ok(Metadata {
         status: status.ok_or(ParseError::MissingField("Status"))?,
-        kind: kind.ok_or(ParseError::MissingField("Kind"))?,
         labels: Labels::from_tokens_lossy(label_tokens).0,
         authors: authors.ok_or(ParseError::MissingField("Authors"))?,
         date: date.ok_or(ParseError::MissingField("Date"))?,

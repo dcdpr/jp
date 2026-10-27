@@ -21,7 +21,6 @@ use crate::{Comment, LABEL_KEY, NewTicket, Status, parse};
 pub fn ticket(new: &NewTicket<'_>) -> String {
     let mut out = format!("# {}\n\n", new.title);
     out.push_str(&format!("- **Status**: {}\n", Status::Todo));
-    out.push_str(&format!("- **Kind**: {}\n", new.kind));
     out.push_str(&format!("- **Authors**: {}\n", new.authors));
     out.push_str(&format!("- **Date**: {}\n", new.date));
     if let Some(rfd) = new.implements {

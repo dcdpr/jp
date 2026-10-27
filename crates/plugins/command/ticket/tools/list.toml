@@ -2,7 +2,7 @@
 source = "plugin.command.ticket.list"
 summary = "List the tickets in the repository, in board order."
 description = """
-One line per ticket: id, status, kind, title, labels, and comment count.
+One line per ticket: id, status, title, labels, and comment count.
 
 Tickets come in board order: Todo, In Progress, then Done, each column top
 first. The first Todo ticket is the next one to work on.
@@ -32,7 +32,7 @@ Only what is being worked on:
 
 Only open bugs:
 ```json
-{"status": "todo", "kind": "bug"}
+{"status": "todo", "labels": ["type=bug"]}
 ```
 
 Every ticket mentioning the wrap width, in its title, description, or comments:
@@ -60,12 +60,6 @@ type = "string"
 required = false
 enum = ["todo", "in progress", "done"]
 summary = "Only tickets at this status."
-
-[conversation.tools.ticket_list.parameters.kind]
-type = "string"
-required = false
-enum = ["bug", "feature", "chore"]
-summary = "Only tickets of this kind."
 
 [conversation.tools.ticket_list.parameters.query]
 type = "string"

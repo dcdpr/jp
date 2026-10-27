@@ -2,25 +2,26 @@
 tag = "ticket_skill"
 title = "Skill: Tickets"
 content = """\
-You have been given the ticket skill. Tickets are work items — bugs, features, \
-chores — tracked as markdown files under `docs/ticket/`, alongside the RFDs. \
-The following tools help you with this:
+You have been given the ticket skill. Tickets are work items tracked as \
+markdown files under `docs/ticket/`, alongside the RFDs. The following tools \
+help you with this:
 
 - ticket_list: List tickets in board order, Todo first and the top of each \
-column first, with status, kind, labels, and comment count. Filter by \
-status, kind, label, or text the ticket mentions; a long listing comes a \
-page at a time.
+column first, with status, labels, and comment count. Filter by status, \
+label, or text the ticket mentions; a long listing comes a page at a time.
 - ticket_show: Read one ticket's metadata; ask for its description or its \
 comments, numbered for replies, when you need them.
 - ticket_create: File a new ticket, at status Todo.
 - ticket_comment: Append a comment to a ticket's discussion, optionally \
 replying to an earlier one.
-- ticket_edit: Change a ticket's title, description, kind, status, or labels, \
-any of them in one call. Status `done` closes it.
+- ticket_edit: Change a ticket's title, description, status, or labels, any \
+of them in one call. Status `done` closes it.
 
-Labels group tickets by area of the system, orthogonally to kind. Each one is a \
-`key=value` pair (`client=cli`, `package=jp_config`), and a key may be named \
-more than once, which is how a ticket spanning two crates says so. The set is \
+Labels classify tickets: `type` says what kind of work a ticket is (`bug`, \
+`feature`, `task`, ...), and the other keys say which part of the system it \
+lands in. Each one is a `key=value` pair (`client=cli`, `package=jp_config`), \
+and a key may be named more than once, which is how a ticket spanning two \
+crates says so. The set is \
 closed and lives in `plugins.command.ticket.options.labels`; the tools \
 advertise it, and a label outside it is refused. `ticket_edit` writes the \
 whole set, so read the ticket first when you mean to keep the labels it \

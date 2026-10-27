@@ -84,7 +84,6 @@ fn run_with(
 /// board's order file.
 fn write_ticket(dir: &Utf8Path, body: &str, title: &str, status: Status) -> TicketId {
     let document = ticket::render::ticket(&NewTicket {
-        kind: Kind::Bug,
         title,
         authors: "john",
         date: "2026-08-05",
@@ -102,7 +101,6 @@ fn write_ticket(dir: &Utf8Path, body: &str, title: &str, status: Status) -> Tick
 /// File a labelled ticket and hand back its id.
 fn add_labelled(dir: &Utf8TempDir, title: &str, labels: &[&str]) -> TicketId {
     run_command(dir, Command::Add {
-        kind: Some(Kind::Bug),
         title: Some(title.to_owned()),
         author: Some("john".to_owned()),
         body: None,
@@ -272,20 +270,18 @@ fn cli_definition_is_valid() {
 }
 
 #[test]
-fn add_takes_a_kind_and_a_title_and_defaults_the_author() {
-    let args = parse(&["add", "bug", "Tool call header misaligned"]).unwrap();
+fn add_takes_a_title_and_defaults_the_author() {
+    let args = parse(&["add", "Tool call header misaligned"]).unwrap();
 
     assert_eq!(args.dir, None);
     match args.command {
         Command::Add {
-            kind,
             title,
             author,
             body,
             implements,
             labels,
         } => {
-            assert_eq!(kind, Some(Kind::Bug));
             assert_eq!(title.as_deref(), Some("Tool call header misaligned"));
             assert_eq!(author, None);
             assert_eq!(body, None);
@@ -296,14 +292,19 @@ fn add_takes_a_kind_and_a_title_and_defaults_the_author() {
     }
 }
 
+/// A title is one argument, so `add bug "Title"` is refused rather than filing
+/// a ticket titled `bug`.
 #[test]
-fn add_rejects_an_unknown_kind() {
-    let error = parse(&["add", "task", "Title"]).unwrap_err();
+fn add_takes_one_title() {
+    let error = parse(&["add", "bug", "Title"]).unwrap_err();
 
-    assert!(error.to_string().contains("`task` is not a valid `Kind`"));
+    assert!(
+        error.to_string().contains("unexpected argument 'Title'"),
+        "{error}"
+    );
     assert!(
         error.use_stderr(),
-        "a bad kind is a failure, not help output"
+        "a stray argument is a failure, not help output"
     );
 }
 
@@ -427,7 +428,7 @@ fn an_explicit_body_is_not_read_back_as_the_title() {
     let dir = Utf8TempDir::new().unwrap();
 
     let messages = exchange_with(
-        &init(dir.path(), &["add", "bug", "--body", "Steps to reproduce"]),
+        &init(dir.path(), &["add", "--body", "Steps to reproduce"]),
         &[composed("Header misaligned")],
     );
 
@@ -502,13 +503,11 @@ fn list_filters_are_optional() {
     match args.command {
         Command::List {
             status,
-            kind,
             labels,
             query,
         } => {
             assert_eq!(query, None);
             assert_eq!(status, Some(Status::InProgress));
-            assert_eq!(kind, None);
             assert!(labels.is_empty());
         }
         other => panic!("expected list, got {other:?}"),
@@ -602,12 +601,12 @@ fn the_ticket_directory_comes_from_the_options_unless_dir_names_one() {
 
     exchange(&init_with_options(
         dir.path(),
-        &["add", "bug", "Filed in the configured place"],
+        &["add", "Filed in the configured place"],
         serde_json::json!({ "dir": "work/items" }),
     ));
     exchange(&init_with_options(
         dir.path(),
-        &["--dir", "elsewhere", "add", "bug", "Filed where --dir says"],
+        &["--dir", "elsewhere", "add", "Filed where --dir says"],
         serde_json::json!({ "dir": "work/items" }),
     ));
 
@@ -653,7 +652,6 @@ fn unreadable_options_end_the_run() {
 fn rename_moves_the_file() {
     let dir = Utf8TempDir::new().unwrap();
     run_command(&dir, Command::Add {
-        kind: Some(Kind::Bug),
         title: Some("Tool call header misaligned".to_owned()),
         author: Some("John Doe".to_owned()),
         body: None,
@@ -723,7 +721,6 @@ fn edit_rewrites_the_description_and_keeps_the_title() {
         id: Some(id),
         title: None,
         body: Some("A new description.".to_owned()),
-        kind: Some(Kind::Chore),
         status: None,
         labels: vec![],
     })
@@ -734,7 +731,6 @@ fn edit_rewrites_the_description_and_keeps_the_title() {
     let ticket = ticket::parse::document(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(ticket.title, "Kept title");
     assert_eq!(ticket.description, "A new description.");
-    assert_eq!(ticket.metadata.kind, Kind::Chore);
 }
 
 /// A new title moves the file, as `rename` does, and the labels named are the
@@ -748,7 +744,6 @@ fn edit_changes_the_title_and_the_labels_at_once() {
         id: Some(id),
         title: Some("The wrap calculation is off".to_owned()),
         body: None,
-        kind: None,
         status: None,
         labels: vec!["client=cli".to_owned()],
     })
@@ -774,7 +769,6 @@ fn edit_refuses_a_label_before_changing_anything() {
         id: Some(id),
         title: Some("The wrap calculation is off".to_owned()),
         body: None,
-        kind: None,
         status: None,
         labels: vec!["client=windows".to_owned()],
     })
@@ -846,7 +840,7 @@ fn edit_without_an_editor_names_the_flags() {
             code: 1,
             reason: Some(
                 "Couldn't open an editor: there is no terminal to open an editor on. Pass what to \
-                 change instead: --title, --body, --kind, --status, or --label."
+                 change instead: --title, --body, --status, or --label."
                     .to_owned()
             ),
         }))
@@ -906,8 +900,7 @@ fn status_places_the_ticket_next_to_its_neighbour() {
     let board = run_in(root, Command::Board).unwrap();
     assert!(
         board.text.contains(
-            "In Progress (3)\nT-02wt0k2 Bug      Started\nT-02wt0k1 Bug      Moving\nT-02wt0k3 \
-             Bug      Also started\n"
+            "In Progress (3)\nT-02wt0k2 Started\nT-02wt0k1 Moving\nT-02wt0k3 Also started\n"
         ),
         "{}",
         board.text
@@ -1000,9 +993,8 @@ fn board_prints_each_column_in_board_order() {
 
     assert_eq!(
         output.text,
-        "Todo (3)\nT-02wt0k3 Bug      Third filed\nT-02wt0k1 Bug      First filed\nT-02wt0k2 \
-         Bug      Second filed\n\nIn Progress (0)\n\nDone (2, showing 1)\nT-02wt0k5 Bug      \
-         Newer done\n"
+        "Todo (3)\nT-02wt0k3 Third filed\nT-02wt0k1 First filed\nT-02wt0k2 Second filed\n\nIn \
+         Progress (0)\n\nDone (2, showing 1)\nT-02wt0k5 Newer done\n"
     );
 }
 
@@ -1025,7 +1017,7 @@ fn rank_places_a_ticket_and_the_board_follows() {
     assert!(
         board
             .text
-            .starts_with("Todo (2)\nT-02wt0k2 Bug      Second filed\nT-02wt0k1 Bug      First"),
+            .starts_with("Todo (2)\nT-02wt0k2 Second filed\nT-02wt0k1 First"),
         "{}",
         board.text
     );
@@ -1130,7 +1122,6 @@ fn commands_run_against_the_resolved_directory() {
     let dir = Utf8TempDir::new().unwrap();
 
     let created = run_command(&dir, Command::Add {
-        kind: Some(Kind::Bug),
         title: Some("Tool call header misaligned".to_owned()),
         author: Some("John Doe".to_owned()),
         body: Some("The header renders one column left of the body.".to_owned()),
@@ -1160,14 +1151,13 @@ fn commands_run_against_the_resolved_directory() {
 
     let listed = run_command(&dir, Command::List {
         status: None,
-        kind: None,
         labels: vec![],
         query: None,
     })
     .unwrap();
     assert_eq!(
         listed.text,
-        format!("{id} Todo         Bug      Tool call header misaligned\n")
+        format!("{id} Todo         Tool call header misaligned\n")
     );
 
     let closed = run_command(&dir, Command::Close { id: Some(id) }).unwrap();
@@ -1175,7 +1165,6 @@ fn commands_run_against_the_resolved_directory() {
 
     let json = run_json(&dir, Command::List {
         status: Some(Status::Done),
-        kind: None,
         labels: vec![],
         query: None,
     })
@@ -1200,8 +1189,7 @@ fn refresh_rewrites_the_branch_and_leaves_the_base_alone() {
     // On `main`: the ticket that wins the id, and a file naming it.
     std::fs::write(
         dir.join("02wt0kx-winner.md"),
-        "# Winner\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- **Date**: \
-         2026-08-14\n\nBody.\n",
+        "# Winner\n\n- **Status**: Todo\n- **Authors**: john\n- **Date**: 2026-08-14\n\nBody.\n",
     )
     .unwrap();
     std::fs::write(root.join("NOTES.md"), "See T-02wt0kx for the winner.\n").unwrap();
@@ -1213,8 +1201,8 @@ fn refresh_rewrites_the_branch_and_leaves_the_base_alone() {
     let losing = dir.join("02wt0kx-loser.md");
     std::fs::write(
         &losing,
-        "# Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- **Date**: \
-         2026-08-14\n\nOther body.\n",
+        "# Loser\n\n- **Status**: Todo\n- **Authors**: jane\n- **Date**: 2026-08-14\n\nOther \
+         body.\n",
     )
     .unwrap();
     std::fs::write(root.join("BRANCH.md"), "Fixes T-02wt0kx on this branch.\n").unwrap();
@@ -1279,7 +1267,7 @@ fn refresh_leaves_a_reply_alone() {
     let losing = dir.join("02wt0kx-loser.md");
     std::fs::write(
         &losing,
-        "# Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- **Date**: \
+        "# Loser\n\n- **Status**: Todo\n- **Authors**: jane\n- **Date**: \
          2026-08-14\n\nBody.\n\n## Comments\n\n-----\n\n- **From**: john\n- **Date**: \
          2026-08-14T10:00:00Z\n\nFirst.\n\n-----\n\n- **From**: jp\n- **Date**: \
          2026-08-14T11:00:00Z\n- **Re**: #1\n\nSecond.\n",
@@ -1312,8 +1300,8 @@ fn refresh_reports_prose_naming_the_old_id_in_the_renamed_ticket() {
     let losing = dir.join("02wt0kx-loser.md");
     std::fs::write(
         &losing,
-        "# Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- **Date**: \
-         2026-08-14\n\nProbably a duplicate of T-02wt0kx.\n",
+        "# Loser\n\n- **Status**: Todo\n- **Authors**: jane\n- **Date**: 2026-08-14\n\nProbably a \
+         duplicate of T-02wt0kx.\n",
     )
     .unwrap();
     commit(root, "Add the losing ticket", None);
@@ -1346,7 +1334,7 @@ fn refresh_accepts_a_repository_relative_path() {
 
     std::fs::write(
         dir.join("02wt0kx-filed-earlier.md"),
-        "# Filed earlier\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- **Date**: \
+        "# Filed earlier\n\n- **Status**: Todo\n- **Authors**: john\n- **Date**: \
          2026-08-14\n\nBody.\n",
     )
     .unwrap();
@@ -1381,8 +1369,7 @@ fn refresh_reports_a_file_that_named_the_id_on_base() {
     let losing = dir.join("02wt0kx-loser.md");
     std::fs::write(
         &losing,
-        "# Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- **Date**: \
-         2026-08-14\n\nBody.\n",
+        "# Loser\n\n- **Status**: Todo\n- **Authors**: jane\n- **Date**: 2026-08-14\n\nBody.\n",
     )
     .unwrap();
     // The branch touches the file for an unrelated reason.
@@ -1422,7 +1409,7 @@ fn refresh_keeps_the_ticket_in_the_bucket_it_was_created_in() {
     let path = dir.join("02wt0kx-filed-earlier.md");
     std::fs::write(
         &path,
-        "# Filed earlier\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- **Date**: \
+        "# Filed earlier\n\n- **Status**: Todo\n- **Authors**: john\n- **Date**: \
          2026-08-14\n\nBody.\n",
     )
     .unwrap();
@@ -1472,7 +1459,6 @@ fn rewriting_a_missing_or_binary_file_is_skipped() {
 fn show_json_carries_the_id() {
     let dir = Utf8TempDir::new().unwrap();
     run_command(&dir, Command::Add {
-        kind: Some(Kind::Bug),
         title: Some("Tool call header misaligned".to_owned()),
         author: Some("john".to_owned()),
         body: Some("The header renders one column left.".to_owned()),
@@ -1547,11 +1533,7 @@ fn the_manifest_states_the_protocol_the_handshake_needs() {
 #[test]
 fn a_run_reports_ready_then_output_then_exit() {
     let dir = Utf8TempDir::new().unwrap();
-    let messages = exchange(&init(dir.path(), &[
-        "add",
-        "bug",
-        "Tool call header misaligned",
-    ]));
+    let messages = exchange(&init(dir.path(), &["add", "Tool call header misaligned"]));
 
     match messages.as_slice() {
         [
@@ -1593,10 +1575,7 @@ fn tool_call_init(root: &Utf8Path, options: serde_json::Value) -> HostToPlugin {
     message.tool = Some(ToolCall {
         action: ToolAction::Run,
         name: "create".to_owned(),
-        arguments: Map::from_iter([
-            ("kind".to_owned(), json!("bug")),
-            ("title".to_owned(), json!("Tool call header misaligned")),
-        ]),
+        arguments: Map::from_iter([("title".to_owned(), json!("Tool call header misaligned"))]),
         answers: Map::new(),
         options: Map::new(),
         access: None,
@@ -1713,7 +1692,6 @@ fn labels_survive_the_round_trip_and_show_in_the_listing() {
 
     let listed = run_command(&dir, Command::List {
         status: None,
-        kind: None,
         labels: vec![],
         query: None,
     })
@@ -1721,9 +1699,7 @@ fn labels_survive_the_round_trip_and_show_in_the_listing() {
 
     assert_eq!(
         listed.text,
-        format!(
-            "{id} Todo         Bug      Window title truncates [client=macos, package=jp_config]\n"
-        )
+        format!("{id} Todo         Window title truncates [client=macos, package=jp_config]\n")
     );
 }
 
@@ -1737,7 +1713,6 @@ fn listing_narrows_to_tickets_carrying_every_label() {
 
     let listed = run_command(&dir, Command::List {
         status: None,
-        kind: None,
         labels: vec!["package=jp_cli".to_owned(), "client=macos".to_owned()],
         query: None,
     })
@@ -1745,7 +1720,7 @@ fn listing_narrows_to_tickets_carrying_every_label() {
 
     assert_eq!(
         listed.text,
-        format!("{both} Todo         Bug      Both [client=macos, package=jp_cli]\n")
+        format!("{both} Todo         Both [client=macos, package=jp_cli]\n")
     );
 }
 
@@ -1760,7 +1735,6 @@ fn listing_narrows_on_a_bare_key() {
 
     let listed = run_command(&dir, Command::List {
         status: None,
-        kind: None,
         labels: vec!["client".to_owned()],
         query: None,
     })
@@ -1782,7 +1756,6 @@ fn listing_narrows_on_a_query() {
         id: Some(described),
         title: None,
         body: Some("The WRAP width ignores the gutter.".to_owned()),
-        kind: None,
         status: None,
         labels: vec![],
     })
@@ -1790,7 +1763,6 @@ fn listing_narrows_on_a_query() {
     let listing = |query: &str| {
         run_command(&dir, Command::List {
             status: None,
-            kind: None,
             labels: vec![],
             query: Some(query.to_owned()),
         })
@@ -1801,8 +1773,8 @@ fn listing_narrows_on_a_query() {
     assert_eq!(
         listing("wrap"),
         format!(
-            "{titled} Todo         Bug      Wrap is off by one\n{described} Todo         Bug      \
-             Header misaligned\n"
+            "{titled} Todo         Wrap is off by one\n{described} Todo         Header \
+             misaligned\n"
         )
     );
     assert_eq!(listing("  ").lines().count(), 3);
@@ -1844,7 +1816,6 @@ fn an_unknown_label_is_refused_with_the_known_set() {
     let dir = Utf8TempDir::new().unwrap();
 
     let error = run_command(&dir, Command::Add {
-        kind: Some(Kind::Bug),
         title: Some("Typo".to_owned()),
         author: Some("john".to_owned()),
         body: None,
@@ -1982,7 +1953,6 @@ fn a_broken_vocabulary_fails_only_what_labels() {
     run_with_options(
         dir.path(),
         Command::Add {
-            kind: Some(Kind::Bug),
             title: Some("Unlabelled".to_owned()),
             author: Some("john".to_owned()),
             body: None,
@@ -2000,7 +1970,6 @@ fn a_broken_vocabulary_fails_only_what_labels() {
 fn unreadable_tickets_are_warned_about_separately() {
     let dir = Utf8TempDir::new().unwrap();
     run_command(&dir, Command::Add {
-        kind: Some(Kind::Chore),
         title: Some("Readable".to_owned()),
         author: Some("john".to_owned()),
         body: None,
@@ -2012,7 +1981,6 @@ fn unreadable_tickets_are_warned_about_separately() {
 
     let listed = run_json(&dir, Command::List {
         status: None,
-        kind: None,
         labels: vec![],
         query: None,
     })

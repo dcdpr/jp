@@ -3,7 +3,7 @@ use std::{collections::VecDeque, io};
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use serde_json::{Value, json};
-use ticket::{Kind, Labels, NewTicket, render};
+use ticket::{Labels, NewTicket, render};
 
 use super::*;
 
@@ -80,7 +80,6 @@ fn write_ticket(dir: &Utf8TempDir) -> (Utf8PathBuf, String) {
     let id: TicketId = ID.parse().unwrap();
     let path = dir.path().join(format!("{}slug.md", id.file_prefix()));
     let source = render::ticket(&NewTicket {
-        kind: Kind::Bug,
         title: "Wrapping is wrong",
         authors: "jp",
         date: "2026-08-05",
@@ -254,6 +253,6 @@ fn an_older_host_is_told_to_upgrade() {
     assert_eq!(
         error,
         "Opening an editor needs `jp` protocol 13, and this `jp` speaks 12; reinstall the two \
-         together. Pass what to change instead: --title, --body, --kind, --status, or --label."
+         together. Pass what to change instead: --title, --body, --status, or --label."
     );
 }

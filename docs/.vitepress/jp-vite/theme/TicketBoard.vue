@@ -29,10 +29,6 @@ function setNotice(text, kind, ms) {
     noticeTimer = setTimeout(() => { notice.value = null }, ms)
 }
 
-function kindClass(kind) {
-    return `ticket-kind--${(kind ?? 'unknown').toLowerCase()}`
-}
-
 /// Rebuild the model from what the DOM now says, then save the move.
 ///
 /// SortableJS moves the nodes; `toArray()` reads the resulting order back out
@@ -121,7 +117,6 @@ onBeforeUnmount(() => {
             >
                 <div class="ticket-card-head">
                     <span class="ticket-id">{{ ticket.id }}</span>
-                    <span class="ticket-badge" :class="kindClass(ticket.kind)">{{ ticket.kind }}</span>
                 </div>
                 <a :href="ticket.path" class="ticket-card-title">{{ ticket.title }}</a>
                 <div class="ticket-card-foot">
@@ -226,18 +221,6 @@ onBeforeUnmount(() => {
     font-size: 0.7rem;
     line-height: 1.5;
     white-space: nowrap;
-    background: var(--vp-c-default-soft);
-    color: var(--vp-c-text-2);
-}
-.ticket-kind--bug {
-    background: var(--vp-c-danger-soft);
-    color: var(--vp-c-danger-1);
-}
-.ticket-kind--feature {
-    background: var(--vp-c-brand-soft);
-    color: var(--vp-c-brand-1);
-}
-.ticket-kind--chore {
     background: var(--vp-c-default-soft);
     color: var(--vp-c-text-2);
 }

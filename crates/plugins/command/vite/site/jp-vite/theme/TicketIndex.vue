@@ -14,7 +14,6 @@ import { problem } from './problem.mjs'
 // build-time data loader, and a reload is the honest way to pick up what changed
 // on disk.
 
-const KINDS = ['bug', 'feature', 'chore']
 const STATUSES = ['Todo', 'In Progress', 'Done']
 const ENDPOINT = '/__ticket'
 
@@ -33,8 +32,13 @@ async function reveal() {
 
 function openAdd() {
     notice.value = null
-    form.value = { action: 'add', kind: 'bug', title: '', body: '', status: 'Todo' }
+    form.value = { action: 'add', title: '', body: '', labels: '', status: 'Todo' }
     reveal()
+}
+
+// The labels field holds them as the index shows them, comma-separated.
+function splitLabels(text) {
+    return text.split(',').map(label => label.trim()).filter(Boolean)
 }
 
 // The description isn't in the index data (the loader strips it), so it's read
@@ -42,12 +46,14 @@ function openAdd() {
 async function openEdit(ticket) {
     notice.value = null
     busy.value = true
+    const labels = (ticket.labels ?? []).join(', ')
     form.value = {
         action: 'edit',
         id: ticket.id,
-        kind: (ticket.kind ?? 'bug').toLowerCase(),
         title: ticket.title ?? '',
         body: '',
+        labels,
+        labelsBefore: labels,
         status: ticket.status ?? 'Todo',
     }
     reveal()
@@ -92,11 +98,22 @@ async function post(payload) {
 }
 
 async function submit() {
-    if (!form.value.title.trim()) {
+    const { labelsBefore, ...payload } = form.value
+    if (!payload.title.trim()) {
         notice.value = 'A ticket needs a title.'
         return
     }
-    await post(form.value)
+
+    // Labels replace the whole set, so they are sent only when they changed: a
+    // title fix shouldn't fail on a ticket whose labels the board would refuse
+    // as they stand.
+    if (payload.action === 'edit' && payload.labels === labelsBefore) {
+        delete payload.labels
+    } else {
+        payload.labels = splitLabels(payload.labels)
+    }
+
+    await post(payload)
 }
 
 async function remove(ticket) {
@@ -123,14 +140,16 @@ async function remove(ticket) {
     <form v-if="form" class="ticket-admin-form" @submit.prevent="submit()">
         <div class="ticket-admin-row">
             <strong>{{ form.action === 'add' ? 'New ticket' : 'Edit ' + form.id }}</strong>
-            <select v-model="form.kind" class="doc-search">
-                <option v-for="kind in KINDS" :key="kind" :value="kind">{{ kind }}</option>
-            </select>
             <select v-if="form.action === 'edit'" v-model="form.status" class="doc-search">
                 <option v-for="status in STATUSES" :key="status" :value="status">{{ status }}</option>
             </select>
         </div>
         <input v-model="form.title" class="doc-search" placeholder="Title" />
+        <input
+            v-model="form.labels"
+            class="doc-search"
+            placeholder="Labels, as key=value, separated by commas"
+        />
         <textarea
             v-model="form.body"
             class="doc-search ticket-admin-body"
@@ -153,8 +172,7 @@ async function remove(ticket) {
     storage-key="ticket"
     id-label="Ticket"
     id-field="num"
-    :filters="KINDS"
-    filter-field="kind"
+    :filters="[]"
     :show-summary="false"
     :show-authors="true"
 >

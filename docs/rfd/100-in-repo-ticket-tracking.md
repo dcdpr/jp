@@ -88,12 +88,12 @@ one `fs_read_file`, one `cat`, or one page on the website.
 # Tool call header misaligned
 
 - **Status**: In Progress
-- **Kind**: Bug
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-05
 - **Implements**: 095
 - **Label**: client=cli
 - **Label**: package=jp_printer
+- **Label**: type=bug
 
 The header renders one column left of the body when `style.parameters` is
 `function_call` and the terminal is narrower than 80 columns.
@@ -130,7 +130,6 @@ parses with a three-line regex and renders as visible content.
 | Field         | Required | Values                           |
 | ------------- | -------- | -------------------------------- |
 | `Status`      | yes      | `Todo`, `In Progress`, `Done`    |
-| `Kind`        | yes      | `Bug`, `Feature`, `Chore`        |
 | `Authors`     | yes      |                                  |
 | `Date`        | yes      | `YYYY-MM-DD`                     |
 | `Implements`  | no       | The RFD this ticket implements   |
@@ -144,9 +143,10 @@ timestamp that can go stale.
 
 #### Labels
 
-A label is a `key=value` annotation grouping tickets by area of the system,
-orthogonally to `Kind`: `Kind` says what type of work a ticket is, a label says
-what part of the system it lands in.
+A label is a `key=value` annotation classifying a ticket: what type of work it
+is, and what part of the system it lands in.
+JP's board says the first with `type` and the second with keys such as `client`
+and `package`; another board picks its own.
 A ticket carries any number of them, or none, and a key may repeat: a ticket
 spanning two crates carries `package=jp_cli` and `package=jp_config`.
 
@@ -374,7 +374,7 @@ They are imported as tickets, one way only.
 
 Each import replaces the ticket's content — title, description, comments —
 wholesale, and never touches the metadata block.
-GitHub owns what was written on GitHub; the repository owns `Status`, `Kind`,
+GitHub owns what was written on GitHub; the repository owns `Status`,
 `Implements`, and the labels, so an imported ticket can be triaged and moved
 across the board without the next import undoing it.
 

@@ -1839,11 +1839,11 @@ rfd-board-prune:
 rfd-grep +ARGS:
     @rg {{ARGS}} docs/rfd/
 
-# File a ticket. KIND is 'bug', 'feature', or 'chore'.
+# File a ticket. TYPE becomes its `type` label: 'bug', 'feature', 'task', and the
+# rest `just ticket-labels` lists.
 #
-# Tickets are markdown files under `docs/ticket/`, numbered from a counter that
-# never reuses an id. Write a ticket when the work is clear enough to start, and
-# an RFD when it needs a design first.
+# Tickets are markdown files under `docs/ticket/`. Write a ticket when the work is
+# clear enough to start, and an RFD when it needs a design first.
 #
 # The author comes from your JP or git identity. Omit the title to compose the
 # ticket inline — first line the title, blank line, then the description, with
@@ -1851,9 +1851,9 @@ rfd-grep +ARGS:
 #
 #   just ticket-add bug "Tool call header misaligned"
 #   just ticket-add bug
-#   pbpaste | just ticket-add chore "Bump the deny list"
+#   pbpaste | just ticket-add task "Bump the deny list"
 [group('ticket')]
-ticket-add KIND *TITLE: _install-ticket
+ticket-add TYPE *TITLE: _install-ticket
     #!/usr/bin/env sh
     set -eu
 
@@ -1864,7 +1864,7 @@ ticket-add KIND *TITLE: _install-ticket
         body=$(cat)
     fi
 
-    set -- add {{quote(KIND)}}
+    set -- add --label {{quote("type=" + TYPE)}}
     if [ -n "{{TITLE}}" ]; then
         set -- "$@" {{quote(TITLE)}}
     fi
@@ -1933,7 +1933,7 @@ ticket-close NNN: _install-ticket
 #
 #   just ticket-list                        # every ticket
 #   just ticket-list --status "In Progress" # one column of the board
-#   just ticket-list --kind bug
+#   just ticket-list --label type=bug       # one type of work
 #   just ticket-list --label package=jp_cli # one area of the system
 #   just ticket-list --label package        # any value of one key
 #   jp -F json ticket list                  # for `jq`
@@ -1987,7 +1987,7 @@ ticket-show NNN *ARGS: _install-ticket
 # on GitHub and arrive when you import again.
 #
 #   just ticket-import 123
-#   just ticket-import 123 --kind feature
+#   just ticket-import 123 --label type=feature
 [group('ticket')]
 [positional-arguments]
 ticket-import NNN *ARGS: _install-ticket

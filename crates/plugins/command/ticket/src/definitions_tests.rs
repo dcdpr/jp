@@ -1,7 +1,7 @@
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use serde_json::json;
-use ticket::{Kind, Status};
+use ticket::Status;
 
 use super::*;
 use crate::tool::{DEFAULT_MAX_TITLE_LENGTH, SHORTER_TITLE, TOOLS};
@@ -93,39 +93,28 @@ fn enum_values(tool: &toml::Value, parameter: &str) -> Vec<String> {
         .collect()
 }
 
-/// The values a definition advertises must be values the parser accepts, in
+/// The statuses a definition advertises must be ones the parser accepts, in
 /// both directions: nothing advertised that is rejected, nothing accepted that
 /// is hidden.
 fn assert_advertised_values_match_the_parser(routed: &[(String, String, toml::Value)]) {
     for (name, key, tool) in routed {
-        let parameters: &[&str] = match name.as_str() {
-            "create" => &["kind"],
-            "edit" | "list" => &["kind", "status"],
-            _ => continue,
-        };
-
-        for parameter in parameters {
-            let values = enum_values(tool, parameter);
-            for value in &values {
-                let accepted = match *parameter {
-                    "kind" => value.parse::<Kind>().is_ok(),
-                    _ => value.parse::<Status>().is_ok(),
-                };
-                assert!(accepted, "{key} advertises `{value}` for `{parameter}`");
-            }
-
-            let count = match *parameter {
-                "kind" => [Kind::Bug, Kind::Feature, Kind::Chore]
-                    .into_iter()
-                    .filter(|kind| values.iter().any(|value| value.parse() == Ok(*kind)))
-                    .count(),
-                _ => [Status::Todo, Status::InProgress, Status::Done]
-                    .into_iter()
-                    .filter(|status| values.iter().any(|value| value.parse() == Ok(*status)))
-                    .count(),
-            };
-            assert_eq!(count, 3, "{key} hides an accepted `{parameter}`");
+        if !matches!(name.as_str(), "edit" | "list") {
+            continue;
         }
+
+        let values = enum_values(tool, "status");
+        for value in &values {
+            assert!(
+                value.parse::<Status>().is_ok(),
+                "{key} advertises `{value}` for `status`"
+            );
+        }
+
+        let count = [Status::Todo, Status::InProgress, Status::Done]
+            .into_iter()
+            .filter(|status| values.iter().any(|value| value.parse() == Ok(*status)))
+            .count();
+        assert_eq!(count, 3, "{key} hides an accepted `status`");
     }
 }
 

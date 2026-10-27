@@ -169,7 +169,6 @@ fn create_ticket(dir: &Utf8TempDir, title: &str) -> String {
         dir,
         "create",
         json!({
-            "kind": "bug",
             "title": title,
             "body": "Something is wrong."
         }),
@@ -179,7 +178,6 @@ fn create_ticket(dir: &Utf8TempDir, title: &str) -> String {
 /// A ticket with everything but the title fixed.
 fn draft<'a>(title: &'a str, labels: &'a Labels) -> NewTicket<'a> {
     NewTicket {
-        kind: Kind::Bug,
         title,
         authors: "jp",
         date: DATE,
@@ -241,7 +239,7 @@ fn create_writes_where_the_options_say_and_as_whom() {
     let call = ToolCall {
         action: ToolAction::Run,
         name: "create".to_owned(),
-        arguments: object(json!({ "kind": "chore", "title": "Bump the deny list" })),
+        arguments: object(json!({ "title": "Bump the deny list" })),
         answers: Map::new(),
         options: Map::new(),
         access: None,
@@ -289,7 +287,6 @@ fn create_preview_renders_the_file_that_will_be_written() {
             "> # Tool call header misaligned\n",
             "> \n",
             "> - **Status**: Todo\n",
-            "> - **Kind**: Bug\n",
             "> - **Authors**: jp\n",
             "> - **Date**: 2026-08-05\n",
             "> - **Implements**: 045\n",
@@ -310,7 +307,6 @@ fn create_preview_asks_before_drawing_a_title_that_will_change() {
         &dir,
         "create",
         json!({
-            "kind": "chore",
             "title": "Make provider fixtures deterministic and sanitize recorded model output",
             "body": "Something is wrong."
         }),
@@ -330,7 +326,6 @@ fn create_preview_draws_the_answered_title() {
         ToolAction::FormatArguments,
         "create",
         json!({
-            "kind": "chore",
             "title": "Make provider fixtures deterministic and sanitize recorded model output",
             "body": "Something is wrong."
         }),
@@ -355,7 +350,6 @@ fn create_preview_writes_nothing() {
         &dir,
         "create",
         json!({
-            "kind": "chore",
             "title": "Bump the deny list"
         }),
     )));
@@ -504,8 +498,8 @@ fn comment_preview_tolerates_a_malformed_header() {
     fs::create_dir_all(&dir_path).unwrap();
     fs::write(
         dir_path.join(format!("{}slug.md", id.file_prefix())),
-        "# Tool call header misaligned\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Date**: \
-         2026-08-05\n\nSomething is wrong.\n",
+        "# Tool call header misaligned\n\n- **Status**: Todo\n- **Date**: 2026-08-05\n\nSomething \
+         is wrong.\n",
     )
     .unwrap();
 
@@ -536,11 +530,7 @@ fn preview_rejects_the_arguments_execution_would_reject() {
     let dir = Utf8TempDir::new().unwrap();
 
     assert_eq!(
-        error_message(preview_tool(
-            &dir,
-            "create",
-            json!({ "kind": "chore", "title": "   " })
-        )),
+        error_message(preview_tool(&dir, "create", json!({ "title": "   " }))),
         "`title` must not be empty."
     );
     assert_eq!(
@@ -562,7 +552,6 @@ fn create_reflows_the_body_with_comfort() {
         &dir,
         "create",
         json!({
-            "kind": "bug",
             "title": "Wrapping is wrong",
             "body": "The first sentence. The second one, which the model wrote on the same line."
         }),
@@ -584,22 +573,6 @@ fn create_reflows_the_body_with_comfort() {
 }
 
 #[test]
-fn create_rejects_an_unknown_kind() {
-    let dir = Utf8TempDir::new().unwrap();
-
-    let out = error_message(run_tool(
-        &dir,
-        "create",
-        json!({
-            "kind": "task",
-            "title": "Title"
-        }),
-    ));
-
-    assert_eq!(out, "`kind` must be one of: bug, feature, chore.");
-}
-
-#[test]
 fn create_rejects_an_empty_title() {
     let dir = Utf8TempDir::new().unwrap();
 
@@ -607,7 +580,6 @@ fn create_rejects_an_empty_title() {
         &dir,
         "create",
         json!({
-            "kind": "chore",
             "title": "   "
         }),
     ));
@@ -622,8 +594,8 @@ fn a_missing_argument_is_named() {
     let dir = Utf8TempDir::new().unwrap();
 
     assert_eq!(
-        error_message(run_tool(&dir, "create", json!({ "title": "Title" }))),
-        "Missing argument `kind`."
+        error_message(run_tool(&dir, "create", json!({}))),
+        "Missing argument `title`."
     );
     assert_eq!(
         error_message(run_tool(&dir, "show", json!({}))),
@@ -641,7 +613,6 @@ fn create_asks_for_a_shorter_title() {
         &dir,
         "create",
         json!({
-            "kind": "chore",
             "title": "Make provider fixtures deterministic and sanitize recorded model output",
             "body": "Something is wrong."
         }),
@@ -683,7 +654,6 @@ fn a_shorter_title_answer_files_the_ticket() {
         &dir,
         "create",
         json!({
-            "kind": "chore",
             "title": "Make provider fixtures deterministic and sanitize recorded model output",
             "body": "Something is wrong."
         }),
@@ -720,7 +690,7 @@ fn a_shorter_title_answer_that_still_does_not_fit_ends_the_call() {
     let out = error_message(run_tool_with_answers(
         &dir,
         "create",
-        json!({ "kind": "chore", "title": "A title that does not fit" }),
+        json!({ "title": "A title that does not fit" }),
         json!({
             "shorter_title":
                 "Make provider fixtures deterministic and sanitize recorded model output"
@@ -742,7 +712,7 @@ fn an_empty_shorter_title_answer_ends_the_call() {
     let out = error_message(run_tool_with_answers(
         &dir,
         "create",
-        json!({ "kind": "chore", "title": "A title that does not fit" }),
+        json!({ "title": "A title that does not fit" }),
         json!({ "shorter_title": "  " }),
     ));
 
@@ -773,7 +743,7 @@ fn the_title_limit_is_configurable() {
     let question = question(run_tool_with_options(
         &dir,
         "create",
-        json!({ "kind": "chore", "title": "Bump the deny list" }),
+        json!({ "title": "Bump the deny list" }),
         json!({ "max_title_length": 10 }),
     ));
 
@@ -954,7 +924,6 @@ fn edit_changes_several_things_at_once() {
             "id": FIXED_ID,
             "title": "The wrap calculation is off",
             "description": "Off by one at 80 columns.",
-            "kind": "feature",
             "status": "in progress",
             "labels": ["client=cli"]
         }),
@@ -963,16 +932,15 @@ fn edit_changes_several_things_at_once() {
     assert_eq!(
         out,
         format!(
-            "Edited {id}:\n- labels: client=cli\n- kind: Feature\n- status: Todo -> In \
-             Progress\n- description replaced\n- title changed, moved docs/ticket/{prefix}slug.md \
-             -> docs/ticket/{prefix}the-wrap-calculation-is-off.md\n"
+            "Edited {id}:\n- labels: client=cli\n- status: Todo -> In Progress\n- description \
+             replaced\n- title changed, moved docs/ticket/{prefix}slug.md -> \
+             docs/ticket/{prefix}the-wrap-calculation-is-off.md\n"
         )
     );
     let entries = store::list(&tickets(&dir).dir).unwrap();
     let ticket = entries[0].ticket.as_ref().unwrap();
     assert_eq!(ticket.title, "The wrap calculation is off");
     assert_eq!(ticket.description, "Off by one at 80 columns.");
-    assert_eq!(ticket.metadata.kind, Kind::Feature);
     assert_eq!(ticket.metadata.status, Status::InProgress);
     assert_eq!(ticket.metadata.labels.to_tokens(), ["client=cli"]);
 }
@@ -985,7 +953,7 @@ fn edit_needs_something_to_change() {
 
     assert_eq!(
         error_message(run_tool(&dir, "edit", json!({ "id": FIXED_ID }))),
-        "Name what to change: `title`, `description`, `kind`, `status`, or `labels`."
+        "Name what to change: `title`, `description`, `status`, or `labels`."
     );
     assert_eq!(
         error_message(run_tool(
@@ -993,7 +961,7 @@ fn edit_needs_something_to_change() {
             "edit",
             json!({ "id": FIXED_ID, "labels": null })
         )),
-        "Name what to change: `title`, `description`, `kind`, `status`, or `labels`."
+        "Name what to change: `title`, `description`, `status`, or `labels`."
     );
 }
 
@@ -1194,16 +1162,11 @@ fn list_shows_one_line_per_ticket_and_filters() {
     let all = content(run_tool(&dir, "list", json!({})));
     assert_eq!(
         all,
-        format!(
-            "{open} Todo         Bug      Still open\n{finished} Done         Bug      Finished\n"
-        )
+        format!("{open} Todo         Still open\n{finished} Done         Finished\n")
     );
 
     let todo = content(run_tool(&dir, "list", json!({ "status": "todo" })));
-    assert_eq!(todo, format!("{open} Todo         Bug      Still open\n"));
-
-    let chores = content(run_tool(&dir, "list", json!({ "kind": "chore" })));
-    assert_eq!(chores, "No tickets match.\n");
+    assert_eq!(todo, format!("{open} Todo         Still open\n"));
 }
 
 /// The first Todo line is the next thing to work on: each column comes in the
@@ -1222,8 +1185,8 @@ fn list_follows_the_board_order() {
 
     assert_eq!(
         out,
-        "T-02wt0k2 Todo         Bug      Filed second\nT-02wt0k1 Todo         Bug      Filed \
-         first\nT-02wt0k3 In Progress  Bug      Started\n"
+        "T-02wt0k2 Todo         Filed second\nT-02wt0k1 Todo         Filed first\nT-02wt0k3 In \
+         Progress  Started\n"
     );
 }
 
@@ -1251,8 +1214,8 @@ fn list_finds_a_query_in_the_title_description_and_comments() {
 
     assert_eq!(
         out,
-        "T-02wt0k1 Todo         Bug      Wrap is off by one\nT-02wt0k2 Todo         Bug      \
-         Header misaligned\nT-02wt0k3 Todo         Bug      Colour is wrong (1 comment)\n"
+        "T-02wt0k1 Todo         Wrap is off by one\nT-02wt0k2 Todo         Header \
+         misaligned\nT-02wt0k3 Todo         Colour is wrong (1 comment)\n"
     );
 }
 
@@ -1275,12 +1238,12 @@ fn list_pages_through_a_long_listing() {
 
     assert_eq!(
         content(page(1)),
-        "T-02wt0k1 Todo         Bug      First\nT-02wt0k2 Todo         Bug      Second\n\nPage 1 \
-         of 2 (3 tickets). Pass `page: 2` for more.\n"
+        "T-02wt0k1 Todo         First\nT-02wt0k2 Todo         Second\n\nPage 1 of 2 (3 tickets). \
+         Pass `page: 2` for more.\n"
     );
     assert_eq!(
         content(page(2)),
-        "T-02wt0k3 Todo         Bug      Third\n\nPage 2 of 2 (3 tickets).\n"
+        "T-02wt0k3 Todo         Third\n\nPage 2 of 2 (3 tickets).\n"
     );
     assert_eq!(error_message(page(3)), "Page 3 is past the last page, 2.");
 }
@@ -1307,8 +1270,8 @@ fn an_unreadable_board_order_lists_each_column_by_id() {
 
     assert!(
         out.starts_with(
-            "T-02wt0k1 Todo         Bug      Filed first\nT-02wt0k2 Todo         Bug      Filed \
-             second\n\nCould not read:\n- docs/ticket/.board.json: "
+            "T-02wt0k1 Todo         Filed first\nT-02wt0k2 Todo         Filed second\n\nCould not \
+             read:\n- docs/ticket/.board.json: "
         ),
         "{out}"
     );
@@ -1363,7 +1326,6 @@ fn show_prints_the_metadata_and_names_what_it_left_out() {
 
 - **Path**: docs/ticket/02wt0kx-slug.md
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-05
 
@@ -1392,7 +1354,6 @@ fn show_prints_everything_asked_for() {
 
 - **Path**: docs/ticket/02wt0kx-slug.md
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-05
 
@@ -1503,7 +1464,6 @@ fn create_writes_labels_and_list_shows_them() {
         &dir,
         "create",
         json!({
-            "kind": "bug",
             "title": "Flag parsing drops the last value",
             "labels": ["package=jp_config", "client=cli"]
         }),
@@ -1515,8 +1475,7 @@ fn create_writes_labels_and_list_shows_them() {
     assert_eq!(
         listed,
         format!(
-            "{id} Todo         Bug      Flag parsing drops the last value [client=cli, \
-             package=jp_config]\n"
+            "{id} Todo         Flag parsing drops the last value [client=cli, package=jp_config]\n"
         )
     );
 }
@@ -1533,7 +1492,7 @@ fn list_narrows_to_tickets_carrying_every_label() {
         content(run_tool(
             &dir,
             "create",
-            json!({ "kind": "bug", "title": title, "labels": labels }),
+            json!({ "title": title, "labels": labels }),
         ));
     }
 
@@ -1601,10 +1560,13 @@ fn a_null_label_list_leaves_the_labels_alone() {
     let out = content(run_tool(
         &dir,
         "edit",
-        json!({ "id": FIXED_ID, "labels": null, "kind": "chore" }),
+        json!({ "id": FIXED_ID, "labels": null, "status": "in progress" }),
     ));
 
-    assert_eq!(out, format!("Edited {id}:\n- kind: Chore\n"));
+    assert_eq!(
+        out,
+        format!("Edited {id}:\n- status: Todo -> In Progress\n")
+    );
     let entries = store::list(&tickets(&dir).dir).unwrap();
     let ticket = entries[0].ticket.as_ref().unwrap();
     assert_eq!(ticket.metadata.labels.to_tokens(), [
@@ -1622,7 +1584,7 @@ fn an_unknown_label_is_refused_with_the_known_set() {
     let message = error_message(run_tool(
         &dir,
         "create",
-        json!({ "kind": "bug", "title": "Typo", "labels": ["client=clii"] }),
+        json!({ "title": "Typo", "labels": ["client=clii"] }),
     ));
 
     assert_eq!(
@@ -1691,7 +1653,7 @@ fn an_unknown_label_is_refused_before_the_preview() {
     let message = error_message(preview_tool(
         &dir,
         "create",
-        json!({ "kind": "bug", "title": "Typo", "labels": ["client=clii"] }),
+        json!({ "title": "Typo", "labels": ["client=clii"] }),
     ));
 
     assert_eq!(
@@ -1727,7 +1689,7 @@ fn a_write_the_access_policy_denies_is_refused() {
     let message = error_message(run_with_access(
         &dir,
         "create",
-        json!({ "kind": "chore", "title": "Bump the deny list" }),
+        json!({ "title": "Bump the deny list" }),
         &read_only,
     ));
 

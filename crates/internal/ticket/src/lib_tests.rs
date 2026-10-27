@@ -29,10 +29,10 @@ fn statuses_parse_leniently() {
 /// word, so a test can tell which part a match came from.
 fn searchable() -> Ticket {
     parse::document(
-        "# Header misaligned\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- \
-         **Date**: 2026-08-05\n- **Label**: client=cli\n\nThe wrap width ignores the gutter.\n\n## \
-         Comments\n\n-----\n\n- **From**: john\n- **Date**: 2026-08-05T14:03:11Z\n\nReproduced \
-         at 72 columns.\n",
+        "# Header misaligned\n\n- **Status**: Todo\n- **Authors**: john\n- **Date**: \
+         2026-08-05\n- **Label**: client=cli\n\nThe wrap width ignores the gutter.\n\n## \
+         Comments\n\n-----\n\n- **From**: john\n- **Date**: 2026-08-05T14:03:11Z\n\nReproduced at \
+         72 columns.\n",
     )
     .unwrap()
 }
@@ -55,24 +55,4 @@ fn the_metadata_block_is_not_searched() {
 
     assert!(!ticket.mentions("client=cli"));
     assert!(!ticket.mentions("Todo"));
-}
-
-#[test]
-fn kinds_round_trip() {
-    for kind in [Kind::Bug, Kind::Feature, Kind::Chore] {
-        assert_eq!(kind.to_string().parse(), Ok(kind));
-    }
-}
-
-#[test]
-fn kinds_parse_leniently() {
-    assert_eq!("bug".parse(), Ok(Kind::Bug));
-    assert_eq!("FEATURE".parse(), Ok(Kind::Feature));
-    assert_eq!(
-        "task".parse::<Kind>(),
-        Err(ParseError::InvalidValue {
-            field: "Kind",
-            value: "task".to_owned(),
-        })
-    );
 }
