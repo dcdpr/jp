@@ -14,8 +14,9 @@ pub(crate) mod time;
 pub(crate) mod turn_selection;
 pub(crate) mod workspace;
 
-use std::{fmt, num::NonZeroU8};
+use std::{fmt, iter, num::NonZeroU8};
 
+use clap::{ArgMatches, Args, Command, FromArgMatches, error::ErrorKind, value_parser};
 use jp_config::PartialAppConfig;
 use jp_workspace::Workspace;
 use serde_json::Value;
@@ -24,48 +25,126 @@ pub(crate) use target::ConversationLoadRequest;
 use super::cmd::conversation_id::format_target_help;
 use crate::{Ctx, bootstrap::WorkspaceRequirement, ctx::IntoPartialAppConfig};
 
-#[derive(Debug, clap::Subcommand)]
-#[command(disable_help_subcommand = true, allow_external_subcommands = true)]
+/// A `jp` subcommand and its arguments.
+#[derive(Debug)]
 pub(crate) enum Commands {
-    /// Initialize a new workspace.
     Init(init::Init),
-
-    /// Configuration management.
-    #[command(visible_alias = "cfg")]
     Config(config::Config),
-
-    /// Query the assistant.
-    #[command(visible_alias = "q")]
     Query(query::Query),
-
-    /// Manage attachments.
-    #[command(visible_alias = "a", alias = "attachments")]
     Attachment(attachment::Attachment),
-
-    // TODO: Remove once we have proper customizable "command aliases".
-    #[command(name = "aa", hide = true)]
     AttachmentAdd(attachment::add::Add),
-
-    /// Manage conversations.
-    #[command(visible_alias = "c", alias = "conversations")]
     Conversation(conversation::Conversation),
-
-    /// Manage plugins.
     Plugin(plugin::PluginManagement),
-
-    /// Manage workspaces.
-    #[command(visible_alias = "w", alias = "workspaces")]
     Workspace(workspace::Workspace),
-
-    /// Manage provider credentials.
     Provider(provider::Provider),
 
-    /// External plugin subcommand (`jp-<name>` on $PATH or registry).
-    #[command(external_subcommand)]
+    /// A command a plugin provides (`jp-<name>` on `$PATH` or in the registry):
+    /// its name, then its arguments.
     External(Vec<String>),
 }
 
+/// A subcommand named `name`, declaring the arguments of `T` and described in
+/// help by `about`.
+fn subcommand<T: Args>(name: &'static str, about: Option<&'static str>) -> Command {
+    // A derived argument struct describes the command with its own Rust doc
+    // comment, and so does every struct flattened into it. Those are written
+    // for contributors, so both descriptions are set here, the long one empty.
+    T::augment_args(Command::new(name))
+        .about(about)
+        .long_about(None)
+}
+
 impl Commands {
+    /// Mount every subcommand on `cmd`.
+    ///
+    /// Any other first word names a plugin's command.
+    pub(crate) fn augment(cmd: Command) -> Command {
+        cmd.disable_help_subcommand(true)
+            .allow_external_subcommands(true)
+            .external_subcommand_value_parser(value_parser!(String))
+            .subcommand(subcommand::<init::Init>(
+                "init",
+                Some("Initialize a new workspace"),
+            ))
+            .subcommand(
+                subcommand::<config::Config>("config", Some("Configuration management"))
+                    .visible_alias("cfg"),
+            )
+            .subcommand(
+                subcommand::<query::Query>("query", Some("Query the assistant")).visible_alias("q"),
+            )
+            .subcommand(
+                subcommand::<attachment::Attachment>("attachment", Some("Manage attachments"))
+                    .visible_alias("a")
+                    .alias("attachments"),
+            )
+            // TODO: Remove once we have proper customizable "command aliases".
+            .subcommand(subcommand::<attachment::add::Add>("aa", None).hide(true))
+            .subcommand(
+                subcommand::<conversation::Conversation>(
+                    "conversation",
+                    Some("Manage conversations"),
+                )
+                .visible_alias("c")
+                .alias("conversations"),
+            )
+            .subcommand(subcommand::<plugin::PluginManagement>(
+                "plugin",
+                Some("Manage plugins"),
+            ))
+            .subcommand(
+                subcommand::<workspace::Workspace>("workspace", Some("Manage workspaces"))
+                    .visible_alias("w")
+                    .alias("workspaces"),
+            )
+            .subcommand(subcommand::<provider::Provider>(
+                "provider",
+                Some("Manage provider credentials"),
+            ))
+    }
+
+    /// Read the subcommand `matches` names, and its arguments.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a subcommand's arguments cannot be read, or when
+    /// no subcommand was given.
+    pub(crate) fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        let Some((name, sub)) = matches.subcommand() else {
+            return Err(clap::Error::raw(
+                ErrorKind::MissingSubcommand,
+                "A subcommand is required but one was not provided.\n",
+            ));
+        };
+
+        Ok(match name {
+            "init" => Self::Init(FromArgMatches::from_arg_matches(sub)?),
+            "config" => Self::Config(FromArgMatches::from_arg_matches(sub)?),
+            "query" => Self::Query(FromArgMatches::from_arg_matches(sub)?),
+            "attachment" => Self::Attachment(FromArgMatches::from_arg_matches(sub)?),
+            "aa" => Self::AttachmentAdd(FromArgMatches::from_arg_matches(sub)?),
+            "conversation" => Self::Conversation(FromArgMatches::from_arg_matches(sub)?),
+            "plugin" => Self::Plugin(FromArgMatches::from_arg_matches(sub)?),
+            "workspace" => Self::Workspace(FromArgMatches::from_arg_matches(sub)?),
+            "provider" => Self::Provider(FromArgMatches::from_arg_matches(sub)?),
+
+            // Only a plugin's command carries the unnamed argument that clap
+            // collects everything after an unknown subcommand into. Without
+            // it, the name is one `augment` mounts and this match forgot.
+            name => {
+                let Ok(args) = sub.try_get_many::<String>("") else {
+                    return Err(clap::Error::raw(
+                        ErrorKind::InvalidSubcommand,
+                        format!("`{name}` is a built-in command `jp` cannot read\n"),
+                    ));
+                };
+
+                let args = args.into_iter().flatten().cloned();
+                Self::External(iter::once(name.to_owned()).chain(args).collect())
+            }
+        })
+    }
+
     pub(crate) async fn run(
         self,
         ctx: &mut Ctx,

@@ -13,9 +13,6 @@ hidden: false
 external_subcommands: Some(Some(alloc::string::String))
 set: ["version", "long_version", "author", "subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp [OPTIONS] <COMMAND>
-group Cli: [] required=false multiple=true
-group Globals: ["config", "no_config", "verbose", "quiet", "no_interactive", "format", "persist", "workspace", "width", "log_format", "log_file", "log"] required=false multiple=true
-group RootOpts: ["threads"] required=false multiple=true
 
 ### config
 short: Some('c')
@@ -48,7 +45,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["NO_CONFIG"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: Some("Global Options")
@@ -68,7 +65,7 @@ action: Count
 num_args: Some(0)
 value_type: u8
 possible_values: []
-value_names: Some(["VERBOSE"])
+value_names: None
 value_delimiter: None
 default_values: ["0"]
 help_heading: Some("Global Options")
@@ -88,7 +85,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["QUIET"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: Some("Global Options")
@@ -108,7 +105,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["NO_INTERACTIVE"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: Some("Global Options")
@@ -148,7 +145,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["PERSIST"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: Some("Global Options")

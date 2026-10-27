@@ -1,5 +1,6 @@
 mod access;
 mod bootstrap;
+mod cli;
 mod cmd;
 mod config_pipeline;
 mod ctx;
@@ -32,11 +33,7 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::NamedUtf8TempFile;
-use clap::{
-    ArgAction, Parser,
-    builder::{BoolValueParser, TypedValueParser as _},
-};
-use cmd::{Commands, workspace::target::WorkspaceTarget};
+use cmd::Commands;
 use crossterm::{style::Stylize as _, terminal};
 use ctx::{Ctx, IntoPartialAppConfig};
 use error::{Error, Result};
@@ -63,6 +60,7 @@ use serde_json::Value;
 use tokio::runtime::{self, Runtime};
 use tracing::{debug, info, trace, warn};
 
+pub(crate) use crate::cli::{Cli, Globals};
 use crate::{
     bootstrap::WorkspaceRequirement,
     cmd::{plugin::help::print_root_section, query::ArgPrompts, target::resolve_request},
@@ -80,180 +78,6 @@ const DEFAULT_VARIABLE_PREFIX: &str = "JP_";
 
 /// The prefix used to parse a CLI argument as a path instead of a string.
 const PATH_STRING_PREFIX: char = '@';
-
-// Jean Pierre's LLM Toolkit.
-#[derive(Parser)]
-#[command(name = "jp", author, version, long_version = env!("LONG_VERSION"), about, long_about = None)]
-struct Cli {
-    #[command(flatten, next_help_heading = "Global Options")]
-    globals: Globals,
-
-    #[command(flatten)]
-    root: RootOpts,
-
-    #[command(subcommand, next_help_heading = "Options")]
-    command: Commands,
-}
-
-/// The root options for the CLI.
-///
-/// These options are only available at the root level, e.g. `jp --foo` but not
-/// `jp query --foo`.
-#[derive(Parser)]
-pub struct RootOpts {
-    /// Number of threads to use for processing (default is number of available
-    /// cores)
-    #[arg(short = 't', long = "threads")]
-    pub threads: Option<NonZeroUsize>,
-}
-
-#[derive(Debug, Default, clap::Args)]
-struct Globals {
-    /// Override a configuration value for the duration of the command.
-    #[arg(
-        short = 'c',
-        long = "cfg",
-        global = true,
-        action = ArgAction::Append,
-        value_name = "KEY=VALUE",
-        value_parser = KeyValueOrPath::from_str,
-    )]
-    config: Vec<KeyValueOrPath>,
-
-    /// Shorthand for `--cfg=NONE`: skip implicit config loading and start from
-    /// program defaults.
-    ///
-    /// Subsequent `--cfg` values layer on top of the defaults.
-    #[arg(long = "no-cfg", global = true, default_value_t = false)]
-    no_config: bool,
-
-    /// Increase verbosity of logging.
-    ///
-    /// Can be specified multiple times to increase verbosity.
-    ///
-    /// Defaults to printing "error" messages.
-    /// For each increase in verbosity, the log level is set to "warn", "info",
-    /// "debug", and "trace" respectively.
-    #[arg(short = 'v', long, global = true, action = ArgAction::Count)]
-    verbose: u8,
-
-    /// Suppress chrome: progress indicators, status lines, and tool call
-    /// headers.
-    ///
-    /// Command output and the assistant's response still go to stdout, and a
-    /// failing run still reports its error.
-    /// Redirect them (`>/dev/null`, `2>/dev/null`) to drop those as well.
-    ///
-    /// Tracing written to stderr by `-v` or `--log-file=-` is suppressed too.
-    /// The trace log file still records the run in full.
-    #[arg(short = 'q', long, global = true)]
-    quiet: bool,
-
-    /// Assume no user is available to answer prompts.
-    ///
-    /// Everything JP would ask about resolves the way it does when JP runs
-    /// without a terminal: the workspace and conversation pickers, the
-    /// lock-timeout prompt, and a third-party plugin's approval all fail, and a
-    /// tool set to ask before running runs unconfirmed.
-    ///
-    /// A command with no answer to fall back on fails too: `jp init`, and any
-    /// removal or archive it would have to confirm.
-    ///
-    /// Set `JP_NONINTERACTIVE=1` to apply this to every invocation in an
-    /// environment, such as a script or a CI job.
-    ///
-    /// This does not change output formatting; use `--format` for that.
-    #[arg(long, global = true, visible_alias = "non-interactive")]
-    no_interactive: bool,
-
-    /// The output format.
-    #[arg(
-        short = 'F',
-        long = "format",
-        global = true,
-        value_enum,
-        default_value_t = CliFormat::Auto,
-    )]
-    format: CliFormat,
-
-    /// Persist modified state to disk.
-    ///
-    /// This is enabled by default, but can be disabled to debug certain
-    /// actions.
-    /// It is also useful to send a query to the assistant, without adding that
-    /// query to the conversation history.
-    #[arg(
-        short = '!',
-        long = "no-persist",
-        visible_short_alias = 'P',
-        global = true,
-        default_value_t = false,
-        value_parser = BoolValueParser::new().map(|v| !v),
-        help = "Disable persistence for the duration of the command.",
-    )]
-    persist: bool,
-
-    /// The workspace to use for the command.
-    ///
-    /// Accepts the workspace targeting grammar (see `jp w use help`): a
-    /// workspace ID, a path, `cwd` / `.`, or `-` to read an ID from stdin.
-    /// Interactive runs can also use the session keywords (`s`, `?s`), the
-    /// pickers (`?`), and free-text matching.
-    ///
-    /// Selects the workspace for this invocation only; it does not change the
-    /// session's active workspace (that is `jp w use`).
-    ///
-    /// On `jp workspace use` and `jp workspace show` it names the workspace the
-    /// subcommand acts on, as an alternative to their positional target.
-    #[arg(short = 'w', long, global = true)]
-    workspace: Option<WorkspaceTarget>,
-
-    /// Lay output out against this many columns.
-    ///
-    /// Detected automatically when stdout is a terminal.
-    /// Set it when stdout is a pipe that still renders for a human at a known
-    /// width, such as a preview pane laid out by another program.
-    /// `0` means unknown, which is the default when piped: content keeps its
-    /// natural width instead of being fitted to a guess.
-    #[arg(long, global = true, value_name = "COLUMNS")]
-    width: Option<u16>,
-
-    /// The format of the log output written to stderr.
-    ///
-    /// Defaults to "text" when stderr is a terminal, and "json" when stderr is
-    /// redirected to a file or pipe.
-    /// Only takes effect when tracing is written to stderr (via `-v` or
-    /// `--log-file=-`).
-    #[arg(long, global = true, value_enum, default_value_t = LogFormat::Auto)]
-    log_format: LogFormat,
-
-    /// Write the full tracing log to the given file.
-    ///
-    /// Use `-` to stream logs to stderr instead.
-    /// When unset, the log is written to a temporary file.
-    /// `JP_DEBUG=1` announces its path before execution and keeps it afterward.
-    /// Runs lasting at least five minutes repeat the path at completion.
-    /// A failed run without `JP_DEBUG` reports the retained path at completion.
-    #[arg(long, global = true, value_name = "PATH")]
-    log_file: Option<String>,
-
-    /// Filter log output by target and level.
-    ///
-    /// Accepts a comma-separated list of `target=level` pairs.
-    /// Levels are one of: off, error, warn, info, debug, trace.
-    /// Targets match path prefixes.
-    ///
-    /// Examples: --log=tool::stderr=trace Show stderr output from local tools.
-    /// --log=mcp::stderr=debug Show stderr from MCP servers.
-    /// --log='jp_llm=trace,plugin=off' Trace jp_llm internals, silence plugins.
-    ///
-    /// Composes with `-v`: verbosity sets the baseline for jp's own modules;
-    /// `--log` adds or overrides specific targets.
-    /// Passing `--log` without `-v` still enables stderr log output.
-    #[allow(clippy::doc_markdown)]
-    #[arg(long, global = true, value_name = "DIRECTIVE")]
-    log: Option<String>,
-}
 
 /// The format used for log output on stderr.
 #[derive(Debug, Default, Clone, Copy, clap::ValueEnum)]
@@ -412,7 +236,7 @@ pub fn run() -> ExitCode {
     #[cfg(feature = "dhat")]
     let _profiler = run_dhat();
 
-    let mut cli = match Cli::try_parse() {
+    let mut cli = match Cli::try_parse_from(env::args_os()) {
         Ok(cli) => cli,
         Err(e) => {
             if e.kind() == clap::error::ErrorKind::DisplayHelp && is_root_help_request() {

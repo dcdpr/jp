@@ -2,7 +2,7 @@ use std::{env, fmt::Write as _, fs, sync::Arc};
 
 use camino::Utf8PathBuf;
 use camino_tempfile::tempdir;
-use clap::{Arg, Command, CommandFactory, builder::ValueParser};
+use clap::{Arg, Command, builder::ValueParser};
 use jp_config::{
     AppConfig, PartialAppConfig,
     model::id::{PartialModelIdConfig, ProviderId},
@@ -796,7 +796,7 @@ fn query_model_override_persists_config_delta_through_run_inner() {
     conv.update_metadata(|_| {});
     drop(conv);
 
-    let cli = Cli::parse_from([
+    let cli = Cli::try_parse_from([
         "jp",
         "--workspace",
         root.as_str(),
@@ -819,7 +819,8 @@ fn query_model_override_persists_config_delta_through_run_inner() {
         "providers.llm.openai.api_key_env=JP_TEST_DUMMY_OPENAI_API_KEY",
         "--cfg",
         "providers.llm.openai.base_url=http://127.0.0.1:9",
-    ]);
+    ])
+    .unwrap();
 
     let result = run_inner(cli, OutputFormat::TextPretty);
     assert!(
@@ -909,7 +910,7 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
         .record_session_activation(&session, conversation_id, chrono::Utc::now())
         .unwrap();
 
-    let cli = Cli::parse_from([
+    let cli = Cli::try_parse_from([
         "jp",
         "--workspace",
         root.as_str(),
@@ -925,7 +926,8 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
         "providers.llm.openai.api_key_env=JP_TEST_DUMMY_OPENAI_API_KEY",
         "--cfg",
         "providers.llm.openai.base_url=http://127.0.0.1:9",
-    ]);
+    ])
+    .unwrap();
 
     let result = run_inner(cli, OutputFormat::TextPretty);
     assert!(
