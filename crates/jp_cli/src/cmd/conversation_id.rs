@@ -150,7 +150,7 @@ impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> clap::Args
             .visible_alias("ids")
             .value_parser(TargetParser::<SESSION>)
             .help(short_help())
-            .long_help(long_help(SESSION, MULTI))
+            .long_help(flag_long_help(SESSION, MULTI))
             .num_args(0..=1)
             .default_missing_value("");
 
@@ -351,8 +351,16 @@ fn long_help(session: bool, multi: bool) -> String {
         s.push_str("\nWhen multiple IDs are given, only literal conversation IDs are accepted.");
     }
 
+    s
+}
+
+/// [`long_help`] for `--id`, which on `jp query` can give its value back to the
+/// query.
+fn flag_long_help(session: bool, multi: bool) -> String {
+    let mut s = long_help(session, multi);
+    s.truncate(s.trim_end().len());
     s.push_str(
-        "\nOn `jp query`, a value written directly before the query that is neither a \
+        "\n\nOn `jp query`, a value written directly before the query that is neither a \
          conversation ID nor one of the forms above is the query's first word instead, and the \
          picker opens: `jp q -i fix the bug` picks a conversation and asks \"fix the bug\". Put \
          the query after `--` to search the picker by title: `jp q -i auth -- fix the bug`.",
