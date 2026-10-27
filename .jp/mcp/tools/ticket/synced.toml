@@ -9,8 +9,16 @@
 # gets retired ones, because replacing a ticket's whole set means naming a
 # retired label to keep it. `list` also gets a bare key per facet, which is how
 # a filter asks for any value under it.
+#
+# A key the board bounds with `min` or `max` is described beside the lists of
+# `create` and `edit`, and `create` requires labels when a key needs one, so
+# the assistant knows before its first call.
+
+[conversation.tools.ticket_create.parameters.labels]
+required = true
 
 [conversation.tools.ticket_create.parameters.labels.items]
+summary = "One `key=value` label. A ticket carries exactly one label under `type`."
 enum = [
   "client=cli",
   "client=macos",
@@ -76,6 +84,7 @@ enum = [
 ]
 
 [conversation.tools.ticket_edit.parameters.labels.items]
+summary = "One `key=value` label. A ticket carries exactly one label under `type`."
 enum = [
   "client=cli",
   "client=macos",

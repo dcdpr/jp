@@ -101,7 +101,9 @@
           "question",
           "task",
           "tracking"
-        ]
+        ],
+        "min": 1,
+        "max": 1
       }
     }
   }

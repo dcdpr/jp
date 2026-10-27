@@ -68,14 +68,15 @@ in development. An RFD has at most one, filed by `rfd_track`, so name
 `type=tracking` here only when the RFD has none.
 """
 
+# Not marked required here: `jp ticket tools sync` marks it when the board
+# requires a label, and a value set here would compete with that one.
 [conversation.tools.ticket_create.parameters.labels]
 type = "array"
-required = false
 summary = "What kind of work this is and where it lands, as `key=value` labels."
 description = """
 Labels classify a ticket: `type` says what kind of work it is, and the others
-say which part of the system it lands in. Give it its `type`, and every other
-label that fits.
+say which part of the system it lands in. Give it exactly one `type`, which
+every ticket carries, and every other label that fits.
 
 Each label is a `key=value` pair. A key may be named more than once, which is
 how a ticket spanning two crates says so: `["package=jp_cli",
