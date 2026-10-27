@@ -541,16 +541,119 @@ fn labelling_without_an_id_offers_the_picker() {
     let error = compose_missing(
         dir.path(),
         &labelled(),
-        Command::Label {
-            id: None,
-            labels: vec!["client=cli".to_owned()],
-        },
+        label_on(&[], LabelVerb::Add {
+            labels: owned(&["client=cli"]),
+        }),
         &mut &b""[..],
         &mut Vec::new(),
     )
     .unwrap_err();
 
     assert_eq!(error, "No tickets to choose from.");
+}
+
+/// `jp ticket label VERB` on the tickets `ids` names.
+fn label_on(ids: &[TicketId], verb: LabelVerb) -> Command {
+    Command::Label {
+        ids: ids.to_vec(),
+        verb: Some(verb),
+    }
+}
+
+fn owned(labels: &[&str]) -> Vec<String> {
+    labels.iter().map(|label| (*label).to_owned()).collect()
+}
+
+/// `--id` names the tickets on either side of the verb, repeated or
+/// comma-separated, so labels stay bare arguments.
+#[test]
+fn label_takes_its_tickets_with_id_on_either_side_of_the_verb() {
+    let expected = ["T-02wt0kx".parse::<TicketId>().unwrap()];
+    for args in [
+        &["label", "--id", "T-02wt0kx", "add", "client=cli"][..],
+        &["label", "add", "--id", "T-02wt0kx", "client=cli"][..],
+        &["label", "a", "-i", "02wt0kx", "client=cli"][..],
+    ] {
+        match parse(args).unwrap().command {
+            Command::Label {
+                ids,
+                verb: Some(LabelVerb::Add { labels }),
+            } => {
+                assert_eq!(ids, expected, "{args:?}");
+                assert_eq!(labels, ["client=cli"], "{args:?}");
+            }
+            other => panic!("expected label add, got {other:?}"),
+        }
+    }
+
+    match parse(&[
+        "label",
+        "rm",
+        "--id",
+        "T-02wt0kx,T-02wt0k1",
+        "-i",
+        "T-02wt0k2",
+    ])
+    .unwrap()
+    .command
+    {
+        Command::Label { ids, .. } => assert_eq!(ids.len(), 3),
+        other => panic!("expected label rm, got {other:?}"),
+    }
+}
+
+#[test]
+fn label_verbs_take_what_they_need() {
+    assert!(matches!(
+        parse(&["label"]).unwrap().command,
+        Command::Label { verb: None, .. }
+    ));
+    assert!(matches!(
+        parse(&["label", "ls", "--id", "T-02wt0kx"])
+            .unwrap()
+            .command,
+        Command::Label {
+            verb: Some(LabelVerb::Ls),
+            ..
+        }
+    ));
+    assert!(parse(&["label", "add"]).is_err());
+    assert!(parse(&["label", "set"]).is_err());
+    assert!(parse(&["label", "rm"]).is_ok());
+
+    // The form that replaced every label fails rather than doing something
+    // else.
+    assert!(parse(&["label", "T-02wt0kx", "--label", "client=cli"]).is_err());
+}
+
+/// A ticket id written where a label goes is refused before the picker opens,
+/// and when `--id` named the tickets, where nothing else would catch it.
+#[test]
+fn a_label_written_as_a_ticket_id_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    let named = "T-02wt0k1".parse::<TicketId>().unwrap();
+
+    for ids in [&[][..], &[named][..]] {
+        let error = compose_missing(
+            dir.path(),
+            &labelled(),
+            label_on(ids, LabelVerb::Add {
+                labels: owned(&["T-02wt0kx", "client=cli"]),
+            }),
+            &mut &b""[..],
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            "`T-02wt0kx` is a ticket id, not a label; name each ticket to change with its own \
+             `--id`, as in `--id T-02wt0kx`."
+        );
+    }
+
+    // Only the form `jp ticket` prints ids in: a word is a label.
+    assert!(refuse_ticket_ids(&owned(&["blocked", "tracking", "t-shirt-size"])).is_ok());
 }
 
 /// `jp vite serve` reads the revision of the site files this plugin was built
@@ -750,6 +853,29 @@ fn edit_changes_the_title_and_the_labels_at_once() {
     let ticket = ticket::parse::document(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(ticket.title, "The wrap calculation is off");
     assert_eq!(ticket.metadata.labels.to_tokens(), ["client=cli"]);
+}
+
+/// `--label` sets the whole list, so `edit` says which labels that took off.
+#[test]
+fn edit_reports_the_labels_it_removes() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = add_labelled(&dir, "Relabel me", &["client=macos", "package=jp_cli"]);
+    let path = store::locate_ticket(dir.path(), id).unwrap();
+
+    let edited = run_command(&dir, Command::Edit {
+        id: Some(id),
+        title: None,
+        body: None,
+        status: None,
+        labels: owned(&["client=cli"]),
+    })
+    .unwrap();
+
+    assert_eq!(
+        edited.text,
+        format!("Edited {path}\nRemoved labels: client=macos, package=jp_cli\n")
+    );
+    assert_eq!(labels_of(&dir, id), ["client=cli"]);
 }
 
 /// Labels are checked before anything is written, so a refused one leaves the
@@ -1774,34 +1900,246 @@ fn listing_narrows_on_a_query() {
     assert_eq!(listing("  ").lines().count(), 3);
 }
 
-/// The whole set is written, so labelling is idempotent and a label left off
-/// the call is a label removed.
+/// `add` keeps what the ticket carries, and says when a label was there
+/// already, so running it twice changes nothing.
 #[test]
-fn labelling_replaces_the_whole_set() {
+fn label_add_keeps_what_the_ticket_carries() {
     let dir = Utf8TempDir::new().unwrap();
-    let id = add_labelled(&dir, "Replace me", &["client=macos", "package=jp_cli"]);
+    let id = add_labelled(&dir, "Add to me", &["client=macos"]);
+    let path = store::locate_ticket(dir.path(), id).unwrap();
+    let add = || {
+        run_command(
+            &dir,
+            label_on(&[id], LabelVerb::Add {
+                labels: owned(&["package=jp_cli", "client=macos"]),
+            }),
+        )
+        .unwrap()
+        .text
+    };
 
-    let out = run_command(&dir, Command::Label {
-        id: Some(id),
-        labels: vec!["package=jp_cli".to_owned()],
-    })
-    .unwrap();
-    assert!(out.text.ends_with(": package=jp_cli\n"), "{}", out.text);
-
-    let cleared = run_command(&dir, Command::Label {
-        id: Some(id),
-        labels: vec![],
-    })
-    .unwrap();
-    assert!(
-        cleared.text.ends_with(": labels cleared\n"),
-        "{}",
-        cleared.text
+    assert_eq!(
+        add(),
+        format!("{path}: added package=jp_cli; already carries client=macos\n")
     );
+    assert_eq!(
+        add(),
+        format!("{path}: already carries package=jp_cli, client=macos\n")
+    );
+    assert_eq!(labels_of(&dir, id), ["client=macos", "package=jp_cli"]);
+}
+
+/// `set` replaces what the keys it names hold, and leaves the other keys alone.
+#[test]
+fn label_set_replaces_what_a_key_holds() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = add_labelled(&dir, "Set me", &["client=macos", "package=jp_cli"]);
+    let path = store::locate_ticket(dir.path(), id).unwrap();
+
+    let out = run_command(
+        &dir,
+        label_on(&[id], LabelVerb::Set {
+            labels: owned(&["package=jp_config"]),
+        }),
+    )
+    .unwrap();
+
+    assert_eq!(
+        out.text,
+        format!("{path}: removed package=jp_cli; added package=jp_config\n")
+    );
+    assert_eq!(labels_of(&dir, id), ["client=macos", "package=jp_config"]);
+}
+
+/// `rm` takes one label, or every label under a bare key, and names what the
+/// ticket didn't carry rather than failing on it.
+#[test]
+fn label_rm_reports_what_it_took_and_what_was_not_there() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = add_labelled(&dir, "Trim me", &[
+        "client=cli",
+        "client=macos",
+        "package=jp_cli",
+    ]);
+    let path = store::locate_ticket(dir.path(), id).unwrap();
+
+    let out = run_command(
+        &dir,
+        label_on(&[id], LabelVerb::Rm {
+            labels: owned(&["client", "package=jp_config"]),
+        }),
+    )
+    .unwrap();
+
+    assert_eq!(
+        out.text,
+        format!("{path}: removed client=cli, client=macos; doesn't carry package=jp_config\n")
+    );
+    assert_eq!(labels_of(&dir, id), ["package=jp_cli"]);
+}
+
+/// A bare `rm` takes every label, and drops the field rather than leaving an
+/// empty one.
+#[test]
+fn label_rm_without_labels_removes_every_label() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = add_labelled(&dir, "Clear me", &["client=macos", "package=jp_cli"]);
+
+    run_command(&dir, label_on(&[id], LabelVerb::Rm { labels: vec![] })).unwrap();
 
     let path = store::locate_ticket(dir.path(), id).unwrap();
     let source = std::fs::read_to_string(path).unwrap();
     assert!(!source.contains("- **Label**"), "{source}");
+}
+
+/// A label to remove has to be one: a malformed one matches nothing, which
+/// would read as removed.
+#[test]
+fn label_rm_refuses_what_is_not_a_label() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = add_labelled(&dir, "Keep me", &["client=cli"]);
+
+    let error = run_command(
+        &dir,
+        label_on(&[id], LabelVerb::Rm {
+            labels: owned(&["1client"]),
+        }),
+    )
+    .unwrap_err();
+
+    assert!(error.starts_with("label key '1client'"), "{error}");
+    assert_eq!(labels_of(&dir, id), ["client=cli"]);
+}
+
+/// One ticket's labels print one per line; several tickets' lines start with
+/// their ids.
+#[test]
+fn label_ls_lists_one_label_per_line() {
+    let dir = Utf8TempDir::new().unwrap();
+    let first = add_labelled(&dir, "First", &["client=cli", "package=jp_cli"]);
+    let second = add_labelled(&dir, "Second", &["client=macos"]);
+
+    let one = run_command(&dir, label_on(&[first], LabelVerb::Ls)).unwrap();
+    let both = run_command(&dir, Command::Label {
+        ids: vec![first, second],
+        verb: None,
+    })
+    .unwrap();
+
+    assert_eq!(one.text, "client=cli\npackage=jp_cli\n");
+    assert_eq!(
+        both.text,
+        format!("{first}: client=cli\n{first}: package=jp_cli\n{second}: client=macos\n")
+    );
+}
+
+/// Several tickets change in one command, each from the labels it carries.
+#[test]
+fn label_changes_several_tickets_at_once() {
+    let dir = Utf8TempDir::new().unwrap();
+    let first = add_labelled(&dir, "First", &["client=cli"]);
+    let second = add_labelled(&dir, "Second", &["package=jp_cli"]);
+
+    let out = run_command(
+        &dir,
+        label_on(&[first, second], LabelVerb::Add {
+            labels: owned(&["client=macos"]),
+        }),
+    )
+    .unwrap();
+
+    assert_eq!(out.text.lines().count(), 2, "{}", out.text);
+    assert_eq!(labels_of(&dir, first), ["client=cli", "client=macos"]);
+    assert_eq!(labels_of(&dir, second), ["client=macos", "package=jp_cli"]);
+}
+
+/// One ticket the board refuses stops the whole command, and the refusal names
+/// the ticket.
+#[test]
+fn label_changes_no_ticket_when_one_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    let typed = typed();
+    let file = |title: &str, labels: &[&str]| {
+        run_with_options(
+            dir.path(),
+            Command::Add {
+                title: Some(title.to_owned()),
+                author: Some("john".to_owned()),
+                body: None,
+                labels: owned(labels),
+            },
+            &typed,
+        )
+        .unwrap();
+        store::list(dir.path())
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.ticket.as_ref().is_ok_and(|t| t.title == title))
+            .unwrap()
+            .id
+    };
+    let bug = file("A bug", &["type=bug"]);
+    let feature = file("A feature", &["type=feature"]);
+
+    // Every ticket carries exactly one `type`: removing `type=bug` leaves the
+    // bug with none, while the feature has no `type=bug` to lose.
+    let error = run_with_options(
+        dir.path(),
+        label_on(&[feature, bug], LabelVerb::Rm {
+            labels: owned(&["type=bug"]),
+        }),
+        &typed,
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        format!("{bug}: `type` label missing: add one of type=bug, type=feature.")
+    );
+    assert_eq!(labels_of(&dir, bug), ["type=bug"]);
+}
+
+/// Adding can't make room under a key the board holds to one label, so the
+/// refusal points at `set`, which can.
+#[test]
+fn adding_to_a_full_key_points_at_set() {
+    let dir = Utf8TempDir::new().unwrap();
+    run_with_options(
+        dir.path(),
+        Command::Add {
+            title: Some("A bug".to_owned()),
+            author: Some("john".to_owned()),
+            body: None,
+            labels: owned(&["type=bug"]),
+        },
+        &typed(),
+    )
+    .unwrap();
+    let id = store::list(dir.path()).unwrap()[0].id;
+    let run = |verb| run_with_options(dir.path(), label_on(&[id], verb), &typed());
+
+    let error = run(LabelVerb::Add {
+        labels: owned(&["type=feature"]),
+    })
+    .unwrap_err();
+    assert_eq!(
+        error,
+        "`type` takes exactly one label, and 2 are given: type=bug, type=feature.\nReplace what a \
+         key holds with `jp ticket label set`."
+    );
+
+    run(LabelVerb::Set {
+        labels: owned(&["type=feature"]),
+    })
+    .unwrap();
+    assert_eq!(labels_of(&dir, id), ["type=feature"]);
+}
+
+/// The labels a ticket's file carries, as tokens.
+fn labels_of(dir: &Utf8TempDir, id: TicketId) -> Vec<String> {
+    let path = store::locate_ticket(dir.path(), id).unwrap();
+
+    ticket::parse::labels(&std::fs::read_to_string(path).unwrap()).to_tokens()
 }
 
 /// A typo names the vocabulary rather than landing a label nothing groups by.
@@ -1861,17 +2199,16 @@ fn a_retired_label_already_on_a_ticket_can_be_kept() {
     )
     .unwrap();
 
-    let out = run_command(&dir, Command::Label {
-        id: Some(id),
-        labels: vec!["package=jp_legacy".to_owned(), "client=cli".to_owned()],
-    })
+    let out = run_command(
+        &dir,
+        label_on(&[id], LabelVerb::Add {
+            labels: owned(&["client=cli"]),
+        }),
+    )
     .unwrap();
 
-    assert!(
-        out.text.ends_with(": client=cli, package=jp_legacy\n"),
-        "{}",
-        out.text
-    );
+    assert!(out.text.ends_with(": added client=cli\n"), "{}", out.text);
+    assert_eq!(labels_of(&dir, id), ["client=cli", "package=jp_legacy"]);
 }
 
 #[test]
@@ -1879,10 +2216,12 @@ fn a_retired_label_cannot_be_added_fresh() {
     let dir = Utf8TempDir::new().unwrap();
     let id = add_labelled(&dir, "Fresh", &[]);
 
-    let error = run_command(&dir, Command::Label {
-        id: Some(id),
-        labels: vec!["package=jp_legacy".to_owned()],
-    })
+    let error = run_command(
+        &dir,
+        label_on(&[id], LabelVerb::Add {
+            labels: owned(&["package=jp_legacy"]),
+        }),
+    )
     .unwrap_err();
 
     assert_eq!(
@@ -2031,10 +2370,10 @@ fn the_labels_are_checked_before_the_composer_opens() {
     );
 }
 
-/// Relabelling replaces the whole set, so dropping the required key is refused
-/// and the ticket keeps the labels it had.
+/// Removing the required key is refused, and the ticket keeps the labels it
+/// had.
 #[test]
-fn relabelling_cannot_drop_a_required_label() {
+fn removing_a_required_label_is_refused() {
     let dir = Utf8TempDir::new().unwrap();
     run_with_options(
         dir.path(),
@@ -2051,10 +2390,9 @@ fn relabelling_cannot_drop_a_required_label() {
 
     let error = run_with_options(
         dir.path(),
-        Command::Label {
-            id: Some(id),
-            labels: vec!["client=cli".to_owned()],
-        },
+        label_on(&[id], LabelVerb::Rm {
+            labels: owned(&["type"]),
+        }),
         &typed(),
     )
     .unwrap_err();
@@ -2161,8 +2499,8 @@ fn a_taken_label_is_refused_before_the_composer_opens() {
     assert!(sent.is_empty(), "the composer was asked for");
 }
 
-/// Relabelling one ticket with what another holds is refused too, and a ticket
-/// keeps a unique label it already carries.
+/// Adding what another ticket holds is refused too, and a ticket keeps a unique
+/// label it already carries.
 #[test]
 fn relabelling_onto_a_label_another_ticket_holds_is_refused() {
     let dir = Utf8TempDir::new().unwrap();
@@ -2176,22 +2514,56 @@ fn relabelling_onto_a_label_another_ticket_holds_is_refused() {
     else {
         panic!("expected two tickets");
     };
-    let relabel = |id, labels: &[&str]| {
+    let add = |id, labels: &[&str]| {
         run_with_options(
             dir.path(),
-            Command::Label {
-                id: Some(id),
-                labels: labels.iter().map(|label| (*label).to_owned()).collect(),
-            },
+            label_on(&[id], LabelVerb::Add {
+                labels: owned(labels),
+            }),
             &unique_board(),
         )
     };
 
     assert_eq!(
-        relabel(waiting, &["focus"]).unwrap_err(),
+        add(waiting, &["focus"]).unwrap_err(),
         format!("`focus` is already on {focused}, and the board lets one ticket carry it.")
     );
-    relabel(focused, &["focus", "rfd=116"]).unwrap();
+    add(focused, &["rfd=116"]).unwrap();
+}
+
+/// Two tickets labelled together can't both take a label the board lets one
+/// ticket carry, though neither carries it yet.
+#[test]
+fn labelling_two_tickets_with_one_unique_label_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    add_unique(&dir, "First", &[]).unwrap();
+    add_unique(&dir, "Second", &[]).unwrap();
+    let [first, second] = store::list(dir.path())
+        .unwrap()
+        .iter()
+        .map(|entry| entry.id)
+        .collect::<Vec<_>>()[..]
+    else {
+        panic!("expected two tickets");
+    };
+
+    let error = run_with_options(
+        dir.path(),
+        label_on(&[first, second], LabelVerb::Add {
+            labels: owned(&["rfd=116"]),
+        }),
+        &unique_board(),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        format!(
+            "{first}: `rfd=116` would also go on {second}, and the board lets one ticket carry \
+             each `rfd` value."
+        )
+    );
+    assert!(labels_of(&dir, first).is_empty());
 }
 
 /// `jp ticket labels` shows a key taking any value, and which keys one ticket

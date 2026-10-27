@@ -10,9 +10,9 @@ as it is.
   changed. Read it first with `ticket_show`, passing `description: true`.
 - `status` moves it between `todo`, `in progress`, and `done`; `done` closes
   it.
-- `labels` replaces the whole set: pass every label the ticket should end up
-  with, or `[]` to clear them. A value the board has retired stays valid on a
-  ticket that already carries it, so listing it again keeps it.
+- `remove_labels` takes labels off: `key=value` that label, a bare `key`
+  every label under it. `add_labels` then puts labels on. The labels neither
+  names stay, so there is no need to read the ticket first.
 
 To add to the discussion instead, use `ticket_comment`.
 """
@@ -28,9 +28,14 @@ Close it:
 {"id": "T-02wt0kx", "status": "done"}
 ```
 
-Retitle and relabel it:
+Retitle it and add a label:
 ```json
-{"id": "T-02wt0kx", "title": "Header misaligned below 80 columns", "labels": ["client=cli"]}
+{"id": "T-02wt0kx", "title": "Header misaligned below 80 columns", "add_labels": ["client=cli"]}
+```
+
+Replace whatever `client` holds:
+```json
+{"id": "T-02wt0kx", "remove_labels": ["client"], "add_labels": ["client=macos"]}
 ```
 """
 
@@ -60,10 +65,18 @@ required = false
 enum = ["todo", "in progress", "done"]
 summary = "The column to move it to; `done` closes it."
 
-[conversation.tools.ticket_edit.parameters.labels]
+[conversation.tools.ticket_edit.parameters.add_labels]
 type = "array"
 required = false
-summary = "Every `key=value` label the ticket should carry. `[]` clears them."
+summary = "`key=value` labels to put on the ticket; it keeps the ones it carries."
 
-[conversation.tools.ticket_edit.parameters.labels.items]
+[conversation.tools.ticket_edit.parameters.add_labels.items]
+type = "string"
+
+[conversation.tools.ticket_edit.parameters.remove_labels]
+type = "array"
+required = false
+summary = "Labels to take off: `key=value` that label, a bare `key` all under it."
+
+[conversation.tools.ticket_edit.parameters.remove_labels.items]
 type = "string"

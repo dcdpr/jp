@@ -188,7 +188,12 @@ fn init_refuses_to_overwrite_and_writes_nothing() {
 
 /// A definition declaring the `labels` parameter, served as `source`.
 fn labelled(source: &str) -> Value {
-    json!({ "source": source, "parameters": { "labels": { "type": "array" } } })
+    declaring(source, "labels")
+}
+
+/// A definition declaring `parameter`, served as `source`.
+fn declaring(source: &str, parameter: &str) -> Value {
+    json!({ "source": source, "parameters": { parameter: { "type": "array" } } })
 }
 
 /// Tools are found by their source, so a project that exposes `create` under a
@@ -202,7 +207,7 @@ fn sync_offers_each_tool_its_labels_found_by_source() {
                 "*": { "run": "ask" },
                 "ticket_create": labelled("plugin.command.ticket.create"),
                 "track": labelled("plugin.command.ticket.create"),
-                "ticket_edit": labelled("plugin.command.ticket.edit"),
+                "ticket_edit": declaring("plugin.command.ticket.edit", "add_labels"),
                 "list": labelled("plugin.command.ticket"),
                 "ticket_show": { "source": "plugin.command.ticket.show" },
                 "fs_read_file": { "source": "local" },
@@ -238,12 +243,11 @@ enum = [
   "triaged",
 ]
 
-[conversation.tools.ticket_edit.parameters.labels.items]
+[conversation.tools.ticket_edit.parameters.add_labels.items]
 enum = [
   "client=cli",
   "client=macos",
   "package=jp_cli",
-  "package=jp_legacy",
   "triaged",
 ]
 
@@ -304,8 +308,9 @@ fn sync_leaves_out_a_tool_that_declares_no_labels() {
     assert_eq!(
         output.text,
         format!(
-            "Wrote {path}, with labels for ticket_create\nLeft out ticket_edit, ticket_list: \
-             their definitions declare no `labels` parameter.\n"
+            "Wrote {path}, with labels for ticket_create\nLeft out ticket_edit (no `add_labels` \
+             parameter), ticket_list (no `labels` parameter): the labels go into that parameter, \
+             which their definitions don't declare.\n"
         )
     );
     let synced = fs::read_to_string(&path).unwrap();
@@ -322,9 +327,10 @@ fn jp_definitions_declare_the_labels_parameter() {
             continue;
         }
 
+        let parameter = parameter(&name);
         assert!(
-            tool["parameters"]["labels"].get("type").is_some(),
-            "{key} declares no `labels` parameter"
+            tool["parameters"][parameter].get("type").is_some(),
+            "{key} declares no `{parameter}` parameter"
         );
     }
 }
@@ -358,7 +364,7 @@ fn sync_describes_the_bounds_to_the_tools_that_write_labels() {
     let dir = Utf8TempDir::new().unwrap();
     let config = json!({ "conversation": { "tools": {
         "ticket_create": labelled("plugin.command.ticket.create"),
-        "ticket_edit": labelled("plugin.command.ticket.edit"),
+        "ticket_edit": declaring("plugin.command.ticket.edit", "add_labels"),
         "ticket_list": labelled("plugin.command.ticket.list")
     }}});
     let vocabulary = Vocabulary::parse(
@@ -382,7 +388,7 @@ enum = [
   "type=bug",
 ]
 
-[conversation.tools.ticket_edit.parameters.labels.items]
+[conversation.tools.ticket_edit.parameters.add_labels.items]
 summary = "One `key=value` label. A ticket carries at most one label under `team` and exactly one label under `type`."
 enum = [
   "team=core",

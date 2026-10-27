@@ -18,6 +18,7 @@
 
 mod definitions;
 mod edit;
+mod label;
 mod options;
 mod tool;
 
@@ -117,19 +118,20 @@ enum Command {
         body: Option<String>,
     },
 
-    /// Replace a ticket's labels.
+    /// Add, set, remove, or list a ticket's labels.
     ///
-    /// The whole set is written: pass every label the ticket should end up
-    /// with, or none to clear them.
+    /// Name the tickets with `--id`, before or after the verb; repeat it, or
+    /// separate ids with commas, to change several at once, all of them or
+    /// none.
+    /// Without it, you choose one.
+    /// Without a verb, lists the labels.
     Label {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
-        /// Omit it to choose.
-        id: Option<TicketId>,
+        /// A ticket to act on: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        #[arg(long = "id", short = 'i', global = true, value_delimiter = ',')]
+        ids: Vec<TicketId>,
 
-        /// A `key=value` label from the board's vocabulary.
-        /// Repeat for more than one.
-        #[arg(long = "label")]
-        labels: Vec<String>,
+        #[command(subcommand)]
+        verb: Option<LabelVerb>,
     },
 
     /// List the labels the board defines.
@@ -310,6 +312,58 @@ enum Command {
         #[command(subcommand)]
         command: ToolsCommand,
     },
+}
+
+/// What `label` does to the tickets it names.
+#[derive(Debug, Subcommand)]
+enum LabelVerb {
+    /// Add labels; the ticket keeps the ones it carries.
+    ///
+    /// A key the board holds to one label is changed with `set` instead.
+    #[command(visible_alias = "a")]
+    Add {
+        /// A label to add, as `key=value`, or a bare `key` the board takes
+        /// without a value.
+        #[arg(value_name = "KEY=VALUE", required = true)]
+        labels: Vec<String>,
+    },
+
+    /// Replace what each named key holds; every other label stays.
+    ///
+    /// `set type=bug` swaps whatever `type` holds for `bug`, and naming a key
+    /// twice gives it both values.
+    #[command(visible_alias = "s")]
+    Set {
+        /// A label to set, as `key=value`.
+        #[arg(value_name = "KEY=VALUE", required = true)]
+        labels: Vec<String>,
+    },
+
+    /// Remove labels: `key=value` takes that label, a bare `key` every label
+    /// under it.
+    ///
+    /// With none named, removes every label.
+    /// Naming one the ticket doesn't carry isn't an error, but is reported.
+    #[command(visible_alias = "r", aliases = ["remove", "del", "delete"])]
+    Rm {
+        /// A label to remove, as `key=value`, or a bare `key` for all of them.
+        #[arg(value_name = "KEY[=VALUE]")]
+        labels: Vec<String>,
+    },
+
+    /// List the labels, one per line.
+    #[command(alias = "list")]
+    Ls,
+}
+
+impl LabelVerb {
+    /// The labels the verb names.
+    fn labels(&self) -> &[String] {
+        match self {
+            Self::Add { labels } | Self::Set { labels } | Self::Rm { labels } => labels,
+            Self::Ls => &[],
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -692,10 +746,19 @@ fn compose_missing(
             labels,
         }),
 
-        Command::Label { id: None, labels } => Ok(Command::Label {
-            id: Some(pick_ticket(dir, stdin, stdout, "Label", false)?),
-            labels,
-        }),
+        Command::Label { ids, verb } => {
+            // Before the picker, so an id written where a label goes is caught
+            // whether or not `--id` named the tickets.
+            refuse_ticket_ids(verb.as_ref().map_or(&[][..], LabelVerb::labels))?;
+
+            let ids = if ids.is_empty() {
+                vec![pick_ticket(dir, stdin, stdout, "Label", false)?]
+            } else {
+                ids
+            };
+
+            Ok(Command::Label { ids, verb })
+        }
 
         Command::Delete { id: None } => Ok(Command::Delete {
             id: Some(pick_ticket(dir, stdin, stdout, "Delete", false)?),
@@ -1268,8 +1331,8 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             &body.unwrap_or_default(),
         ),
 
-        Command::Label { id, labels } => {
-            relabel(dir, ctx.options, required(id, "ticket id")?, &labels)
+        Command::Label { ids, verb } => {
+            label(dir, ctx.options, &ids, &verb.unwrap_or(LabelVerb::Ls))
         }
 
         Command::Labels => vocabulary_listing(dir, ctx.options),
@@ -1685,26 +1748,135 @@ fn add(dir: &Utf8Path, vocabulary: &Vocabulary, new: &NewTicket<'_>) -> Result<O
     Ok(format!("Created {path} ({id})\n").into())
 }
 
-/// Replace a ticket's labels with the set the caller named.
+/// Refuse a label written as a ticket id, `T-02wt0kx`: it names a ticket to act
+/// on, which `--id` takes.
 ///
-/// Checked against the ticket rather than against the vocabulary alone, so a
-/// retired value the ticket already carries can be listed again and kept.
-fn relabel(
+/// Only the form ids are printed in, `T-` and seven characters, is refused.
+/// An id without the `T`, such as `02wt0kx`, can't start a label key, so the
+/// board refuses it anyway; one without the dash can't be told from a word,
+/// since `tracking` reads as the id `T-rack1ng`.
+fn refuse_ticket_ids(labels: &[String]) -> Result<(), String> {
+    let Some(id) = labels.iter().map(|label| label.trim()).find(|label| {
+        label
+            .get(..2)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("t-"))
+            && label.parse::<TicketId>().is_ok()
+    }) else {
+        return Ok(());
+    };
+
+    Err(format!(
+        "`{id}` is a ticket id, not a label; name each ticket to change with its own `--id`, as \
+         in `--id {id}`."
+    ))
+}
+
+/// Run a label verb on every ticket `ids` names, all of them or none.
+fn label(
     dir: &Utf8Path,
     options: &Options,
-    id: TicketId,
-    requested: &[String],
+    ids: &[TicketId],
+    verb: &LabelVerb,
 ) -> Result<Output, String> {
-    let vocabulary = options.vocabulary()?;
-    let (path, applied) =
-        store::set_labels(dir, id, &vocabulary, requested).map_err(|error| error.to_string())?;
-
-    Ok(if applied.is_empty() {
-        format!("{path}: labels cleared\n")
-    } else {
-        format!("{path}: {applied}\n")
+    if ids.is_empty() {
+        return Err("No ticket given; name one with `--id`.".to_owned());
     }
-    .into())
+    if matches!(verb, LabelVerb::Ls) {
+        return list_labels(dir, ids);
+    }
+
+    // `add` and `set` are checked by the board; a label to remove has to be
+    // one before it can match anything.
+    if let LabelVerb::Rm { labels } = verb {
+        Labels::from_tokens(labels).map_err(|error| format!("{error}."))?;
+    }
+
+    let relabeled = store::relabel(dir, &options.vocabulary()?, ids, |current| {
+        relabelled(verb, current)
+    })
+    .map_err(|error| label_refusal(&error, verb))?;
+
+    let (adding, removing) = match verb {
+        LabelVerb::Add { labels } => (&labels[..], &[][..]),
+        LabelVerb::Rm { labels } => (&[][..], &labels[..]),
+        LabelVerb::Set { .. } | LabelVerb::Ls => (&[][..], &[][..]),
+    };
+    let mut out = String::new();
+    for ticket in &relabeled {
+        let what = label::describe(&ticket.before, &ticket.after, adding, removing);
+        out.push_str(&format!("{}: {what}\n", ticket.path));
+    }
+
+    Ok(out.into())
+}
+
+/// The whole set a ticket carrying `current` ends up with after `verb`.
+fn relabelled(verb: &LabelVerb, current: &Labels) -> Vec<String> {
+    match verb {
+        LabelVerb::Add { labels } => label::add(current, labels),
+        LabelVerb::Set { labels } => label::set(current, labels),
+        LabelVerb::Rm { labels } if labels.is_empty() => vec![],
+        LabelVerb::Rm { labels } => label::remove(current, labels),
+        LabelVerb::Ls => current.to_tokens(),
+    }
+}
+
+/// A relabel's refusal, pointing `add` at `set` when it overfilled a key the
+/// board bounds, since adding can't make room.
+fn label_refusal(error: &store::Error, verb: &LabelVerb) -> String {
+    fn overfilled(error: &store::Error) -> bool {
+        match error {
+            store::Error::Rejected(rejected) => rejected
+                .miscounted
+                .iter()
+                .any(|miscount| miscount.max.is_some_and(|max| miscount.given.len() > max)),
+            store::Error::Refused(refused) => refused.iter().any(|(_, error)| overfilled(error)),
+            _ => false,
+        }
+    }
+
+    let mut text = error.to_string();
+    if matches!(verb, LabelVerb::Add { .. }) && overfilled(error) {
+        text.push_str("\nReplace what a key holds with `jp ticket label set`.");
+    }
+
+    text
+}
+
+/// List the labels of every ticket `ids` names, one per line.
+///
+/// With several tickets, each line starts with its ticket's id, the way `grep`
+/// names the file a match came from.
+fn list_labels(dir: &Utf8Path, ids: &[TicketId]) -> Result<Output, String> {
+    let entries = store::list(dir).map_err(|error| error.to_string())?;
+
+    let mut named: Vec<TicketId> = vec![];
+    for id in ids {
+        if !named.contains(id) {
+            named.push(*id);
+        }
+    }
+
+    let mut out = String::new();
+    for id in &named {
+        let entry = entries
+            .iter()
+            .find(|entry| entry.id == *id)
+            .ok_or_else(|| format!("No ticket {id}."))?;
+        let ticket = entry
+            .ticket
+            .as_ref()
+            .map_err(|error| format!("{id} is not a well-formed ticket: {error}"))?;
+
+        for token in ticket.metadata.labels.to_tokens() {
+            if named.len() > 1 {
+                out.push_str(&format!("{id}: "));
+            }
+            out.push_str(&format!("{token}\n"));
+        }
+    }
+
+    Ok(out.into())
 }
 
 /// Check labels for a ticket being filed.
@@ -1813,11 +1985,15 @@ fn edit(
     }
 
     let mut path = store::locate_ticket(dir, id).map_err(failed)?;
+    let mut removed = vec![];
     if !changes.labels.is_empty() {
         let vocabulary = options.vocabulary()?;
-        path = store::set_labels(dir, id, &vocabulary, &changes.labels)
-            .map_err(failed)?
-            .0;
+        let relabeled =
+            store::relabel(dir, &vocabulary, &[id], |_| changes.labels.clone()).map_err(failed)?;
+        if let Some(ticket) = relabeled.into_iter().next() {
+            removed = label::difference(&ticket.before, &ticket.after).0;
+            path = ticket.path;
+        }
     }
     if let Some(status) = changes.status {
         path = store::set_status(dir, id, status).map_err(failed)?.0;
@@ -1829,7 +2005,14 @@ fn edit(
             .to;
     }
 
-    Ok(format!("Edited {path}\n").into())
+    // `--label` sets the whole list, so a label left off it goes; saying which
+    // is the only way to notice one that went by mistake.
+    let mut text = format!("Edited {path}\n");
+    if !removed.is_empty() {
+        text.push_str(&format!("Removed labels: {}\n", removed.join(", ")));
+    }
+
+    Ok(text.into())
 }
 
 /// Read one ticket, as markdown or as JSON for scripting.

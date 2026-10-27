@@ -73,6 +73,12 @@ pub enum Error {
     /// A write named labels the board lets one ticket carry, and another ticket
     /// already does.
     Taken(Vec<(Clash, TicketId)>),
+    /// A write named labels the board lets one ticket carry, and gives them to
+    /// another ticket it writes too.
+    Shared(Vec<(Clash, TicketId)>),
+    /// A write to several tickets the board refused, with each ticket refused
+    /// and why.
+    Refused(Vec<(TicketId, Error)>),
     /// A ticket file that is there but isn't a well-formed ticket.
     Malformed { id: TicketId, error: ParseError },
     /// The board's order file can't be read as one.
@@ -128,18 +134,30 @@ impl fmt::Display for Error {
             Self::Taken(taken) => {
                 let sentences: Vec<String> = taken
                     .iter()
-                    .map(|(clash, id)| match clash.value {
-                        Some(_) => format!(
-                            "`{clash}` is already on {id}, and the board lets one ticket carry \
-                             each `{}` value.",
-                            clash.key
-                        ),
-                        None => format!(
-                            "`{clash}` is already on {id}, and the board lets one ticket carry it."
-                        ),
+                    .map(|(clash, id)| {
+                        format!("`{clash}` is already on {id}, and {}.", held_to_one(clash))
                     })
                     .collect();
                 f.write_str(&sentences.join(" "))
+            }
+            Self::Shared(shared) => {
+                let sentences: Vec<String> = shared
+                    .iter()
+                    .map(|(clash, id)| {
+                        format!(
+                            "`{clash}` would also go on {id}, and {}.",
+                            held_to_one(clash)
+                        )
+                    })
+                    .collect();
+                f.write_str(&sentences.join(" "))
+            }
+            Self::Refused(refused) => {
+                let lines: Vec<String> = refused
+                    .iter()
+                    .map(|(id, error)| format!("{id}: {error}"))
+                    .collect();
+                f.write_str(&lines.join("\n"))
             }
             Self::Malformed { id, error } => write!(f, "{id} is not a well-formed ticket: {error}"),
             Self::Board { path, reason } => write!(f, "{path} is not a board order: {reason}."),
@@ -165,6 +183,14 @@ impl fmt::Display for Error {
             ),
             Self::Io(error) => error.fmt(f),
         }
+    }
+}
+
+/// Why the board refuses `clash` on a second ticket.
+fn held_to_one(clash: &Clash) -> String {
+    match clash.value {
+        Some(_) => format!("the board lets one ticket carry each `{}` value", clash.key),
+        None => "the board lets one ticket carry it".to_owned(),
     }
 }
 
@@ -362,35 +388,136 @@ pub fn set_field(dir: &Utf8Path, id: TicketId, key: &str, value: &str) -> Result
     Ok(path)
 }
 
-/// Replace a ticket's labels, returning its path and what it now carries.
+/// A ticket's labels before and after [`relabel`] wrote them.
+#[derive(Debug)]
+pub struct Relabeled {
+    pub id: TicketId,
+    pub path: Utf8PathBuf,
+    /// What the ticket carried, as its label lines said.
+    pub before: Labels,
+    /// What it carries now, in the board's spelling.
+    pub after: Labels,
+}
+
+/// Change the labels of every ticket `ids` names, all of them or none.
 ///
-/// The whole set is written, so this is the only write labels need: an empty
-/// list drops the field.
-/// Replacing rather than merging keeps a retried call from landing twice.
+/// `change` maps the labels a ticket carries to the whole set it should end up
+/// with, as tokens.
+/// Each set is checked as [`Vocabulary::resolve_against`] checks one, so a
+/// retired value the ticket already carries can be kept, and held to the keys
+/// the board lets one ticket carry: against the rest of the board, and against
+/// the other tickets `ids` names.
 ///
-/// `requested` is checked against the ticket's current labels, not just against
-/// the vocabulary, so a retired label the ticket already carries can be listed
-/// again and kept.
-/// The check happens here rather than in the caller because the current labels
-/// come from the same read this write is about to replace.
-pub fn set_labels(
+/// Every ticket is checked before any is written, so a refusal changes nothing.
+/// With one ticket, the error is the board's own refusal; with several, it is
+/// [`Error::Refused`], naming each ticket refused.
+/// A ticket whose labels don't change isn't rewritten.
+///
+/// The writes go one file at a time: a failure partway through, such as a full
+/// disk, leaves the tickets before it written.
+pub fn relabel(
     dir: &Utf8Path,
-    id: TicketId,
     vocabulary: &Vocabulary,
-    requested: &[String],
-) -> Result<(Utf8PathBuf, Labels)> {
-    let path = locate(dir, id)?;
-    let source = fs::read_to_string(&path)?;
+    ids: &[TicketId],
+    change: impl Fn(&Labels) -> Vec<String>,
+) -> Result<Vec<Relabeled>> {
+    let mut named: Vec<TicketId> = vec![];
+    for id in ids {
+        if !named.contains(id) {
+            named.push(*id);
+        }
+    }
 
-    let current = parse::labels(&source);
-    let applied = vocabulary.resolve_against(requested, &current)?;
-    check_unique(dir, vocabulary, &applied, Some(id))?;
+    let mut planned = vec![];
+    let mut refused = vec![];
+    for id in named.iter().copied() {
+        let path = locate(dir, id)?;
+        let source = fs::read_to_string(&path)?;
+        let before = parse::labels(&source);
+        match vocabulary.resolve_against(&change(&before), &before) {
+            Ok(after) => planned.push((
+                Relabeled {
+                    id,
+                    path,
+                    before,
+                    after,
+                },
+                source,
+            )),
+            Err(rejected) => refused.push((id, Error::Rejected(rejected))),
+        }
+    }
 
-    let updated = render::set_repeated_metadata(&source, LABEL_KEY, &applied.to_tokens())
-        .ok_or(ParseError::MissingMetadata)?;
-    fs::write(&path, updated)?;
+    let writing: Vec<(TicketId, &Labels)> = planned
+        .iter()
+        .map(|(ticket, _)| (ticket.id, &ticket.after))
+        .collect();
+    refused.extend(unique_refusals(dir, vocabulary, &writing)?);
 
-    Ok((path, applied))
+    if !refused.is_empty() {
+        // Reported in the order the tickets were named, whichever check
+        // refused each.
+        refused.sort_by_key(|(id, _)| named.iter().position(|named| named == id));
+
+        return Err(if named.len() == 1 {
+            refused.swap_remove(0).1
+        } else {
+            Error::Refused(refused)
+        });
+    }
+
+    let mut done = vec![];
+    for (ticket, source) in planned {
+        if ticket.after != ticket.before {
+            let updated =
+                render::set_repeated_metadata(&source, LABEL_KEY, &ticket.after.to_tokens())
+                    .ok_or(ParseError::MissingMetadata)?;
+            fs::write(&ticket.path, updated)?;
+        }
+        done.push(ticket);
+    }
+
+    Ok(done)
+}
+
+/// What the keys the board lets one ticket carry refuse among `writing`, the
+/// tickets a write gives labels to: a label another ticket in `dir` already
+/// carries, and one two of them would both carry.
+///
+/// Nothing is read when none of them carries a unique key.
+fn unique_refusals(
+    dir: &Utf8Path,
+    vocabulary: &Vocabulary,
+    writing: &[(TicketId, &Labels)],
+) -> Result<Vec<(TicketId, Error)>> {
+    if !writing
+        .iter()
+        .any(|(_, labels)| carries_unique(vocabulary, labels))
+    {
+        return Ok(vec![]);
+    }
+
+    let others = board_labels(dir, |id| writing.iter().any(|(written, _)| *written == id))?;
+
+    let mut refused = vec![];
+    for (index, (id, labels)) in writing.iter().enumerate() {
+        let taken = clashes_with(
+            vocabulary,
+            labels,
+            others.iter().map(|(other, theirs)| (*other, theirs)),
+        );
+        if !taken.is_empty() {
+            refused.push((*id, Error::Taken(taken)));
+        }
+
+        // Each pair once, against the tickets named after this one.
+        let shared = clashes_with(vocabulary, labels, writing[index + 1..].iter().copied());
+        if !shared.is_empty() {
+            refused.push((*id, Error::Shared(shared)));
+        }
+    }
+
+    Ok(refused)
 }
 
 /// Refuse `labels` when another ticket in `dir` already carries one the
@@ -410,33 +537,62 @@ pub fn check_unique(
     labels: &Labels,
     except: Option<TicketId>,
 ) -> Result<()> {
-    let carries_unique = vocabulary.facets().any(|(key, facet)| {
-        facet.unique().is_some() && labels.keys().any(|label| label.eq_ignore_ascii_case(key))
-    });
-    if !carries_unique {
+    if !carries_unique(vocabulary, labels) {
         return Ok(());
     }
 
-    let mut taken = vec![];
-    for (id, path) in files(dir)? {
-        if Some(id) == except {
-            continue;
-        }
-
-        let other = parse::labels(&fs::read_to_string(&path)?);
-        taken.extend(
-            vocabulary
-                .clashes(labels, &other)
-                .into_iter()
-                .map(|clash| (clash, id)),
-        );
-    }
+    let others = board_labels(dir, |id| Some(id) == except)?;
+    let taken = clashes_with(
+        vocabulary,
+        labels,
+        others.iter().map(|(other, theirs)| (*other, theirs)),
+    );
 
     if taken.is_empty() {
         Ok(())
     } else {
         Err(Error::Taken(taken))
     }
+}
+
+/// Whether `labels` carries a key the vocabulary lets one ticket carry.
+fn carries_unique(vocabulary: &Vocabulary, labels: &Labels) -> bool {
+    vocabulary.facets().any(|(key, facet)| {
+        facet.unique().is_some() && labels.keys().any(|label| label.eq_ignore_ascii_case(key))
+    })
+}
+
+/// Every ticket in `dir` but the ones `skip` picks, with the labels its label
+/// lines carry, read as written whether or not the rest of the file parses.
+fn board_labels(
+    dir: &Utf8Path,
+    skip: impl Fn(TicketId) -> bool,
+) -> Result<Vec<(TicketId, Labels)>> {
+    let mut tickets = vec![];
+    for (id, path) in files(dir)? {
+        if !skip(id) {
+            tickets.push((id, parse::labels(&fs::read_to_string(&path)?)));
+        }
+    }
+
+    Ok(tickets)
+}
+
+/// The labels of `labels` that each of `others` carries too, among the keys the
+/// vocabulary lets one ticket carry, paired with the ticket carrying it.
+fn clashes_with<'a>(
+    vocabulary: &Vocabulary,
+    labels: &Labels,
+    others: impl Iterator<Item = (TicketId, &'a Labels)>,
+) -> Vec<(Clash, TicketId)> {
+    others
+        .flat_map(|(other, theirs)| {
+            vocabulary
+                .clashes(labels, theirs)
+                .into_iter()
+                .map(move |clash| (clash, other))
+        })
+        .collect()
 }
 
 /// Delete a ticket, returning the path that held it.

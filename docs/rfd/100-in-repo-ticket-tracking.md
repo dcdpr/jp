@@ -233,20 +233,34 @@ Filtering takes a pair or a bare key: `--label package=jp_cli` matches that
 value, `--label package` matches any value under the key.
 Repeating the flag narrows further, so each term is an additional requirement.
 
-Labelling replaces the whole set rather than merging: `jp ticket label <id>
---label client=cli` is what the ticket ends up with, and no arguments clears it.
-A retried call therefore lands the same way twice.
-Because the check is against the ticket as well as the vocabulary, listing a
-retired value the ticket already has is how you keep it.
+Labelling adds and removes rather than replacing, so a write never drops a label
+it doesn't name:
+
+```sh
+jp ticket label add --id T-02wt0kx client=cli   # keeps what the ticket carries
+jp ticket label set --id T-02wt0kx type=bug      # replaces what `type` holds
+jp ticket label rm --id T-02wt0kx package        # takes every `package` label
+```
+
+`--id` names the tickets, on either side of the verb; repeat it, or separate ids
+with commas, to change several at once, all of them or none.
+Adding a label the ticket carries, or removing one it lacks, changes nothing and
+says so, so a retried call lands the same way twice.
+`jp ticket edit --label` is the one write that sets the whole list, and it names
+the labels it removed.
+Because the check is against the ticket as well as the vocabulary, a retired
+value the ticket already has stays through any of them.
 
 The `ticket_*` tools advertise the accepted tokens as a JSON Schema `enum`, so
 the assistant is offered the set rather than guessing at it.
 An `enum` can't hold every value of an open key, so a board with one gets no
 `enum`: its labels are described in words instead, and a wrong guess is refused
 with the labels it can use.
-`ticket_create` is offered only what it may add; `ticket_edit` and `ticket_list`
-also get retired values, because replacing a whole set means naming a retired
-value to keep it, and finding what still carries one means filtering on it.
+`ticket_create` and `ticket_edit`'s `add_labels` are offered only what they may
+add; `ticket_list` also gets retired values, because finding what still carries
+one means filtering on it.
+`ticket_edit` takes labels off with `remove_labels`, where a bare key takes
+every label under it.
 The tool declarations cannot read the vocabulary themselves, so `jp ticket tools
 sync` mirrors the tokens into a file it generates next to them,
 `.jp/mcp/tools/ticket/synced.toml` in JP.

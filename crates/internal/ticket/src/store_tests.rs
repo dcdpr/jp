@@ -46,6 +46,23 @@ fn owned(labels: &[&str]) -> Vec<String> {
     labels.iter().map(|label| (*label).to_owned()).collect()
 }
 
+/// Give one ticket exactly `labels`, the whole set.
+fn replace(
+    dir: &Utf8Path,
+    vocabulary: &Vocabulary,
+    id: TicketId,
+    labels: &[String],
+) -> Result<Relabeled> {
+    relabel(dir, vocabulary, &[id], |_| labels.to_vec()).map(|mut done| done.remove(0))
+}
+
+/// The labels a ticket's file carries, as tokens.
+fn labels_of(dir: &Utf8TempDir, id: TicketId) -> Vec<String> {
+    let path = locate(dir.path(), id).unwrap();
+
+    parse::labels(&fs::read_to_string(path).unwrap()).to_tokens()
+}
+
 #[test]
 fn create_writes_a_file_named_for_its_id() {
     let dir = Utf8TempDir::new().unwrap();
@@ -681,33 +698,155 @@ fn create_refuses_a_label_another_ticket_holds() {
 
 /// A ticket doesn't clash with itself, so relabelling keeps what it holds.
 #[test]
-fn set_labels_holds_the_other_tickets_to_unique_keys() {
+fn relabel_holds_the_other_tickets_to_unique_keys() {
     let dir = Utf8TempDir::new().unwrap();
     let vocabulary = unique_vocabulary();
     let (first, _) = file_unique(&dir, "Tracks 116", &["rfd=116"]).unwrap();
     let (second, _) = file_unique(&dir, "Tracks 117", &["rfd=117"]).unwrap();
 
-    set_labels(
+    replace(
         dir.path(),
-        first,
         &vocabulary,
+        first,
         &owned(&["rfd=116", "client=cli"]),
     )
     .unwrap();
 
-    let error = set_labels(dir.path(), second, &vocabulary, &owned(&["rfd=116"])).unwrap_err();
+    let error = replace(dir.path(), &vocabulary, second, &owned(&["rfd=116"])).unwrap_err();
     assert!(
         matches!(&error, Error::Taken(taken) if taken[0].1 == first),
         "{error}"
     );
-    let entry = list(dir.path())
-        .unwrap()
-        .into_iter()
-        .find(|entry| entry.id == second)
-        .unwrap();
-    assert_eq!(entry.ticket.unwrap().metadata.labels.to_tokens(), [
-        "rfd=117"
-    ]);
+    assert_eq!(labels_of(&dir, second), ["rfd=117"]);
+}
+
+/// Two tickets written together can't both take a label the board lets one
+/// ticket carry, though neither carries it yet; and neither is written.
+#[test]
+fn relabel_refuses_a_unique_label_two_named_tickets_would_share() {
+    let dir = Utf8TempDir::new().unwrap();
+    let vocabulary = unique_vocabulary();
+    let (first, _) = file_unique(&dir, "First", &["client=cli"]).unwrap();
+    let (second, _) = file_unique(&dir, "Second", &["client=cli"]).unwrap();
+
+    let error = relabel(dir.path(), &vocabulary, &[first, second], |current| {
+        let mut tokens = current.to_tokens();
+        tokens.push("rfd=116".to_owned());
+        tokens
+    })
+    .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "{first}: `rfd=116` would also go on {second}, and the board lets one ticket carry \
+             each `rfd` value."
+        )
+    );
+    assert_eq!(labels_of(&dir, first), ["client=cli"]);
+    assert_eq!(labels_of(&dir, second), ["client=cli"]);
+}
+
+/// A ticket named twice is one ticket, so it can't clash with itself.
+#[test]
+fn relabel_reads_a_ticket_named_twice_as_one() {
+    let dir = Utf8TempDir::new().unwrap();
+    let vocabulary = unique_vocabulary();
+    let (id, _) = file_unique(&dir, "Tracks 116", &[]).unwrap();
+
+    let done = relabel(dir.path(), &vocabulary, &[id, id], |_| owned(&["rfd=116"])).unwrap();
+
+    assert_eq!(done.len(), 1);
+    assert_eq!(labels_of(&dir, id), ["rfd=116"]);
+}
+
+/// Each ticket's new set comes from its own labels, and the ones the change
+/// leaves alone stay.
+#[test]
+fn relabel_changes_each_ticket_from_its_own_labels() {
+    let dir = Utf8TempDir::new().unwrap();
+    let vocabulary = test_vocabulary();
+    let cli = vocabulary.resolve(&owned(&["package=jp_cli"])).unwrap();
+    let config = vocabulary.resolve(&owned(&["package=jp_config"])).unwrap();
+    let (first, _) = create(dir.path(), &vocabulary, &draft("First", &cli)).unwrap();
+    let (second, _) = create(dir.path(), &vocabulary, &draft("Second", &config)).unwrap();
+
+    let done = relabel(dir.path(), &vocabulary, &[first, second], |current| {
+        let mut tokens = current.to_tokens();
+        tokens.push("client=cli".to_owned());
+        tokens
+    })
+    .unwrap();
+
+    assert_eq!(done[0].before.to_tokens(), ["package=jp_cli"]);
+    assert_eq!(labels_of(&dir, first), ["client=cli", "package=jp_cli"]);
+    assert_eq!(labels_of(&dir, second), ["client=cli", "package=jp_config"]);
+}
+
+/// One ticket the board refuses stops the whole write, and the refusal names it
+/// among the others.
+#[test]
+fn relabel_writes_every_ticket_or_none() {
+    let dir = Utf8TempDir::new().unwrap();
+    let vocabulary = test_vocabulary();
+    let fresh = new_ticket(&dir, "Fresh");
+    let old = new_ticket(&dir, "Old");
+    let path = locate(dir.path(), old).unwrap();
+    let source = fs::read_to_string(&path).unwrap();
+    fs::write(
+        &path,
+        render::set_repeated_metadata(&source, LABEL_KEY, &owned(&["package=jp_legacy"])).unwrap(),
+    )
+    .unwrap();
+
+    // Keeping each ticket's labels and adding the retired value: the old ticket
+    // may keep it, the fresh one may not take it.
+    let error = relabel(dir.path(), &vocabulary, &[fresh, old], |current| {
+        let mut tokens = current.to_tokens();
+        tokens.extend(owned(&["client=cli", "package=jp_legacy"]));
+        tokens
+    })
+    .unwrap_err();
+
+    assert!(
+        matches!(&error, Error::Refused(refused) if refused.len() == 1 && refused[0].0 == fresh),
+        "{error}"
+    );
+    assert!(
+        error
+            .to_string()
+            .starts_with(&format!("{fresh}: `package=jp_legacy` is retired")),
+        "{error}"
+    );
+    assert!(labels_of(&dir, fresh).is_empty());
+    assert_eq!(labels_of(&dir, old), ["package=jp_legacy"]);
+}
+
+/// A ticket whose labels come out the same isn't rewritten, so a label order
+/// written by hand survives a relabel that changes nothing.
+#[test]
+fn relabel_leaves_an_unchanged_ticket_as_it_is() {
+    let dir = Utf8TempDir::new().unwrap();
+    let vocabulary = test_vocabulary();
+    let id = new_ticket(&dir, "Hand ordered");
+    let path = locate(dir.path(), id).unwrap();
+    let source = fs::read_to_string(&path).unwrap();
+    fs::write(
+        &path,
+        render::set_repeated_metadata(
+            &source,
+            LABEL_KEY,
+            &owned(&["package=jp_cli", "client=cli"]),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let before = fs::read_to_string(&path).unwrap();
+
+    let done = relabel(dir.path(), &vocabulary, &[id], Labels::to_tokens).unwrap();
+
+    assert_eq!(done[0].before, done[0].after);
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
 }
 
 /// A ticket edited by hand still holds what its label lines say, even when the
@@ -790,7 +929,7 @@ fn no_label_line_grows_with_the_number_of_labels() {
 }
 
 #[test]
-fn set_labels_replaces_the_whole_set() {
+fn relabel_writes_the_set_the_change_gives() {
     let dir = Utf8TempDir::new().unwrap();
     let vocabulary = test_vocabulary();
 
@@ -804,9 +943,10 @@ fn set_labels_replaces_the_whole_set() {
     )
     .unwrap();
 
-    let (path, applied) = set_labels(dir.path(), id, &vocabulary, &owned(&["client=cli"])).unwrap();
+    let Relabeled { path, after, .. } =
+        replace(dir.path(), &vocabulary, id, &owned(&["client=cli"])).unwrap();
 
-    assert_eq!(applied.to_tokens(), ["client=cli"]);
+    assert_eq!(after.to_tokens(), ["client=cli"]);
     let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(ticket.metadata.labels.to_tokens(), ["client=cli"]);
 }
@@ -814,7 +954,7 @@ fn set_labels_replaces_the_whole_set() {
 /// Clearing drops every line rather than leaving an empty one behind, so a
 /// ticket with no labels looks like one that never had any.
 #[test]
-fn set_labels_with_nothing_drops_every_line() {
+fn relabel_to_nothing_drops_every_line() {
     let dir = Utf8TempDir::new().unwrap();
     let vocabulary = test_vocabulary();
 
@@ -828,9 +968,9 @@ fn set_labels_with_nothing_drops_every_line() {
     )
     .unwrap();
 
-    let (path, applied) = set_labels(dir.path(), id, &vocabulary, &[]).unwrap();
+    let Relabeled { path, after, .. } = replace(dir.path(), &vocabulary, id, &[]).unwrap();
 
-    assert!(applied.is_empty());
+    assert!(after.is_empty());
     let source = fs::read_to_string(&path).unwrap();
     assert!(!source.contains("- **Label**"), "{source}");
     assert!(parse::document(&source).unwrap().metadata.labels.is_empty());
@@ -838,12 +978,13 @@ fn set_labels_with_nothing_drops_every_line() {
 
 /// Labelling a ticket that was filed without labels adds the field.
 #[test]
-fn set_labels_adds_the_field_to_a_ticket_without_one() {
+fn relabel_adds_the_field_to_a_ticket_without_one() {
     let dir = Utf8TempDir::new().unwrap();
     let vocabulary = test_vocabulary();
     let id = new_ticket(&dir, "Unlabelled");
 
-    let (path, _) = set_labels(dir.path(), id, &vocabulary, &owned(&["client=macos"])).unwrap();
+    let Relabeled { path, .. } =
+        replace(dir.path(), &vocabulary, id, &owned(&["client=macos"])).unwrap();
 
     let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(ticket.metadata.labels.to_tokens(), ["client=macos"]);
@@ -858,15 +999,15 @@ fn one_key_holds_several_values() {
     let vocabulary = test_vocabulary();
     let id = new_ticket(&dir, "Two crates");
 
-    let (path, applied) = set_labels(
+    let Relabeled { path, after, .. } = replace(
         dir.path(),
-        id,
         &vocabulary,
+        id,
         &owned(&["package=jp_cli", "package=jp_config"]),
     )
     .unwrap();
 
-    assert_eq!(applied.to_tokens(), ["package=jp_cli", "package=jp_config"]);
+    assert_eq!(after.to_tokens(), ["package=jp_cli", "package=jp_config"]);
     let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(
         ticket.metadata.labels.values("package").collect::<Vec<_>>(),
@@ -894,17 +1035,17 @@ fn a_retired_label_already_on_a_ticket_survives_a_relabel() {
     )
     .unwrap();
 
-    let (path, applied) = set_labels(
+    let Relabeled { path, after, .. } = replace(
         dir.path(),
-        id,
         &vocabulary,
+        id,
         &owned(&["package=jp_legacy", "client=cli"]),
     )
     .unwrap();
 
-    assert_eq!(applied.to_tokens(), ["client=cli", "package=jp_legacy"]);
+    assert_eq!(after.to_tokens(), ["client=cli", "package=jp_legacy"]);
     let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(ticket.metadata.labels, applied);
+    assert_eq!(ticket.metadata.labels, after);
 }
 
 #[test]
@@ -913,8 +1054,7 @@ fn a_retired_label_cannot_be_added_to_a_ticket_without_it() {
     let vocabulary = test_vocabulary();
     let id = new_ticket(&dir, "Fresh");
 
-    let error =
-        set_labels(dir.path(), id, &vocabulary, &owned(&["package=jp_legacy"])).unwrap_err();
+    let error = replace(dir.path(), &vocabulary, id, &owned(&["package=jp_legacy"])).unwrap_err();
 
     assert!(
         matches!(&error, Error::Rejected(rejected) if rejected.retired == ["package=jp_legacy"]),
@@ -938,10 +1078,10 @@ fn a_rejected_relabel_writes_nothing() {
     .unwrap();
     let before = fs::read_to_string(&path).unwrap();
 
-    set_labels(
+    replace(
         dir.path(),
-        id,
         &vocabulary,
+        id,
         &owned(&["package=jp_cli", "package=nope"]),
     )
     .unwrap_err();

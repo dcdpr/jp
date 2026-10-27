@@ -1945,22 +1945,23 @@ ticket-list *ARGS: _install-ticket
 
     jp ticket list "$@"
 
-# Replace the labels on a ticket. NNN is T-02wt0kx or 02wt0kx.
+# Add, set, or remove labels on a ticket. NNN is T-02wt0kx or 02wt0kx.
 #
-# The whole set is written: name every label the ticket should end up with, or
-# none to clear them. `just ticket-labels` lists what the board defines.
+# `add` keeps what the ticket carries, `set` replaces what each named key
+# holds, and `rm` takes labels off, a bare key every label under it. `just
+# ticket-labels` lists what the board defines.
 #
-#   just ticket-label T-02wt0kx --label client=cli --label package=jp_cli
-#   just ticket-label T-02wt0kx --label package=jp_cli --label package=jp_config
-#   just ticket-label T-02wt0kx
+#   just ticket-label add T-02wt0kx client=cli package=jp_cli
+#   just ticket-label set T-02wt0kx type=bug
+#   just ticket-label rm T-02wt0kx package
 [group('ticket')]
 [positional-arguments]
-ticket-label NNN *ARGS: _install-ticket
+ticket-label VERB NNN *LABELS: _install-ticket
     #!/usr/bin/env sh
     set -eu
 
-    shift # remove NNN from positional params
-    jp ticket label {{quote(NNN)}} "$@"
+    shift 2 # remove VERB and NNN from positional params
+    jp ticket label {{quote(VERB)}} --id {{quote(NNN)}} "$@"
 
 # List the labels the board defines, with what each one covers.
 [group('ticket')]

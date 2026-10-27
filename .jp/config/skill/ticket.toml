@@ -25,8 +25,8 @@ say which part of the system it lands in, or which RFD its work belongs to \
 which is how a ticket spanning two crates says so. The labels live in \
 `plugins.command.ticket.options.labels`; the tools describe them, and a \
 label outside them, or a ticket without its `type`, is refused. `ticket_edit` \
-writes the whole set, so read the ticket first when you mean to keep the \
-labels it already carries.
+adds and removes labels, leaving the rest: to change a key a ticket carries \
+one of, such as `type`, remove the bare key and add the new label in one call.
 
 Write a ticket when the work is clear enough to start, and an RFD when it needs \
 a design first. The signal is whether there is a decision to argue about, not \

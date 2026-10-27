@@ -44,10 +44,9 @@ const SYNCED_NOTES: &str = "\
 # after changing the labels or the tools: this file is rewritten whole, and
 # edits to it are lost.
 #
-# The lists differ. `create` is offered the labels it may add. `edit` also
-# gets retired ones, because replacing a ticket's whole set means naming a
-# retired label to keep it. `list` also gets a bare key per facet, which is how
-# a filter asks for any value under it.
+# The lists differ. `create` and `edit` are offered the labels they may add,
+# `edit` in its `add_labels`. `list` also gets retired ones, and a bare key per
+# facet, which is how a filter asks for any value under it.
 #
 # A key the board bounds with `min` or `max`, or makes `unique`, is described
 # beside the lists of `create` and `edit`, and `create` requires labels when a
@@ -135,7 +134,7 @@ pub(crate) fn sync(
     let (tools, undeclared): (Vec<_>, Vec<_>) = served_tools(config)
         .into_iter()
         .filter(|(_, tool)| tokens(tool, vocabulary).is_some())
-        .partition(|(key, _)| declares(config, key, "labels"));
+        .partition(|(key, tool)| declares(config, key, parameter(tool)));
 
     fs::write(&path, synced(&tools, vocabulary))
         .map_err(|error| format!("failed to write {path}: {error}"))?;
@@ -147,10 +146,14 @@ pub(crate) fn sync(
         format!("Wrote {path}, with labels for {}\n", keys.join(", "))
     };
     if !undeclared.is_empty() {
-        let keys: Vec<&str> = undeclared.iter().map(|(key, _)| key.as_str()).collect();
+        let left: Vec<String> = undeclared
+            .iter()
+            .map(|(key, tool)| format!("{key} (no `{}` parameter)", parameter(tool)))
+            .collect();
         text.push_str(&format!(
-            "Left out {}: their definitions declare no `labels` parameter.\n",
-            keys.join(", ")
+            "Left out {}: the labels go into that parameter, which their definitions don't \
+             declare.\n",
+            left.join(", ")
         ));
     }
 
@@ -200,17 +203,22 @@ pub(crate) fn served_tools(config: &Value) -> Vec<(String, String)> {
     served
 }
 
+/// The parameter a tool takes labels in.
+fn parameter(tool: &str) -> &'static str {
+    match tool {
+        "edit" => "add_labels",
+        _ => "labels",
+    }
+}
+
 /// The labels a tool is offered, or `None` for a tool that takes none.
 ///
-/// `create` gets the values it may add.
-/// `edit` also gets retired ones, because replacing a ticket's whole set means
-/// naming a retired value to keep it.
-/// `list` also gets a bare key per facet, which is how a filter asks for any
-/// value under it.
+/// `create` and `edit` get the values they may add.
+/// `list` also gets retired ones, and a bare key per facet, which is how a
+/// filter asks for any value under it.
 fn tokens(tool: &str, vocabulary: &Vocabulary) -> Option<Vec<String>> {
     match tool {
-        "create" => Some(vocabulary.tokens()),
-        "edit" => Some(vocabulary.tokens_including_retired()),
+        "create" | "edit" => Some(vocabulary.tokens()),
         "list" => {
             let mut tokens = vocabulary.tokens_including_retired();
             tokens.extend(vocabulary.keys().map(ToOwned::to_owned));
@@ -244,13 +252,14 @@ fn synced(tools: &[(String, String)], vocabulary: &Vocabulary) -> String {
         // A filter names no ticket's whole set, so the rules don't apply to it.
         let rules = rules.as_deref().filter(|_| tool != "list");
 
+        let parameter = parameter(tool);
         if tool == "create" && required {
             out.push_str(&format!(
-                "\n[conversation.tools.{key}.parameters.labels]\nrequired = true\n"
+                "\n[conversation.tools.{key}.parameters.{parameter}]\nrequired = true\n"
             ));
         }
         out.push_str(&format!(
-            "\n[conversation.tools.{key}.parameters.labels.items]\n"
+            "\n[conversation.tools.{key}.parameters.{parameter}.items]\n"
         ));
         if let Some(summary) = summary(&tokens, &open, rules, tool == "list") {
             out.push_str(&format!("summary = {}\n", toml_string(&summary)));

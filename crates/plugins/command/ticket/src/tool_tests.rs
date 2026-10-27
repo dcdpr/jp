@@ -997,15 +997,15 @@ fn edit_changes_several_things_at_once() {
             "title": "The wrap calculation is off",
             "description": "Off by one at 80 columns.",
             "status": "in progress",
-            "labels": ["client=cli"]
+            "add_labels": ["client=cli"]
         }),
     ));
 
     assert_eq!(
         out,
         format!(
-            "Edited {id}:\n- labels: client=cli\n- status: Todo -> In Progress\n- description \
-             replaced\n- title changed, moved docs/ticket/{prefix}slug.md -> \
+            "Edited {id}:\n- labels: added client=cli\n- status: Todo -> In Progress\n- \
+             description replaced\n- title changed, moved docs/ticket/{prefix}slug.md -> \
              docs/ticket/{prefix}the-wrap-calculation-is-off.md\n"
         )
     );
@@ -1023,17 +1023,125 @@ fn edit_needs_something_to_change() {
     let dir = Utf8TempDir::new().unwrap();
     write_ticket(&dir, "Wrapping is wrong");
 
+    let nothing =
+        "Name what to change: `title`, `description`, `status`, `add_labels`, or `remove_labels`.";
+
     assert_eq!(
         error_message(run_tool(&dir, "edit", json!({ "id": FIXED_ID }))),
-        "Name what to change: `title`, `description`, `status`, or `labels`."
+        nothing
     );
     assert_eq!(
         error_message(run_tool(
             &dir,
             "edit",
-            json!({ "id": FIXED_ID, "labels": null })
+            json!({ "id": FIXED_ID, "add_labels": [], "remove_labels": null })
         )),
-        "Name what to change: `title`, `description`, `status`, or `labels`."
+        nothing
+    );
+}
+
+/// File a ticket carrying `labels` and hand back its id.
+fn labelled_ticket(dir: &Utf8TempDir, labels: &[&str]) -> TicketId {
+    content(run_tool(
+        dir,
+        "create",
+        json!({ "title": "Labelled", "labels": labels }),
+    ));
+
+    ids(dir)[0]
+}
+
+/// Labels are added and removed, so the ones a call doesn't name stay, and a
+/// label to remove that the ticket lacks is reported rather than refused.
+#[test]
+fn edit_adds_and_removes_labels_and_keeps_the_rest() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = labelled_ticket(&dir, &["client=cli", "package=jp_cli"]);
+
+    let out = content(run_tool(
+        &dir,
+        "edit",
+        json!({
+            "id": id.to_string(),
+            "remove_labels": ["package=jp_cli", "client=macos"],
+            "add_labels": ["package=jp_config"]
+        }),
+    ));
+
+    assert_eq!(
+        out,
+        format!(
+            "Edited {id}:\n- labels: removed package=jp_cli; added package=jp_config; doesn't \
+             carry client=macos\n"
+        )
+    );
+    let entries = store::list(&tickets(&dir).dir).unwrap();
+    assert_eq!(
+        entries[0]
+            .ticket
+            .as_ref()
+            .unwrap()
+            .metadata
+            .labels
+            .to_tokens(),
+        ["client=cli", "package=jp_config"]
+    );
+}
+
+/// A bare key in `remove_labels` takes every label under it, so a key the board
+/// holds to one label changes in one call.
+#[test]
+fn edit_swaps_what_a_bounded_key_holds_in_one_call() {
+    let dir = Utf8TempDir::new().unwrap();
+    let Value::Object(options) = json!({ "labels": {
+        "type": { "description": "The type", "values": ["bug", "task"], "min": 1, "max": 1 }
+    } }) else {
+        unreachable!("options are an object");
+    };
+    let options = Options::read(&options).unwrap();
+    let call = |name: &str, arguments: Value| {
+        let call = ToolCall {
+            action: ToolAction::Run,
+            name: name.to_owned(),
+            arguments: object(arguments),
+            answers: Map::new(),
+            options: Map::new(),
+            access: None,
+            conversation: "test".to_owned(),
+        };
+        run(&init(&dir), &call, &options)
+    };
+    content(call(
+        "create",
+        json!({ "title": "Typed", "labels": ["type=task"] }),
+    ));
+    let id = ids(&dir)[0];
+
+    let out = content(call(
+        "edit",
+        json!({ "id": id.to_string(), "remove_labels": ["type"], "add_labels": ["type=bug"] }),
+    ));
+
+    assert_eq!(
+        out,
+        format!("Edited {id}:\n- labels: removed type=task; added type=bug\n")
+    );
+}
+
+#[test]
+fn edit_refuses_a_label_to_remove_that_is_not_one() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "Wrapping is wrong");
+
+    let message = error_message(run_tool(
+        &dir,
+        "edit",
+        json!({ "id": FIXED_ID, "remove_labels": ["1client"] }),
+    ));
+
+    assert!(
+        message.starts_with("`remove_labels`: label key '1client'"),
+        "{message}"
     );
 }
 
@@ -1048,7 +1156,7 @@ fn a_refused_label_changes_nothing() {
     let message = error_message(run_tool(
         &dir,
         "edit",
-        json!({ "id": FIXED_ID, "status": "done", "labels": ["client=clii"] }),
+        json!({ "id": FIXED_ID, "status": "done", "add_labels": ["client=clii"] }),
     ));
 
     assert!(
@@ -1581,43 +1689,45 @@ fn list_narrows_to_tickets_carrying_every_label() {
     );
 }
 
-/// The whole set is written, so a retried call lands the same way twice and a
-/// label left off the call is a label removed.
+/// Adding what a ticket carries changes nothing, so a retried call lands the
+/// same way twice; a bare key in `remove_labels` takes every label under it.
 #[test]
-fn labels_replace_the_whole_set() {
+fn adding_and_removing_labels_can_be_retried() {
     let dir = Utf8TempDir::new().unwrap();
     let id = write_ticket(&dir, "Tool call header misaligned");
+    let add = || {
+        content(run_tool(
+            &dir,
+            "edit",
+            json!({ "id": FIXED_ID, "add_labels": ["package=jp_config", "client=cli"] }),
+        ))
+    };
 
-    let out = content(run_tool(
-        &dir,
-        "edit",
-        json!({ "id": FIXED_ID, "labels": ["package=jp_config", "client=cli"] }),
-    ));
     assert_eq!(
-        out,
-        format!("Edited {id}:\n- labels: client=cli, package=jp_config\n")
+        add(),
+        format!("Edited {id}:\n- labels: added client=cli, package=jp_config\n")
+    );
+    assert_eq!(
+        add(),
+        format!("Edited {id}:\n- labels: already carries package=jp_config, client=cli\n")
     );
 
     let out = content(run_tool(
         &dir,
         "edit",
-        json!({ "id": FIXED_ID, "labels": ["client=cli"] }),
+        json!({ "id": FIXED_ID, "remove_labels": ["client", "package"] }),
     ));
-    assert_eq!(out, format!("Edited {id}:\n- labels: client=cli\n"));
-
-    let out = content(run_tool(
-        &dir,
-        "edit",
-        json!({ "id": FIXED_ID, "labels": [] }),
-    ));
-    assert_eq!(out, format!("Edited {id}:\n- labels cleared\n"));
+    assert_eq!(
+        out,
+        format!("Edited {id}:\n- labels: removed client=cli, package=jp_config\n")
+    );
 
     let shown = content(run_tool(&dir, "show", json!({ "id": FIXED_ID })));
-    assert!(!shown.contains("Labels"), "{shown}");
+    assert!(!shown.contains("Label"), "{shown}");
 }
 
-/// A null `labels` is the shape a model reaches for when it means "leave them
-/// alone", so it leaves them alone; `[]` is what clears them.
+/// A null label list is the shape a model reaches for when it means "leave them
+/// alone", so it leaves them alone.
 #[test]
 fn a_null_label_list_leaves_the_labels_alone() {
     let dir = Utf8TempDir::new().unwrap();
@@ -1626,13 +1736,18 @@ fn a_null_label_list_leaves_the_labels_alone() {
     content(run_tool(
         &dir,
         "edit",
-        json!({ "id": FIXED_ID, "labels": ["client=cli", "package=jp_config"] }),
+        json!({ "id": FIXED_ID, "add_labels": ["client=cli", "package=jp_config"] }),
     ));
 
     let out = content(run_tool(
         &dir,
         "edit",
-        json!({ "id": FIXED_ID, "labels": null, "status": "in progress" }),
+        json!({
+            "id": FIXED_ID,
+            "add_labels": null,
+            "remove_labels": null,
+            "status": "in progress"
+        }),
     ));
 
     assert_eq!(
@@ -1688,12 +1803,20 @@ fn a_retired_label_already_on_a_ticket_can_be_kept() {
     let out = content(run_tool(
         &dir,
         "edit",
-        json!({ "id": FIXED_ID, "labels": ["package=jp_legacy", "client=cli"] }),
+        json!({ "id": FIXED_ID, "add_labels": ["client=cli"] }),
     ));
 
+    assert_eq!(out, format!("Edited {id}:\n- labels: added client=cli\n"));
+    let entries = store::list(&tickets(&dir).dir).unwrap();
     assert_eq!(
-        out,
-        format!("Edited {id}:\n- labels: client=cli, package=jp_legacy\n")
+        entries[0]
+            .ticket
+            .as_ref()
+            .unwrap()
+            .metadata
+            .labels
+            .to_tokens(),
+        ["client=cli", "package=jp_legacy"]
     );
 }
 
@@ -1705,7 +1828,7 @@ fn a_retired_label_cannot_be_added_fresh() {
     let message = error_message(run_tool(
         &dir,
         "edit",
-        json!({ "id": FIXED_ID, "labels": ["package=jp_legacy"] }),
+        json!({ "id": FIXED_ID, "add_labels": ["package=jp_legacy"] }),
     ));
 
     assert_eq!(
@@ -1742,7 +1865,7 @@ fn labelling_a_missing_ticket_says_so() {
     let message = error_message(run_tool(
         &dir,
         "edit",
-        json!({ "id": FIXED_ID, "labels": ["client=cli"] }),
+        json!({ "id": FIXED_ID, "add_labels": ["client=cli"] }),
     ));
 
     assert_eq!(message, format!("No {FIXED_ID}."));

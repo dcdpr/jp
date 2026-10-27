@@ -36,7 +36,7 @@ use ticket::{
     parse, render, store,
 };
 
-use crate::options::Options;
+use crate::{label, options::Options};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -501,6 +501,10 @@ fn preview_comment(
 /// Change any of a ticket's title, description, status, and labels in one call,
 /// leaving the rest as it is.
 ///
+/// Labels are added and removed rather than replaced, so a call can't drop one
+/// it doesn't name: `remove_labels` first, where a bare key takes every label
+/// under it, then `add_labels`.
+///
 /// Every argument is checked before anything is written.
 /// The labels, which the vocabulary can still refuse, are written first, so a
 /// refused call changes nothing; the title last, since it moves the file.
@@ -519,10 +523,22 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
         Some(Ok(status)) => Some(status),
         None => None,
     };
-    let labels = args.optional::<Vec<String>>("labels")?;
+    let add = args
+        .optional::<Vec<String>>("add_labels")?
+        .unwrap_or_default();
+    let remove = args
+        .optional::<Vec<String>>("remove_labels")?
+        .unwrap_or_default();
+    let relabels = !add.is_empty() || !remove.is_empty();
 
-    if title.is_none() && description.is_none() && status.is_none() && labels.is_none() {
-        return refuse("Name what to change: `title`, `description`, `status`, or `labels`.");
+    if title.is_none() && description.is_none() && status.is_none() && !relabels {
+        return refuse(
+            "Name what to change: `title`, `description`, `status`, `add_labels`, or \
+             `remove_labels`.",
+        );
+    }
+    if let Err(error) = Labels::from_tokens(&remove) {
+        return refuse(format!("`remove_labels`: {error}."));
     }
     if title
         .as_deref()
@@ -546,14 +562,10 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     }
 
     let mut changed = vec![];
-    if let Some(requested) = &labels {
-        let vocabulary = tickets.options.vocabulary()?;
-        match store::set_labels(&tickets.dir, id, &vocabulary, requested) {
-            Ok((_, applied)) if applied.is_empty() => changed.push("labels cleared".to_owned()),
-            Ok((_, applied)) => changed.push(format!("labels: {applied}")),
-            Err(store::Error::Rejected(refusal)) => return refuse(refusal.to_string()),
-            Err(taken @ store::Error::Taken(_)) => return refuse(taken.to_string()),
-            Err(other) => return Err(other.into()),
+    if relabels {
+        match edit_labels(tickets, id, &add, &remove)? {
+            Ok(what) => changed.push(format!("labels: {what}")),
+            Err(refusal) => return refuse(refusal),
         }
     }
     if let Some(status) = status {
@@ -594,6 +606,34 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     }
 
     Ok(text.into())
+}
+
+/// Apply `edit`'s label changes to a ticket: `remove`, then `add`.
+///
+/// Returns what changed, in words; the inner error is the board's refusal, for
+/// the assistant.
+fn edit_labels(
+    tickets: &Tickets<'_>,
+    id: TicketId,
+    add: &[String],
+    remove: &[String],
+) -> Result<Result<String, String>, Error> {
+    let vocabulary = tickets.options.vocabulary()?;
+    let relabeled = store::relabel(&tickets.dir, &vocabulary, &[id], |current| {
+        let mut tokens = label::remove(current, remove);
+        tokens.extend(add.iter().cloned());
+        tokens
+    });
+
+    match relabeled {
+        Ok(relabeled) => Ok(Ok(relabeled.first().map_or_else(String::new, |ticket| {
+            label::describe(&ticket.before, &ticket.after, add, remove)
+        }))),
+        Err(refusal @ (store::Error::Rejected(_) | store::Error::Taken(_))) => {
+            Ok(Err(refusal.to_string()))
+        }
+        Err(other) => Err(other.into()),
+    }
 }
 
 /// Read one ticket: its metadata, and the description and comments when the

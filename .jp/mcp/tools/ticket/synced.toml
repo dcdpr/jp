@@ -5,10 +5,9 @@
 # after changing the labels or the tools: this file is rewritten whole, and
 # edits to it are lost.
 #
-# The lists differ. `create` is offered the labels it may add. `edit` also
-# gets retired ones, because replacing a ticket's whole set means naming a
-# retired label to keep it. `list` also gets a bare key per facet, which is how
-# a filter asks for any value under it.
+# The lists differ. `create` and `edit` are offered the labels they may add,
+# `edit` in its `add_labels`. `list` also gets retired ones, and a bare key per
+# facet, which is how a filter asks for any value under it.
 #
 # A key the board bounds with `min` or `max`, or makes `unique`, is described
 # beside the lists of `create` and `edit`, and `create` requires labels when a
@@ -24,7 +23,7 @@ required = true
 [conversation.tools.ticket_create.parameters.labels.items]
 summary = "One `key=value` label: client=cli, client=macos, client=web, domain=conversation, domain=llm, domain=mcp, domain=plugins, domain=storage, domain=tooling, llm-provider=anthropic, llm-provider=cerebras, llm-provider=google, llm-provider=llamacpp, llm-provider=ollama, llm-provider=openai, llm-provider=openrouter, package=bookworm, package=comfort, package=grizzly, package=jp_attachment, package=jp_attachment_agentic_shepherd, package=jp_attachment_bear_note, package=jp_attachment_cmd_output, package=jp_attachment_file_content, package=jp_attachment_github, package=jp_attachment_http_content, package=jp_attachment_internal, package=jp_attachment_mcp_resources, package=jp_cli, package=jp_config, package=jp_conversation, package=jp_editor, package=jp_github, package=jp_id, package=jp_inquire, package=jp_label, package=jp_llm, package=jp_macro, package=jp_mcp, package=jp_md, package=jp_openrouter, package=jp_plugin, package=jp_printer, package=jp_storage, package=jp_task, package=jp_term, package=jp_test, package=jp_tombmap, package=jp_tool, package=jp_workspace, package=json_edit, package=schematic, package=xct2cli, type=bug, type=enhancement, type=feature, type=follow-up, type=pre-rfd, type=question, type=task, type=tracking, or relevant-rfd=<value>, tracking-rfd=<value> with any value. A ticket carries at most one label under `tracking-rfd` and exactly one label under `type`. Only one ticket carries each `tracking-rfd` value."
 
-[conversation.tools.ticket_edit.parameters.labels.items]
+[conversation.tools.ticket_edit.parameters.add_labels.items]
 summary = "One `key=value` label: client=cli, client=macos, client=web, domain=conversation, domain=llm, domain=mcp, domain=plugins, domain=storage, domain=tooling, llm-provider=anthropic, llm-provider=cerebras, llm-provider=google, llm-provider=llamacpp, llm-provider=ollama, llm-provider=openai, llm-provider=openrouter, package=bookworm, package=comfort, package=grizzly, package=jp_attachment, package=jp_attachment_agentic_shepherd, package=jp_attachment_bear_note, package=jp_attachment_cmd_output, package=jp_attachment_file_content, package=jp_attachment_github, package=jp_attachment_http_content, package=jp_attachment_internal, package=jp_attachment_mcp_resources, package=jp_cli, package=jp_config, package=jp_conversation, package=jp_editor, package=jp_github, package=jp_id, package=jp_inquire, package=jp_label, package=jp_llm, package=jp_macro, package=jp_mcp, package=jp_md, package=jp_openrouter, package=jp_plugin, package=jp_printer, package=jp_storage, package=jp_task, package=jp_term, package=jp_test, package=jp_tombmap, package=jp_tool, package=jp_workspace, package=json_edit, package=schematic, package=xct2cli, type=bug, type=enhancement, type=feature, type=follow-up, type=pre-rfd, type=question, type=task, type=tracking, or relevant-rfd=<value>, tracking-rfd=<value> with any value. A ticket carries at most one label under `tracking-rfd` and exactly one label under `type`. Only one ticket carries each `tracking-rfd` value."
 
 [conversation.tools.ticket_list.parameters.labels.items]

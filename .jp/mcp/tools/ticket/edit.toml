@@ -12,13 +12,12 @@ as it is.
 - `status` moves it between `todo`, `in progress`, and `done`; `done` closes
   it. Move a ticket to `in progress` when work on it starts, and back to `todo`
   when it stops before it is finished.
-- `labels` replaces the whole set: pass every label the ticket should end up
-  with, or `[]` to clear them. Read the ticket first if you mean to keep the
-  labels it already carries, and keep its `tracking-rfd` and `relevant-rfd`
-  labels unless you mean to unlink the RFDs they name. The labels are defined
-  in the workspace configuration; a label outside them is refused, and the
-  refusal names the ones you can use. A value the board has retired stays valid
-  on a ticket that already carries it, so listing it again keeps it.
+- `remove_labels` takes labels off: `key=value` that label, a bare `key`
+  every label under it. `add_labels` then puts labels on. The labels neither
+  names stay, its `tracking-rfd` and `relevant-rfd` links among them, so there
+  is no need to read the ticket first. The labels are defined in the workspace
+  configuration; one outside them is refused, and the refusal names the ones
+  you can use.
 
 To add to the discussion instead, use `ticket_comment`.
 """
@@ -34,9 +33,14 @@ Close it:
 {"id": "T-02wt0kx", "status": "done"}
 ```
 
-Retitle and relabel it, naming one key twice:
+Retitle it and add labels, naming one key twice:
 ```json
-{"id": "T-02wt0kx", "title": "Header misaligned below 80 columns", "labels": ["client=cli", "package=jp_cli", "package=jp_config"]}
+{"id": "T-02wt0kx", "title": "Header misaligned below 80 columns", "add_labels": ["client=cli", "package=jp_cli", "package=jp_config"]}
+```
+
+Change its `type`, which a ticket carries exactly one of:
+```json
+{"id": "T-02wt0kx", "remove_labels": ["type"], "add_labels": ["type=bug"]}
 ```
 """
 
@@ -66,13 +70,21 @@ required = false
 enum = ["todo", "in progress", "done"]
 summary = "The column to move it to; `done` closes it."
 
-[conversation.tools.ticket_edit.parameters.labels]
+[conversation.tools.ticket_edit.parameters.add_labels]
 type = "array"
 required = false
-summary = "Every `key=value` label the ticket should carry. `[]` clears them."
+summary = "`key=value` labels to put on the ticket; it keeps the ones it carries."
 
 # The accepted values live in `synced.toml`, generated from
 # `plugins.command.ticket.options.labels` by
 # `jp ticket tools sync .jp/mcp/tools/ticket`.
-[conversation.tools.ticket_edit.parameters.labels.items]
+[conversation.tools.ticket_edit.parameters.add_labels.items]
+type = "string"
+
+[conversation.tools.ticket_edit.parameters.remove_labels]
+type = "array"
+required = false
+summary = "Labels to take off: `key=value` that label, a bare `key` all under it."
+
+[conversation.tools.ticket_edit.parameters.remove_labels.items]
 type = "string"
