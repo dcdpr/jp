@@ -151,7 +151,7 @@ fn create_request_asks_the_template_to_think_when_reasoning_is_on() {
 
     assert_eq!(
         body["chat_template_kwargs"],
-        json!({ "enable_thinking": true })
+        json!({ "enable_thinking": true, "thinking": true })
     );
     // `auto` leaves the effort to the template rather than picking one.
     assert!(body.get("reasoning_effort").is_none());
@@ -165,7 +165,7 @@ fn create_request_off_disables_thinking() {
     assert_eq!(body["reasoning_effort"], json!("none"));
     assert_eq!(
         body["chat_template_kwargs"],
-        json!({ "enable_thinking": false })
+        json!({ "enable_thinking": false, "thinking": false })
     );
 }
 
@@ -176,7 +176,7 @@ fn create_request_none_effort_disables_thinking() {
     assert_eq!(body["reasoning_effort"], json!("none"));
     assert_eq!(
         body["chat_template_kwargs"],
-        json!({ "enable_thinking": false })
+        json!({ "enable_thinking": false, "thinking": false })
     );
 }
 
@@ -187,7 +187,7 @@ fn create_request_sends_the_effort_level() {
     assert_eq!(body["reasoning_effort"], json!("high"));
     assert_eq!(
         body["chat_template_kwargs"],
-        json!({ "enable_thinking": true })
+        json!({ "enable_thinking": true, "thinking": true })
     );
 }
 
@@ -207,7 +207,7 @@ fn create_request_sends_a_token_effort_as_a_thinking_budget() {
     assert!(body.get("reasoning_effort").is_none());
     assert_eq!(
         body["chat_template_kwargs"],
-        json!({ "enable_thinking": true })
+        json!({ "enable_thinking": true, "thinking": true })
     );
 }
 

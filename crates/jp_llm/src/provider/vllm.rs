@@ -266,8 +266,12 @@ fn create_request(
 /// A configured effort is sent as `reasoning_effort`, which vLLM translates for
 /// the chat template (through `--reasoning-effort-map` where the operator set
 /// one).
-/// `enable_thinking` is sent alongside it for servers that predate that
-/// translation; a template that does not read the kwarg ignores it.
+/// The thinking switch is also sent as chat template kwargs, for servers that
+/// do not translate the effort.
+/// Templates disagree on its name: Qwen3's reads `enable_thinking`, and the
+/// `DeepSeek` V3.1 family's reads `thinking`.
+/// Both are sent with the same value, and a template ignores the one it does
+/// not declare.
 fn apply_reasoning(body: &mut Value, model: &ModelDetails, parameters: &ParametersConfig) {
     let effort = match parameters.reasoning {
         Some(ReasoningConfig::Off) => ReasoningEffort::None,
@@ -280,7 +284,7 @@ fn apply_reasoning(body: &mut Value, model: &ModelDetails, parameters: &Paramete
     let effort = match effort {
         ReasoningEffort::None => {
             body["reasoning_effort"] = json!("none");
-            body["chat_template_kwargs"] = json!({ "enable_thinking": false });
+            body["chat_template_kwargs"] = thinking_kwargs(false);
             return;
         }
         ReasoningEffort::Auto => None,
@@ -299,7 +303,13 @@ fn apply_reasoning(body: &mut Value, model: &ModelDetails, parameters: &Paramete
     if let Some(effort) = effort {
         body["reasoning_effort"] = json!(effort);
     }
-    body["chat_template_kwargs"] = json!({ "enable_thinking": true });
+    body["chat_template_kwargs"] = thinking_kwargs(true);
+}
+
+/// The chat template kwargs that switch thinking on or off, under every name a
+/// served template is known to read.
+fn thinking_kwargs(enabled: bool) -> Value {
+    json!({ "enable_thinking": enabled, "thinking": enabled })
 }
 
 /// A `/v1/models` listing from vLLM.
