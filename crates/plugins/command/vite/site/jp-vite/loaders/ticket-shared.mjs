@@ -304,30 +304,6 @@ export function orderColumn(tickets, column, order) {
     })
 }
 
-// The label marking a ticket as its RFD's tracking ticket.
-export const TRACKING_LABEL = 'type=tracking'
-
-// The RFDs currently being implemented, derived from ticket state.
-//
-// An RFD is in development when its tracking ticket sits in the In Progress
-// column. Phase tickets name the same RFD in `Implements` without the tracking
-// label, and never light the flag. Derived, not synced, so there is nothing to
-// keep in step (see RFD 100).
-export function inDevelopmentRfds(tickets) {
-    const rfds = new Set()
-    for (const ticket of tickets) {
-        if (ticket.status !== 'In Progress' || !ticket.implements) continue
-        if (!ticket.labels.includes(TRACKING_LABEL)) continue
-        // Anchored, so a draft id keeps its `D`: an unanchored digit match
-        // reads `D33` as RFD 033, which is a different document.
-        const id = ticket.implements.trim().replace(/^RFD\s+/i, '')
-        if (!/^(D\d{1,2}|\d{1,3})$/.test(id)) continue
-        rfds.add(id.startsWith('D') ? id : id.padStart(3, '0'))
-    }
-
-    return [...rfds].sort()
-}
-
 // Files left in the pre-RFD-102 `NNNN-slug.md` shape.
 //
 // A branch cut before the id change carries them, and the reader below would
@@ -406,22 +382,19 @@ export function loadTickets(settings = readSettings()) {
 
 // Assemble the board: every ticket, plus the three columns in display order.
 //
-// `done` is capped at the settings' Done limit; `total` reports how many there
-// are so the view can point at the index for the rest.
+// Every column holds all its tickets. The board shows the head of Done, up to
+// `doneLimit`, and the whole column only when a filter narrows it: a filtered
+// board has to find a matching ticket past the cap.
 export function assembleBoard(settings = readSettings()) {
     const tickets = loadTickets(settings)
     const order = loadBoard(workflowDir(settings, 'ticket'))
     const doneLimit = settings.ticket?.doneLimit ?? DEFAULT_DONE_LIMIT
 
-    const columns = COLUMNS.map(column => {
-        const rows = orderColumn(tickets, column, order[column.key])
-        return {
-            key: column.key,
-            status: column.status,
-            total: rows.length,
-            tickets: column.key === 'done' ? rows.slice(0, doneLimit) : rows,
-        }
-    })
+    const columns = COLUMNS.map(column => ({
+        key: column.key,
+        status: column.status,
+        tickets: orderColumn(tickets, column, order[column.key]),
+    }))
 
-    return { tickets, columns }
+    return { tickets, columns, doneLimit }
 }

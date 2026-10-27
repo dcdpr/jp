@@ -35,7 +35,8 @@ pub(crate) enum Place {
 
 /// Move `id` on the board.
 pub(crate) fn rank(paths: &Paths, id: RfdId, place: Place) -> Result<Output, String> {
-    let board::Loaded { board, .. } = board::load(&paths.root, &paths.rfds, &paths.tickets)?;
+    // Ranking reads the RFDs and their order, and nothing the tickets say.
+    let board::Loaded { board, .. } = board::load(&paths.root, &paths.rfds, None)?;
     let entry = entry(paths, &board, id)?;
     if entry.is_terminal() {
         return Err(format!(

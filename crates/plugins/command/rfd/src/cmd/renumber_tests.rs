@@ -42,7 +42,14 @@ fn workspace() -> Workspace {
 fn a_draft_moves_to_the_slot_given() {
     let workspace = workspace();
 
-    let output = renumber(&workspace.paths, "D05", Some("D07"), true).unwrap();
+    let output = renumber(
+        &workspace.paths,
+        &Links::default(),
+        "D05",
+        Some("D07"),
+        true,
+    )
+    .unwrap();
 
     assert!(!workspace.exists("docs/rfd/drafts/D05-sketch.md"));
     assert_eq!(
@@ -63,7 +70,7 @@ fn a_draft_moves_to_the_slot_given() {
 fn references_to_a_draft_follow_it() {
     let workspace = workspace();
 
-    renumber(&workspace.paths, "D05", Some("d7"), true).unwrap();
+    renumber(&workspace.paths, &Links::default(), "D05", Some("d7"), true).unwrap();
 
     let other = workspace.read("docs/rfd/drafts/D06-other.md");
     assert!(
@@ -89,7 +96,14 @@ fn references_to_a_draft_follow_it() {
 fn mentions_elsewhere_are_reported() {
     let workspace = workspace();
 
-    let output = renumber(&workspace.paths, "D05", Some("D07"), true).unwrap();
+    let output = renumber(
+        &workspace.paths,
+        &Links::default(),
+        "D05",
+        Some("D07"),
+        true,
+    )
+    .unwrap();
 
     let warning = "Warning: references outside docs/rfd/ and docs/ticket/ still mention D05:\n  \
                    crates/notes.rs";
@@ -104,7 +118,14 @@ fn mentions_elsewhere_are_reported() {
 fn mentions_elsewhere_go_unchecked_when_the_workspace_is_out_of_reach() {
     let workspace = workspace();
 
-    let output = renumber(&workspace.paths, "D05", Some("D07"), false).unwrap();
+    let output = renumber(
+        &workspace.paths,
+        &Links::default(),
+        "D05",
+        Some("D07"),
+        false,
+    )
+    .unwrap();
 
     let warning = "References outside docs/rfd/ and docs/ticket/ were not checked: the access \
                    policy doesn't allow reading the workspace.";
@@ -115,7 +136,7 @@ fn mentions_elsewhere_go_unchecked_when_the_workspace_is_out_of_reach() {
 fn without_a_target_the_next_free_id_is_taken() {
     let workspace = workspace();
 
-    let output = renumber(&workspace.paths, "D06", None, true).unwrap();
+    let output = renumber(&workspace.paths, &Links::default(), "D06", None, true).unwrap();
 
     assert!(
         output
@@ -125,12 +146,72 @@ fn without_a_target_the_next_free_id_is_taken() {
         output.text
     );
 
-    let output = renumber(&workspace.paths, "042", None, true).unwrap();
+    let output = renumber(&workspace.paths, &Links::default(), "042", None, true).unwrap();
 
     assert!(
         output
             .text
             .contains("042-published.md -> docs/rfd/001-published.md (042 -> 001)\n"),
+        "{}",
+        output.text
+    );
+}
+
+/// A ticket names a published RFD by its bare number in a link label, so the
+/// label follows the RFD where a bare `042` in prose doesn't.
+#[test]
+fn the_tickets_linked_to_a_published_rfd_follow_it() {
+    let workspace = workspace();
+    workspace.write(
+        "docs/ticket/02wt0k1-track.md",
+        &ticket(
+            "Track",
+            "In Progress",
+            &[("Label", "tracking-rfd=042"), ("Label", "type=tracking")],
+            "Implements 042.",
+        ),
+    );
+    workspace.write(
+        "docs/ticket/02wt0k2-phase.md",
+        &ticket(
+            "Phase",
+            "Todo",
+            &[("Label", "relevant-rfd=042"), ("Label", "relevant-rfd=100")],
+            "",
+        ),
+    );
+
+    let output = renumber(
+        &workspace.paths,
+        &Links::default(),
+        "042",
+        Some("097"),
+        true,
+    )
+    .unwrap();
+
+    assert_eq!(
+        workspace.read("docs/ticket/02wt0k1-track.md"),
+        ticket(
+            "Track",
+            "In Progress",
+            &[("Label", "tracking-rfd=097"), ("Label", "type=tracking")],
+            "Implements 042.",
+        )
+    );
+    assert_eq!(
+        workspace.read("docs/ticket/02wt0k2-phase.md"),
+        ticket(
+            "Phase",
+            "Todo",
+            &[("Label", "relevant-rfd=097"), ("Label", "relevant-rfd=100")],
+            "",
+        )
+    );
+    assert!(
+        output
+            .text
+            .contains("  updated 042 -> 097 references in docs/ticket/02wt0k1-track.md\n"),
         "{}",
         output.text
     );
@@ -147,7 +228,7 @@ fn a_published_rfd_rewrites_its_citations_and_file_name_only() {
          042](042-published.md)\n\n## Summary\n\nBuilt on RFD 042, on 042.\n",
     );
 
-    renumber(&workspace.paths, "42", Some("97"), true).unwrap();
+    renumber(&workspace.paths, &Links::default(), "42", Some("97"), true).unwrap();
 
     assert_eq!(
         workspace.read("docs/rfd/097-published.md"),
@@ -189,7 +270,7 @@ fn a_target_has_to_be_a_free_id_in_the_same_space() {
         ("D05", "D06", "Target id D06 is taken by D06-other.md."),
     ] {
         assert_eq!(
-            renumber(&workspace.paths, rfd, Some(target), true).unwrap_err(),
+            renumber(&workspace.paths, &Links::default(), rfd, Some(target), true).unwrap_err(),
             error,
             "{rfd} -> {target}"
         );
@@ -211,7 +292,14 @@ fn a_file_name_picks_one_of_two_documents_sharing_an_id() {
          RFD D05.\n",
     );
 
-    let error = renumber(&workspace.paths, "D05", Some("D07"), true).unwrap_err();
+    let error = renumber(
+        &workspace.paths,
+        &Links::default(),
+        "D05",
+        Some("D07"),
+        true,
+    )
+    .unwrap_err();
     assert!(
         error.starts_with("Ambiguous: 2 files share ID D05:"),
         "{error}"
@@ -219,6 +307,7 @@ fn a_file_name_picks_one_of_two_documents_sharing_an_id() {
 
     let output = renumber(
         &workspace.paths,
+        &Links::default(),
         "docs/rfd/drafts/D05-rival",
         Some("D07"),
         true,
@@ -251,8 +340,22 @@ fn a_file_name_picks_one_of_two_documents_sharing_an_id() {
 fn a_file_name_is_found_in_either_directory() {
     let workspace = workspace();
 
-    renumber(&workspace.paths, "D05-sketch.md", Some("D07"), true).unwrap();
-    renumber(&workspace.paths, "042-published", Some("097"), true).unwrap();
+    renumber(
+        &workspace.paths,
+        &Links::default(),
+        "D05-sketch.md",
+        Some("D07"),
+        true,
+    )
+    .unwrap();
+    renumber(
+        &workspace.paths,
+        &Links::default(),
+        "042-published",
+        Some("097"),
+        true,
+    )
+    .unwrap();
 
     assert!(workspace.exists("docs/rfd/drafts/D07-sketch.md"));
     assert!(workspace.exists("docs/rfd/097-published.md"));
@@ -265,15 +368,36 @@ fn templates_and_misplaced_files_are_not_renumbered() {
     workspace.write("docs/rfd/D09-misplaced.md", "# RFD D09: Misplaced\n");
 
     assert_eq!(
-        renumber(&workspace.paths, "000-design-template.md", None, true).unwrap_err(),
+        renumber(
+            &workspace.paths,
+            &Links::default(),
+            "000-design-template.md",
+            None,
+            true
+        )
+        .unwrap_err(),
         "Refusing to renumber a template."
     );
     assert_eq!(
-        renumber(&workspace.paths, "D09-misplaced.md", None, true).unwrap_err(),
+        renumber(
+            &workspace.paths,
+            &Links::default(),
+            "D09-misplaced.md",
+            None,
+            true
+        )
+        .unwrap_err(),
         "docs/rfd/D09-misplaced.md is not in docs/rfd/drafts, where RFD D09 belongs."
     );
     assert_eq!(
-        renumber(&workspace.paths, "no-such-file.md", None, true).unwrap_err(),
+        renumber(
+            &workspace.paths,
+            &Links::default(),
+            "no-such-file.md",
+            None,
+            true
+        )
+        .unwrap_err(),
         "No RFD file matching 'no-such-file.md'."
     );
 }

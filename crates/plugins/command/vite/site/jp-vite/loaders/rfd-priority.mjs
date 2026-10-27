@@ -29,8 +29,7 @@ export const TERMINAL_STATUSES = new Set([
 //
 // There is no in-development field: "someone is writing code for this" is a
 // property of a work item, not of a design document, and lives on the RFD's
-// tracking ticket instead (see RFD 100). The board's checkbox moves that
-// ticket; it stores nothing here.
+// tracking ticket instead (see RFD 100), which moves on the ticket board.
 export function normalizePriority(raw) {
     const ids = v => (Array.isArray(v) ? v.map(String) : [])
 

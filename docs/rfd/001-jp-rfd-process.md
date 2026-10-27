@@ -344,8 +344,8 @@ All categories use the same metadata:
 
 Implementation progress is tracked in [tickets], not in the metadata header.
 When `just rfd-promote` advances an RFD from Discussion to Accepted, it offers
-to file the RFD's tracking ticket: one ticket carrying `Implements: NNN` and the
-label `type=tracking`, with the Implementation Plan as its description.
+to file the RFD's tracking ticket: one ticket labelled `tracking-rfd=NNN`, with
+the Implementation Plan as its description.
 The plan is read out of the document by `jp`, so the ticket matches the RFD
 rather than a fixed template, and whoever accepts the prompt reviews it before
 it lands.
@@ -353,8 +353,11 @@ it lands.
 Accepting an RFD records an agreed direction, not a commitment to start
 building, which is why the ticket is offered rather than created.
 Decline the prompt and file it later with `jp rfd track NNN`.
-Marking the RFD in development, with `jp rfd start NNN` or on the [priority
-board], files it too.
+The RFD is in development while its tracking ticket is In Progress: move it on
+the [ticket board] when the work starts, or run `jp rfd start NNN`, which files
+it first if it has none.
+Any other ticket whose work belongs to the RFD is labelled `relevant-rfd=NNN`,
+and the [priority board] links each RFD to all of its tickets.
 
 A handful of older RFDs still carry a `Tracking Issue` field pointing at a
 GitHub issue.
@@ -653,4 +656,5 @@ The steps are:
 [`000-guide-template.md`]: 000-guide-template.md
 [`000-process-template.md`]: 000-process-template.md
 [priority board]: priority.md
+[ticket board]: ../ticket/board.md
 [tickets]: 100-in-repo-ticket-tracking.md

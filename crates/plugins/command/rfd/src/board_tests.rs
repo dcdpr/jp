@@ -40,7 +40,7 @@ fn board(published: &[Source], drafts: &[Source], priority: &Value) -> Board {
         published,
         drafts,
         Priority::normalize(priority),
-        &BTreeSet::new(),
+        &BTreeMap::new(),
     )
 }
 
@@ -53,13 +53,10 @@ fn entry<'a>(board: &'a Board, num: &str) -> &'a Entry {
 }
 
 /// A ticket file, as `jp ticket` writes one.
-fn ticket(status: &str, implements: Option<&str>, labels: &[&str]) -> String {
+fn ticket(status: &str, labels: &[&str]) -> String {
     let mut out = format!("# A ticket\n\n- **Status**: {status}\n");
     out.push_str("- **Authors**: jp\n");
     out.push_str("- **Date**: 2026-08-05\n");
-    if let Some(implements) = implements {
-        out.push_str(&format!("- **Implements**: {implements}\n"));
-    }
     for label in labels {
         out.push_str(&format!("- **Label**: {label}\n"));
     }
@@ -233,37 +230,44 @@ fn references_leave_out_the_rfd_itself_the_templates_and_tickets() {
     assert_eq!(entry.links, ["000", "100", "T-02wt0kx"]);
 }
 
+/// Only a tracking ticket In Progress puts its RFD in development: a ticket
+/// whose work merely belongs to the RFD doesn't, and neither does a tracking
+/// ticket nobody is working on.
 #[test]
 fn an_rfd_is_in_development_when_its_tracking_ticket_is_in_progress() {
     let dir = Utf8TempDir::new().unwrap();
-    let tickets = [
-        (
-            "02wt0k1",
-            ticket("In Progress", Some("042"), &["type=tracking"]),
-        ),
-        (
-            "02wt0k2",
-            ticket("In Progress", Some("RFD 7"), &["type=tracking"]),
-        ),
-        // A phase ticket names its RFD without the label.
-        ("02wt0k3", ticket("In Progress", Some("043"), &[])),
-        // A tracking ticket nobody is working on.
-        ("02wt0k4", ticket("Todo", Some("044"), &["type=tracking"])),
-        ("02wt0k5", ticket("In Progress", None, &["type=tracking"])),
-        (
-            "02wt0k6",
-            ticket("In Progress", Some("whatever"), &["type=tracking"]),
-        ),
-    ];
-    for (id, content) in &tickets {
+    for (id, content) in [
+        ("02wt0k1", ticket("In Progress", &["tracking-rfd=042"])),
+        ("02wt0k2", ticket("In Progress", &["tracking-rfd=RFD 7"])),
+        ("02wt0k3", ticket("In Progress", &["relevant-rfd=043"])),
+        ("02wt0k4", ticket("Todo", &["tracking-rfd=044"])),
+        ("02wt0k5", ticket("In Progress", &["tracking-rfd=whatever"])),
+    ] {
         fs::write(dir.path().join(format!("{id}-ticket.md")), content).unwrap();
     }
+    let tickets = Links::default().by_rfd(&store::list(dir.path()).unwrap());
 
-    let entries = store::list(dir.path()).unwrap();
+    let board = Board::assemble(
+        &[
+            accepted("007-seven.md"),
+            accepted("042-forty-two.md"),
+            accepted("043-forty-three.md"),
+            accepted("044-forty-four.md"),
+        ],
+        &[],
+        Priority::default(),
+        &tickets,
+    );
 
-    assert_eq!(in_development(&entries).into_iter().collect::<Vec<_>>(), [
-        "007", "042"
-    ]);
+    let in_development: Vec<&str> = board
+        .entries
+        .iter()
+        .filter(|entry| entry.in_development)
+        .map(|entry| entry.num.as_str())
+        .collect();
+    assert_eq!(in_development, ["007", "042"]);
+    assert_eq!(entry(&board, "043").tickets.len(), 1);
+    assert!(!entry(&board, "043").tickets[0].tracking);
 }
 
 #[test]
@@ -297,11 +301,12 @@ fn load_reads_rfds_drafts_the_board_and_the_tickets() {
     .unwrap();
     fs::write(
         tickets.join("02wt0k1-track.md"),
-        ticket("In Progress", Some("042"), &["type=tracking"]),
+        ticket("In Progress", &["tracking-rfd=042"]),
     )
     .unwrap();
 
-    let Loaded { board, warnings } = load(root.path(), &dir, &tickets).unwrap();
+    let Loaded { board, warnings } =
+        load(root.path(), &dir, Some((&tickets, &Links::default()))).unwrap();
 
     assert!(warnings.is_empty(), "{warnings:?}");
     let files: Vec<&str> = board
@@ -317,6 +322,28 @@ fn load_reads_rfds_drafts_the_board_and_the_tickets() {
     assert_eq!(entry(&board, "042").priority, Some(1));
     assert!(entry(&board, "042").in_development);
     assert!(!entry(&board, "D05").in_development);
+    assert_eq!(entry(&board, "042").tickets[0].id, "T-02wt0k1");
+}
+
+/// Ranking reads no tickets, so a broken ticket directory can't get in its way.
+#[test]
+fn load_without_tickets_reads_none() {
+    let root = Utf8TempDir::new().unwrap();
+    let dir = root.path().join("rfd");
+    let tickets = root.path().join("tickets");
+    fs::create_dir_all(&dir).unwrap();
+    fs::create_dir_all(&tickets).unwrap();
+    fs::write(
+        dir.join("042-ordered.md"),
+        rfd("042: Ordered", &[("Status", "Accepted")]),
+    )
+    .unwrap();
+    fs::write(tickets.join("02wt0k1-broken.md"), "no heading\n").unwrap();
+
+    let Loaded { board, warnings } = load(root.path(), &dir, None).unwrap();
+
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert!(entry(&board, "042").tickets.is_empty());
 }
 
 /// A new project has no drafts, no board file, and maybe no tickets yet, and
@@ -332,7 +359,9 @@ fn load_needs_only_the_rfd_directory() {
     )
     .unwrap();
 
-    let Loaded { board, warnings } = load(root.path(), &dir, &root.path().join("tickets")).unwrap();
+    let tickets = root.path().join("tickets");
+    let Loaded { board, warnings } =
+        load(root.path(), &dir, Some((&tickets, &Links::default()))).unwrap();
 
     assert!(warnings.is_empty(), "{warnings:?}");
     assert_eq!(board.entries.len(), 1);
@@ -345,7 +374,7 @@ fn load_refuses_a_missing_rfd_directory() {
     let dir = root.path().join("docs/rfd");
 
     assert_eq!(
-        load(root.path(), &dir, &root.path().join("docs/ticket")).unwrap_err(),
+        load(root.path(), &dir, None).unwrap_err(),
         format!(
             "There is no RFD directory at {dir}. Set `plugins.command.rfd.options.dir` to the \
              directory holding the RFDs."
@@ -365,7 +394,8 @@ fn load_warns_about_what_it_could_not_read() {
     fs::write(dir.join(PRIORITY_FILE), "{ not json").unwrap();
     fs::write(tickets.join("02wt0k1-broken.md"), "no heading\n").unwrap();
 
-    let Loaded { board, warnings } = load(root.path(), &dir, &tickets).unwrap();
+    let Loaded { board, warnings } =
+        load(root.path(), &dir, Some((&tickets, &Links::default()))).unwrap();
 
     assert_eq!(board.priority, Priority::default());
     assert_eq!(warnings.len(), 2, "{warnings:?}");
@@ -391,8 +421,13 @@ fn the_jp_board_loads() {
         .canonicalize_utf8()
         .unwrap();
 
-    let Loaded { board, .. } =
-        load(&root, &root.join("docs/rfd"), &root.join("docs/ticket")).unwrap();
+    let tickets = root.join("docs/ticket");
+    let Loaded { board, .. } = load(
+        &root,
+        &root.join("docs/rfd"),
+        Some((&tickets, &Links::default())),
+    )
+    .unwrap();
 
     let process = entry(&board, "001");
     assert_eq!(process.title, "The JP RFD Process");

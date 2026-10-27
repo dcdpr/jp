@@ -8,31 +8,29 @@
 //! - The board file ([`priority`]), which ranks open work into milestone groups
 //!   above an unranked backlog.
 //!
-//! - The tickets: an RFD is in development while its tracking ticket, the one
-//!   labelled `type=tracking` that implements it, is In Progress.
+//! - The tickets that name an RFD ([`Links`]): an RFD is in development while
+//!   its tracking ticket is In Progress.
 //!
 //! [`Board::assemble`] joins sources already read, and [`load`] reads them.
 //! Nothing here validates the board: an id it names that no RFD carries is
 //! skipped, not reported.
 
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, HashMap},
     fs,
     path::MAIN_SEPARATOR,
 };
 
 use camino::Utf8Path;
 use serde::Serialize;
-use ticket::{Status, Ticket, store};
+use ticket::{Status, store};
 
 use crate::{
     document::{Header, referenced_labels, title},
     id::{DRAFTS_DIR, RfdId},
+    links::{LinkedTicket, Links},
     priority::{self, Priority},
 };
-
-/// The label marking a ticket as its RFD's tracking ticket.
-pub(crate) const TRACKING_LABEL: (&str, &str) = ("type", "tracking");
 
 /// Statuses that take an RFD off the board, which ranks open work only.
 pub(crate) const TERMINAL_STATUSES: [&str; 3] = ["Implemented", "Superseded", "Abandoned"];
@@ -99,6 +97,10 @@ pub(crate) struct Entry {
     /// Whether the RFD's tracking ticket is In Progress.
     pub in_development: bool,
 
+    /// The tickets naming the RFD, the ones tracking it first.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tickets: Vec<LinkedTicket>,
+
     /// The RFDs this one requires or extends, which the board keeps above it.
     pub depends_on: Vec<String>,
 
@@ -137,15 +139,16 @@ pub(crate) struct Board {
 }
 
 impl Board {
-    /// Join the RFD files, the board file, and the RFDs in development.
+    /// Join the RFD files, the board file, and the tickets naming each RFD.
     ///
-    /// `in_development` holds ids in their canonical form (`042`, `D05`).
+    /// `tickets` is keyed by the RFD's canonical id (`042`, `D05`), as
+    /// [`Links::by_rfd`] gathers it.
     #[must_use]
     pub(crate) fn assemble(
         published: &[Source],
         drafts: &[Source],
         priority: Priority,
-        in_development: &BTreeSet<String>,
+        tickets: &BTreeMap<String, Vec<LinkedTicket>>,
     ) -> Self {
         let mut entries = linked(published);
         entries.extend(linked(drafts));
@@ -199,7 +202,11 @@ impl Board {
                 .then(|| milestones.get(entry.num.as_str()).copied().flatten())
                 .flatten()
                 .map(ToOwned::to_owned);
-            entry.in_development = in_development.contains(&entry.num);
+            entry.tickets = tickets.get(&entry.num).cloned().unwrap_or_default();
+            entry.in_development = entry
+                .tickets
+                .iter()
+                .any(|ticket| ticket.tracking && ticket.status == Status::InProgress);
             entry.depends_on = depends_on.get(&entry.num).cloned().unwrap_or_default();
         }
 
@@ -287,39 +294,11 @@ fn entry(source: &Source) -> Entry {
         priority: None,
         milestone: None,
         in_development: false,
+        tickets: vec![],
         depends_on: vec![],
         relations,
         num,
     }
-}
-
-/// The RFD `ticket` is the tracking ticket of, if it is one.
-///
-/// A tracking ticket carries the `type=tracking` label and names its RFD in
-/// `Implements`.
-/// Phase tickets name the same RFD without the label, and track nothing.
-#[must_use]
-pub(crate) fn tracked(ticket: &Ticket) -> Option<RfdId> {
-    let (key, value) = TRACKING_LABEL;
-    if !ticket.metadata.labels.contains(key, value) {
-        return None;
-    }
-
-    ticket.metadata.implements.as_deref()?.parse().ok()
-}
-
-/// The RFDs whose tracking ticket is In Progress, by canonical id.
-///
-/// Tickets that didn't parse are passed over.
-#[must_use]
-pub(crate) fn in_development(tickets: &[store::Entry]) -> BTreeSet<String> {
-    tickets
-        .iter()
-        .filter_map(|entry| entry.ticket.as_ref().ok())
-        .filter(|ticket| ticket.metadata.status == Status::InProgress)
-        .filter_map(tracked)
-        .map(|id| id.to_string())
-        .collect()
 }
 
 /// What [`load`] read, and what it had to pass over to read it.
@@ -331,8 +310,9 @@ pub(crate) struct Loaded {
     pub warnings: Vec<String>,
 }
 
-/// Read the board: the RFDs in `dir`, its board file, and the tickets in
-/// `tickets`.
+/// Read the board: the RFDs in `dir`, its board file, and, when `tickets` names
+/// a ticket directory and the keys tickets name RFDs under, the tickets naming
+/// each RFD.
 ///
 /// `root` is the workspace root that entries' `file` paths are relative to.
 /// A missing drafts directory holds no drafts, and a missing ticket directory
@@ -340,7 +320,11 @@ pub(crate) struct Loaded {
 /// An unreadable board file or ticket directory leaves the board unranked or
 /// nothing in development, with a warning saying so; a missing RFD directory is
 /// an error.
-pub(crate) fn load(root: &Utf8Path, dir: &Utf8Path, tickets: &Utf8Path) -> Result<Loaded, String> {
+pub(crate) fn load(
+    root: &Utf8Path,
+    dir: &Utf8Path,
+    tickets: Option<(&Utf8Path, &Links)>,
+) -> Result<Loaded, String> {
     if !dir.is_dir() {
         return Err(format!(
             "There is no RFD directory at {dir}. Set `plugins.command.rfd.options.dir` to the \
@@ -366,29 +350,32 @@ pub(crate) fn load(root: &Utf8Path, dir: &Utf8Path, tickets: &Utf8Path) -> Resul
         }
     };
 
-    let in_development = match store::list(tickets) {
-        Ok(entries) => {
-            let unreadable = entries.iter().filter(|entry| entry.ticket.is_err()).count();
-            if unreadable > 0 {
-                let files = if unreadable == 1 { "file" } else { "files" };
-                warnings.push(format!(
-                    "{unreadable} ticket {files} in {tickets} could not be read; an RFD whose \
-                     tracking ticket is among them does not show as in development."
-                ));
+    let linked = match tickets {
+        None => BTreeMap::new(),
+        Some((tickets, links)) => match store::list(tickets) {
+            Ok(entries) => {
+                let unreadable = entries.iter().filter(|entry| entry.ticket.is_err()).count();
+                if unreadable > 0 {
+                    let files = if unreadable == 1 { "file" } else { "files" };
+                    warnings.push(format!(
+                        "{unreadable} ticket {files} in {tickets} could not be read; an RFD whose \
+                         tracking ticket is among them does not show as in development."
+                    ));
+                }
+                links.by_rfd(&entries)
             }
-            in_development(&entries)
-        }
-        Err(error) => {
-            warnings.push(format!(
-                "The tickets in {tickets} could not be read ({error}); no RFD shows as in \
-                 development."
-            ));
-            BTreeSet::new()
-        }
+            Err(error) => {
+                warnings.push(format!(
+                    "The tickets in {tickets} could not be read ({error}); no RFD shows as in \
+                     development."
+                ));
+                BTreeMap::new()
+            }
+        },
     };
 
     Ok(Loaded {
-        board: Board::assemble(&published, &drafts, priority, &in_development),
+        board: Board::assemble(&published, &drafts, priority, &linked),
         warnings,
     })
 }

@@ -4,20 +4,33 @@
 //! [plugins.command.rfd.options]
 //! dir = "docs/rfd"
 //! categories = ["design", "decision", "guide", "process"]
+//!
+//! # The label a ticket names the RFD it tracks under, and the labels a
+//! # tracking ticket is filed with besides it.
+//! [plugins.command.rfd.options.tracking]
+//! key = "tracking-rfd"
+//! labels = ["type=tracking"]
+//!
+//! # The label a ticket names an RFD its work belongs to under.
+//! [plugins.command.rfd.options.relevant]
+//! key = "relevant-rfd"
 //! ```
 //!
-//! Every option is optional.
+//! Every option is optional, and `tracking.labels` defaults to none.
 //! Keys this plugin doesn't read are ignored, so a configuration written for a
 //! newer `jp-rfd` still loads.
 //!
 //! The ticket directory belongs to `jp ticket`, and is read from its options
-//! ([`ticket_dir`]), as are who a ticket filed through a tool is attributed to
-//! ([`assistant`]) and the labels a ticket can carry ([`ticket_vocabulary`]).
+//! ([`ticket_dir`]), as are the labels a ticket can carry
+//! ([`ticket_vocabulary`]).
 
 use camino::Utf8PathBuf;
+use jp_label::validate_key;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use ticket::{Vocabulary, store};
+
+use crate::links::{DEFAULT_RELEVANT_KEY, DEFAULT_TRACKING_KEY, Links};
 
 /// Where `jp ticket` configures the label vocabulary, as a user writes it.
 pub(crate) const TICKET_LABELS_KEY: &str = "plugins.command.ticket.options.labels";
@@ -28,13 +41,8 @@ const DEFAULT_DIR: &str = "docs/rfd";
 /// The categories when `categories` isn't set.
 const DEFAULT_CATEGORIES: [&str; 4] = ["design", "decision", "guide", "process"];
 
-/// Who a ticket filed through a tool is attributed to, when `jp ticket` sets
-/// nobody.
-const DEFAULT_ASSISTANT: &str = "assistant";
-
 /// The settings every command and tool runs with.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Options {
     /// Directory holding the RFDs, relative to the workspace root.
     /// Drafts live in its `drafts/` directory.
@@ -42,6 +50,9 @@ pub(crate) struct Options {
 
     /// The categories an RFD can carry, lowercase.
     pub categories: Vec<String>,
+
+    /// The label keys tickets name RFDs under.
+    pub links: Links,
 }
 
 impl Default for Options {
@@ -49,6 +60,60 @@ impl Default for Options {
         Self {
             dir: Utf8PathBuf::from(DEFAULT_DIR),
             categories: DEFAULT_CATEGORIES.map(ToOwned::to_owned).to_vec(),
+            links: Links::default(),
+        }
+    }
+}
+
+/// The options as the configuration writes them.
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+struct Raw {
+    dir: Utf8PathBuf,
+    categories: Vec<String>,
+    tracking: RawTracking,
+    relevant: RawRelevant,
+}
+
+impl Default for Raw {
+    fn default() -> Self {
+        let options = Options::default();
+
+        Self {
+            dir: options.dir,
+            categories: options.categories,
+            tracking: RawTracking::default(),
+            relevant: RawRelevant::default(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+struct RawTracking {
+    key: String,
+    labels: Vec<String>,
+}
+
+impl Default for RawTracking {
+    fn default() -> Self {
+        Self {
+            key: DEFAULT_TRACKING_KEY.to_owned(),
+            labels: vec![],
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+struct RawRelevant {
+    key: String,
+}
+
+impl Default for RawRelevant {
+    fn default() -> Self {
+        Self {
+            key: DEFAULT_RELEVANT_KEY.to_owned(),
         }
     }
 }
@@ -60,7 +125,7 @@ impl Options {
     /// The error names the setting and says what is wrong with it, for the user
     /// to fix in their configuration.
     pub(crate) fn read(options: &Map<String, Value>) -> Result<Self, String> {
-        let read: Self = serde_json::from_value(Value::Object(options.clone()))
+        let read: Raw = serde_json::from_value(Value::Object(options.clone()))
             .map_err(|error| format!("`plugins.command.rfd.options` is invalid: {error}."))?;
 
         if read.dir.as_str().trim().is_empty() {
@@ -98,8 +163,49 @@ impl Options {
         Ok(Self {
             dir: read.dir,
             categories,
+            links: links(read.tracking, read.relevant)?,
         })
     }
+}
+
+/// The link keys and the labels a tracking ticket is filed with, checked.
+///
+/// The two keys have to differ, or every ticket naming an RFD would track it,
+/// and a filed-with label can't sit under either, since the link is added on
+/// its own.
+fn links(tracking: RawTracking, relevant: RawRelevant) -> Result<Links, String> {
+    for (setting, key) in [
+        ("tracking.key", &tracking.key),
+        ("relevant.key", &relevant.key),
+    ] {
+        validate_key(key).map_err(|error| {
+            format!("`plugins.command.rfd.options.{setting}` is invalid: {error}.")
+        })?;
+    }
+
+    if tracking.key.eq_ignore_ascii_case(&relevant.key) {
+        return Err(format!(
+            "`plugins.command.rfd.options.tracking.key` and `relevant.key` are both `{}`; a \
+             ticket naming an RFD under it would both track it and only relate to it.",
+            tracking.key
+        ));
+    }
+
+    for label in &tracking.labels {
+        let key = label.split_once('=').map_or(label.as_str(), |(key, _)| key);
+        if key.eq_ignore_ascii_case(&tracking.key) || key.eq_ignore_ascii_case(&relevant.key) {
+            return Err(format!(
+                "`plugins.command.rfd.options.tracking.labels` holds `{label}`; the label naming \
+                 the RFD is added on its own."
+            ));
+        }
+    }
+
+    Ok(Links {
+        tracking: tracking.key,
+        relevant: relevant.key,
+        filed_with: tracking.labels,
+    })
 }
 
 /// The ticket directory, as `jp ticket` is configured to use it: its
@@ -123,24 +229,6 @@ pub(crate) fn ticket_vocabulary(config: &Value) -> Result<Vocabulary, String> {
         None | Some(Value::Null) => Ok(Vocabulary::default()),
         Some(labels) => Vocabulary::from_value(labels.clone())
             .map_err(|error| format!("`{TICKET_LABELS_KEY}`: {error}")),
-    }
-}
-
-/// Who a ticket filed through a tool is attributed to, as `jp ticket` is
-/// configured: its `plugins.command.ticket.options.assistant`, or `assistant`.
-///
-/// `config` is the whole configuration the host passed in `init`.
-pub(crate) fn assistant(config: &Value) -> Result<String, String> {
-    match config.pointer("/plugins/command/ticket/options/assistant") {
-        None | Some(Value::Null) => Ok(DEFAULT_ASSISTANT.to_owned()),
-        Some(Value::String(name))
-            if !name.trim().is_empty() && !name.chars().any(char::is_control) =>
-        {
-            Ok(name.trim().to_owned())
-        }
-        Some(_) => {
-            Err("`plugins.command.ticket.options.assistant` must be a name on one line.".to_owned())
-        }
     }
 }
 

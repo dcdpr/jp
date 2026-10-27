@@ -55,6 +55,8 @@ fn both_workflows_are_read_where_the_plugins_keep_them() {
                 "guide".to_owned(),
                 "process".to_owned(),
             ],
+            tracking_key: "tracking-rfd".to_owned(),
+            relevant_key: "relevant-rfd".to_owned(),
         }),
         ticket: Some(TicketSettings {
             dir: "docs/ticket".to_owned(),
@@ -215,7 +217,13 @@ fn the_snapshot_renders_in_a_fixed_shape() {
         revision: "0123456789abcdef".to_owned(),
         site: "docs".to_owned(),
         repository: Some("https://github.com/dcdpr/jp".to_owned()),
-        rfd: None,
+        rfd: Some(RfdSettings {
+            dir: "docs/rfd".to_owned(),
+            route: "rfd".to_owned(),
+            categories: vec!["design".to_owned()],
+            tracking_key: "tracking-rfd".to_owned(),
+            relevant_key: "relevant-rfd".to_owned(),
+        }),
         ticket: Some(TicketSettings {
             dir: "docs/ticket".to_owned(),
             route: "ticket".to_owned(),
@@ -258,7 +266,15 @@ fn the_snapshot_renders_in_a_fixed_shape() {
   "revision": "0123456789abcdef",
   "site": "docs",
   "repository": "https://github.com/dcdpr/jp",
-  "rfd": null,
+  "rfd": {
+    "dir": "docs/rfd",
+    "route": "rfd",
+    "categories": [
+      "design"
+    ],
+    "trackingKey": "tracking-rfd",
+    "relevantKey": "relevant-rfd"
+  },
   "ticket": {
     "dir": "docs/ticket",
     "route": "ticket",

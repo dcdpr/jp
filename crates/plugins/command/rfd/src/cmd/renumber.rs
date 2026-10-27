@@ -6,8 +6,9 @@
 //! stays right and only the name changes.
 //!
 //! References are rewritten in the RFDs, the drafts, and the tickets: the file
-//! name everywhere, and `RFD <old>`, plus a draft's bare `D05`, unless another
-//! file still holds the old id, which would make every such mention ambiguous.
+//! name everywhere, and `RFD <old>`, plus a draft's bare `D05` and the labels
+//! that link a ticket to the RFD ([`Links`]), unless another file still holds
+//! the old id, which would make every such mention ambiguous.
 //! Mentions elsewhere in the workspace are reported, not rewritten.
 
 use std::fs;
@@ -19,6 +20,7 @@ use crate::{
     Output,
     document::Document,
     id::{self, RfdId},
+    links::Links,
     paths::{self, Paths},
     priority,
     references::{self, Rule, markdown_files},
@@ -33,6 +35,7 @@ use crate::{
 /// rewrite didn't reach.
 pub(crate) fn renumber(
     paths: &Paths,
+    links: &Links,
     given: &str,
     target: Option<&str>,
     scan_workspace: bool,
@@ -98,6 +101,7 @@ pub(crate) fn renumber(
     let mut output = Output::default();
     let updated = rewrite_references(
         paths,
+        links,
         old,
         new,
         (&old_stem, stem(&new_name)),
@@ -150,10 +154,12 @@ pub(crate) fn renumber(
 /// how many files changed.
 ///
 /// `stems` is the old and new file stem.
-/// Id-keyed references are rewritten only when `unique` says no other file
-/// holds the old id, or inside the renumbered file itself.
+/// Id-keyed references, a ticket's link labels among them, are rewritten only
+/// when `unique` says no other file holds the old id, or inside the renumbered
+/// file itself.
 fn rewrite_references(
     paths: &Paths,
+    links: &Links,
     old: RfdId,
     new: RfdId,
     stems: (&str, &str),
@@ -185,7 +191,12 @@ fn rewrite_references(
                 rules.extend(by_id.iter().cloned());
             }
 
-            if references::rewrite_file(&file, &rules)? {
+            let mut changed = references::rewrite_file(&file, &rules)?;
+            if unique && dir == paths.tickets {
+                changed |= links.relink(&file, old, new)?;
+            }
+
+            if changed {
                 output.text.push_str(&format!(
                     "  updated {old} -> {new} references in {}\n",
                     paths.show(&file)

@@ -11,12 +11,25 @@ use serde_json::json;
 use super::*;
 use crate::cmd::tests::{Workspace, ticket};
 
-/// A ticket vocabulary defining the tracking label.
+/// A ticket vocabulary that takes a tracking ticket: the link, open to any RFD
+/// and held to one ticket per RFD, and a `type` with `tracking` among its
+/// values.
 fn vocabulary() -> Vocabulary {
     Vocabulary::parse(
-        r#"{"type": {"description": "The type of ticket", "values": ["bug", "feature", "tracking"]}}"#,
+        r#"{
+            "tracking-rfd": {"description": "The RFD tracked", "values": [], "max": 1, "unique": "key-value"},
+            "type": {"description": "The type of ticket", "values": ["bug", "feature", "tracking"]}
+        }"#,
     )
     .unwrap()
+}
+
+/// The default link keys, with a tracking ticket also filed as `type=tracking`.
+fn links() -> Links {
+    Links {
+        filed_with: vec!["type=tracking".to_owned()],
+        ..Links::default()
+    }
 }
 
 /// RFD 116 is Accepted and RFD 117 is in Discussion, beside an empty ticket
@@ -88,7 +101,7 @@ fn filed(workspace: &Workspace, status: &str, description: &str) -> String {
         &ticket(
             "Shareable tooling",
             status,
-            &[("Implements", "116"), ("Label", "type=tracking")],
+            &[("Label", "tracking-rfd=116"), ("Label", "type=tracking")],
             description,
         ),
     );
@@ -104,6 +117,7 @@ fn track_files_a_ticket_holding_the_plan() {
     let tracked = track(
         &workspace.paths,
         &vocabulary(),
+        &links(),
         id("116"),
         &filer(),
         &mut |request| {
@@ -126,7 +140,7 @@ fn track_files_a_ticket_holding_the_plan() {
 - **Status**: Todo
 - **Authors**: Jane Doe <jane@example.com>
 - **Date**: 2026-10-15
-- **Implements**: 116
+- **Label**: tracking-rfd=116
 - **Label**: type=tracking
 
 Tracking ticket for [RFD 116](../rfd/116-shareable-tooling.md).
@@ -156,6 +170,7 @@ fn a_plan_that_cannot_be_read_leaves_the_marker() {
     let tracked = track(
         &workspace.paths,
         &vocabulary(),
+        &links(),
         id("116"),
         &filer(),
         &mut |_| Ok(Plan::Unavailable("the provider is down".to_owned())),
@@ -182,6 +197,7 @@ fn an_rfd_without_a_plan_leaves_the_marker() {
     let tracked = track(
         &workspace.paths,
         &vocabulary(),
+        &links(),
         id("116"),
         &filer(),
         &mut |_| Ok(Plan::Phases(vec![])),
@@ -205,6 +221,7 @@ fn an_existing_tracking_ticket_is_reused() {
     let tracked = track(
         &workspace.paths,
         &vocabulary(),
+        &links(),
         id("116"),
         &filer(),
         &mut unread,
@@ -233,6 +250,7 @@ fn a_pending_plan_is_read_into_the_existing_ticket() {
     let tracked = track(
         &workspace.paths,
         &vocabulary(),
+        &links(),
         id("116"),
         &filer(),
         &mut |_| Ok(phases()),
@@ -268,6 +286,7 @@ fn a_plan_still_pending_leaves_the_ticket_as_it_was() {
     let tracked = track(
         &workspace.paths,
         &vocabulary(),
+        &links(),
         id("116"),
         &filer(),
         &mut |_| Ok(Plan::Unavailable("no provider".to_owned())),
@@ -295,6 +314,7 @@ fn only_the_marker_is_replaced() {
     track(
         &workspace.paths,
         &vocabulary(),
+        &links(),
         id("116"),
         &filer(),
         &mut |_| Ok(phases()),
@@ -333,6 +353,7 @@ fn a_ticket_filled_while_the_plan_was_read_is_left_alone() {
     let tracked = track(
         &workspace.paths,
         &vocabulary(),
+        &links(),
         id("116"),
         &filer(),
         &mut |_| {
@@ -353,41 +374,20 @@ fn a_ticket_filled_while_the_plan_was_read_is_left_alone() {
     assert_eq!(tracked.report.notes, [note]);
 }
 
-/// A plan left for later is a note, not a warning: nothing went wrong.
-#[test]
-fn a_deferred_plan_files_the_ticket_with_the_marker() {
-    let workspace = workspace();
-
-    let tracked = track(
-        &workspace.paths,
-        &vocabulary(),
-        id("116"),
-        &filer(),
-        &mut |_| Ok(Plan::Deferred),
-    )
-    .unwrap();
-
-    assert!(read_ticket(&workspace, tracked.ticket).ends_with(&format!("{PENDING}\n")));
-    assert!(tracked.report.warnings.is_empty());
-    assert_eq!(
-        tracked.report.notes[0],
-        "The tracking ticket holds `<!-- rfd-plan: pending -->` in place of the Implementation \
-         Plan of RFD 116 until `jp rfd track 116` reads it."
-    );
-}
-
-/// Phase tickets name the RFD they belong to without the tracking label.
+/// A phase ticket names the RFD its work belongs to under the relevant key,
+/// which tracks nothing.
 #[test]
 fn a_phase_ticket_is_not_the_tracking_ticket() {
     let workspace = workspace();
     workspace.write(
         "docs/ticket/02wt0k1-phase-one.md",
-        &ticket("Phase one", "Todo", &[("Implements", "116")], ""),
+        &ticket("Phase one", "Todo", &[("Label", "relevant-rfd=116")], ""),
     );
 
     let tracked = track(
         &workspace.paths,
         &vocabulary(),
+        &links(),
         id("116"),
         &filer(),
         &mut |_| Ok(phases()),
@@ -420,6 +420,7 @@ fn only_an_accepted_or_implemented_rfd_is_tracked() {
             track(
                 &workspace.paths,
                 &vocabulary(),
+                &links(),
                 id(rfd),
                 &filer(),
                 &mut unread
@@ -431,6 +432,7 @@ fn only_an_accepted_or_implemented_rfd_is_tracked() {
             start(
                 &workspace.paths,
                 &vocabulary(),
+                &links(),
                 id(rfd),
                 &filer(),
                 &mut unread
@@ -446,6 +448,7 @@ fn only_an_accepted_or_implemented_rfd_is_tracked() {
         track(
             &workspace.paths,
             &vocabulary(),
+            &links(),
             id("030"),
             &filer(),
             &mut |_| Ok(phases())
@@ -464,6 +467,7 @@ fn tracking_needs_a_ticket_directory() {
         track(
             &workspace.paths,
             &vocabulary(),
+            &links(),
             id("116"),
             &filer(),
             &mut unread
@@ -475,6 +479,7 @@ fn tracking_needs_a_ticket_directory() {
         start(
             &workspace.paths,
             &vocabulary(),
+            &links(),
             id("116"),
             &filer(),
             &mut unread
@@ -482,43 +487,81 @@ fn tracking_needs_a_ticket_directory() {
         .unwrap_err(),
         error
     );
-    assert_eq!(stop(&workspace.paths, id("116")).unwrap_err(), error);
+    assert_eq!(
+        stop(&workspace.paths, &links(), id("116")).unwrap_err(),
+        error
+    );
 }
 
+/// A board that defines labels but not the link can't take a tracking ticket,
+/// and is told the entry to add, ready to paste.
 #[test]
-fn a_vocabulary_has_to_define_the_tracking_label() {
+fn a_board_has_to_define_the_link_before_tracking() {
     let workspace = workspace();
-
-    let without =
-        Vocabulary::parse(r#"{"type": {"description": "The type", "values": ["bug"]}}"#).unwrap();
-    assert_eq!(
-        track(&workspace.paths, &without, id("116"), &filer(), &mut unread).unwrap_err(),
-        "Tracking label missing. Add `\"tracking\"` to \
-         `plugins.command.ticket.options.labels.type.values`."
-    );
-
-    let retired = Vocabulary::parse(
-        r#"{"type": {"description": "The type", "values": ["bug"], "retired": ["tracking"]}}"#,
+    let without = Vocabulary::parse(
+        r#"{"type": {"description": "The type", "values": ["bug", "tracking"]}}"#,
     )
     .unwrap();
-    assert_eq!(
-        track(&workspace.paths, &retired, id("116"), &filer(), &mut unread).unwrap_err(),
-        "Tracking label retired. Move `\"tracking\"` from \
-         `plugins.command.ticket.options.labels.type.retired` to \
-         `plugins.command.ticket.options.labels.type.values`."
-    );
 
+    assert_eq!(
+        track(
+            &workspace.paths,
+            &without,
+            &links(),
+            id("116"),
+            &filer(),
+            &mut unread
+        )
+        .unwrap_err(),
+        "\
+RFD tracking must be enabled first by adding the `tracking-rfd` label to the ticket configuration:
+
+    [plugins.command.ticket.options.labels.tracking-rfd]
+    description = \"The RFD whose implementation this ticket tracks.\"
+    values = []
+    max = 1
+    unique = \"key-value\""
+    );
     assert!(ticket_files(&workspace).is_empty());
 }
 
-/// A tracking ticket is filed with the tracking label alone, so a board that
-/// requires another key is told why it can't take one, rather than that the
-/// tracking label is missing.
+/// A link listing fixed values can't name every RFD.
 #[test]
-fn a_board_requiring_another_label_is_named_as_the_reason() {
+fn the_link_has_to_take_any_value() {
+    let workspace = workspace();
+
+    for declared in [
+        r#"{"tracking-rfd": {}, "type": {"values": ["tracking"]}}"#,
+        r#"{"tracking-rfd": {"values": ["042"]}, "type": {"values": ["tracking"]}}"#,
+    ] {
+        let vocabulary = Vocabulary::parse(declared).unwrap();
+
+        assert_eq!(
+            track(
+                &workspace.paths,
+                &vocabulary,
+                &links(),
+                id("116"),
+                &filer(),
+                &mut unread
+            )
+            .unwrap_err(),
+            "RFD tracking needs `tracking-rfd` to take any value: set `values = []` under \
+             `plugins.command.ticket.options.labels.tracking-rfd`.",
+            "{declared}"
+        );
+    }
+    assert!(ticket_files(&workspace).is_empty());
+}
+
+/// A board that requires another key, or refuses a label the ticket is filed
+/// with, is named as the reason.
+#[test]
+fn a_board_refusing_the_other_labels_is_named_as_the_reason() {
     let workspace = workspace();
     let vocabulary = Vocabulary::parse(
         r#"{
+            "tracking-rfd": {"values": []},
             "type": {"values": ["tracking"], "min": 1, "max": 1},
             "area": {"values": ["cli"], "min": 1}
         }"#,
@@ -529,36 +572,65 @@ fn a_board_requiring_another_label_is_named_as_the_reason() {
         track(
             &workspace.paths,
             &vocabulary,
+            &links(),
             id("116"),
             &filer(),
             &mut unread
         )
         .unwrap_err(),
-        "A tracking ticket is filed with only `type=tracking`, and this board needs more. `area` \
-         label missing: add one of area=cli."
+        "A tracking ticket is filed with `tracking-rfd=116` and `type=tracking`, and the ticket \
+         board refuses them. `area` label missing: add one of area=cli."
     );
     assert!(ticket_files(&workspace).is_empty());
 }
 
-/// A board that defines no labels takes any, so it takes the tracking label.
+/// A board that defines no labels takes any, so it takes the link.
 #[test]
-fn a_board_without_labels_takes_the_tracking_label() {
+fn a_board_without_labels_takes_the_link() {
     let workspace = workspace();
 
     let tracked = track(
         &workspace.paths,
         &Vocabulary::default(),
+        &Links::default(),
         id("116"),
         &filer(),
         &mut |_| Ok(phases()),
     )
     .unwrap();
 
-    assert!(
-        read_ticket(&workspace, tracked.ticket).contains("- **Label**: type=tracking\n"),
-        "{}",
-        read_ticket(&workspace, tracked.ticket)
+    let text = read_ticket(&workspace, tracked.ticket);
+    assert!(text.contains("- **Label**: tracking-rfd=116\n"), "{text}");
+    assert!(!text.contains("type=tracking"), "{text}");
+}
+
+/// A board that names its link its own way tracks under that name.
+#[test]
+fn the_link_key_is_the_configured_one() {
+    let workspace = workspace();
+    let links = Links {
+        tracking: "tracks".to_owned(),
+        relevant: "rfd".to_owned(),
+        filed_with: vec![],
+    };
+    workspace.write(
+        "docs/ticket/02wt0k1-old-style.md",
+        &ticket("Old style", "Todo", &[("Label", "tracking-rfd=116")], ""),
     );
+
+    let tracked = track(
+        &workspace.paths,
+        &Vocabulary::default(),
+        &links,
+        id("116"),
+        &filer(),
+        &mut |_| Ok(phases()),
+    )
+    .unwrap();
+
+    // The ticket under the default key tracks nothing on this board.
+    assert_ne!(tracked.ticket.to_string(), "T-02wt0k1");
+    assert!(read_ticket(&workspace, tracked.ticket).contains("- **Label**: tracks=116\n"));
 }
 
 /// An interrupted read must not file a ticket without its plan.
@@ -569,6 +641,7 @@ fn an_interrupted_plan_read_files_nothing() {
     let error = track(
         &workspace.paths,
         &vocabulary(),
+        &links(),
         id("116"),
         &filer(),
         &mut |_| Err("Interrupted.".to_owned()),
@@ -586,6 +659,7 @@ fn start_files_the_ticket_and_moves_it_to_in_progress() {
     let output = start(
         &workspace.paths,
         &vocabulary(),
+        &links(),
         id("116"),
         &filer(),
         &mut |_| Ok(phases()),
@@ -612,6 +686,7 @@ fn start_files_the_ticket_and_moves_it_to_in_progress() {
     let again = start(
         &workspace.paths,
         &vocabulary(),
+        &links(),
         id("116"),
         &filer(),
         &mut |_| {
@@ -640,12 +715,12 @@ fn stop_moves_the_ticket_back_to_todo_whatever_the_rfd_says() {
         &ticket(
             "Discussed",
             "In Progress",
-            &[("Implements", "117"), ("Label", "type=tracking")],
+            &[("Label", "tracking-rfd=117")],
             "",
         ),
     );
 
-    let output = stop(&workspace.paths, id("117")).unwrap();
+    let output = stop(&workspace.paths, &links(), id("117")).unwrap();
 
     assert_eq!(
         output.text,
@@ -658,7 +733,7 @@ fn stop_moves_the_ticket_back_to_todo_whatever_the_rfd_says() {
     );
 
     assert_eq!(
-        stop(&workspace.paths, id("117")).unwrap().text,
+        stop(&workspace.paths, &links(), id("117")).unwrap().text,
         "docs/ticket/02wt0k1-discussed.md: already Todo\n"
     );
 }
@@ -667,7 +742,7 @@ fn stop_moves_the_ticket_back_to_todo_whatever_the_rfd_says() {
 fn stop_without_a_ticket_files_nothing() {
     let workspace = workspace();
 
-    let output = stop(&workspace.paths, id("116")).unwrap();
+    let output = stop(&workspace.paths, &links(), id("116")).unwrap();
 
     assert_eq!(
         output.text,
@@ -675,7 +750,7 @@ fn stop_without_a_ticket_files_nothing() {
     );
     assert!(ticket_files(&workspace).is_empty());
     assert_eq!(
-        stop(&workspace.paths, id("099")).unwrap_err(),
+        stop(&workspace.paths, &links(), id("099")).unwrap_err(),
         "No RFD found with number 099."
     );
 }
@@ -689,7 +764,7 @@ fn a_second_tracking_ticket_is_reported_and_the_first_used() {
         &ticket(
             "Again",
             "Todo",
-            &[("Implements", "RFD 116"), ("Label", "type=tracking")],
+            &[("Label", "tracking-rfd=RFD 116")],
             "Second.",
         ),
     );
@@ -697,6 +772,7 @@ fn a_second_tracking_ticket_is_reported_and_the_first_used() {
     let tracked = track(
         &workspace.paths,
         &vocabulary(),
+        &links(),
         id("116"),
         &filer(),
         &mut unread,
@@ -721,6 +797,7 @@ fn an_unreadable_ticket_is_reported_when_filing() {
     let tracked = track(
         &workspace.paths,
         &vocabulary(),
+        &links(),
         id("116"),
         &filer(),
         &mut |_| Ok(phases()),
@@ -745,9 +822,14 @@ fn the_link_to_the_rfd_is_relative_to_the_ticket_directory() {
     );
     fs::create_dir_all(&paths.tickets).unwrap();
 
-    let tracked = track(&paths, &vocabulary(), id("116"), &filer(), &mut |_| {
-        Ok(phases())
-    })
+    let tracked = track(
+        &paths,
+        &vocabulary(),
+        &links(),
+        id("116"),
+        &filer(),
+        &mut |_| Ok(phases()),
+    )
     .unwrap();
 
     let path = store::locate_ticket(&paths.tickets, tracked.ticket).unwrap();

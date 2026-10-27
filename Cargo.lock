@@ -2146,6 +2146,7 @@ dependencies = [
  "comfort",
  "ignore",
  "jp_config",
+ "jp_label",
  "jp_plugin",
  "jp_tool",
  "regex",

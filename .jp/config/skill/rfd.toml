@@ -21,9 +21,6 @@ rfd_supersede = { enable = true, run = "allow" }
 rfd_abandon = { enable = true, run = "allow" }
 rfd_extend = { enable = true, run = "allow" }
 rfd_require = { enable = true, run = "allow" }
-rfd_track = { enable = true, run = "allow" }
-rfd_start = { enable = true, run = "allow" }
-rfd_stop = { enable = true, run = "allow" }
 
 fs_modify_file = { enable = true, run = "allow" }
 fs_create_file.questions.overwrite_file.answer = true
@@ -57,8 +54,8 @@ as the authoritative reference for all RFD conventions.
 
 `rfd_list` lists the RFDs in priority order: their rank on the board, \
 status, and whether they are in development. `rfd_show` reads one RFD's \
-metadata, its relationships, and where it stands on the board; with \
-`body: true` it adds the document's sections.
+metadata, its relationships, where it stands on the board, and the tickets \
+naming it; with `body: true` it adds the document's sections.
 
 `rfd_draft` creates new RFD drafts under `docs/rfd/drafts/` as DNN-slug.md \
 (e.g. docs/rfd/drafts/D01-my-feature.md). Drafts are not published to the \
@@ -69,13 +66,16 @@ status, which also moves the file up to `docs/rfd/`.
 `rfd_promote` handles deferred numbering: for DNN-prefixed drafts, it \
 assigns the next available permanent number and renames the file. When \
 promoting to Accepted, it offers to file the RFD's tracking ticket at a \
-terminal; when it can't ask, file it with `rfd_track` once the user wants it.
+terminal; when it can't ask, it names the labels to file one with.
 
-`rfd_track` files or refreshes an Accepted or Implemented RFD's tracking \
-ticket, `rfd_start` marks the RFD in development by moving that ticket to In \
-Progress, and `rfd_stop` moves it back to Todo. A ticket filed through a tool \
-holds a marker in place of the Implementation Plan until `jp rfd track` runs \
-at a terminal.
+An RFD's implementation is tracked on the ticket board. Its tracking ticket \
+carries `tracking-rfd=NNN`, and a ticket whose work belongs to it carries \
+`relevant-rfd=NNN`; `rfd_show` lists both. An Accepted or Implemented RFD \
+without a tracking ticket gets one with `ticket_create` once the user wants \
+it: the labels `rfd_show` names, and the phases of the RFD's Implementation \
+Plan as its description. The RFD is in development while its tracking ticket \
+is In Progress, so starting or stopping the work is a `ticket_edit` of that \
+ticket's status.
 
 Promoting a draft to Discussion publishes it, and a published RFD needs a \
 `- **Summary**:` metadata field or the docs build fails. Nothing writes \

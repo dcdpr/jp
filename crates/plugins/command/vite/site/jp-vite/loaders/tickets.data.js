@@ -5,7 +5,7 @@ import { assembleBoard } from './ticket-shared.mjs'
 //
 // Both pages read the same loader: the index lists every ticket regardless of
 // status, and the board takes the columns, which are ordered by the board file,
-// `.board.json`, and capped in Done.
+// `.board.json`, and the number of Done tickets it shows when unfiltered.
 
 // What to watch: the settings, which name the ticket directory, and the
 // tickets themselves. Paths are relative to this file, which sits three levels
@@ -20,8 +20,8 @@ function watched() {
 export default {
     watch: watched(),
     load() {
-        const { tickets, columns } = assembleBoard()
+        const { tickets, columns, doneLimit } = assembleBoard()
 
-        return { tickets, columns }
+        return { tickets, columns, doneLimit }
     },
 }

@@ -3,8 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 
 import { data } from '../loaders/rfd-board.data.js'
 import { normalizePriority, TERMINAL_STATUSES } from '../loaders/rfd-priority.mjs'
-import settings from '../settings.json'
-import { createSortable, isDev, loadBoard, postBoard, saveBoard } from './board.mjs'
+import { createSortable, isDev, loadBoard, saveBoard } from './board.mjs'
 import { problem } from './problem.mjs'
 
 // The RFD priority board, which a page renders with `<RfdBoard />`.
@@ -100,62 +99,20 @@ function buildRows(p) {
 
 const items = ref([])
 
-// Which RFDs are being implemented: their tracking ticket sits in the In
-// Progress column. Seeded from ticket state, refreshed on mount, and updated in
-// place as the checkbox writes, because the data loader caches for the dev
-// server's lifetime and `entries` never carries a write back.
+// What the tickets say about each RFD: which are being implemented, because
+// their tracking ticket sits in the In Progress column, and how many tickets
+// name each. Work starts and stops on the ticket board, so the dev server
+// re-reads both on mount: the data loader caches for its lifetime.
 const inDev = ref(
     new Set(data.entries.filter(e => e.inDevelopment).map(e => e.num))
 )
+const ticketCounts = ref(
+    Object.fromEntries(data.entries.map(e => [e.num, e.ticketCount ?? 0]))
+)
 
-// Statuses whose RFDs can be marked in development. `jp rfd start` refuses
-// anything earlier, where implementation has not begun (see RFD 001).
-const TRACKABLE_STATUSES = new Set(['Accepted', 'Implemented'])
-
-// Whether to offer the checkbox. An RFD already marked keeps it whatever its
-// status, so a mark left behind by an RFD moving back to Discussion can still
-// be turned off. A project without tickets has nowhere to track one.
-function canToggleDev(rfd) {
-    if (!settings.ticket) return false
-    return TRACKABLE_STATUSES.has(rfd.status) || inDev.value.has(rfd.num)
-}
-
-// RFDs with a checkbox write in flight, so a second click doesn't race the
-// first.
-const devPending = ref(new Set())
-
-// Mark an RFD as in development, or stop it, by moving its tracking ticket.
-//
-// Local state moves only once the endpoint has written the ticket, so a failed
-// write leaves the board showing what the tickets hold. The checkbox is a DOM
-// input that has already flipped by then, and Vue does not re-render an
-// unchanged value, so it is put back by hand.
-async function toggleDev(rfd, event) {
-    if (devPending.value.has(rfd.num)) return
-
-    const active = !inDev.value.has(rfd.num)
-    devPending.value = new Set(devPending.value).add(rfd.num)
-
-    const { ok, output } = await postBoard('/__rfd-development', {
-        num: rfd.num,
-        active,
-    })
-
-    const pending = new Set(devPending.value)
-    pending.delete(rfd.num)
-    devPending.value = pending
-
-    if (!ok) {
-        if (event?.target) event.target.checked = !active
-        setNotice(output, 'err', 8000)
-        return
-    }
-
-    const marked = new Set(inDev.value)
-    if (active) marked.add(rfd.num)
-    else marked.delete(rfd.num)
-    inDev.value = marked
-    setNotice(output || (active ? 'In development' : 'Back in Todo'), 'ok', 4000)
+// `3 tickets`, for the link to an RFD's tickets on the ticket board.
+function ticketsLabel(count) {
+    return `${count} ${count === 1 ? 'ticket' : 'tickets'}`
 }
 
 // Initial board state from the build-time data. On the dev server the same
@@ -512,19 +469,22 @@ async function loadFreshPriority() {
     if (fresh) applyPriority(fresh)
 }
 
-// Re-read which RFDs are in development. Writing a ticket file reloads the
-// page, and the cached loader data shows the state the page was built with.
-async function loadFreshInDev() {
-    const fresh = await loadBoard('/__rfd-development')
+// Re-read what the tickets say. They change on the ticket board, and the
+// cached loader data shows the state the page was built with.
+async function loadFreshTickets() {
+    const fresh = await loadBoard('/__rfd-tickets')
     if (Array.isArray(fresh?.inDevelopment)) {
         inDev.value = new Set(fresh.inDevelopment)
+    }
+    if (fresh?.ticketCounts) {
+        ticketCounts.value = fresh.ticketCounts
     }
 }
 
 onMounted(() => {
     if (!isDev) return
     loadFreshPriority()
-    loadFreshInDev()
+    loadFreshTickets()
     import('sortablejs').then(({ default: Sortable }) => {
         if (!listRef.value) return
         sortable = Sortable.create(listRef.value, {
@@ -535,8 +495,8 @@ onMounted(() => {
             delay: 150,
             delayOnTouchOnly: true,
             touchStartThreshold: 5,
-            // Drag from anywhere on the row, except the link, dev toggle, and
-            // jump buttons, which stay clickable.
+            // Drag from anywhere on the row, except the links and the jump
+            // buttons, which stay clickable.
             filter: 'a, input, label, button, .rfd-board-addzone',
             preventOnFilter: false,
             ghostClass: 'rfd-board-ghost',
@@ -561,7 +521,7 @@ onBeforeUnmount(() => {
 <div v-if="!problem" class="rfd-board">
     <div v-if="isDev" class="rfd-board-status">
         <span v-if="notice" :class="'rfd-board-' + notice.kind">{{ notice.text }}</span>
-        <span v-else class="rfd-board-hint">Drag a row to reorder; hover the gap between rows to add a milestone; tick <code>dev</code> to start an RFD. Changes save automatically.</span>
+        <span v-else class="rfd-board-hint">Drag a row to reorder; hover the gap between rows to add a milestone. Changes save automatically. An RFD is in development while its tracking ticket is In Progress on the ticket board.</span>
     </div>
     <p v-else class="rfd-board-note">
         The active backlog in priority order. Top of the list is worked on first.
@@ -640,24 +600,16 @@ onBeforeUnmount(() => {
                         <a :href="rfd.path" target="_blank" rel="noopener" class="rfd-board-title">{{ rfd.title }}</a>
                         <span v-if="inDev.has(rfd.num)" class="doc-badge doc-badge--indev">in development</span>
                         <span class="doc-badge" :class="statusClass(rfd.status)">{{ rfd.status }}</span>
+                        <a
+                            v-if="rfd.ticketsPath && ticketCounts[rfd.num]"
+                            :href="rfd.ticketsPath"
+                            class="rfd-board-tickets"
+                            title="The tickets naming this RFD, on the ticket board"
+                        >{{ ticketsLabel(ticketCounts[rfd.num]) }}</a>
                         <span v-if="dragNum && requiredSet.has(rfd.num)" class="doc-badge rfd-board-reqpill">required by RFD {{ dragNum }}</span>
                     </div>
                     <div v-if="rfd.summary" class="rfd-board-summary">{{ rfd.summary }}</div>
                 </div>
-                <label
-                    v-if="isDev && canToggleDev(rfd)"
-                    class="rfd-board-devtoggle"
-                    :class="{ 'is-pending': devPending.has(rfd.num) }"
-                    title="Mark as in development: files the RFD's tracking ticket if it has none, and moves it to In Progress"
-                >
-                    <input
-                        type="checkbox"
-                        :checked="inDev.has(rfd.num)"
-                        :disabled="devPending.has(rfd.num)"
-                        @change="toggleDev(rfd, $event)"
-                    />
-                    dev
-                </label>
                 <span v-if="isDev" class="rfd-board-jump">
                     <button class="rfd-board-jump-btn" title="Move to top of section" @click="moveTo(rfd, 'top')">▲</button>
                     <button class="rfd-board-jump-btn" title="Move to bottom of section" @click="moveTo(rfd, 'bottom')">▼</button>
@@ -888,17 +840,8 @@ onBeforeUnmount(() => {
     /* Align under the title: past the number gutter (min-width) + titlerow gap. */
     margin-left: 2.7rem;
 }
-.rfd-board-devtoggle {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
+.rfd-board-tickets {
     font-size: 0.75rem;
-    color: var(--vp-c-text-3);
-    cursor: pointer;
     white-space: nowrap;
-}
-.rfd-board-devtoggle.is-pending {
-    cursor: progress;
-    opacity: 0.5;
 }
 </style>

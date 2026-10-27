@@ -9,8 +9,8 @@
 //! The RFD directory is resolved against the workspace root from the host's
 //! `init` message, so the commands work from any subdirectory.
 //!
-//! [`board`] reads the RFDs, the priority board, and the tracking tickets into
-//! one view, and [`render`] prints it.
+//! [`board`] reads the RFDs, the priority board, and the tickets naming each
+//! RFD ([`links`]) into one view, and [`render`] prints it.
 //! [`cmd`] holds the commands that change RFDs, which write every metadata
 //! change through [`document::Document`].
 //! A command that asks the user something, or reads an RFD's plan through a
@@ -26,6 +26,7 @@ mod cmd;
 mod definitions;
 mod document;
 mod id;
+mod links;
 mod options;
 mod paths;
 mod priority;
@@ -49,7 +50,7 @@ use serde_json::Value;
 use ticket::TicketId;
 
 use crate::{
-    board::Loaded,
+    board::{Entry, Loaded},
     cmd::{
         draft::Draft,
         rank::Place,
@@ -57,6 +58,7 @@ use crate::{
     },
     document::Document,
     id::RfdId,
+    links::Links,
     options::{Options, ticket_dir, ticket_vocabulary},
     paths::Paths,
     render::Sections,
@@ -171,12 +173,6 @@ enum Command {
     Start {
         /// The RFD: a number (`42`, `042`).
         id: RfdId,
-
-        /// Don't read the Implementation Plan now.
-        /// A ticket without it holds a marker in its place until `jp rfd track`
-        /// reads it, so this returns without waiting on a model.
-        #[arg(long)]
-        no_plan: bool,
     },
 
     /// Mark an RFD as no longer in development, moving its tracking ticket back
@@ -421,7 +417,16 @@ struct Context<'a> {
 impl Context<'_> {
     /// Read the board, the way every reading command starts.
     fn board(&self) -> Result<Loaded, String> {
-        board::load(&self.paths.root, &self.paths.rfds, &self.paths.tickets)
+        board::load(
+            &self.paths.root,
+            &self.paths.rfds,
+            Some((&self.paths.tickets, self.links())),
+        )
+    }
+
+    /// The keys tickets name RFDs under.
+    fn links(&self) -> &Links {
+        &self.options.links
     }
 }
 
@@ -575,9 +580,28 @@ fn show(ctx: &Context<'_>, id: RfdId, body: bool) -> Result<Output, String> {
     Ok(Output {
         text,
         json,
+        notes: untracked(paths, ctx.links(), entry).into_iter().collect(),
         warnings,
-        ..Output::default()
     })
+}
+
+/// How to file the tracking ticket of the RFD `entry` describes, when it is far
+/// enough along to carry one and has none; `None` otherwise.
+///
+/// This is what tells the assistant the labels a tracking ticket takes, since
+/// it files one with `ticket_create` rather than with a tool of its own.
+fn untracked(paths: &Paths, links: &Links, entry: &Entry) -> Option<String> {
+    let carries_one = matches!(entry.status.as_deref(), Some("Accepted" | "Implemented"));
+    if !carries_one || !paths.tickets.is_dir() || entry.tickets.iter().any(|t| t.tracking) {
+        return None;
+    }
+    let id: RfdId = entry.num.parse().ok()?;
+
+    Some(format!(
+        "RFD {id} has no tracking ticket. File one as a ticket labelled {}, or with `jp rfd track \
+         {id}`.",
+        links.describe_tracking(id)
+    ))
 }
 
 fn execute<R: BufRead, W: Write>(
@@ -624,27 +648,33 @@ fn execute<R: BufRead, W: Write>(
 
         Command::Track { id } => {
             let vocabulary = ticket_vocabulary(ctx.config)?;
-            let tracked = track::track(paths, &vocabulary, id, &user(ctx)?, &mut |request| {
-                session.read_plan(request)
-            })?;
+            let tracked = track::track(
+                paths,
+                &vocabulary,
+                ctx.links(),
+                id,
+                &user(ctx)?,
+                &mut |request| session.read_plan(request),
+            )?;
 
             let mut output = tracked.report;
             output.text = format!("{}\n", tracked.ticket);
             Ok(output)
         }
 
-        Command::Start { id, no_plan } => {
+        Command::Start { id } => {
             let vocabulary = ticket_vocabulary(ctx.config)?;
-            track::start(paths, &vocabulary, id, &user(ctx)?, &mut |request| {
-                if no_plan {
-                    Ok(Plan::Deferred)
-                } else {
-                    session.read_plan(request)
-                }
-            })
+            track::start(
+                paths,
+                &vocabulary,
+                ctx.links(),
+                id,
+                &user(ctx)?,
+                &mut |request| session.read_plan(request),
+            )
         }
 
-        Command::Stop { id } => track::stop(paths, id),
+        Command::Stop { id } => track::stop(paths, ctx.links(), id),
 
         Command::Extend { id, target } => cmd::relate::extend(paths, id, target),
 
@@ -654,7 +684,9 @@ fn execute<R: BufRead, W: Write>(
 
         Command::Abandon { id, reason } => cmd::abandon::abandon(paths, id, &reason.join(" ")),
 
-        Command::Renumber { id, new } => cmd::renumber::renumber(paths, &id, new.as_deref(), true),
+        Command::Renumber { id, new } => {
+            cmd::renumber::renumber(paths, ctx.links(), &id, new.as_deref(), true)
+        }
 
         Command::Rename { id, title } => cmd::rename::rename(paths, id, &title.join(" "), true),
 
@@ -745,18 +777,43 @@ fn promote<R: BufRead, W: Write>(
     session.emit(&promoted)?;
 
     let mut output = Output::default();
+    let key = &ctx.links().tracking;
+
+    // A board whose labels leave out the link can't take a tracking ticket, so
+    // there is nothing to offer. A vocabulary that doesn't load is left to the
+    // filing to report.
+    if let Ok(vocabulary) = ticket_vocabulary(ctx.config)
+        && !vocabulary.is_empty()
+        && !vocabulary
+            .keys()
+            .any(|known| known.eq_ignore_ascii_case(key))
+    {
+        output.notes.push(format!(
+            "Skipped the tracking ticket: the ticket board doesn't define `{key}`. `jp rfd track \
+             {id}` shows what to add."
+        ));
+        return Ok(output);
+    }
+
     let filed = match session.choose(tracking_offer(id)) {
         Ok(Some(answer)) if answer == FILE_TRACKING_TICKET => user(ctx).and_then(|filer| {
             let vocabulary = ticket_vocabulary(ctx.config)?;
-            track::track(&ctx.paths, &vocabulary, id, &filer, &mut |request| {
-                session.read_plan(request)
-            })
+            track::track(
+                &ctx.paths,
+                &vocabulary,
+                ctx.links(),
+                id,
+                &filer,
+                &mut |request| session.read_plan(request),
+            )
         }),
         // Declined, or nobody at a terminal to ask: acceptance records an
         // agreed direction, not a commitment to start building.
         Ok(_) => {
             output.notes.push(format!(
-                "Skipped the tracking ticket. File it later with `jp rfd track {id}`."
+                "Skipped the tracking ticket. File it later with `jp rfd track {id}`, or as a \
+                 ticket labelled {}.",
+                ctx.links().describe_tracking(id)
             ));
             return Ok(output);
         }

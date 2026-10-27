@@ -46,8 +46,7 @@ fn workspace() -> Utf8TempDir {
             "- **Status**: In Progress\n",
             "- **Authors**: jp\n",
             "- **Date**: 2026-08-05\n",
-            "- **Implements**: 042\n",
-            "- **Label**: type=tracking\n",
+            "- **Label**: tracking-rfd=042\n",
         ),
     )
     .unwrap();
@@ -425,10 +424,9 @@ fn show_body_adds_the_documents_sections() {
 
     let (text, code, _) = printed(&exchange(&init(root.path(), &["show", "42", "--body"])));
     assert_eq!(code, 0);
-    assert!(
-        text.ends_with("- **In development**: yes\n\n## Summary\n\nThings, in order.\n"),
-        "{text}"
-    );
+    let shown = "- **Tracking ticket**: T-02wt0k1 [In Progress] Ordered things\n\n## \
+                 Summary\n\nThings, in order.\n";
+    assert!(text.ends_with(shown), "{text}");
 
     let (text, _, _) = printed(&exchange(&init_json(root.path(), &[
         "show", "42", "--body",
@@ -661,14 +659,6 @@ fn track_start_and_stop_take_an_id() {
         parse(&["start", "116"]).unwrap().command,
         Command::Start {
             id: RfdId::Published(116),
-            no_plan: false,
-        }
-    ));
-    assert!(matches!(
-        parse(&["start", "116", "--no-plan"]).unwrap().command,
-        Command::Start {
-            id: RfdId::Published(116),
-            no_plan: true,
         }
     ));
     assert!(matches!(
@@ -699,14 +689,21 @@ fn trackable() -> Utf8TempDir {
 }
 
 /// The init for running `args`, attributed to a configured user, on a board
-/// whose ticket vocabulary defines the tracking label.
+/// whose ticket vocabulary takes the link a tracking ticket carries.
 fn init_by_jane(root: &Utf8Path, args: &[&str]) -> HostToPlugin {
+    init_with_labels(
+        root,
+        args,
+        &json!({ "tracking-rfd": { "description": "The RFD", "values": [] } }),
+    )
+}
+
+/// [`init_by_jane`], on a board whose ticket vocabulary is `labels`.
+fn init_with_labels(root: &Utf8Path, args: &[&str], labels: &Value) -> HostToPlugin {
     let mut message = init_message(root, args);
     message.config = json!({
         "user": { "name": "Jane Doe <jane@example.com>" },
-        "plugins": { "command": { "ticket": { "options": {
-            "labels": { "type": { "description": "The type", "values": ["tracking"] } }
-        } } } }
+        "plugins": { "command": { "ticket": { "options": { "labels": labels } } } }
     });
 
     HostToPlugin::Init(Box::new(message))
@@ -926,7 +923,10 @@ fn a_declined_or_unanswerable_offer_files_nothing() {
         assert_eq!(code, 0, "{answer:?}");
         assert_eq!(
             chrome(&messages),
-            ["Skipped the tracking ticket. File it later with `jp rfd track 044`.\n"],
+            [
+                "Skipped the tracking ticket. File it later with `jp rfd track 044`, or as a \
+                 ticket labelled `tracking-rfd=044`.\n"
+            ],
             "{answer:?}"
         );
         assert!(queries(&messages).is_empty(), "{answer:?}");
@@ -938,20 +938,39 @@ fn a_declined_or_unanswerable_offer_files_nothing() {
     }
 }
 
+/// A board whose labels leave out the link can't take a tracking ticket, so
+/// acceptance offers none and says why.
+#[test]
+fn a_board_without_the_link_is_offered_no_tracking_ticket() {
+    let root = trackable();
+
+    let messages = exchange(&init_with_labels(
+        root.path(),
+        &["promote", "44"],
+        &json!({ "type": { "description": "The type", "values": ["bug"] } }),
+    ));
+
+    assert_eq!(printed(&messages).1, 0);
+    assert!(questions(&messages).is_empty(), "{messages:?}");
+    let skipped = "Skipped the tracking ticket: the ticket board doesn't define `tracking-rfd`. \
+                   `jp rfd track 044` shows what to add.\n";
+    assert_eq!(chrome(&messages), [skipped]);
+}
+
 /// A ticket that can't be filed doesn't undo the promotion before it.
 #[test]
 fn a_tracking_ticket_that_cannot_be_filed_leaves_the_promotion() {
     let root = trackable();
-    let mut unlabelled = init_message(root.path(), &["promote", "44"]);
-    unlabelled.config = json!({
-        "user": { "name": "Jane Doe <jane@example.com>" },
-        "plugins": { "command": { "ticket": { "options": {
-            "labels": { "type": { "description": "The type", "values": ["bug"] } }
-        } } } }
-    });
 
     let messages = exchange_all(&[
-        HostToPlugin::Init(Box::new(unlabelled)),
+        init_with_labels(
+            root.path(),
+            &["promote", "44"],
+            &json!({
+                "tracking-rfd": { "description": "The RFD", "values": [] },
+                "area": { "description": "The area", "values": ["cli"], "min": 1 }
+            }),
+        ),
         HostToPlugin::Composed(ComposeResponse {
             id: None,
             text: Some("file".to_owned()),
@@ -961,10 +980,15 @@ fn a_tracking_ticket_that_cannot_be_filed_leaves_the_promotion() {
 
     let (_, code, _) = printed(&messages);
     assert_eq!(code, 0);
-    let warning = "Could not file the tracking ticket: Tracking label missing. Add `\"tracking\"` \
-                   to `plugins.command.ticket.options.labels.type.values`.\nRun `jp rfd track \
-                   044` to retry.\n";
+    let warning = "Could not file the tracking ticket: A tracking ticket is filed with \
+                   `tracking-rfd=044`, and the ticket board refuses them. `area` label missing: \
+                   add one of area=cli.\nRun `jp rfd track 044` to retry.\n";
     assert_eq!(chrome(&messages), [warning]);
+    assert!(
+        fs::read_to_string(root.path().join("docs/rfd/044-discussed.md"))
+            .unwrap()
+            .contains("- **Status**: Accepted\n")
+    );
 }
 
 /// Only acceptance offers the ticket, and a project without tickets is never
@@ -1004,38 +1028,20 @@ fn start_and_stop_move_the_tracking_ticket() {
     assert!(queries(&stopped).is_empty());
 }
 
-/// `--no-plan` files the ticket without waiting on a model, and a later `track`
-/// reads the plan into it.
+/// An RFD far enough along to carry a tracking ticket, and without one, is
+/// shown with how to file it.
 #[test]
-fn start_without_the_plan_leaves_it_for_track() {
+fn show_says_how_to_file_a_missing_tracking_ticket() {
     let root = trackable();
 
-    let started = exchange(&init_by_jane(root.path(), &["start", "43", "--no-plan"]));
-    assert!(queries(&started).is_empty(), "{started:?}");
-    let (text, code, _) = printed(&started);
-    assert_eq!(code, 0);
-    assert!(text.ends_with(": Todo -> In Progress\n"), "{text}");
-    let note = "The tracking ticket holds `<!-- rfd-plan: pending -->` in place of the \
-                Implementation Plan of RFD 043 until `jp rfd track 043` reads it.\n";
-    assert!(chrome(&started).contains(&note), "{started:?}");
-    assert!(
-        tracking_ticket(&root)
-            .unwrap()
-            .ends_with("<!-- rfd-plan: pending -->\n")
-    );
+    let untracked = exchange(&init_by_jane(root.path(), &["show", "43"]));
+    let note = "RFD 043 has no tracking ticket. File one as a ticket labelled `tracking-rfd=043`, \
+                or with `jp rfd track 043`.\n";
+    assert_eq!(chrome(&untracked), [note]);
 
-    let [created, complete] = plan_answered(one_phase());
-    let tracked = exchange_all(&[
-        init_by_jane(root.path(), &["track", "43"]),
-        created,
-        complete,
-    ]);
-    assert_eq!(printed(&tracked).1, 0);
-
-    let ticket = tracking_ticket(&root).unwrap();
-    assert!(ticket.contains("- **Status**: In Progress\n"), "{ticket}");
-    assert!(
-        ticket.ends_with("## Implementation plan\n\n- **Order things**: Keeps them in order.\n"),
-        "{ticket}"
-    );
+    // RFD 042 has one, and RFD 044 is still in Discussion.
+    for id in ["42", "44"] {
+        let messages = exchange(&init_by_jane(root.path(), &["show", id]));
+        assert!(chrome(&messages).is_empty(), "{id}: {messages:?}");
+    }
 }

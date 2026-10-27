@@ -2,13 +2,14 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { readSettings, workflowDir, workflowPath } from '../settings.mjs'
+import { anyLabelQuery } from '../theme/label-filter.mjs'
 import { field, wrappedField } from './metadata.mjs'
 import {
     checkMilestones,
     normalizePriority,
     TERMINAL_STATUSES,
 } from './rfd-priority.mjs'
-import { inDevelopmentRfds, loadTickets } from './ticket-shared.mjs'
+import { loadTickets } from './ticket-shared.mjs'
 
 // Shared parsing and validation for the RFD data loaders.
 //
@@ -186,16 +187,121 @@ export function mergePriority(entries, priority) {
     }
 }
 
-// Mark the RFDs someone is currently implementing.
+// The label keys tickets name RFDs under, as `jp rfd` is configured.
 //
-// Derived from the tickets: an RFD is in development when its tracking ticket
-// sits in the In Progress column. The board file records nothing about this, so
-// moving or closing that ticket is what changes the flag.
-export function mergeInDevelopment(entries, tickets) {
-    const inDev = new Set(inDevelopmentRfds(tickets))
-    for (const entry of entries) {
-        entry.inDevelopment = inDev.has(entry.num)
+// A ticket labelled with the tracking key, `tracking-rfd=116` by default, is
+// the RFD's tracking ticket; one labelled with the relevant key,
+// `relevant-rfd=116`, is part of its work.
+export function linkKeys(settings = readSettings()) {
+    return {
+        tracking: settings.rfd?.trackingKey ?? 'tracking-rfd',
+        relevant: settings.rfd?.relevantKey ?? 'relevant-rfd',
     }
+}
+
+// An RFD id the way `jp rfd` reads one, `116`, `RFD 116`, or `d5`, in its
+// canonical form, `116` or `D05`; `null` for text that names no RFD.
+export function canonicalRfd(text) {
+    const id = text.trim().replace(/^RFD\s+/i, '')
+    if (/^D\d{1,2}$/i.test(id)) return `D${id.slice(1).padStart(2, '0')}`
+    if (/^\d{1,3}$/.test(id)) return id.padStart(3, '0')
+
+    return null
+}
+
+// The key and value of `label`, the key as written; the value is `null` for a
+// bare label.
+function splitLabel(label) {
+    const split = label.indexOf('=')
+    if (split < 0) return { key: label, value: null }
+
+    return { key: label.slice(0, split), value: label.slice(split + 1) }
+}
+
+// Whether `key` is `wanted`, without case, the way `jp ticket` matches keys.
+function sameKey(key, wanted) {
+    return key.toLowerCase() === wanted.toLowerCase()
+}
+
+// What the tickets say about each RFD, by its canonical id: whether it is in
+// development, and the ids of the tickets naming it either way.
+//
+// An RFD is in development while a ticket tracking it sits in the In Progress
+// column. The board file records nothing about this, so moving that ticket is
+// what changes it.
+export function rfdTickets(tickets, settings = readSettings()) {
+    const keys = linkKeys(settings)
+    const byRfd = new Map()
+    const at = num => {
+        if (!byRfd.has(num)) byRfd.set(num, { inDevelopment: false, tickets: new Set() })
+        return byRfd.get(num)
+    }
+
+    for (const ticket of tickets) {
+        for (const label of ticket.labels) {
+            const { key, value } = splitLabel(label)
+            const num = value === null ? null : canonicalRfd(value)
+            if (!num) continue
+
+            if (sameKey(key, keys.tracking)) {
+                const linked = at(num)
+                linked.tickets.add(ticket.id)
+                if (ticket.status === 'In Progress') linked.inDevelopment = true
+            } else if (sameKey(key, keys.relevant)) {
+                at(num).tickets.add(ticket.id)
+            }
+        }
+    }
+
+    return byRfd
+}
+
+// Mark each RFD with what its tickets say: `inDevelopment`, `ticketCount`, and
+// `ticketsPath`, the ticket board showing them, or `null` in a project without
+// tickets.
+//
+// The board finds them by their labels, so the link names both keys and the
+// board knows nothing about RFDs.
+export function mergeTickets(entries, tickets, settings = readSettings()) {
+    const keys = linkKeys(settings)
+    const board = workflowPath(settings, 'ticket')
+    const byRfd = rfdTickets(tickets, settings)
+
+    for (const entry of entries) {
+        const linked = byRfd.get(entry.num)
+        entry.inDevelopment = linked?.inDevelopment ?? false
+        entry.ticketCount = linked?.tickets.size ?? 0
+        entry.ticketsPath = board
+            ? `${board}/board${anyLabelQuery([
+                `${keys.tracking}=${entry.num}`,
+                `${keys.relevant}=${entry.num}`,
+            ])}`
+            : null
+    }
+}
+
+// Tickets whose link labels name no RFD, or name one in a spelling other than
+// its id.
+//
+// `jp rfd` reads `relevant-rfd=91` as RFD 091, but the board's filter, `unique`,
+// and every other reader compare a label as written, and miss it. A value
+// naming no RFD, such as a typo, links nothing at all.
+export function findBrokenRfdLinks(tickets, known, settings = readSettings()) {
+    const keys = linkKeys(settings)
+    const broken = []
+    for (const ticket of tickets) {
+        for (const label of ticket.labels) {
+            const { key, value } = splitLabel(label)
+            if (!sameKey(key, keys.tracking) && !sameKey(key, keys.relevant)) continue
+            if (value === null || !known.has(value)) broken.push(`  ${ticket.id}: ${label}`)
+        }
+    }
+
+    if (broken.length === 0) return null
+
+    return `Tickets link to RFDs that don't exist, or by an id spelled another way:\n` +
+        `${broken.join('\n')}\n\n` +
+        `Write the RFD's id the way \`jp rfd list\` shows it, such as \`042\` or \`D05\`.`
 }
 
 // Attach each entry's hard ordering dependencies (Requires ∪ Extends) as an
@@ -639,15 +745,16 @@ export function checkRequiresOnImplemented(graph) {
 }
 
 // Assemble the full priority board: every published RFD and prioritisable
-// draft, annotated with board position (`priority`), in-development flag (from
-// the RFD's tracking ticket), and hard dependencies (`dependsOn`). Entries not
+// draft, annotated with board position (`priority`), what the tickets naming
+// it say (see `mergeTickets`), and hard dependencies (`dependsOn`). Entries not
 // placed on the board — including terminal RFDs — carry `priority: null`.
 //
 // Returns the entries alongside the normalized `priority` record so callers
 // can tell the prioritised `order` — and its milestone groups, `planned` —
 // from the unsorted `backlog` (the cutoff sits at `priority.order.length`).
-// Throws when the board references an unknown id (see `checkPriority`) or
-// when the milestone groups are malformed (see `checkMilestones`).
+// Throws when the board references an unknown id (see `checkPriority`), when
+// the milestone groups are malformed (see `checkMilestones`), or when a ticket
+// links to an RFD that isn't there (see `findBrokenRfdLinks`).
 //
 // A project without RFDs has an empty board.
 export function assembleBoard(settings = readSettings()) {
@@ -670,11 +777,15 @@ export function assembleBoard(settings = readSettings()) {
     ])
 
     const priority = loadPriority(rfds.priority)
+    const tickets = loadTickets(settings)
     mergePriority(entries, priority)
-    mergeInDevelopment(entries, loadTickets(settings))
+    mergeTickets(entries, tickets, settings)
     mergeDependencies(entries, graph)
 
-    const error = checkPriority(entries, priority) ?? checkMilestones(priority.planned)
+    const known = new Set(entries.map(entry => entry.num))
+    const error = checkPriority(entries, priority) ??
+        checkMilestones(priority.planned) ??
+        findBrokenRfdLinks(tickets, known, settings)
     if (error) throw new Error(error)
 
     return { entries, priority }

@@ -33,8 +33,8 @@ fn workspace() -> Utf8TempDir {
     .unwrap();
     fs::write(
         tickets.join("02wt0k1-track.md"),
-        "# Ordered things\n\n- **Status**: In Progress\n- **Kind**: Feature\n- **Authors**: jp\n- \
-         **Date**: 2026-08-05\n- **Implements**: 042\n- **Label**: type=tracking\n",
+        "# Ordered things\n\n- **Status**: In Progress\n- **Authors**: jp\n- **Date**: \
+         2026-08-05\n- **Label**: tracking-rfd=042\n",
     )
     .unwrap();
 
@@ -156,10 +156,28 @@ fn show_prints_one_rfd_as_markdown() {
             "- **Category**: Design\n",
             "- **Board**: planned, rank 1\n",
             "- **In development**: yes\n",
+            "- **Tracking ticket**: T-02wt0k1 [In Progress] Ordered things\n",
             "\n",
             "Keeps things in order.\n",
             "```",
         )
+    );
+}
+
+/// The assistant files a tracking ticket with `ticket_create`, so an RFD that
+/// can carry one and has none is shown with the labels it takes.
+#[test]
+fn show_names_the_labels_a_missing_tracking_ticket_takes() {
+    let root = trackable();
+
+    let out = content(run_tool(&root, "show", json!({ "id": "43" })));
+
+    assert!(
+        out.ends_with(
+            "```\nRFD 043 has no tracking ticket. File one as a ticket labelled \
+             `tracking-rfd=043`, or with `jp rfd track 043`."
+        ),
+        "{out}"
     );
 }
 
@@ -182,7 +200,10 @@ fn show_with_the_body_fences_it_past_its_own_code_blocks() {
         "{out}"
     );
     assert!(
-        out.ends_with("- **In development**: yes\n\n## Design\n\n```sh\njp rfd list\n```\n````"),
+        out.ends_with(
+            "- **Tracking ticket**: T-02wt0k1 [In Progress] Ordered things\n\n## \
+             Design\n\n```sh\njp rfd list\n```\n````"
+        ),
         "{out}"
     );
 }
@@ -226,7 +247,7 @@ fn an_unknown_tool_names_the_ones_served() {
     assert_eq!(
         error_message(run_tool(&root, "frobnicate", json!({}))),
         "`jp rfd` serves no tool named `frobnicate`. It serves: abandon, draft, extend, list, \
-         promote, rename, renumber, require, show, start, stop, supersede, track."
+         promote, rename, renumber, require, show, supersede."
     );
 }
 
@@ -633,96 +654,35 @@ fn trackable() -> Utf8TempDir {
     root
 }
 
-/// The tracking ticket RFD 043 got, as written.
-fn tracking_ticket(root: &Utf8TempDir) -> String {
-    let name = fs::read_dir(root.path().join("docs/ticket"))
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-        .find(|name| name.ends_with("-more-order.md"))
-        .expect("a tracking ticket for RFD 043");
-
-    fs::read_to_string(root.path().join("docs/ticket").join(name)).unwrap()
-}
-
-/// The config whose ticket vocabulary defines the tracking label.
-fn with_labels() -> Value {
-    json!({ "plugins": { "command": { "ticket": { "options": {
-        "labels": { "type": { "description": "The type", "values": ["tracking"] } }
-    } } } } })
-}
-
-/// [`with_labels`], also naming who `jp ticket` attributes a tool's tickets to.
-fn with_assistant() -> Value {
-    let mut config = with_labels();
-    config["plugins"]["command"]["ticket"]["options"]["assistant"] = json!("jp");
-
-    config
-}
-
-/// A tool call can't have the plan read, so the ticket is filed with the marker
-/// in its place, attributed to the assistant `jp ticket` names.
+/// A tool call has no terminal to offer the tracking ticket on, so it names the
+/// labels to file it with instead, the configured ones included.
 #[test]
-fn track_files_the_ticket_with_the_plan_pending() {
+fn promoting_to_accepted_names_the_labels_of_the_tracking_ticket_it_skipped() {
     let root = trackable();
+    fs::write(
+        root.path().join("docs/rfd/044-discussed.md"),
+        "# RFD 044: Discussed\n\n- **Status**: Discussion\n",
+    )
+    .unwrap();
+    let options = Options {
+        links: Links {
+            filed_with: vec!["type=tracking".to_owned()],
+            ..Links::default()
+        },
+        ..Options::default()
+    };
 
     let out = content(run(
-        &init(&root, with_assistant()),
-        &call("track", json!({ "id": 43 })),
-        &Options::default(),
-    ));
-
-    assert!(out.starts_with("Filed docs/ticket/"), "{out}");
-    assert!(
-        out.ends_with(
-            "The Implementation Plan of RFD 043 could not be read: a tool call can't ask the host \
-             to run a query. The tracking ticket holds `<!-- rfd-plan: pending -->` in its place \
-             until `jp rfd track 043` reads it.\n"
-        ),
-        "{out}"
-    );
-    let ticket = tracking_ticket(&root);
-    assert!(ticket.contains("- **Authors**: jp\n"), "{ticket}");
-    assert!(ticket.contains("- **Implements**: 043\n"), "{ticket}");
-    assert!(ticket.ends_with("<!-- rfd-plan: pending -->\n"), "{ticket}");
-}
-
-#[test]
-fn start_and_stop_move_the_tracking_ticket() {
-    let root = trackable();
-
-    let started = content(run(
-        &init(&root, with_labels()),
-        &call("start", json!({ "id": "043" })),
-        &Options::default(),
-    ));
-    assert!(started.contains(": Todo -> In Progress\n"), "{started}");
-    let ticket = tracking_ticket(&root);
-    assert!(ticket.contains("- **Status**: In Progress\n"), "{ticket}");
-    assert!(ticket.contains("- **Authors**: assistant\n"), "{ticket}");
-
-    let stopped = content(run_tool(&root, "stop", json!({ "id": "043" })));
-    assert!(stopped.ends_with(": In Progress -> Todo\n"), "{stopped}");
-}
-
-/// Filing a ticket writes in the ticket directory, which the policy has to
-/// allow.
-#[test]
-fn track_has_to_be_allowed_to_write_tickets() {
-    let root = trackable();
-    let rules = vec![
-        FsRule::new("docs/rfd").with_read(true),
-        FsRule::new("docs/ticket").with_read(true),
-    ];
-
-    let message = error_message(run(
         &init(&root, json!({})),
-        &with_policy("track", json!({ "id": "043" }), rules),
-        &Options::default(),
+        &call("promote", json!({ "id": "044" })),
+        &options,
     ));
 
-    assert!(
-        message.starts_with("`track` can't reach the ticket directory: access denied: create on"),
-        "{message}"
+    assert_eq!(
+        out,
+        "docs/rfd/044-discussed.md: Discussion -> Accepted\nSkipped the tracking ticket, which a \
+         tool call doesn't offer. When the work starts, file it as a ticket labelled \
+         `tracking-rfd=044` and `type=tracking`, or with `jp rfd track 044`.\n"
     );
 }
 
@@ -742,7 +702,8 @@ fn promoting_to_accepted_names_the_tracking_ticket_it_skipped() {
     assert_eq!(
         out,
         "docs/rfd/044-discussed.md: Discussion -> Accepted\nSkipped the tracking ticket, which a \
-         tool call doesn't offer. File it with `jp rfd track 044` when the work starts.\n"
+         tool call doesn't offer. When the work starts, file it as a ticket labelled \
+         `tracking-rfd=044`, or with `jp rfd track 044`.\n"
     );
 }
 

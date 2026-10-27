@@ -1,10 +1,11 @@
 //! `jp rfd track`, `start`, and `stop`: an RFD's tracking ticket.
 //!
 //! The tracking ticket stands for an RFD's implementation as a whole: one
-//! ticket carrying `Implements: <id>` and the label `type=tracking`, holding
-//! the RFD's Implementation Plan as its description.
+//! ticket labelled with the tracking key and the RFD's id, `tracking-rfd=116`
+//! by default ([`Links`]), holding the RFD's Implementation Plan as its
+//! description.
 //! A phase that needs a card of its own is filed separately and names the RFD
-//! without the label.
+//! under the relevant key.
 //! An RFD is in development while its tracking ticket is In Progress.
 //!
 //! `track` files the ticket, or finds the one already filed.
@@ -22,9 +23,9 @@ use ticket::{Labels, NewTicket, Status, Ticket, TicketId, Vocabulary, parse, sto
 
 use crate::{
     Output,
-    board::{self, TRACKING_LABEL},
     document::{self, Document},
     id::RfdId,
+    links::Links,
     options::TICKET_LABELS_KEY,
     paths::{self, Paths},
     references,
@@ -65,9 +66,6 @@ pub(crate) enum Plan {
 
     /// The plan couldn't be read, for the reason given.
     Unavailable(String),
-
-    /// The plan wasn't read, on purpose: a later `track` reads it.
-    Deferred,
 }
 
 /// The RFD a plan is read from.
@@ -108,10 +106,12 @@ pub(crate) struct Tracked {
 ///
 /// Only an Accepted or Implemented RFD carries one: implementation begins at
 /// Accepted.
-/// `vocabulary` is the ticket board's, which has to define the tracking label.
+/// `vocabulary` is the ticket board's, which has to take the labels `links`
+/// files a tracking ticket with.
 pub(crate) fn track(
     paths: &Paths,
     vocabulary: &Vocabulary,
+    links: &Links,
     id: RfdId,
     filer: &Filer,
     read_plan: &mut ReadPlan<'_>,
@@ -129,7 +129,7 @@ pub(crate) fn track(
         ));
     }
 
-    let labels = tracking_labels(vocabulary)?;
+    let labels = tracking_labels(vocabulary, links, id)?;
     let entries = store::list(&paths.tickets).map_err(|error| error.to_string())?;
 
     let mut report = Output::default();
@@ -145,7 +145,7 @@ pub(crate) fn track(
         file.file_name().unwrap_or_default(),
     );
 
-    if let Some((ticket, path, existing)) = the_one(paths, id, &entries, &mut report) {
+    if let Some((ticket, path, existing)) = the_one(paths, links, id, &entries, &mut report) {
         if !existing.description.contains(PENDING) {
             report.notes.push(format!(
                 "{} ({ticket}) already tracks RFD {id}.",
@@ -166,7 +166,7 @@ pub(crate) fn track(
         title: &title,
         authors: &filer.author,
         date: &filer.date,
-        implements: Some(&id.to_string()),
+        implements: None,
         labels: &labels,
         description: &description(id, &link, plan.as_deref()),
     })
@@ -202,11 +202,12 @@ pub(crate) fn track(
 pub(crate) fn start(
     paths: &Paths,
     vocabulary: &Vocabulary,
+    links: &Links,
     id: RfdId,
     filer: &Filer,
     read_plan: &mut ReadPlan<'_>,
 ) -> Result<Output, String> {
-    let tracked = track(paths, vocabulary, id, filer, read_plan)?;
+    let tracked = track(paths, vocabulary, links, id, filer, read_plan)?;
     let (path, previous) = store::set_status(&paths.tickets, tracked.ticket, Status::InProgress)
         .map_err(|error| error.to_string())?;
 
@@ -223,13 +224,13 @@ pub(crate) fn start(
 /// back to Discussion still has to be clearable.
 /// An RFD without a tracking ticket is already not in development, so nothing
 /// is filed.
-pub(crate) fn stop(paths: &Paths, id: RfdId) -> Result<Output, String> {
+pub(crate) fn stop(paths: &Paths, links: &Links, id: RfdId) -> Result<Output, String> {
     needs_tickets(paths)?;
     paths.resolve(id)?;
 
     let entries = store::list(&paths.tickets).map_err(|error| error.to_string())?;
     let mut output = Output::default();
-    let Some((ticket, ..)) = the_one(paths, id, &entries, &mut output) else {
+    let Some((ticket, ..)) = the_one(paths, links, id, &entries, &mut output) else {
         output.text = format!("RFD {id} has no tracking ticket; nothing to stop.\n");
         return Ok(output);
     };
@@ -254,39 +255,58 @@ fn needs_tickets(paths: &Paths) -> Result<(), String> {
     ))
 }
 
-/// The labels a tracking ticket is filed with, as the ticket vocabulary spells
-/// them, or a refusal naming what to change.
+/// The labels a tracking ticket for `id` is filed with, as the ticket
+/// vocabulary spells them, or a refusal naming what to change.
 ///
-/// A board that defines no labels takes any, the tracking label among them.
-fn tracking_labels(vocabulary: &Vocabulary) -> Result<Labels, String> {
-    let (key, value) = TRACKING_LABEL;
-    let entry = format!("{TICKET_LABELS_KEY}.{key}");
+/// A board that defines no labels takes any, the link among them.
+fn tracking_labels(vocabulary: &Vocabulary, links: &Links, id: RfdId) -> Result<Labels, String> {
+    let key = &links.tracking;
 
     vocabulary
-        .resolve(&[format!("{key}={value}")])
+        .resolve(&links.tracking_labels(id))
         .map_err(|rejected| {
-            if !rejected.retired.is_empty() {
+            let link = format!("{key}={id}");
+            if rejected
+                .unknown_keys
+                .iter()
+                .any(|unknown| unknown.eq_ignore_ascii_case(key))
+            {
+                enable_tracking(key)
+            } else if rejected
+                .unknown_values
+                .iter()
+                .any(|value| value.eq_ignore_ascii_case(&link))
+            {
                 format!(
-                    "Tracking label retired. Move `\"{value}\"` from `{entry}.retired` to \
-                     `{entry}.values`."
+                    "RFD tracking needs `{key}` to take any value: set `values = []` under \
+                     `{TICKET_LABELS_KEY}.{key}`."
                 )
-            } else if !rejected.unknown_keys.is_empty() || !rejected.unknown_values.is_empty() {
-                format!("Tracking label missing. Add `\"{value}\"` to `{entry}.values`.")
             } else {
-                // The label resolved, and the board's bounds ask for more than
-                // the one label a tracking ticket is filed with.
                 format!(
-                    "A tracking ticket is filed with only `{key}={value}`, and this board needs \
-                     more. {rejected}"
+                    "A tracking ticket is filed with {}, and the ticket board refuses them. \
+                     {rejected}",
+                    links.describe_tracking(id)
                 )
             }
         })
+}
+
+/// What a board has to define before its tickets can track RFDs, ready to paste
+/// into a configuration file.
+pub(crate) fn enable_tracking(key: &str) -> String {
+    format!(
+        "RFD tracking must be enabled first by adding the `{key}` label to the ticket \
+         configuration:\n\n    [{TICKET_LABELS_KEY}.{key}]\n    description = \"The RFD whose \
+         implementation this ticket tracks.\"\n    values = []\n    max = 1\n    unique = \
+         \"key-value\""
+    )
 }
 
 /// RFD `id`'s tracking ticket among `entries`, the first by id when there are
 /// several, which is reported.
 fn the_one<'a>(
     paths: &Paths,
+    links: &Links,
     id: RfdId,
     entries: &'a [store::Entry],
     report: &mut Output,
@@ -295,7 +315,10 @@ fn the_one<'a>(
         .iter()
         .filter_map(|entry| {
             let ticket = entry.ticket.as_ref().ok()?;
-            (board::tracked(ticket) == Some(id)).then_some((entry.id, &entry.path, ticket))
+            links
+                .tracked(&ticket.metadata.labels)
+                .contains(&id)
+                .then_some((entry.id, &entry.path, ticket))
         })
         .collect();
 
@@ -356,13 +379,6 @@ fn phases(id: RfdId, plan: Plan, report: &mut Output) -> Option<Vec<Phase>> {
         Plan::Phases(_) => format!("No Implementation Plan was found in RFD {id}."),
         Plan::Unavailable(reason) => {
             format!("The Implementation Plan of RFD {id} could not be read: {reason}.")
-        }
-        Plan::Deferred => {
-            report.notes.push(format!(
-                "The tracking ticket holds `{PENDING}` in place of the Implementation Plan of RFD \
-                 {id} until `jp rfd track {id}` reads it."
-            ));
-            return None;
         }
     };
 

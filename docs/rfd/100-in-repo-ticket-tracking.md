@@ -333,22 +333,28 @@ They meet in three places.
 
 ### An accepted RFD gets a tracking ticket, optionally
 
-When an RFD is accepted, `rfd-promote` offers to file its tracking ticket: one
-ticket carrying `Implements: 045` and the label `type=tracking`, with the phases
-of the Implementation Plan as its description.
+When an RFD is accepted, `jp rfd promote` offers to file its tracking ticket:
+one ticket labelled `tracking-rfd=045`, with the phases of the Implementation
+Plan as its description.
 A prompt, not an automatic step — the same shape as the existing tracking-issue
 prompt — because acceptance records an agreed direction, not a commitment to
 start building.
 Whoever accepts the prompt reviews the ticket before it lands.
 
-The same operation runs when the RFD board's box is checked, so an RFD that was
-accepted without a ticket gets one at the moment work starts.
-It is idempotent: an existing tracking ticket is reused, never duplicated.
+`jp rfd track` files it later, and `jp rfd start` files it when the work starts
+if it has none.
+Both are idempotent: an existing tracking ticket is reused, never duplicated.
 
-A phase that needs its own card is filed separately and carries `Implements:
-045` without the label.
+A phase that needs its own card is filed separately, labelled
+`relevant-rfd=045`, as is any other ticket whose work belongs to the RFD.
 The fan-out is a decision made when the work is picked up, not at acceptance,
 where the phases are still a plan.
+
+The two keys are settings of `jp rfd`, `tracking.key` and `relevant.key` ([RFD
+116]), so the ticket format knows nothing about RFDs.
+A board that defines labels defines both keys, open to any value; `max = 1` and
+`unique = "key-value"` on the tracking key hold a ticket to tracking one RFD and
+an RFD to one tracking ticket.
 
 This replaces the GitHub tracking issue from [RFD 041] §2.
 
@@ -366,25 +372,20 @@ The `inDevelopment` flag leaves `docs/rfd/priority.json`.
 of a design document — it was on the RFD board only because tickets did not
 exist.
 
-Each RFD gets at most one **tracking ticket**: a ticket carrying `Implements:
-NNN` and the label `type=tracking`, holding the implementation plan as its
-description.
+Each RFD gets at most one **tracking ticket**: the ticket labelled
+`tracking-rfd=NNN`, holding the implementation plan as its description.
 It plays the role a tracking issue plays elsewhere; a phase that needs its own
-card gets a separate ticket, which carries `Implements: NNN` without the label.
+card gets a separate ticket, labelled `relevant-rfd=NNN`.
 
 The flag becomes **derived** from that one ticket: an RFD is in development when
 its tracking ticket sits in the In Progress column.
 Phase tickets never light the flag.
 
-The RFD board is a control surface over that ticket, not a second store, the
-same way dragging a card between columns is.
-Checking an RFD's box creates the tracking ticket if it doesn't exist and sets
-it to In Progress; unchecking sets it back to Todo.
+Work starts and stops on the ticket board, by moving the tracking ticket.
+The RFD board shows the flag and links each RFD with tickets to the ticket
+board, narrowed to the tickets labelled with either key for that RFD.
 No status history is written to the ticket — the file's git history already
 dates every change.
-The box is offered from Accepted onward, which is where implementation begins: a
-draft or an RFD still under discussion is something to prioritise finishing, not
-to start building.
 
 RFD priority ordering stays.
 The two boards rank different things:

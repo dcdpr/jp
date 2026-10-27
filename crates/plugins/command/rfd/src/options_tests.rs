@@ -22,6 +22,7 @@ fn every_option_has_a_default() {
                 "guide".to_owned(),
                 "process".to_owned(),
             ],
+            links: Links::default(),
         })
     );
 }
@@ -33,7 +34,71 @@ fn configured_options_replace_the_defaults() {
     assert_eq!(options, Options {
         dir: Utf8PathBuf::from("design"),
         categories: vec!["adr".to_owned(), "how-to".to_owned()],
+        links: Links::default(),
     });
+}
+
+/// A board names its link labels its own way, and says what else a tracking
+/// ticket carries.
+#[test]
+fn the_link_keys_and_tracking_labels_are_configurable() {
+    let options = read(json!({
+        "tracking": { "key": "tracks", "labels": ["type=tracking"] },
+        "relevant": { "key": "rfd" }
+    }))
+    .unwrap();
+
+    assert_eq!(options.links, Links {
+        tracking: "tracks".to_owned(),
+        relevant: "rfd".to_owned(),
+        filed_with: vec!["type=tracking".to_owned()],
+    });
+
+    // A table that sets one field keeps the other's default.
+    let options = read(json!({ "tracking": { "labels": ["type=tracking"] } })).unwrap();
+    assert_eq!(options.links.tracking, "tracking-rfd");
+    assert_eq!(options.links.relevant, "relevant-rfd");
+}
+
+#[test]
+fn a_link_key_has_to_be_a_label_key() {
+    assert_eq!(
+        read(json!({ "tracking": { "key": "1st" } })),
+        Err(
+            "`plugins.command.rfd.options.tracking.key` is invalid: label key '1st' starts with \
+             '1': a label key starts with an ASCII letter, followed by any number of letters, \
+             digits, underscores, and hyphens."
+                .to_owned()
+        )
+    );
+    assert!(read(json!({ "relevant": { "key": "" } })).is_err());
+}
+
+/// The same key both ways would make every ticket naming an RFD its tracking
+/// ticket.
+#[test]
+fn the_two_link_keys_have_to_differ() {
+    assert_eq!(
+        read(json!({ "tracking": { "key": "rfd" }, "relevant": { "key": "RFD" } })),
+        Err(
+            "`plugins.command.rfd.options.tracking.key` and `relevant.key` are both `rfd`; a \
+             ticket naming an RFD under it would both track it and only relate to it."
+                .to_owned()
+        )
+    );
+}
+
+#[test]
+fn the_tracking_labels_cannot_hold_a_link() {
+    assert_eq!(
+        read(json!({ "tracking": { "labels": ["type=tracking", "tracking-rfd=1"] } })),
+        Err(
+            "`plugins.command.rfd.options.tracking.labels` holds `tracking-rfd=1`; the label \
+             naming the RFD is added on its own."
+                .to_owned()
+        )
+    );
+    assert!(read(json!({ "tracking": { "labels": ["relevant-rfd"] } })).is_err());
 }
 
 /// A category names a template file and a filter value, so it is read the one

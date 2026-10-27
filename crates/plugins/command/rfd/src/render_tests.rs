@@ -1,9 +1,25 @@
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
+use ticket::Status;
 
 use super::*;
-use crate::{board::Source, priority::Priority};
+use crate::{board::Source, links::LinkedTicket, priority::Priority};
+
+/// A ticket naming an RFD: In Progress when it tracks the RFD, Todo when its
+/// work only belongs to it.
+fn linked(id: &str, title: &str, tracking: bool) -> LinkedTicket {
+    LinkedTicket {
+        id: id.to_owned(),
+        title: title.to_owned(),
+        status: if tracking {
+            Status::InProgress
+        } else {
+            Status::Todo
+        },
+        tracking,
+    }
+}
 
 fn source(name: &str, fields: &[(&str, &str)]) -> Source {
     let (id, slug) = name.split_once('-').unwrap();
@@ -70,12 +86,13 @@ fn board() -> Board {
         "backlog": ["010"]
     }));
 
-    Board::assemble(
-        &published,
-        &drafts,
-        priority,
-        &BTreeSet::from(["044".to_owned()]),
-    )
+    // RFD 044 is in development, with a phase ticket beside its tracking one.
+    let tickets = BTreeMap::from([("044".to_owned(), vec![
+        linked("T-02wt0k1", "Implement RFD 044", true),
+        linked("T-02wt0k2", "Phase one", false),
+    ])]);
+
+    Board::assemble(&published, &drafts, priority, &tickets)
 }
 
 fn entry<'a>(board: &'a Board, num: &str) -> &'a Entry {
@@ -256,12 +273,12 @@ fn the_json_listing_tags_every_rfd() {
     let priority = Priority::normalize(&json!({
         "planned": [{ "milestone": "First", "ids": ["042"] }]
     }));
-    let board = Board::assemble(
-        &published,
-        &[],
-        priority,
-        &BTreeSet::from(["042".to_owned()]),
-    );
+    let tickets = BTreeMap::from([("042".to_owned(), vec![linked(
+        "T-02wt0k1",
+        "Implement RFD 042",
+        true,
+    )])]);
+    let board = Board::assemble(&published, &[], priority, &tickets);
 
     assert_eq!(
         list_json(&board, None).unwrap(),
@@ -287,6 +304,14 @@ fn the_json_listing_tags_every_rfd() {
     "priority": 0,
     "milestone": "First",
     "inDevelopment": true,
+    "tickets": [
+      {
+        "id": "T-02wt0k1",
+        "title": "Implement RFD 042",
+        "status": "In Progress",
+        "tracking": true
+      }
+    ],
     "dependsOn": [
       "001"
     ],
@@ -340,6 +365,8 @@ fn show_prints_an_rfds_metadata_and_board_position() {
 - **Requires**: RFD 001
 - **Board**: planned, rank 1, in the v0.1 milestone
 - **In development**: yes
+- **Tracking ticket**: T-02wt0k1 [In Progress] Implement RFD 044
+- **Ticket**: T-02wt0k2 [Todo] Phase one
 
 Initializes workspaces.
 "
@@ -389,7 +416,7 @@ fn show_names_the_rfds_that_link_to_this_one() {
             ..source("002-second.md", &[])
         },
     ];
-    let board = Board::assemble(&published, &[], Priority::default(), &BTreeSet::new());
+    let board = Board::assemble(&published, &[], Priority::default(), &BTreeMap::new());
 
     assert!(
         show_text(&board, entry(&board, "001"), None).contains("- **Referenced by**: RFD 002\n"),

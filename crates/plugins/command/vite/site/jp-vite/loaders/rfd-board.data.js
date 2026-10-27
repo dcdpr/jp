@@ -10,9 +10,10 @@ import { assembleBoard } from './rfd-shared.mjs'
 // rows — milestone lines and the unsorted cutoff — from it, since markers are
 // also created, renamed, and removed at runtime.
 //
-// Each entry's `inDevelopment` flag comes from the RFD's tracking ticket rather
-// than from the board file. The board's checkbox writes it by moving that
-// ticket, through the dev server's `/__rfd-development` endpoint.
+// Each entry's `inDevelopment` flag and ticket count come from the tickets
+// naming the RFD rather than from the board file (see `mergeTickets`). They
+// change on the ticket board, and the board component re-reads them through
+// the dev server's `/__rfd-tickets` endpoint.
 
 export default {
     // The settings name the RFD and ticket directories, so a change to them is

@@ -11,9 +11,10 @@
 //! directory, and the ticket directory when the tool touches tickets, have to
 //! be inside the workspace and allow what the tool does to them.
 //!
-//! With nothing to ask, `promote` offers no tracking ticket, and `track` and
-//! `start` file one without reading the plan: its marker stays in the
-//! description until `jp rfd track` runs where the host can read it.
+//! Tracking an RFD is ticket work, done with the ticket tools: a tracking
+//! ticket is filed with `ticket_create`, carrying the labels `show` and
+//! `promote` name, and started or stopped by moving it with `ticket_edit`.
+//! With nothing to ask, `promote` offers no tracking ticket.
 
 use std::error;
 
@@ -27,17 +28,14 @@ use ticket::TicketId;
 use crate::{
     Output, author,
     board::{self, Board},
-    cmd::{
-        self,
-        draft::Draft,
-        track::{Filer, Plan},
-    },
+    cmd::{self, draft::Draft},
     document::{self, Document},
     id::RfdId,
-    options::{self, Options, ticket_dir},
+    links::Links,
+    options::{Options, ticket_dir},
     paths::{self, Paths},
     render::{self, Sections},
-    today,
+    today, untracked,
 };
 
 type Error = Box<dyn error::Error + Send + Sync>;
@@ -57,10 +55,7 @@ pub(crate) const TOOLS: &[&str] = &[
     "renumber",
     "require",
     "show",
-    "start",
-    "stop",
     "supersede",
-    "track",
 ];
 
 /// Answer one tool call.
@@ -108,9 +103,6 @@ fn answer(init: &InitMessage, call: &ToolCall, options: &Options) -> Answer {
         "abandon" => abandon(&place, &args),
         "renumber" => renumber(&place, &args),
         "rename" => rename(&place, &args),
-        "track" => track(&place, &args, &init.config),
-        "start" => start(&place, &args, &init.config),
-        "stop" => stop(&place, &args),
         // `TOOLS` above holds exactly the names matched here.
         other => Err(Refusal(format!("`jp rfd` serves no tool named `{other}`."))),
     };
@@ -158,6 +150,9 @@ struct Place<'a> {
     /// The ticket directory, likewise.
     tickets: Utf8PathBuf,
 
+    /// The keys tickets name RFDs under.
+    links: Links,
+
     ctx: Context,
 }
 
@@ -185,6 +180,7 @@ impl<'a> Place<'a> {
             paths: Paths::new(root, &rfds, &tickets),
             rfds,
             tickets,
+            links: options.links.clone(),
             ctx: Context {
                 root: root.to_owned(),
                 action: Action::Run,
@@ -240,8 +236,12 @@ impl<'a> Place<'a> {
 
     /// Read the board, the way the reading tools start.
     fn board(&self) -> Result<Board, String> {
-        board::load(&self.paths.root, &self.paths.rfds, &self.paths.tickets)
-            .map(|loaded| loaded.board)
+        board::load(
+            &self.paths.root,
+            &self.paths.rfds,
+            Some((&self.paths.tickets, &self.links)),
+        )
+        .map(|loaded| loaded.board)
     }
 }
 
@@ -398,7 +398,12 @@ fn show(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
     // The terminal keys syntax highlighting off a leading code fence, so the
     // fence is what gets the RFD displayed as markdown rather than as a flat
     // wall of text.
-    Ok(fenced(shown.trim_end()).into())
+    let mut text = fenced(shown.trim_end());
+    if let Some(untracked) = untracked(&place.paths, &place.links, entry) {
+        text.push_str(&format!("\n{untracked}"));
+    }
+
+    Ok(text.into())
 }
 
 /// `text` in a markdown code fence longer than any run of backticks inside it,
@@ -470,8 +475,9 @@ fn promote(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
     let mut output = cmd::promote::promote(&place.paths, id)?;
     if status.as_deref() == Some("Discussion") && place.paths.tickets.is_dir() {
         output.text.push_str(&format!(
-            "Skipped the tracking ticket, which a tool call doesn't offer. File it with `jp rfd \
-             track {id}` when the work starts.\n"
+            "Skipped the tracking ticket, which a tool call doesn't offer. When the work starts, \
+             file it as a ticket labelled {}, or with `jp rfd track {id}`.\n",
+            place.links.describe_tracking(id)
         ));
     }
 
@@ -520,8 +526,13 @@ fn renumber(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
     place.require(Dir::Rfds, &MOVE)?;
     place.require_tickets(&[Capability::Read, Capability::Update])?;
 
-    let output =
-        cmd::renumber::renumber(&place.paths, &id, new.as_deref(), place.reads_workspace())?;
+    let output = cmd::renumber::renumber(
+        &place.paths,
+        &place.links,
+        &id,
+        new.as_deref(),
+        place.reads_workspace(),
+    )?;
 
     Ok(reported(output))
 }
@@ -546,71 +557,6 @@ fn rename(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
     let output = cmd::rename::rename(&place.paths, id, &title, place.reads_workspace())?;
 
     Ok(reported(output))
-}
-
-/// Who a tracking ticket a tool files is attributed to, filing today.
-fn assistant(config: &Value) -> Result<Filer, Refusal> {
-    Ok(Filer {
-        author: options::assistant(config)?,
-        date: today(),
-    })
-}
-
-/// The plan a tool call reads: none, since the host can't be asked to run a
-/// query once the call has started.
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "`track` takes a plan reader that can fail"
-)]
-fn no_plan(_: &cmd::track::PlanRequest<'_>) -> Result<Plan, String> {
-    Ok(Plan::Unavailable(
-        "a tool call can't ask the host to run a query".to_owned(),
-    ))
-}
-
-/// What filing or moving a tracking ticket takes in the ticket directory.
-const TRACKING: [Capability; 3] = [Capability::Read, Capability::Create, Capability::Update];
-
-fn track(place: &Place<'_>, args: &Arguments<'_>, config: &Value) -> Reply {
-    let id = args.id("id")?;
-    place.require(Dir::Rfds, &[Capability::Read])?;
-    place.require_tickets(&TRACKING)?;
-
-    let vocabulary = options::ticket_vocabulary(config)?;
-    let tracked = cmd::track::track(
-        &place.paths,
-        &vocabulary,
-        id,
-        &assistant(config)?,
-        &mut no_plan,
-    )?;
-
-    Ok(reported(tracked.report))
-}
-
-fn start(place: &Place<'_>, args: &Arguments<'_>, config: &Value) -> Reply {
-    let id = args.id("id")?;
-    place.require(Dir::Rfds, &[Capability::Read])?;
-    place.require_tickets(&TRACKING)?;
-
-    let vocabulary = options::ticket_vocabulary(config)?;
-    let output = cmd::track::start(
-        &place.paths,
-        &vocabulary,
-        id,
-        &assistant(config)?,
-        &mut no_plan,
-    )?;
-
-    Ok(reported(output))
-}
-
-fn stop(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
-    let id = args.id("id")?;
-    place.require(Dir::Rfds, &[Capability::Read])?;
-    place.require_tickets(&[Capability::Read, Capability::Update])?;
-
-    Ok(reported(cmd::track::stop(&place.paths, id)?))
 }
 
 #[cfg(test)]

@@ -15,6 +15,8 @@ fn settings(rfd: Option<&str>, ticket: Option<&str>) -> Settings {
             dir: format!("docs/{route}"),
             route: route.to_owned(),
             categories: vec!["design".to_owned()],
+            tracking_key: "tracking-rfd".to_owned(),
+            relevant_key: "relevant-rfd".to_owned(),
         }),
         ticket: ticket.map(|route| TicketSettings {
             dir: format!("docs/{route}"),

@@ -28,10 +28,7 @@ pub(crate) const DEFINITIONS: &[(&str, &str)] = &[
     ("renumber.toml", include_str!("../tools/renumber.toml")),
     ("require.toml", include_str!("../tools/require.toml")),
     ("show.toml", include_str!("../tools/show.toml")),
-    ("start.toml", include_str!("../tools/start.toml")),
-    ("stop.toml", include_str!("../tools/stop.toml")),
     ("supersede.toml", include_str!("../tools/supersede.toml")),
-    ("track.toml", include_str!("../tools/track.toml")),
 ];
 
 /// The file `tools sync` writes, inside the definitions directory.

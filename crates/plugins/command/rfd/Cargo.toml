@@ -19,6 +19,7 @@ version.workspace = true
 
 [dependencies]
 comfort = { workspace = true }
+jp_label = { workspace = true }
 jp_plugin = { workspace = true }
 jp_tool = { workspace = true }
 ticket = { workspace = true }

@@ -393,10 +393,7 @@ fn jp_routes_every_tool_this_plugin_serves_but_promote() {
         "renumber",
         "require",
         "show",
-        "start",
-        "stop",
         "supersede",
-        "track",
     ]);
     assert!(names.iter().all(|name| TOOLS.contains(name)), "{names:?}");
     assert_category_tools_declare_the_parameter(&routed);

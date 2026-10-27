@@ -96,6 +96,8 @@ fn the_rfd_options_default_to_what_jp_rfd_uses() {
                 "guide".to_owned(),
                 "process".to_owned(),
             ],
+            tracking_key: "tracking-rfd".to_owned(),
+            relevant_key: "relevant-rfd".to_owned(),
         })
     );
 }
@@ -105,13 +107,17 @@ fn the_rfd_options_are_read_from_jp_rfds_settings() {
     let options = rfd_options(&json!({
         "plugins": { "command": { "rfd": { "options": {
             "dir": "design",
-            "categories": ["Design", "ADR", "design"]
+            "categories": ["Design", "ADR", "design"],
+            "tracking": { "key": "tracks", "labels": ["type=tracking"] },
+            "relevant": { "key": "rfd" }
         } } } }
     }))
     .unwrap();
 
     assert_eq!(options.dir, "design");
     assert_eq!(options.categories, ["design", "adr"]);
+    assert_eq!(options.tracking_key, "tracks");
+    assert_eq!(options.relevant_key, "rfd");
 }
 
 #[test]

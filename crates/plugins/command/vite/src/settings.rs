@@ -4,9 +4,10 @@
 //! The site's loaders also run without `jp`, in a static `vitepress build`, so
 //! they read this file rather than the configuration.
 //! It holds where the RFDs and tickets live and where the site serves them, the
-//! RFD categories, the ticket vocabulary, how much of the Done column the board
-//! shows, where links to repository files point, and the revision of the site
-//! files it was written with.
+//! RFD categories, the label keys a ticket names an RFD under, the ticket
+//! vocabulary, how much of the Done column the board shows, where links to
+//! repository files point, and the revision of the site files it was written
+//! with.
 //!
 //! A workflow whose directory doesn't exist is `null`: the project doesn't have
 //! it, and the site neither loads it nor links to it.
@@ -47,6 +48,7 @@ pub(crate) struct Settings {
 
 /// Where the RFDs live, and what the site shows of them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct RfdSettings {
     /// The directory, relative to the workspace root, as `jp rfd` reads it.
     pub dir: String,
@@ -57,6 +59,13 @@ pub(crate) struct RfdSettings {
 
     /// The categories an RFD can carry, which the index filters by.
     pub categories: Vec<String>,
+
+    /// The label key a tracking ticket names its RFD under, which puts the RFD
+    /// in development while that ticket is In Progress.
+    pub tracking_key: String,
+
+    /// The label key a ticket names an RFD its work belongs to under.
+    pub relevant_key: String,
 }
 
 /// Where the tickets live, and what the site shows of them.
@@ -156,6 +165,8 @@ pub(crate) fn snapshot(
         dir,
         route,
         categories: rfd_options.categories,
+        tracking_key: rfd_options.tracking_key,
+        relevant_key: rfd_options.relevant_key,
     });
 
     let ticket_options = ticket_options(config)?;

@@ -283,7 +283,8 @@ fn placement(board: &Board, entry: &Entry) -> (Section, Option<usize>) {
 }
 
 /// Show one RFD as markdown: its heading, its metadata, where it stands on the
-/// board, and its summary, then `body`, the document's sections, when given.
+/// board, the tickets naming it, and its summary, then `body`, the document's
+/// sections, when given.
 ///
 /// `entry` has to be one of `board`'s entries.
 #[must_use]
@@ -337,6 +338,17 @@ pub(crate) fn show_text(board: &Board, entry: &Entry, body: Option<&str>) -> Str
         "In development",
         if entry.in_development { "yes" } else { "no" },
     );
+    for ticket in &entry.tickets {
+        let key = if ticket.tracking {
+            "Tracking ticket"
+        } else {
+            "Ticket"
+        };
+        field(
+            key,
+            &format!("{} [{}] {}", ticket.id, ticket.status, ticket.title),
+        );
+    }
 
     if !entry.referenced_by.is_empty() {
         field("Referenced by", &cite(&entry.referenced_by));

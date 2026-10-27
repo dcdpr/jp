@@ -1,5 +1,5 @@
 {
-  "revision": "9341c5d3e5589713",
+  "revision": "1ea5708357d78153",
   "site": "docs",
   "repository": "https://github.com/dcdpr/jp",
   "rfd": {
@@ -10,7 +10,9 @@
       "decision",
       "guide",
       "process"
-    ]
+    ],
+    "trackingKey": "tracking-rfd",
+    "relevantKey": "relevant-rfd"
   },
   "ticket": {
     "dir": "docs/ticket",

@@ -15,10 +15,11 @@
 //! newer `jp-vite` still loads.
 //!
 //! Each setting has one owner.
-//! The document directories, the RFD categories, the ticket vocabulary, and how
-//! much of the Done column the board shows belong to `jp rfd` and `jp ticket`,
-//! and are read here from the whole configuration ([`rfd_options`],
-//! [`ticket_options`]), with the defaults those plugins use.
+//! The document directories, the RFD categories, the label keys a ticket names
+//! an RFD under, the ticket vocabulary, and how much of the Done column the
+//! board shows belong to `jp rfd` and `jp ticket`, and are read here from the
+//! whole configuration ([`rfd_options`], [`ticket_options`]), with the defaults
+//! those plugins use.
 
 use std::collections::BTreeSet;
 
@@ -35,6 +36,14 @@ const DEFAULT_RFD_DIR: &str = "docs/rfd";
 
 /// `jp rfd`'s categories when its `categories` isn't set.
 const DEFAULT_CATEGORIES: [&str; 4] = ["design", "decision", "guide", "process"];
+
+/// The key a tracking ticket names its RFD under when `jp rfd`'s `tracking.key`
+/// isn't set.
+const DEFAULT_TRACKING_KEY: &str = "tracking-rfd";
+
+/// The key a ticket names an RFD its work belongs to under when `jp rfd`'s
+/// `relevant.key` isn't set.
+const DEFAULT_RELEVANT_KEY: &str = "relevant-rfd";
 
 /// Where `jp ticket` keeps the tickets when its `dir` isn't set.
 const DEFAULT_TICKET_DIR: &str = "docs/ticket";
@@ -112,6 +121,12 @@ pub(crate) struct RfdOptions {
 
     /// The categories an RFD can carry, lowercase, each once.
     pub categories: Vec<String>,
+
+    /// The label key a tracking ticket names its RFD under.
+    pub tracking_key: String,
+
+    /// The label key a ticket names an RFD its work belongs to under.
+    pub relevant_key: String,
 }
 
 /// What the site reads of `jp ticket`'s options.
@@ -133,6 +148,15 @@ pub(crate) struct TicketOptions {
 struct RfdSection {
     dir: Option<Utf8PathBuf>,
     categories: Option<Vec<String>>,
+    tracking: KeySection,
+    relevant: KeySection,
+}
+
+/// A `jp rfd` setting naming a label key, of which the site reads the key.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct KeySection {
+    key: Option<String>,
 }
 
 /// `jp ticket`'s options, as the configuration sets them.
@@ -175,6 +199,14 @@ pub(crate) fn rfd_options(config: &Value) -> Result<RfdOptions, String> {
     Ok(RfdOptions {
         dir: directory(section.dir, DEFAULT_RFD_DIR, "rfd")?,
         categories,
+        tracking_key: section
+            .tracking
+            .key
+            .unwrap_or_else(|| DEFAULT_TRACKING_KEY.to_owned()),
+        relevant_key: section
+            .relevant
+            .key
+            .unwrap_or_else(|| DEFAULT_RELEVANT_KEY.to_owned()),
     })
 }
 

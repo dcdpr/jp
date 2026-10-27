@@ -2,7 +2,8 @@ import { spawn } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { assembleBoard, COLUMNS, inDevelopmentRfds, loadTickets } from './loaders/ticket-shared.mjs'
+import { rfdTickets } from './loaders/rfd-shared.mjs'
+import { assembleBoard, COLUMNS, loadTickets } from './loaders/ticket-shared.mjs'
 import { readSettings, SRC_DIR, workflowDir } from './settings.mjs'
 
 // The dev server's endpoints for the boards and the ticket index.
@@ -30,13 +31,9 @@ export function writeRefusal() {
 }
 
 // How long a `jp` command a request waits on may run. None of them waits on a
-// model, and each takes a second or two, so one still running after this is
-// stuck.
+// model, and each takes well under a second, so one still running after this
+// is stuck.
 const COMMAND_TIMEOUT = 15 * 1000
-
-// How long reading an RFD's Implementation Plan may run. It waits on a model,
-// and runs in the background, so nothing waits on it.
-const PLAN_TIMEOUT = 5 * 60 * 1000
 
 // Run `jp` with `args`, the site's directories pinned with `--cfg`.
 //
@@ -49,9 +46,9 @@ const PLAN_TIMEOUT = 5 * 60 * 1000
 // nothing would resume it. There is nobody to answer a prompt either, hence
 // `--no-interactive` and no stdin.
 //
-// A command still running after `timeout` is killed with its whole process
-// group.
-function jp(args, timeout = COMMAND_TIMEOUT) {
+// A command still running after `COMMAND_TIMEOUT` is killed with its whole
+// process group.
+function jp(args) {
     const settings = readSettings()
     const pinned = ['--no-interactive']
     if (settings.rfd) pinned.push('--cfg', `plugins.command.rfd.options.dir=${settings.rfd.dir}`)
@@ -74,7 +71,7 @@ function jp(args, timeout = COMMAND_TIMEOUT) {
             settled = true
             clearTimeout(timer)
             if (!ok) console.warn(`[jp-vite] ${command} failed:\n${output}`)
-            done({ ok, output: output.trim(), notes: stderr.trim() })
+            done({ ok, output: output.trim() })
         }
 
         const child = spawn('jp', [...pinned, ...args], {
@@ -89,14 +86,14 @@ function jp(args, timeout = COMMAND_TIMEOUT) {
         timer = setTimeout(() => {
             timedOut = true
             killGroup(child)
-        }, timeout)
+        }, COMMAND_TIMEOUT)
 
         child.on('error', (err) => finish(false, `${command}: ${err.message ?? err}`))
         child.on('close', (code) => {
             if (timedOut) {
                 // Its stderr names the trace log, which says where it stopped.
                 return finish(false, `${command} gave no answer within ` +
-                    `${Math.round(timeout / 1000)} seconds and was stopped.\n${stderr}`)
+                    `${Math.round(COMMAND_TIMEOUT / 1000)} seconds and was stopped.\n${stderr}`)
             }
             finish(code === 0, stdout || stderr || `${command} exited with ${code}`)
         })
@@ -255,8 +252,8 @@ const ticketBoardWriter = {
         server.middlewares.use('/__ticket-board', endpoint(async (req, res, next) => {
             if (req.method === 'GET') {
                 try {
-                    const { columns } = assembleBoard()
-                    return reply(res, 200, { columns })
+                    const { columns, doneLimit } = assembleBoard()
+                    return reply(res, 200, { columns, doneLimit })
                 } catch (err) {
                     return refuse(res, 500, String(err?.message ?? err))
                 }
@@ -374,78 +371,30 @@ const ticketWriter = {
     },
 }
 
-// The RFDs whose Implementation Plan is being read in the background, so marking
-// one again while its read runs doesn't start a second.
-const planReads = new Set()
-
-// Read RFD `num`'s Implementation Plan into its tracking ticket, in the
-// background.
+// What the tickets say about each RFD (`/rfd/priority`): which are in
+// development, and how many tickets name each.
 //
-// `jp rfd track` asks a model for the plan, which takes a minute or more, and
-// does nothing when the ticket holds one already. Nobody waits on it: the board
-// has moved on, so what it did goes to the dev server's console.
-function readPlanInBackground(num) {
-    if (planReads.has(num)) return
-    planReads.add(num)
-
-    jp(['rfd', 'track', num], PLAN_TIMEOUT)
-        .then(({ ok, notes }) => {
-            if (ok && notes) console.info(`[jp-vite] RFD ${num}: ${notes}`)
-        })
-        .finally(() => planReads.delete(num))
-}
-
-// An RFD's in-development state (`/rfd/priority`).
-//
-// The state lives on the RFD's tracking ticket, so a write shells out to
-// `jp rfd start` / `jp rfd stop` rather than touching a file. Marking an RFD
-// files that ticket when it has none; the ticket is filed with a marker in place
-// of the plan, and the plan is read in the background, so the request answers
-// without waiting on a model.
-const rfdDevelopmentWriter = {
-    name: 'rfd-development-writer',
+// The board reads this on mount. The tickets change on the ticket board, and
+// the data loader caches for the server's lifetime, so without this the board
+// shows the state it was built with. Read through the site's own rule.
+const rfdTicketsReader = {
+    name: 'rfd-tickets-reader',
     configureServer(server) {
-        server.middlewares.use('/__rfd-development', endpoint(async (req, res, next) => {
-            // The board reads this on mount. Writing a ticket file reloads the
-            // page, and the data loader caches for the server's lifetime, so
-            // without this the board comes back showing the state it was built
-            // with. Read through the site's own parser and rule.
-            if (req.method === 'GET') {
-                try {
-                    return reply(res, 200, { inDevelopment: inDevelopmentRfds(loadTickets()) })
-                } catch (err) {
-                    return refuse(res, 500, String(err?.message ?? err))
+        server.middlewares.use('/__rfd-tickets', endpoint(async (req, res, next) => {
+            if (req.method !== 'GET') return next()
+
+            try {
+                const inDevelopment = []
+                const ticketCounts = {}
+                for (const [num, linked] of rfdTickets(loadTickets())) {
+                    if (linked.inDevelopment) inDevelopment.push(num)
+                    ticketCounts[num] = linked.tickets.size
                 }
+
+                return reply(res, 200, { inDevelopment, ticketCounts })
+            } catch (err) {
+                return refuse(res, 500, String(err?.message ?? err))
             }
-
-            if (req.method !== 'POST') return next()
-
-            const refusal = writeRefusal()
-            if (refusal) return reply(res, 403, { ok: false, output: refusal })
-
-            const parsed = await readJson(req, res, 4 * 1024)
-            if (parsed === undefined) return
-
-            // The command is chosen here rather than taken from the request, so
-            // a request can only ask for one of the two operations, on a
-            // published RFD. Whether that RFD is far enough along to carry a
-            // tracking ticket is `jp rfd`'s call.
-            if (
-                typeof parsed.num !== 'string' ||
-                !/^\d{3}$/.test(parsed.num) ||
-                typeof parsed.active !== 'boolean'
-            ) {
-                return refuse(res, 400, 'expected { num: "NNN", active: boolean }')
-            }
-
-            if (!parsed.active) {
-                const { ok, output } = await jp(['rfd', 'stop', parsed.num])
-                return reply(res, ok ? 200 : 500, { ok, output })
-            }
-
-            const { ok, output } = await jp(['rfd', 'start', parsed.num, '--no-plan'])
-            if (ok) readPlanInBackground(parsed.num)
-            reply(res, ok ? 200 : 500, { ok, output })
         }))
     },
 }
@@ -453,7 +402,7 @@ const rfdDevelopmentWriter = {
 // Every endpoint, as Vite plugins.
 export const devServer = [
     rfdPriorityWriter,
-    rfdDevelopmentWriter,
+    rfdTicketsReader,
     ticketBoardWriter,
     ticketWriter,
 ]
