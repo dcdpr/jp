@@ -9,7 +9,7 @@ use jp_attachment::AttachmentContent;
 use jp_config::{
     model::{
         id::{ModelIdConfig, Name, ProviderId},
-        parameters::ReasoningConfig,
+        parameters::{ParametersConfig, ReasoningConfig, ReasoningEffort},
     },
     providers::llm::vllm::VllmConfig,
 };
@@ -212,18 +212,13 @@ fn create_request(
         "Built vLLM request."
     );
 
-    // Models such as Qwen3 default to thinking-on, so
-    // `chat_template_kwargs.enable_thinking` tells the chat template whether to
-    // prompt the model to think at all. Models whose template doesn't read the
-    // kwarg silently ignore it.
-    let reasoning_enabled = !matches!(parameters.reasoning, None | Some(ReasoningConfig::Off));
-
     let mut body = json!({
         "model": slug,
         "messages": messages,
         "stream": true,
-        "chat_template_kwargs": { "enable_thinking": reasoning_enabled },
     });
+
+    apply_reasoning(&mut body, model, parameters);
 
     if let Some(temperature) = parameters.temperature {
         body["temperature"] = json!(temperature);
@@ -261,6 +256,50 @@ fn create_request(
     }
 
     Ok((body, is_structured, decoders))
+}
+
+/// Add the reasoning fields for `parameters` to the request `body`.
+///
+/// With reasoning unconfigured nothing is sent, so the served model's chat
+/// template and the server's `--default-chat-template-kwargs` decide.
+///
+/// A configured effort is sent as `reasoning_effort`, which vLLM translates for
+/// the chat template (through `--reasoning-effort-map` where the operator set
+/// one).
+/// `enable_thinking` is sent alongside it for servers that predate that
+/// translation; a template that does not read the kwarg ignores it.
+fn apply_reasoning(body: &mut Value, model: &ModelDetails, parameters: &ParametersConfig) {
+    let effort = match parameters.reasoning {
+        Some(ReasoningConfig::Off) => ReasoningEffort::None,
+        reasoning => match model.custom_reasoning_config(reasoning, model.max_output_tokens) {
+            Some(custom) => custom.effort,
+            None => return,
+        },
+    };
+
+    let effort = match effort {
+        ReasoningEffort::None => {
+            body["reasoning_effort"] = json!("none");
+            body["chat_template_kwargs"] = json!({ "enable_thinking": false });
+            return;
+        }
+        ReasoningEffort::Auto => None,
+        ReasoningEffort::Absolute(tokens) => {
+            body["thinking_token_budget"] = json!(tokens);
+            None
+        }
+        ReasoningEffort::Xlow => Some("minimal"),
+        ReasoningEffort::Low => Some("low"),
+        ReasoningEffort::Medium => Some("medium"),
+        ReasoningEffort::High => Some("high"),
+        ReasoningEffort::XHigh => Some("xhigh"),
+        ReasoningEffort::Max => Some("max"),
+    };
+
+    if let Some(effort) = effort {
+        body["reasoning_effort"] = json!(effort);
+    }
+    body["chat_template_kwargs"] = json!({ "enable_thinking": true });
 }
 
 /// A `/v1/models` listing from vLLM.

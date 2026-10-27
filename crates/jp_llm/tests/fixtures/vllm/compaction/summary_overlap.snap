@@ -27,6 +27,7 @@ expression: request
     }
   ],
   "stream": true,
+  "reasoning_effort": "none",
   "chat_template_kwargs": {
     "enable_thinking": false
   }
