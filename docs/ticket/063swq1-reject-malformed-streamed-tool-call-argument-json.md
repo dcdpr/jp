@@ -1,7 +1,6 @@
 # Reject malformed streamed tool-call argument JSON
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-21
 - **Label**: domain=llm

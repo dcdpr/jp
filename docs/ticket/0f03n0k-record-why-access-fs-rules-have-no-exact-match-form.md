@@ -1,7 +1,6 @@
 # Record why access.fs rules have no exact-match form
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-07
 - **Implements**: 076

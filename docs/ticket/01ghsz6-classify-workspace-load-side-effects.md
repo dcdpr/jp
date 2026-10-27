@@ -1,7 +1,6 @@
 # classify workspace load side effects
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: Jean Mertz
 - **Date**: 2026-08-12
 - **Label**: package=jp_workspace

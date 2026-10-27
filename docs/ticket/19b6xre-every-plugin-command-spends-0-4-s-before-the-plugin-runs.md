@@ -1,7 +1,6 @@
 # Every plugin command spends 0.4 s before the plugin runs
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-10-27
 - **Label**: domain=plugins

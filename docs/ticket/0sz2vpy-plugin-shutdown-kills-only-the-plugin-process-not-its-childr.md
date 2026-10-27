@@ -1,7 +1,6 @@
 # Plugin shutdown kills only the plugin process, not its children
 
 - **Status**: Done
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-28
 - **Implements**: 072

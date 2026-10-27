@@ -1,7 +1,6 @@
 # Assert OpenAI prompt-cache behavior automatically
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-21
 - **Label**: domain=llm

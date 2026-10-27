@@ -1,7 +1,6 @@
 # Prompt to approve external access rules on first use
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-08-18
 - **Label**: client=cli

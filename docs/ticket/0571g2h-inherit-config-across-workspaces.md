@@ -1,7 +1,6 @@
 # Inherit config across workspaces
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-08-19
 - **Label**: package=jp_config

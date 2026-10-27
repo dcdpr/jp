@@ -1,7 +1,6 @@
 # Write per-rule rustqual guidance for tier 1 and 2 rules
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: domain=tooling

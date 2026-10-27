@@ -1,7 +1,6 @@
 # No way to assert on tracing output in tests
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-04
 - **Label**: domain=tooling

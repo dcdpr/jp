@@ -1,7 +1,6 @@
 # Define deny-preserving `access.env` matching on case-insensitive platforms
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-05
 - **Implements**: 076

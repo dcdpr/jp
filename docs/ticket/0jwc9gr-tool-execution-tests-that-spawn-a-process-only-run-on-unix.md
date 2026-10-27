@@ -1,7 +1,6 @@
 # Tool-execution tests that spawn a process only run on Unix
 
 - **Status**: Done
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-14
 - **Implements**: 109

@@ -1,7 +1,6 @@
 # Gate CI on new rustqual findings against the base commit
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: domain=tooling

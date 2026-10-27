@@ -1,7 +1,6 @@
 # Resolve llama.cpp model details when request aliases differ from catalog IDs
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-21
 - **Label**: domain=llm

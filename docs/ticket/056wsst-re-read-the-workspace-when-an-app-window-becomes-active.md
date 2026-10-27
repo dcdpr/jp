@@ -1,7 +1,6 @@
 # Re-read the workspace when an app window becomes active
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-08-19
 - **Implements**: 099

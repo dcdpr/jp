@@ -1,7 +1,6 @@
 # OAuth refresh must survive caller cancellation and not block executor threads
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-23
 - **Implements**: 090

@@ -1,7 +1,6 @@
 # The query path never fits a conversation to the model's context window
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-09-18
 - **Label**: domain=conversation

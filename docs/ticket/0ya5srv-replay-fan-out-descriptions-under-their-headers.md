@@ -1,11 +1,11 @@
 # Replay fan-out descriptions under their headers
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: client=cli
 - **Label**: package=jp_cli
+- **Label**: type=feature
 
 A fanned-out call whose tool has a custom `style.parameters` formatter shows
 each operation's header followed by its description when it runs.

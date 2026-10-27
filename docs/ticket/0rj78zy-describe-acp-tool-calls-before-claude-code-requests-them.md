@@ -1,7 +1,6 @@
 # Describe ACP tool calls before Claude Code requests them
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-09-25
 - **Label**: domain=llm

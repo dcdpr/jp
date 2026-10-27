@@ -1,9 +1,9 @@
 # Add a PTY harness for terminal rendering tests
 
 - **Status**: Done
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-27
+- **Label**: type=task
 
 `Printer::memory` records the bytes JP emits and models nothing about what a
 terminal does with them.

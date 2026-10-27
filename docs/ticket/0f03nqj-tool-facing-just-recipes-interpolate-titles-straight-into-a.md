@@ -1,7 +1,6 @@
 # Tool-facing just recipes interpolate titles straight into a shell script
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-07
 - **Label**: domain=tooling

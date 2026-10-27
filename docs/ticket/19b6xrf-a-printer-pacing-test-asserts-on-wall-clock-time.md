@@ -1,7 +1,6 @@
 # A printer pacing test asserts on wall-clock time
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-10-27
 - **Label**: package=jp_printer

@@ -1,7 +1,6 @@
 # Session detaches from its conversation after a `--no-persist` query
 
 - **Status**: Done
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-15
 - **Label**: domain=conversation

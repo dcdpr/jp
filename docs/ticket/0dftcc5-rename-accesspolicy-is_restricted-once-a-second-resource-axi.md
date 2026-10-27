@@ -1,7 +1,6 @@
 # Rename `AccessPolicy::is_restricted` once a second resource axis is enforced
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-04
 - **Implements**: 076

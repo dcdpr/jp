@@ -1,7 +1,6 @@
 # `--quiet` does not suppress printer output despite its help text
 
 - **Status**: Done
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-04
 - **Label**: client=cli

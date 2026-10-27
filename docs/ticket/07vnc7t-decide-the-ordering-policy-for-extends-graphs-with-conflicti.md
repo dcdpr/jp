@@ -1,7 +1,6 @@
 # Decide the ordering policy for `extends` graphs with conflicting precedence
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-24
 - **Implements**: 035

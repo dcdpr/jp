@@ -1,7 +1,6 @@
 # `unarchive` moves a conversation between partitions without a lock
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-15
 - **Label**: domain=conversation

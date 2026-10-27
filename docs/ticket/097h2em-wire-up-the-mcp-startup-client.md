@@ -1,10 +1,10 @@
 # Wire up the MCP startup client
 
 - **Status**: Done
-- **Kind**: Feature
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-27
 - **Implements**: 091
+- **Label**: type=feature
 
 Adds a tagged line channel to `spawn_stderr_forwarder` and a receiver to
 `StartupSet`; `await_mcp_servers` owns one sink per pending server and drops it

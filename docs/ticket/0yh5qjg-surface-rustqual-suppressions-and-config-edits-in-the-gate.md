@@ -1,7 +1,6 @@
 # Surface rustqual suppressions and config edits in the gate
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: domain=tooling

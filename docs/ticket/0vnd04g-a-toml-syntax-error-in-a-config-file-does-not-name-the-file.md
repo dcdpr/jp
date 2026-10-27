@@ -1,7 +1,6 @@
 # A TOML syntax error in a config file does not name the file
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-10-01
 - **Label**: package=jp_config

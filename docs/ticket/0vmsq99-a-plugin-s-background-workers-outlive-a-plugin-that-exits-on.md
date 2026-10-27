@@ -1,7 +1,6 @@
 # A plugin's background workers outlive a plugin that exits on its own
 
 - **Status**: Done
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-10-01
 - **Implements**: 072

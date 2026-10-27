@@ -1,11 +1,11 @@
 # A later config layer replaces a command plugin's options wholesale
 
 - **Status**: Done
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-10-01
 - **Label**: domain=plugins
 - **Label**: package=jp_config
+- **Label**: type=bug
 
 `plugins.command.<name>.options` is an `Option<Value>` with no merge strategy,
 so the derived merge replaces it whenever a later layer sets it

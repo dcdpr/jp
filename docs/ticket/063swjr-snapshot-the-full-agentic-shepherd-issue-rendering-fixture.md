@@ -1,7 +1,6 @@
 # Snapshot the full Agentic Shepherd issue rendering fixture
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-21
 - **Label**: package=jp_attachment_agentic_shepherd

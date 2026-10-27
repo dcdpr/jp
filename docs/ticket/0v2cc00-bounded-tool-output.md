@@ -1,7 +1,6 @@
 # Bounded Tool Output
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-30
 - **Implements**: 115

@@ -1,10 +1,10 @@
 # Add the bounded output window
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-27
 - **Implements**: 091
+- **Label**: type=feature
 
 Adds the bounded line buffer with coalesced redraw, source registration and
 labelling, the SGR filter, ANSI-aware truncation, terminal height as a

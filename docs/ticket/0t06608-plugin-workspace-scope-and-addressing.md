@@ -1,7 +1,6 @@
 # Plugin Workspace Scope and Addressing
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-28
 - **Implements**: 114

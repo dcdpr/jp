@@ -1,7 +1,6 @@
 # A GitHub re-import leaves a ticket's filename on the old title
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-07
 - **Implements**: 100

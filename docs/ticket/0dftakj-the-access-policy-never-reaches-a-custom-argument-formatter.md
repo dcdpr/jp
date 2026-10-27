@@ -1,7 +1,6 @@
 # The access policy never reaches a custom argument formatter
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-04
 - **Implements**: 076

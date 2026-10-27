@@ -1,10 +1,10 @@
 # Let github_pulls find open PRs that touch a path
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-10-01
 - **Label**: domain=tooling
+- **Label**: type=feature
 
 `github_pulls` lists pull requests by state only
 (`.config/jp/tools/src/github/pulls.rs`, `list`).

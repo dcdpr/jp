@@ -1,7 +1,6 @@
 # Plugin help runs binaries the run policy denies
 
 - **Status**: Done
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-28
 - **Implements**: 072

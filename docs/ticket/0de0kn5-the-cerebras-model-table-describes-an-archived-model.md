@@ -1,7 +1,6 @@
 # The Cerebras model table describes an archived model
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-04
 - **Label**: domain=llm

@@ -1,7 +1,6 @@
 # `jp config fmt --all` is accepted and then ignored
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-27
 - **Label**: client=cli

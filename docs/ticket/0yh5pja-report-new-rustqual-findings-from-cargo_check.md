@@ -1,7 +1,6 @@
 # Report new rustqual findings from cargo_check
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: domain=tooling

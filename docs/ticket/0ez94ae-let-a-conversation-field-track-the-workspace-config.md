@@ -1,9 +1,9 @@
 # Let a conversation field track the workspace config
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-09-07
+- **Label**: type=feature
 
 A conversation pins its configuration: workspace edits and JP upgrades leave it
 resolving exactly as it did when it was created.
