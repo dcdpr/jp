@@ -38,7 +38,7 @@ fn count_of_zero_is_rejected() {
 /// where `resolve_model`'s override argument reads it from.
 #[test]
 fn model_flag_lands_on_the_assistant_model() {
-    let title = parse_title(&["--model", "anthropic/claude-haiku-4-5"]);
+    let mut title = parse_title(&["--model", "anthropic/claude-haiku-4-5"]);
     let partial = title
         .apply_cli_config(None, PartialAppConfig::empty(), None)
         .unwrap();
@@ -51,7 +51,7 @@ fn model_flag_lands_on_the_assistant_model() {
 
 #[test]
 fn without_the_model_flag_the_assistant_model_is_untouched() {
-    let title = parse_title(&[]);
+    let mut title = parse_title(&[]);
     let partial = title
         .apply_cli_config(None, PartialAppConfig::empty(), None)
         .unwrap();

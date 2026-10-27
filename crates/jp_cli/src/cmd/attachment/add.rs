@@ -27,7 +27,7 @@ impl Add {
 
 impl IntoPartialAppConfig for Add {
     fn apply_cli_config(
-        &self,
+        &mut self,
         workspace: Option<&Workspace>,
         mut partial: PartialAppConfig,
         _: Option<&PartialAppConfig>,

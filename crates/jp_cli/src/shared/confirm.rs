@@ -70,7 +70,7 @@ impl ConfirmFlag {
 /// `inquire` reads Ctrl-C as a keypress in raw mode rather than letting the
 /// signal through, so JP reports the status the shell would otherwise have set
 /// itself.
-const INTERRUPTED_EXIT_STATUS: u8 = 130;
+pub(crate) const INTERRUPTED_EXIT_STATUS: u8 = 130;
 
 /// A conversation-mutating action that asks before it proceeds.
 ///

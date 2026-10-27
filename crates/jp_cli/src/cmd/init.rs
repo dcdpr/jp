@@ -411,7 +411,7 @@ fn default_model_id_for(provider: ProviderId) -> Option<ModelIdConfig> {
 
 impl IntoPartialAppConfig for Init {
     fn apply_cli_config(
-        &self,
+        &mut self,
         _workspace: Option<&Workspace>,
         partial: PartialAppConfig,
         _: Option<&PartialAppConfig>,

@@ -140,6 +140,16 @@ impl Commands {
         }
     }
 
+    /// Let the command ask the user through `prompts` when an argument's
+    /// meaning needs confirming.
+    ///
+    /// Without it, such an argument is refused.
+    pub(crate) fn set_arg_prompts(&mut self, prompts: query::ArgPrompts) {
+        if let Commands::Query(args) = self {
+            args.set_arg_prompts(prompts);
+        }
+    }
+
     /// Whether the interactive conversation picker should offer a "start a new
     /// conversation" item for this command.
     pub(crate) fn allows_new_from_picker(&self) -> bool {
@@ -175,7 +185,7 @@ impl Commands {
 
 impl IntoPartialAppConfig for Commands {
     fn apply_cli_config(
-        &self,
+        &mut self,
         workspace: Option<&Workspace>,
         partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,

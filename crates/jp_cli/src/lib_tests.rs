@@ -790,6 +790,28 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
     env::set_current_dir(previous_cwd).unwrap();
 }
 
+// A prompt ended with Ctrl-C reports the shell's interrupt status, which a
+// config error's message would lose.
+#[test]
+fn a_command_error_from_cli_flags_keeps_its_exit_status() {
+    let error = cli_config_error(Box::new(cmd::Error::from(130_u8)));
+
+    let Error::Command(error) = error else {
+        panic!("expected the command error to pass through, got {error:?}");
+    };
+    assert_eq!(error.code.get(), 130);
+}
+
+#[test]
+fn any_other_error_from_cli_flags_is_a_config_error() {
+    let error = cli_config_error("`try` is not a configured tool".into());
+
+    assert_matches::assert_matches!(
+        error,
+        Error::CliConfig(message) if message == "`try` is not a configured tool"
+    );
+}
+
 /// Verify that `resolve_config` consumes `default_id` so it doesn't leak into
 /// the runtime `AppConfig`.
 #[test]
@@ -806,9 +828,9 @@ fn resolve_config_consumes_default_id() {
     let mut base = PartialAppConfig::new_test();
     base.conversation.default_id = Some(DefaultConversationId::LastActivated);
 
-    let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
+    let mut cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
     let (config, _handles, _start_new, _config_reset) = resolve_config(
-        &cli.command,
+        &mut cli.command,
         || Ok(base),
         &cli.globals.config,
         &mut workspace,
@@ -856,7 +878,7 @@ fn resolve_config_applies_the_compact_model_flag() {
     );
 
     // `compact` takes the conversation as a positional argument.
-    let cli = Cli::try_parse_from([
+    let mut cli = Cli::try_parse_from([
         "jp",
         "conversation",
         "compact",
@@ -866,7 +888,7 @@ fn resolve_config_applies_the_compact_model_flag() {
     ])
     .unwrap();
     let (config, _handles, _start_new, _config_reset) = resolve_config(
-        &cli.command,
+        &mut cli.command,
         || Ok(base),
         &cli.globals.config,
         &mut workspace,
@@ -895,7 +917,7 @@ fn resolve_config_rejects_a_cleared_model_without_changing_the_conversation() {
         Arc::clone(&base),
     );
     let id = conversation_id.to_string();
-    let cli = Cli::try_parse_from([
+    let mut cli = Cli::try_parse_from([
         "jp",
         "query",
         "--id",
@@ -907,7 +929,7 @@ fn resolve_config_rejects_a_cleared_model_without_changing_the_conversation() {
     .unwrap();
 
     let error = resolve_config(
-        &cli.command,
+        &mut cli.command,
         || Ok(base.to_partial()),
         &cli.globals.config,
         &mut workspace,
@@ -994,11 +1016,11 @@ fn resolve_config_reset_skips_broken_conversation_config() {
     }
 
     let id = conversation_id.to_string();
-    let cli = Cli::try_parse_from(["jp", "query", "--id", &id, "hello"]).unwrap();
+    let mut cli = Cli::try_parse_from(["jp", "query", "--id", &id, "hello"]).unwrap();
 
     // Without a reset point, the conversation layer is resolved and fails.
     let result = resolve_config(
-        &cli.command,
+        &mut cli.command,
         || Ok(base_config.to_partial()),
         &[],
         &mut workspace,
@@ -1011,7 +1033,7 @@ fn resolve_config_reset_skips_broken_conversation_config() {
     // With `--cfg=NONE` (+ the required fields), the conversation layer is
     // skipped and resolution succeeds — the escape hatch works.
     let (config, _handles, _start_new, config_reset) = resolve_config(
-        &cli.command,
+        &mut cli.command,
         || Ok(base_config.to_partial()),
         &[
             KeyValueOrPath::Keyword(CfgKeyword::None),
@@ -1054,9 +1076,9 @@ fn resolve_config_reset_workspace_layer_contains_resolved_model_ids() {
     );
     base.assistant.model.id = PartialModelIdOrAliasConfig::Alias("fast".to_owned());
 
-    let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
+    let mut cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
     let (_config, _handles, _start_new, config_reset) = resolve_config(
-        &cli.command,
+        &mut cli.command,
         || Ok(base),
         &[KeyValueOrPath::Keyword(CfgKeyword::Workspace)],
         &mut workspace,
@@ -1101,9 +1123,9 @@ fn resolve_config_reset_post_layer_contains_resolved_model_ids() {
     let mut workspace = Workspace::in_memory(tmp.path());
     workspace.load_conversation_index();
 
-    let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
+    let mut cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
     let (_config, _handles, _start_new, config_reset) = resolve_config(
-        &cli.command,
+        &mut cli.command,
         || unreachable!("NONE skips implicit loading"),
         &[
             KeyValueOrPath::Keyword(CfgKeyword::None),

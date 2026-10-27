@@ -271,7 +271,7 @@ fn redirect_summaries_to_assistant_model(
 
 impl IntoPartialAppConfig for Compact {
     fn apply_cli_config(
-        &self,
+        &mut self,
         _: Option<&Workspace>,
         mut partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,

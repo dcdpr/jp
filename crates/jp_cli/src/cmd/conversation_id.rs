@@ -20,7 +20,8 @@ use std::{borrow::Cow, ffi::OsStr};
 use clap::{Arg, ArgAction, ArgMatches, Command, FromArgMatches, builder::TypedValueParser};
 use crossterm::style::Stylize as _;
 
-use super::target::ConversationTarget;
+use super::target::{ConversationTarget, PickerFilter};
+use crate::parser::{GivesBack, given_back};
 
 /// Positional conversation ID arguments: `[ID]` or `[ID]...`
 ///
@@ -176,15 +177,58 @@ impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> FromArgMatches
     for FlagIds<SESSION, MULTI, GLOBAL>
 {
     fn from_arg_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
-        let ids = read_ids(matches);
+        let ids = Self::read_ids(matches);
         validate_multi::<MULTI>(&ids)?;
         Ok(Self { ids })
     }
 
     fn update_from_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), clap::Error> {
-        self.ids = read_ids(matches);
+        self.ids = Self::read_ids(matches);
         validate_multi::<MULTI>(&self.ids)?;
         Ok(())
+    }
+}
+
+impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> FlagIds<SESSION, MULTI, GLOBAL> {
+    /// Read the targets, reading a value given back to the query as a bare
+    /// `--id`.
+    fn read_ids(matches: &ArgMatches) -> Vec<ConversationTarget> {
+        let given_back: Vec<usize> = given_back::<Self>(matches)
+            .into_iter()
+            .map(|(index, _)| index)
+            .collect();
+        if given_back.is_empty() {
+            return read_ids(matches);
+        }
+
+        let indices = matches.indices_of(Self::ARG).into_iter().flatten();
+        read_ids(matches)
+            .into_iter()
+            .zip(indices)
+            .map(|(target, index)| {
+                if given_back.contains(&index) {
+                    ConversationTarget::parse("")
+                } else {
+                    target
+                }
+            })
+            .collect()
+    }
+}
+
+impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> GivesBack
+    for FlagIds<SESSION, MULTI, GLOBAL>
+{
+    const ARG: &'static str = "id";
+
+    /// An ID, keyword, picker filter, or `-` is the flag's; free text, which
+    /// would otherwise search the picker by title, and `help` are not.
+    fn claims(value: &str) -> bool {
+        !matches!(
+            ConversationTarget::parse(value),
+            ConversationTarget::Help
+                | ConversationTarget::Picker(PickerFilter { query: Some(_), .. })
+        )
     }
 }
 
@@ -306,6 +350,13 @@ fn long_help(session: bool, multi: bool) -> String {
     if multi {
         s.push_str("\nWhen multiple IDs are given, only literal conversation IDs are accepted.");
     }
+
+    s.push_str(
+        "\nOn `jp query`, a value written directly before the query that is neither a \
+         conversation ID nor one of the forms above is the query's first word instead, and the \
+         picker opens: `jp q -i fix the bug` picks a conversation and asks \"fix the bug\". Put \
+         the query after `--` to search the picker by title: `jp q -i auth -- fix the bug`.",
+    );
 
     s
 }

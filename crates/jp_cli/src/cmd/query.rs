@@ -63,11 +63,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub(crate) use args::{QueryInput, ToolDirective, ToolDirectives};
+pub(crate) use args::{
+    ArgPrompts, ExpiryFlag, ForkFlag, QueryInput, ToolDirective, ToolDirectives, ToolUse,
+};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use clap::{ArgAction, builder::TypedValueParser as _};
 use indexmap::IndexMap;
+use inquire::InquireError;
 use interrupt::TurnInterrupts;
 use jp_attachment::Attachment;
 use jp_config::{
@@ -102,7 +105,10 @@ use jp_conversation::{
     stream::{ApplyDelta, ResetDelta},
     thread::{Thread, ThreadBuilder},
 };
-use jp_inquire::prompt::{PromptBackend, TerminalPromptBackend};
+use jp_inquire::{
+    InlineOption,
+    prompt::{PromptBackend, TerminalPromptBackend},
+};
 use jp_llm::{event::NoticeSink, provider};
 use jp_mcp::{
     StartupSet,
@@ -160,6 +166,7 @@ use crate::{
     output::{notice_sink, print_json},
     parser::AttachmentUrlOrPath,
     render::{RenderFlow, TurnView},
+    shared::confirm::INTERRUPTED_EXIT_STATUS,
     signals::{SignalRouter, TurnInterrupt},
 };
 
@@ -197,17 +204,8 @@ pub(crate) struct Query {
     #[command(flatten)]
     target: FlagIds<false, false>,
 
-    /// Fork the session's active conversation (or the one specified by --id)
-    /// and start a new turn on the fork.
-    ///
-    /// If N is given, the fork keeps only the last N turns.
-    #[arg(
-        long = "fork",
-        num_args = 0..=1,
-        value_parser = parse_fork_turns,
-        conflicts_with = "new",
-    )]
-    fork: Option<Option<usize>>,
+    #[command(flatten)]
+    fork: ForkFlag,
 
     /// Start a new conversation without any message history.
     #[arg(short = 'n', long = "new", group = "new", conflicts_with = "id")]
@@ -329,16 +327,8 @@ pub(crate) struct Query {
     #[command(flatten)]
     tool_directives: ToolDirectives,
 
-    /// Set the expiration date of the conversation.
-    ///
-    /// The conversation is persisted, but only until the conversation is no
-    /// longer marked as active (e.g. when a new conversation is started), and
-    /// when the expiration date is reached.
-    ///
-    /// This differs from `--no-persist` in that the conversation can contain
-    /// multiple turns, as long as it remains active and not expired.
-    #[arg(long = "tmp", requires = "new")]
-    expires_in: Option<Option<humantime::Duration>>,
+    #[command(flatten)]
+    expires_in: ExpiryFlag,
 
     /// Set a custom title for the conversation.
     ///
@@ -357,19 +347,8 @@ pub(crate) struct Query {
     #[arg(long = "no-title", conflicts_with = "title")]
     no_title: bool,
 
-    /// The tool to use.
-    ///
-    /// If a value is provided, the tool matching the value will be used.
-    /// The named tool runs for this query even when it is disabled, so it does
-    /// not have to be enabled separately; a tool whose policy locks it off is
-    /// refused.
-    ///
-    /// This applies to a single query and is *not* persisted: the next query
-    /// forces nothing, and a tool that was disabled stays disabled.
-    /// To persist tool choice behavior, set the `assistant.tool_choice` field
-    /// in a configuration file.
-    #[arg(short = 'u', long = "tool-use")]
-    tool_use: Option<Option<String>>,
+    #[command(flatten)]
+    tool_use: ToolUse,
 
     /// Disable tool use by the assistant.
     ///
@@ -394,6 +373,10 @@ pub(crate) struct Query {
     /// Repeat the flag to mount several paths.
     #[arg(long = "mount", value_name = "[TOOL:]NAME=PATH[:MODE]", action = ArgAction::Append)]
     mount: Vec<String>,
+
+    /// Who confirms a `-t` value that would enable every tool.
+    #[arg(skip)]
+    arg_prompts: ArgPrompts,
 }
 
 impl Query {
@@ -748,7 +731,7 @@ impl Query {
         // A leading markdown heading in the prompt is used verbatim as the
         // title, short-circuiting the LLM round-trip. Otherwise, fall back to
         // background title generation when enabled.
-        if (self.is_new() || self.fork.is_some() || stream.is_empty())
+        if (self.is_new() || self.fork.turns().is_some() || stream.is_empty())
             && ctx.term.args.persist
             && self.title.is_none()
             && !self.no_title
@@ -1335,12 +1318,13 @@ impl Query {
     /// which parses to an empty value and lands on the picker — so it gates
     /// the item just like the other two.
     pub(crate) fn allows_new_from_picker(&self) -> bool {
-        self.fork.is_none() && !self.replay && self.target.ids().is_empty()
+        self.fork.turns().is_none() && !self.replay && self.target.ids().is_empty()
     }
 
     #[must_use]
     fn expires_in_duration(&self) -> Option<Duration> {
-        self.expires_in?
+        self.expires_in
+            .duration()?
             .map(Duration::from)
             .or_else(|| Some(Duration::new(0, 0)))
     }
@@ -1416,9 +1400,9 @@ impl Query {
         let handle = handle.ok_or_else(|| Error::from(grammar))?;
 
         // Handle --fork: fork the conversation before locking.
-        if let Some(fork_turns) = &self.fork {
+        if let Some(fork_turns) = self.fork.turns() {
             return Ok(AcquiredConversation::forked(
-                fork_conversation(ctx, &handle, *fork_turns).await?,
+                fork_conversation(ctx, &handle, fork_turns).await?,
             ));
         }
 
@@ -2068,11 +2052,20 @@ pub(crate) fn turn_config_delta(
 
 impl IntoPartialAppConfig for Query {
     fn apply_cli_config(
-        &self,
+        &mut self,
         workspace: Option<&Workspace>,
         mut partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
+        // Must run before tool-enable processing, which reads the injected
+        // `enable` blocks, and before the tool words are settled, so a
+        // built-in's name is recognized as a tool.
+        inject_builtin_tools(&mut partial)?;
+
+        // Settled against the same tools `apply_enable_tools` validates names
+        // against, so a value read as a tool name is one it accepts.
+        let tool_directives = self.settle_tool_words(merged_config.unwrap_or(&partial))?;
+
         let Self {
             model,
             auth,
@@ -2091,7 +2084,7 @@ impl IntoPartialAppConfig for Query {
             parameters,
             hide_reasoning,
             hide_tool_calls,
-            tool_directives,
+            tool_directives: _,
             reasoning,
             no_reasoning,
             service_tier,
@@ -2103,17 +2096,13 @@ impl IntoPartialAppConfig for Query {
             title: _,
             no_title: _,
             mount,
-        } = &self;
+            arg_prompts: _,
+        } = &*self;
 
         apply_model(&mut partial, model.as_deref(), merged_config);
         apply_auth(&mut partial, auth, merged_config)?;
-
-        // Must run before tool-enable processing, which reads the injected
-        // `enable` blocks.
-        inject_builtin_tools(&mut partial)?;
-
-        apply_enable_tools(&mut partial, tool_directives, merged_config)?;
-        validate_tool_use(&partial, tool_use.as_ref().map(|v| v.as_deref()))?;
+        apply_enable_tools(&mut partial, &tool_directives, merged_config)?;
+        validate_tool_use(&partial, tool_use.choice())?;
         apply_attachments(&mut partial, attachments, workspace)?;
         apply_mounts(&mut partial, mount, workspace, merged_config)?;
         apply_reasoning(&mut partial, reasoning.as_ref(), *no_reasoning);
@@ -2304,7 +2293,7 @@ pub(super) fn apply_model(
 
 fn apply_enable_tools(
     partial: &mut PartialAppConfig,
-    directives: &ToolDirectives,
+    directives: &[ToolDirective],
     merged_config: Option<&PartialAppConfig>,
 ) -> BoxedResult<()> {
     if directives.is_empty() {
@@ -2345,7 +2334,7 @@ fn apply_enable_tools(
         .enable
         .clone()
         .unwrap_or_default();
-    for d in directives.iter() {
+    for d in directives {
         match d {
             ToolDirective::EnableAll => {
                 for (name, tool) in partial.conversation.tools.tools.iter_mut() {
@@ -2386,6 +2375,43 @@ fn effective_enable(
 }
 
 impl Query {
+    /// Return the `-t`/`-T` directives to apply, deciding whether each `-t`,
+    /// `-T`, or `-u` value written directly before the query names tools or
+    /// starts the query.
+    ///
+    /// The value names tools when every comma-separated name in it is a tool
+    /// `config` configures.
+    /// Otherwise it goes back into the query where it was written, and its flag
+    /// reads as if written bare: `-t`/`-T` apply to every tool, `-u` requires
+    /// some tool.
+    /// For `-t`, that needs the user's confirmation first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a `-t` value names no configured tool and the user
+    /// declines, or nobody is there to ask.
+    fn settle_tool_words(&mut self, config: &PartialAppConfig) -> BoxedResult<Vec<ToolDirective>> {
+        let tools = &config.conversation.tools.tools;
+        let prompts = &self.arg_prompts;
+        let (directives, mut words) = self.tool_directives.settle(
+            |name| tools.contains_key(name),
+            |value| confirm_enable_all_tools(prompts, value),
+        )?;
+        words.extend(self.tool_use.settle(|name| tools.contains_key(name)));
+
+        for (index, word) in words {
+            self.input.insert_word(index, word);
+        }
+
+        Ok(directives)
+    }
+
+    /// Let a `-t` value that names no configured tool be confirmed through
+    /// `prompts` instead of refused.
+    pub(crate) fn set_arg_prompts(&mut self, prompts: ArgPrompts) {
+        self.arg_prompts = prompts;
+    }
+
     /// The tool choice for this turn.
     ///
     /// `-u`/`-U` are invocation-scoped, so they are read here rather than
@@ -2400,7 +2426,7 @@ impl Query {
             return ToolChoice::None;
         }
 
-        match self.tool_use.as_ref().map(|v| v.as_deref()) {
+        match self.tool_use.choice() {
             None => cfg.assistant.tool_choice.clone(),
             Some(None | Some("true")) => ToolChoice::Required,
             Some(Some("false")) => ToolChoice::None,
@@ -2486,6 +2512,50 @@ fn inject_builtin_tools(partial: &mut PartialAppConfig) -> BoxedResult<()> {
     }
 
     Ok(())
+}
+
+/// Ask whether a `-t` value that names no configured tool is the start of the
+/// query, which enables every tool.
+///
+/// Only `y` accepts.
+/// `n`, Esc, and having nobody to ask all refuse with an error naming the `--`
+/// spelling that needs no confirmation.
+/// Ctrl-C ends the run with a [`cmd::Error`] carrying the shell's interrupt
+/// status.
+fn confirm_enable_all_tools(prompts: &ArgPrompts, value: &str) -> BoxedResult<()> {
+    let refused = || {
+        format!(
+            "`{value}` is not a configured tool. To enable every tool and start the query with \
+             `{value}`, put the query after `--`: `-t -- {value} ...`"
+        )
+        .into()
+    };
+
+    let Some(backend) = prompts.backend() else {
+        return Err(refused());
+    };
+
+    // `inline_select` prints everything before the last newline as a preamble
+    // and redraws only the question.
+    let message = format!(
+        "`{value}` is not a configured tool.\nEnable every tool on this conversation, and start \
+         the query with `{value}`?"
+    );
+    let options = vec![
+        InlineOption::new('y', "yes, enable every tool"),
+        InlineOption::new('n', "no, stop here"),
+    ];
+
+    match backend.inline_select(&message, options, Some('n'), &mut io::stderr()) {
+        Ok('y') => Ok(()),
+        Ok(_) | Err(InquireError::OperationCanceled) => Err(refused()),
+        // `inquire` reads Ctrl-C as a keypress in raw mode, so no signal stops
+        // the run; this reports the status the shell would have set.
+        Err(InquireError::OperationInterrupted) => {
+            Err(Box::new(cmd::Error::from(INTERRUPTED_EXIT_STATUS)))
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// Reject a `-u NAME` the turn could not honour.
@@ -3100,16 +3170,6 @@ fn parse_schema(s: String) -> Result<schemars::Schema> {
         .map_err(|e| Error::Schema(e.to_string()))?
         .try_into()
         .map_err(Into::into)
-}
-
-/// Parse the `--fork` value: how many trailing turns the fork keeps.
-///
-/// Only reached when a value was written.
-/// A bare `--fork` keeps every turn and never lands here: clap reads the flag's
-/// absent value as `None` for the inner `Option`.
-fn parse_fork_turns(s: &str) -> std::result::Result<usize, String> {
-    s.parse()
-        .map_err(|_| format!("expected a positive integer, got '{s}'"))
 }
 
 /// Read the piped stdin payload, or the empty string when stdin is a terminal.

@@ -68,12 +68,12 @@ impl Conversation {
 
 impl IntoPartialAppConfig for Conversation {
     fn apply_cli_config(
-        &self,
+        &mut self,
         workspace: Option<&Workspace>,
         partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
-        match &self.command {
+        match &mut self.command {
             Commands::Compact(args) => args.apply_cli_config(workspace, partial, merged_config),
             Commands::Title(args) => args.apply_cli_config(workspace, partial, merged_config),
             Commands::Show(_)

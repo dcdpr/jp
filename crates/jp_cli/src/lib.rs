@@ -49,6 +49,7 @@ use jp_config::{
         load_partials_with_inheritance, log_load_diagnostics,
     },
 };
+use jp_inquire::prompt::TerminalPromptBackend;
 use jp_printer::{Chrome, OutputFormat, OutputWidth, Printer, RegionStyle};
 use jp_storage::backend::{
     FsStorageBackend, NullLockBackend, NullPersistBackend, ReadOnlySessionBackend,
@@ -64,7 +65,7 @@ use tracing::{debug, info, trace, warn};
 
 use crate::{
     bootstrap::WorkspaceRequirement,
-    cmd::{plugin::help::print_root_section, target::resolve_request},
+    cmd::{plugin::help::print_root_section, query::ArgPrompts, target::resolve_request},
     config_pipeline::{ConfigPipeline, ConfigReset, ConfigResetEvents, build_partial_over},
 };
 
@@ -585,7 +586,7 @@ fn build_printer(globals: &Globals, format: OutputFormat) -> Printer {
 }
 
 #[expect(clippy::too_many_lines)]
-fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
+fn run_inner(mut cli: Cli, format: OutputFormat) -> Result<()> {
     let printer = build_printer(&cli.globals, format);
 
     // The per-command workspace bootstrap requirement (RFD 087) drives the
@@ -712,7 +713,7 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let cfg_overrides = effective_cfg_overrides(&cli.globals);
 
     let (config, handles, start_new, config_reset) = resolve_config(
-        &cli.command,
+        &mut cli.command,
         || load_base_partial(fs_backend.as_deref(), exec.config_cwd().to_owned()),
         &cfg_overrides,
         &mut workspace,
@@ -969,6 +970,18 @@ fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
     (code.into(), error)
 }
 
+/// The error for a command whose CLI flags could not be applied.
+///
+/// A [`cmd::Error`] carries the run's exit status, such as the shell's
+/// interrupt status for a prompt ended with Ctrl-C, and is kept whole.
+/// Anything else is reported as the flags' configuration error.
+fn cli_config_error(error: Box<dyn std::error::Error + Send + Sync>) -> Error {
+    match error.downcast::<cmd::Error>() {
+        Ok(error) => Error::Command(*error),
+        Err(error) => Error::CliConfig(error.to_string()),
+    }
+}
+
 /// Resolve the final [`AppConfig`] and conversation handles.
 ///
 /// Takes a loader for the base partial (the `files + env` layer) and runs the
@@ -979,18 +992,22 @@ fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
 /// 2. Extract `default_id` for conversation resolution (loading-time only).
 /// 3. Resolve conversation handles from the command's load request.
 /// 4. Merge per-conversation config layer.
-/// 5. Apply CLI flag overrides via [`IntoPartialAppConfig`].
+/// 5. Apply CLI flag overrides via [`IntoPartialAppConfig`], which also settles
+///    the command's arguments whose meaning depends on the configuration.
 /// 6. Consume `default_id` so it doesn't leak into the runtime config.
 /// 7. Build the final [`AppConfig`].
 ///
 /// Step 3 can open the conversation picker, which happens here rather than in
 /// the command because the conversation it selects supplies a config layer.
-/// `interactive` decides whether that prompt is available; without it, a target
-/// that resolves to nothing fails with keyword help.
+/// Step 5 can ask the user to confirm what an argument means, since that too
+/// depends on the configuration.
+/// `interactive` decides whether either prompt is available; without it, a
+/// target that resolves to nothing fails with keyword help, and an argument
+/// that needs confirming is refused.
 ///
 /// [RFD 038]: https://jp.computer/rfd/038
 pub(crate) fn resolve_config(
-    command: &Commands,
+    command: &mut Commands,
     load_base: impl FnOnce() -> Result<PartialAppConfig>,
     cfg_overrides: &[KeyValueOrPath],
     workspace: &mut Workspace,
@@ -1066,9 +1083,12 @@ pub(crate) fn resolve_config(
     };
 
     // Phase 3: CLI flag overrides.
+    if interactive {
+        command.set_arg_prompts(ArgPrompts::new(Arc::new(TerminalPromptBackend)));
+    }
     partial = command
         .apply_cli_config(Some(workspace), partial, None)
-        .map_err(|error| Error::CliConfig(error.to_string()))?;
+        .map_err(cli_config_error)?;
 
     // Consume default_id so it doesn't appear in the runtime config.
     partial.conversation.default_id.take();

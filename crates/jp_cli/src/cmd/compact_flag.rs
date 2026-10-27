@@ -15,6 +15,8 @@ use jp_config::{
     types::{byte_size::ByteSize, policy_spec::PolicySpec},
 };
 
+use crate::parser::{GivesBack, given_back};
+
 /// Shared compaction flag that can be embedded in any command.
 ///
 /// Supports two forms:
@@ -95,7 +97,7 @@ pub(crate) fn combine_rules(
 impl clap::Args for CompactFlag {
     fn augment_args(cmd: Command) -> Command {
         cmd.arg(
-            Arg::new("compact")
+            Arg::new(Self::ARG)
                 .short('k')
                 .long("compact")
                 .help("Run conversation compaction rules")
@@ -117,7 +119,10 @@ impl clap::Args for CompactFlag {
                      .. for all\n\nA negative bound counts from the end, where -1 is the last \
                      turn: ..-3 compacts through the third turn from the end, leaving the final \
                      two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, \
-                     r,over=16kb+t=sres,over=1mb:..-3",
+                     r,over=16kb+t=sres,over=1mb:..-3\n\nOn `jp query`, a value written directly \
+                     before the query that is not a valid spec is the query's first word instead, \
+                     and the flag applies the configured rules: `jp q -k what did we decide` \
+                     compacts with the configured rules and asks \"what did we decide\".",
                 )
                 .action(ArgAction::Append)
                 .num_args(0..=1)
@@ -133,13 +138,21 @@ impl clap::Args for CompactFlag {
 impl clap::FromArgMatches for CompactFlag {
     fn from_arg_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
         let values: Vec<String> = matches
-            .get_many("compact")
+            .get_many(Self::ARG)
             .map(|v| v.cloned().collect())
             .unwrap_or_default();
+        let indices: Vec<usize> = matches
+            .indices_of(Self::ARG)
+            .map(Iterator::collect)
+            .unwrap_or_default();
+        let given_back: Vec<usize> = given_back::<Self>(matches)
+            .into_iter()
+            .map(|(index, _)| index)
+            .collect();
 
         let mut flag = CompactFlag::default();
-        for val in values {
-            if val.is_empty() {
+        for (val, index) in values.into_iter().zip(indices) {
+            if val.is_empty() || given_back.contains(&index) {
                 flag.use_config_rules = true;
             } else {
                 let spec = val.parse::<CompactSpec>().map_err(|e| {
@@ -158,6 +171,14 @@ impl clap::FromArgMatches for CompactFlag {
     fn update_from_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), clap::Error> {
         *self = Self::from_arg_matches(matches)?;
         Ok(())
+    }
+}
+
+impl GivesBack for CompactFlag {
+    const ARG: &'static str = "compact";
+
+    fn claims(value: &str) -> bool {
+        value.parse::<CompactSpec>().is_ok()
     }
 }
 
