@@ -26,7 +26,10 @@ use super::cmd::conversation_id::format_target_help;
 use crate::{
     Ctx, Spelling,
     bootstrap::WorkspaceRequirement,
-    cli::flag::{ArgPrompts, Parsed, SettleError, Settled, Stage},
+    cli::{
+        CommandArgs,
+        flag::{ArgPrompts, Parsed, SettleError, Settled, Stage},
+    },
     ctx::IntoPartialAppConfig,
 };
 
@@ -50,6 +53,12 @@ pub(crate) enum Commands<S: Stage = Settled> {
 
 /// A subcommand named `name`, declaring the arguments of `T` and described in
 /// help by `about`.
+fn mounted<T: CommandArgs>(name: &'static str, about: Option<&'static str>) -> Command {
+    T::augment(Command::new(name)).about(about)
+}
+
+/// A subcommand named `name`, declaring the derived arguments of `T` and
+/// described in help by `about`.
 fn subcommand<T: Args>(name: &'static str, about: Option<&'static str>) -> Command {
     // A derived argument struct describes the command with its own Rust doc
     // comment, and so does every struct flattened into it. Those are written
@@ -67,12 +76,12 @@ impl Commands<Parsed> {
         cmd.disable_help_subcommand(true)
             .allow_external_subcommands(true)
             .external_subcommand_value_parser(value_parser!(String))
-            .subcommand(subcommand::<init::Init>(
+            .subcommand(mounted::<init::Init>(
                 "init",
                 Some("Initialize a new workspace"),
             ))
             .subcommand(
-                subcommand::<config::Config>("config", Some("Configuration management"))
+                mounted::<config::Config>("config", Some("Configuration management"))
                     .visible_alias("cfg"),
             )
             .subcommand(
@@ -128,8 +137,8 @@ impl Commands<Parsed> {
         };
 
         Ok(match name {
-            "init" => Self::Init(FromArgMatches::from_arg_matches(sub)?),
-            "config" => Self::Config(FromArgMatches::from_arg_matches(sub)?),
+            "init" => Self::Init(init::Init::from_matches(sub)?),
+            "config" => Self::Config(config::Config::from_matches(sub)?),
             "query" => Self::Query(query::Query::from_matches(sub, spelling)?),
             "attachment" => Self::Attachment(FromArgMatches::from_arg_matches(sub)?),
             "aa" => Self::AttachmentAdd(FromArgMatches::from_arg_matches(sub)?),

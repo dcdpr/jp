@@ -1,22 +1,57 @@
 use std::fs;
 
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use jp_config::PartialAppConfig;
 
 use super::Target;
-use crate::{Error, cmd::Output, ctx::Ctx};
+use crate::{Error, cli::CommandArgs, cmd::Output, ctx::Ctx};
 
-#[derive(Debug, clap::Args)]
+/// `jp config fmt`.
+#[derive(Debug)]
 pub(crate) struct Fmt {
-    #[command(flatten)]
     target: Target,
 
-    /// Run fmt in check mode.
-    #[arg(long)]
+    /// Report unformatted files instead of rewriting them.
     check: bool,
 
-    /// Format all configuration files.
-    #[arg(long)]
+    /// Format every configuration file.
+    #[expect(dead_code, reason = "accepted but not acted on yet; see T-094q47m")]
     all: bool,
+}
+
+impl CommandArgs for Fmt {
+    fn augment(cmd: Command) -> Command {
+        Target::augment(
+            cmd,
+            "Target",
+            [
+                "The workspace's user-specific configuration target",
+                "The global user-specific configuration target",
+                "The current-working-directory configuration target, recursively upwards",
+            ],
+            None,
+        )
+        .arg(
+            Arg::new("check")
+                .long("check")
+                .action(ArgAction::SetTrue)
+                .help("Run fmt in check mode"),
+        )
+        .arg(
+            Arg::new("all")
+                .long("all")
+                .action(ArgAction::SetTrue)
+                .help("Format all configuration files"),
+        )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            target: Target::from_matches(matches),
+            check: matches.get_flag("check"),
+            all: matches.get_flag("all"),
+        })
+    }
 }
 
 impl Fmt {

@@ -32,6 +32,49 @@ use crate::{
 /// The heading the options accepted by every command are listed under.
 const GLOBAL_HEADING: &str = "Global Options";
 
+/// A command's arguments: declared on its clap [`Command`], and read back from
+/// what clap matched.
+///
+/// A command with subcommands declares them in [`augment`] and reads the one
+/// given in [`from_matches`].
+///
+/// [`augment`]: Self::augment
+/// [`from_matches`]: Self::from_matches
+pub(crate) trait CommandArgs: Sized {
+    /// Declare the arguments, and any subcommands, on `cmd`.
+    fn augment(cmd: Command) -> Command;
+
+    /// Read the arguments back from `matches`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a value cannot be used, or no subcommand was given
+    /// where one is required.
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error>;
+}
+
+/// The subcommand `matches` selected, or the error for a missing one.
+///
+/// # Errors
+///
+/// Returns an error when no subcommand was given.
+pub(crate) fn subcommand_of(matches: &ArgMatches) -> Result<(&str, &ArgMatches), clap::Error> {
+    matches.subcommand().ok_or_else(|| {
+        clap::Error::raw(
+            clap::error::ErrorKind::MissingSubcommand,
+            "A subcommand is required but one was not provided.\n",
+        )
+    })
+}
+
+/// The error for a subcommand name a command declares but does not read.
+pub(crate) fn unread_subcommand(name: &str) -> clap::Error {
+    clap::Error::raw(
+        clap::error::ErrorKind::InvalidSubcommand,
+        format!("`{name}` is a built-in command `jp` cannot read\n"),
+    )
+}
+
 /// A parsed `jp` invocation.
 pub(crate) struct Cli {
     pub(crate) globals: Globals,

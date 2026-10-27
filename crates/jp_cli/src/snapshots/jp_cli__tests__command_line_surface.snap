@@ -325,7 +325,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp init [OPTIONS] [PATH]
-group Init: ["path"] required=false multiple=true
 
 ### path
 short: None
@@ -378,7 +377,6 @@ hidden: false
 external_subcommands: None
 set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp config [OPTIONS] <COMMAND>
-group Config: [] required=false multiple=true
 
 ### help
 short: Some('h')
@@ -411,7 +409,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp config show [OPTIONS]
-group Show: ["defaults", "themes"] required=false multiple=true
 
 ### defaults
 short: None
@@ -424,7 +421,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["DEFAULTS"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -444,7 +441,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["THEMES"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -484,7 +481,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp config set [OPTIONS]
-group Set: [] required=false multiple=true
 group FileTarget: ["user_workspace", "user_global", "cwd"] required=false multiple=false
 
 ### user_workspace
@@ -498,7 +494,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["USER_WORKSPACE"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -518,7 +514,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["USER_GLOBAL"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -538,7 +534,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["CWD"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -598,7 +594,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp config fmt [OPTIONS]
-group Fmt: [] required=false multiple=true
 group Target: ["user_workspace", "user_global", "cwd"] required=false multiple=false
 
 ### user_workspace
@@ -612,7 +607,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["USER_WORKSPACE"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -632,7 +627,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["USER_GLOBAL"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -652,7 +647,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["CWD"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -672,7 +667,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["CHECK"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -692,7 +687,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["ALL"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None

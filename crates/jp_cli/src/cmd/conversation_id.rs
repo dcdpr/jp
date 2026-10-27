@@ -21,7 +21,10 @@ use clap::{Arg, ArgAction, ArgMatches, Command, FromArgMatches, builder::TypedVa
 use crossterm::style::Stylize as _;
 
 use super::target::{ConversationTarget, PickerFilter};
-use crate::cli::flag::{Claim, Flag, FlagValues, OptionalValue, flag_arg};
+use crate::cli::{
+    CommandArgs,
+    flag::{Claim, Flag, FlagValues, OptionalValue, flag_arg},
+};
 
 /// Positional conversation ID arguments: `[ID]` or `[ID]...`
 ///
@@ -164,6 +167,28 @@ impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> ConversationIds
 
     fn supports_session(&self) -> bool {
         SESSION
+    }
+}
+
+impl<const SESSION: bool, const MULTI: bool> CommandArgs for PositionalIds<SESSION, MULTI> {
+    fn augment(cmd: Command) -> Command {
+        <Self as clap::Args>::augment_args(cmd)
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        <Self as FromArgMatches>::from_arg_matches(matches)
+    }
+}
+
+impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> CommandArgs
+    for FlagIds<SESSION, MULTI, GLOBAL>
+{
+    fn augment(cmd: Command) -> Command {
+        cmd.arg(flag_arg::<Ids<SESSION, MULTI, GLOBAL>>())
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Flag::<Ids<SESSION, MULTI, GLOBAL>>::strict(matches)
     }
 }
 
