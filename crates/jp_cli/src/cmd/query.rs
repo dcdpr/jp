@@ -63,14 +63,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub(crate) use args::{
-    ArgPrompts, ExpiryFlag, ForkFlag, QueryInput, ToolDirective, ToolDirectives, ToolUse,
-};
+pub(crate) use args::ToolDirective;
+use args::{QueryText, ToolFlags, ToolUse};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
-use clap::{ArgAction, builder::TypedValueParser as _};
 use indexmap::IndexMap;
-use inquire::InquireError;
 use interrupt::TurnInterrupts;
 use jp_attachment::Attachment;
 use jp_config::{
@@ -105,10 +102,7 @@ use jp_conversation::{
     stream::{ApplyDelta, ResetDelta},
     thread::{Thread, ThreadBuilder},
 };
-use jp_inquire::{
-    InlineOption,
-    prompt::{PromptBackend, TerminalPromptBackend},
-};
+use jp_inquire::prompt::{PromptBackend, TerminalPromptBackend};
 use jp_llm::{event::NoticeSink, provider};
 use jp_mcp::{
     StartupSet,
@@ -138,6 +132,7 @@ use url::Url;
 use super::{
     ConversationLoadRequest, Output,
     attachment::load_conversation_attachments,
+    compact_flag::CompactFlag,
     conversation_id::{ConversationIds, FlagIds},
     lock::LockOutcome,
     target::TargetGrammar,
@@ -149,6 +144,7 @@ use crate::{
         compile::{ApprovalDecision, compile_policy},
         mount::{MountMode, MountSpec},
     },
+    cli::flag::{Flag, Settled, Stage},
     cmd::{
         self,
         conversation::fork,
@@ -166,217 +162,91 @@ use crate::{
     output::{notice_sink, print_json},
     parser::AttachmentUrlOrPath,
     render::{RenderFlow, TurnView},
-    shared::confirm::INTERRUPTED_EXIT_STATUS,
     signals::{SignalRouter, TurnInterrupt},
 };
 
 type BoxedResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-#[derive(Debug, Default, clap::Args)]
-pub(crate) struct Query {
-    /// Use the query string as a Jinja2 template.
-    ///
-    /// You can provide values for template variables using the
-    /// `template.values` config key.
-    #[arg(short = '%', long)]
+/// The arguments of `jp query`, decided as far as `S` says.
+///
+/// Help text for each argument is declared in `Query::augment`.
+#[derive(Debug, Default)]
+pub(crate) struct Query<S: Stage = Settled> {
     template: bool,
-
-    /// Constrain the assistant's response to match a JSON schema.
-    ///
-    /// Accepts either a full JSON Schema object or a concise DSL:
-    ///
-    /// -s 'summary' → single string field -s 'name, age int, bio' → mixed
-    /// types -s 'summary: a brief summary' → field with description
-    ///
-    /// See: <https://jp.computer/rfd/030-schema-dsl>
-    #[arg(short = 's', long, value_parser = string_or_path.try_map(parse_schema))]
     schema: Option<schemars::Schema>,
-
-    /// Replay the last message in the conversation.
-    ///
-    /// If a query is provided, it will be appended to the end of the previous
-    /// message.
-    /// If no query is provided, $EDITOR will open with the last message in the
-    /// conversation.
-    #[arg(long = "replay", conflicts_with = "new")]
     replay: bool,
-
-    #[command(flatten)]
     target: FlagIds<false, false>,
 
-    #[command(flatten)]
-    fork: ForkFlag,
-
-    /// Start a new conversation without any message history.
-    #[arg(short = 'n', long = "new", group = "new", conflicts_with = "id")]
+    /// `None` without `--fork`, `Some(None)` to keep every turn,
+    /// `Some(Some(n))` to keep the last `n`.
+    fork: Option<Option<usize>>,
     new_conversation: bool,
-
-    /// Store the conversation locally, outside of the workspace.
-    #[arg(
-        short = 'l',
-        long = "local",
-        requires = "new_conversation",
-        conflicts_with = "no_local"
-    )]
     local: bool,
-
-    /// Store the conversation in the current workspace.
-    #[arg(
-        short = 'L',
-        long = "no-local",
-        requires = "new_conversation",
-        conflicts_with = "local"
-    )]
     no_local: bool,
-
-    /// Add attachment to the configuration.
-    #[arg(short = 'a', long = "attachment", alias = "attach")]
     attachments: Vec<AttachmentUrlOrPath>,
-
-    /// Open an editor to compose the query.
-    ///
-    /// Forces the editor open even when a query is provided inline (or piped on
-    /// stdin).
-    /// Use `--no-edit` (`-E`) to suppress it.
-    ///
-    /// To change which editor is used, set `editor.cmd` in your config (or pass
-    /// `--cfg editor.cmd=...`).
-    #[arg(short = 'e', long = "edit", conflicts_with = "no_edit")]
     edit: bool,
-
-    /// Do not edit the query.
-    ///
-    /// See `--edit` for more details.
-    #[arg(short = 'E', long = "no-edit", conflicts_with = "edit")]
     no_edit: bool,
 
-    #[command(flatten)]
-    input: QueryInput,
+    /// The query words, in the order they were given.
+    query: S::Text<QueryText>,
 
-    /// The model to use.
-    #[arg(short = 'm', long = "model")]
+    /// `Some(true)` prefixes the quoted message with ` >  `, `Some(false)`
+    /// seeds it verbatim, `None` means `--quote` was not given.
+    quote: Option<bool>,
     model: Option<String>,
-
-    /// Which credential to bill this turn to.
-    ///
-    /// Takes the same entries as the `auth` chain in configuration, comma
-    /// separated: a credential name, `api_key`, `subscription`, or
-    /// `<kind>:<name>`.
-    /// `api` and `sub` are accepted for the kinds.
-    ///
-    /// Applies to the provider the chosen model belongs to, and is recorded on
-    /// the turn, so the rest of the conversation keeps billing the same way
-    /// until another `--auth` changes it.
-    #[arg(long = "auth", value_name = "CHAIN", value_delimiter = ',')]
     auth: Vec<AuthEntry>,
-
-    /// The model parameters to use.
-    #[arg(short = 'p', long = "param", value_name = "KEY=VALUE", action = ArgAction::Append)]
     parameters: Vec<KvAssignment>,
-
-    /// Enable reasoning.
-    #[arg(short = 'r', long = "reasoning")]
     reasoning: Option<ReasoningConfig>,
-
-    /// Disable reasoning.
-    #[arg(short = 'R', long = "no-reasoning")]
     no_reasoning: bool,
-
-    /// Capacity tier to request from the provider.
-    ///
-    /// Providers sell more than one grade of capacity for the same model:
-    /// `flex` is cheaper and slower, `priority` is faster and pricier,
-    /// `standard` is the regular rate, and `off` asks for no tier at all.
-    ///
-    /// Which tiers are available depends on the provider, the model, and the
-    /// account; a provider that sells no equivalent refuses the query rather
-    /// than falling back to a rung that costs something else.
-    /// One that sells the tier but cannot serve this model with it may still
-    /// fall back.
-    ///
-    /// Applies to this query and every later one on the conversation, because
-    /// each tier is served from separate capacity and switching discards the
-    /// prompt cache.
-    #[arg(long = "tier", value_name = "TIER", conflicts_with = "no_service_tier")]
     service_tier: Option<ServiceTier>,
-
-    /// Stop asking for a capacity tier.
-    ///
-    /// Shorthand for `--tier off`, which sends no tier and leaves the choice to
-    /// whatever the account is set up for.
-    ///
-    /// This is not `--tier standard`: `standard` names a rung and is sent as
-    /// one.
-    #[arg(long = "no-tier")]
     no_service_tier: bool,
-
-    /// Do not display the reasoning content.
-    ///
-    /// This does not stop the assistant from generating reasoning tokens to
-    /// help with its accuracy, but it does not display them in the output.
-    #[arg(long = "hide-reasoning")]
     hide_reasoning: bool,
-
-    /// Do not display tool calls.
-    ///
-    /// This does not stop the assistant from running tool calls, but it does
-    /// not display them in the output.
-    #[arg(long = "hide-tool-calls")]
     hide_tool_calls: bool,
 
-    #[command(flatten)]
-    tool_directives: ToolDirectives,
+    /// `-t` and `-T`, in the order written.
+    tool_directives: S::Config<ToolFlags>,
 
-    #[command(flatten)]
-    expires_in: ExpiryFlag,
-
-    /// Set a custom title for the conversation.
-    ///
-    /// Applied to the resolved conversation (new, forked, or resumed) before
-    /// the turn runs.
-    /// Skips title auto-generation for new conversations — your title wins.
-    /// Mutually exclusive with `--no-title`.
-    #[arg(long = "title", conflicts_with = "no_title")]
+    /// `None` without `--tmp`, `Some(None)` without a duration.
+    expires_in: Option<Option<humantime::Duration>>,
     title: Option<String>,
-
-    /// Disable the title for the conversation.
-    ///
-    /// Clears any existing title on the resolved conversation (new, forked, or
-    /// resumed) and skips auto-generation for this run.
-    /// Mutually exclusive with `--title`.
-    #[arg(long = "no-title", conflicts_with = "title")]
     no_title: bool,
 
-    #[command(flatten)]
-    tool_use: ToolUse,
-
-    /// Disable tool use by the assistant.
-    ///
-    /// This applies to a single query and is *not* persisted.
-    /// To keep tools off, use `--no-tool`, which disables them for every future
-    /// query on the conversation.
-    #[arg(short = 'U', long = "no-tool-use")]
+    /// `None` without `-u`, `Some(None)` for a bare `-u`, `Some(Some(value))`
+    /// for a value.
+    tool_use: S::Config<Flag<ToolUse>>,
     no_tool_use: bool,
-
-    /// Compact the conversation before querying.
-    #[command(flatten)]
-    compact: crate::cmd::compact_flag::CompactFlag,
-
-    /// Mount an external path into the workspace as a symlink and grant the
-    /// assistant access to it.
-    ///
-    /// Form: `[TOOL:]NAME=PATH[:MODE]`.
-    /// `NAME` is the workspace-relative location for the symlink, `PATH` is the
-    /// external target, and `MODE` is `ro` (default) or `rw`.
-    /// `rw` requires a `TOOL:` prefix; without a `TOOL:` prefix the grant
-    /// applies to all enabled local and command plugin tools.
-    /// Repeat the flag to mount several paths.
-    #[arg(long = "mount", value_name = "[TOOL:]NAME=PATH[:MODE]", action = ArgAction::Append)]
+    compact: CompactFlag,
     mount: Vec<String>,
+}
 
-    /// Who confirms a `-t` value that would enable every tool.
-    #[arg(skip)]
-    arg_prompts: ArgPrompts,
+impl<S: Stage> Query<S> {
+    /// Declare what conversations this command needs.
+    pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
+        if self.is_new() {
+            return ConversationLoadRequest::none();
+        }
+
+        ConversationLoadRequest::explicit_or_session_with_config(&self.target)
+    }
+
+    #[must_use]
+    fn is_new(&self) -> bool {
+        self.new_conversation
+    }
+
+    /// Whether the conversation picker may offer a "start a new conversation"
+    /// item for this invocation.
+    ///
+    /// Returns `false` when any flag incompatible with `--new` is present, so
+    /// that choosing the item can never produce a combination clap would have
+    /// rejected.
+    /// `--new` conflicts with `--fork`, `--replay`, and `--id`.
+    /// A non-empty `target` means `--id` was given (including bare `--id`,
+    /// which parses to an empty value and lands on the picker), so it gates the
+    /// item just like the other two.
+    pub(crate) fn allows_new_from_picker(&self) -> bool {
+        self.fork.is_none() && !self.replay && self.target.ids().is_empty()
+    }
 }
 
 impl Query {
@@ -731,7 +601,7 @@ impl Query {
         // A leading markdown heading in the prompt is used verbatim as the
         // title, short-circuiting the LLM round-trip. Otherwise, fall back to
         // background title generation when enabled.
-        if (self.is_new() || self.fork.turns().is_some() || stream.is_empty())
+        if (self.is_new() || self.fork.is_some() || stream.is_empty())
             && ctx.term.args.persist
             && self.title.is_none()
             && !self.no_title
@@ -853,7 +723,7 @@ impl Query {
     ///
     /// Returns [`Error::ArgFile`] if the named file cannot be read.
     fn resolve_query(&self) -> Result<Option<String>> {
-        let Some(values) = &self.input.query else {
+        let Some(values) = &self.query else {
             return Ok(None);
         };
 
@@ -863,15 +733,6 @@ impl Query {
         };
 
         Ok(Some(text))
-    }
-
-    /// Declare what conversations this command needs.
-    pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        if self.is_new() {
-            return ConversationLoadRequest::none();
-        }
-
-        ConversationLoadRequest::explicit_or_session_with_config(&self.target)
     }
 
     /// Build the chat request for this query.
@@ -934,7 +795,7 @@ impl Query {
         // between the quoted lines (mutt-style inline reply). Missing message
         // (e.g. brand new conversation) degrades to a warning and the editor
         // opens with whatever else was seeded.
-        if let Some(prefixed) = self.input.quote
+        if let Some(prefixed) = self.quote
             && !seed_quoted_reply(&mut chat_request, view, prefixed, config)
         {
             warn!("--quote: no prior assistant message in this conversation");
@@ -1075,7 +936,7 @@ impl Query {
         // `--quote` that text was assembled from the quoted assistant message
         // rather than typed by the user, so it is synthesized too (and
         // therefore echoed); anything else was typed or piped inline.
-        let source = if self.input.quote.is_some() {
+        let source = if self.quote.is_some() {
             QuerySource::Synthesized
         } else {
             QuerySource::Inline
@@ -1084,9 +945,7 @@ impl Query {
         // If a query is provided, and editing is not explicitly requested, or
         // in addition to the query, stdin contains data, or editing was
         // explicitly suppressed with `--no-edit`, we omit opening the editor.
-        if (self.input.query.as_ref().is_some_and(|v| !v.is_empty())
-            || !piped
-            || self.force_no_edit())
+        if (self.query.as_ref().is_some_and(|v| !v.is_empty()) || !piped || self.force_no_edit())
             && !self.force_edit()
             && !request.is_empty()
         {
@@ -1294,7 +1153,7 @@ impl Query {
     /// In either case the editor should be opened, regardless of whether a
     /// query is provided as an argument.
     fn force_edit(&self) -> bool {
-        !self.force_no_edit() && (self.edit || self.input.quote.is_some())
+        !self.force_no_edit() && (self.edit || self.quote.is_some())
     }
 
     #[must_use]
@@ -1303,28 +1162,8 @@ impl Query {
     }
 
     #[must_use]
-    fn is_new(&self) -> bool {
-        self.new_conversation
-    }
-
-    /// Whether the conversation picker may offer a "start a new conversation"
-    /// item for this invocation.
-    ///
-    /// Returns `false` when any flag incompatible with `--new` is present, so
-    /// that choosing the item can never produce a combination clap would have
-    /// rejected.
-    /// `--new` conflicts with `--fork`, `--replay`, and `--id`.
-    /// A non-empty `target` means `--id` was given — including bare `--id`,
-    /// which parses to an empty value and lands on the picker — so it gates
-    /// the item just like the other two.
-    pub(crate) fn allows_new_from_picker(&self) -> bool {
-        self.fork.turns().is_none() && !self.replay && self.target.ids().is_empty()
-    }
-
-    #[must_use]
     fn expires_in_duration(&self) -> Option<Duration> {
-        self.expires_in
-            .duration()?
+        self.expires_in?
             .map(Duration::from)
             .or_else(|| Some(Duration::new(0, 0)))
     }
@@ -1400,7 +1239,7 @@ impl Query {
         let handle = handle.ok_or_else(|| Error::from(grammar))?;
 
         // Handle --fork: fork the conversation before locking.
-        if let Some(fork_turns) = self.fork.turns() {
+        if let Some(fork_turns) = self.fork {
             return Ok(AcquiredConversation::forked(
                 fork_conversation(ctx, &handle, fork_turns).await?,
             ));
@@ -2052,19 +1891,14 @@ pub(crate) fn turn_config_delta(
 
 impl IntoPartialAppConfig for Query {
     fn apply_cli_config(
-        &mut self,
+        &self,
         workspace: Option<&Workspace>,
         mut partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         // Must run before tool-enable processing, which reads the injected
-        // `enable` blocks, and before the tool words are settled, so a
-        // built-in's name is recognized as a tool.
+        // `enable` blocks.
         inject_builtin_tools(&mut partial)?;
-
-        // Settled against the same tools `apply_enable_tools` validates names
-        // against, so a value read as a tool name is one it accepts.
-        let tool_directives = self.settle_tool_words(merged_config.unwrap_or(&partial))?;
 
         let Self {
             model,
@@ -2078,13 +1912,14 @@ impl IntoPartialAppConfig for Query {
             attachments,
             edit: _,
             no_edit: _,
-            input: _,
+            query: _,
+            quote: _,
             tool_use,
             no_tool_use: _,
             parameters,
             hide_reasoning,
             hide_tool_calls,
-            tool_directives: _,
+            tool_directives,
             reasoning,
             no_reasoning,
             service_tier,
@@ -2096,13 +1931,12 @@ impl IntoPartialAppConfig for Query {
             title: _,
             no_title: _,
             mount,
-            arg_prompts: _,
-        } = &*self;
+        } = self;
 
         apply_model(&mut partial, model.as_deref(), merged_config);
         apply_auth(&mut partial, auth, merged_config)?;
-        apply_enable_tools(&mut partial, &tool_directives, merged_config)?;
-        validate_tool_use(&partial, tool_use.choice())?;
+        apply_enable_tools(&mut partial, tool_directives, merged_config)?;
+        validate_tool_use(&partial, tool_use.as_ref().map(Option::as_deref))?;
         apply_attachments(&mut partial, attachments, workspace)?;
         apply_mounts(&mut partial, mount, workspace, merged_config)?;
         apply_reasoning(&mut partial, reasoning.as_ref(), *no_reasoning);
@@ -2131,23 +1965,25 @@ impl IntoPartialAppConfig for Query {
 
         Ok(partial)
     }
+}
 
-    fn apply_conversation_config(
-        &self,
-        workspace: &Workspace,
-        partial: PartialAppConfig,
-        _: Option<&PartialAppConfig>,
-        handle: &ConversationHandle,
-    ) -> std::result::Result<
-        (PartialAppConfig, Vec<String>),
-        Box<dyn std::error::Error + Send + Sync>,
-    > {
-        let events = workspace.events(handle)?;
-        let config = events.config()?.to_partial();
-        let unsets = events.config_unsets()?;
+/// The configuration layer the conversation behind `handle` carries, merged
+/// over `partial`, and the paths it explicitly clears.
+///
+/// # Errors
+///
+/// Returns an error when the conversation's events or configuration cannot be
+/// read.
+pub(super) fn conversation_config(
+    workspace: &Workspace,
+    partial: PartialAppConfig,
+    handle: &ConversationHandle,
+) -> BoxedResult<(PartialAppConfig, Vec<String>)> {
+    let events = workspace.events(handle)?;
+    let config = events.config()?.to_partial();
+    let unsets = events.config_unsets()?;
 
-        Ok((load_partial(partial, config)?, unsets))
-    }
+    Ok((load_partial(partial, config)?, unsets))
 }
 
 /// Build the sorted list of system prompt sections from assistant config.
@@ -2375,43 +2211,6 @@ fn effective_enable(
 }
 
 impl Query {
-    /// Return the `-t`/`-T` directives to apply, deciding whether each `-t`,
-    /// `-T`, or `-u` value written directly before the query names tools or
-    /// starts the query.
-    ///
-    /// The value names tools when every comma-separated name in it is a tool
-    /// `config` configures.
-    /// Otherwise it goes back into the query where it was written, and its flag
-    /// reads as if written bare: `-t`/`-T` apply to every tool, `-u` requires
-    /// some tool.
-    /// For `-t`, that needs the user's confirmation first.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when a `-t` value names no configured tool and the user
-    /// declines, or nobody is there to ask.
-    fn settle_tool_words(&mut self, config: &PartialAppConfig) -> BoxedResult<Vec<ToolDirective>> {
-        let tools = &config.conversation.tools.tools;
-        let prompts = &self.arg_prompts;
-        let (directives, mut words) = self.tool_directives.settle(
-            |name| tools.contains_key(name),
-            |value| confirm_enable_all_tools(prompts, value),
-        )?;
-        words.extend(self.tool_use.settle(|name| tools.contains_key(name)));
-
-        for (index, word) in words {
-            self.input.insert_word(index, word);
-        }
-
-        Ok(directives)
-    }
-
-    /// Let a `-t` value that names no configured tool be confirmed through
-    /// `prompts` instead of refused.
-    pub(crate) fn set_arg_prompts(&mut self, prompts: ArgPrompts) {
-        self.arg_prompts = prompts;
-    }
-
     /// The tool choice for this turn.
     ///
     /// `-u`/`-U` are invocation-scoped, so they are read here rather than
@@ -2426,7 +2225,7 @@ impl Query {
             return ToolChoice::None;
         }
 
-        match self.tool_use.choice() {
+        match self.tool_use.as_ref().map(Option::as_deref) {
             None => cfg.assistant.tool_choice.clone(),
             Some(None | Some("true")) => ToolChoice::Required,
             Some(Some("false")) => ToolChoice::None,
@@ -2512,50 +2311,6 @@ fn inject_builtin_tools(partial: &mut PartialAppConfig) -> BoxedResult<()> {
     }
 
     Ok(())
-}
-
-/// Ask whether a `-t` value that names no configured tool is the start of the
-/// query, which enables every tool.
-///
-/// Only `y` accepts.
-/// `n`, Esc, and having nobody to ask all refuse with an error naming the `--`
-/// spelling that needs no confirmation.
-/// Ctrl-C ends the run with a [`cmd::Error`] carrying the shell's interrupt
-/// status.
-fn confirm_enable_all_tools(prompts: &ArgPrompts, value: &str) -> BoxedResult<()> {
-    let refused = || {
-        format!(
-            "`{value}` is not a configured tool. To enable every tool and start the query with \
-             `{value}`, put the query after `--`: `-t -- {value} ...`"
-        )
-        .into()
-    };
-
-    let Some(backend) = prompts.backend() else {
-        return Err(refused());
-    };
-
-    // `inline_select` prints everything before the last newline as a preamble
-    // and redraws only the question.
-    let message = format!(
-        "`{value}` is not a configured tool.\nEnable every tool on this conversation, and start \
-         the query with `{value}`?"
-    );
-    let options = vec![
-        InlineOption::new('y', "yes, enable every tool"),
-        InlineOption::new('n', "no, stop here"),
-    ];
-
-    match backend.inline_select(&message, options, Some('n'), &mut io::stderr()) {
-        Ok('y') => Ok(()),
-        Ok(_) | Err(InquireError::OperationCanceled) => Err(refused()),
-        // `inquire` reads Ctrl-C as a keypress in raw mode, so no signal stops
-        // the run; this reports the status the shell would have set.
-        Err(InquireError::OperationInterrupted) => {
-            Err(Box::new(cmd::Error::from(INTERRUPTED_EXIT_STATUS)))
-        }
-        Err(error) => Err(error.into()),
-    }
 }
 
 /// Reject a `-u NAME` the turn could not honour.

@@ -60,10 +60,11 @@ use serde_json::Value;
 use tokio::runtime::{self, Runtime};
 use tracing::{debug, info, trace, warn};
 
-pub(crate) use crate::cli::{Cli, Globals};
+pub(crate) use crate::cli::{Cli, Globals, Spelling};
 use crate::{
     bootstrap::WorkspaceRequirement,
-    cmd::{plugin::help::print_root_section, query::ArgPrompts, target::resolve_request},
+    cli::flag::{ArgPrompts, Parsed},
+    cmd::{plugin::help::print_root_section, target::resolve_request},
     config_pipeline::{ConfigPipeline, ConfigReset, ConfigResetEvents, build_partial_over},
 };
 
@@ -410,7 +411,7 @@ fn build_printer(globals: &Globals, format: OutputFormat) -> Printer {
 }
 
 #[expect(clippy::too_many_lines)]
-fn run_inner(mut cli: Cli, format: OutputFormat) -> Result<()> {
+fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let printer = build_printer(&cli.globals, format);
 
     // The per-command workspace bootstrap requirement (RFD 087) drives the
@@ -536,8 +537,14 @@ fn run_inner(mut cli: Cli, format: OutputFormat) -> Result<()> {
     // [RFD 038]: https://jp.computer/rfd/038
     let cfg_overrides = effective_cfg_overrides(&cli.globals);
 
-    let (config, handles, start_new, config_reset) = resolve_config(
-        &mut cli.command,
+    let Resolved {
+        command,
+        config,
+        handles,
+        start_new,
+        config_reset,
+    } = resolve_config(
+        cli.command,
         || load_base_partial(fs_backend.as_deref(), exec.config_cwd().to_owned()),
         &cfg_overrides,
         &mut workspace,
@@ -574,7 +581,7 @@ fn run_inner(mut cli: Cli, format: OutputFormat) -> Result<()> {
     let output = rt.block_on(async {
         tokio::select! {
             biased;
-            output = cli.command.run(&mut ctx, handles, start_new) => output,
+            output = command.run(&mut ctx, handles, start_new) => output,
             () = shutdown.cancelled() => Err(cmd::Error::interrupted()),
         }
     });
@@ -816,8 +823,9 @@ fn cli_config_error(error: Box<dyn std::error::Error + Send + Sync>) -> Error {
 /// 2. Extract `default_id` for conversation resolution (loading-time only).
 /// 3. Resolve conversation handles from the command's load request.
 /// 4. Merge per-conversation config layer.
-/// 5. Apply CLI flag overrides via [`IntoPartialAppConfig`], which also settles
-///    the command's arguments whose meaning depends on the configuration.
+/// 5. Settle the command's arguments whose meaning depends on the
+///    configuration, then apply its CLI flag overrides via
+///    [`IntoPartialAppConfig`].
 /// 6. Consume `default_id` so it doesn't leak into the runtime config.
 /// 7. Build the final [`AppConfig`].
 ///
@@ -831,19 +839,14 @@ fn cli_config_error(error: Box<dyn std::error::Error + Send + Sync>) -> Error {
 ///
 /// [RFD 038]: https://jp.computer/rfd/038
 pub(crate) fn resolve_config(
-    command: &mut Commands,
+    command: Commands<Parsed>,
     load_base: impl FnOnce() -> Result<PartialAppConfig>,
     cfg_overrides: &[KeyValueOrPath],
     workspace: &mut Workspace,
     session: Option<&jp_workspace::session::Session>,
     fs: Option<&FsStorageBackend>,
     interactive: bool,
-) -> Result<(
-    AppConfig,
-    Vec<jp_workspace::ConversationHandle>,
-    bool,
-    Option<ConfigResetEvents>,
-)> {
+) -> Result<Resolved> {
     let pipeline = ConfigPipeline::new(cfg_overrides, Some(workspace), fs, load_base)?;
 
     // Repair values for a stored conversation config that lost a required
@@ -892,7 +895,7 @@ pub(crate) fn resolve_config(
 
             Some(
                 command
-                    .apply_conversation_config(workspace, PartialAppConfig::default(), None, handle)
+                    .apply_conversation_config(workspace, PartialAppConfig::default(), handle)
                     .map_err(|error| Error::CliConfig(error.to_string()))?,
             )
         }
@@ -907,9 +910,14 @@ pub(crate) fn resolve_config(
     };
 
     // Phase 3: CLI flag overrides.
-    if interactive {
-        command.set_arg_prompts(ArgPrompts::new(Arc::new(TerminalPromptBackend)));
-    }
+    let prompts = if interactive {
+        ArgPrompts::new(Arc::new(TerminalPromptBackend))
+    } else {
+        ArgPrompts::default()
+    };
+    let command = command
+        .settle(&partial, &prompts)
+        .map_err(cli_config_error)?;
     partial = command
         .apply_cli_config(Some(workspace), partial, None)
         .map_err(cli_config_error)?;
@@ -948,7 +956,32 @@ pub(crate) fn resolve_config(
         }
     });
 
-    Ok((config, handles, outcome.start_new, config_reset))
+    Ok(Resolved {
+        command,
+        config,
+        handles,
+        start_new: outcome.start_new,
+        config_reset,
+    })
+}
+
+/// A command settled against its configuration, and what it runs with.
+#[derive(Debug)]
+pub(crate) struct Resolved {
+    /// The command, with every argument's meaning decided.
+    pub(crate) command: Commands,
+
+    /// The configuration the command runs with.
+    pub(crate) config: AppConfig,
+
+    /// The conversations the command asked for.
+    pub(crate) handles: Vec<jp_workspace::ConversationHandle>,
+
+    /// Whether the user chose to start a new conversation from the picker.
+    pub(crate) start_new: bool,
+
+    /// The reset point this invocation records, if any.
+    pub(crate) config_reset: Option<ConfigResetEvents>,
 }
 
 /// The `--cfg` directive list used for config resolution.

@@ -2,10 +2,17 @@
 //!
 //! [`Cli::try_parse_from`] is the entry point.
 //! It builds the root [`Command`], lets clap match the arguments against it,
-//! and reads the matches back into a [`Cli`].
+//! records how each option's value was written ([`Spelling`]), and reads the
+//! matches back into a [`Cli`].
 //! Each subcommand declares and reads its own arguments; see [`Commands`].
 //!
+//! A flag whose value is optional is declared through [`flag`], which decides
+//! whether a word after it is its value or the start of the free text.
+//!
 //! [`Commands`]: crate::cmd::Commands
+
+pub(crate) mod flag;
+mod spelling;
 
 use std::{ffi::OsString, num::NonZeroUsize, str::FromStr as _};
 
@@ -15,6 +22,8 @@ use clap::{
     value_parser,
 };
 
+use self::flag::Parsed;
+pub(crate) use self::spelling::Spelling;
 use crate::{
     CliFormat, KeyValueOrPath, LogFormat,
     cmd::{Commands, workspace::target::WorkspaceTarget},
@@ -27,7 +36,7 @@ const GLOBAL_HEADING: &str = "Global Options";
 pub(crate) struct Cli {
     pub(crate) globals: Globals,
     pub(crate) root: RootOpts,
-    pub(crate) command: Commands,
+    pub(crate) command: Commands<Parsed>,
 }
 
 impl Cli {
@@ -57,22 +66,45 @@ impl Cli {
         I: IntoIterator<Item = T>,
         T: Into<OsString> + Clone,
     {
+        let argv: Vec<OsString> = argv.into_iter().map(Into::into).collect();
+
         let mut cmd = Self::command();
-        let matches = cmd.try_get_matches_from_mut(argv)?;
+        let matches = cmd.try_get_matches_from_mut(&argv)?;
+        cmd.build();
+        let spelling = Spelling::of(&cmd, &matches, &argv);
 
         // An error from reading the matches back carries no usage line of its
-        // own; formatting it against the command gives it the same chrome as an
-        // error clap raised while matching.
-        Self::from_matches(&matches).map_err(|error| error.format(&mut cmd))
+        // own; formatting it against the subcommand gives it the same chrome as
+        // an error clap raised while matching.
+        Self::from_matches(&matches, &spelling)
+            .map_err(|error| error.format(matched_command(&mut cmd, &matches)))
     }
 
-    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+    fn from_matches(matches: &ArgMatches, spelling: &Spelling) -> Result<Self, clap::Error> {
         Ok(Self {
             globals: Globals::from_matches(matches),
             root: RootOpts::from_matches(matches),
-            command: Commands::from_matches(matches)?,
+            command: Commands::from_matches(matches, spelling)?,
         })
     }
+}
+
+/// The innermost declared subcommand of `cmd` that `matches` selected.
+fn matched_command<'a>(cmd: &'a mut Command, matches: &ArgMatches) -> &'a mut Command {
+    let mut cmd = cmd;
+    let mut matches = matches;
+    while let Some((name, sub)) = matches.subcommand() {
+        // A plugin's command is not declared, so its parent is the innermost.
+        if cmd.find_subcommand(name).is_none() {
+            break;
+        }
+        cmd = cmd
+            .find_subcommand_mut(name)
+            .expect("found by the same name above");
+        matches = sub;
+    }
+
+    cmd
 }
 
 /// The options accepted only by `jp` itself, before any subcommand.

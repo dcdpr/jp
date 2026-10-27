@@ -44,12 +44,12 @@ impl Attachment {
 
 impl IntoPartialAppConfig for Attachment {
     fn apply_cli_config(
-        &mut self,
+        &self,
         workspace: Option<&Workspace>,
         partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
-        match &mut self.command {
+        match &self.command {
             Commands::Add(args) => args.apply_cli_config(workspace, partial, merged_config),
             Commands::Remove(args) => args.apply_cli_config(workspace, partial, merged_config),
             Commands::List(_) | Commands::Print(_) => Ok(partial),

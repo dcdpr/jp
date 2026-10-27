@@ -19,7 +19,7 @@ impl Rm {
 
 impl IntoPartialAppConfig for Rm {
     fn apply_cli_config(
-        &mut self,
+        &self,
         workspace: Option<&Workspace>,
         mut partial: PartialAppConfig,
         _: Option<&PartialAppConfig>,

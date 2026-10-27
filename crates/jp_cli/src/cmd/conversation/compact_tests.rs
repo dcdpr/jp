@@ -184,7 +184,7 @@ fn model_flag_targets_the_assistant_model() {
     // `--model` rides the same `assistant.model.id` path as `jp query --model`,
     // so the pipeline resolves the alias. The summarizer picks it up through its
     // fallback: an unset `summary.model` means "use the assistant model".
-    let mut compact = parse_compact(&["--summary", "--model", "gpt"]);
+    let compact = parse_compact(&["--summary", "--model", "gpt"]);
     let mut partial = PartialAppConfig::new_test();
     partial = compact.apply_cli_config(None, partial, None).unwrap();
 
@@ -220,7 +220,7 @@ fn model_alias_reaches_a_configured_summary_model_through_the_pipeline() {
 
     // No `--summary`: a policy flag would replace the configured rule with an
     // ad-hoc one, and the configured `summary.model` is what this exercises.
-    let mut compact = parse_compact(&["--model", "gpt"]);
+    let compact = parse_compact(&["--model", "gpt"]);
     let partial = compact.apply_cli_config(None, partial, None).unwrap();
     let cfg = jp_config::util::build(partial).unwrap();
 

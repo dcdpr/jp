@@ -1,241 +1,766 @@
-//! The `query` arguments clap cannot derive on its own.
+//! The `query` command line: its arguments, and how they are read.
 //!
-//! Every type here exists because its flag depends on *where* a value sat on
-//! the command line, which a derived `clap::Args` cannot see.
-//! [`QueryInput`] has to know whether the word after `--quote` was its value or
-//! the start of the query, and which words the flags in front of the query gave
-//! back to it.
-//! [`ToolDirectives`] has to know the order `--tool` and `--no-tool` were
-//! written in.
-//! It, [`ToolUse`], [`ForkFlag`], and [`ExpiryFlag`] each have to know whether
-//! their value sits directly before the query, where it may instead be the
-//! query's first word.
-//! Everything else on `Query` is derived as usual.
+//! `Query::augment` declares the arguments and `Query::from_matches` reads them
+//! into a `Query<Parsed>`.
+//! Most flags are decided as they are read.
+//! `-t`, `-T`, and `-u` can only tell a tool name from the first word of the
+//! query once the configured tools are known, so they stay undecided until
+//! `Query::settle` turns the command into a `Query<Settled>`.
 
-use std::{fmt, sync::Arc};
+use std::collections::HashSet;
 
-use clap::{ArgAction, error::ErrorKind};
-use jp_inquire::prompt::PromptBackend;
-
-use crate::{
-    cmd::{compact_flag::CompactFlag, conversation_id::FlagIds},
-    parser::{GivesBack, given_back, query_indices, split_list},
+use clap::{
+    Arg, ArgAction, ArgGroup, ArgMatches, Command, builder::TypedValueParser as _, value_parser,
+};
+use jp_config::{
+    PartialAppConfig,
+    assignment::KvAssignment,
+    model::parameters::{ReasoningConfig, ServiceTier},
+    providers::llm::AuthEntry,
 };
 
-/// The query text and the `--quote` seed.
-///
-/// The two are parsed together because `--quote` accepts its value either
-/// attached (`--quote=false`) or as the word right after the flag (`--quote
-/// false`), and in the second form that word arrives as query text.
+use super::{Query, parse_schema, string_or_path, tool};
+use crate::{
+    Spelling,
+    cli::flag::{
+        ArgPrompts, Claim, Confirmation, Flag, FlagValues, FreeText, OptionalValue, Parsed, Settle,
+        SettleError, Settled, flag_arg, invalid_value,
+    },
+    cmd::{compact_flag::Compact, conversation_id::Ids},
+    parser::{AttachmentUrlOrPath, split_list},
+};
+
+/// The `--id` flag `query` takes: one conversation, outside any session.
+type Target = Ids<false, false, false>;
+
+/// The names of the tools a query can enable or use: those the configuration
+/// declares, and the built-ins.
 #[derive(Debug, Default)]
-pub(crate) struct QueryInput {
-    /// The query words, in the order they were given.
-    pub(super) query: Option<Vec<String>>,
+pub(crate) struct KnownTools(HashSet<String>);
 
-    /// `Some(true)` prefixes the quoted message with ` >  `, `Some(false)`
-    /// seeds it verbatim, `None` means `--quote` was not given.
-    pub(super) quote: Option<bool>,
-
-    /// The clap index of each word in `query`, in the same order.
-    pub(super) indices: Vec<usize>,
-}
-
-impl QueryInput {
-    /// Split the parsed arguments into the query and the quote seed.
-    fn resolve(args: QueryInputArgs, matches: &clap::ArgMatches) -> Self {
-        let QueryInputArgs {
-            mut query,
-            escaped_query,
-            quote,
-        } = args;
-
-        let mut indices = query_indices(matches);
-
-        let quote = match quote {
-            None => None,
-            Some(QuoteArg::Attached(prefixed)) => Some(prefixed),
-            // A bare `--quote` reads its value from the next word when that
-            // word is exactly `true` or `false`. Anything else there is query
-            // text, and the flag falls back to its default.
-            Some(QuoteArg::Bare) => {
-                Some(take_quote_value(&mut query, &mut indices, matches).unwrap_or(true))
-            }
-        };
-
-        // The two halves are one query. They stay apart until here so that
-        // `--quote` above only ever sees the unescaped words, and stay in this
-        // order because `--` always comes last.
-        if let Some(escaped) = escaped_query {
-            query.get_or_insert_default().extend(escaped);
-            indices.extend(matches.indices_of("escaped_query").into_iter().flatten());
-        }
-
-        let mut input = Self {
-            query,
-            quote,
-            indices,
-        };
-
-        // These flags decide from the word alone, and read the same
-        // `given_back` to fall back to their bare form. `-t`, `-T`, and `-u` need
-        // the configured tools, and hand their words over later, through
-        // `insert_word`.
-        let given_back = [
-            given_back::<ForkFlag>(matches),
-            given_back::<ExpiryFlag>(matches),
-            given_back::<CompactFlag>(matches),
-            // The instantiation `Query` uses; `--id` claims the same words for
-            // any of them.
-            given_back::<FlagIds<false, false>>(matches),
-        ];
-        for (index, word) in given_back.into_iter().flatten() {
-            input.insert_word(index, word);
-        }
-
-        input
+impl KnownTools {
+    fn of(config: &PartialAppConfig) -> Self {
+        let configured = config.conversation.tools.tools.keys().cloned();
+        let builtins = tool::builtins::all().into_keys();
+        Self(configured.chain(builtins).collect())
     }
 
-    /// Put `word` back into the query at the place it held on the command line.
+    fn contains(&self, name: &str) -> bool {
+        self.0.contains(name)
+    }
+}
+
+impl Query<Parsed> {
+    /// Declare the arguments of `jp query` on `cmd`.
+    #[expect(clippy::too_many_lines)]
+    pub(crate) fn augment(cmd: Command) -> Command {
+        cmd.group(ArgGroup::new("new").arg("new_conversation"))
+            .arg(
+                Arg::new("template")
+                    .short('%')
+                    .long("template")
+                    .action(ArgAction::SetTrue)
+                    .help("Use the query string as a Jinja2 template")
+                    .long_help(
+                        "Use the query string as a Jinja2 template.\n\nYou can provide values for \
+                         template variables using the `template.values` config key.",
+                    ),
+            )
+            .arg(
+                Arg::new("schema")
+                    .short('s')
+                    .long("schema")
+                    .value_name("SCHEMA")
+                    .value_parser(string_or_path.try_map(parse_schema))
+                    .help("Constrain the assistant's response to match a JSON schema")
+                    .long_help(
+                        "Constrain the assistant's response to match a JSON schema.\n\nAccepts \
+                         either a full JSON Schema object or a concise DSL:\n\n-s 'summary' → \
+                         single string field -s 'name, age int, bio' → mixed types -s 'summary: \
+                         a brief summary' → field with description\n\nSee: \
+                         <https://jp.computer/rfd/030-schema-dsl>",
+                    ),
+            )
+            .arg(
+                Arg::new("replay")
+                    .long("replay")
+                    .action(ArgAction::SetTrue)
+                    .conflicts_with("new")
+                    .help("Replay the last message in the conversation")
+                    .long_help(
+                        "Replay the last message in the conversation.\n\nIf a query is provided, \
+                         it will be appended to the end of the previous message. If no query is \
+                         provided, $EDITOR will open with the last message in the conversation.",
+                    ),
+            )
+            .arg(flag_arg::<Target>())
+            .arg(flag_arg::<Fork>())
+            .arg(
+                Arg::new("new_conversation")
+                    .short('n')
+                    .long("new")
+                    .action(ArgAction::SetTrue)
+                    .conflicts_with("id")
+                    .help("Start a new conversation without any message history"),
+            )
+            .arg(
+                Arg::new("local")
+                    .short('l')
+                    .long("local")
+                    .action(ArgAction::SetTrue)
+                    .requires("new_conversation")
+                    .conflicts_with("no_local")
+                    .help("Store the conversation locally, outside of the workspace"),
+            )
+            .arg(
+                Arg::new("no_local")
+                    .short('L')
+                    .long("no-local")
+                    .action(ArgAction::SetTrue)
+                    .requires("new_conversation")
+                    .conflicts_with("local")
+                    .help("Store the conversation in the current workspace"),
+            )
+            .arg(
+                Arg::new("attachments")
+                    .short('a')
+                    .long("attachment")
+                    .alias("attach")
+                    .action(ArgAction::Append)
+                    .value_name("ATTACHMENTS")
+                    .value_parser(value_parser!(AttachmentUrlOrPath))
+                    .help("Add attachment to the configuration"),
+            )
+            .arg(
+                Arg::new("edit")
+                    .short('e')
+                    .long("edit")
+                    .action(ArgAction::SetTrue)
+                    .conflicts_with("no_edit")
+                    .help("Open an editor to compose the query")
+                    .long_help(
+                        "Open an editor to compose the query.\n\nForces the editor open even when \
+                         a query is provided inline (or piped on stdin). Use `--no-edit` (`-E`) to \
+                         suppress it.\n\nTo change which editor is used, set `editor.cmd` in your \
+                         config (or pass `--cfg editor.cmd=...`).",
+                    ),
+            )
+            .arg(
+                Arg::new("no_edit")
+                    .short('E')
+                    .long("no-edit")
+                    .action(ArgAction::SetTrue)
+                    .conflicts_with("edit")
+                    .help("Do not edit the query")
+                    .long_help("Do not edit the query.\n\nSee `--edit` for more details."),
+            )
+            .arg(
+                Arg::new(QueryText::WORDS)
+                    .action(ArgAction::Append)
+                    .num_args(1..)
+                    .value_name("QUERY")
+                    .help(
+                        "The query to send. If not provided, uses `$JP_EDITOR`, `$VISUAL` or \
+                         `$EDITOR` to open edit the query in an editor",
+                    )
+                    .long_help(
+                        "The query to send. If not provided, uses `$JP_EDITOR`, `$VISUAL` or \
+                         `$EDITOR` to open edit the query in an editor.\n\nA query consisting of a \
+                         single `@path` value is read from that file.",
+                    ),
+            )
+            // clap only fills this argument through the `--` separator, which
+            // makes it the record of which words were escaped: no flag's value
+            // is ever read as a word written after `--`.
+            .arg(
+                Arg::new(QueryText::ESCAPED)
+                    .action(ArgAction::Append)
+                    .num_args(1..)
+                    .last(true)
+                    .hide(true)
+                    .value_name("ESCAPED_QUERY")
+                    .help("Query words given after `--`"),
+            )
+            .arg(flag_arg::<Quote>())
+            .arg(
+                Arg::new("model")
+                    .short('m')
+                    .long("model")
+                    .value_name("MODEL")
+                    .help("The model to use"),
+            )
+            .arg(
+                Arg::new("auth")
+                    .long("auth")
+                    .action(ArgAction::Append)
+                    .value_name("CHAIN")
+                    .value_delimiter(',')
+                    .value_parser(value_parser!(AuthEntry))
+                    .help("Which credential to bill this turn to")
+                    .long_help(
+                        "Which credential to bill this turn to.\n\nTakes the same entries as the \
+                         `auth` chain in configuration, comma separated: a credential name, \
+                         `api_key`, `subscription`, or `<kind>:<name>`. `api` and `sub` are \
+                         accepted for the kinds.\n\nApplies to the provider the chosen model \
+                         belongs to, and is recorded on the turn, so the rest of the conversation \
+                         keeps billing the same way until another `--auth` changes it.",
+                    ),
+            )
+            .arg(
+                Arg::new("parameters")
+                    .short('p')
+                    .long("param")
+                    .action(ArgAction::Append)
+                    .value_name("KEY=VALUE")
+                    .value_parser(value_parser!(KvAssignment))
+                    .help("The model parameters to use"),
+            )
+            .arg(
+                Arg::new("reasoning")
+                    .short('r')
+                    .long("reasoning")
+                    .value_name("REASONING")
+                    .value_parser(value_parser!(ReasoningConfig))
+                    .help("Enable reasoning"),
+            )
+            .arg(
+                Arg::new("no_reasoning")
+                    .short('R')
+                    .long("no-reasoning")
+                    .action(ArgAction::SetTrue)
+                    .help("Disable reasoning"),
+            )
+            .arg(
+                Arg::new("service_tier")
+                    .long("tier")
+                    .value_name("TIER")
+                    .value_parser(value_parser!(ServiceTier))
+                    .conflicts_with("no_service_tier")
+                    .help("Capacity tier to request from the provider")
+                    .long_help(
+                        "Capacity tier to request from the provider.\n\nProviders sell more than \
+                         one grade of capacity for the same model: `flex` is cheaper and slower, \
+                         `priority` is faster and pricier, `standard` is the regular rate, and \
+                         `off` asks for no tier at all.\n\nWhich tiers are available depends on \
+                         the provider, the model, and the account; a provider that sells no \
+                         equivalent refuses the query rather than falling back to a rung that \
+                         costs something else. One that sells the tier but cannot serve this \
+                         model with it may still fall back.\n\nApplies to this query and every \
+                         later one on the conversation, because each tier is served from separate \
+                         capacity and switching discards the prompt cache.",
+                    ),
+            )
+            .arg(
+                Arg::new("no_service_tier")
+                    .long("no-tier")
+                    .action(ArgAction::SetTrue)
+                    .help("Stop asking for a capacity tier")
+                    .long_help(
+                        "Stop asking for a capacity tier.\n\nShorthand for `--tier off`, which \
+                         sends no tier and leaves the choice to whatever the account is set up \
+                         for.\n\nThis is not `--tier standard`: `standard` names a rung and is \
+                         sent as one.",
+                    ),
+            )
+            .arg(
+                Arg::new("hide_reasoning")
+                    .long("hide-reasoning")
+                    .action(ArgAction::SetTrue)
+                    .help("Do not display the reasoning content")
+                    .long_help(
+                        "Do not display the reasoning content.\n\nThis does not stop the \
+                         assistant from generating reasoning tokens to help with its accuracy, \
+                         but it does not display them in the output.",
+                    ),
+            )
+            .arg(
+                Arg::new("hide_tool_calls")
+                    .long("hide-tool-calls")
+                    .action(ArgAction::SetTrue)
+                    .help("Do not display tool calls")
+                    .long_help(
+                        "Do not display tool calls.\n\nThis does not stop the assistant from \
+                         running tool calls, but it does not display them in the output.",
+                    ),
+            )
+            .arg(flag_arg::<EnableTools>())
+            .arg(flag_arg::<DisableTools>())
+            .arg(flag_arg::<Expiry>())
+            .arg(
+                Arg::new("title")
+                    .long("title")
+                    .value_name("TITLE")
+                    .conflicts_with("no_title")
+                    .help("Set a custom title for the conversation")
+                    .long_help(
+                        "Set a custom title for the conversation.\n\nApplied to the resolved \
+                         conversation (new, forked, or resumed) before the turn runs. Skips title \
+                         auto-generation for new conversations — your title wins. Mutually \
+                         exclusive with `--no-title`.",
+                    ),
+            )
+            .arg(
+                Arg::new("no_title")
+                    .long("no-title")
+                    .action(ArgAction::SetTrue)
+                    .conflicts_with("title")
+                    .help("Disable the title for the conversation")
+                    .long_help(
+                        "Disable the title for the conversation.\n\nClears any existing title on \
+                         the resolved conversation (new, forked, or resumed) and skips \
+                         auto-generation for this run. Mutually exclusive with `--title`.",
+                    ),
+            )
+            .arg(flag_arg::<ToolUse>())
+            .arg(
+                Arg::new("no_tool_use")
+                    .short('U')
+                    .long("no-tool-use")
+                    .action(ArgAction::SetTrue)
+                    .help("Disable tool use by the assistant")
+                    .long_help(
+                        "Disable tool use by the assistant.\n\nThis applies to a single query and \
+                         is *not* persisted. To keep tools off, use `--no-tool`, which disables \
+                         them for every future query on the conversation.",
+                    ),
+            )
+            .arg(flag_arg::<Compact>())
+            .arg(
+                Arg::new("mount")
+                    .long("mount")
+                    .action(ArgAction::Append)
+                    .value_name("[TOOL:]NAME=PATH[:MODE]")
+                    .help(
+                        "Mount an external path into the workspace as a symlink and grant the \
+                         assistant access to it",
+                    )
+                    .long_help(
+                        "Mount an external path into the workspace as a symlink and grant the \
+                         assistant access to it.\n\nForm: `[TOOL:]NAME=PATH[:MODE]`. `NAME` is the \
+                         workspace-relative location for the symlink, `PATH` is the external \
+                         target, and `MODE` is `ro` (default) or `rw`. `rw` requires a `TOOL:` \
+                         prefix; without a `TOOL:` prefix the grant applies to all enabled local \
+                         and command plugin tools. Repeat the flag to mount several paths.",
+                    ),
+            )
+    }
+
+    /// Read the arguments `matches` holds for `jp query`.
     ///
-    /// `index` is the word's clap index.
-    pub(super) fn insert_word(&mut self, index: usize, word: String) {
+    /// Each flag decided by its word alone is decided here, and gives the words
+    /// it does not claim back to the query.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a value that is a flag's does not parse.
+    pub(crate) fn from_matches(
+        matches: &ArgMatches,
+        spelling: &Spelling,
+    ) -> Result<Self, clap::Error> {
+        let mut text = QueryText::read(matches);
+
+        let target = Flag::<Target>::decide_now(matches, spelling, &mut text)?;
+        let fork = Flag::<Fork>::decide_now(matches, spelling, &mut text)?;
+        let expires_in = Flag::<Expiry>::decide_now(matches, spelling, &mut text)?;
+        let compact = Flag::<Compact>::decide_now(matches, spelling, &mut text)?;
+        let quote = Flag::<Quote>::decide_now(matches, spelling, &mut text)?;
+
+        let tool_directives = ToolFlags {
+            enable: Flag::read(matches, spelling, &text)?,
+            disable: Flag::read(matches, spelling, &text)?,
+        };
+        let tool_use = Flag::read(matches, spelling, &text)?;
+
+        Ok(Self {
+            template: matches.get_flag("template"),
+            schema: matches.get_one("schema").cloned(),
+            replay: matches.get_flag("replay"),
+            target,
+            fork,
+            new_conversation: matches.get_flag("new_conversation"),
+            local: matches.get_flag("local"),
+            no_local: matches.get_flag("no_local"),
+            attachments: values(matches, "attachments"),
+            edit: matches.get_flag("edit"),
+            no_edit: matches.get_flag("no_edit"),
+            query: text,
+            quote,
+            model: matches.get_one("model").cloned(),
+            auth: values(matches, "auth"),
+            parameters: values(matches, "parameters"),
+            reasoning: matches.get_one("reasoning").copied(),
+            no_reasoning: matches.get_flag("no_reasoning"),
+            service_tier: matches.get_one("service_tier").copied(),
+            no_service_tier: matches.get_flag("no_service_tier"),
+            hide_reasoning: matches.get_flag("hide_reasoning"),
+            hide_tool_calls: matches.get_flag("hide_tool_calls"),
+            tool_directives,
+            expires_in,
+            title: matches.get_one("title").cloned(),
+            no_title: matches.get_flag("no_title"),
+            tool_use,
+            no_tool_use: matches.get_flag("no_tool_use"),
+            compact,
+            mount: values(matches, "mount"),
+        })
+    }
+
+    /// Decide whether each `-t`, `-T`, or `-u` value written directly before
+    /// the query names tools or starts the query.
+    ///
+    /// The value names tools when every name in it is a tool `config`
+    /// configures, or a built-in.
+    /// Otherwise it goes back into the query where it was written, and its flag
+    /// reads as if written bare: `-t`/`-T` apply to every tool, `-u` requires
+    /// some tool.
+    /// For `-t`, that needs the user's confirmation through `prompts` first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a `-t` value names no configured tool and the user
+    /// declines, or nobody is there to ask.
+    pub(crate) fn settle(
+        self,
+        config: &PartialAppConfig,
+        prompts: &ArgPrompts,
+    ) -> Result<Query<Settled>, SettleError> {
+        let tools = KnownTools::of(config);
+
+        let Self {
+            template,
+            schema,
+            replay,
+            target,
+            fork,
+            new_conversation,
+            local,
+            no_local,
+            attachments,
+            edit,
+            no_edit,
+            query: mut text,
+            quote,
+            model,
+            auth,
+            parameters,
+            reasoning,
+            no_reasoning,
+            service_tier,
+            no_service_tier,
+            hide_reasoning,
+            hide_tool_calls,
+            tool_directives,
+            expires_in,
+            title,
+            no_title,
+            tool_use,
+            no_tool_use,
+            compact,
+            mount,
+        } = self;
+
+        let tool_directives = tool_directives.settle(&tools, prompts, &mut text)?;
+        let tool_use = tool_use.settle(&tools, prompts, &mut text)?;
+
+        Ok(Query {
+            template,
+            schema,
+            replay,
+            target,
+            fork,
+            new_conversation,
+            local,
+            no_local,
+            attachments,
+            edit,
+            no_edit,
+            query: text.into_words(),
+            quote,
+            model,
+            auth,
+            parameters,
+            reasoning,
+            no_reasoning,
+            service_tier,
+            no_service_tier,
+            hide_reasoning,
+            hide_tool_calls,
+            tool_directives,
+            expires_in,
+            title,
+            no_title,
+            tool_use,
+            no_tool_use,
+            compact,
+            mount,
+        })
+    }
+}
+
+/// Every value of the argument `id`, in command-line order.
+fn values<T: Clone + Send + Sync + 'static>(matches: &ArgMatches, id: &str) -> Vec<T> {
+    matches
+        .get_many(id)
+        .map(|values| values.cloned().collect())
+        .unwrap_or_default()
+}
+
+/// The words of the query, written before `--` or after it.
+#[derive(Debug, Default)]
+pub(crate) struct QueryText {
+    /// The words, in command-line order.
+    words: Vec<String>,
+
+    /// The clap index of each word in `words`.
+    indices: Vec<usize>,
+
+    /// The clap indices of the words written before `--`, as read.
+    ///
+    /// Only those can directly follow a flag's value.
+    unescaped: Vec<usize>,
+}
+
+impl QueryText {
+    /// The clap id of the words written before `--`.
+    const WORDS: &'static str = "query";
+
+    /// The clap id of the words written after `--`.
+    const ESCAPED: &'static str = "escaped_query";
+
+    fn read(matches: &ArgMatches) -> Self {
+        let mut text = Self::default();
+        for id in [Self::WORDS, Self::ESCAPED] {
+            text.words.extend(values::<String>(matches, id));
+            text.indices
+                .extend(matches.indices_of(id).into_iter().flatten());
+
+            if id == Self::WORDS {
+                text.unescaped.clone_from(&text.indices);
+            }
+        }
+
+        text
+    }
+}
+
+impl FreeText for QueryText {
+    type Words = Option<Vec<String>>;
+
+    fn takes_words(&self) -> bool {
+        true
+    }
+
+    fn is_text(&self, index: usize) -> bool {
+        self.unescaped.contains(&index)
+    }
+
+    fn give(&mut self, index: usize, word: String) {
         let at = self.indices.partition_point(|&i| i < index);
-        self.query.get_or_insert_default().insert(at, word);
+        self.words.insert(at, word);
         self.indices.insert(at, index);
     }
-}
 
-/// Take the `true` / `false` word sitting directly after `--quote` out of the
-/// query and return its value.
-///
-/// Returns `None` — leaving the query untouched — when the flag is followed
-/// by anything else.
-/// Words given after `--` are never candidates: they land in a separate
-/// argument that this never reads.
-fn take_quote_value(
-    query: &mut Option<Vec<String>>,
-    indices: &mut Vec<usize>,
-    matches: &clap::ArgMatches,
-) -> Option<bool> {
-    // clap counts a flag and its value as two separate indices, so the word
-    // directly after `--quote` sits one past the index of the flag's own
-    // (defaulted) value.
-    let after_quote = matches.index_of("quote")? + 1;
-    let position = indices.iter().position(|&index| index == after_quote)?;
-
-    let words = query.as_mut()?;
-    let value = words.get(position)?.parse::<bool>().ok()?;
-
-    words.remove(position);
-    indices.remove(position);
-    if words.is_empty() {
-        *query = None;
-    }
-
-    Some(value)
-}
-
-/// Argument declarations for [`QueryInput`].
-///
-/// [`QueryInput`] borrows these declarations and resolves the parsed values
-/// itself; it is never constructed as a command's own arguments.
-#[derive(Debug, clap::Args)]
-struct QueryInputArgs {
-    /// The query to send.
-    /// If not provided, uses `$JP_EDITOR`, `$VISUAL` or `$EDITOR` to open edit
-    /// the query in an editor.
-    ///
-    /// A query consisting of a single `@path` value is read from that file.
-    query: Option<Vec<String>>,
-
-    /// Query words given after `--`.
-    ///
-    /// clap only fills this argument through the `--` separator, which makes it
-    /// the record of which words were escaped.
-    /// They are appended to `query` once `--quote` has been resolved, so `--`
-    /// shields a `true` / `false` word from being read as the flag's value.
-    #[arg(last = true, hide = true)]
-    escaped_query: Option<Vec<String>>,
-
-    /// Pre-fill the editor with the last assistant message quoted as a markdown
-    /// blockquote (each line prefixed with ` >  `).
-    ///
-    /// Useful for inline replies: open `$EDITOR` with the assistant's last
-    /// response pre-quoted, then intersperse your replies between the quoted
-    /// lines (mutt/email style).
-    /// The complete buffer — quotes plus your replies — becomes your next
-    /// message.
-    ///
-    /// `--quote=false` seeds the message verbatim, without the ` >  ` prefixes.
-    /// `--quote=true` is the same as a bare `--quote`.
-    /// Both values also work unattached (`--quote false`); any other word after
-    /// `--quote` stays part of the query, so `jp q --quote what now?` still
-    /// asks "what now?".
-    /// To ask a question that *is* `true` or `false`, put it after `--`.
-    ///
-    /// Forces the editor open by default; respects `--no-edit` / `--edit=false`
-    /// if explicitly suppressed, in which case the quoted text is sent as-is
-    /// and echoed to the terminal before the turn runs.
-    /// Composes with `--replay`: the quote is taken from the stream *after* the
-    /// replayed turn has been trimmed, i.e. the assistant message preceding the
-    /// turn being replayed.
-    ///
-    /// If no prior assistant message exists in this conversation, a warning is
-    /// emitted and the editor opens with whatever other content was seeded
-    /// (query, stdin, or empty).
-    #[arg(
-        long = "quote",
-        value_name = "BOOL",
-        num_args = 0..=1,
-        require_equals = true,
-        default_missing_value = "",
-        value_parser = parse_quote_arg,
-    )]
-    quote: Option<QuoteArg>,
-}
-
-/// The `--quote` value as it was written on the command line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum QuoteArg {
-    /// `--quote` with nothing attached.
-    Bare,
-
-    /// `--quote=true` or `--quote=false`.
-    Attached(bool),
-}
-
-/// Parse the `--quote` value.
-///
-/// The empty string is what a bare `--quote` yields, since `require_equals`
-/// keeps it from swallowing the next word and the flag falls back to its
-/// `default_missing_value`.
-fn parse_quote_arg(s: &str) -> Result<QuoteArg, String> {
-    match s {
-        "" => Ok(QuoteArg::Bare),
-        "true" => Ok(QuoteArg::Attached(true)),
-        "false" => Ok(QuoteArg::Attached(false)),
-        _ => Err("expected `true` or `false`".to_owned()),
+    fn into_words(self) -> Option<Vec<String>> {
+        (!self.words.is_empty()).then_some(self.words)
     }
 }
 
-impl clap::Args for QueryInput {
-    fn augment_args(cmd: clap::Command) -> clap::Command {
-        QueryInputArgs::augment_args(cmd)
+/// `--fork[=N]`: fork the conversation before the query, keeping its last `N`
+/// turns, or all of them.
+pub(crate) enum Fork {}
+
+impl OptionalValue for Fork {
+    const ID: &'static str = "fork";
+
+    type Context = ();
+    type Output = Option<Option<usize>>;
+    type Value = usize;
+
+    fn declare(arg: Arg) -> Arg {
+        arg.long("fork")
+            .value_name("N")
+            .conflicts_with("new")
+            .help("Fork the conversation and start a new turn on the fork")
+            .long_help(
+                "Fork the session's active conversation (or the one specified by --id) and start \
+                 a new turn on the fork.\n\nIf N is given, the fork keeps only the last N \
+                 turns.\n\nA value written directly before the query that is not a number is the \
+                 query's first word instead, and the fork keeps every turn: `jp q --fork what if \
+                 we` forks and asks \"what if we\". A value attached with `=` is always the \
+                 number of turns.",
+            )
     }
 
-    fn augment_args_for_update(cmd: clap::Command) -> clap::Command {
-        QueryInputArgs::augment_args_for_update(cmd)
+    fn parse(value: &str) -> Result<usize, clap::Error> {
+        value.parse().map_err(|_| {
+            invalid_value(format!(
+                "invalid value for '--fork': expected a positive integer, got '{value}'"
+            ))
+        })
+    }
+
+    fn claim(value: &str, (): &()) -> Result<Claim<usize>, clap::Error> {
+        Ok(value.parse().map_or(Claim::Text, Claim::Value))
+    }
+
+    fn collect(values: FlagValues<usize>) -> Result<Self::Output, clap::Error> {
+        Ok(values.last())
     }
 }
 
-impl clap::FromArgMatches for QueryInput {
-    fn from_arg_matches(matches: &clap::ArgMatches) -> Result<Self, clap::Error> {
-        QueryInputArgs::from_arg_matches(matches).map(|args| Self::resolve(args, matches))
+/// `--tmp[=DURATION]`: the new conversation expires once it is no longer
+/// active, or after `DURATION`.
+pub(crate) enum Expiry {}
+
+impl OptionalValue for Expiry {
+    const ID: &'static str = "expires_in";
+
+    type Context = ();
+    type Output = Option<Option<humantime::Duration>>;
+    type Value = humantime::Duration;
+
+    fn declare(arg: Arg) -> Arg {
+        arg.long("tmp")
+            .value_name("DURATION")
+            .requires("new")
+            .help("Set the expiration date of the conversation")
+            .long_help(
+                "Set the expiration date of the conversation.\n\nThe conversation is persisted, \
+                 but only until the conversation is no longer marked as active (e.g. when a new \
+                 conversation is started), and when the expiration date is reached.\n\nThis \
+                 differs from `--no-persist` in that the conversation can contain multiple turns, \
+                 as long as it remains active and not expired.\n\nA value written directly before \
+                 the query that is not a duration is the query's first word instead, and no \
+                 duration is set: `jp q -n --tmp quick question` asks \"quick question\". A value \
+                 attached with `=` is always the duration.",
+            )
     }
 
-    fn update_from_arg_matches(&mut self, matches: &clap::ArgMatches) -> Result<(), clap::Error> {
-        *self = Self::from_arg_matches(matches)?;
-        Ok(())
+    fn parse(value: &str) -> Result<humantime::Duration, clap::Error> {
+        value
+            .parse()
+            .map_err(|error| invalid_value(format!("invalid value '{value}' for '--tmp': {error}")))
+    }
+
+    fn claim(value: &str, (): &()) -> Result<Claim<humantime::Duration>, clap::Error> {
+        Ok(value.parse().map_or(Claim::Text, Claim::Value))
+    }
+
+    fn collect(values: FlagValues<humantime::Duration>) -> Result<Self::Output, clap::Error> {
+        Ok(values.last())
+    }
+}
+
+/// `--quote[=BOOL]`: seed the editor with the last assistant message, quoted.
+pub(crate) enum Quote {}
+
+impl OptionalValue for Quote {
+    // `true` and `false` are rarely the start of a query, and no other word is
+    // ever the flag's, so a separate word is the flag's only when it is one of
+    // those two, wherever it sits.
+    const CLAIMS_EVERY_SEPARATE_VALUE: bool = true;
+    const ID: &'static str = "quote";
+
+    type Context = ();
+    /// `Some(true)` prefixes the quoted message with ` >  `, `Some(false)`
+    /// seeds it verbatim, `None` means `--quote` was not given.
+    type Output = Option<bool>;
+    type Value = bool;
+
+    fn declare(arg: Arg) -> Arg {
+        arg.long("quote")
+            .value_name("BOOL")
+            .help(
+                "Pre-fill the editor with the last assistant message quoted as a markdown \
+                 blockquote (each line prefixed with ` >  `)",
+            )
+            .long_help(
+                "Pre-fill the editor with the last assistant message quoted as a markdown \
+                 blockquote (each line prefixed with ` >  `).\n\nUseful for inline replies: open \
+                 `$EDITOR` with the assistant's last response pre-quoted, then intersperse your \
+                 replies between the quoted lines (mutt/email style). The complete buffer — \
+                 quotes plus your replies — becomes your next message.\n\n`--quote=false` seeds \
+                 the message verbatim, without the ` >  ` prefixes. `--quote=true` is the same as \
+                 a bare `--quote`. Both values also work unattached (`--quote false`); any other \
+                 word after `--quote` stays part of the query, so `jp q --quote what now?` still \
+                 asks \"what now?\". To ask a question that *is* `true` or `false`, put it after \
+                 `--`.\n\nForces the editor open by default; respects `--no-edit` / \
+                 `--edit=false` if explicitly suppressed, in which case the quoted text is sent \
+                 as-is and echoed to the terminal before the turn runs. Composes with `--replay`: \
+                 the quote is taken from the stream *after* the replayed turn has been trimmed, \
+                 i.e. the assistant message preceding the turn being replayed.\n\nIf no prior \
+                 assistant message exists in this conversation, a warning is emitted and the \
+                 editor opens with whatever other content was seeded (query, stdin, or empty).",
+            )
+    }
+
+    fn parse(value: &str) -> Result<bool, clap::Error> {
+        value.parse().map_err(|_| {
+            invalid_value(format!(
+                "invalid value '{value}' for '--quote': expected `true` or `false`"
+            ))
+        })
+    }
+
+    fn claim(value: &str, (): &()) -> Result<Claim<bool>, clap::Error> {
+        Ok(value.parse().map_or(Claim::Text, Claim::Value))
+    }
+
+    fn collect(values: FlagValues<bool>) -> Result<Option<bool>, clap::Error> {
+        Ok(values.last().map(|value| value.unwrap_or(true)))
+    }
+}
+
+/// `-u` / `--tool-use[=TOOL]`: the tool choice for this query alone.
+pub(crate) enum ToolUse {}
+
+impl OptionalValue for ToolUse {
+    const ID: &'static str = "tool_use";
+
+    type Context = KnownTools;
+    /// `None` without `-u`, `Some(None)` for a bare `-u`, `Some(Some(value))`
+    /// for a value.
+    type Output = Option<Option<String>>;
+    type Value = String;
+
+    fn declare(arg: Arg) -> Arg {
+        arg.short('u')
+            .long("tool-use")
+            .value_name("TOOL")
+            .help("The tool to use")
+            .long_help(
+                "The tool to use.\n\nIf a value is provided, the tool matching the value will be \
+                 used. The named tool runs for this query even when it is disabled, so it does \
+                 not have to be enabled separately; a tool whose policy locks it off is \
+                 refused.\n\nWithout a value, or with `true`, the assistant must use one of its \
+                 enabled tools. With `false`, it may use none.\n\nThis applies to a single query \
+                 and is *not* persisted: the next query forces nothing, and a tool that was \
+                 disabled stays disabled. To persist tool choice behavior, set the \
+                 `assistant.tool_choice` field in a configuration file.\n\nA value written \
+                 directly before the query names a tool when a tool by that name is configured; \
+                 otherwise it is the first word of the query, and the assistant must use one of \
+                 its tools: `jp q -u fix the bug`. A value attached with `=` always names a tool.",
+            )
+    }
+
+    fn parse(value: &str) -> Result<String, clap::Error> {
+        Ok(value.to_owned())
+    }
+
+    /// `true` and `false` are the flag's own spellings, never a tool name.
+    ///
+    /// A word naming no tool needs no confirmation: a bare `-u` only requires
+    /// the assistant to call one of the tools it already has.
+    fn claim(value: &str, tools: &KnownTools) -> Result<Claim<String>, clap::Error> {
+        if matches!(value, "true" | "false") || tools.contains(value) {
+            return Ok(Claim::Value(value.to_owned()));
+        }
+
+        Ok(Claim::Text)
+    }
+
+    fn collect(values: FlagValues<String>) -> Result<Self::Output, clap::Error> {
+        Ok(values.last())
     }
 }
 
@@ -278,551 +803,169 @@ impl ToolDirective {
     }
 }
 
-/// Ordered sequence of tool directives from `--tool` and `--no-tools`.
-///
-/// Implements manual [`clap::Args`] and [`clap::FromArgMatches`] to recover the
-/// position of each flag value using [`ArgMatches::indices_of`], then merges
-/// and sorts them by index into a single ordered list.
-///
-/// A value written directly before the query can only be told apart from the
-/// query's first word once the configured tools are known, so the directives
-/// are only reachable through [`settle`].
-///
-/// [`ArgMatches::indices_of`]: clap::ArgMatches::indices_of
-/// [`settle`]: Self::settle
-#[derive(Debug, Clone, Default)]
-pub(crate) struct ToolDirectives(State);
-
-#[derive(Debug, Clone)]
-enum State {
-    /// As written on the command line.
-    Parsed(Vec<ParsedDirective>),
-
-    /// Decided against the configured tools.
-    Settled(Vec<ToolDirective>),
+/// `-t` and `-T`, whose directives apply together, in the order written.
+#[derive(Debug, Default)]
+pub(crate) struct ToolFlags {
+    enable: Flag<EnableTools>,
+    disable: Flag<DisableTools>,
 }
 
-impl Default for State {
-    fn default() -> Self {
-        Self::Settled(vec![])
-    }
-}
+impl Settle for ToolFlags {
+    type Context = KnownTools;
+    type Output = Vec<ToolDirective>;
 
-/// A `--tool` or `--no-tool` flag as written on the command line.
-#[derive(Debug, Clone)]
-enum ParsedDirective {
-    Decided(ToolDirective),
+    fn settle(
+        self,
+        tools: &KnownTools,
+        prompts: &ArgPrompts,
+        text: &mut impl FreeText,
+    ) -> Result<Vec<ToolDirective>, SettleError> {
+        let enable = self.enable.settle(tools, prompts, text)?;
+        let disable = self.disable.settle(tools, prompts, text)?;
 
-    /// A value written directly before query text, which either names tools or
-    /// is the first word of the query.
-    Ambiguous {
-        /// `true` for `--tool`, `false` for `--no-tool`.
-        enable: bool,
-        value: String,
-        /// The clap index of `value`.
-        index: usize,
-    },
-}
-
-/// The directives to apply, and each value read as query text with its clap
-/// index, in command-line order.
-type Settlement = (Vec<ToolDirective>, Vec<(usize, String)>);
-
-impl ToolDirectives {
-    /// Return the directives to apply, deciding what each value written
-    /// directly before the query is.
-    ///
-    /// Such a value names tools when it is a valid comma-separated list and
-    /// `is_tool` accepts every name in it.
-    /// Any other value is query text: its flag applies to every tool, and the
-    /// value is returned with its clap index, in command-line order.
-    ///
-    /// A `--tool` value is only read as query text once `confirm_enable_all`
-    /// accepts it, since its flag then enables every tool.
-    /// An error from `confirm_enable_all` refuses, is returned as is, and
-    /// leaves the directives unsettled.
-    /// A `--no-tool` value is never asked about: disabling every tool grants
-    /// nothing.
-    ///
-    /// Only the first successful call decides anything; later calls return the
-    /// same directives and no query text.
-    pub(crate) fn settle<E>(
-        &mut self,
-        is_tool: impl Fn(&str) -> bool,
-        mut confirm_enable_all: impl FnMut(&str) -> Result<(), E>,
-    ) -> Result<Settlement, E> {
-        let parsed = match &self.0 {
-            State::Settled(directives) => return Ok((directives.clone(), vec![])),
-            State::Parsed(parsed) => parsed,
-        };
-
-        let mut directives = Vec::with_capacity(parsed.len());
-        let mut words = vec![];
-        for directive in parsed {
-            let (enable, value, index) = match directive {
-                ParsedDirective::Decided(directive) => {
-                    directives.push(directive.clone());
-                    continue;
-                }
-                ParsedDirective::Ambiguous {
-                    enable,
-                    value,
-                    index,
-                } => (*enable, value, *index),
-            };
-
-            let names = split_list::<String>(value, "tool name")
-                .ok()
-                .filter(|names| names.iter().all(|name| is_tool(name)));
-
-            if let Some(names) = names {
-                directives.extend(
-                    names
-                        .into_iter()
-                        .map(|name| ToolDirective::named(enable, name)),
-                );
-                continue;
-            }
-
-            if enable {
-                confirm_enable_all(value)?;
-            }
-
-            directives.push(ToolDirective::bulk(enable));
-            words.push((index, value.clone()));
-        }
-
-        self.0 = State::Settled(directives.clone());
-        Ok((directives, words))
-    }
-}
-
-impl From<Vec<ToolDirective>> for ToolDirectives {
-    fn from(directives: Vec<ToolDirective>) -> Self {
-        Self(State::Settled(directives))
-    }
-}
-
-/// Who answers when an argument's meaning needs the user's confirmation.
-///
-/// Empty unless the invocation has a user to ask, and an empty one refuses
-/// every question.
-#[derive(Clone, Default)]
-pub(crate) struct ArgPrompts(Option<Arc<dyn PromptBackend>>);
-
-impl ArgPrompts {
-    /// Ask `backend` whenever an argument needs confirming.
-    pub(crate) fn new(backend: Arc<dyn PromptBackend>) -> Self {
-        Self(Some(backend))
-    }
-
-    /// The backend to ask, or `None` when nobody is there to answer.
-    pub(crate) fn backend(&self) -> Option<&dyn PromptBackend> {
-        self.0.as_deref()
-    }
-}
-
-impl fmt::Debug for ArgPrompts {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let state = if self.0.is_some() {
-            "available"
-        } else {
-            "none"
-        };
-        f.debug_tuple("ArgPrompts").field(&state).finish()
-    }
-}
-
-impl clap::FromArgMatches for ToolDirectives {
-    fn from_arg_matches(matches: &clap::ArgMatches) -> Result<Self, clap::Error> {
-        let tool_values: Vec<String> = matches
-            .get_many("tools")
-            .map(|v| v.cloned().collect())
-            .unwrap_or_default();
-        let tool_indices: Vec<_> = matches
-            .indices_of("tools")
-            .map(Iterator::collect)
-            .unwrap_or_default();
-
-        let no_tool_values: Vec<String> = matches
-            .get_many("no_tools")
-            .map(|v| v.cloned().collect())
-            .unwrap_or_default();
-        let no_tool_indices: Vec<_> = matches
-            .indices_of("no_tools")
-            .map(Iterator::collect)
-            .unwrap_or_default();
-
-        let query_indices = query_indices(matches);
-
-        let tools = tool_values.into_iter().zip(tool_indices).map(|v| (true, v));
-        let no_tools = no_tool_values
+        let mut indexed: Vec<_> = enable
+            .into_indexed()
             .into_iter()
-            .zip(no_tool_indices)
-            .map(|v| (false, v));
-
-        let mut indexed = vec![];
-        for (enable, (val, idx)) in tools.chain(no_tools) {
-            if val.is_empty() {
-                let directive = ToolDirective::bulk(enable);
-                indexed.push((idx, ParsedDirective::Decided(directive)));
-                continue;
-            }
-
-            // Only the configured tools can tell a tool name from the start of
-            // the query, so the value is left whole, unsplit and unvalidated: a
-            // query may well start with `hello,`.
-            if query_indices.contains(&(idx + 1)) {
-                indexed.push((idx, ParsedDirective::Ambiguous {
-                    enable,
-                    value: val,
-                    index: idx,
-                }));
-                continue;
-            }
-
-            for name in split_list(&val, "tool name")? {
-                let directive = ToolDirective::named(enable, name);
-                indexed.push((idx, ParsedDirective::Decided(directive)));
-            }
-        }
+            .map(|(index, names)| (index, true, names))
+            .chain(
+                disable
+                    .into_indexed()
+                    .into_iter()
+                    .map(|(index, names)| (index, false, names)),
+            )
+            .collect();
 
         // A stable sort, so the names of a single flag keep the order they were
         // written in: they all carry that flag's index.
-        indexed.sort_by_key(|(idx, _)| *idx);
-        let parsed = indexed.into_iter().map(|(_, d)| d).collect();
-        Ok(Self(State::Parsed(parsed)))
-    }
+        indexed.sort_by_key(|(index, ..)| *index);
 
-    fn update_from_arg_matches(&mut self, matches: &clap::ArgMatches) -> Result<(), clap::Error> {
-        *self = Self::from_arg_matches(matches)?;
-        Ok(())
-    }
-}
-
-/// `-u` / `--tool-use`: the tool choice for this query alone.
-///
-/// A value written directly before the query is the query's first word unless
-/// it names a tool, which only the configured tools can tell; until [`settle`]
-/// decides, it reads as a tool name.
-///
-/// [`settle`]: Self::settle
-#[derive(Debug, Clone, Default)]
-pub(crate) struct ToolUse {
-    /// `None` without `-u`, `Some(None)` for a bare `-u`, `Some(Some(value))`
-    /// for a value.
-    choice: Option<Option<String>>,
-
-    /// The clap index of a value that may be the query's first word instead.
-    undecided: Option<usize>,
-}
-
-impl ToolUse {
-    const ARG: &'static str = "tool_use";
-
-    /// `None` without `-u`, `Some(None)` for a bare `-u`, `Some(Some(value))`
-    /// for a value.
-    pub(crate) fn choice(&self) -> Option<Option<&str>> {
-        self.choice.as_ref().map(Option::as_deref)
-    }
-
-    /// Decide whether a value written directly before the query names a tool.
-    ///
-    /// When `is_tool` rejects it, the flag reads as a bare `-u` and the value
-    /// is returned with its clap index, to go back into the query.
-    /// No prompt is needed: a bare `-u` only requires the assistant to call one
-    /// of the tools it already has.
-    /// Only the first call decides anything.
-    pub(crate) fn settle(&mut self, is_tool: impl Fn(&str) -> bool) -> Option<(usize, String)> {
-        let index = self.undecided.take()?;
-        if is_tool(self.choice()??) {
-            return None;
-        }
-
-        let value = self.choice.replace(None).flatten()?;
-        Some((index, value))
-    }
-
-    /// `-u NAME`, written where it cannot be the start of the query.
-    #[cfg(test)]
-    pub(crate) fn forcing(name: &str) -> Self {
-        Self {
-            choice: Some(Some(name.to_owned())),
-            undecided: None,
-        }
+        Ok(indexed
+            .into_iter()
+            .flat_map(|(_, enable, names)| match names {
+                None => vec![ToolDirective::bulk(enable)],
+                Some(names) => names
+                    .into_iter()
+                    .map(|name| ToolDirective::named(enable, name))
+                    .collect(),
+            })
+            .collect())
     }
 }
 
-impl clap::FromArgMatches for ToolUse {
-    fn from_arg_matches(matches: &clap::ArgMatches) -> Result<Self, clap::Error> {
-        let Some(value) = matches.get_one::<String>(Self::ARG) else {
-            return Ok(Self::default());
-        };
+/// `-t` / `--tool[=NAMES]`: tools to enable, or every tool.
+pub(crate) enum EnableTools {}
 
-        if value.is_empty() {
-            return Ok(Self {
-                choice: Some(None),
-                undecided: None,
-            });
-        }
+impl OptionalValue for EnableTools {
+    const ID: &'static str = "tools";
 
-        // `true` and `false` are the flag's own spellings, never a tool name.
-        let undecided = matches
-            .index_of(Self::ARG)
-            .filter(|index| query_indices(matches).contains(&(index + 1)))
-            .filter(|_| value != "true" && value != "false");
+    type Context = KnownTools;
+    type Output = FlagValues<Vec<String>>;
+    type Value = Vec<String>;
 
-        Ok(Self {
-            choice: Some(Some(value.clone())),
-            undecided,
-        })
-    }
-
-    fn update_from_arg_matches(&mut self, matches: &clap::ArgMatches) -> Result<(), clap::Error> {
-        *self = Self::from_arg_matches(matches)?;
-        Ok(())
-    }
-}
-
-impl clap::Args for ToolUse {
-    fn augment_args(cmd: clap::Command) -> clap::Command {
-        cmd.arg(
-            clap::Arg::new(Self::ARG)
-                .short('u')
-                .long("tool-use")
-                .value_name("TOOL")
-                .help("The tool to use")
-                .long_help(
-                    "The tool to use.\n\nIf a value is provided, the tool matching the value will \
-                     be used. The named tool runs for this query even when it is disabled, so it \
-                     does not have to be enabled separately; a tool whose policy locks it off is \
-                     refused.\n\nWithout a value, or with `true`, the assistant must use one of \
-                     its enabled tools. With `false`, it may use none.\n\nThis applies to a \
-                     single query and is *not* persisted: the next query forces nothing, and a \
-                     tool that was disabled stays disabled. To persist tool choice behavior, set \
-                     the `assistant.tool_choice` field in a configuration file.\n\nA value \
-                     written directly before the query names a tool when a tool by that name is \
-                     configured; otherwise it is the first word of the query, and the assistant \
-                     must use one of its tools: `jp q -u fix the bug`.",
-                )
-                .num_args(0..=1)
-                .default_missing_value(""),
-        )
-    }
-
-    fn augment_args_for_update(cmd: clap::Command) -> clap::Command {
-        Self::augment_args(cmd)
-    }
-}
-
-/// `--fork[=N]`: fork the conversation before the query, keeping its last `N`
-/// turns, or all of them.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct ForkFlag(Option<Option<usize>>);
-
-impl ForkFlag {
-    /// `None` without `--fork`, `Some(None)` to keep every turn,
-    /// `Some(Some(n))` to keep the last `n`.
-    pub(crate) fn turns(self) -> Option<Option<usize>> {
-        self.0
-    }
-}
-
-impl From<Option<Option<usize>>> for ForkFlag {
-    fn from(turns: Option<Option<usize>>) -> Self {
-        Self(turns)
-    }
-}
-
-impl GivesBack for ForkFlag {
-    const ARG: &'static str = "fork";
-
-    fn claims(value: &str) -> bool {
-        value.parse::<usize>().is_ok()
-    }
-}
-
-impl clap::FromArgMatches for ForkFlag {
-    fn from_arg_matches(matches: &clap::ArgMatches) -> Result<Self, clap::Error> {
-        let Some(value) = matches.get_one::<String>(Self::ARG) else {
-            return Ok(Self(None));
-        };
-
-        if value.is_empty() || !given_back::<Self>(matches).is_empty() {
-            return Ok(Self(Some(None)));
-        }
-
-        let turns = value.parse().map_err(|_| {
-            clap::Error::raw(
-                ErrorKind::InvalidValue,
-                format!("invalid value for '--fork': expected a positive integer, got '{value}'\n"),
+    fn declare(arg: Arg) -> Arg {
+        // The values are split on commas by hand rather than with
+        // `value_delimiter(',')`, which splits before the empty value of a bare
+        // flag is read: an empty segment in `--tool=read,` would then be
+        // indistinguishable from a bare `--tool` and enable every tool.
+        arg.short('t')
+            .long("tool")
+            .alias("tools")
+            .action(ArgAction::Append)
+            .help("The tool(s) to enable")
+            .long_help(
+                "The tool(s) to enable.\n\nIf an existing tool is configured with a matching \
+                 name, it is enabled for this query and every later one on the conversation; use \
+                 `--no-tool` to turn it back off.\n\nTo run a disabled tool just once, use \
+                 `--tool-use NAME` instead.\n\nIf no arguments are provided, every tool that \
+                 allows it is enabled; a tool set to `explicit` or `always` is \
+                 unaffected.\n\nName several tools at once by separating them with commas \
+                 (`--tool=read,write`), or by providing this flag multiple times. Flags are \
+                 evaluated left-to-right, so `--no-tools --tool=write` first disables everything, \
+                 then re-enables only 'write'.\n\nA value written directly before the query, as \
+                 in `jp q -t fix the bug`, names tools when every name in it is a configured \
+                 tool. Otherwise JP asks before enabling every tool and reading the value as the \
+                 first word of the query, and refuses when there is nobody to ask. Put the query \
+                 after `--` to enable every tool without being asked: `jp q -t -- fix the bug`. A \
+                 value attached with `=` (`-t=read`) always names tools.",
             )
-        })?;
-
-        Ok(Self(Some(Some(turns))))
     }
 
-    fn update_from_arg_matches(&mut self, matches: &clap::ArgMatches) -> Result<(), clap::Error> {
-        *self = Self::from_arg_matches(matches)?;
-        Ok(())
-    }
-}
-
-impl clap::Args for ForkFlag {
-    fn augment_args(cmd: clap::Command) -> clap::Command {
-        cmd.arg(
-            clap::Arg::new(Self::ARG)
-                .long("fork")
-                .value_name("N")
-                .help("Fork the conversation and start a new turn on the fork")
-                .long_help(
-                    "Fork the session's active conversation (or the one specified by --id) and \
-                     start a new turn on the fork.\n\nIf N is given, the fork keeps only the last \
-                     N turns.\n\nA value written directly before the query that is not a number \
-                     is the query's first word instead, and the fork keeps every turn: `jp q \
-                     --fork what if we` forks and asks \"what if we\".",
-                )
-                .num_args(0..=1)
-                .default_missing_value("")
-                .conflicts_with("new"),
-        )
+    fn parse(value: &str) -> Result<Vec<String>, clap::Error> {
+        split_list(value, "tool name")
     }
 
-    fn augment_args_for_update(cmd: clap::Command) -> clap::Command {
-        Self::augment_args(cmd)
-    }
-}
-
-/// `--tmp[=DURATION]`: the new conversation expires once it is no longer
-/// active, or after `DURATION`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct ExpiryFlag(Option<Option<humantime::Duration>>);
-
-impl ExpiryFlag {
-    /// `None` without `--tmp`, `Some(None)` without a duration.
-    pub(crate) fn duration(self) -> Option<Option<humantime::Duration>> {
-        self.0
-    }
-}
-
-impl GivesBack for ExpiryFlag {
-    const ARG: &'static str = "expires_in";
-
-    fn claims(value: &str) -> bool {
-        value.parse::<humantime::Duration>().is_ok()
-    }
-}
-
-impl clap::FromArgMatches for ExpiryFlag {
-    fn from_arg_matches(matches: &clap::ArgMatches) -> Result<Self, clap::Error> {
-        let Some(value) = matches.get_one::<String>(Self::ARG) else {
-            return Ok(Self(None));
-        };
-
-        if value.is_empty() || !given_back::<Self>(matches).is_empty() {
-            return Ok(Self(Some(None)));
+    /// A word naming no configured tool starts the query only once the user
+    /// agrees, because `-t` written bare enables every tool.
+    fn claim(value: &str, tools: &KnownTools) -> Result<Claim<Vec<String>>, clap::Error> {
+        if let Some(names) = tool_names(value, tools) {
+            return Ok(Claim::Value(names));
         }
 
-        let duration = value.parse::<humantime::Duration>().map_err(|error| {
-            clap::Error::raw(
-                ErrorKind::InvalidValue,
-                format!("invalid value '{value}' for '--tmp': {error}\n"),
+        Ok(Claim::Confirm(Confirmation {
+            question: format!(
+                "`{value}` is not a configured tool.\nEnable every tool on this conversation, and \
+                 start the query with `{value}`?"
+            ),
+            accept: "yes, enable every tool",
+            refusal: format!(
+                "`{value}` is not a configured tool. To enable every tool and start the query \
+                 with `{value}`, put the query after `--`: `-t -- {value} ...`"
+            ),
+        }))
+    }
+
+    fn collect(values: FlagValues<Vec<String>>) -> Result<Self::Output, clap::Error> {
+        Ok(values)
+    }
+}
+
+/// `-T` / `--no-tool[=NAMES]`: tools to disable, or every tool.
+pub(crate) enum DisableTools {}
+
+impl OptionalValue for DisableTools {
+    const ID: &'static str = "no_tools";
+
+    type Context = KnownTools;
+    type Output = FlagValues<Vec<String>>;
+    type Value = Vec<String>;
+
+    fn declare(arg: Arg) -> Arg {
+        arg.short('T')
+            .long("no-tool")
+            .alias("no-tools")
+            .action(ArgAction::Append)
+            .help("Disable tool(s)")
+            .long_help(
+                "Disable tool(s).\n\nIf provided without a value, every tool that allows it is \
+                 disabled (a tool set to `explicit` or `always` is unaffected), otherwise name \
+                 the tools to disable, separated by commas (`--no-tool=read,write`) or across \
+                 repeated flags.\n\nThe change applies to this query and every later one on the \
+                 conversation; use `--tool` to turn tools back on. To suppress tools for a single \
+                 query, use `--no-tool-use`.\n\nFlags are evaluated left-to-right together with \
+                 `--tool`.\n\nA value written directly before the query names tools when every \
+                 name in it is a configured tool; otherwise it is the first word of the query, \
+                 and the flag disables every tool. A value attached with `=` always names tools.",
             )
-        })?;
-
-        Ok(Self(Some(Some(duration))))
     }
 
-    fn update_from_arg_matches(&mut self, matches: &clap::ArgMatches) -> Result<(), clap::Error> {
-        *self = Self::from_arg_matches(matches)?;
-        Ok(())
-    }
-}
-
-impl clap::Args for ExpiryFlag {
-    fn augment_args(cmd: clap::Command) -> clap::Command {
-        cmd.arg(
-            clap::Arg::new(Self::ARG)
-                .long("tmp")
-                .value_name("DURATION")
-                .help("Set the expiration date of the conversation")
-                .long_help(
-                    "Set the expiration date of the conversation.\n\nThe conversation is \
-                     persisted, but only until the conversation is no longer marked as active \
-                     (e.g. when a new conversation is started), and when the expiration date is \
-                     reached.\n\nThis differs from `--no-persist` in that the conversation can \
-                     contain multiple turns, as long as it remains active and not expired.\n\nA \
-                     value written directly before the query that is not a duration is the \
-                     query's first word instead, and no duration is set: `jp q -n --tmp quick \
-                     question` asks \"quick question\".",
-                )
-                .num_args(0..=1)
-                .default_missing_value("")
-                .requires("new"),
-        )
+    fn parse(value: &str) -> Result<Vec<String>, clap::Error> {
+        split_list(value, "tool name")
     }
 
-    fn augment_args_for_update(cmd: clap::Command) -> clap::Command {
-        Self::augment_args(cmd)
+    /// A word naming no configured tool starts the query without asking:
+    /// disabling every tool grants nothing.
+    fn claim(value: &str, tools: &KnownTools) -> Result<Claim<Vec<String>>, clap::Error> {
+        Ok(tool_names(value, tools).map_or(Claim::Text, Claim::Value))
+    }
+
+    fn collect(values: FlagValues<Vec<String>>) -> Result<Self::Output, clap::Error> {
+        Ok(values)
     }
 }
 
-impl clap::Args for ToolDirectives {
-    fn augment_args(cmd: clap::Command) -> clap::Command {
-        cmd.arg(
-            clap::Arg::new("tools")
-                .short('t')
-                .long("tool")
-                .alias("tools")
-                .help("The tool(s) to enable")
-                .long_help(
-                    "The tool(s) to enable.\n\nIf an existing tool is configured with a matching \
-                     name, it is enabled for this query and every later one on the conversation; \
-                     use `--no-tool` to turn it back off.\n\nTo run a disabled tool just once, \
-                     use `--tool-use NAME` instead.\n\nIf no arguments are provided, every tool \
-                     that allows it is enabled; a tool set to `explicit` or `always` is \
-                     unaffected.\n\nName several tools at once by separating them with commas \
-                     (`--tool=read,write`), or by providing this flag multiple times. Flags are \
-                     evaluated left-to-right, so `--no-tools --tool=write` first disables \
-                     everything, then re-enables only 'write'.\n\nA value written directly before \
-                     the query, as in `jp q -t fix the bug`, names tools when every name in it is \
-                     a configured tool. Otherwise JP asks before enabling every tool and reading \
-                     the value as the first word of the query, and refuses when there is nobody \
-                     to ask. Put the query after `--` to enable every tool without being asked: \
-                     `jp q -t -- fix the bug`.",
-                )
-                .action(ArgAction::Append)
-                .num_args(0..=1)
-                // The values are split on commas by hand rather than with
-                // `value_delimiter(',')`, which splits before this empty string
-                // is read: an empty segment in `--tool=read,` would then be
-                // indistinguishable from a bare `--tool` and enable every tool.
-                .default_missing_value(""),
-        )
-        .arg(
-            clap::Arg::new("no_tools")
-                .short('T')
-                .long("no-tool")
-                .alias("no-tools")
-                .help("Disable tool(s)")
-                .long_help(
-                    "Disable tool(s).\n\nIf provided without a value, every tool that allows it \
-                     is disabled (a tool set to `explicit` or `always` is unaffected), otherwise \
-                     name the tools to disable, separated by commas (`--no-tool=read,write`) or \
-                     across repeated flags.\n\nThe change applies to this query and every later \
-                     one on the conversation; use `--tool` to turn tools back on. To suppress \
-                     tools for a single query, use `--no-tool-use`.\n\nFlags are evaluated \
-                     left-to-right together with `--tool`.\n\nA value written directly before the \
-                     query names tools when every name in it is a configured tool; otherwise it \
-                     is the first word of the query, and the flag disables every tool.",
-                )
-                .action(ArgAction::Append)
-                .num_args(0..=1)
-                .default_missing_value(""),
-        )
-    }
-
-    fn augment_args_for_update(cmd: clap::Command) -> clap::Command {
-        Self::augment_args(cmd)
-    }
+/// The tools `value` names, when it is a valid list of known tools.
+fn tool_names(value: &str, tools: &KnownTools) -> Option<Vec<String>> {
+    split_list::<String>(value, "tool name")
+        .ok()
+        .filter(|names| names.iter().all(|name| tools.contains(name)))
 }

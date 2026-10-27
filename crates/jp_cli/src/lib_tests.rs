@@ -1001,9 +1001,9 @@ fn resolve_config_consumes_default_id() {
     let mut base = PartialAppConfig::new_test();
     base.conversation.default_id = Some(DefaultConversationId::LastActivated);
 
-    let mut cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
-    let (config, _handles, _start_new, _config_reset) = resolve_config(
-        &mut cli.command,
+    let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
+    let Resolved { config, .. } = resolve_config(
+        cli.command,
         || Ok(base),
         &cli.globals.config,
         &mut workspace,
@@ -1051,7 +1051,7 @@ fn resolve_config_applies_the_compact_model_flag() {
     );
 
     // `compact` takes the conversation as a positional argument.
-    let mut cli = Cli::try_parse_from([
+    let cli = Cli::try_parse_from([
         "jp",
         "conversation",
         "compact",
@@ -1060,8 +1060,8 @@ fn resolve_config_applies_the_compact_model_flag() {
         "gpt",
     ])
     .unwrap();
-    let (config, _handles, _start_new, _config_reset) = resolve_config(
-        &mut cli.command,
+    let Resolved { config, .. } = resolve_config(
+        cli.command,
         || Ok(base),
         &cli.globals.config,
         &mut workspace,
@@ -1090,7 +1090,7 @@ fn resolve_config_rejects_a_cleared_model_without_changing_the_conversation() {
         Arc::clone(&base),
     );
     let id = conversation_id.to_string();
-    let mut cli = Cli::try_parse_from([
+    let cli = Cli::try_parse_from([
         "jp",
         "query",
         "--id",
@@ -1102,7 +1102,7 @@ fn resolve_config_rejects_a_cleared_model_without_changing_the_conversation() {
     .unwrap();
 
     let error = resolve_config(
-        &mut cli.command,
+        cli.command,
         || Ok(base.to_partial()),
         &cli.globals.config,
         &mut workspace,
@@ -1189,11 +1189,11 @@ fn resolve_config_reset_skips_broken_conversation_config() {
     }
 
     let id = conversation_id.to_string();
-    let mut cli = Cli::try_parse_from(["jp", "query", "--id", &id, "hello"]).unwrap();
+    let parse = || Cli::try_parse_from(["jp", "query", "--id", &id, "hello"]).unwrap();
 
     // Without a reset point, the conversation layer is resolved and fails.
     let result = resolve_config(
-        &mut cli.command,
+        parse().command,
         || Ok(base_config.to_partial()),
         &[],
         &mut workspace,
@@ -1205,8 +1205,12 @@ fn resolve_config_reset_skips_broken_conversation_config() {
 
     // With `--cfg=NONE` (+ the required fields), the conversation layer is
     // skipped and resolution succeeds — the escape hatch works.
-    let (config, _handles, _start_new, config_reset) = resolve_config(
-        &mut cli.command,
+    let Resolved {
+        config,
+        config_reset,
+        ..
+    } = resolve_config(
+        parse().command,
         || Ok(base_config.to_partial()),
         &[
             KeyValueOrPath::Keyword(CfgKeyword::None),
@@ -1249,9 +1253,9 @@ fn resolve_config_reset_workspace_layer_contains_resolved_model_ids() {
     );
     base.assistant.model.id = PartialModelIdOrAliasConfig::Alias("fast".to_owned());
 
-    let mut cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
-    let (_config, _handles, _start_new, config_reset) = resolve_config(
-        &mut cli.command,
+    let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
+    let Resolved { config_reset, .. } = resolve_config(
+        cli.command,
         || Ok(base),
         &[KeyValueOrPath::Keyword(CfgKeyword::Workspace)],
         &mut workspace,
@@ -1296,9 +1300,9 @@ fn resolve_config_reset_post_layer_contains_resolved_model_ids() {
     let mut workspace = Workspace::in_memory(tmp.path());
     workspace.load_conversation_index();
 
-    let mut cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
-    let (_config, _handles, _start_new, config_reset) = resolve_config(
-        &mut cli.command,
+    let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
+    let Resolved { config_reset, .. } = resolve_config(
+        cli.command,
         || unreachable!("NONE skips implicit loading"),
         &[
             KeyValueOrPath::Keyword(CfgKeyword::None),

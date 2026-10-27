@@ -286,31 +286,12 @@ pub(crate) trait IntoPartialAppConfig {
     ///
     /// `merged_config` may contain the full configuration for validation when
     /// `partial` is incomplete.
-    ///
-    /// The command is borrowed mutably because an argument's meaning can depend
-    /// on the configuration, and is settled here.
-    /// Applying the same command again yields the same overrides.
     fn apply_cli_config(
-        &mut self,
+        &self,
         workspace: Option<&Workspace>,
         partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>>;
-
-    /// Apply the conversation layer and return its explicitly cleared paths.
-    #[expect(unused_variables)]
-    fn apply_conversation_config(
-        &self,
-        workspace: &Workspace,
-        partial: PartialAppConfig,
-        merged_config: Option<&PartialAppConfig>,
-        handle: &jp_workspace::ConversationHandle,
-    ) -> std::result::Result<
-        (PartialAppConfig, Vec<String>),
-        Box<dyn std::error::Error + Send + Sync>,
-    > {
-        Ok((partial, Vec::new()))
-    }
 }
 
 impl Drop for Ctx {

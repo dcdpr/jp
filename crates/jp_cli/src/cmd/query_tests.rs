@@ -3,8 +3,8 @@ use std::sync::Arc;
 use assert_matches::assert_matches;
 use camino_tempfile::Utf8TempDir;
 use chrono::{DateTime, Utc};
-use clap::Parser as _;
 use indexmap::IndexMap;
+use inquire::InquireError;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial,
     conversation::tool::{
@@ -19,7 +19,7 @@ use jp_conversation::{
     Conversation, ConversationId, ConversationStream,
     event::{ChatRequest, ChatResponse, TurnStart},
 };
-use jp_inquire::{ReplyEditMode, ReplyOutcome, prompt::MockPromptBackend};
+use jp_inquire::{InlineOption, ReplyEditMode, ReplyOutcome, prompt::MockPromptBackend};
 use jp_llm::{Provider, provider::mock::MockProvider};
 use jp_mcp::{Startup, StartupSet, id::McpServerId, server::tool_definitions};
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
@@ -44,7 +44,8 @@ use super::{
     *,
 };
 use crate::{
-    Cli, Globals, KeyValueOrPath,
+    Cli, Globals, KeyValueOrPath, Resolved,
+    cli::flag::{ArgPrompts, Parsed, SettleError},
     cmd::{
         Commands,
         target::{ConversationTarget, PickerFilter},
@@ -97,17 +98,18 @@ fn effective(partial: &PartialAppConfig, name: &str) -> Enable {
         .effective(&defaults)
 }
 
-/// Query input carrying `text` as the inline query, with `--quote` unset.
-fn inline_query(text: &str) -> QueryInput {
-    QueryInput {
-        query: Some(vec![text.to_owned()]),
-        ..Default::default()
-    }
+/// `text` as the inline query.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "stands in for the `Option` a query holds"
+)]
+fn inline_query(text: &str) -> Option<Vec<String>> {
+    Some(vec![text.to_owned()])
 }
 
 /// Helper to build directives from a list.
-fn directives(ds: Vec<ToolDirective>) -> ToolDirectives {
-    ToolDirectives::from(ds)
+fn directives(ds: Vec<ToolDirective>) -> Vec<ToolDirective> {
+    ds
 }
 
 /// An `access` block granting read on one workspace path.
@@ -329,16 +331,13 @@ fn build_query_config(
     workspace: &Workspace,
     base: PartialAppConfig,
     cfg_args: &[KeyValueOrPath],
-    query: &mut Query,
+    query: &Query,
     handle: Option<&ConversationHandle>,
 ) -> AppConfig {
     let pipeline = ConfigPipeline::new(cfg_args, Some(workspace), None, || Ok(base)).unwrap();
 
-    let conversation_partial = handle.map(|handle| {
-        query
-            .apply_conversation_config(workspace, PartialAppConfig::default(), None, handle)
-            .unwrap()
-    });
+    let conversation_partial = handle
+        .map(|handle| conversation_config(workspace, PartialAppConfig::default(), handle).unwrap());
 
     let mut partial = match conversation_partial {
         Some((conversation_partial, unsets)) => {
@@ -583,7 +582,7 @@ fn test_query_tools_and_no_tools() {
 
     // Keep all tools as-is (no directives).
     partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![]),
             ..Default::default()
         },
@@ -600,7 +599,7 @@ fn test_query_tools_and_no_tools() {
 
     // Disable one tool.
     partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![ToolDirective::Disable(
                 "implicitly_enabled_tool".into(),
             )]),
@@ -619,7 +618,7 @@ fn test_query_tools_and_no_tools() {
 
     // Enable one tool.
     partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![ToolDirective::Enable(
                 "explicitly_disabled_tool".into(),
             )]),
@@ -638,7 +637,7 @@ fn test_query_tools_and_no_tools() {
 
     // Enable all tools -- if_named tools stay disabled and keep their policy.
     partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![ToolDirective::EnableAll]),
             ..Default::default()
         },
@@ -660,7 +659,7 @@ fn test_query_tools_and_no_tools() {
 
     // Disable all tools.
     partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![ToolDirective::DisableAll]),
             ..Default::default()
         },
@@ -677,7 +676,7 @@ fn test_query_tools_and_no_tools() {
 
     // Enable multiple tools.
     partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![
                 ToolDirective::Enable("explicitly_disabled_tool".into()),
                 ToolDirective::Enable("explicitly_enabled_tool".into()),
@@ -702,7 +701,7 @@ fn test_explicit_tool_enabled_by_name() {
     let mut partial = make_partial_with_tools();
 
     partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![ToolDirective::Enable("explicit_tool".into())]),
             ..Default::default()
         },
@@ -727,7 +726,7 @@ fn test_enable_all_and_explicit_by_name() {
     let mut partial = make_partial_with_tools();
 
     partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![
                 ToolDirective::EnableAll,
                 ToolDirective::Enable("explicit_tool".into()),
@@ -754,7 +753,7 @@ fn test_enable_all_skips_unnamed_explicit() {
     let mut partial = make_partial_with_tools();
 
     partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![ToolDirective::EnableAll]),
             ..Default::default()
         },
@@ -782,7 +781,7 @@ fn test_interleaved_disable_all_then_enable_named() {
     let mut partial = make_partial_with_tools();
 
     partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![
                 ToolDirective::DisableAll,
                 ToolDirective::Enable("explicitly_disabled_tool".into()),
@@ -811,7 +810,7 @@ fn test_interleaved_enable_all_then_disable_named() {
     let mut partial = make_partial_with_tools();
 
     partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![
                 ToolDirective::EnableAll,
                 ToolDirective::Disable("implicitly_enabled_tool".into()),
@@ -840,7 +839,7 @@ fn test_interleaved_disable_all_then_enable_all() {
     let mut partial = make_partial_with_tools();
 
     partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![ToolDirective::DisableAll, ToolDirective::EnableAll]),
             ..Default::default()
         },
@@ -872,7 +871,7 @@ fn test_interleaved_three_step_composition() {
     let mut partial = make_partial_with_tools();
 
     partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![
                 ToolDirective::DisableAll,
                 ToolDirective::Enable("explicitly_disabled_tool".into()),
@@ -901,7 +900,7 @@ fn test_named_disable_of_locked_on_tool_errors() {
     // `describe_tools` is injected as locked-on; naming it for disable errors
     // with an allow_toggle-aware message.
     let err = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![ToolDirective::Disable("describe_tools".into())]),
             ..Default::default()
         },
@@ -929,7 +928,7 @@ fn test_named_enable_of_locked_off_tool_errors() {
         });
 
     let err = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![ToolDirective::Enable("network".into())]),
             ..Default::default()
         },
@@ -961,7 +960,7 @@ fn test_bulk_directives_skip_locked_tools() {
     // Bulk enable then bulk disable: neither touches locked tools, neither
     // errors.
     let partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![ToolDirective::EnableAll, ToolDirective::DisableAll]),
             ..Default::default()
         },
@@ -1001,7 +1000,7 @@ fn test_sticky_tool_named_disable_and_bulk_skip() {
 
     // A named disable flips a sticky tool off.
     let partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![ToolDirective::Disable("ask_user".into())]),
             ..Default::default()
         },
@@ -1014,7 +1013,7 @@ fn test_sticky_tool_named_disable_and_bulk_skip() {
 
     // A bulk disable leaves a sticky tool on (`if_named` rejects bulk).
     let partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![ToolDirective::DisableAll]),
             ..Default::default()
         },
@@ -1043,8 +1042,8 @@ fn test_tool_use_accepts_tool_enabled_via_defaults() {
         });
 
     let result = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
-            tool_use: ToolUse::forcing("fs_read"),
+        &Query {
+            tool_use: Some(Some("fs_read".to_owned())),
             ..Default::default()
         },
         None,
@@ -1058,8 +1057,8 @@ fn test_tool_use_accepts_tool_enabled_via_defaults() {
 fn test_tool_use_accepts_locked_on_builtin() {
     // `describe_tools` (locked-on) is force-selectable via `-u`.
     let result = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
-            tool_use: ToolUse::forcing("describe_tools"),
+        &Query {
+            tool_use: Some(Some("describe_tools".to_owned())),
             ..Default::default()
         },
         None,
@@ -1074,13 +1073,13 @@ fn test_tool_use_forces_a_disabled_tool_for_one_turn() {
     // `jp q -u explicitly_disabled_tool` runs that tool without a second flag:
     // `tool_definitions` keeps a forced tool even while it is disabled, so the
     // choice alone is enough and nothing has to be enabled in the config.
-    let mut query = Query {
-        tool_use: ToolUse::forcing("explicitly_disabled_tool"),
+    let query = Query {
+        tool_use: Some(Some("explicitly_disabled_tool".to_owned())),
         ..Default::default()
     };
 
     let partial =
-        IntoPartialAppConfig::apply_cli_config(&mut query, None, make_partial_with_tools(), None)
+        IntoPartialAppConfig::apply_cli_config(&query, None, make_partial_with_tools(), None)
             .unwrap();
 
     assert_eq!(
@@ -1097,12 +1096,12 @@ fn test_tool_use_forces_a_disabled_tool_for_one_turn() {
 fn test_tool_use_accepts_an_if_named_tool() {
     // `explicit_tool` is off with `allow_toggle = if_named`. A named force is
     // exactly what its policy permits, so `-u` is accepted rather than refused.
-    let mut query = Query {
-        tool_use: ToolUse::forcing("explicit_tool"),
+    let query = Query {
+        tool_use: Some(Some("explicit_tool".to_owned())),
         ..Default::default()
     };
 
-    IntoPartialAppConfig::apply_cli_config(&mut query, None, make_partial_with_tools(), None)
+    IntoPartialAppConfig::apply_cli_config(&query, None, make_partial_with_tools(), None)
         .expect("an if_named tool accepts a named force");
 
     assert_eq!(
@@ -1139,8 +1138,8 @@ fn test_tool_use_of_locked_off_tool_errors() {
         });
 
     let err = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
-            tool_use: ToolUse::forcing("network"),
+        &Query {
+            tool_use: Some(Some("network".to_owned())),
             ..Default::default()
         },
         None,
@@ -1159,8 +1158,8 @@ fn test_tool_use_of_locked_off_tool_errors() {
 #[test]
 fn test_tool_use_of_unknown_tool_errors() {
     let err = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
-            tool_use: ToolUse::forcing("no_such_tool"),
+        &Query {
+            tool_use: Some(Some("no_such_tool".to_owned())),
             ..Default::default()
         },
         None,
@@ -1187,8 +1186,8 @@ fn test_tool_use_does_not_persist_into_partial_config() {
     let base = make_partial_with_tools();
 
     let with_flag = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
-            tool_use: ToolUse::forcing("explicitly_disabled_tool"),
+        &Query {
+            tool_use: Some(Some("explicitly_disabled_tool".to_owned())),
             ..Default::default()
         },
         None,
@@ -1197,7 +1196,7 @@ fn test_tool_use_does_not_persist_into_partial_config() {
     )
     .unwrap();
     let without_flag =
-        IntoPartialAppConfig::apply_cli_config(&mut Query::default(), None, base, None).unwrap();
+        IntoPartialAppConfig::apply_cli_config(&Query::default(), None, base, None).unwrap();
 
     assert_eq!(with_flag.assistant.tool_choice, None);
     assert_eq!(
@@ -1211,7 +1210,7 @@ fn test_no_tool_use_does_not_persist_into_partial_config() {
     // `-U` is the single-turn counterpart of `-T`, so it must not write
     // `tool_choice = none` into the conversation either.
     let partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             no_tool_use: true,
             ..Default::default()
         },
@@ -1240,7 +1239,7 @@ fn test_tool_directive_does_persist_into_partial_config() {
     // reach the config, because that is the only way to make it stick, and
     // `-T` is the documented undo.
     let partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
+        &Query {
             tool_directives: directives(vec![ToolDirective::Enable(
                 "explicitly_disabled_tool".into(),
             )]),
@@ -1259,16 +1258,16 @@ fn test_tool_directive_does_persist_into_partial_config() {
 fn test_tool_use_forces_a_tool_a_directive_disabled() {
     // `jp q -T my_tool -u my_tool`: the two no longer contradict. `-T` disables
     // the tool durably, `-u` forces it for this turn only, and both hold.
-    let mut query = Query {
+    let query = Query {
         tool_directives: directives(vec![ToolDirective::Disable(
             "implicitly_enabled_tool".into(),
         )]),
-        tool_use: ToolUse::forcing("implicitly_enabled_tool"),
+        tool_use: Some(Some("implicitly_enabled_tool".to_owned())),
         ..Default::default()
     };
 
     let partial =
-        IntoPartialAppConfig::apply_cli_config(&mut query, None, make_partial_with_tools(), None)
+        IntoPartialAppConfig::apply_cli_config(&query, None, make_partial_with_tools(), None)
             .unwrap();
 
     assert!(
@@ -1296,7 +1295,7 @@ fn test_builtin_config_merges_under_user_config() {
         });
 
     let partial =
-        IntoPartialAppConfig::apply_cli_config(&mut Query::default(), None, partial, None).unwrap();
+        IntoPartialAppConfig::apply_cli_config(&Query::default(), None, partial, None).unwrap();
 
     let tool = &partial.conversation.tools.tools["describe_tools"];
     assert_eq!(tool.result, Some(ResultMode::Ask), "user field wins");
@@ -1338,7 +1337,7 @@ fn test_builtin_config_merges_under_a_shadowing_local_tool() {
         });
 
     let partial =
-        IntoPartialAppConfig::apply_cli_config(&mut Query::default(), None, partial, None).unwrap();
+        IntoPartialAppConfig::apply_cli_config(&Query::default(), None, partial, None).unwrap();
 
     let tool = &partial.conversation.tools.tools["describe_tools"];
     assert_eq!(
@@ -1375,7 +1374,7 @@ fn test_builtin_config_preserves_tool_order() {
     ]);
 
     let partial =
-        IntoPartialAppConfig::apply_cli_config(&mut Query::default(), None, partial, None).unwrap();
+        IntoPartialAppConfig::apply_cli_config(&Query::default(), None, partial, None).unwrap();
 
     let names: Vec<&str> = partial
         .conversation
@@ -1412,8 +1411,8 @@ fn test_table_disabled_builtin_cannot_be_forced() {
         });
 
     let err = IntoPartialAppConfig::apply_cli_config(
-        &mut Query {
-            tool_use: ToolUse::forcing("describe_tools"),
+        &Query {
+            tool_use: Some(Some("describe_tools".to_owned())),
             ..Default::default()
         },
         None,
@@ -1445,12 +1444,12 @@ fn test_bool_disabled_builtin_can_still_be_forced() {
             ..Default::default()
         });
 
-    let mut query = Query {
-        tool_use: ToolUse::forcing("describe_tools"),
+    let query = Query {
+        tool_use: Some(Some("describe_tools".to_owned())),
         ..Default::default()
     };
 
-    let partial = IntoPartialAppConfig::apply_cli_config(&mut query, None, partial, None)
+    let partial = IntoPartialAppConfig::apply_cli_config(&query, None, partial, None)
         .expect("the bool shorthand leaves the tool forceable");
 
     assert_eq!(
@@ -1479,7 +1478,7 @@ fn resolve_config_keeps_a_cleared_conversation_field_across_invocations() {
         Arc::clone(&base),
     );
     let id = conversation_id.to_string();
-    let mut cli = Cli::try_parse_from([
+    let cli = Cli::try_parse_from([
         "jp",
         "query",
         "--id",
@@ -1490,8 +1489,12 @@ fn resolve_config_keeps_a_cleared_conversation_field_across_invocations() {
     ])
     .unwrap();
 
-    let (first, mut handles, _, _) = resolve_config(
-        &mut cli.command,
+    let Resolved {
+        config: first,
+        mut handles,
+        ..
+    } = resolve_config(
+        cli.command,
         || Ok(base.to_partial()),
         &cli.globals.config,
         &mut workspace,
@@ -1510,9 +1513,13 @@ fn resolve_config_keeps_a_cleared_conversation_field_across_invocations() {
         assert_eq!(lock.events().config().unwrap().assistant.name, None);
     }
 
-    let mut cli = Cli::try_parse_from(["jp", "query", "--id", &id, "hello again"]).unwrap();
-    let (second, mut handles, _, _) = resolve_config(
-        &mut cli.command,
+    let cli = Cli::try_parse_from(["jp", "query", "--id", &id, "hello again"]).unwrap();
+    let Resolved {
+        config: second,
+        mut handles,
+        ..
+    } = resolve_config(
+        cli.command,
         || Ok(base.to_partial()),
         &cli.globals.config,
         &mut workspace,
@@ -1534,7 +1541,7 @@ fn resolve_config_keeps_a_cleared_conversation_field_across_invocations() {
 #[test]
 fn test_describe_tools_is_enabled_in_resolved_config() {
     let partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query::default(),
+        &Query::default(),
         None,
         AppConfig::new_test().to_partial(),
         None,
@@ -1559,7 +1566,7 @@ fn test_describe_tools_is_enabled_in_resolved_config() {
 #[tokio::test]
 async fn test_describe_tools_reaches_the_llm_tool_list() {
     let partial = IntoPartialAppConfig::apply_cli_config(
-        &mut Query::default(),
+        &Query::default(),
         None,
         AppConfig::new_test().to_partial(),
         None,
@@ -1594,7 +1601,7 @@ fn query_model_override_is_persisted_as_config_delta() {
     let handle = workspace.acquire_conversation(&conversation_id).unwrap();
     let lock = workspace.test_lock(handle);
 
-    let mut query = Query {
+    let query = Query {
         model: Some("openai/gpt-4o".to_owned()),
         ..Default::default()
     };
@@ -1647,7 +1654,7 @@ fn tier_flag_parses_every_rung() {
 
 #[test]
 fn tier_flag_reaches_the_model_parameters() {
-    let mut query = parse_query(&["--tier", "flex"]).unwrap();
+    let query = parse_query(&["--tier", "flex"]).unwrap();
 
     let partial = query
         .apply_cli_config(None, PartialAppConfig::empty(), None)
@@ -1678,7 +1685,7 @@ fn tier_flag_is_persisted_as_config_delta() {
     let handle = workspace.acquire_conversation(&conversation_id).unwrap();
     let lock = workspace.test_lock(handle);
 
-    let mut query = Query {
+    let query = Query {
         service_tier: Some(ServiceTier::Flex),
         ..Default::default()
     };
@@ -1742,7 +1749,7 @@ fn no_tier_flag_replaces_a_persisted_tier_with_off() {
         "the fixture must start with a tier to turn off"
     );
 
-    let mut query = Query {
+    let query = Query {
         no_service_tier: true,
         ..Default::default()
     };
@@ -1990,7 +1997,7 @@ fn inline_compact_dsl_is_not_written_into_query_config() {
     // Start from an empty partial so any compaction rules in the result could
     // only have been written by `apply_cli_config` itself.
     let base = jp_config::PartialAppConfig::default();
-    let mut query = Query {
+    let query = Query {
         compact: CompactFlag {
             use_config_rules: false,
             specs: vec!["s:..-3".parse().unwrap()],
@@ -2030,16 +2037,16 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
 
     let mut workspace = Workspace::in_memory(root);
 
-    let mut query1 = Query {
+    let query1 = Query {
         new_conversation: true,
-        input: inline_query("is this thing on?"),
+        query: inline_query("is this thing on?"),
         ..Default::default()
     };
     let cfg1 = build_query_config(
         &workspace,
         base.clone(),
         &[KeyValueOrPath::Path("dev".into())],
-        &mut query1,
+        &query1,
         None,
     );
     let model1 = cfg1.assistant.model.id.resolved();
@@ -2054,12 +2061,12 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
     drop(lock1);
 
     let handle2 = workspace.acquire_conversation(&conversation_id).unwrap();
-    let mut query2 = Query {
+    let query2 = Query {
         model: Some("gpt".to_owned()),
-        input: inline_query("are you there?"),
+        query: inline_query("are you there?"),
         ..Default::default()
     };
-    let cfg2 = build_query_config(&workspace, base.clone(), &[], &mut query2, Some(&handle2));
+    let cfg2 = build_query_config(&workspace, base.clone(), &[], &query2, Some(&handle2));
     let lock2 = workspace.test_lock(handle2);
     let delta = turn_config_delta(&cfg2, &lock2)
         .unwrap()
@@ -2071,11 +2078,11 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
     drop(lock2);
 
     let handle3 = workspace.acquire_conversation(&conversation_id).unwrap();
-    let mut query3 = Query {
-        input: inline_query("plain query"),
+    let query3 = Query {
+        query: inline_query("plain query"),
         ..Default::default()
     };
-    let cfg3 = build_query_config(&workspace, base, &[], &mut query3, Some(&handle3));
+    let cfg3 = build_query_config(&workspace, base, &[], &query3, Some(&handle3));
     let model3 = cfg3.assistant.model.id.resolved();
     assert_eq!(model3.provider, ProviderId::Openai);
     assert_eq!(model3.name.as_ref(), "gpt-model");
@@ -2296,7 +2303,7 @@ fn echo_request_unless_inline() {
 
     // Replay without an editor: the message comes from history and isn't
     // otherwise visible on the terminal, so it must be echoed.
-    let replay = Query {
+    let replay: Query = Query {
         replay: true,
         ..Default::default()
     };
@@ -2368,10 +2375,7 @@ fn edit_message_quote_without_editor_is_synthesized() {
     // inline.
     let config = AppConfig::new_test();
     let query = Query {
-        input: QueryInput {
-            quote: Some(true),
-            ..Default::default()
-        },
+        quote: Some(true),
         no_edit: true,
         ..Default::default()
     };
@@ -2502,10 +2506,7 @@ fn edit_message_rejects_a_forced_editor_when_non_interactive() {
     ));
 
     let query = Query {
-        input: QueryInput {
-            quote: Some(true),
-            ..Default::default()
-        },
+        quote: Some(true),
         ..Default::default()
     };
 
@@ -2620,15 +2621,15 @@ fn picker_new_item_gated_by_new_incompatible_flags() {
     // `--new` (and still reach the picker), so choosing the item would
     // otherwise silently drop the fork/replay request and manufacture a state
     // clap rejects at parse time.
-    assert!(Query::default().allows_new_from_picker());
+    assert!(Query::<Settled>::default().allows_new_from_picker());
 
-    let fork = Query {
-        fork: Some(None).into(),
+    let fork: Query = Query {
+        fork: Some(None),
         ..Default::default()
     };
     assert!(!fork.allows_new_from_picker());
 
-    let replay = Query {
+    let replay: Query = Query {
         replay: true,
         ..Default::default()
     };
@@ -2642,7 +2643,7 @@ fn picker_new_item_gated_by_bare_id_flag() {
     // Since `--new` conflicts with the `id` arg, the picker must not offer the
     // synthetic "new" item: choosing it would drop the target and manufacture a
     // `--new --id` state clap rejects at parse time.
-    let bare_id = Query {
+    let bare_id: Query = Query {
         target: FlagIds::from_targets(vec![ConversationTarget::Picker(PickerFilter::default())]),
         ..Default::default()
     };
@@ -2651,65 +2652,65 @@ fn picker_new_item_gated_by_bare_id_flag() {
 
 /// The query words a parse produced, for comparison against a static slice.
 fn query_words(query: &Query) -> &[String] {
-    query.input.query.as_deref().unwrap_or_default()
+    query.query.as_deref().unwrap_or_default()
 }
 
 #[test]
 fn bare_quote_uses_the_blockquote_prefix() {
     let query = parse_query(&["--quote"]).unwrap();
-    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query.quote, Some(true));
     assert!(query_words(&query).is_empty());
 }
 
 #[test]
 fn quote_true_is_the_same_as_a_bare_quote() {
     let query = parse_query(&["--quote=true"]).unwrap();
-    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query.quote, Some(true));
     assert!(query_words(&query).is_empty());
 }
 
 #[test]
 fn quote_false_still_quotes_but_drops_the_prefix() {
     let query = parse_query(&["--quote=false"]).unwrap();
-    assert_eq!(query.input.quote, Some(false));
+    assert_eq!(query.quote, Some(false));
     assert!(query_words(&query).is_empty());
 }
 
 #[test]
 fn quote_is_absent_when_not_given() {
     let query = parse_query(&[]).unwrap();
-    assert_eq!(query.input.quote, None);
+    assert_eq!(query.quote, None);
 }
 
 #[test]
 fn quote_takes_an_unattached_bool() {
     let query = parse_query(&["--quote", "false"]).unwrap();
-    assert_eq!(query.input.quote, Some(false));
+    assert_eq!(query.quote, Some(false));
     assert!(query_words(&query).is_empty());
 
     let query = parse_query(&["--quote", "true"]).unwrap();
-    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query.quote, Some(true));
     assert!(query_words(&query).is_empty());
 }
 
 #[test]
 fn quote_takes_an_unattached_bool_ahead_of_the_query() {
     let query = parse_query(&["--quote", "false", "and", "now?"]).unwrap();
-    assert_eq!(query.input.quote, Some(false));
+    assert_eq!(query.quote, Some(false));
     assert_eq!(query_words(&query), ["and".to_owned(), "now?".to_owned()]);
 }
 
 #[test]
 fn quote_does_not_swallow_a_following_flag() {
     let query = parse_query(&["--quote", "--model", "foo"]).unwrap();
-    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query.quote, Some(true));
     assert_eq!(query.model.as_deref(), Some("foo"));
 }
 
 #[test]
 fn quote_does_not_swallow_the_positional_query() {
     let query = parse_query(&["--quote", "what about X?"]).unwrap();
-    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query.quote, Some(true));
     assert_eq!(query_words(&query), ["what about X?".to_owned()]);
 }
 
@@ -2718,26 +2719,26 @@ fn quote_only_takes_the_word_directly_after_it() {
     // `false` is the query here: it sits before the flag, so it was never
     // offered as the flag's value.
     let query = parse_query(&["false", "--quote"]).unwrap();
-    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query.quote, Some(true));
     assert_eq!(query_words(&query), ["false".to_owned()]);
 
     // Same when another flag sits between the two.
     let query = parse_query(&["--quote", "--model", "foo", "false"]).unwrap();
-    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query.quote, Some(true));
     assert_eq!(query_words(&query), ["false".to_owned()]);
 }
 
 #[test]
 fn a_double_dash_shields_a_bool_from_quote() {
     let query = parse_query(&["--quote", "--", "false"]).unwrap();
-    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query.quote, Some(true));
     assert_eq!(query_words(&query), ["false".to_owned()]);
 }
 
 #[test]
 fn words_before_and_after_a_double_dash_form_one_query() {
     let query = parse_query(&["why", "--", "--model", "foo"]).unwrap();
-    assert_eq!(query.input.quote, None);
+    assert_eq!(query.quote, None);
     assert_eq!(query_words(&query), [
         "why".to_owned(),
         "--model".to_owned(),
@@ -2751,7 +2752,7 @@ fn quote_with_an_attached_value_leaves_a_following_bool_in_the_query() {
     // text. Without the attached/bare distinction both forms would look
     // identical here, since clap records the same index for either.
     let query = parse_query(&["--quote=false", "true"]).unwrap();
-    assert_eq!(query.input.quote, Some(false));
+    assert_eq!(query.quote, Some(false));
     assert_eq!(query_words(&query), ["true".to_owned()]);
 }
 
@@ -3237,21 +3238,32 @@ fn read_arg_file_returns_file_contents() {
     assert_eq!(read_arg_file(path.as_str()).unwrap(), "# Notes\n\nbody\n");
 }
 
-/// Host for [`Query`]'s arguments, so tests can drive the real clap parser
-/// rather than constructing a [`Query`] the CLI could never produce.
-#[derive(clap::Parser)]
-struct QueryArgs {
-    #[command(flatten)]
-    query: Query,
+/// Read `jp query <args>` through the real command line, leaving undecided what
+/// needs the configuration.
+fn parsed_query(args: &[&str]) -> std::result::Result<Query<Parsed>, clap::Error> {
+    let argv = ["jp", "query"].into_iter().chain(args.iter().copied());
+    let Commands::Query(query) = Cli::try_parse_from(argv)?.command else {
+        panic!("`jp query` parses as a query");
+    };
+
+    Ok(query)
 }
 
-/// Parse `jp query <args>`, always with `--no-edit` so no editor opens.
-fn parse_query(args: &[&str]) -> std::result::Result<Query, clap::Error> {
-    let argv = ["query", "--no-edit"]
-        .into_iter()
-        .chain(args.iter().copied());
+/// Read `jp query <args>` and settle it with no tools configured and nobody to
+/// ask, which only `-t` naming an unknown tool before the query could refuse.
+fn query_from(args: &[&str]) -> std::result::Result<Query, clap::Error> {
+    Ok(parsed_query(args)?
+        .settle(&PartialAppConfig::default(), &ArgPrompts::default())
+        .expect("settles without asking"))
+}
 
-    QueryArgs::try_parse_from(argv).map(|parsed| parsed.query)
+/// [`query_from`], always with `--no-edit` so no editor opens.
+fn parse_query(args: &[&str]) -> std::result::Result<Query, clap::Error> {
+    let argv: Vec<&str> = ["--no-edit"]
+        .into_iter()
+        .chain(args.iter().copied())
+        .collect();
+    query_from(&argv)
 }
 
 /// Build the request for `args`, with no piped stdin and an empty stream.
@@ -3512,8 +3524,7 @@ fn assert_store_needs_no_repair(root: &Utf8Path) {
 /// Run `jp query <args>` to completion, without `parse_query`'s `--no-edit`:
 /// opening the editor is the path these tests exercise.
 fn run_query(ctx: &mut Ctx, args: &[&str]) -> crate::cmd::Output {
-    let argv = ["query"].into_iter().chain(args.iter().copied());
-    let query = QueryArgs::try_parse_from(argv).unwrap().query;
+    let query = query_from(args).unwrap();
 
     let result = Runtime::new()
         .unwrap()
@@ -3570,20 +3581,16 @@ fn run_empty_titled_query_stores_no_conversation() {
 // while parsing its own arguments.
 #[test]
 fn fork_flag_parses_with_and_without_a_turn_count() {
-    let bare = QueryArgs::try_parse_from(["query", "--fork"])
-        .unwrap()
-        .query;
-    assert_eq!(bare.fork.turns(), Some(None));
+    let bare = query_from(&["--fork"]).unwrap();
+    assert_eq!(bare.fork, Some(None));
 
-    let counted = QueryArgs::try_parse_from(["query", "--fork=2"])
-        .unwrap()
-        .query;
-    assert_eq!(counted.fork.turns(), Some(Some(2)));
+    let counted = query_from(&["--fork=2"]).unwrap();
+    assert_eq!(counted.fork, Some(Some(2)));
 }
 
 #[test]
 fn fork_flag_rejects_a_non_numeric_turn_count() {
-    let Err(error) = QueryArgs::try_parse_from(["query", "--fork=x"]) else {
+    let Err(error) = query_from(&["--fork=x"]) else {
         panic!("a non-numeric turn count must be rejected");
     };
 
@@ -3646,9 +3653,7 @@ fn run_empty_forking_query_leaves_only_the_source() {
     let source = seed_conversation(&mut ctx);
     let source_id = source.id();
 
-    let query = QueryArgs::try_parse_from(["query", "--fork"])
-        .unwrap()
-        .query;
+    let query = query_from(&["--fork"]).unwrap();
     Runtime::new()
         .unwrap()
         .block_on(query.run(&mut ctx, Some(source), false))
@@ -3673,9 +3678,7 @@ fn run_empty_compacting_query_stores_no_compaction() {
     let source = seed_conversation(&mut ctx);
     let source_id = source.id();
 
-    let query = QueryArgs::try_parse_from(["query", "--compact=r:.."])
-        .unwrap()
-        .query;
+    let query = query_from(&["--compact=r:.."]).unwrap();
     Runtime::new()
         .unwrap()
         .block_on(query.run(&mut ctx, Some(source), false))
@@ -3756,9 +3759,7 @@ fn run_renaming_query_keeps_the_composed_draft() {
     drop(lock);
 
     let source = ctx.workspace.acquire_conversation(&id).unwrap();
-    let query = QueryArgs::try_parse_from(["query", "--edit", "--title", "New"])
-        .unwrap()
-        .query;
+    let query = query_from(&["--edit", "--title", "New"]).unwrap();
     let Err(error) = Runtime::new()
         .unwrap()
         .block_on(query.run(&mut ctx, Some(source), false))
@@ -3824,9 +3825,7 @@ fn run_forking_query_stores_the_fork_before_the_turn() {
 
     // An inline query skips the editor, so the request is non-empty. It goes
     // ahead of `--fork`, which would otherwise swallow it as its turn count.
-    let query = QueryArgs::try_parse_from(["query", "hello", "--fork"])
-        .unwrap()
-        .query;
+    let query = query_from(&["hello", "--fork"]).unwrap();
     let Err(error) = Runtime::new()
         .unwrap()
         .block_on(query.run(&mut ctx, Some(source), false))
@@ -3896,29 +3895,24 @@ fn resolve_query_missing_at_path_errors() {
     assert_matches!(&error, Error::ArgFile { path: p, .. } if p == path.as_str());
 }
 
-/// Parse `jp query <args>` and settle its tool words against `partial`, asking
-/// `prompts` about a `-t` value that names no tool.
-///
-/// Returns the query and the directives to apply.
+/// Read `jp query <args>` and settle it against `partial`, asking `prompts`
+/// about a `-t` value that names no tool.
 fn try_settled_query(
     args: &[&str],
     partial: &PartialAppConfig,
-    prompts: ArgPrompts,
-) -> BoxedResult<(Query, Vec<ToolDirective>)> {
-    let mut query = parse_query(args).unwrap();
-    query.set_arg_prompts(prompts);
-    let directives = query.settle_tool_words(partial)?;
-    Ok((query, directives))
+    prompts: &ArgPrompts,
+) -> std::result::Result<Query, SettleError> {
+    parsed_query(args).unwrap().settle(partial, prompts)
 }
 
 /// [`try_settled_query`] with nobody to ask.
-fn settled_query(args: &[&str], partial: &PartialAppConfig) -> (Query, Vec<ToolDirective>) {
-    try_settled_query(args, partial, ArgPrompts::default()).unwrap()
+fn settled_query(args: &[&str], partial: &PartialAppConfig) -> Query {
+    try_settled_query(args, partial, &ArgPrompts::default()).unwrap()
 }
 
 /// [`try_settled_query`] with a user who confirms once.
-fn confirmed_query(args: &[&str], partial: &PartialAppConfig) -> (Query, Vec<ToolDirective>) {
-    try_settled_query(args, partial, answering(['y'])).unwrap()
+fn confirmed_query(args: &[&str], partial: &PartialAppConfig) -> Query {
+    try_settled_query(args, partial, &answering(['y'])).unwrap()
 }
 
 /// Prompts answered with `answers` in order; a prompt past the last answer is
@@ -3931,7 +3925,16 @@ fn answering(answers: impl IntoIterator<Item = char>) -> ArgPrompts {
 
 /// The directives `jp query <args>` applies when no tools are configured.
 fn parsed_directives(args: &[&str]) -> Vec<ToolDirective> {
-    settled_query(args, &PartialAppConfig::default()).1
+    settled_query(args, &PartialAppConfig::default()).tool_directives
+}
+
+/// `words` as query words.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "compared against the `Option` a query holds"
+)]
+fn words(words: &[&str]) -> Option<Vec<String>> {
+    Some(words.iter().map(ToString::to_string).collect())
 }
 
 #[test]
@@ -3982,13 +3985,10 @@ fn bare_tool_flag_stays_a_bulk_directive() {
 
 #[test]
 fn a_confirmed_word_after_tool_flag_naming_no_tool_starts_the_query() {
-    let (query, directives) = confirmed_query(&["-t", "try", "again"], &make_partial_with_tools());
+    let query = confirmed_query(&["-t", "try", "again"], &make_partial_with_tools());
 
-    assert_eq!(directives, [ToolDirective::EnableAll]);
-    assert_eq!(
-        query.input.query,
-        Some(vec!["try".to_owned(), "again".to_owned()])
-    );
+    assert_eq!(query.tool_directives, [ToolDirective::EnableAll]);
+    assert_eq!(query.query, words(&["try", "again"]));
 }
 
 // Reading the word as query text enables every tool, durably, so a typo in a
@@ -3998,7 +3998,7 @@ fn a_word_after_tool_flag_naming_no_tool_is_refused_without_a_user() {
     let Err(error) = try_settled_query(
         &["-t", "fs_raed_file", "explain"],
         &make_partial_with_tools(),
-        ArgPrompts::default(),
+        &ArgPrompts::default(),
     ) else {
         panic!("an unconfirmed word must not enable every tool");
     };
@@ -4015,7 +4015,7 @@ fn a_declined_word_after_tool_flag_is_refused() {
     let Err(error) = try_settled_query(
         &["-t", "etote", "it"],
         &make_partial_with_tools(),
-        answering(['n']),
+        &answering(['n']),
     ) else {
         panic!("a declined word must not enable every tool");
     };
@@ -4033,7 +4033,7 @@ fn a_dismissed_question_refuses_the_word() {
     let Err(error) = try_settled_query(
         &["-t", "try", "again"],
         &make_partial_with_tools(),
-        answering([]),
+        &answering([]),
     ) else {
         panic!("Esc must not enable every tool");
     };
@@ -4045,88 +4045,71 @@ fn a_dismissed_question_refuses_the_word() {
     );
 }
 
-// A refusal must not consume the directives: a later attempt still has the
-// word to decide, rather than an empty, "settled" list.
+// `=` says the value is the flag's, so it names tools however the query after
+// it reads: an unknown name is an error, not a question.
 #[test]
-fn a_refusal_leaves_the_tool_word_undecided() {
-    let mut query = parse_query(&["-t", "try", "again"]).unwrap();
-    assert!(query.settle_tool_words(&make_partial_with_tools()).is_err());
+fn an_attached_value_before_the_query_always_names_tools() {
+    let query = settled_query(&["-t=explicit_tool", "go"], &make_partial_with_tools());
+    assert_eq!(query.tool_directives, [ToolDirective::Enable(
+        "explicit_tool".into()
+    )]);
+    assert_eq!(query.query, words(&["go"]));
 
-    query.set_arg_prompts(answering(['y']));
-    let directives = query.settle_tool_words(&make_partial_with_tools()).unwrap();
+    // Named as a tool, the typo reaches the same check a lone `-t typo` does.
+    let query = settled_query(&["-t=try", "again"], &make_partial_with_tools());
+    assert_eq!(query.tool_directives, [ToolDirective::Enable("try".into())]);
+    assert_eq!(query.query, words(&["again"]));
 
-    assert_eq!(directives, [ToolDirective::EnableAll]);
-    assert_eq!(
-        query.input.query,
-        Some(vec!["try".to_owned(), "again".to_owned()])
-    );
-}
-
-// The attached spelling records the same clap index for flag and value, so
-// the query still follows the value and it settles the same way.
-#[test]
-fn an_attached_value_before_the_query_settles_the_same_way() {
-    let (query, directives) = confirmed_query(&["-t=try", "again"], &make_partial_with_tools());
-
-    assert_eq!(directives, [ToolDirective::EnableAll]);
-    assert_eq!(
-        query.input.query,
-        Some(vec!["try".to_owned(), "again".to_owned()])
-    );
-
-    let (query, directives) =
-        settled_query(&["-t=explicit_tool", "go"], &make_partial_with_tools());
-
-    assert_eq!(directives, [ToolDirective::Enable("explicit_tool".into())]);
-    assert_eq!(query.input.query, Some(vec!["go".to_owned()]));
+    let query = settled_query(&["-ttry", "again"], &make_partial_with_tools());
+    assert_eq!(query.tool_directives, [ToolDirective::Enable("try".into())]);
 }
 
 // Disabling every tool grants nothing, so nobody is asked.
 #[test]
 fn a_word_after_no_tool_flag_naming_no_tool_starts_the_query() {
-    let (query, directives) = settled_query(&["-T", "what", "now?"], &make_partial_with_tools());
+    let query = settled_query(&["-T", "what", "now?"], &make_partial_with_tools());
 
-    assert_eq!(directives, [ToolDirective::DisableAll]);
-    assert_eq!(
-        query.input.query,
-        Some(vec!["what".to_owned(), "now?".to_owned()])
-    );
+    assert_eq!(query.tool_directives, [ToolDirective::DisableAll]);
+    assert_eq!(query.query, words(&["what", "now?"]));
 }
 
 // Nobody to ask, so the word settling at all shows nobody was asked.
 #[test]
 fn a_word_after_tool_flag_naming_a_tool_stays_a_tool_name() {
-    let (query, directives) =
-        settled_query(&["-t", "explicit_tool", "go"], &make_partial_with_tools());
+    let query = settled_query(&["-t", "explicit_tool", "go"], &make_partial_with_tools());
 
-    assert_eq!(directives, [ToolDirective::Enable("explicit_tool".into())]);
-    assert_eq!(query.input.query, Some(vec!["go".to_owned()]));
+    assert_eq!(query.tool_directives, [ToolDirective::Enable(
+        "explicit_tool".into()
+    )]);
+    assert_eq!(query.query, words(&["go"]));
 }
 
-// The built-ins join the configured tools before the words are settled, so a
-// built-in's name is a tool name even when no config declares it.
+// A built-in's name is a tool name even when no config declares it.
 #[test]
 fn a_word_naming_a_builtin_tool_stays_a_tool_name() {
-    let mut query = parse_query(&["-t", "describe_tools", "go"]).unwrap();
+    let query = settled_query(
+        &["-t", "describe_tools", "go"],
+        &PartialAppConfig::default(),
+    );
 
-    IntoPartialAppConfig::apply_cli_config(&mut query, None, PartialAppConfig::default(), None)
-        .unwrap();
-
-    assert_eq!(query.input.query, Some(vec!["go".to_owned()]));
+    assert_eq!(query.tool_directives, [ToolDirective::Enable(
+        "describe_tools".into()
+    )]);
+    assert_eq!(query.query, words(&["go"]));
 }
 
 #[test]
 fn a_word_listing_only_known_tools_stays_a_tool_list() {
-    let (query, directives) = settled_query(
+    let query = settled_query(
         &["-t", "explicit_tool,implicitly_enabled_tool", "go"],
         &make_partial_with_tools(),
     );
 
-    assert_eq!(directives, [
+    assert_eq!(query.tool_directives, [
         ToolDirective::Enable("explicit_tool".into()),
         ToolDirective::Enable("implicitly_enabled_tool".into()),
     ]);
-    assert_eq!(query.input.query, Some(vec!["go".to_owned()]));
+    assert_eq!(query.query, words(&["go"]));
 }
 
 // One unknown name makes the whole list a candidate for query text, which
@@ -4136,7 +4119,7 @@ fn a_word_listing_an_unknown_tool_is_refused_without_a_user() {
     let Err(error) = try_settled_query(
         &["-t", "explicit_tool,nope", "go"],
         &make_partial_with_tools(),
-        ArgPrompts::default(),
+        &ArgPrompts::default(),
     ) else {
         panic!("a list naming an unknown tool must not settle unasked");
     };
@@ -4150,131 +4133,89 @@ fn a_word_listing_an_unknown_tool_is_refused_without_a_user() {
 
 #[test]
 fn a_confirmed_word_listing_an_unknown_tool_starts_the_query() {
-    let (query, directives) = confirmed_query(
+    let query = confirmed_query(
         &["-t", "explicit_tool,nope", "go"],
         &make_partial_with_tools(),
     );
 
-    assert_eq!(directives, [ToolDirective::EnableAll]);
-    assert_eq!(
-        query.input.query,
-        Some(vec!["explicit_tool,nope".to_owned(), "go".to_owned()])
-    );
+    assert_eq!(query.tool_directives, [ToolDirective::EnableAll]);
+    assert_eq!(query.query, words(&["explicit_tool,nope", "go"]));
 }
 
 // `hello,` is not a valid tool list, which must not fail the parse before the
 // word gets the chance to be query text.
 #[test]
 fn a_word_ending_in_a_comma_starts_the_query() {
-    let (query, directives) =
-        confirmed_query(&["-t", "hello,", "world"], &make_partial_with_tools());
+    let query = confirmed_query(&["-t", "hello,", "world"], &make_partial_with_tools());
 
-    assert_eq!(directives, [ToolDirective::EnableAll]);
-    assert_eq!(
-        query.input.query,
-        Some(vec!["hello,".to_owned(), "world".to_owned()])
-    );
+    assert_eq!(query.tool_directives, [ToolDirective::EnableAll]);
+    assert_eq!(query.query, words(&["hello,", "world"]));
 }
 
 #[test]
 fn a_word_given_back_to_the_query_keeps_its_place() {
-    let (query, _) = confirmed_query(
+    let query = confirmed_query(
         &["please", "-t", "try", "again", "--", "later"],
         &make_partial_with_tools(),
     );
 
-    assert_eq!(
-        query.input.query,
-        Some(vec![
-            "please".to_owned(),
-            "try".to_owned(),
-            "again".to_owned(),
-            "later".to_owned(),
-        ])
-    );
+    assert_eq!(query.query, words(&["please", "try", "again", "later"]));
 }
 
 // `--quote` takes a word out of the query first, which must not shift where the
 // tool word goes back in.
 #[test]
 fn a_word_given_back_to_the_query_keeps_its_place_around_quote() {
-    let (before, _) = confirmed_query(
+    let before = confirmed_query(
         &["--quote", "false", "-t", "try", "again"],
         &make_partial_with_tools(),
     );
-    assert_eq!(before.input.quote, Some(false));
-    assert_eq!(
-        before.input.query,
-        Some(vec!["try".to_owned(), "again".to_owned()])
-    );
+    assert_eq!(before.quote, Some(false));
+    assert_eq!(before.query, words(&["try", "again"]));
 
-    let (after, _) = confirmed_query(
+    let after = confirmed_query(
         &["-t", "try", "again", "--quote", "false"],
         &make_partial_with_tools(),
     );
-    assert_eq!(after.input.quote, Some(false));
-    assert_eq!(
-        after.input.query,
-        Some(vec!["try".to_owned(), "again".to_owned()])
-    );
+    assert_eq!(after.quote, Some(false));
+    assert_eq!(after.query, words(&["try", "again"]));
 }
 
 // Without query text after it, the word can only be meant as a tool name, so a
 // typo is reported instead of being sent to the assistant.
 #[test]
 fn a_lone_word_after_tool_flag_stays_a_tool_name() {
-    let (query, directives) = settled_query(&["-t", "typo"], &make_partial_with_tools());
+    let query = settled_query(&["-t", "typo"], &make_partial_with_tools());
 
-    assert_eq!(directives, [ToolDirective::Enable("typo".into())]);
-    assert_eq!(query.input.query, None);
+    assert_eq!(query.tool_directives, [ToolDirective::Enable(
+        "typo".into()
+    )]);
+    assert_eq!(query.query, None);
 }
 
 #[test]
 fn a_word_followed_by_a_flag_stays_a_tool_name() {
-    let (query, directives) = settled_query(
+    let query = settled_query(
         &["-t", "typo", "--hide-reasoning", "hello"],
         &make_partial_with_tools(),
     );
 
-    assert_eq!(directives, [ToolDirective::Enable("typo".into())]);
-    assert_eq!(query.input.query, Some(vec!["hello".to_owned()]));
+    assert_eq!(query.tool_directives, [ToolDirective::Enable(
+        "typo".into()
+    )]);
+    assert_eq!(query.query, words(&["hello"]));
 }
 
+// The settled directive is what reaches the configuration.
 #[test]
-fn apply_cli_config_reads_a_confirmed_tool_word_as_query_text() {
-    let mut query = parse_query(&["-t", "try", "again"]).unwrap();
-    query.set_arg_prompts(answering(['y']));
+fn a_confirmed_tool_word_enables_every_tool() {
+    let query = confirmed_query(&["-t", "try", "again"], &make_partial_with_tools());
 
     let partial =
-        IntoPartialAppConfig::apply_cli_config(&mut query, None, make_partial_with_tools(), None)
+        IntoPartialAppConfig::apply_cli_config(&query, None, make_partial_with_tools(), None)
             .unwrap();
 
-    assert_eq!(
-        query.input.query,
-        Some(vec!["try".to_owned(), "again".to_owned()])
-    );
     // Off in the base config, so only the bulk directive turns it on.
-    assert!(effective(&partial, "explicitly_disabled_tool").state);
-}
-
-// The word goes back into the query when it is first settled; applying the
-// same command again must neither repeat it nor lose its directive. There is
-// only one answer, so asking a second time would refuse.
-#[test]
-fn applying_twice_puts_a_tool_word_back_into_the_query_once() {
-    let mut query = parse_query(&["-t", "try", "again"]).unwrap();
-    query.set_arg_prompts(answering(['y']));
-
-    IntoPartialAppConfig::apply_cli_config(&mut query, None, make_partial_with_tools(), None)
-        .unwrap();
-    let partial =
-        IntoPartialAppConfig::apply_cli_config(&mut query, None, make_partial_with_tools(), None)
-            .unwrap();
-
-    assert_eq!(
-        query.input.query,
-        Some(vec!["try".to_owned(), "again".to_owned()])
-    );
     assert!(effective(&partial, "explicitly_disabled_tool").state);
 }
 
@@ -4293,10 +4234,10 @@ fn resolve_config_refuses_an_unknown_tool_word_without_a_user() {
         Arc::clone(&base),
     );
     let id = conversation_id.to_string();
-    let mut cli = Cli::try_parse_from(["jp", "query", "--id", &id, "-t", "try", "again"]).unwrap();
+    let cli = Cli::try_parse_from(["jp", "query", "--id", &id, "-t", "try", "again"]).unwrap();
 
     let error = resolve_config(
-        &mut cli.command,
+        cli.command,
         || Ok(base.to_partial()),
         &cli.globals.config,
         &mut workspace,
@@ -4327,10 +4268,10 @@ fn resolve_config_reads_an_unknown_no_tool_word_as_query_text() {
         Arc::clone(&base),
     );
     let id = conversation_id.to_string();
-    let mut cli = Cli::try_parse_from(["jp", "query", "--id", &id, "-T", "try", "again"]).unwrap();
+    let cli = Cli::try_parse_from(["jp", "query", "--id", &id, "-T", "try", "again"]).unwrap();
 
-    resolve_config(
-        &mut cli.command,
+    let resolved = resolve_config(
+        cli.command,
         || Ok(base.to_partial()),
         &cli.globals.config,
         &mut workspace,
@@ -4340,13 +4281,10 @@ fn resolve_config_reads_an_unknown_no_tool_word_as_query_text() {
     )
     .unwrap();
 
-    let Commands::Query(query) = cli.command else {
+    let Commands::Query(query) = resolved.command else {
         panic!("parsed as a query");
     };
-    assert_eq!(
-        query.input.query,
-        Some(vec!["try".to_owned(), "again".to_owned()])
-    );
+    assert_eq!(query.query, words(&["try", "again"]));
 }
 
 /// A prompt the user ends with Ctrl-C.
@@ -4398,12 +4336,13 @@ impl PromptBackend for InterruptedPrompts {
 // than reading as a refusal with a config error's exit status.
 #[test]
 fn ctrl_c_at_the_tool_question_carries_the_interrupt_status() {
-    let mut query = parse_query(&["-t", "try", "again"]).unwrap();
-    query.set_arg_prompts(ArgPrompts::new(Arc::new(InterruptedPrompts)));
-
-    let error =
-        IntoPartialAppConfig::apply_cli_config(&mut query, None, make_partial_with_tools(), None)
-            .unwrap_err();
+    let Err(error) = try_settled_query(
+        &["-t", "try", "again"],
+        &make_partial_with_tools(),
+        &ArgPrompts::new(Arc::new(InterruptedPrompts)),
+    ) else {
+        panic!("an interrupted question must not settle");
+    };
 
     let Ok(error) = error.downcast::<cmd::Error>() else {
         panic!("an interrupt must stay a typed command error");
@@ -4415,19 +4354,31 @@ fn ctrl_c_at_the_tool_question_carries_the_interrupt_status() {
 fn a_word_after_fork_that_is_no_number_starts_the_query() {
     let query = parse_query(&["--fork", "what", "if", "we"]).unwrap();
 
-    assert_eq!(query.fork.turns(), Some(None));
-    assert_eq!(
-        query.input.query,
-        Some(vec!["what".to_owned(), "if".to_owned(), "we".to_owned()])
-    );
+    assert_eq!(query.fork, Some(None));
+    assert_eq!(query.query, words(&["what", "if", "we"]));
 }
 
 #[test]
 fn a_number_after_fork_stays_the_turn_count() {
     let query = parse_query(&["--fork", "2", "hello"]).unwrap();
 
-    assert_eq!(query.fork.turns(), Some(Some(2)));
-    assert_eq!(query.input.query, Some(vec!["hello".to_owned()]));
+    assert_eq!(query.fork, Some(Some(2)));
+    assert_eq!(query.query, words(&["hello"]));
+}
+
+// `=` says the value is the flag's, so a word that is no number is an error
+// rather than the start of the query.
+#[test]
+fn an_attached_word_after_fork_is_rejected() {
+    let Err(error) = parse_query(&["--fork=what", "if", "we"]) else {
+        panic!("an attached value must be the flag's");
+    };
+
+    assert_eq!(
+        error.render().to_string(),
+        "error: invalid value for '--fork': expected a positive integer, got 'what'\n\nUsage: jp \
+         query [OPTIONS] [QUERY]...\n\nFor more information, try '--help'.\n"
+    );
 }
 
 // Nothing follows the value, so it can only be the flag's, and a typo is
@@ -4466,22 +4417,21 @@ fn a_word_after_fork_followed_by_escaped_words_is_still_rejected() {
 fn a_word_after_tmp_that_is_no_duration_starts_the_query() {
     let query = parse_query(&["-n", "--tmp", "quick", "question"]).unwrap();
 
-    assert_eq!(query.expires_in.duration(), Some(None));
-    assert_eq!(
-        query.input.query,
-        Some(vec!["quick".to_owned(), "question".to_owned()])
-    );
+    assert_eq!(query.expires_in, Some(None));
+    assert_eq!(query.query, words(&["quick", "question"]));
 }
 
 #[test]
 fn a_duration_after_tmp_stays_the_duration() {
     let query = parse_query(&["-n", "--tmp", "1h", "hello"]).unwrap();
 
-    assert_eq!(
-        query.expires_in.duration(),
-        Some(Some("1h".parse().unwrap()))
-    );
-    assert_eq!(query.input.query, Some(vec!["hello".to_owned()]));
+    assert_eq!(query.expires_in, Some(Some("1h".parse().unwrap())));
+    assert_eq!(query.query, words(&["hello"]));
+}
+
+#[test]
+fn an_attached_word_after_tmp_is_rejected() {
+    assert!(parse_query(&["-n", "--tmp=quick", "question"]).is_err());
 }
 
 #[test]
@@ -4490,15 +4440,7 @@ fn a_word_after_compact_that_is_no_spec_starts_the_query() {
 
     assert!(query.compact.use_config_rules);
     assert!(query.compact.specs.is_empty());
-    assert_eq!(
-        query.input.query,
-        Some(vec![
-            "what".to_owned(),
-            "did".to_owned(),
-            "we".to_owned(),
-            "decide".to_owned(),
-        ])
-    );
+    assert_eq!(query.query, words(&["what", "did", "we", "decide"]));
 }
 
 #[test]
@@ -4507,7 +4449,22 @@ fn a_spec_after_compact_stays_a_spec() {
 
     assert!(!query.compact.use_config_rules);
     assert_eq!(query.compact.specs, ["r+t".parse().unwrap()]);
-    assert_eq!(query.input.query, Some(vec!["hello".to_owned()]));
+    assert_eq!(query.query, words(&["hello"]));
+}
+
+// `-kwhat` shares the flag's argument, which says the value is the flag's.
+#[test]
+fn an_attached_word_after_compact_is_rejected() {
+    let Err(error) = parse_query(&["-kwhat", "did", "we", "decide"]) else {
+        panic!("an attached value must be the flag's");
+    };
+
+    assert!(
+        error
+            .to_string()
+            .contains("invalid compact spec 'what': unknown policy 'what'"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]
@@ -4517,10 +4474,7 @@ fn a_word_after_id_that_is_no_target_opens_the_picker() {
     assert_eq!(query.target.ids(), [ConversationTarget::Picker(
         PickerFilter::default()
     )]);
-    assert_eq!(
-        query.input.query,
-        Some(vec!["fix".to_owned(), "the".to_owned(), "bug".to_owned()])
-    );
+    assert_eq!(query.query, words(&["fix", "the", "bug"]));
 }
 
 #[test]
@@ -4528,7 +4482,7 @@ fn a_keyword_after_id_stays_the_target() {
     let query = parse_query(&["-i", "recent", "hello"]).unwrap();
 
     assert_eq!(query.target.ids(), [ConversationTarget::Recent]);
-    assert_eq!(query.input.query, Some(vec!["hello".to_owned()]));
+    assert_eq!(query.query, words(&["hello"]));
 }
 
 // `a` is the documented alias for the most recently archived conversation, and
@@ -4538,10 +4492,7 @@ fn the_archived_alias_after_id_stays_the_target() {
     let query = parse_query(&["-i", "a", "quick", "question"]).unwrap();
 
     assert_eq!(query.target.ids(), [ConversationTarget::Archived]);
-    assert_eq!(
-        query.input.query,
-        Some(vec!["quick".to_owned(), "question".to_owned()])
-    );
+    assert_eq!(query.query, words(&["quick", "question"]));
 }
 
 #[test]
@@ -4551,13 +4502,10 @@ fn help_after_id_starts_the_query() {
     assert_eq!(query.target.ids(), [ConversationTarget::Picker(
         PickerFilter::default()
     )]);
-    assert_eq!(
-        query.input.query,
-        Some(vec!["help".to_owned(), "me".to_owned()])
-    );
+    assert_eq!(query.query, words(&["help", "me"]));
 }
 
-// `--` is how a title search and a query are written together.
+// `--` is one way to write a title search and a query together.
 #[test]
 fn a_title_search_after_id_followed_by_escaped_words_stays_the_target() {
     let query = parse_query(&["-i", "auth", "--", "fix", "the", "bug"]).unwrap();
@@ -4568,10 +4516,21 @@ fn a_title_search_after_id_followed_by_escaped_words_stays_the_target() {
             ..Default::default()
         }
     )]);
-    assert_eq!(
-        query.input.query,
-        Some(vec!["fix".to_owned(), "the".to_owned(), "bug".to_owned()])
-    );
+    assert_eq!(query.query, words(&["fix", "the", "bug"]));
+}
+
+// `=` is the other: the value is the flag's, wherever it sits.
+#[test]
+fn an_attached_title_search_after_id_stays_the_target() {
+    let query = parse_query(&["-i=auth", "fix", "the", "bug"]).unwrap();
+
+    assert_eq!(query.target.ids(), [ConversationTarget::Picker(
+        PickerFilter {
+            query: Some("auth".to_owned()),
+            ..Default::default()
+        }
+    )]);
+    assert_eq!(query.query, words(&["fix", "the", "bug"]));
 }
 
 // Without query text after it, the value is the flag's: a title search.
@@ -4585,7 +4544,7 @@ fn a_lone_word_after_id_stays_a_title_search() {
             ..Default::default()
         }
     )]);
-    assert_eq!(query.input.query, None);
+    assert_eq!(query.query, None);
 }
 
 // Several flags can give a word back in one command line; each lands where it
@@ -4595,16 +4554,8 @@ fn words_given_back_by_several_flags_keep_their_places() {
     let query = parse_query(&["-k", "now", "please", "--fork", "then", "go"]).unwrap();
 
     assert!(query.compact.use_config_rules);
-    assert_eq!(query.fork.turns(), Some(None));
-    assert_eq!(
-        query.input.query,
-        Some(vec![
-            "now".to_owned(),
-            "please".to_owned(),
-            "then".to_owned(),
-            "go".to_owned(),
-        ])
-    );
+    assert_eq!(query.fork, Some(None));
+    assert_eq!(query.query, words(&["now", "please", "then", "go"]));
 }
 
 // A flag after the value means no query word follows it, so the value is the
@@ -4625,73 +4576,68 @@ fn a_word_followed_by_another_flag_is_still_rejected() {
 
 #[test]
 fn a_word_after_tool_use_naming_no_tool_starts_the_query() {
-    let mut query = parse_query(&["-u", "fix", "the", "bug"]).unwrap();
+    let query = settled_query(&["-u", "fix", "the", "bug"], &make_partial_with_tools());
 
-    IntoPartialAppConfig::apply_cli_config(&mut query, None, make_partial_with_tools(), None)
-        .unwrap();
-
-    assert_eq!(query.tool_use.choice(), Some(None));
+    assert_eq!(query.tool_use, Some(None));
     assert_eq!(
         query.effective_tool_choice(&AppConfig::new_test()),
         ToolChoice::Required
     );
-    assert_eq!(
-        query.input.query,
-        Some(vec!["fix".to_owned(), "the".to_owned(), "bug".to_owned()])
-    );
+    assert_eq!(query.query, words(&["fix", "the", "bug"]));
 }
 
 // A disabled tool can still be forced, so it counts as a tool name.
 #[test]
 fn a_word_after_tool_use_naming_a_tool_stays_the_tool() {
-    let mut query = parse_query(&["-u", "explicitly_disabled_tool", "go"]).unwrap();
-
-    IntoPartialAppConfig::apply_cli_config(&mut query, None, make_partial_with_tools(), None)
-        .unwrap();
+    let query = settled_query(
+        &["-u", "explicitly_disabled_tool", "go"],
+        &make_partial_with_tools(),
+    );
 
     assert_eq!(
         query.effective_tool_choice(&AppConfig::new_test()),
         ToolChoice::Function("explicitly_disabled_tool".into())
     );
-    assert_eq!(query.input.query, Some(vec!["go".to_owned()]));
+    assert_eq!(query.query, words(&["go"]));
 }
 
 #[test]
 fn false_after_tool_use_stays_the_flag_value() {
-    let mut query = parse_query(&["-u", "false", "positives", "hurt"]).unwrap();
-
-    IntoPartialAppConfig::apply_cli_config(&mut query, None, make_partial_with_tools(), None)
-        .unwrap();
+    let query = settled_query(
+        &["-u", "false", "positives", "hurt"],
+        &make_partial_with_tools(),
+    );
 
     assert_eq!(
         query.effective_tool_choice(&AppConfig::new_test()),
         ToolChoice::None
     );
-    assert_eq!(
-        query.input.query,
-        Some(vec!["positives".to_owned(), "hurt".to_owned()])
-    );
+    assert_eq!(query.query, words(&["positives", "hurt"]));
 }
 
-// Undecided, the value reads as a tool name, which fails loudly rather than
-// silently changing what the assistant may do.
+// Attached, the value names a tool, so an unknown one reaches the check that
+// reports it.
 #[test]
-fn an_unsettled_word_after_tool_use_reads_as_a_tool_name() {
-    let query = parse_query(&["-u", "fix", "the", "bug"]).unwrap();
+fn an_attached_word_after_tool_use_stays_the_tool() {
+    let query = settled_query(&["-u=fix", "the", "bug"], &make_partial_with_tools());
 
-    assert_eq!(query.tool_use.choice(), Some(Some("fix")));
+    let error =
+        IntoPartialAppConfig::apply_cli_config(&query, None, make_partial_with_tools(), None)
+            .unwrap_err();
+
     assert_eq!(
-        query.input.query,
-        Some(vec!["the".to_owned(), "bug".to_owned()])
+        error.to_string(),
+        "tool choice 'fix' does not match any known tools"
     );
+    assert_eq!(query.query, words(&["the", "bug"]));
 }
 
 #[test]
 fn a_lone_unknown_word_after_tool_use_is_still_rejected() {
-    let mut query = parse_query(&["-u", "typo"]).unwrap();
+    let query = settled_query(&["-u", "typo"], &make_partial_with_tools());
 
     let error =
-        IntoPartialAppConfig::apply_cli_config(&mut query, None, make_partial_with_tools(), None)
+        IntoPartialAppConfig::apply_cli_config(&query, None, make_partial_with_tools(), None)
             .unwrap_err();
 
     assert_eq!(

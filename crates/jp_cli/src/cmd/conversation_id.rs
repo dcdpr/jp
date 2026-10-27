@@ -21,7 +21,7 @@ use clap::{Arg, ArgAction, ArgMatches, Command, FromArgMatches, builder::TypedVa
 use crossterm::style::Stylize as _;
 
 use super::target::{ConversationTarget, PickerFilter};
-use crate::parser::{GivesBack, given_back};
+use crate::cli::flag::{Claim, Flag, FlagValues, OptionalValue, flag_arg};
 
 /// Positional conversation ID arguments: `[ID]` or `[ID]...`
 ///
@@ -60,6 +60,68 @@ pub(crate) struct FlagIds<const SESSION: bool, const MULTI: bool, const GLOBAL: 
 impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> FlagIds<SESSION, MULTI, GLOBAL> {
     pub fn from_targets(ids: Vec<ConversationTarget>) -> Self {
         Self { ids }
+    }
+}
+
+/// The `-i` / `--id` flag that reads into a [`FlagIds`] of the same parameters.
+pub(crate) enum Ids<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> {}
+
+impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> OptionalValue
+    for Ids<SESSION, MULTI, GLOBAL>
+{
+    const ID: &'static str = "id";
+
+    type Context = ();
+    type Output = FlagIds<SESSION, MULTI, GLOBAL>;
+    type Value = ConversationTarget;
+
+    fn declare(arg: Arg) -> Arg {
+        let mut arg = arg
+            .short('i')
+            .long("id")
+            .visible_alias("ids")
+            .help(short_help())
+            .long_help(flag_long_help(SESSION, MULTI));
+
+        if MULTI {
+            arg = arg.action(ArgAction::Append).value_delimiter(',');
+        }
+
+        // A global arg is accepted on either side of a subcommand, so
+        // `jp c label --id=X add k=v` and `jp c label add --id=X k=v` mean the
+        // same thing.
+        if GLOBAL {
+            arg = arg.global(true);
+        }
+
+        arg
+    }
+
+    fn parse(value: &str) -> Result<ConversationTarget, clap::Error> {
+        parse_target::<SESSION>(value)
+    }
+
+    /// An ID, keyword, picker filter, or `-` is the flag's; free text, which
+    /// would otherwise search the picker by title, and `help` are not.
+    fn claim(value: &str, (): &()) -> Result<Claim<ConversationTarget>, clap::Error> {
+        match ConversationTarget::parse(value) {
+            ConversationTarget::Help
+            | ConversationTarget::Picker(PickerFilter { query: Some(_), .. }) => Ok(Claim::Text),
+            _ => Self::parse(value).map(Claim::Value),
+        }
+    }
+
+    fn collect(values: FlagValues<ConversationTarget>) -> Result<Self::Output, clap::Error> {
+        // Written bare, or with a value given up to the query, the flag opens
+        // the picker.
+        let ids: Vec<_> = values
+            .into_indexed()
+            .into_iter()
+            .map(|(_, target)| target.unwrap_or_else(|| ConversationTarget::parse("")))
+            .collect();
+
+        validate_multi::<MULTI>(&ids)?;
+        Ok(FlagIds { ids })
     }
 }
 
@@ -144,28 +206,7 @@ impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> clap::Args
     for FlagIds<SESSION, MULTI, GLOBAL>
 {
     fn augment_args(cmd: Command) -> Command {
-        let mut arg = Arg::new("id")
-            .short('i')
-            .long("id")
-            .visible_alias("ids")
-            .value_parser(TargetParser::<SESSION>)
-            .help(short_help())
-            .long_help(flag_long_help(SESSION, MULTI))
-            .num_args(0..=1)
-            .default_missing_value("");
-
-        if MULTI {
-            arg = arg.action(ArgAction::Append).value_delimiter(',');
-        }
-
-        // A global arg is accepted on either side of a subcommand, so
-        // `jp c label --id=X add k=v` and `jp c label add --id=X k=v` mean the
-        // same thing.
-        if GLOBAL {
-            arg = arg.global(true);
-        }
-
-        cmd.arg(arg)
+        cmd.arg(flag_arg::<Ids<SESSION, MULTI, GLOBAL>>())
     }
 
     fn augment_args_for_update(cmd: Command) -> Command {
@@ -177,58 +218,12 @@ impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> FromArgMatches
     for FlagIds<SESSION, MULTI, GLOBAL>
 {
     fn from_arg_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
-        let ids = Self::read_ids(matches);
-        validate_multi::<MULTI>(&ids)?;
-        Ok(Self { ids })
+        Flag::<Ids<SESSION, MULTI, GLOBAL>>::strict(matches)
     }
 
     fn update_from_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), clap::Error> {
-        self.ids = Self::read_ids(matches);
-        validate_multi::<MULTI>(&self.ids)?;
+        *self = Self::from_arg_matches(matches)?;
         Ok(())
-    }
-}
-
-impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> FlagIds<SESSION, MULTI, GLOBAL> {
-    /// Read the targets, reading a value given back to the query as a bare
-    /// `--id`.
-    fn read_ids(matches: &ArgMatches) -> Vec<ConversationTarget> {
-        let given_back: Vec<usize> = given_back::<Self>(matches)
-            .into_iter()
-            .map(|(index, _)| index)
-            .collect();
-        if given_back.is_empty() {
-            return read_ids(matches);
-        }
-
-        let indices = matches.indices_of(Self::ARG).into_iter().flatten();
-        read_ids(matches)
-            .into_iter()
-            .zip(indices)
-            .map(|(target, index)| {
-                if given_back.contains(&index) {
-                    ConversationTarget::parse("")
-                } else {
-                    target
-                }
-            })
-            .collect()
-    }
-}
-
-impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> GivesBack
-    for FlagIds<SESSION, MULTI, GLOBAL>
-{
-    const ARG: &'static str = "id";
-
-    /// An ID, keyword, picker filter, or `-` is the flag's; free text, which
-    /// would otherwise search the picker by title, and `help` are not.
-    fn claims(value: &str) -> bool {
-        !matches!(
-            ConversationTarget::parse(value),
-            ConversationTarget::Help
-                | ConversationTarget::Picker(PickerFilter { query: Some(_), .. })
-        )
     }
 }
 
@@ -321,17 +316,22 @@ impl<const SESSION: bool> TypedValueParser for TargetParser<SESSION> {
             .to_str()
             .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
 
-        let target = ConversationTarget::parse(s);
-
-        if !SESSION && target.requires_session() {
-            return Err(clap::Error::raw(
-                clap::error::ErrorKind::InvalidValue,
-                "session-based targets are not supported by this command\n",
-            ));
-        }
-
-        Ok(target)
+        parse_target::<SESSION>(s)
     }
+}
+
+/// Parse a conversation target, refusing a session-based one unless `SESSION`.
+fn parse_target<const SESSION: bool>(value: &str) -> Result<ConversationTarget, clap::Error> {
+    let target = ConversationTarget::parse(value);
+
+    if !SESSION && target.requires_session() {
+        return Err(clap::Error::raw(
+            clap::error::ErrorKind::InvalidValue,
+            "session-based targets are not supported by this command\n",
+        ));
+    }
+
+    Ok(target)
 }
 
 fn short_help() -> &'static str {

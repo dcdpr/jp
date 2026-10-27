@@ -116,7 +116,7 @@ impl Title {
 
 impl IntoPartialAppConfig for Title {
     fn apply_cli_config(
-        &mut self,
+        &self,
         _: Option<&Workspace>,
         mut partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,

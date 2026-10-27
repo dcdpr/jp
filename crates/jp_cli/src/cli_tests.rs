@@ -85,7 +85,7 @@ fn no_subcommand_is_an_error() {
 }
 
 // An error raised while reading a subcommand's arguments back gets the same
-// usage line as one clap raises while matching them.
+// usage line as one clap raises while matching them: the subcommand's own.
 #[test]
 fn an_error_reading_arguments_back_carries_the_usage_line() {
     let Err(error) = Cli::try_parse_from(["jp", "query", "-tfoo,,bar"]) else {
@@ -94,7 +94,7 @@ fn an_error_reading_arguments_back_carries_the_usage_line() {
 
     assert_eq!(
         error.render().to_string(),
-        "error: empty tool name in 'foo,,bar'\n\n\nUsage: jp [OPTIONS] <COMMAND>\n\nFor more \
-         information, try '--help'.\n"
+        "error: empty tool name in 'foo,,bar'\n\n\nUsage: jp query [OPTIONS] [QUERY]...\n\nFor \
+         more information, try '--help'.\n"
     );
 }

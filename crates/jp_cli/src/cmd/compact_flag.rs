@@ -15,7 +15,7 @@ use jp_config::{
     types::{byte_size::ByteSize, policy_spec::PolicySpec},
 };
 
-use crate::parser::{GivesBack, given_back};
+use crate::cli::flag::{Claim, Flag, FlagValues, OptionalValue, flag_arg, invalid_value};
 
 /// Shared compaction flag that can be embedded in any command.
 ///
@@ -94,40 +94,73 @@ pub(crate) fn combine_rules(
     }
 }
 
+/// `-k` / `--compact[=SPEC]`: compact the conversation by the configured rules,
+/// or by an inline spec.
+pub(crate) enum Compact {}
+
+impl OptionalValue for Compact {
+    const ID: &'static str = "compact";
+
+    type Context = ();
+    type Output = CompactFlag;
+    type Value = CompactSpec;
+
+    fn declare(arg: Arg) -> Arg {
+        arg.short('k')
+            .long("compact")
+            .action(ArgAction::Append)
+            .help("Run conversation compaction rules")
+            .long_help(
+                "Compact the conversation.\n\nWithout a value, applies the compaction rules from \
+                 the resolved configuration.\n\nWith a DSL value (e.g. `--compact=s:..-3`), \
+                 applies an inline compaction rule. Multiple `--compact=SPEC` flags add multiple \
+                 rules.\n\nBoth forms compose: bare `--compact` includes config rules, each \
+                 `--compact=SPEC` adds a DSL rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies \
+                 are joined with `+`:\n- `r` / `reasoning`: strip reasoning blocks\n- `s` / \
+                 `summary`: generate an LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool \
+                 calls; bare strips both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, \
+                 `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a \
+                 `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or a \
+                 byte count). Each half of a tool call is judged on its own size; `omit` is \
+                 judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO \
+                 (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or .. \
+                 for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 \
+                 compacts through the third turn from the end, leaving the final two \
+                 alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, \
+                 r,over=16kb+t=sres,over=1mb:..-3\n\nOn `jp query`, a value written directly \
+                 before the query that is not a valid spec is the query's first word instead, and \
+                 the flag applies the configured rules: `jp q -k what did we decide` compacts \
+                 with the configured rules and asks \"what did we decide\". A value attached with \
+                 `=` is always a spec.",
+            )
+    }
+
+    fn parse(value: &str) -> Result<CompactSpec, clap::Error> {
+        value
+            .parse()
+            .map_err(|error| invalid_value(format!("invalid compact spec '{value}': {error}")))
+    }
+
+    fn claim(value: &str, (): &()) -> Result<Claim<CompactSpec>, clap::Error> {
+        Ok(value.parse().map_or(Claim::Text, Claim::Value))
+    }
+
+    fn collect(values: FlagValues<CompactSpec>) -> Result<CompactFlag, clap::Error> {
+        let mut flag = CompactFlag::default();
+        for (_, spec) in values.into_indexed() {
+            match spec {
+                Some(spec) => flag.specs.push(spec),
+                None => flag.use_config_rules = true,
+            }
+        }
+
+        Ok(flag)
+    }
+}
+
 impl clap::Args for CompactFlag {
     fn augment_args(cmd: Command) -> Command {
-        cmd.arg(
-            Arg::new(Self::ARG)
-                .short('k')
-                .long("compact")
-                .help("Run conversation compaction rules")
-                .long_help(
-                    "Compact the conversation.\n\nWithout a value, applies the compaction rules \
-                     from the resolved configuration.\n\nWith a DSL value (e.g. \
-                     `--compact=s:..-3`), applies an inline compaction rule. Multiple \
-                     `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare \
-                     `--compact` includes config rules, each `--compact=SPEC` adds a DSL \
-                     rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- \
-                     `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an \
-                     LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips \
-                     both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, \
-                     `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a \
-                     `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or \
-                     a byte count). Each half of a tool call is judged on its own size; `omit` is \
-                     judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO \
-                     (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or \
-                     .. for all\n\nA negative bound counts from the end, where -1 is the last \
-                     turn: ..-3 compacts through the third turn from the end, leaving the final \
-                     two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, \
-                     r,over=16kb+t=sres,over=1mb:..-3\n\nOn `jp query`, a value written directly \
-                     before the query that is not a valid spec is the query's first word instead, \
-                     and the flag applies the configured rules: `jp q -k what did we decide` \
-                     compacts with the configured rules and asks \"what did we decide\".",
-                )
-                .action(ArgAction::Append)
-                .num_args(0..=1)
-                .default_missing_value(""),
-        )
+        cmd.arg(flag_arg::<Compact>())
     }
 
     fn augment_args_for_update(cmd: Command) -> Command {
@@ -137,48 +170,12 @@ impl clap::Args for CompactFlag {
 
 impl clap::FromArgMatches for CompactFlag {
     fn from_arg_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
-        let values: Vec<String> = matches
-            .get_many(Self::ARG)
-            .map(|v| v.cloned().collect())
-            .unwrap_or_default();
-        let indices: Vec<usize> = matches
-            .indices_of(Self::ARG)
-            .map(Iterator::collect)
-            .unwrap_or_default();
-        let given_back: Vec<usize> = given_back::<Self>(matches)
-            .into_iter()
-            .map(|(index, _)| index)
-            .collect();
-
-        let mut flag = CompactFlag::default();
-        for (val, index) in values.into_iter().zip(indices) {
-            if val.is_empty() || given_back.contains(&index) {
-                flag.use_config_rules = true;
-            } else {
-                let spec = val.parse::<CompactSpec>().map_err(|e| {
-                    clap::Error::raw(
-                        clap::error::ErrorKind::InvalidValue,
-                        format!("invalid compact spec '{val}': {e}\n"),
-                    )
-                })?;
-                flag.specs.push(spec);
-            }
-        }
-
-        Ok(flag)
+        Flag::<Compact>::strict(matches)
     }
 
     fn update_from_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), clap::Error> {
         *self = Self::from_arg_matches(matches)?;
         Ok(())
-    }
-}
-
-impl GivesBack for CompactFlag {
-    const ARG: &'static str = "compact";
-
-    fn claims(value: &str) -> bool {
-        value.parse::<CompactSpec>().is_ok()
     }
 }
 

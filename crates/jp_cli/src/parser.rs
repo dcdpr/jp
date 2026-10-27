@@ -1,7 +1,7 @@
 use std::{convert::Infallible, fmt, str::FromStr};
 
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf, absolute_utf8};
-use clap::{ArgMatches, error::ErrorKind};
+use clap::error::ErrorKind;
 use clean_path::Clean as _;
 use jp_id::Parts;
 use relative_path::RelativePathBuf;
@@ -9,69 +9,6 @@ use tracing::trace;
 use url::Url;
 
 use crate::error::{Error, Result};
-
-/// The clap id of `jp query`'s positional query words.
-pub(crate) const QUERY_ARG: &str = "query";
-
-/// The clap indices of the query words, or none when the command takes no query
-/// text.
-pub(crate) fn query_indices(matches: &ArgMatches) -> Vec<usize> {
-    // `indices_of` panics on an id the command does not define, and most
-    // commands share their flags with `jp query` without its query words.
-    if matches.try_get_raw(QUERY_ARG).is_err() {
-        return vec![];
-    }
-
-    matches
-        .indices_of(QUERY_ARG)
-        .map(Iterator::collect)
-        .unwrap_or_default()
-}
-
-/// A flag with an optional value that, written directly before the query, may
-/// instead be the query's first word.
-///
-/// `jp q --fork 2 hello` forks keeping two turns and asks "hello", while `jp q
-/// --fork hello there` forks keeping every turn and asks "hello there".
-/// The flag and the query words each read [`given_back`] for the same type, so
-/// they agree on which word went where.
-pub(crate) trait GivesBack {
-    /// The flag's clap argument id.
-    const ARG: &'static str;
-
-    /// Whether `value` is meant for the flag.
-    ///
-    /// Only asked about a non-empty value written directly before the query;
-    /// any other value belongs to the flag regardless.
-    fn claims(value: &str) -> bool;
-}
-
-/// Each value of `F` that `F` gives back to the query, with its clap index.
-///
-/// A value is given back when it is written directly before a query word and
-/// `F` does not claim it.
-/// The flag then behaves as if it were written without a value.
-/// A command without query text never gives anything back.
-pub(crate) fn given_back<F: GivesBack>(matches: &ArgMatches) -> Vec<(usize, String)> {
-    let query = query_indices(matches);
-    if query.is_empty() {
-        return vec![];
-    }
-
-    let Ok(Some(values)) = matches.try_get_raw(F::ARG) else {
-        return vec![];
-    };
-    let Some(indices) = matches.indices_of(F::ARG) else {
-        return vec![];
-    };
-
-    values
-        .zip(indices)
-        .filter(|(_, index)| query.contains(&(index + 1)))
-        .filter_map(|(value, index)| Some((index, value.to_str()?.to_owned())))
-        .filter(|(_, value)| !value.is_empty() && !F::claims(value))
-        .collect()
-}
 
 /// Split a comma-separated flag value into its items.
 ///

@@ -556,7 +556,7 @@ short_aliases: None
 index: None
 action: Append
 num_args: Some(0..=1)
-value_type: jp_cli::cmd::target::ConversationTarget
+value_type: alloc::string::String
 possible_values: []
 value_names: None
 value_delimiter: Some(',')
@@ -732,8 +732,6 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp query [OPTIONS] [QUERY]...
-group Query: [] required=false multiple=true
-group QueryInputArgs: ["query", "escaped_query", "quote"] required=false multiple=true
 group new: ["new_conversation"] required=false multiple=false
 
 ### template
@@ -747,7 +745,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["TEMPLATE"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -787,7 +785,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["REPLAY"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -805,7 +803,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: jp_cli::cmd::target::ConversationTarget
+value_type: alloc::string::String
 possible_values: []
 value_names: None
 value_delimiter: None
@@ -834,7 +832,7 @@ help_heading: None
 conflicts: ["new_conversation"]
 set: []
 help: Some("Fork the conversation and start a new turn on the fork")
-long_help: Some("Fork the session's active conversation (or the one specified by --id) and start a new turn on the fork.\n\nIf N is given, the fork keeps only the last N turns.\n\nA value written directly before the query that is not a number is the query's first word instead, and the fork keeps every turn: `jp q --fork what if we` forks and asks \"what if we\".")
+long_help: Some("Fork the session's active conversation (or the one specified by --id) and start a new turn on the fork.\n\nIf N is given, the fork keeps only the last N turns.\n\nA value written directly before the query that is not a number is the query's first word instead, and the fork keeps every turn: `jp q --fork what if we` forks and asks \"what if we\". A value attached with `=` is always the number of turns.")
 
 ### new_conversation
 short: Some('n')
@@ -847,7 +845,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["NEW_CONVERSATION"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -867,7 +865,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["LOCAL"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -887,7 +885,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["NO_LOCAL"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -927,7 +925,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["EDIT"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -947,7 +945,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["NO_EDIT"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -994,7 +992,7 @@ help_heading: None
 conflicts: []
 set: ["hide", "last"]
 help: Some("Query words given after `--`")
-long_help: Some("Query words given after `--`.\n\nclap only fills this argument through the `--` separator, which makes it the record of which words were escaped. They are appended to `query` once `--quote` has been resolved, so `--` shields a `true` / `false` word from being read as the flag's value.")
+long_help: None
 
 ### quote
 short: None
@@ -1005,14 +1003,14 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: jp_cli::cmd::query::args::QuoteArg
+value_type: alloc::string::String
 possible_values: []
 value_names: Some(["BOOL"])
 value_delimiter: None
 default_values: []
 help_heading: None
 conflicts: []
-set: ["require_equals"]
+set: []
 help: Some("Pre-fill the editor with the last assistant message quoted as a markdown blockquote (each line prefixed with ` >  `)")
 long_help: Some("Pre-fill the editor with the last assistant message quoted as a markdown blockquote (each line prefixed with ` >  `).\n\nUseful for inline replies: open `$EDITOR` with the assistant's last response pre-quoted, then intersperse your replies between the quoted lines (mutt/email style). The complete buffer — quotes plus your replies — becomes your next message.\n\n`--quote=false` seeds the message verbatim, without the ` >  ` prefixes. `--quote=true` is the same as a bare `--quote`. Both values also work unattached (`--quote false`); any other word after `--quote` stays part of the query, so `jp q --quote what now?` still asks \"what now?\". To ask a question that *is* `true` or `false`, put it after `--`.\n\nForces the editor open by default; respects `--no-edit` / `--edit=false` if explicitly suppressed, in which case the quoted text is sent as-is and echoed to the terminal before the turn runs. Composes with `--replay`: the quote is taken from the stream *after* the replayed turn has been trimmed, i.e. the assistant message preceding the turn being replayed.\n\nIf no prior assistant message exists in this conversation, a warning is emitted and the editor opens with whatever other content was seeded (query, stdin, or empty).")
 
@@ -1107,7 +1105,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["NO_REASONING"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -1147,7 +1145,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["NO_SERVICE_TIER"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -1167,7 +1165,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["HIDE_REASONING"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -1187,7 +1185,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["HIDE_TOOL_CALLS"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -1214,7 +1212,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("The tool(s) to enable")
-long_help: Some("The tool(s) to enable.\n\nIf an existing tool is configured with a matching name, it is enabled for this query and every later one on the conversation; use `--no-tool` to turn it back off.\n\nTo run a disabled tool just once, use `--tool-use NAME` instead.\n\nIf no arguments are provided, every tool that allows it is enabled; a tool set to `explicit` or `always` is unaffected.\n\nName several tools at once by separating them with commas (`--tool=read,write`), or by providing this flag multiple times. Flags are evaluated left-to-right, so `--no-tools --tool=write` first disables everything, then re-enables only 'write'.\n\nA value written directly before the query, as in `jp q -t fix the bug`, names tools when every name in it is a configured tool. Otherwise JP asks before enabling every tool and reading the value as the first word of the query, and refuses when there is nobody to ask. Put the query after `--` to enable every tool without being asked: `jp q -t -- fix the bug`.")
+long_help: Some("The tool(s) to enable.\n\nIf an existing tool is configured with a matching name, it is enabled for this query and every later one on the conversation; use `--no-tool` to turn it back off.\n\nTo run a disabled tool just once, use `--tool-use NAME` instead.\n\nIf no arguments are provided, every tool that allows it is enabled; a tool set to `explicit` or `always` is unaffected.\n\nName several tools at once by separating them with commas (`--tool=read,write`), or by providing this flag multiple times. Flags are evaluated left-to-right, so `--no-tools --tool=write` first disables everything, then re-enables only 'write'.\n\nA value written directly before the query, as in `jp q -t fix the bug`, names tools when every name in it is a configured tool. Otherwise JP asks before enabling every tool and reading the value as the first word of the query, and refuses when there is nobody to ask. Put the query after `--` to enable every tool without being asked: `jp q -t -- fix the bug`. A value attached with `=` (`-t=read`) always names tools.")
 
 ### no_tools
 short: Some('T')
@@ -1234,7 +1232,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("Disable tool(s)")
-long_help: Some("Disable tool(s).\n\nIf provided without a value, every tool that allows it is disabled (a tool set to `explicit` or `always` is unaffected), otherwise name the tools to disable, separated by commas (`--no-tool=read,write`) or across repeated flags.\n\nThe change applies to this query and every later one on the conversation; use `--tool` to turn tools back on. To suppress tools for a single query, use `--no-tool-use`.\n\nFlags are evaluated left-to-right together with `--tool`.\n\nA value written directly before the query names tools when every name in it is a configured tool; otherwise it is the first word of the query, and the flag disables every tool.")
+long_help: Some("Disable tool(s).\n\nIf provided without a value, every tool that allows it is disabled (a tool set to `explicit` or `always` is unaffected), otherwise name the tools to disable, separated by commas (`--no-tool=read,write`) or across repeated flags.\n\nThe change applies to this query and every later one on the conversation; use `--tool` to turn tools back on. To suppress tools for a single query, use `--no-tool-use`.\n\nFlags are evaluated left-to-right together with `--tool`.\n\nA value written directly before the query names tools when every name in it is a configured tool; otherwise it is the first word of the query, and the flag disables every tool. A value attached with `=` always names tools.")
 
 ### expires_in
 short: None
@@ -1254,7 +1252,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("Set the expiration date of the conversation")
-long_help: Some("Set the expiration date of the conversation.\n\nThe conversation is persisted, but only until the conversation is no longer marked as active (e.g. when a new conversation is started), and when the expiration date is reached.\n\nThis differs from `--no-persist` in that the conversation can contain multiple turns, as long as it remains active and not expired.\n\nA value written directly before the query that is not a duration is the query's first word instead, and no duration is set: `jp q -n --tmp quick question` asks \"quick question\".")
+long_help: Some("Set the expiration date of the conversation.\n\nThe conversation is persisted, but only until the conversation is no longer marked as active (e.g. when a new conversation is started), and when the expiration date is reached.\n\nThis differs from `--no-persist` in that the conversation can contain multiple turns, as long as it remains active and not expired.\n\nA value written directly before the query that is not a duration is the query's first word instead, and no duration is set: `jp q -n --tmp quick question` asks \"quick question\". A value attached with `=` is always the duration.")
 
 ### title
 short: None
@@ -1287,7 +1285,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["NO_TITLE"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -1314,7 +1312,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("The tool to use")
-long_help: Some("The tool to use.\n\nIf a value is provided, the tool matching the value will be used. The named tool runs for this query even when it is disabled, so it does not have to be enabled separately; a tool whose policy locks it off is refused.\n\nWithout a value, or with `true`, the assistant must use one of its enabled tools. With `false`, it may use none.\n\nThis applies to a single query and is *not* persisted: the next query forces nothing, and a tool that was disabled stays disabled. To persist tool choice behavior, set the `assistant.tool_choice` field in a configuration file.\n\nA value written directly before the query names a tool when a tool by that name is configured; otherwise it is the first word of the query, and the assistant must use one of its tools: `jp q -u fix the bug`.")
+long_help: Some("The tool to use.\n\nIf a value is provided, the tool matching the value will be used. The named tool runs for this query even when it is disabled, so it does not have to be enabled separately; a tool whose policy locks it off is refused.\n\nWithout a value, or with `true`, the assistant must use one of its enabled tools. With `false`, it may use none.\n\nThis applies to a single query and is *not* persisted: the next query forces nothing, and a tool that was disabled stays disabled. To persist tool choice behavior, set the `assistant.tool_choice` field in a configuration file.\n\nA value written directly before the query names a tool when a tool by that name is configured; otherwise it is the first word of the query, and the assistant must use one of its tools: `jp q -u fix the bug`. A value attached with `=` always names a tool.")
 
 ### no_tool_use
 short: Some('U')
@@ -1327,7 +1325,7 @@ action: SetTrue
 num_args: Some(0)
 value_type: bool
 possible_values: []
-value_names: Some(["NO_TOOL_USE"])
+value_names: None
 value_delimiter: None
 default_values: ["false"]
 help_heading: None
@@ -1354,7 +1352,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("Run conversation compaction rules")
-long_help: Some("Compact the conversation.\n\nWithout a value, applies the compaction rules from the resolved configuration.\n\nWith a DSL value (e.g. `--compact=s:..-3`), applies an inline compaction rule. Multiple `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare `--compact` includes config rules, each `--compact=SPEC` adds a DSL rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or a byte count). Each half of a tool call is judged on its own size; `omit` is judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 compacts through the third turn from the end, leaving the final two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, r,over=16kb+t=sres,over=1mb:..-3\n\nOn `jp query`, a value written directly before the query that is not a valid spec is the query's first word instead, and the flag applies the configured rules: `jp q -k what did we decide` compacts with the configured rules and asks \"what did we decide\".")
+long_help: Some("Compact the conversation.\n\nWithout a value, applies the compaction rules from the resolved configuration.\n\nWith a DSL value (e.g. `--compact=s:..-3`), applies an inline compaction rule. Multiple `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare `--compact` includes config rules, each `--compact=SPEC` adds a DSL rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or a byte count). Each half of a tool call is judged on its own size; `omit` is judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 compacts through the third turn from the end, leaving the final two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, r,over=16kb+t=sres,over=1mb:..-3\n\nOn `jp query`, a value written directly before the query that is not a valid spec is the query's first word instead, and the flag applies the configured rules: `jp q -k what did we decide` compacts with the configured rules and asks \"what did we decide\". A value attached with `=` is always a spec.")
 
 ### mount
 short: None
@@ -2669,7 +2667,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("Run conversation compaction rules")
-long_help: Some("Compact the conversation.\n\nWithout a value, applies the compaction rules from the resolved configuration.\n\nWith a DSL value (e.g. `--compact=s:..-3`), applies an inline compaction rule. Multiple `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare `--compact` includes config rules, each `--compact=SPEC` adds a DSL rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or a byte count). Each half of a tool call is judged on its own size; `omit` is judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 compacts through the third turn from the end, leaving the final two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, r,over=16kb+t=sres,over=1mb:..-3\n\nOn `jp query`, a value written directly before the query that is not a valid spec is the query's first word instead, and the flag applies the configured rules: `jp q -k what did we decide` compacts with the configured rules and asks \"what did we decide\".")
+long_help: Some("Compact the conversation.\n\nWithout a value, applies the compaction rules from the resolved configuration.\n\nWith a DSL value (e.g. `--compact=s:..-3`), applies an inline compaction rule. Multiple `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare `--compact` includes config rules, each `--compact=SPEC` adds a DSL rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or a byte count). Each half of a tool call is judged on its own size; `omit` is judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 compacts through the third turn from the end, leaving the final two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, r,over=16kb+t=sres,over=1mb:..-3\n\nOn `jp query`, a value written directly before the query that is not a valid spec is the query's first word instead, and the flag applies the configured rules: `jp q -k what did we decide` compacts with the configured rules and asks \"what did we decide\". A value attached with `=` is always a spec.")
 
 ### title
 short: Some('t')
@@ -3063,7 +3061,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("Run conversation compaction rules")
-long_help: Some("Compact the conversation.\n\nWithout a value, applies the compaction rules from the resolved configuration.\n\nWith a DSL value (e.g. `--compact=s:..-3`), applies an inline compaction rule. Multiple `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare `--compact` includes config rules, each `--compact=SPEC` adds a DSL rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or a byte count). Each half of a tool call is judged on its own size; `omit` is judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 compacts through the third turn from the end, leaving the final two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, r,over=16kb+t=sres,over=1mb:..-3\n\nOn `jp query`, a value written directly before the query that is not a valid spec is the query's first word instead, and the flag applies the configured rules: `jp q -k what did we decide` compacts with the configured rules and asks \"what did we decide\".")
+long_help: Some("Compact the conversation.\n\nWithout a value, applies the compaction rules from the resolved configuration.\n\nWith a DSL value (e.g. `--compact=s:..-3`), applies an inline compaction rule. Multiple `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare `--compact` includes config rules, each `--compact=SPEC` adds a DSL rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or a byte count). Each half of a tool call is judged on its own size; `omit` is judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 compacts through the third turn from the end, leaving the final two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, r,over=16kb+t=sres,over=1mb:..-3\n\nOn `jp query`, a value written directly before the query that is not a valid spec is the query's first word instead, and the flag applies the configured rules: `jp q -k what did we decide` compacts with the configured rules and asks \"what did we decide\". A value attached with `=` is always a spec.")
 
 ### help
 short: Some('h')
@@ -3280,7 +3278,7 @@ short_aliases: None
 index: None
 action: Append
 num_args: Some(0..=1)
-value_type: jp_cli::cmd::target::ConversationTarget
+value_type: alloc::string::String
 possible_values: []
 value_names: None
 value_delimiter: Some(',')
@@ -3613,7 +3611,7 @@ short_aliases: None
 index: None
 action: Append
 num_args: Some(0..=1)
-value_type: jp_cli::cmd::target::ConversationTarget
+value_type: alloc::string::String
 possible_values: []
 value_names: None
 value_delimiter: Some(',')

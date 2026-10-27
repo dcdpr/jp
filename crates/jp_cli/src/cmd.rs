@@ -23,14 +23,19 @@ use serde_json::Value;
 pub(crate) use target::ConversationLoadRequest;
 
 use super::cmd::conversation_id::format_target_help;
-use crate::{Ctx, bootstrap::WorkspaceRequirement, ctx::IntoPartialAppConfig};
+use crate::{
+    Ctx, Spelling,
+    bootstrap::WorkspaceRequirement,
+    cli::flag::{ArgPrompts, Parsed, SettleError, Settled, Stage},
+    ctx::IntoPartialAppConfig,
+};
 
-/// A `jp` subcommand and its arguments.
+/// A `jp` subcommand and its arguments, decided as far as `S` says.
 #[derive(Debug)]
-pub(crate) enum Commands {
+pub(crate) enum Commands<S: Stage = Settled> {
     Init(init::Init),
     Config(config::Config),
-    Query(query::Query),
+    Query(query::Query<S>),
     Attachment(attachment::Attachment),
     AttachmentAdd(attachment::add::Add),
     Conversation(conversation::Conversation),
@@ -54,7 +59,7 @@ fn subcommand<T: Args>(name: &'static str, about: Option<&'static str>) -> Comma
         .long_about(None)
 }
 
-impl Commands {
+impl Commands<Parsed> {
     /// Mount every subcommand on `cmd`.
     ///
     /// Any other first word names a plugin's command.
@@ -71,7 +76,9 @@ impl Commands {
                     .visible_alias("cfg"),
             )
             .subcommand(
-                subcommand::<query::Query>("query", Some("Query the assistant")).visible_alias("q"),
+                query::Query::augment(Command::new("query"))
+                    .about("Query the assistant")
+                    .visible_alias("q"),
             )
             .subcommand(
                 subcommand::<attachment::Attachment>("attachment", Some("Manage attachments"))
@@ -109,7 +116,10 @@ impl Commands {
     ///
     /// Returns an error when a subcommand's arguments cannot be read, or when
     /// no subcommand was given.
-    pub(crate) fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+    pub(crate) fn from_matches(
+        matches: &ArgMatches,
+        spelling: &Spelling,
+    ) -> Result<Self, clap::Error> {
         let Some((name, sub)) = matches.subcommand() else {
             return Err(clap::Error::raw(
                 ErrorKind::MissingSubcommand,
@@ -120,7 +130,7 @@ impl Commands {
         Ok(match name {
             "init" => Self::Init(FromArgMatches::from_arg_matches(sub)?),
             "config" => Self::Config(FromArgMatches::from_arg_matches(sub)?),
-            "query" => Self::Query(FromArgMatches::from_arg_matches(sub)?),
+            "query" => Self::Query(query::Query::from_matches(sub, spelling)?),
             "attachment" => Self::Attachment(FromArgMatches::from_arg_matches(sub)?),
             "aa" => Self::AttachmentAdd(FromArgMatches::from_arg_matches(sub)?),
             "conversation" => Self::Conversation(FromArgMatches::from_arg_matches(sub)?),
@@ -145,6 +155,36 @@ impl Commands {
         })
     }
 
+    /// Decide the arguments whose meaning depends on `config`, the
+    /// configuration the command runs with before its own flags apply.
+    ///
+    /// `prompts` answers when an argument's meaning needs the user's
+    /// confirmation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when an argument needs confirming and is refused.
+    pub(crate) fn settle(
+        self,
+        config: &PartialAppConfig,
+        prompts: &ArgPrompts,
+    ) -> Result<Commands, SettleError> {
+        Ok(match self {
+            Self::Query(args) => Commands::Query(args.settle(config, prompts)?),
+            Self::Init(args) => Commands::Init(args),
+            Self::Config(args) => Commands::Config(args),
+            Self::Attachment(args) => Commands::Attachment(args),
+            Self::AttachmentAdd(args) => Commands::AttachmentAdd(args),
+            Self::Conversation(args) => Commands::Conversation(args),
+            Self::Plugin(args) => Commands::Plugin(args),
+            Self::Workspace(args) => Commands::Workspace(args),
+            Self::Provider(args) => Commands::Provider(args),
+            Self::External(args) => Commands::External(args),
+        })
+    }
+}
+
+impl Commands {
     pub(crate) async fn run(
         self,
         ctx: &mut Ctx,
@@ -179,7 +219,9 @@ impl Commands {
             }
         }
     }
+}
 
+impl<S: Stage> Commands<S> {
     /// Declare what conversations this command needs and whether any should
     /// participate in the config loading pipeline.
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
@@ -219,13 +261,29 @@ impl Commands {
         }
     }
 
-    /// Let the command ask the user through `prompts` when an argument's
-    /// meaning needs confirming.
+    /// The conversation's own configuration layer, and the paths it explicitly
+    /// clears, for a command that reads one.
     ///
-    /// Without it, such an argument is refused.
-    pub(crate) fn set_arg_prompts(&mut self, prompts: query::ArgPrompts) {
-        if let Commands::Query(args) = self {
-            args.set_arg_prompts(prompts);
+    /// # Errors
+    ///
+    /// Returns an error when the conversation's configuration cannot be read.
+    pub(crate) fn apply_conversation_config(
+        &self,
+        workspace: &Workspace,
+        partial: PartialAppConfig,
+        handle: &jp_workspace::ConversationHandle,
+    ) -> Result<(PartialAppConfig, Vec<String>), SettleError> {
+        match self {
+            Commands::Query(_) => query::conversation_config(workspace, partial, handle),
+            Commands::Config(_)
+            | Commands::Attachment(_)
+            | Commands::AttachmentAdd(_)
+            | Commands::Conversation(_)
+            | Commands::Init(_)
+            | Commands::Plugin(_)
+            | Commands::Provider(_)
+            | Commands::Workspace(_)
+            | Commands::External(_) => Ok((partial, Vec::new())),
         }
     }
 
@@ -264,7 +322,7 @@ impl Commands {
 
 impl IntoPartialAppConfig for Commands {
     fn apply_cli_config(
-        &mut self,
+        &self,
         workspace: Option<&Workspace>,
         partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,
@@ -284,29 +342,6 @@ impl IntoPartialAppConfig for Commands {
             | Commands::Provider(_)
             | Commands::Workspace(_)
             | Commands::External(_) => Ok(partial),
-        }
-    }
-
-    fn apply_conversation_config(
-        &self,
-        workspace: &Workspace,
-        partial: PartialAppConfig,
-        merged_config: Option<&PartialAppConfig>,
-        handle: &jp_workspace::ConversationHandle,
-    ) -> Result<(PartialAppConfig, Vec<String>), Box<dyn std::error::Error + Send + Sync>> {
-        match self {
-            Commands::Query(args) => {
-                args.apply_conversation_config(workspace, partial, merged_config, handle)
-            }
-            Commands::Config(_)
-            | Commands::Attachment(_)
-            | Commands::AttachmentAdd(_)
-            | Commands::Conversation(_)
-            | Commands::Init(_)
-            | Commands::Plugin(_)
-            | Commands::Provider(_)
-            | Commands::Workspace(_)
-            | Commands::External(_) => Ok((partial, Vec::new())),
         }
     }
 }
