@@ -254,6 +254,157 @@ impl Provider for RunawayProvider {
     }
 }
 
+/// A provider that does not serve the model a turn asks for.
+///
+/// Its stream fails the way vLLM's does: the request goes out and the server
+/// answers with an unknown-model rejection.
+/// `served` is what `models()` lists; `None` makes the listing itself fail.
+#[derive(Debug)]
+struct RejectingProvider {
+    served: Option<Vec<&'static str>>,
+    calls: AtomicUsize,
+}
+
+impl RejectingProvider {
+    fn serving(served: Option<Vec<&'static str>>) -> Self {
+        Self {
+            served,
+            calls: AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait]
+impl Provider for RejectingProvider {
+    async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
+        Ok(ModelDetails::empty(id::ModelIdConfig {
+            provider: ProviderId::Test,
+            name: name.clone(),
+        }))
+    }
+
+    async fn models(&self) -> Result<Vec<ModelDetails>, LlmError> {
+        let Some(served) = &self.served else {
+            return Err(LlmError::InvalidResponse("listing unavailable".into()));
+        };
+
+        Ok(served
+            .iter()
+            .map(|name| {
+                ModelDetails::empty(id::ModelIdConfig {
+                    provider: ProviderId::Test,
+                    name: name.parse().expect("valid name"),
+                })
+            })
+            .collect())
+    }
+
+    async fn chat_completion_stream(
+        &self,
+        _model: &ModelDetails,
+        _query: ChatQuery,
+    ) -> Result<EventStream, LlmError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+
+        Ok(Box::pin(stream::iter(vec![Err(
+            StreamError::unknown_model("The model `glm-5.3` does not exist. (HTTP 404 Not Found)"),
+        )])))
+    }
+}
+
+/// Run a non-interactive turn for `glm-5.3` against `provider`.
+async fn run_rejected_turn(provider: Arc<RejectingProvider>) -> Result<(), Error> {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+
+    let mut config = AppConfig::new_test();
+    // A retry budget is left in place so the call count can show the rejection
+    // was not retried.
+    config.assistant.request.max_retries = 5;
+    config.assistant.request.base_backoff_ms = 0;
+
+    let fs = Arc::new(FsStorageBackend::new(&root.join(".jp")).expect("failed to create backend"));
+    let mut workspace = Workspace::in_memory(root).with_backend(fs);
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+
+    let dyn_provider: Arc<dyn Provider> = provider;
+    let model = dyn_provider
+        .model_details(&"glm-5.3".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let router = detached_router();
+
+    timeout(
+        Duration::from_secs(5),
+        run_turn_loop(
+            dyn_provider,
+            &model,
+            &config,
+            &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
+            false, // interactive
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            Arc::new(printer),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("hi"),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
+        ),
+    )
+    .await
+    .expect("an unknown model should end the turn, not hang it")
+}
+
+/// A model the server does not serve ends the turn with the models it does
+/// serve, so the user can see what to switch to.
+#[tokio::test]
+async fn unknown_model_lists_the_served_models() {
+    let provider = Arc::new(RejectingProvider::serving(Some(vec![
+        "Qwen/Qwen3.8-27B-FP8",
+        "deepseek-v4.1-flash",
+    ])));
+
+    let result = run_rejected_turn(provider.clone()).await;
+
+    let Err(Error::UnknownModel { model, available }) = result else {
+        panic!("expected an unknown-model error, got: {result:?}");
+    };
+    assert_eq!(model, "glm-5.3");
+    assert_eq!(available, vec![
+        "Qwen/Qwen3.8-27B-FP8".to_owned(),
+        "deepseek-v4.1-flash".to_owned(),
+    ]);
+    assert_eq!(
+        provider.calls.load(Ordering::SeqCst),
+        1,
+        "an unknown model is the same on every attempt, so it must not be retried"
+    );
+}
+
+/// A listing that fails still reports the rejection, without alternatives.
+#[tokio::test]
+async fn unknown_model_without_a_listing_names_no_alternatives() {
+    let provider = Arc::new(RejectingProvider::serving(None));
+
+    let result = run_rejected_turn(provider).await;
+
+    let Err(Error::UnknownModel { model, available }) = result else {
+        panic!("expected an unknown-model error, got: {result:?}");
+    };
+    assert_eq!(model, "glm-5.3");
+    assert!(available.is_empty());
+}
+
 /// A provider whose stream yields the given events and then stays pending
 /// forever, simulating an in-flight response that only an interrupt can stop.
 #[derive(Debug)]

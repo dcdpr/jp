@@ -1299,6 +1299,10 @@ impl From<GeminiError> for StreamError {
                     return insufficient_quota(&msg, err);
                 }
 
+                if unknown_model_name(value).is_some() {
+                    return StreamError::unknown_model(msg).with_source(err);
+                }
+
                 // An oversized prompt is the same size on the next attempt, so it
                 // is fatal rather than retryable.
                 if looks_like_context_window_error(&msg) {
@@ -1315,25 +1319,37 @@ impl From<GeminiError> for StreamError {
 
 impl From<GeminiError> for Error {
     fn from(error: GeminiError) -> Self {
-        match &error {
-            GeminiError::Api(api) if api.get("status").and_then(Value::as_u64) == Some(404) => {
-                if let Some(model) = api.pointer("/message/error/message").and_then(|v| {
-                    v.as_str().and_then(|s| {
-                        s.contains("Call ListModels").then(|| {
-                            s.split('/')
-                                .nth(1)
-                                .and_then(|v| v.split(' ').next())
-                                .unwrap_or("unknown")
-                        })
-                    })
-                }) {
-                    return Self::UnknownModel(model.to_owned());
-                }
-                Self::Gemini(error)
-            }
-            _ => Self::Gemini(error),
+        if let GeminiError::Api(api) = &error
+            && let Some(model) = unknown_model_name(api)
+        {
+            return Self::UnknownModel(model.to_owned());
         }
+
+        Self::Gemini(error)
     }
+}
+
+/// The model a Gemini API error says is not served, if it says that.
+///
+/// Gemini answers an unknown model with a `404` whose message reads
+/// `models/<name> is not found ... Call ListModels ...`.
+fn unknown_model_name(api: &Value) -> Option<&str> {
+    if api.get("status").and_then(Value::as_u64) != Some(404) {
+        return None;
+    }
+
+    let message = api.pointer("/message/error/message")?.as_str()?;
+    if !message.contains("Call ListModels") {
+        return None;
+    }
+
+    Some(
+        message
+            .split('/')
+            .nth(1)
+            .and_then(|v| v.split(' ').next())
+            .unwrap_or("unknown"),
+    )
 }
 
 /// Returns `true` if the error is a Google API 400 "Corrupted thought

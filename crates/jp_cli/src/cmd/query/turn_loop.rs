@@ -32,7 +32,7 @@ use jp_conversation::{
 use jp_inquire::prompt::PromptBackend;
 use jp_llm::{
     Error as LlmError, EventStream, Provider,
-    error::StreamError,
+    error::{StreamError, StreamErrorKind},
     event::{Event, EventPart, FinishReason, NoticeSink, ToolCallPart},
     model::ModelDetails,
     provider::get_provider,
@@ -442,14 +442,21 @@ async fn drive_turn(
                 let mut raw_stream = if let Some(stream) = continuation.take() {
                     stream
                 } else {
-                    let started = provider
+                    let started = match provider
                         .start_query(model, query, QueryContext {
                             root: root.to_path_buf(),
                             mcp_endpoint: tool_coordinator.endpoint(),
                             invocation: Some(query_invocation.clone()),
                         })
                         .await
-                        .map_err(|e| map_llm_error(e, vec![]))?;
+                    {
+                        Ok(started) => started,
+                        Err(error) => {
+                            return Err(
+                                with_served_models(error.into(), provider.as_ref(), model).await
+                            );
+                        }
+                    };
                     execution = started.execution;
                     tool_coordinator
                         .set_execution(execution)
@@ -662,7 +669,12 @@ async fn drive_turn(
                                             ResponseBoundary::Final,
                                         );
                                         conv.flush()?;
-                                        return Err(LlmError::Stream(e).into());
+                                        return Err(with_served_models(
+                                            LlmError::Stream(e).into(),
+                                            provider.as_ref(),
+                                            model,
+                                        )
+                                        .await);
                                     }
 
                                     match handle_stream_error(
@@ -685,7 +697,12 @@ async fn drive_turn(
                                             if let Err(err) = conv.flush() {
                                                 warn!("Failed to persist before abort: {err}");
                                             }
-                                            return Err(error);
+                                            return Err(with_served_models(
+                                                error,
+                                                provider.as_ref(),
+                                                model,
+                                            )
+                                            .await);
                                         }
                                         // A Ctrl-C cut the backoff wait short:
                                         // run the streaming interrupt flow with
@@ -1417,13 +1434,37 @@ fn flush_rendered_arguments(coordinator: &mut ToolCoordinator, conv: &mut Conver
     });
 }
 
-fn map_llm_error(error: jp_llm::Error, models: Vec<ModelDetails>) -> Error {
-    match error {
-        jp_llm::Error::UnknownModel(model) => Error::UnknownModel {
-            model,
-            available: models.into_iter().map(|v| v.id.name.to_string()).collect(),
-        },
-        _ => error.into(),
+/// Name the models the provider does serve, when `error` is it refusing
+/// `model`.
+///
+/// Any other error is returned unchanged.
+/// The listing is a second request; when it fails, the rejection is still
+/// reported, without alternatives.
+async fn with_served_models(error: Error, provider: &dyn Provider, model: &ModelDetails) -> Error {
+    let unknown_model = match &error {
+        Error::Llm(LlmError::UnknownModel(_)) => true,
+        Error::Llm(LlmError::Stream(error)) => error.kind == StreamErrorKind::UnknownModel,
+        _ => false,
+    };
+
+    if !unknown_model {
+        return error;
+    }
+
+    let available = match provider.models().await {
+        Ok(models) => models
+            .into_iter()
+            .map(|model| model.id.name.to_string())
+            .collect(),
+        Err(error) => {
+            debug!(%error, "Could not list the provider's models.");
+            vec![]
+        }
+    };
+
+    Error::UnknownModel {
+        model: model.id.name.to_string(),
+        available,
     }
 }
 

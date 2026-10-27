@@ -1207,6 +1207,19 @@ mod stream_error_classification {
     }
 
     #[test]
+    fn a_model_the_api_does_not_list_is_an_unknown_model() {
+        let error = StreamError::from(api_error(
+            404,
+            "models/gemini-future-99 is not found for API version v1beta, or is not supported for \
+             generateContent. Call ListModels to see the list of available models and their \
+             supported methods.",
+        ));
+
+        assert_eq!(error.kind, StreamErrorKind::UnknownModel);
+        assert!(!error.is_retryable());
+    }
+
+    #[test]
     fn oversized_input_is_a_context_window_error() {
         let error = StreamError::from(api_error(
             400,
