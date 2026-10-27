@@ -1227,6 +1227,74 @@ fn list_follows_the_board_order() {
     );
 }
 
+/// A query matches the title, the description, or a comment, whatever its case,
+/// and leaves out a ticket that mentions it nowhere.
+#[test]
+fn list_finds_a_query_in_the_title_description_and_comments() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket_as(&dir, "T-02wt0k1", "Wrap is off by one");
+    write_ticket_as(&dir, "T-02wt0k2", "Header misaligned");
+    write_ticket_as(&dir, "T-02wt0k3", "Colour is wrong");
+    write_ticket_as(&dir, "T-02wt0k4", "Unrelated");
+    content(run_tool(
+        &dir,
+        "edit",
+        json!({ "id": "T-02wt0k2", "description": "The wrap width ignores the gutter." }),
+    ));
+    content(run_tool(
+        &dir,
+        "comment",
+        json!({ "id": "T-02wt0k3", "body": "Same WRAP issue at 72 columns." }),
+    ));
+
+    let out = content(run_tool(&dir, "list", json!({ "query": "Wrap" })));
+
+    assert_eq!(
+        out,
+        "T-02wt0k1 Todo         Bug      Wrap is off by one\nT-02wt0k2 Todo         Bug      \
+         Header misaligned\nT-02wt0k3 Todo         Bug      Colour is wrong (1 comment)\n"
+    );
+}
+
+/// A long listing comes a page at a time, and each page but the last says which
+/// one to ask for next.
+#[test]
+fn list_pages_through_a_long_listing() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket_as(&dir, "T-02wt0k1", "First");
+    write_ticket_as(&dir, "T-02wt0k2", "Second");
+    write_ticket_as(&dir, "T-02wt0k3", "Third");
+    let page = |page: usize| {
+        run_tool_with_options(
+            &dir,
+            "list",
+            json!({ "page": page }),
+            json!({ "page_size": 2 }),
+        )
+    };
+
+    assert_eq!(
+        content(page(1)),
+        "T-02wt0k1 Todo         Bug      First\nT-02wt0k2 Todo         Bug      Second\n\nPage 1 \
+         of 2 (3 tickets). Pass `page: 2` for more.\n"
+    );
+    assert_eq!(
+        content(page(2)),
+        "T-02wt0k3 Todo         Bug      Third\n\nPage 2 of 2 (3 tickets).\n"
+    );
+    assert_eq!(error_message(page(3)), "Page 3 is past the last page, 2.");
+}
+
+#[test]
+fn list_pages_count_from_one() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    assert_eq!(
+        error_message(run_tool(&dir, "list", json!({ "page": 0 }))),
+        "`page` counts from 1."
+    );
+}
+
 /// An order file that can't be read costs the order, not the listing.
 #[test]
 fn an_unreadable_board_order_lists_each_column_by_id() {

@@ -58,6 +58,10 @@ pub(crate) const TOOLS: &[&str] = &["comment", "create", "edit", "list", "show"]
 /// at most one ASCII byte.
 pub(crate) const DEFAULT_MAX_TITLE_LENGTH: usize = store::MAX_SLUG_SIZE;
 
+/// How many tickets a page of `list` holds, unless the tool's
+/// `options.page_size` overrides it.
+pub(crate) const DEFAULT_PAGE_SIZE: usize = 50;
+
 /// The question `create` puts back when a title doesn't fit.
 ///
 /// The tool's definition routes it to the assistant, and the answer must be
@@ -104,7 +108,7 @@ fn answer(init: &InitMessage, call: &ToolCall, options: &Options) -> Answer {
         "comment" => comment(&tickets, &args, preview),
         "edit" => edit(&tickets, &args),
         "show" => show(&tickets, &args),
-        "list" => list(&tickets, &args),
+        "list" => list(&tickets, &args, call),
         // `capabilities` above answers for exactly the names in `TOOLS`.
         other => refuse(format!("`jp ticket` serves no tool named `{other}`.")),
     }
@@ -654,14 +658,14 @@ fn show(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     }
 }
 
-/// List the board, filtered by whatever the caller named.
+/// List the board, filtered by whatever the caller named, one page at a time.
 ///
 /// Tickets come in board order: Todo, In Progress, then Done, each column top
 /// first, so the first Todo line is the next thing to work on.
 /// Labels are matched as written on the ticket rather than through the
 /// vocabulary, so a ticket carrying a label the board has since dropped can
 /// still be found.
-fn list(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
+fn list(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall) -> Answer {
     let status = match args
         .optional::<String>("status")?
         .map(|s| s.parse::<Status>())
@@ -676,6 +680,15 @@ fn list(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
         None => None,
     };
     let labels = args.optional::<Vec<String>>("labels")?.unwrap_or_default();
+    let query = args
+        .optional::<String>("query")?
+        .map(|query| query.trim().to_lowercase())
+        .filter(|query| !query.is_empty());
+    let page = args.optional::<usize>("page")?.unwrap_or(1);
+    if page == 0 {
+        return refuse("`page` counts from 1.");
+    }
+    let page_size = option_or(&call.options, "page_size", DEFAULT_PAGE_SIZE).max(1);
 
     let entries = store::list(&tickets.dir)?;
 
@@ -697,6 +710,7 @@ fn list(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
         status.is_none_or(|status| status == ticket.metadata.status)
             && kind.is_none_or(|kind| kind == ticket.metadata.kind)
             && ticket.metadata.labels.matches(&selectors)
+            && query.as_deref().is_none_or(|query| mentions(ticket, query))
     });
 
     // An order file that can't be read costs the order, not the listing: the
@@ -714,7 +728,37 @@ fn list(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
         }
     };
 
-    Ok(render_list(&in_board_order(&found, &order), &unreadable).into())
+    let laid_out = in_board_order(&found, &order);
+    let count = laid_out.len();
+    let pages = count.div_ceil(page_size).max(1);
+    if page > pages {
+        return refuse(format!("Page {page} is past the last page, {pages}."));
+    }
+
+    let start = (page - 1) * page_size;
+    let shown = &laid_out[start..count.min(start + page_size)];
+    let footer = (pages > 1).then(|| {
+        let mut footer = format!("Page {page} of {pages} ({count} tickets).");
+        if page < pages {
+            footer.push_str(&format!(" Pass `page: {}` for more.", page + 1));
+        }
+        footer
+    });
+
+    Ok(render_list(shown, footer.as_deref(), &unreadable).into())
+}
+
+/// Whether `query`, already lowercased, appears in a ticket's title,
+/// description, or comments, ignoring case.
+fn mentions(ticket: &Ticket, query: &str) -> bool {
+    let contains = |text: &str| text.to_lowercase().contains(query);
+
+    contains(&ticket.title)
+        || contains(&ticket.description)
+        || ticket
+            .comments
+            .iter()
+            .any(|comment| contains(&comment.body))
 }
 
 /// `found` laid out the way the board shows it: Todo, In Progress, then Done,
@@ -796,8 +840,13 @@ fn preview(document: &str) -> String {
     Formatter::new().format_terminal(&quoted).unwrap_or(quoted)
 }
 
-/// Render the board as one line per ticket.
-fn render_list(tickets: &[(TicketId, &Ticket)], unreadable: &[String]) -> String {
+/// Render one page of the board as one line per ticket, then `footer`, which
+/// says where the page sits when there are more.
+fn render_list(
+    tickets: &[(TicketId, &Ticket)],
+    footer: Option<&str>,
+    unreadable: &[String],
+) -> String {
     let mut out = String::new();
 
     if tickets.is_empty() {
@@ -809,6 +858,7 @@ fn render_list(tickets: &[(TicketId, &Ticket)], unreadable: &[String]) -> String
         let kind = ticket.metadata.kind.to_string();
         let comments = match ticket.comments.len() {
             0 => String::new(),
+            1 => " (1 comment)".to_owned(),
             count => format!(" ({count} comments)"),
         };
         let labels = if ticket.metadata.labels.is_empty() {
@@ -821,6 +871,10 @@ fn render_list(tickets: &[(TicketId, &Ticket)], unreadable: &[String]) -> String
             "{id:<9} {status:<12} {kind:<8} {}{labels}{comments}\n",
             ticket.title
         ));
+    }
+
+    if let Some(footer) = footer {
+        out.push_str(&format!("\n{footer}\n"));
     }
 
     if !unreadable.is_empty() {
