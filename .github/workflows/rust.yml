@@ -7,6 +7,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # `.config/insta.yaml` rewrites a mismatched snapshot and lets the test pass,
+  # which suits local work. On CI a mismatch must fail the job that ran it.
+  INSTA_UPDATE: "no"
   JUST_TIMESTAMP: true
   JUST_COLOR: always
   JUST_EXPLAIN: true
