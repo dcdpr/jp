@@ -807,6 +807,31 @@ fn a_delta_may_introduce_a_model_alias_the_base_config_never_had() {
 }
 
 #[test]
+fn last_carries_the_config_before_it_and_not_after() {
+    let mut before = PartialAppConfig::empty();
+    before.conversation.tools.defaults.run = Some(RunMode::Allow);
+    let mut after = PartialAppConfig::empty();
+    after.conversation.tools.defaults.run = Some(RunMode::Skip);
+
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("first");
+    stream.add_config_delta(before);
+    stream.push(ConversationEvent::now(ChatResponse::message("last")));
+    stream.add_config_delta(after);
+
+    let last = stream.last().unwrap();
+    assert_eq!(
+        last.event.as_chat_response(),
+        Some(&ChatResponse::message("last"))
+    );
+    // A delta applies to the events after it, so the trailing one is excluded.
+    assert_eq!(
+        last.config.conversation.tools.defaults.run,
+        Some(RunMode::Allow)
+    );
+}
+
+#[test]
 fn pop_and_trim_preserve_trailing_config_delta() {
     // The other global event variant: a config delta must survive the same
     // pruning paths as a compaction.

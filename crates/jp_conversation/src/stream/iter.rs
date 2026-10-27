@@ -42,10 +42,9 @@ use crate::{ConversationEvent, EventId, EventKind};
 /// A recomputed delta is a new entry and is assigned a new ID.
 impl Extend<ConversationEventWithConfig> for ConversationStream {
     fn extend<T: IntoIterator<Item = ConversationEventWithConfig>>(&mut self, iter: T) {
-        // Cache the running tail config across iterations. Without this, every
-        // push falls through `push_with_config_delta` → `self.last()`, which
-        // walks the whole stream and deep-clones `PartialAppConfig` on each
-        // step — making `extend(n)` O(n²) in clones.
+        // Cache the running tail config across iterations. Recomputing it with
+        // `self.last()` per event folds every config delta in the stream each
+        // time, which makes `extend(n)` quadratic.
         let mut tail = self
             .last()
             .map_or_else(|| self.base_config().to_partial(), |v| v.config);
