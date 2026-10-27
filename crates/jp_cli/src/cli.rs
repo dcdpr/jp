@@ -236,11 +236,12 @@ impl Globals {
                 // The flag turns persistence off, so its value is inverted:
                 // present reads as `false`, absent as `true`.
                 .value_parser(BoolValueParser::new().map(|v| !v))
-                .help("Disable persistence for the duration of the command.")
+                .help("Disable persistence for the duration of the command")
                 .long_help(
-                    "Persist modified state to disk.\n\nThis is enabled by default, but can be \
-                     disabled to debug certain actions. It is also useful to send a query to the \
-                     assistant, without adding that query to the conversation history.",
+                    "Disable persistence for the duration of the command.\n\nModified state is \
+                     persisted to disk by default. Disabling it helps debug certain actions, and \
+                     lets you send a query to the assistant without adding it to the conversation \
+                     history.",
                 ),
         ))
         .arg(global(
