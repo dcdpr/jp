@@ -236,26 +236,25 @@ Several flags take an optional value, and on `jp query` the word after such a
 flag may be the start of the query instead: `jp q -t try again` enables every
 tool and asks "try again", while `jp q -t fs_read_file explain` enables one
 tool.
-Each of these flags implements `OptionalValue` (`jp_cli/src/cli/flag.rs`),
-whose `claim` decides what a word is, against the same context the flag settles
-with: the configured and built-in tool names for `-t`, `-T` and `-u`, and
-nothing for the rest.
+Each of these flags implements `OptionalValue` (`jp_cli/src/cli/flag.rs`), whose
+`claim` decides what a word is, against the same context the flag settles with:
+the configured and built-in tool names for `-t`, `-T` and `-u`, and nothing for
+the rest.
 
 Completion candidates for these flags come from the same trait, so the two
 cannot disagree:
 
-- `OptionalValue` gains a `candidates(cx)` method, and `flag_arg` attaches it
-  to the argument as `ArgValueCandidates`, so every such flag has one.
+- `OptionalValue` gains a `candidates(cx)` method, and `flag_arg` attaches it to
+  the argument as `ArgValueCandidates`, so every such flag has one.
 - A candidate is a word the flag's `claim` keeps as its value.
   Completing one never turns it into query text, and never reaches the question
   `-t` asks before enabling every tool.
 - By default the candidates are the possible values of the flag's parser.
   When an argument has `ArgValueCandidates`, `clap_complete` offers only those
   and skips the parser's possible values, so the default has to include them.
-- On a command that takes free text after its flags, the candidates also
-  include `--`, which keeps every value before it the flag's:
-  `jp q -t <TAB>` offers the tool names and `--`, for `jp q -t -- read the
-  file`.
+- On a command that takes free text after its flags, the candidates also include
+  `--`, which keeps every value before it the flag's: `jp q -t <TAB>` offers the
+  tool names and `--`, for `jp q -t -- read the file`.
 - A value attached to its flag (`--tool=x`, `-t=x`, `-tx`) completes from the
   same candidates.
   `clap_complete` completes an attached long value only for the argument's
@@ -263,8 +262,7 @@ cannot disagree:
 
 A conversation target (`-i`/`--id`, or the positional IDs most `conversation`
 subcommands take) offers the conversation IDs in the workspace index, and the
-keyword and sigil forms (`recent`, `pinned`, `?`, …) its instantiation
-accepts.
+keyword and sigil forms (`recent`, `pinned`, `?`, …) its instantiation accepts.
 `jp query` takes no session target, so it does not offer `session` or `?s`.
 
 ### Completion performance
@@ -339,8 +337,8 @@ help gesture.
 ## Risks and Open Questions
 
 - **`--` after an attached value**: `clap_complete` does not tell a completer
-  whether the value is attached, so `--tool=<TAB>` offers `--tool=--` along
-  with the tool names.
+  whether the value is attached, so `--tool=<TAB>` offers `--tool=--` along with
+  the tool names.
   Choosing it fails as an unknown tool rather than doing anything unexpected.
   An `ArgValueCompleter` sees the same input, so it cannot tell either; leaving
   `--` out everywhere would remove it where it is useful.
@@ -398,14 +396,13 @@ help gesture.
 2. Add `ArgValueCandidates` to `--model` with a completer that reads model
    aliases from config files.
 3. Implement `OptionalValue::candidates` for conversation targets, returning
-   conversation IDs from the workspace index and the keyword and sigil forms
-   the target accepts.
-   The positional targets of `conversation` subcommands use the same
-   candidates.
+   conversation IDs from the workspace index and the keyword and sigil forms the
+   target accepts.
+   The positional targets of `conversation` subcommands use the same candidates.
 4. Add completions for `--cfg @<TAB>` that returns files in `config_load_paths`
    directories.
-5. Test that completion and parsing agree: for every `OptionalValue` flag on
-   `jp query` and every candidate it offers other than `--`, parsing `jp query
+5. Test that completion and parsing agree: for every `OptionalValue` flag on `jp
+   query` and every candidate it offers other than `--`, parsing `jp query
    <flag> <candidate> word` keeps the candidate as the flag's value.
 
 Phases 1-2 can be merged independently.
