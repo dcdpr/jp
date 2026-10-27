@@ -169,10 +169,10 @@ The formatter also escapes what would otherwise be emphasis, so `package=jp_cli`
 is written `package=jp\_cli` and every reader undoes that.
 
 The shape, the key grammar, and the on-disk invariants come from [`jp_label`],
-the same `Labels` conversation labels use ([RFD 101]); the closed vocabulary
-below is the ticket board's own, declared through that crate's `Vocabulary`.
+the same `Labels` conversation labels use ([RFD 101]); the vocabulary below is
+the ticket board's own, declared through that crate's `Vocabulary`.
 
-The vocabulary is closed and lives in the workspace configuration, under
+The vocabulary lives in the workspace configuration, under
 `plugins.command.ticket.options.labels` ([RFD 116]).
 That setting is the only source of truth for which labels exist; nothing here
 enumerates them.
@@ -185,6 +185,7 @@ values = ["<value>"]
 retired = ["<value>"]
 min = 1
 max = 1
+unique = "key-value"
 ```
 
 `min` and `max` bound how many of the key's values one ticket carries.
@@ -195,12 +196,26 @@ makes one optional, but never repeated.
 Every label write is held to them, and the refusal names the values to choose
 from; the docs build reports a ticket that breaks them, such as one edited by
 hand.
-A key without values is present or absent, so it takes neither.
+A key that leaves `values` out is bare: present or absent, so it takes neither.
+
+`unique` holds a key to one ticket across the board.
+`unique = "key"` lets one ticket carry the key at all, whatever its value;
+`unique = "key-value"` lets one ticket carry each of its values, so `rfd=116`
+and `rfd=117` sit on two tickets but `rfd=116` on only one.
+Every label write checks it against the other tickets, and the refusal names the
+ticket already carrying the label; the docs build reports two tickets carrying
+one, such as after a hand edit or a merge.
+`unique = "key"` on a key every ticket needs is refused, since no two tickets
+could meet it.
 
 A closed set is the point of declaring one.
 Free-text labels accumulate near-synonyms and grouping stops working.
 A write naming a key or value the vocabulary doesn't declare is refused, and the
 refusal names the ones that can be added.
+A key declared with `values = []` is open: it takes any value, for labels whose
+values can't be listed up front, such as an RFD number.
+Its values are spelled as given, and it can be bounded and made unique like any
+other key.
 A board that declares no vocabulary has no set to hold a label to, so it takes
 any well-formed `key` or `key=value` label as written.
 
@@ -227,6 +242,9 @@ retired value the ticket already has is how you keep it.
 
 The `ticket_*` tools advertise the accepted tokens as a JSON Schema `enum`, so
 the assistant is offered the set rather than guessing at it.
+An `enum` can't hold every value of an open key, so a board with one gets no
+`enum`: its labels are described in words instead, and a wrong guess is refused
+with the labels it can use.
 `ticket_create` is offered only what it may add; `ticket_edit` and `ticket_list`
 also get retired values, because replacing a whole set means naming a retired
 value to keep it, and finding what still carries one means filtering on it.

@@ -162,7 +162,7 @@ pub(crate) fn track(
         .ok_or_else(|| format!("No heading found in {shown}; cannot title the ticket."))?;
     let plan = phases(id, read_plan(&request)?, &mut report);
 
-    let (ticket, path) = store::create(&paths.tickets, &NewTicket {
+    let (ticket, path) = store::create(&paths.tickets, vocabulary, &NewTicket {
         title: &title,
         authors: &filer.author,
         date: &filer.date,

@@ -145,7 +145,7 @@ pub(crate) fn in_editor(
             return Ok(format!("{path}: unchanged\n").into());
         }
 
-        match check(&edited, &original, options)? {
+        match check(dir, id, &edited, &original, options)? {
             Ok(()) => break edited,
             Err(problem) if editing.again(&format!("{id} can't be saved: {problem}")) => {}
             Err(problem) => {
@@ -173,12 +173,19 @@ pub(crate) fn in_editor(
     .into())
 }
 
-/// Whether `edited` is a ticket the board accepts: one that parses, carrying
-/// only labels the board takes or that `original` already carried.
+/// Whether `edited` is ticket `id` as the board accepts it: one that parses,
+/// carrying only labels the board takes or that `original` already carried, and
+/// none another ticket holds that the board lets one ticket carry.
 ///
-/// The outer error is the board's vocabulary failing to load, which no edit
-/// fixes; the inner one is a problem with the edit.
-fn check(edited: &str, original: &str, options: &Options) -> Result<Result<(), String>, String> {
+/// The outer error is the board failing to load, which no edit fixes; the inner
+/// one is a problem with the edit.
+fn check(
+    dir: &Utf8Path,
+    id: TicketId,
+    edited: &str,
+    original: &str,
+    options: &Options,
+) -> Result<Result<(), String>, String> {
     let ticket = match parse::document(edited) {
         Ok(ticket) => ticket,
         Err(problem) => return Ok(Err(problem.to_string())),
@@ -191,11 +198,17 @@ fn check(edited: &str, original: &str, options: &Options) -> Result<Result<(), S
         return Ok(Ok(()));
     }
 
-    Ok(options
-        .vocabulary()?
-        .resolve_against(&ticket.metadata.labels.to_tokens(), &current)
-        .map(drop)
-        .map_err(|refusal| refusal.to_string()))
+    let vocabulary = options.vocabulary()?;
+    let labels = match vocabulary.resolve_against(&ticket.metadata.labels.to_tokens(), &current) {
+        Ok(labels) => labels,
+        Err(refusal) => return Ok(Err(refusal.to_string())),
+    };
+
+    match store::check_unique(dir, &vocabulary, &labels, Some(id)) {
+        Ok(()) => Ok(Ok(())),
+        Err(taken @ store::Error::Taken(_)) => Ok(Err(taken.to_string())),
+        Err(other) => Err(other.to_string()),
+    }
 }
 
 #[cfg(test)]

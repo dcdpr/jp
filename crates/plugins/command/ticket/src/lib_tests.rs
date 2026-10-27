@@ -2084,13 +2084,142 @@ fn relabelling_cannot_drop_a_required_label() {
 #[test]
 fn importing_a_new_issue_without_required_labels_fetches_nothing() {
     let dir = Utf8TempDir::new().unwrap();
-    let refused = Err("`type` label missing: add one of type=bug, type=feature.".to_owned());
 
-    let error = import_all(dir.path(), &[123], "dcdpr/jp", &refused).unwrap_err();
+    let error = import_all(dir.path(), &typed(), &[123], "dcdpr/jp", &[]).unwrap_err();
 
     assert_eq!(
         error,
         "`type` label missing: add one of type=bug, type=feature."
+    );
+}
+
+/// A board whose `rfd` key takes any value, held to one ticket per value, and
+/// whose `focus` sits on one ticket.
+fn unique_board() -> Options {
+    let Value::Object(options) = json!({ "labels": {
+        "rfd": { "description": "The RFD it tracks.", "values": [], "unique": "key-value" },
+        "focus": { "description": "Being worked on now.", "unique": "key" }
+    } }) else {
+        unreachable!("options are an object");
+    };
+
+    Options::read(&options).unwrap()
+}
+
+/// File a ticket on [`unique_board`].
+fn add_unique(dir: &Utf8TempDir, title: &str, labels: &[&str]) -> Result<Output, String> {
+    run_with_options(
+        dir.path(),
+        Command::Add {
+            title: Some(title.to_owned()),
+            author: Some("john".to_owned()),
+            body: None,
+            implements: None,
+            labels: labels.iter().map(|label| (*label).to_owned()).collect(),
+        },
+        &unique_board(),
+    )
+}
+
+/// A label the board lets one ticket carry is refused on a second one, naming
+/// the ticket that holds it; a key taking any value takes a fresh one.
+#[test]
+fn adding_a_label_another_ticket_holds_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    add_unique(&dir, "Tracks 116", &["rfd=116"]).unwrap();
+    let holder = store::list(dir.path()).unwrap()[0].id;
+
+    assert_eq!(
+        add_unique(&dir, "Also 116", &["rfd=116"]).unwrap_err(),
+        format!(
+            "`rfd=116` is already on {holder}, and the board lets one ticket carry each `rfd` \
+             value."
+        )
+    );
+
+    add_unique(&dir, "Tracks 117", &["rfd=117"]).unwrap();
+    assert_eq!(store::list(dir.path()).unwrap().len(), 2);
+}
+
+/// A label another ticket holds is refused before the composer opens, so it
+/// costs the user nothing they typed.
+#[test]
+fn a_taken_label_is_refused_before_the_composer_opens() {
+    let dir = Utf8TempDir::new().unwrap();
+    add_unique(&dir, "Tracks 116", &["rfd=116"]).unwrap();
+    let holder = store::list(dir.path()).unwrap()[0].id;
+    let mut sent = Vec::new();
+
+    let error = compose_missing(
+        dir.path(),
+        &unique_board(),
+        Command::Add {
+            title: None,
+            author: None,
+            body: None,
+            implements: None,
+            labels: vec!["rfd=116".to_owned()],
+        },
+        &mut &b""[..],
+        &mut sent,
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        format!(
+            "`rfd=116` is already on {holder}, and the board lets one ticket carry each `rfd` \
+             value."
+        )
+    );
+    assert!(sent.is_empty(), "the composer was asked for");
+}
+
+/// Relabelling one ticket with what another holds is refused too, and a ticket
+/// keeps a unique label it already carries.
+#[test]
+fn relabelling_onto_a_label_another_ticket_holds_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    add_unique(&dir, "Focused", &["focus"]).unwrap();
+    add_unique(&dir, "Waiting", &[]).unwrap();
+    let [focused, waiting] = store::list(dir.path())
+        .unwrap()
+        .iter()
+        .map(|entry| entry.id)
+        .collect::<Vec<_>>()[..]
+    else {
+        panic!("expected two tickets");
+    };
+    let relabel = |id, labels: &[&str]| {
+        run_with_options(
+            dir.path(),
+            Command::Label {
+                id: Some(id),
+                labels: labels.iter().map(|label| (*label).to_owned()).collect(),
+            },
+            &unique_board(),
+        )
+    };
+
+    assert_eq!(
+        relabel(waiting, &["focus"]).unwrap_err(),
+        format!("`focus` is already on {focused}, and the board lets one ticket carry it.")
+    );
+    relabel(focused, &["focus", "rfd=116"]).unwrap();
+}
+
+/// `jp ticket labels` shows a key taking any value, and which keys one ticket
+/// holds on its own.
+#[test]
+fn the_label_listing_names_open_and_unique_keys() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let out = run_with_options(dir.path(), Command::Labels, &unique_board()).unwrap();
+
+    assert_eq!(
+        out.text,
+        "focus  Being worked on now. (on one ticket only)\n\nrfd  The RFD it tracks. (each value \
+         on one ticket only)\n  rfd=<any value>\n\n"
     );
 }
 

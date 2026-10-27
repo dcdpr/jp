@@ -14,7 +14,7 @@ use std::{
 
 use camino::Utf8Path;
 use serde_json::Value;
-use ticket::Vocabulary;
+use ticket::{Unique, Vocabulary};
 
 use crate::Output;
 
@@ -49,9 +49,13 @@ const SYNCED_NOTES: &str = "\
 # retired label to keep it. `list` also gets a bare key per facet, which is how
 # a filter asks for any value under it.
 #
-# A key the board bounds with `min` or `max` is described beside the lists of
-# `create` and `edit`, and `create` requires labels when a key needs one, so
-# the assistant knows before its first call.
+# A key the board bounds with `min` or `max`, or makes `unique`, is described
+# beside the lists of `create` and `edit`, and `create` requires labels when a
+# key needs one, so the assistant knows before its first call.
+#
+# A board with a key that takes any value gets no lists at all: a list holds
+# only the values it names, so it would refuse that key's. Its labels are
+# described in words instead.
 ";
 
 /// The plugin a tool's `source` has to name for the tool to be one of ours.
@@ -228,7 +232,8 @@ fn synced(tools: &[(String, String)], vocabulary: &Vocabulary) -> String {
         return out;
     }
 
-    let bounds = bounds(vocabulary);
+    let rules = rules(vocabulary);
+    let open: Vec<&str> = vocabulary.open_keys().collect();
     let required = vocabulary.facets().any(|(_, facet)| facet.min() > 0);
 
     for (key, tool) in tools {
@@ -236,8 +241,8 @@ fn synced(tools: &[(String, String)], vocabulary: &Vocabulary) -> String {
             continue;
         };
         let key = toml_key(key);
-        // A filter names no ticket's whole set, so the bounds don't apply to it.
-        let writes = tool != "list";
+        // A filter names no ticket's whole set, so the rules don't apply to it.
+        let rules = rules.as_deref().filter(|_| tool != "list");
 
         if tool == "create" && required {
             out.push_str(&format!(
@@ -247,8 +252,11 @@ fn synced(tools: &[(String, String)], vocabulary: &Vocabulary) -> String {
         out.push_str(&format!(
             "\n[conversation.tools.{key}.parameters.labels.items]\n"
         ));
-        if writes && let Some(bounds) = &bounds {
-            out.push_str(&format!("summary = {}\n", toml_string(bounds)));
+        if let Some(summary) = summary(&tokens, &open, rules) {
+            out.push_str(&format!("summary = {}\n", toml_string(&summary)));
+        }
+        if !open.is_empty() {
+            continue;
         }
         out.push_str("enum = [\n");
         for token in tokens {
@@ -260,22 +268,65 @@ fn synced(tools: &[(String, String)], vocabulary: &Vocabulary) -> String {
     out
 }
 
-/// What the board's bounded keys ask of a ticket, as the description of one
-/// label in a tool's schema, or `None` when no key is bounded.
-fn bounds(vocabulary: &Vocabulary) -> Option<String> {
-    let parts: Vec<String> = vocabulary
+/// The description of one label in a tool's schema, or `None` when the list of
+/// accepted values says all there is.
+///
+/// With `open` keys there is no list, so the labels are named here instead.
+fn summary(tokens: &[String], open: &[&str], rules: Option<&str>) -> Option<String> {
+    if open.is_empty() && rules.is_none() {
+        return None;
+    }
+
+    let mut summary = "One `key=value` label".to_owned();
+    if !open.is_empty() {
+        let any = open
+            .iter()
+            .map(|key| format!("{key}=<value>"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        summary.push_str(&if tokens.is_empty() {
+            format!(": {any}, with any value")
+        } else {
+            format!(": {}, or {any} with any value", tokens.join(", "))
+        });
+    }
+    summary.push('.');
+    if let Some(rules) = rules {
+        summary.push(' ');
+        summary.push_str(rules);
+    }
+
+    Some(summary)
+}
+
+/// What the board's bounded and unique keys ask of a ticket, as sentences, or
+/// `None` when no key asks anything.
+fn rules(vocabulary: &Vocabulary) -> Option<String> {
+    let bounds: Vec<String> = vocabulary
         .facets()
         .filter_map(|(key, facet)| facet.bound().map(|bound| format!("{bound} under `{key}`")))
         .collect();
 
-    let (last, rest) = parts.split_last()?;
-    let all = if rest.is_empty() {
-        last.clone()
-    } else {
-        format!("{} and {last}", rest.join(", "))
-    };
+    let mut sentences = vec![];
+    if let Some((last, rest)) = bounds.split_last() {
+        let all = if rest.is_empty() {
+            last.clone()
+        } else {
+            format!("{} and {last}", rest.join(", "))
+        };
+        sentences.push(format!("A ticket carries {all}."));
+    }
+    for (key, facet) in vocabulary.facets() {
+        match facet.unique() {
+            Some(Unique::KeyValue) if !facet.is_bare() => {
+                sentences.push(format!("Only one ticket carries each `{key}` value."));
+            }
+            Some(_) => sentences.push(format!("Only one ticket carries `{key}`.")),
+            None => {}
+        }
+    }
 
-    Some(format!("One `key=value` label. A ticket carries {all}."))
+    (!sentences.is_empty()).then(|| sentences.join(" "))
 }
 
 /// A TOML key: bare when it can be, quoted otherwise.

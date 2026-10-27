@@ -41,6 +41,20 @@
 //! key, or held to one value of it.
 //! A key without values is present or absent, and takes neither.
 //!
+//! A key with an empty list of values takes any value, such as an RFD number:
+//!
+//! ```json
+//! { "rfd": { "description": "The RFD the work comes from.", "values": [] } }
+//! ```
+//!
+//! Leaving `values` out makes a bare key instead, which takes none.
+//!
+//! A key can also be held to one item across a collection, with `unique`:
+//! `"key"` lets one item carry the key at all, and `"key-value"` lets one item
+//! carry each of its values.
+//! A collection is the consumer's, so [`Vocabulary::clashes`] compares two
+//! items, and the consumer compares an item against the rest.
+//!
 //! Retiring a value is not deleting it.
 //! A retired value stays readable and stays writable on an item that already
 //! carries it, so relabelling something old doesn't force its history to be
@@ -71,14 +85,44 @@ use crate::{KeyError, Labels, parse_token, validate_key, validate_value};
 struct Entry {
     #[serde(default)]
     description: String,
+    /// Absent for a key that takes no value, empty for one that takes any.
     #[serde(default)]
-    values: BTreeSet<String>,
+    values: Option<BTreeSet<String>>,
     #[serde(default)]
     retired: BTreeSet<String>,
     #[serde(default)]
     min: Option<usize>,
     #[serde(default)]
     max: Option<usize>,
+    #[serde(default)]
+    unique: Option<Unique>,
+}
+
+/// How much of a key one item of a collection holds on its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Unique {
+    /// One item carries the key, whatever its value.
+    Key,
+    /// One item carries each value of the key.
+    KeyValue,
+}
+
+impl Unique {
+    /// The spelling a declaration uses: `key` or `key-value`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Key => "key",
+            Self::KeyValue => "key-value",
+        }
+    }
+}
+
+impl fmt::Display for Unique {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// One key of a vocabulary: what it means, and what it accepts.
@@ -87,8 +131,11 @@ pub struct Facet {
     description: String,
     active: BTreeSet<String>,
     retired: BTreeSet<String>,
+    /// Whether the key takes any value, declared as `values = []`.
+    open: bool,
     min: usize,
     max: Option<usize>,
+    unique: Option<Unique>,
 }
 
 impl Facet {
@@ -112,7 +159,20 @@ impl Facet {
     /// Whether this key accepts no values at all, making it a bare-only key.
     #[must_use]
     pub fn is_bare(&self) -> bool {
-        self.active.is_empty() && self.retired.is_empty()
+        !self.open && self.active.is_empty() && self.retired.is_empty()
+    }
+
+    /// Whether this key takes any value rather than a listed one.
+    #[must_use]
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
+    /// How much of this key one item of a collection holds on its own, or
+    /// `None` when any number of items may carry it.
+    #[must_use]
+    pub fn unique(&self) -> Option<Unique> {
+        self.unique
     }
 
     /// The fewest values of this key an item carries; `0` when it may carry
@@ -161,16 +221,19 @@ fn bound(min: usize, max: Option<usize>) -> Option<String> {
     }
 }
 
-/// Check an entry's `min` and `max` describe a count an item can reach.
-fn bounds(key: &str, entry: &Entry) -> Result<(), Error> {
+/// Check a facet asks for something an item, and a collection of them, can
+/// meet.
+fn check(key: &str, facet: &Facet) -> Result<(), Error> {
     let key = key.to_owned();
-    let bare = entry.values.is_empty() && entry.retired.is_empty();
-    if bare && (entry.min.is_some() || entry.max.is_some()) {
+    if facet.open && !facet.retired.is_empty() {
+        return Err(Error::RetiredOnOpenKey { key });
+    }
+    if facet.is_bare() && facet.is_bounded() {
         return Err(Error::BoundOnBareKey { key });
     }
 
-    let min = entry.min.unwrap_or(0);
-    match entry.max {
+    let min = facet.min;
+    match facet.max {
         Some(0) => return Err(Error::ZeroMax { key }),
         Some(max) if min > max => return Err(Error::MinAboveMax { key, min, max }),
         _ => {}
@@ -178,12 +241,16 @@ fn bounds(key: &str, entry: &Entry) -> Result<(), Error> {
 
     // A retired value can't be added, so only the active ones can make up the
     // count on a new item.
-    if min > entry.values.len() {
+    if !facet.open && min > facet.active.len() {
         return Err(Error::MinAboveValues {
             key,
             min,
-            values: entry.values.len(),
+            values: facet.active.len(),
         });
+    }
+
+    if facet.unique == Some(Unique::Key) && min > 0 {
+        return Err(Error::UniqueRequired { key, min });
     }
 
     Ok(())
@@ -248,8 +315,11 @@ impl Vocabulary {
                 });
             }
 
+            let open = entry.values.as_ref().is_some_and(BTreeSet::is_empty);
+            let values = entry.values.unwrap_or_default();
+
             let mut seen_values: BTreeMap<String, String> = BTreeMap::new();
-            for value in entry.values.iter().chain(&entry.retired) {
+            for value in values.iter().chain(&entry.retired) {
                 validate_value(value).map_err(Error::Name)?;
                 if value.is_empty() {
                     return Err(Error::EmptyValue { key: key.clone() });
@@ -269,15 +339,18 @@ impl Vocabulary {
                 }
             }
 
-            bounds(&key, &entry)?;
-
-            facets.insert(key, Facet {
+            let facet = Facet {
                 description: entry.description,
-                active: entry.values,
+                active: values,
                 retired: entry.retired,
+                open,
                 min: entry.min.unwrap_or(0),
                 max: entry.max,
-            });
+                unique: entry.unique,
+            };
+            check(&key, &facet)?;
+
+            facets.insert(key, facet);
         }
 
         Ok(Self(facets))
@@ -305,10 +378,22 @@ impl Vocabulary {
         self.0.iter().map(|(key, facet)| (key.as_str(), facet))
     }
 
+    /// The keys that take any value, in order.
+    ///
+    /// None of their values are in [`Vocabulary::tokens`], which can only list
+    /// what is declared.
+    pub fn open_keys(&self) -> impl Iterator<Item = &str> {
+        self.facets()
+            .filter(|(_, facet)| facet.open)
+            .map(|(key, _)| key)
+    }
+
     /// Every addable `key=value` token, in order.
     ///
     /// This is what a consumer advertises to a caller that needs the set up
     /// front, such as a JSON Schema `enum`.
+    /// A key that takes any value contributes none; see
+    /// [`Vocabulary::open_keys`].
     #[must_use]
     pub fn tokens(&self) -> Vec<String> {
         self.tokens_with(false)
@@ -327,6 +412,9 @@ impl Vocabulary {
     fn tokens_with(&self, retired: bool) -> Vec<String> {
         let mut tokens = vec![];
         for (key, facet) in &self.0 {
+            if facet.open {
+                continue;
+            }
             if facet.is_bare() {
                 tokens.push(key.clone());
                 continue;
@@ -369,7 +457,10 @@ impl Vocabulary {
     /// The tokens are the item's whole set, so each key's `min` and `max` are
     /// checked against them.
     ///
+    /// A key that takes any value keeps the value as given.
     /// An empty vocabulary accepts every well-formed token, spelled as given.
+    /// Neither checks `unique`, which needs the rest of the collection; see
+    /// [`Vocabulary::clashes`].
     ///
     /// # Errors
     ///
@@ -387,7 +478,7 @@ impl Vocabulary {
         // Staged in the vocabulary's own order rather than the caller's, so a
         // resolved set is the same whichever order the tokens arrived in and a
         // relabel produces no spurious diff.
-        let mut accepted: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        let mut accepted: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
         let mut malformed = vec![];
         let mut unknown_keys = vec![];
         let mut unknown_values = vec![];
@@ -408,7 +499,7 @@ impl Vocabulary {
                 if facet.is_bare() {
                     // A bare label records its key's presence with the empty
                     // value, which is how `Labels` stores it.
-                    accepted.entry(key).or_default().insert("");
+                    accepted.entry(key).or_default().insert(String::new());
                 } else {
                     unknown_values.push(key.to_owned());
                 }
@@ -416,13 +507,15 @@ impl Vocabulary {
             };
 
             if let Some(known) = matching(facet.active.iter(), &value) {
-                accepted.entry(key).or_default().insert(known);
+                accepted.entry(key).or_default().insert(known.to_owned());
             } else if let Some(known) = matching(facet.retired.iter(), &value) {
                 if current.contains(key, known) {
-                    accepted.entry(key).or_default().insert(known);
+                    accepted.entry(key).or_default().insert(known.to_owned());
                 } else {
                     retired.push(format!("{key}={known}"));
                 }
+            } else if facet.open {
+                accepted.entry(key).or_default().insert(value);
             } else {
                 unknown_values.push(format!("{key}={value}"));
             }
@@ -443,17 +536,64 @@ impl Vocabulary {
                 retired,
                 miscounted,
                 addable: self.tokens(),
+                open_keys: self.open_keys().map(ToOwned::to_owned).collect(),
             });
         }
 
         Ok(accepted.into_iter().collect())
     }
 
+    /// The labels of `labels` that `other` carries too, among the keys this
+    /// vocabulary makes unique.
+    ///
+    /// Comparing an item against every other item of a collection is how a
+    /// consumer holds a collection to `unique`.
+    /// `other` is read as written, so keys and values match without case.
+    #[must_use]
+    pub fn clashes(&self, labels: &Labels, other: &Labels) -> Vec<Clash> {
+        let mut clashes = vec![];
+
+        for (key, facet) in &self.0 {
+            let Some(unique) = facet.unique else {
+                continue;
+            };
+            let mine = values_under(labels, key);
+            let theirs = values_under(other, key);
+            if mine.is_empty() || theirs.is_empty() {
+                continue;
+            }
+
+            // A bare key has no values to tell apart, so it is unique as a
+            // whole either way.
+            if unique == Unique::Key || facet.is_bare() {
+                clashes.push(Clash {
+                    key: key.clone(),
+                    value: None,
+                });
+                continue;
+            }
+
+            for value in mine {
+                if theirs
+                    .iter()
+                    .any(|theirs| theirs.eq_ignore_ascii_case(value))
+                {
+                    clashes.push(Clash {
+                        key: key.clone(),
+                        value: Some(value.to_owned()),
+                    });
+                }
+            }
+        }
+
+        clashes
+    }
+
     /// The bounded keys `accepted` carries too few or too many values of.
     ///
     /// Counted on what resolved, so a value the vocabulary refused counts as
     /// missing rather than as given.
-    fn miscounted(&self, accepted: &BTreeMap<&str, BTreeSet<&str>>) -> Vec<Miscount> {
+    fn miscounted(&self, accepted: &BTreeMap<&str, BTreeSet<String>>) -> Vec<Miscount> {
         self.0
             .iter()
             .filter(|(_, facet)| facet.is_bounded())
@@ -462,7 +602,7 @@ impl Vocabulary {
                     .get(key.as_str())
                     .into_iter()
                     .flatten()
-                    .map(|value| (*value).to_owned())
+                    .cloned()
                     .collect();
                 let fits =
                     given.len() >= facet.min && facet.max.is_none_or(|max| given.len() <= max);
@@ -473,6 +613,7 @@ impl Vocabulary {
                     max: facet.max,
                     given,
                     values: facet.active.iter().cloned().collect(),
+                    open: facet.open,
                 })
             })
             .collect()
@@ -484,6 +625,35 @@ impl Vocabulary {
             .iter()
             .find(|(known, _)| known.eq_ignore_ascii_case(key))
             .map(|(known, facet)| (known.as_str(), facet))
+    }
+}
+
+/// The values `labels` holds under `key`, matching the key without case.
+fn values_under<'a>(labels: &'a Labels, key: &str) -> Vec<&'a str> {
+    labels
+        .iter()
+        .filter(|(known, _)| known.eq_ignore_ascii_case(key))
+        .flat_map(|(_, values)| values.iter().map(String::as_str))
+        .collect()
+}
+
+/// A label an item can't carry because another item of its collection already
+/// does, and the vocabulary lets one item hold it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Clash {
+    /// The key the vocabulary makes unique, as the vocabulary spells it.
+    pub key: String,
+    /// The value both items carry, for a key each of whose values is unique;
+    /// `None` for a key unique as a whole.
+    pub value: Option<String>,
+}
+
+impl fmt::Display for Clash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.value {
+            Some(value) => write!(f, "{}={value}", self.key),
+            None => f.write_str(&self.key),
+        }
     }
 }
 
@@ -516,6 +686,7 @@ fn free_form(requested: &[String]) -> Result<Labels, Rejected> {
             retired: vec![],
             miscounted: vec![],
             addable: vec![],
+            open_keys: vec![],
         });
     }
 
@@ -566,6 +737,10 @@ pub enum Error {
         min: usize,
         values: usize,
     },
+    /// `retired` on a key that takes any value.
+    RetiredOnOpenKey { key: String },
+    /// `unique = "key"` on a key every item has to carry.
+    UniqueRequired { key: String, min: usize },
 }
 
 impl fmt::Display for Error {
@@ -607,6 +782,17 @@ impl fmt::Display for Error {
                 "`{key}` in the label vocabulary has `min = {min}`, but only {values} values to \
                  choose from."
             ),
+            Self::RetiredOnOpenKey { key } => write!(
+                f,
+                "`{key}` in the label vocabulary takes any value (`values = []`), so it has \
+                 nothing to retire. To retire every value of a key, list them under `retired` and \
+                 leave `values` out."
+            ),
+            Self::UniqueRequired { key, min } => write!(
+                f,
+                "`{key}` in the label vocabulary is required on every item (`min = {min}`) but \
+                 allowed on one (`unique = \"key\"`), which no two items can meet."
+            ),
         }
     }
 }
@@ -639,6 +825,8 @@ pub struct Rejected {
     pub miscounted: Vec<Miscount>,
     /// The tokens a write may add.
     pub addable: Vec<String>,
+    /// The keys a write may add with any value.
+    pub open_keys: Vec<String>,
 }
 
 /// A bounded key an item would carry too few or too many values of.
@@ -651,6 +839,8 @@ pub struct Miscount {
     pub given: Vec<String>,
     /// The values the key accepts, so a refusal for too few can offer them.
     pub values: Vec<String>,
+    /// Whether the key takes any value, so there is no list to offer.
+    pub open: bool,
 }
 
 impl fmt::Display for Miscount {
@@ -674,21 +864,21 @@ impl fmt::Display for Miscount {
             );
         }
 
-        let offered = tokens(&self.values);
+        let (one, more) = if self.open {
+            let any = format!("`{key}=<value>`, with any value");
+            (format!("add one, as {any}"), format!("add more, as {any}"))
+        } else {
+            let offered = tokens(&self.values);
+            (
+                format!("add one of {offered}"),
+                format!("add from {offered}"),
+            )
+        };
         match self.given.len() {
-            0 if self.min == 1 => write!(f, "`{key}` label missing: add one of {offered}."),
-            0 => write!(
-                f,
-                "`{key}` takes {bound}, and none is given: add from {offered}."
-            ),
-            1 => write!(
-                f,
-                "`{key}` takes {bound}, and 1 is given: add from {offered}."
-            ),
-            count => write!(
-                f,
-                "`{key}` takes {bound}, and {count} are given: add from {offered}."
-            ),
+            0 if self.min == 1 => write!(f, "`{key}` label missing: {one}."),
+            0 => write!(f, "`{key}` takes {bound}, and none is given: {more}."),
+            1 => write!(f, "`{key}` takes {bound}, and 1 is given: {more}."),
+            count => write!(f, "`{key}` takes {bound}, and {count} are given: {more}."),
         }
     }
 }
@@ -738,11 +928,22 @@ impl fmt::Display for Rejected {
             || !self.unknown_keys.is_empty()
             || !self.unknown_values.is_empty()
             || !self.retired.is_empty();
-        if refused && !self.addable.is_empty() {
-            sentence(
-                f,
-                format!("Labels you can add: {}.", self.addable.join(", ")),
-            )?;
+        if refused && !(self.addable.is_empty() && self.open_keys.is_empty()) {
+            let mut offered = self.addable.join(", ");
+            if !self.open_keys.is_empty() {
+                let open = self
+                    .open_keys
+                    .iter()
+                    .map(|key| format!("{key}=<value>"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                offered = if offered.is_empty() {
+                    format!("{open}, with any value")
+                } else {
+                    format!("{offered}, and {open} with any value")
+                };
+            }
+            sentence(f, format!("Labels you can add: {offered}."))?;
         }
 
         for miscount in &self.miscounted {

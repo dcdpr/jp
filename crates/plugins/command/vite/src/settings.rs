@@ -16,6 +16,7 @@
 use std::collections::BTreeMap;
 
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
+use jp_label::Unique;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -82,8 +83,13 @@ pub(crate) struct Label {
     /// What the key covers.
     pub description: String,
 
-    /// The values a ticket can be given; none for a key that takes none.
+    /// The values a ticket can be given; none for a key that takes none, or
+    /// any.
     pub values: Vec<String>,
+
+    /// Whether the key takes any value; left out when it takes listed ones.
+    #[serde(skip_serializing_if = "is_false")]
+    pub open: bool,
 
     /// The values a ticket that already carries one may keep.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -98,6 +104,19 @@ pub(crate) struct Label {
     /// limit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max: Option<usize>,
+
+    /// How much of the key one ticket holds on its own, `key` or `key-value`;
+    /// left out when any number of tickets may carry it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unique: Option<&'static str>,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde passes a reference"
+)]
+fn is_false(flag: &bool) -> bool {
+    !*flag
 }
 
 #[expect(
@@ -153,8 +172,10 @@ pub(crate) fn snapshot(
                         description: facet.description().to_owned(),
                         values: facet.values().map(ToOwned::to_owned).collect(),
                         retired: facet.retired().map(ToOwned::to_owned).collect(),
+                        open: facet.is_open(),
                         min: facet.min(),
                         max: facet.max(),
+                        unique: facet.unique().map(Unique::as_str),
                     })
                 })
                 .collect(),

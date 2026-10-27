@@ -79,8 +79,8 @@ export function readLabels(content) {
         .sort()
 }
 
-// The labels the board defines, as a map of key to `{ values, retired, min,
-// max }`.
+// The labels the board defines, as a map of key to `{ values, open, retired,
+// min, max, unique }`.
 //
 // A board that configures none defines none, and takes any label.
 export function loadVocabulary(settings = readSettings()) {
@@ -94,13 +94,19 @@ export function loadVocabulary(settings = readSettings()) {
     return labels
 }
 
-// Every `key=value` token the vocabulary accepts, retired ones included.
+// Whether the vocabulary accepts `label`, retired values included.
 //
 // Retired values count as defined: retiring one keeps existing tickets valid,
-// which is the whole difference between retiring and deleting.
-function knownTokens(vocabulary) {
+// which is the whole difference between retiring and deleting. A key that
+// takes any value accepts every `key=value` under it, but not the key alone.
+function knownLabel(vocabulary) {
     const known = new Set()
+    const open = new Set()
     for (const [key, entry] of Object.entries(vocabulary)) {
+        if (entry?.open) {
+            open.add(key)
+            continue
+        }
         const values = [...(entry?.values ?? []), ...(entry?.retired ?? [])]
         if (values.length === 0) {
             known.add(key)
@@ -109,7 +115,11 @@ function knownTokens(vocabulary) {
         for (const value of values) known.add(`${key}=${value}`)
     }
 
-    return known
+    return label => {
+        if (known.has(label)) return true
+        const split = label.indexOf('=')
+        return split > 0 && split < label.length - 1 && open.has(label.slice(0, split))
+    }
 }
 
 // Labels used on a ticket that the vocabulary doesn't define.
@@ -120,9 +130,9 @@ function knownTokens(vocabulary) {
 export function findUnknownLabels(tickets, vocabulary) {
     if (Object.keys(vocabulary).length === 0) return null
 
-    const known = knownTokens(vocabulary)
+    const known = knownLabel(vocabulary)
     const offenders = tickets
-        .map(ticket => [ticket.id, ticket.labels.filter(label => !known.has(label))])
+        .map(ticket => [ticket.id, ticket.labels.filter(label => !known(label))])
         .filter(([, unknown]) => unknown.length > 0)
 
     if (offenders.length === 0) return null
@@ -165,6 +175,43 @@ export function findMiscountedLabels(tickets, vocabulary) {
     return `Tickets carry too few or too many labels of one key:\n${offenders.join('\n')}\n\n` +
         `Fix the tickets (\`jp ticket label <id> --label key=value\`), or change the key's ` +
         `\`min\` and \`max\` in \`plugins.command.ticket.options.labels\`.`
+}
+
+// Labels the vocabulary lets one ticket carry, found on several.
+//
+// `unique: "key"` lets one ticket carry the key at all, and `"key-value"` lets
+// one carry each of its values; a key without values is held as a whole either
+// way. Values match without case, as `jp ticket` matches them. `jp ticket`
+// refuses such a write; this catches a ticket edited by hand, or one filed
+// before the key was made unique.
+export function findSharedLabels(tickets, vocabulary) {
+    const unique = Object.entries(vocabulary).filter(([, entry]) => entry?.unique)
+    if (unique.length === 0) return null
+
+    // Keyed without case; each holder keeps the first spelling it was seen in.
+    const holders = new Map()
+    for (const ticket of tickets) {
+        for (const [key, entry] of unique) {
+            const carried = ticket.labels.filter(label => label === key || label.startsWith(`${key}=`))
+            if (carried.length === 0) continue
+
+            const whole = entry.unique === 'key' || carried.every(label => label === key)
+            const names = new Map((whole ? [key] : carried).map(name => [name.toLowerCase(), name]))
+            for (const [folded, name] of names) {
+                const holder = holders.get(folded) ?? { name, ids: [] }
+                holder.ids.push(ticket.id)
+                holders.set(folded, holder)
+            }
+        }
+    }
+
+    const shared = [...holders.values()].filter(({ ids }) => ids.length > 1)
+    if (shared.length === 0) return null
+
+    const report = shared.map(({ name, ids }) => `  ${name}: ${ids.join(', ')}`).join('\n')
+    return `Labels the board lets one ticket carry are on several:\n${report}\n\n` +
+        `Keep each on one ticket (\`jp ticket label <id> --label key=value\`), or drop ` +
+        `\`unique\` from the key in \`plugins.command.ticket.options.labels\`.`
 }
 
 // A key's bounds in words, as the count they ask for.
@@ -351,6 +398,8 @@ export function loadTickets(settings = readSettings()) {
     if (unknown) throw new Error(unknown)
     const miscounted = findMiscountedLabels(tickets, vocabulary)
     if (miscounted) throw new Error(miscounted)
+    const shared = findSharedLabels(tickets, vocabulary)
+    if (shared) throw new Error(shared)
 
     return tickets
 }

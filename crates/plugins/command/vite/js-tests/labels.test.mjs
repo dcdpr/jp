@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { findMiscountedLabels } from '../site/jp-vite/loaders/ticket-shared.mjs'
+import {
+    findMiscountedLabels,
+    findSharedLabels,
+    findUnknownLabels,
+} from '../site/jp-vite/loaders/ticket-shared.mjs'
 
 // A board where every ticket carries exactly one `type`, and at most one
 // `team`.
@@ -43,6 +47,60 @@ test('each ticket names the keys it carries too few or too many of', () => {
             + '  T-02wt0k2: 2 `type` (needs exactly 1), 2 `team` (needs at most 1)\n\n'
             + 'Fix the tickets (`jp ticket label <id> --label key=value`), or change the key\'s '
             + '`min` and `max` in `plugins.command.ticket.options.labels`.',
+    )
+})
+
+// A key that takes any value is written `values: []` and marked `open`; a bare
+// key has neither values nor the mark.
+const OPEN = {
+    rfd: { description: 'The RFD', values: [], open: true, unique: 'key-value' },
+    focus: { description: 'Being worked on now', values: [], unique: 'key' },
+    owner: { description: 'Who', values: ['jean', 'jp'], unique: 'key' },
+    area: { description: 'The area', values: ['cli'] },
+}
+
+test('a key taking any value accepts every value, but not the key alone', () => {
+    const tickets = [
+        ticket('T-02wt0k1', ['rfd=116', 'rfd=Some title', 'focus', 'area=cli']),
+        ticket('T-02wt0k2', ['rfd', 'rfd=', 'area=docs']),
+    ]
+
+    assert.equal(
+        findUnknownLabels(tickets, OPEN),
+        'Tickets carry labels the vocabulary doesn\'t define:\n'
+            + '  T-02wt0k2: rfd, rfd=, area=docs\n\n'
+            + 'Add them to `plugins.command.ticket.options.labels`, or fix the tickets '
+            + '(`jp ticket label <id> --label key=value`).',
+    )
+})
+
+test('labels the board lets one ticket carry pass when each is on one', () => {
+    const tickets = [
+        ticket('T-02wt0k1', ['rfd=116', 'focus', 'owner=jean']),
+        ticket('T-02wt0k2', ['rfd=117', 'area=cli']),
+    ]
+
+    assert.equal(findSharedLabels(tickets, OPEN), null)
+    assert.equal(findSharedLabels(tickets, { area: OPEN.area }), null)
+})
+
+// `key-value` holds each value to one ticket, matching without case; `key`
+// holds the whole key, whatever value each ticket carries.
+test('a label on several tickets names them all', () => {
+    const tickets = [
+        ticket('T-02wt0k1', ['rfd=abc', 'focus', 'owner=jean']),
+        ticket('T-02wt0k2', ['rfd=ABC', 'rfd=117', 'owner=jp']),
+        ticket('T-02wt0k3', ['focus', 'rfd=118']),
+    ]
+
+    assert.equal(
+        findSharedLabels(tickets, OPEN),
+        'Labels the board lets one ticket carry are on several:\n'
+            + '  rfd=abc: T-02wt0k1, T-02wt0k2\n'
+            + '  focus: T-02wt0k1, T-02wt0k3\n'
+            + '  owner: T-02wt0k1, T-02wt0k2\n\n'
+            + 'Keep each on one ticket (`jp ticket label <id> --label key=value`), or drop '
+            + '`unique` from the key in `plugins.command.ticket.options.labels`.',
     )
 })
 

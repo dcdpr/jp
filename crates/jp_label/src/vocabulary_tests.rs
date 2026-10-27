@@ -471,6 +471,228 @@ fn bounds_no_item_can_meet_are_an_error() {
     );
 }
 
+/// A board whose `rfd` key takes any value, beside a bare key and a closed one.
+fn open() -> Vocabulary {
+    Vocabulary::parse(
+        r#"{
+            "rfd": {"description": "The RFD the work comes from.", "values": []},
+            "draft": {},
+            "client": {"values": ["cli"]}
+        }"#,
+    )
+    .unwrap()
+}
+
+/// An empty list takes any value, and leaving `values` out takes none: the two
+/// are told apart by whether the list is there.
+#[test]
+fn an_empty_list_of_values_takes_any_value() {
+    let vocabulary = open();
+
+    assert!(vocabulary.facet("rfd").unwrap().is_open());
+    assert!(!vocabulary.facet("rfd").unwrap().is_bare());
+    assert!(vocabulary.facet("draft").unwrap().is_bare());
+    assert!(!vocabulary.facet("draft").unwrap().is_open());
+    assert_eq!(vocabulary.open_keys().collect::<Vec<_>>(), ["rfd"]);
+
+    let labels = vocabulary
+        .resolve(&owned(&[
+            "RFD=116",
+            "rfd=Some Title",
+            "draft",
+            "client=CLI",
+        ]))
+        .unwrap();
+
+    assert_eq!(labels.to_tokens(), [
+        "client=cli",
+        "draft",
+        "rfd=116",
+        "rfd=Some Title"
+    ]);
+}
+
+/// A key that takes any value still takes one: alone, it says nothing.
+#[test]
+fn a_key_taking_any_value_needs_one() {
+    let error = open().resolve(&owned(&["rfd"])).unwrap_err();
+
+    assert_eq!(error.unknown_values, ["rfd"]);
+    assert_eq!(
+        error.to_string(),
+        "`rfd` is not a known label. Labels you can add: client=cli, draft, and rfd=<value> with \
+         any value."
+    );
+}
+
+/// The listed tokens can only hold what is declared, so a key taking any value
+/// has none there.
+#[test]
+fn a_key_taking_any_value_lists_no_tokens() {
+    assert_eq!(open().tokens(), ["client=cli", "draft"]);
+    assert_eq!(open().tokens_including_retired(), ["client=cli", "draft"]);
+}
+
+#[test]
+fn a_required_key_taking_any_value_says_how_to_add_one() {
+    let vocabulary = Vocabulary::parse(r#"{"rfd": {"values": [], "min": 1}}"#).unwrap();
+
+    let error = vocabulary.resolve(&[]).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "`rfd` label missing: add one, as `rfd=<value>`, with any value."
+    );
+}
+
+/// Moving every value of a key to `retired` and leaving `values = []` behind
+/// would open the key to any value; it is refused, naming the shape that
+/// retires them.
+#[test]
+fn retiring_values_of_a_key_taking_any_value_is_an_error() {
+    let error = Vocabulary::parse(r#"{"client": {"values": [], "retired": ["cli"]}}"#).unwrap_err();
+
+    assert_eq!(error, Error::RetiredOnOpenKey {
+        key: "client".to_owned()
+    });
+    assert_eq!(
+        error.to_string(),
+        "`client` in the label vocabulary takes any value (`values = []`), so it has nothing to \
+         retire. To retire every value of a key, list them under `retired` and leave `values` out."
+    );
+
+    let retired = Vocabulary::parse(r#"{"client": {"retired": ["cli"]}}"#).unwrap();
+    assert!(!retired.facet("client").unwrap().is_open());
+    assert!(retired.tokens().is_empty());
+}
+
+/// A board where each `rfd` value sits on one item, one item carries `focus`,
+/// and one item carries `owner`, whatever its value.
+fn unique() -> Vocabulary {
+    Vocabulary::parse(
+        r#"{
+            "rfd": {"values": [], "unique": "key-value"},
+            "focus": {"unique": "key-value"},
+            "owner": {"values": ["jean", "jp"], "unique": "key"},
+            "client": {"values": ["cli", "web"]}
+        }"#,
+    )
+    .unwrap()
+}
+
+fn labels(tokens: &[&str]) -> Labels {
+    Labels::from_tokens(tokens).unwrap()
+}
+
+#[test]
+fn reads_how_much_of_a_key_one_item_holds() {
+    let vocabulary = unique();
+
+    assert_eq!(
+        vocabulary.facet("rfd").unwrap().unique(),
+        Some(Unique::KeyValue)
+    );
+    assert_eq!(
+        vocabulary.facet("owner").unwrap().unique(),
+        Some(Unique::Key)
+    );
+    assert_eq!(vocabulary.facet("client").unwrap().unique(), None);
+    assert_eq!(Unique::KeyValue.to_string(), "key-value");
+}
+
+/// `key-value` holds each value to one item, so two items can carry the key
+/// with different values.
+#[test]
+fn a_value_unique_key_clashes_on_a_shared_value_only() {
+    let vocabulary = unique();
+
+    assert_eq!(
+        vocabulary.clashes(&labels(&["rfd=116", "rfd=117"]), &labels(&["rfd=117"])),
+        [Clash {
+            key: "rfd".to_owned(),
+            value: Some("117".to_owned())
+        }]
+    );
+    assert!(
+        vocabulary
+            .clashes(&labels(&["rfd=116"]), &labels(&["rfd=118"]))
+            .is_empty()
+    );
+}
+
+/// `key` holds the whole key to one item, whatever value either carries.
+#[test]
+fn a_key_unique_as_a_whole_clashes_on_any_value() {
+    let clashes = unique().clashes(&labels(&["owner=jean"]), &labels(&["owner=jp"]));
+
+    assert_eq!(clashes, [Clash {
+        key: "owner".to_owned(),
+        value: None
+    }]);
+    assert_eq!(clashes[0].to_string(), "owner");
+}
+
+/// A bare key has no values to tell apart, so `key-value` holds it as a whole.
+#[test]
+fn a_unique_bare_key_clashes_as_a_whole() {
+    assert_eq!(
+        unique().clashes(&labels(&["focus"]), &labels(&["focus", "client=cli"])),
+        [Clash {
+            key: "focus".to_owned(),
+            value: None
+        }]
+    );
+}
+
+/// A label on another item written by hand matches without case, as it does
+/// everywhere else.
+#[test]
+fn a_clash_matches_without_case() {
+    assert_eq!(
+        unique().clashes(&labels(&["rfd=abc"]), &labels(&["RFD=ABC"])),
+        [Clash {
+            key: "rfd".to_owned(),
+            value: Some("abc".to_owned())
+        }]
+    );
+}
+
+#[test]
+fn keys_that_are_not_unique_never_clash() {
+    assert!(
+        unique()
+            .clashes(&labels(&["client=cli"]), &labels(&["client=cli"]))
+            .is_empty()
+    );
+}
+
+#[test]
+fn an_unknown_uniqueness_is_an_error() {
+    assert!(matches!(
+        Vocabulary::parse(r#"{"rfd": {"values": [], "unique": "value"}}"#),
+        Err(Error::Malformed(_))
+    ));
+}
+
+/// Every item needing the key while one item may carry it fails as soon as the
+/// collection holds two, so it is refused where it is declared.
+#[test]
+fn a_required_key_unique_as_a_whole_is_an_error() {
+    assert_eq!(
+        Vocabulary::parse(r#"{"owner": {"values": ["jp"], "min": 1, "unique": "key"}}"#),
+        Err(Error::UniqueRequired {
+            key: "owner".to_owned(),
+            min: 1
+        })
+    );
+
+    // Held per value, a required key can still be unique: each item carries
+    // a value of its own.
+    assert!(
+        Vocabulary::parse(r#"{"slug": {"values": [], "min": 1, "unique": "key-value"}}"#).is_ok()
+    );
+}
+
 /// A configuration file declares the vocabulary as a table, which reaches the
 /// reader already parsed.
 #[test]

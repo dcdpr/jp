@@ -37,7 +37,7 @@ use jp_plugin::message::{
 use serde::Serialize;
 use serde_json::Value;
 use ticket::{
-    Comment, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId, Vocabulary,
+    Comment, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId, Unique, Vocabulary,
     board::{self, Place},
     import::Import,
     store,
@@ -619,9 +619,11 @@ fn compose_missing(
             implements,
             labels,
         } => {
-            // Checked before composing, so labels the board refuses don't cost
-            // the user what they typed.
-            resolve_labels(options, &labels)?;
+            // Checked before composing, so labels the board refuses, or that
+            // another ticket holds, don't cost the user what they typed.
+            let resolved = resolve_labels(options, &labels)?;
+            store::check_unique(dir, &options.vocabulary()?, &resolved, None)
+                .map_err(|error| error.to_string())?;
             let (title, body) = compose_add(body, stdin, stdout)?;
 
             Ok(Command::Add {
@@ -1252,14 +1254,14 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             body,
             implements,
             labels,
-        } => add(
-            dir,
-            &required(title, "title")?,
-            &resolve_author(author, config)?,
-            body.as_deref().unwrap_or_default(),
-            implements.as_deref(),
-            &resolve_labels(ctx.options, &labels)?,
-        ),
+        } => add(dir, &ctx.options.vocabulary()?, &NewTicket {
+            title: &required(title, "title")?,
+            authors: &resolve_author(author, config)?,
+            date: &Local::now().format("%Y-%m-%d").to_string(),
+            implements: implements.as_deref(),
+            labels: &resolve_labels(ctx.options, &labels)?,
+            description: body.as_deref().unwrap_or_default(),
+        }),
 
         Command::Comment {
             id,
@@ -1330,7 +1332,7 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             numbers,
             repo,
             labels,
-        } => import_all(dir, &numbers, &repo, &resolve_labels(ctx.options, &labels)),
+        } => import_all(dir, ctx.options, &numbers, &repo, &labels),
 
         Command::List {
             status,
@@ -1533,14 +1535,16 @@ fn init_dir(dir: &Utf8Path) -> Result<Output, String> {
 
 /// Import each of `numbers` from `repo`, stopping at the first that fails.
 ///
-/// A ticket the import creates is filed with `labels`, which are needed only
-/// then: a ticket refreshed from upstream keeps its own, so a refusal of them
-/// stops only an issue imported for the first time.
+/// A ticket the import creates is filed with the `requested` labels, which are
+/// needed only then: a ticket refreshed from upstream keeps its own, so the
+/// board's vocabulary is read, and can refuse, only for an issue imported for
+/// the first time.
 fn import_all(
     dir: &Utf8Path,
+    options: &Options,
     numbers: &[u64],
     repo: &str,
-    labels: &Result<Labels, String>,
+    requested: &[String],
 ) -> Result<Output, String> {
     if numbers.is_empty() {
         return Err("No issue numbers given, and no terminal to ask for one.".to_owned());
@@ -1549,13 +1553,21 @@ fn import_all(
     let mut output = Output::default();
     for &number in numbers {
         // Decided before anything is fetched, so a refusal costs no request.
-        let labels = match store::imported(dir, number).map_err(|error| error.to_string())? {
-            Some(_) => Labels::default(),
-            None => labels.clone()?,
+        let refresh = store::imported(dir, number)
+            .map_err(|error| error.to_string())?
+            .is_some();
+        let (vocabulary, labels) = if refresh {
+            (Vocabulary::default(), Labels::default())
+        } else {
+            let vocabulary = options.vocabulary()?;
+            let labels = resolve_labels(options, requested)?;
+            store::check_unique(dir, &vocabulary, &labels, None)
+                .map_err(|error| error.to_string())?;
+            (vocabulary, labels)
         };
         output
             .text
-            .push_str(&import(dir, number, repo, &labels)?.text);
+            .push_str(&import(dir, &vocabulary, number, repo, &labels)?.text);
     }
 
     Ok(output)
@@ -1565,7 +1577,13 @@ fn import_all(
 ///
 /// One way only: replies belong on GitHub and arrive on the next import, so
 /// nothing is ever written back.
-fn import(dir: &Utf8Path, number: u64, repo: &str, labels: &Labels) -> Result<Output, String> {
+fn import(
+    dir: &Utf8Path,
+    vocabulary: &Vocabulary,
+    number: u64,
+    repo: &str,
+    labels: &Labels,
+) -> Result<Output, String> {
     let (owner, name) = repo
         .split_once('/')
         .ok_or_else(|| format!("`{repo}` is not an `owner/name` pair."))?;
@@ -1593,7 +1611,7 @@ fn import(dir: &Utf8Path, number: u64, repo: &str, labels: &Labels) -> Result<Ou
         .collect();
 
     let count = comments.len();
-    let imported = store::import(dir, &Import {
+    let imported = store::import(dir, vocabulary, &Import {
         number,
         title: &issue.title,
         description: issue.body.as_deref().unwrap_or_default(),
@@ -1666,25 +1684,11 @@ fn token() -> Option<String> {
 }
 
 /// File a ticket at `Todo`.
-fn add(
-    dir: &Utf8Path,
-    title: &str,
-    author: &str,
-    body: &str,
-    implements: Option<&str>,
-    labels: &Labels,
-) -> Result<Output, String> {
-    let date = Local::now().format("%Y-%m-%d").to_string();
-
-    let (id, path) = store::create(dir, &NewTicket {
-        title,
-        authors: author,
-        date: &date,
-        implements,
-        labels,
-        description: body,
-    })
-    .map_err(|error| error.to_string())?;
+///
+/// `new.labels` are resolved already, and `vocabulary` holds them to the keys
+/// it lets one ticket carry.
+fn add(dir: &Utf8Path, vocabulary: &Vocabulary, new: &NewTicket<'_>) -> Result<Output, String> {
+    let (id, path) = store::create(dir, vocabulary, new).map_err(|error| error.to_string())?;
 
     Ok(format!("Created {path} ({id})\n").into())
 }
@@ -1750,11 +1754,27 @@ fn describe_vocabulary(vocabulary: &Vocabulary, leftover: Option<&str>) -> Strin
 
     let mut out = String::new();
     for (key, facet) in vocabulary.facets() {
-        let bound = facet
-            .bound()
-            .map(|bound| format!(" ({bound} per ticket)"))
-            .unwrap_or_default();
-        out.push_str(&format!("{key}  {}{bound}\n", facet.description()));
+        let mut notes = vec![];
+        if let Some(bound) = facet.bound() {
+            notes.push(format!("{bound} per ticket"));
+        }
+        match facet.unique() {
+            Some(Unique::KeyValue) if !facet.is_bare() => {
+                notes.push("each value on one ticket only".to_owned());
+            }
+            Some(_) => notes.push("on one ticket only".to_owned()),
+            None => {}
+        }
+        let notes = if notes.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", notes.join("; "))
+        };
+
+        out.push_str(&format!("{key}  {}{notes}\n", facet.description()));
+        if facet.is_open() {
+            out.push_str(&format!("  {key}=<any value>\n"));
+        }
         for value in facet.values() {
             out.push_str(&format!("  {key}={value}\n"));
         }

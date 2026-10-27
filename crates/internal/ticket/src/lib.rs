@@ -58,7 +58,7 @@ pub mod render;
 pub mod store;
 
 pub use id::TicketId;
-pub use jp_label::{Labels, Selector, Vocabulary};
+pub use jp_label::{Labels, Selector, Unique, Vocabulary};
 
 /// The metadata key one label is written under.
 ///

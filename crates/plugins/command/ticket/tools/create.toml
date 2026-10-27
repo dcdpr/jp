@@ -72,8 +72,9 @@ When the board defines labels, only those are accepted: a label outside them is
 refused, and the refusal names the ones you can use. A board that defines none
 takes any.
 
-A board can also require a key, or hold a ticket to one value of it. A call
-that doesn't meet that is refused, naming the labels to add.
+A board can also require a key, hold a ticket to one value of it, or let one
+ticket at a time carry a label. A call that breaks one of these is refused, and
+the refusal says what to change.
 """
 
 # The accepted values are mirrored from the vocabulary by `jp ticket tools sync`.

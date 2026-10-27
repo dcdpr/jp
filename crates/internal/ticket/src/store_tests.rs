@@ -19,9 +19,13 @@ fn draft<'a>(title: &'a str, labels: &'a Labels) -> NewTicket<'a> {
 }
 
 fn new_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
-    create(dir.path(), &draft(title, &Labels::default()))
-        .unwrap()
-        .0
+    create(
+        dir.path(),
+        &Vocabulary::default(),
+        &draft(title, &Labels::default()),
+    )
+    .unwrap()
+    .0
 }
 
 /// A board's vocabulary, so label writes have something to check against.
@@ -47,7 +51,7 @@ fn owned(labels: &[&str]) -> Vec<String> {
 fn create_writes_a_file_named_for_its_id() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let (id, path) = create(dir.path(), &NewTicket {
+    let (id, path) = create(dir.path(), &Vocabulary::default(), &NewTicket {
         title: "Tool call header misaligned",
         authors: "John Doe",
         date: DATE,
@@ -264,7 +268,7 @@ fn an_import_creates_a_ticket_linked_to_its_issue() {
     let dir = Utf8TempDir::new().unwrap();
     let labels = test_vocabulary().resolve(&owned(&["client=cli"])).unwrap();
 
-    let imported = import(dir.path(), &Import {
+    let imported = import(dir.path(), &Vocabulary::default(), &Import {
         number: 123,
         title: "Crash on empty input",
         description: "Running `jp q` with no argument panics.",
@@ -298,7 +302,7 @@ fn an_imported_issue_is_found_by_its_number() {
     let dir = Utf8TempDir::new().unwrap();
     assert!(imported(dir.path(), 123).unwrap().is_none());
 
-    let first = import(dir.path(), &Import {
+    let first = import(dir.path(), &Vocabulary::default(), &Import {
         number: 123,
         title: "Crash",
         description: "",
@@ -332,7 +336,12 @@ fn re_importing_replaces_content_and_keeps_triage() {
         date: "2026-08-05",
     };
 
-    let first = import(dir.path(), &upstream("Crash", "First telling.")).unwrap();
+    let first = import(
+        dir.path(),
+        &Vocabulary::default(),
+        &upstream("Crash", "First telling."),
+    )
+    .unwrap();
 
     // Local triage between imports.
     let source = fs::read_to_string(&first.path).unwrap();
@@ -340,7 +349,12 @@ fn re_importing_replaces_content_and_keeps_triage() {
     let triaged = render::set_metadata(&triaged, "Implements", "095").unwrap();
     fs::write(&first.path, triaged).unwrap();
 
-    let second = import(dir.path(), &upstream("Crash, revised", "Second telling.")).unwrap();
+    let second = import(
+        dir.path(),
+        &Vocabulary::default(),
+        &upstream("Crash, revised", "Second telling."),
+    )
+    .unwrap();
 
     assert!(!second.created);
     assert_eq!(second.id, first.id);
@@ -357,7 +371,7 @@ fn re_importing_replaces_content_and_keeps_triage() {
 fn imported_content_is_escaped_on_the_way_in() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let imported = import(dir.path(), &Import {
+    let imported = import(dir.path(), &Vocabulary::default(), &Import {
         number: 7,
         title: "<script>x</script>",
         description: "Uses {{ interpolation }}.",
@@ -625,6 +639,97 @@ fn reassign_refuses_a_four_digit_file_name() {
     assert!(path.exists());
 }
 
+/// A board where each `rfd` value sits on one ticket, and one ticket carries
+/// `focus`.
+fn unique_vocabulary() -> Vocabulary {
+    Vocabulary::parse(
+        r#"{
+            "rfd": {"values": [], "unique": "key-value"},
+            "focus": {"unique": "key"},
+            "client": {"values": ["cli"]}
+        }"#,
+    )
+    .unwrap()
+}
+
+/// File a ticket carrying `labels` on the unique board.
+fn file_unique(dir: &Utf8TempDir, title: &str, labels: &[&str]) -> Result<(TicketId, Utf8PathBuf)> {
+    let vocabulary = unique_vocabulary();
+    let labels = vocabulary.resolve(&owned(labels)).unwrap();
+
+    create(dir.path(), &vocabulary, &draft(title, &labels))
+}
+
+/// A label the board lets one ticket carry is refused on a second, naming the
+/// ticket holding it, and nothing is written.
+#[test]
+fn create_refuses_a_label_another_ticket_holds() {
+    let dir = Utf8TempDir::new().unwrap();
+    let (first, _) = file_unique(&dir, "Tracks 116", &["rfd=116", "focus"]).unwrap();
+
+    let error = file_unique(&dir, "Also 116", &["rfd=116", "focus", "client=cli"]).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "`focus` is already on {first}, and the board lets one ticket carry it. `rfd=116` is \
+             already on {first}, and the board lets one ticket carry each `rfd` value."
+        )
+    );
+    assert_eq!(list(dir.path()).unwrap().len(), 1);
+
+    // Another value of a key unique per value is free.
+    file_unique(&dir, "Tracks 117", &["rfd=117"]).unwrap();
+}
+
+/// A ticket doesn't clash with itself, so relabelling keeps what it holds.
+#[test]
+fn set_labels_holds_the_other_tickets_to_unique_keys() {
+    let dir = Utf8TempDir::new().unwrap();
+    let vocabulary = unique_vocabulary();
+    let (first, _) = file_unique(&dir, "Tracks 116", &["rfd=116"]).unwrap();
+    let (second, _) = file_unique(&dir, "Tracks 117", &["rfd=117"]).unwrap();
+
+    set_labels(
+        dir.path(),
+        first,
+        &vocabulary,
+        &owned(&["rfd=116", "client=cli"]),
+    )
+    .unwrap();
+
+    let error = set_labels(dir.path(), second, &vocabulary, &owned(&["rfd=116"])).unwrap_err();
+    assert!(
+        matches!(&error, Error::Taken(taken) if taken[0].1 == first),
+        "{error}"
+    );
+    let entry = list(dir.path())
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.id == second)
+        .unwrap();
+    assert_eq!(entry.ticket.unwrap().metadata.labels.to_tokens(), [
+        "rfd=117"
+    ]);
+}
+
+/// A ticket edited by hand still holds what its label lines say, even when the
+/// rest of the file doesn't parse.
+#[test]
+fn an_unreadable_ticket_still_holds_its_unique_labels() {
+    let dir = Utf8TempDir::new().unwrap();
+    let (first, path) = file_unique(&dir, "Tracks 116", &["rfd=116"]).unwrap();
+    let source = fs::read_to_string(&path).unwrap();
+    fs::write(&path, source.replace("- **Status**: Todo\n", "")).unwrap();
+
+    let error = file_unique(&dir, "Also 116", &["rfd=116"]).unwrap_err();
+
+    assert!(
+        matches!(&error, Error::Taken(taken) if taken[0].1 == first),
+        "{error}"
+    );
+}
+
 #[test]
 fn create_writes_one_line_per_label() {
     let dir = Utf8TempDir::new().unwrap();
@@ -636,7 +741,12 @@ fn create_writes_one_line_per_label() {
             "package=jp_cli",
         ]))
         .unwrap();
-    let (_, path) = create(dir.path(), &draft("Labelled", &resolved)).unwrap();
+    let (_, path) = create(
+        dir.path(),
+        &Vocabulary::default(),
+        &draft("Labelled", &resolved),
+    )
+    .unwrap();
 
     let source = fs::read_to_string(&path).unwrap();
     assert!(source.contains("- **Label**: client=cli\n"), "{source}");
@@ -669,7 +779,12 @@ fn no_label_line_grows_with_the_number_of_labels() {
             "package=jp_conversation",
         ]))
         .unwrap();
-    let (_, path) = create(dir.path(), &draft("Labelled", &resolved)).unwrap();
+    let (_, path) = create(
+        dir.path(),
+        &Vocabulary::default(),
+        &draft("Labelled", &resolved),
+    )
+    .unwrap();
 
     let source = fs::read_to_string(&path).unwrap();
     let longest = source.lines().map(str::len).max().unwrap_or_default();
@@ -685,7 +800,12 @@ fn set_labels_replaces_the_whole_set() {
     let resolved = vocabulary
         .resolve(&owned(&["package=jp_config", "client=cli"]))
         .unwrap();
-    let (id, _) = create(dir.path(), &draft("Labelled", &resolved)).unwrap();
+    let (id, _) = create(
+        dir.path(),
+        &Vocabulary::default(),
+        &draft("Labelled", &resolved),
+    )
+    .unwrap();
 
     let (path, applied) = set_labels(dir.path(), id, &vocabulary, &owned(&["client=cli"])).unwrap();
 
@@ -704,7 +824,12 @@ fn set_labels_with_nothing_drops_every_line() {
     let resolved = vocabulary
         .resolve(&owned(&["client=cli", "package=jp_cli"]))
         .unwrap();
-    let (id, _) = create(dir.path(), &draft("Labelled", &resolved)).unwrap();
+    let (id, _) = create(
+        dir.path(),
+        &Vocabulary::default(),
+        &draft("Labelled", &resolved),
+    )
+    .unwrap();
 
     let (path, applied) = set_labels(dir.path(), id, &vocabulary, &[]).unwrap();
 
@@ -808,7 +933,12 @@ fn a_rejected_relabel_writes_nothing() {
     let vocabulary = test_vocabulary();
 
     let resolved = vocabulary.resolve(&owned(&["client=cli"])).unwrap();
-    let (id, path) = create(dir.path(), &draft("Labelled", &resolved)).unwrap();
+    let (id, path) = create(
+        dir.path(),
+        &Vocabulary::default(),
+        &draft("Labelled", &resolved),
+    )
+    .unwrap();
     let before = fs::read_to_string(&path).unwrap();
 
     set_labels(

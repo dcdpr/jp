@@ -403,6 +403,39 @@ enum = [
     );
 }
 
+/// A key taking any value can't be listed, so a board with one gets no lists:
+/// its labels are described in words instead, along with the keys one ticket
+/// holds on its own.
+#[test]
+fn sync_describes_open_and_unique_keys_in_words() {
+    let dir = Utf8TempDir::new().unwrap();
+    let config = json!({ "conversation": { "tools": {
+        "ticket_create": labelled("plugin.command.ticket.create"),
+        "ticket_list": labelled("plugin.command.ticket.list")
+    }}});
+    let vocabulary = Vocabulary::parse(
+        r#"{
+            "rfd": {"values": [], "unique": "key-value"},
+            "type": {"values": ["bug"]}
+        }"#,
+    )
+    .unwrap();
+
+    sync(dir.path(), &config, &vocabulary).unwrap();
+
+    let lists = r#"
+[conversation.tools.ticket_create.parameters.labels.items]
+summary = "One `key=value` label: type=bug, or rfd=<value> with any value. Only one ticket carries each `rfd` value."
+
+[conversation.tools.ticket_list.parameters.labels.items]
+summary = "One `key=value` label: rfd, type, type=bug, or rfd=<value> with any value."
+"#;
+    assert_eq!(
+        fs::read_to_string(dir.path().join(SYNCED_FILE)).unwrap(),
+        format!("{SYNCED_HEADER}\n{SYNCED_NOTES}{lists}")
+    );
+}
+
 /// An empty `enum` accepts nothing, which some providers refuse outright, so a
 /// board without labels writes no lists at all.
 #[test]

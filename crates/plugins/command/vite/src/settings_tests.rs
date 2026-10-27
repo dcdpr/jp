@@ -65,15 +65,19 @@ fn both_workflows_are_read_where_the_plugins_keep_them() {
                     description: "Looked at".to_owned(),
                     values: vec![],
                     retired: vec![],
+                    open: false,
                     min: 0,
                     max: None,
+                    unique: None,
                 }),
                 ("type".to_owned(), Label {
                     description: "The type".to_owned(),
                     values: vec!["bug".to_owned()],
                     retired: vec!["chore".to_owned()],
+                    open: false,
                     min: 1,
                     max: Some(1),
+                    unique: None,
                 }),
             ]),
         }),
@@ -221,15 +225,28 @@ fn the_snapshot_renders_in_a_fixed_shape() {
                     description: "The type".to_owned(),
                     values: vec!["bug".to_owned()],
                     retired: vec![],
+                    open: false,
                     min: 1,
                     max: Some(1),
+                    unique: None,
                 }),
                 ("area".to_owned(), Label {
                     description: "The area".to_owned(),
                     values: vec!["cli".to_owned()],
                     retired: vec![],
+                    open: false,
                     min: 0,
                     max: None,
+                    unique: None,
+                }),
+                ("rfd".to_owned(), Label {
+                    description: "The RFD".to_owned(),
+                    values: vec![],
+                    retired: vec![],
+                    open: true,
+                    min: 0,
+                    max: None,
+                    unique: Some("key-value"),
                 }),
             ]),
         }),
@@ -252,6 +269,12 @@ fn the_snapshot_renders_in_a_fixed_shape() {
         "values": [
           "cli"
         ]
+      },
+      "rfd": {
+        "description": "The RFD",
+        "values": [],
+        "open": true,
+        "unique": "key-value"
       },
       "type": {
         "description": "The type",

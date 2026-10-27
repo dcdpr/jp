@@ -15,6 +15,7 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use jp_label::Clash;
 
 use crate::{
     Comment, LABEL_KEY, Labels, NewTicket, ParseError, Status, Ticket, TicketId, Vocabulary,
@@ -69,6 +70,9 @@ pub enum Error {
     Exhausted,
     /// A write named labels the board won't accept.
     Rejected(jp_label::Rejected),
+    /// A write named labels the board lets one ticket carry, and another ticket
+    /// already does.
+    Taken(Vec<(Clash, TicketId)>),
     /// A ticket file that is there but isn't a well-formed ticket.
     Malformed { id: TicketId, error: ParseError },
     /// The board's order file can't be read as one.
@@ -121,6 +125,22 @@ impl fmt::Display for Error {
                 "The ticket id format has no time buckets left; it needs a wider time component.",
             ),
             Self::Rejected(error) => error.fmt(f),
+            Self::Taken(taken) => {
+                let sentences: Vec<String> = taken
+                    .iter()
+                    .map(|(clash, id)| match clash.value {
+                        Some(_) => format!(
+                            "`{clash}` is already on {id}, and the board lets one ticket carry \
+                             each `{}` value.",
+                            clash.key
+                        ),
+                        None => format!(
+                            "`{clash}` is already on {id}, and the board lets one ticket carry it."
+                        ),
+                    })
+                    .collect();
+                f.write_str(&sentences.join(" "))
+            }
             Self::Malformed { id, error } => write!(f, "{id} is not a well-formed ticket: {error}"),
             Self::Board { path, reason } => write!(f, "{path} is not a board order: {reason}."),
             Self::SameTicket(id) => write!(f, "{id} can't be ranked against itself."),
@@ -197,10 +217,18 @@ const CLAIM_ATTEMPTS: usize = 16;
 
 /// Create a ticket at `Todo`, returning its id and path.
 ///
+/// `new.labels` are resolved already; `vocabulary` holds them to the keys it
+/// lets one ticket carry, which only the board can check.
+///
 /// Creating the file exclusively is what claims the id: two processes drawing
 /// in the same bucket can land on one tail, and the loser finds out here rather
 /// than overwriting the winner's ticket.
-pub fn create(dir: &Utf8Path, new: &NewTicket<'_>) -> Result<(TicketId, Utf8PathBuf)> {
+pub fn create(
+    dir: &Utf8Path,
+    vocabulary: &Vocabulary,
+    new: &NewTicket<'_>,
+) -> Result<(TicketId, Utf8PathBuf)> {
+    check_unique(dir, vocabulary, new.labels, None)?;
     let slug = slug(new.title);
 
     for _ in 0..CLAIM_ATTEMPTS {
@@ -356,12 +384,59 @@ pub fn set_labels(
 
     let current = parse::labels(&source);
     let applied = vocabulary.resolve_against(requested, &current)?;
+    check_unique(dir, vocabulary, &applied, Some(id))?;
 
     let updated = render::set_repeated_metadata(&source, LABEL_KEY, &applied.to_tokens())
         .ok_or(ParseError::MissingMetadata)?;
     fs::write(&path, updated)?;
 
     Ok((path, applied))
+}
+
+/// Refuse `labels` when another ticket in `dir` already carries one the
+/// vocabulary lets one ticket carry.
+///
+/// `except` is the ticket being written, which can't clash with itself.
+/// The other tickets' labels are read as written, whether or not the rest of
+/// each file parses, so a ticket edited by hand still holds what it carries.
+/// Nothing is read when `labels` carries no unique key.
+///
+/// # Errors
+///
+/// Returns [`Error::Taken`], naming each label and the ticket holding it.
+pub fn check_unique(
+    dir: &Utf8Path,
+    vocabulary: &Vocabulary,
+    labels: &Labels,
+    except: Option<TicketId>,
+) -> Result<()> {
+    let carries_unique = vocabulary.facets().any(|(key, facet)| {
+        facet.unique().is_some() && labels.keys().any(|label| label.eq_ignore_ascii_case(key))
+    });
+    if !carries_unique {
+        return Ok(());
+    }
+
+    let mut taken = vec![];
+    for (id, path) in files(dir)? {
+        if Some(id) == except {
+            continue;
+        }
+
+        let other = parse::labels(&fs::read_to_string(&path)?);
+        taken.extend(
+            vocabulary
+                .clashes(labels, &other)
+                .into_iter()
+                .map(|clash| (clash, id)),
+        );
+    }
+
+    if taken.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::Taken(taken))
+    }
 }
 
 /// Delete a ticket, returning the path that held it.
@@ -442,7 +517,9 @@ pub fn imported(dir: &Utf8Path, number: u64) -> Result<Option<Entry>> {
 /// number stay independent.
 /// Re-importing is safe and idempotent: the metadata block survives, so triage
 /// done here is never undone from there.
-pub fn import(dir: &Utf8Path, upstream: &Import<'_>) -> Result<Imported> {
+/// `vocabulary` holds a new ticket's labels to the keys it lets one ticket
+/// carry, as [`create`] does.
+pub fn import(dir: &Utf8Path, vocabulary: &Vocabulary, upstream: &Import<'_>) -> Result<Imported> {
     let marker = upstream.marker();
     let (title, description, comments) = escaped(upstream);
 
@@ -453,7 +530,7 @@ pub fn import(dir: &Utf8Path, upstream: &Import<'_>) -> Result<Imported> {
     } else {
         // The repository owns the metadata block, so the labels are the
         // importer's, not upstream's.
-        let (id, path) = create(dir, &NewTicket {
+        let (id, path) = create(dir, vocabulary, &NewTicket {
             title: &title,
             authors: upstream.authors,
             date: upstream.date,

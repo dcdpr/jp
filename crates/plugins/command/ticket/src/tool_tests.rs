@@ -608,6 +608,44 @@ fn create_needs_the_labels_the_board_requires() {
     assert_eq!(ids(&dir).len(), 1);
 }
 
+/// A label the board lets one ticket carry, held by another, is refused in the
+/// preview too, so the assistant fixes the call before anyone approves it.
+#[test]
+fn create_refuses_a_label_another_ticket_holds() {
+    let dir = Utf8TempDir::new().unwrap();
+    let Value::Object(options) = json!({ "labels": {
+        "rfd": { "description": "The RFD.", "values": [], "unique": "key-value" }
+    } }) else {
+        unreachable!("options are an object");
+    };
+    let options = Options::read(&options).unwrap();
+    let call = |action: ToolAction, title: &str| {
+        let call = ToolCall {
+            action,
+            name: "create".to_owned(),
+            arguments: object(json!({ "title": title, "labels": ["rfd=116"] })),
+            answers: Map::new(),
+            options: Map::new(),
+            access: None,
+            conversation: "test".to_owned(),
+        };
+        run(&init(&dir), &call, &options)
+    };
+
+    content(call(ToolAction::Run, "Tracks 116"));
+    let holder = ids(&dir)[0];
+    let refusal = format!(
+        "`rfd=116` is already on {holder}, and the board lets one ticket carry each `rfd` value."
+    );
+
+    assert_eq!(
+        error_message(call(ToolAction::FormatArguments, "Also 116")),
+        refusal
+    );
+    assert_eq!(error_message(call(ToolAction::Run, "Also 116")), refusal);
+    assert_eq!(ids(&dir).len(), 1);
+}
+
 #[test]
 fn create_rejects_an_empty_title() {
     let dir = Utf8TempDir::new().unwrap();

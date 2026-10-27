@@ -31,7 +31,7 @@ use jp_tool::{AccessPolicy, Action, Capability, Context, FsAccessError, Outcome,
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 use ticket::{
-    Comment, Labels, NewTicket, ParseError, Selector, Status, Ticket, TicketId,
+    Comment, Labels, NewTicket, ParseError, Selector, Status, Ticket, TicketId, Vocabulary,
     board::{self, Order},
     parse, render, store,
 };
@@ -299,13 +299,19 @@ fn create(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall, preview:
     if title.trim().is_empty() {
         return refuse("`title` must not be empty.");
     }
+    let vocabulary = tickets.options.vocabulary()?;
     let labels = match resolve_labels(
-        tickets.options,
+        &vocabulary,
         args.optional::<Vec<String>>("labels")?.as_deref(),
-    )? {
+    ) {
         Ok(labels) => labels,
         Err(refusal) => return refuse(refusal),
     };
+    match store::check_unique(&tickets.dir, &vocabulary, &labels, None) {
+        Ok(()) => {}
+        Err(taken @ store::Error::Taken(_)) => return refuse(taken.to_string()),
+        Err(other) => return Err(other.into()),
+    }
 
     let limit = option_or(&call.options, "max_title_length", DEFAULT_MAX_TITLE_LENGTH);
     let title = match fitting_title(&title, &call.answers, limit) {
@@ -327,7 +333,7 @@ fn create(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall, preview:
         return Ok(preview_create(&new).into());
     }
 
-    let (id, path) = store::create(&tickets.dir, &new)?;
+    let (id, path) = store::create(&tickets.dir, &vocabulary, &new)?;
     reflow(&path)?;
 
     Ok(format!("Created {id} at {}", tickets.relative(&path)).into())
@@ -409,19 +415,13 @@ fn option_or<T: DeserializeOwned>(options: &Map<String, Value>, key: &str, defau
 
 /// Check labels for a ticket being filed against the board's vocabulary.
 ///
-/// The vocabulary is read even for a call that names no labels, since it can
-/// require some.
-/// The outer error is the vocabulary being unreadable, which is the board's
-/// problem; the inner one is a set of labels the board refuses, which is the
-/// caller's and comes back as a refusal naming what it takes.
-fn resolve_labels(
-    options: &Options,
-    requested: Option<&[String]>,
-) -> Result<Result<Labels, String>, Error> {
-    Ok(options
-        .vocabulary()?
+/// A call that names no labels is checked too, since the board can require
+/// some.
+/// The error is the caller's, a refusal naming what the board takes.
+fn resolve_labels(vocabulary: &Vocabulary, requested: Option<&[String]>) -> Result<Labels, String> {
+    vocabulary
         .resolve(requested.unwrap_or_default())
-        .map_err(|refusal| refusal.to_string()))
+        .map_err(|refusal| refusal.to_string())
 }
 
 fn comment(tickets: &Tickets<'_>, args: &Arguments<'_>, preview: bool) -> Answer {
@@ -554,6 +554,7 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
             Ok((_, applied)) if applied.is_empty() => changed.push("labels cleared".to_owned()),
             Ok((_, applied)) => changed.push(format!("labels: {applied}")),
             Err(store::Error::Rejected(refusal)) => return refuse(refusal.to_string()),
+            Err(taken @ store::Error::Taken(_)) => return refuse(taken.to_string()),
             Err(other) => return Err(other.into()),
         }
     }

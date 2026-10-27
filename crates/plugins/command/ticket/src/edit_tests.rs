@@ -215,6 +215,48 @@ fn a_label_the_board_refuses_goes_back_to_the_editor() {
     assert_eq!(fs::read_to_string(&path).unwrap(), original);
 }
 
+/// A label the board lets one ticket carry, added by hand while another ticket
+/// holds it, goes back to the editor naming that ticket.
+#[test]
+fn a_label_another_ticket_holds_goes_back_to_the_editor() {
+    let dir = Utf8TempDir::new().unwrap();
+    let (path, original) = write_ticket(&dir);
+    let holder: TicketId = "T-02wt0k1".parse().unwrap();
+    let held = Labels::from_tokens(["rfd=116"]).unwrap();
+    fs::write(
+        dir.path().join(format!("{}held.md", holder.file_prefix())),
+        render::ticket(&NewTicket {
+            title: "Tracks 116",
+            authors: "jp",
+            date: "2026-08-05",
+            implements: None,
+            labels: &held,
+            description: "",
+        }),
+    )
+    .unwrap();
+    let edited = original.replace(
+        "- **Status**: Todo\n",
+        "- **Status**: Todo\n- **Label**: rfd=116\n",
+    );
+    let mut editing = Scripted::editing([(Some(edited), true)]).answering([false]);
+    let options = options_with(&json!({
+        "rfd": { "description": "The RFD.", "values": [], "unique": "key-value" }
+    }));
+
+    let error = in_editor(dir.path(), id(), &options, &mut editing).unwrap_err();
+
+    assert_eq!(editing.asked, [format!(
+        "{ID} can't be saved: `rfd=116` is already on {holder}, and the board lets one ticket \
+         carry each `rfd` value."
+    )]);
+    assert!(
+        error.starts_with(&format!("{ID} is unchanged: ")),
+        "{error}"
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+}
+
 /// Labels left as they were don't read the vocabulary, so a board whose
 /// vocabulary is broken can still have its descriptions edited.
 #[test]
