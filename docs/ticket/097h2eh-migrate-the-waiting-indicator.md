@@ -3,7 +3,7 @@
 - **Status**: Done
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-27
-- **Implements**: 091
+- **Label**: relevant-rfd=091
 - **Label**: type=feature
 
 Moves the turn loop's waiting indicator, including its status transitions, from

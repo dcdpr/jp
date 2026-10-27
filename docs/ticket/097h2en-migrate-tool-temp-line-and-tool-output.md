@@ -3,7 +3,7 @@
 - **Status**: Done
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-27
-- **Implements**: 091
+- **Label**: relevant-rfd=091
 - **Label**: type=feature
 
 Migrates `ToolRenderer`'s preparing line and execution-progress ticker to the

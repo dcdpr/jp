@@ -3,8 +3,8 @@
 - **Status**: Todo
 - **Authors**: jp
 - **Date**: 2026-09-07
-- **Implements**: 076
 - **Label**: package=jp_tool
+- **Label**: relevant-rfd=076
 - **Label**: type=task
 
 Every `access.fs` rule is a recursive prefix: a rule at `docs/ticket` covers the

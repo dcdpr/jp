@@ -3,9 +3,9 @@
 - **Status**: Todo
 - **Authors**: jp
 - **Date**: 2026-10-06
-- **Implements**: 117
 - **Label**: domain=mcp
 - **Label**: domain=tooling
+- **Label**: relevant-rfd=117
 - **Label**: type=task
 
 RFD 117 adds `fan_out` but enables it for no tool.

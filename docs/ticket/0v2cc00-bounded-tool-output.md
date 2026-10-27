@@ -3,7 +3,7 @@
 - **Status**: Todo
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-30
-- **Implements**: 115
+- **Label**: tracking-rfd=115
 - **Label**: type=tracking
 
 Tracking ticket for [RFD 115].

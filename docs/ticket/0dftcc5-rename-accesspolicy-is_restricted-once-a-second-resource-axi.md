@@ -3,8 +3,8 @@
 - **Status**: Todo
 - **Authors**: jp
 - **Date**: 2026-09-04
-- **Implements**: 076
 - **Label**: package=jp_tool
+- **Label**: relevant-rfd=076
 - **Label**: type=follow-up
 
 `AccessPolicy::is_restricted()` reports on `fs` alone — it is

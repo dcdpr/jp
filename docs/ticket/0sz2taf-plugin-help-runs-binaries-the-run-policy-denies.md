@@ -3,10 +3,10 @@
 - **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-09-28
-- **Implements**: 072
 - **Label**: client=cli
 - **Label**: domain=plugins
 - **Label**: package=jp_cli
+- **Label**: relevant-rfd=072
 - **Label**: type=bug
 
 `jp -h` and `jp <plugin> -h` execute plugin binaries without checking

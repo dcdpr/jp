@@ -70,6 +70,20 @@ values = [
     "tracking",
 ]
 
+# The RFD a tracking ticket stands for. A ticket tracks at most one RFD, and an
+# RFD has at most one tracking ticket.
+[plugins.command.ticket.options.labels.tracking-rfd]
+description = "The RFD whose implementation this ticket tracks."
+values = []
+max = 1
+unique = "key-value"
+
+# Any other RFD a ticket's work belongs to, such as one phase of its
+# Implementation Plan.
+[plugins.command.ticket.options.labels.relevant-rfd]
+description = "An RFD this ticket's work belongs to."
+values = []
+
 [plugins.command.ticket.options.labels.package]
 description = "Any relevant packages"
 values = [
@@ -113,9 +127,14 @@ values = [
 ]
 
 # `jp rfd` is served the same way, installed with `just _install-rfd`. Its
-# options are left at their defaults, which are JP's layout.
+# directories and link labels are left at their defaults, which are JP's layout.
 [plugins.command.rfd]
 run = "allow"
+
+# A tracking ticket carries `type=tracking` beside its `tracking-rfd` link, since
+# every ticket here carries exactly one `type`.
+[plugins.command.rfd.options.tracking]
+labels = ["type=tracking"]
 
 # `jp vite` keeps the site's RFD and ticket pages in step with the two plugins
 # above, installed with `just _install-vite`. The site reads its settings from

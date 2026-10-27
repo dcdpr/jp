@@ -14,10 +14,11 @@ as it is.
   when it stops before it is finished.
 - `labels` replaces the whole set: pass every label the ticket should end up
   with, or `[]` to clear them. Read the ticket first if you mean to keep the
-  labels it already carries. The set is closed and defined in the workspace
-  configuration; a label outside it is refused, and the refusal names the ones
-  you can use. A value the board has retired stays valid on a ticket that
-  already carries it, so listing it again keeps it.
+  labels it already carries, and keep its `tracking-rfd` and `relevant-rfd`
+  labels unless you mean to unlink the RFDs they name. The labels are defined
+  in the workspace configuration; a label outside them is refused, and the
+  refusal names the ones you can use. A value the board has retired stays valid
+  on a ticket that already carries it, so listing it again keeps it.
 
 To add to the discussion instead, use `ticket_comment`.
 """

@@ -3,11 +3,11 @@
 - **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-09-23
-- **Implements**: 090
 - **Label**: domain=llm
 - **Label**: package=jp_cli
 - **Label**: package=jp_llm
 - **Label**: package=jp_task
+- **Label**: relevant-rfd=090
 - **Label**: type=bug
 
 `Event::Notice` reaches the user on the query path only.

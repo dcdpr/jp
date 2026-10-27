@@ -3,10 +3,10 @@
 - **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-10-01
-- **Implements**: 072
 - **Label**: client=cli
 - **Label**: domain=plugins
 - **Label**: package=jp_cli
+- **Label**: relevant-rfd=072
 - **Label**: type=bug
 
 When a plugin exits by itself (it sends `exit`, or it closes stdout), JP reaps

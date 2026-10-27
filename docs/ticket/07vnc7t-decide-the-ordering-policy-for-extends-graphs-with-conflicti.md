@@ -3,8 +3,8 @@
 - **Status**: Todo
 - **Authors**: jp
 - **Date**: 2026-08-24
-- **Implements**: 035
 - **Label**: package=jp_config
+- **Label**: relevant-rfd=035
 - **Label**: type=question
 
 #887 made the `extends` graph resolve fully before any file is loaded, then

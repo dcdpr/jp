@@ -3,10 +3,10 @@
 - **Status**: Todo
 - **Authors**: jp
 - **Date**: 2026-09-23
-- **Implements**: 090
 - **Label**: domain=llm
 - **Label**: llm-provider=anthropic
 - **Label**: package=jp_llm
+- **Label**: relevant-rfd=090
 - **Label**: type=bug
 
 Two problems in `jp_llm::provider::anthropic::resolve` that cannot happen yet,

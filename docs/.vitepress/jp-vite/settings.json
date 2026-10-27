@@ -92,6 +92,18 @@
           "xct2cli"
         ]
       },
+      "relevant-rfd": {
+        "description": "An RFD this ticket's work belongs to.",
+        "values": [],
+        "open": true
+      },
+      "tracking-rfd": {
+        "description": "The RFD whose implementation this ticket tracks.",
+        "values": [],
+        "open": true,
+        "max": 1,
+        "unique": "key-value"
+      },
       "type": {
         "description": "The type of ticket",
         "values": [
