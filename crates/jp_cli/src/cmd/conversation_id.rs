@@ -369,11 +369,11 @@ fn long_help(session: bool, multi: bool) -> String {
     } else {
         "Conversation ID, Interactive Filter/Picker, or Alias."
     };
-    let mut s = format!("{header}\n\n");
-    s.push_str(&keyword_help(session, multi, false));
+    let keywords = keyword_help(session, multi, false);
+    let mut s = format!("{header}\n\n{}", keywords.trim_end());
 
     if multi {
-        s.push_str("\nWhen multiple IDs are given, only literal conversation IDs are accepted.");
+        s.push_str("\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.");
     }
 
     s
@@ -401,18 +401,21 @@ fn keyword_help(session: bool, multi: bool, ansi: bool) -> String {
     let h_pick_all = h("select from all");
     let h_pick_pinned = h("select from pinned");
     let h_pick_session = h("select from session");
+    let h_pick_archived = h("select from archived");
 
     let h_alias_active = h("target the session's active conversation");
     let h_alias_recent = h("target most recently activated in workspace");
     let h_alias_newest = h("target newest created");
     let h_alias_pinned = h("target most recently pinned");
     let h_alias_session = h("target the session's previous conversation");
+    let h_alias_archived = h("target most recently archived");
 
     let mut help = indoc::formatdoc! {"
         {picker}:
           ?                             {h_pick_all}
           ?p, ?pinned                   {h_pick_pinned}
           ?s, ?session                  {h_pick_session}
+          ?a, ?archived                 {h_pick_archived}
 
         {aliases}:
           ., active                     {h_alias_active}
@@ -420,6 +423,7 @@ fn keyword_help(session: bool, multi: bool, ansi: bool) -> String {
           n, newest                     {h_alias_newest}
           p, pinned                     {h_alias_pinned}
           s, session                    {h_alias_session}
+          a, archived                   {h_alias_archived}
     "};
 
     if multi {
@@ -427,12 +431,14 @@ fn keyword_help(session: bool, multi: bool, ansi: bool) -> String {
         let h_multi_live = h("target all live conversations");
         let h_multi_pinned = h("target all pinned");
         let h_multi_session = h("target all activated in session");
+        let h_multi_archived = h("target all archived");
         let h_stdin = h("read IDs from stdin, one per line");
         help.push_str(&indoc::formatdoc! {"
             \n{multi_target}:
               +l, +live                     {h_multi_live}
               +p, +pinned                   {h_multi_pinned}
               +s, +session                  {h_multi_session}
+              +a, +archived                 {h_multi_archived}
               -                             {h_stdin}
         "});
     }

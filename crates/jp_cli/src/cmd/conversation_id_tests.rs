@@ -417,6 +417,7 @@ fn target_help_table() {
       ?                             select from all
       ?p, ?pinned                   select from pinned
       ?s, ?session                  select from session
+      ?a, ?archived                 select from archived
 
     Conversation Aliases:
       ., active                     target the session's active conversation
@@ -424,11 +425,13 @@ fn target_help_table() {
       n, newest                     target newest created
       p, pinned                     target most recently pinned
       s, session                    target the session's previous conversation
+      a, archived                   target most recently archived
 
     Multi-Target Keywords:
       +l, +live                     target all live conversations
       +p, +pinned                   target all pinned
       +s, +session                  target all activated in session
+      +a, +archived                 target all archived
       -                             read IDs from stdin, one per line
     "#);
 }
