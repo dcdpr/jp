@@ -309,6 +309,11 @@ enum Command {
         /// Repeat to require several.
         #[arg(long = "label")]
         labels: Vec<String>,
+
+        /// Only tickets whose title, description, or comments contain this
+        /// text, ignoring case.
+        #[arg(long)]
+        query: Option<String>,
     },
 
     /// Create the ticket directory.
@@ -1311,20 +1316,13 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             author,
             re,
             body,
-        } => {
-            let id = required(id, "ticket id")?;
-            let author = resolve_author(author, config)?;
-            let body = body.unwrap_or_default();
-            if body.trim().is_empty() {
-                return Err("Refusing to write an empty comment; pass --body.".to_owned());
-            }
-
-            let date = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
-            let position = store::append_comment(dir, id, &author, &date, re, body.trim())
-                .map_err(|error| error.to_string())?;
-
-            Ok(format!("Added {id}#{position} by {author}\n").into())
-        }
+        } => comment(
+            dir,
+            required(id, "ticket id")?,
+            &resolve_author(author, config)?,
+            re,
+            &body.unwrap_or_default(),
+        ),
 
         Command::Label { id, labels } => {
             relabel(dir, ctx.options, required(id, "ticket id")?, &labels)
@@ -1384,31 +1382,47 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             numbers,
             repo,
             kind,
-        } => {
-            if numbers.is_empty() {
-                return Err("No issue numbers given, and no terminal to ask for one.".to_owned());
-            }
-
-            let mut output = Output::default();
-            for number in numbers {
-                output
-                    .text
-                    .push_str(&import(dir, number, &repo, kind)?.text);
-            }
-
-            Ok(output)
-        }
+        } => import_all(dir, &numbers, &repo, kind),
 
         Command::List {
             status,
             kind,
             labels,
-        } => list(dir, status, kind, &labels, ctx.format.is_json()),
+            query,
+        } => list(
+            dir,
+            &Filter {
+                status,
+                kind,
+                labels: &labels,
+                query: query.as_deref(),
+            },
+            ctx.format.is_json(),
+        ),
 
         Command::Init => init_dir(dir),
 
         Command::Tools { command } => tools(ctx, command),
     }
+}
+
+/// Append a comment to a ticket, replying to the one at position `re` if given.
+fn comment(
+    dir: &Utf8Path,
+    id: TicketId,
+    author: &str,
+    re: Option<usize>,
+    body: &str,
+) -> Result<Output, String> {
+    if body.trim().is_empty() {
+        return Err("Refusing to write an empty comment; pass --body.".to_owned());
+    }
+
+    let date = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    let position = store::append_comment(dir, id, author, &date, re, body.trim())
+        .map_err(|error| error.to_string())?;
+
+    Ok(format!("Added {id}#{position} by {author}\n").into())
 }
 
 /// Move a ticket to the column `status` names, next to the ticket `at` names.
@@ -1570,6 +1584,20 @@ fn init_dir(dir: &Utf8Path) -> Result<Output, String> {
     fs::create_dir_all(dir).map_err(|error| format!("failed to create {dir}: {error}"))?;
 
     Ok(format!("Created {dir}\n").into())
+}
+
+/// Import each of `numbers` from `repo`, stopping at the first that fails.
+fn import_all(dir: &Utf8Path, numbers: &[u64], repo: &str, kind: Kind) -> Result<Output, String> {
+    if numbers.is_empty() {
+        return Err("No issue numbers given, and no terminal to ask for one.".to_owned());
+    }
+
+    let mut output = Output::default();
+    for &number in numbers {
+        output.text.push_str(&import(dir, number, repo, kind)?.text);
+    }
+
+    Ok(output)
 }
 
 /// Fetch a GitHub issue and write it into a ticket.
@@ -1893,18 +1921,24 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
     Ok(out.into())
 }
 
+/// What `list` narrows the tickets to; `None`, or no labels, keeps them all.
+struct Filter<'a> {
+    status: Option<Status>,
+    kind: Option<Kind>,
+    labels: &'a [String],
+    query: Option<&'a str>,
+}
+
 /// List tickets, filtered by whatever the caller named.
 ///
 /// Labels are matched as written on the ticket rather than through the
 /// vocabulary, so a ticket carrying a label the board has since dropped can
 /// still be found and fixed.
-fn list(
-    dir: &Utf8Path,
-    status: Option<Status>,
-    kind: Option<Kind>,
-    labels: &[String],
-    json: bool,
-) -> Result<Output, String> {
+fn list(dir: &Utf8Path, filter: &Filter<'_>, json: bool) -> Result<Output, String> {
+    let query = filter
+        .query
+        .map(str::trim)
+        .filter(|query| !query.is_empty());
     let entries = store::list(dir).map_err(|error| error.to_string())?;
 
     let mut warnings = vec![];
@@ -1915,11 +1949,14 @@ fn list(
             Err(error) => warnings.push(format!("{}: {error}", entry.path)),
         }
     }
-    let selectors = Selector::parse_all(labels).map_err(|error| error.to_string())?;
+    let selectors = Selector::parse_all(filter.labels).map_err(|error| error.to_string())?;
     tickets.retain(|(_, ticket, _)| {
-        status.is_none_or(|status| status == ticket.metadata.status)
-            && kind.is_none_or(|kind| kind == ticket.metadata.kind)
+        filter
+            .status
+            .is_none_or(|status| status == ticket.metadata.status)
+            && filter.kind.is_none_or(|kind| kind == ticket.metadata.kind)
             && ticket.metadata.labels.matches(&selectors)
+            && query.is_none_or(|query| ticket.mentions(query))
     });
 
     let text = if json {

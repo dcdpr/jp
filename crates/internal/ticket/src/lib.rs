@@ -201,6 +201,23 @@ pub struct Ticket {
     pub comments: Vec<Comment>,
 }
 
+impl Ticket {
+    /// Whether `query` appears in the title, the description, or a comment,
+    /// ignoring case.
+    ///
+    /// The metadata block is not searched: labels and status have filters of
+    /// their own.
+    #[must_use]
+    pub fn mentions(&self, query: &str) -> bool {
+        let query = query.to_lowercase();
+        let contains = |text: &str| text.to_lowercase().contains(&query);
+
+        contains(&self.title)
+            || contains(&self.description)
+            || self.comments.iter().any(|comment| contains(&comment.body))
+    }
+}
+
 /// A document that doesn't hold a well-formed ticket.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {

@@ -504,7 +504,9 @@ fn list_filters_are_optional() {
             status,
             kind,
             labels,
+            query,
         } => {
+            assert_eq!(query, None);
             assert_eq!(status, Some(Status::InProgress));
             assert_eq!(kind, None);
             assert!(labels.is_empty());
@@ -1160,6 +1162,7 @@ fn commands_run_against_the_resolved_directory() {
         status: None,
         kind: None,
         labels: vec![],
+        query: None,
     })
     .unwrap();
     assert_eq!(
@@ -1174,6 +1177,7 @@ fn commands_run_against_the_resolved_directory() {
         status: Some(Status::Done),
         kind: None,
         labels: vec![],
+        query: None,
     })
     .unwrap();
     assert!(json.json);
@@ -1711,6 +1715,7 @@ fn labels_survive_the_round_trip_and_show_in_the_listing() {
         status: None,
         kind: None,
         labels: vec![],
+        query: None,
     })
     .unwrap();
 
@@ -1734,6 +1739,7 @@ fn listing_narrows_to_tickets_carrying_every_label() {
         status: None,
         kind: None,
         labels: vec!["package=jp_cli".to_owned(), "client=macos".to_owned()],
+        query: None,
     })
     .unwrap();
 
@@ -1756,11 +1762,50 @@ fn listing_narrows_on_a_bare_key() {
         status: None,
         kind: None,
         labels: vec!["client".to_owned()],
+        query: None,
     })
     .unwrap();
 
     assert_eq!(listed.text.lines().count(), 1, "{}", listed.text);
     assert!(listed.text.contains("Client work"), "{}", listed.text);
+}
+
+/// A query matches the title or the description, whatever its case, and a blank
+/// one keeps every ticket.
+#[test]
+fn listing_narrows_on_a_query() {
+    let dir = Utf8TempDir::new().unwrap();
+    let titled = add_labelled(&dir, "Wrap is off by one", &[]);
+    let described = add_labelled(&dir, "Header misaligned", &[]);
+    add_labelled(&dir, "Unrelated", &[]);
+    run_command(&dir, Command::Edit {
+        id: Some(described),
+        title: None,
+        body: Some("The WRAP width ignores the gutter.".to_owned()),
+        kind: None,
+        status: None,
+        labels: vec![],
+    })
+    .unwrap();
+    let listing = |query: &str| {
+        run_command(&dir, Command::List {
+            status: None,
+            kind: None,
+            labels: vec![],
+            query: Some(query.to_owned()),
+        })
+        .unwrap()
+        .text
+    };
+
+    assert_eq!(
+        listing("wrap"),
+        format!(
+            "{titled} Todo         Bug      Wrap is off by one\n{described} Todo         Bug      \
+             Header misaligned\n"
+        )
+    );
+    assert_eq!(listing("  ").lines().count(), 3);
 }
 
 /// The whole set is written, so labelling is idempotent and a label left off
@@ -1969,6 +2014,7 @@ fn unreadable_tickets_are_warned_about_separately() {
         status: None,
         kind: None,
         labels: vec![],
+        query: None,
     })
     .unwrap();
 

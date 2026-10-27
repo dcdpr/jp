@@ -682,7 +682,7 @@ fn list(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall) -> Answer 
     let labels = args.optional::<Vec<String>>("labels")?.unwrap_or_default();
     let query = args
         .optional::<String>("query")?
-        .map(|query| query.trim().to_lowercase())
+        .map(|query| query.trim().to_owned())
         .filter(|query| !query.is_empty());
     let page = args.optional::<usize>("page")?.unwrap_or(1);
     if page == 0 {
@@ -710,7 +710,7 @@ fn list(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall) -> Answer 
         status.is_none_or(|status| status == ticket.metadata.status)
             && kind.is_none_or(|kind| kind == ticket.metadata.kind)
             && ticket.metadata.labels.matches(&selectors)
-            && query.as_deref().is_none_or(|query| mentions(ticket, query))
+            && query.as_deref().is_none_or(|query| ticket.mentions(query))
     });
 
     // An order file that can't be read costs the order, not the listing: the
@@ -746,19 +746,6 @@ fn list(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall) -> Answer 
     });
 
     Ok(render_list(shown, footer.as_deref(), &unreadable).into())
-}
-
-/// Whether `query`, already lowercased, appears in a ticket's title,
-/// description, or comments, ignoring case.
-fn mentions(ticket: &Ticket, query: &str) -> bool {
-    let contains = |text: &str| text.to_lowercase().contains(query);
-
-    contains(&ticket.title)
-        || contains(&ticket.description)
-        || ticket
-            .comments
-            .iter()
-            .any(|comment| contains(&comment.body))
 }
 
 /// `found` laid out the way the board shows it: Todo, In Progress, then Done,
