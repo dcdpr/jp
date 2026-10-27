@@ -32,17 +32,6 @@ use crate::{
     parser::{AttachmentUrlOrPath, split_list},
 };
 
-/// How a flag with an optional value reads a word written before the query.
-///
-/// Shown once, under `jp query --help`, rather than on each such flag.
-pub(crate) const VALUES_BEFORE_THE_QUERY: &str =
-    "Values before the query:
-  A flag whose value is optional reads the word after it as its value only when the word is one it \
-     accepts; otherwise the word starts the query, as in `jp q --fork what if we`. A value \
-     attached to its flag (`--fork=2`, `-k2`) is always the flag's. `-t` asks before reading a \
-     word that names no tool as the query, because it then enables every tool. Put the query \
-     after `--` to keep every value the flag's.";
-
 /// The `--id` flag `query` takes: one conversation, outside any session.
 type Target = Ids<false, false, false>;
 
