@@ -4376,10 +4376,14 @@ fn an_attached_word_after_fork_is_rejected() {
 
     assert_eq!(
         error.render().to_string(),
-        "error: invalid value for '--fork': expected a positive integer, got 'what'\n\nUsage: jp \
-         query [OPTIONS] [QUERY]...\n\nFor more information, try '--help'.\n"
+        "error: invalid value 'what' for '--fork [<N>]': expected a positive integer\n\nFor more \
+         information, try '--help'.\n"
     );
 }
+
+/// How `--fork` rejects the value `x`.
+const FORK_REJECTS_X: &str = "error: invalid value 'x' for '--fork [<N>]': expected a positive \
+                              integer\n\nFor more information, try '--help'.\n";
 
 // Nothing follows the value, so it can only be the flag's, and a typo is
 // reported.
@@ -4389,12 +4393,7 @@ fn a_lone_word_after_fork_is_still_rejected() {
         panic!("a value with no query after it must be the flag's");
     };
 
-    assert!(
-        error
-            .to_string()
-            .contains("invalid value for '--fork': expected a positive integer, got 'x'"),
-        "unexpected error: {error}"
-    );
+    assert_eq!(error.render().to_string(), FORK_REJECTS_X);
 }
 
 // Words after `--` are never the query directly after a flag, so `--` keeps
@@ -4405,12 +4404,7 @@ fn a_word_after_fork_followed_by_escaped_words_is_still_rejected() {
         panic!("a value followed by `--` must be the flag's");
     };
 
-    assert!(
-        error
-            .to_string()
-            .contains("invalid value for '--fork': expected a positive integer, got 'x'"),
-        "unexpected error: {error}"
-    );
+    assert_eq!(error.render().to_string(), FORK_REJECTS_X);
 }
 
 #[test]
@@ -4459,11 +4453,10 @@ fn an_attached_word_after_compact_is_rejected() {
         panic!("an attached value must be the flag's");
     };
 
-    assert!(
-        error
-            .to_string()
-            .contains("invalid compact spec 'what': unknown policy 'what'"),
-        "unexpected error: {error}"
+    assert_eq!(
+        error.render().to_string(),
+        "error: invalid value 'what' for '--compact [<compact>]': unknown policy 'what'\n\nFor \
+         more information, try '--help'.\n"
     );
 }
 
@@ -4566,11 +4559,10 @@ fn a_word_followed_by_another_flag_is_still_rejected() {
         panic!("a value followed by a flag must be the flag's");
     };
 
-    assert!(
-        error
-            .to_string()
-            .contains("invalid compact spec 'now': unknown policy 'now'"),
-        "unexpected error: {error}"
+    assert_eq!(
+        error.render().to_string(),
+        "error: invalid value 'now' for '--compact [<compact>]': unknown policy 'now'\n\nFor more \
+         information, try '--help'.\n"
     );
 }
 

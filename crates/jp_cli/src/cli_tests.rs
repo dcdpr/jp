@@ -88,13 +88,28 @@ fn no_subcommand_is_an_error() {
 // usage line as one clap raises while matching them: the subcommand's own.
 #[test]
 fn an_error_reading_arguments_back_carries_the_usage_line() {
+    let Err(error) = Cli::try_parse_from(["jp", "query", "-i", "+pinned"]) else {
+        panic!("a multi-target keyword must be refused on a single-target command");
+    };
+
+    assert_eq!(
+        error.render().to_string(),
+        "error: multi-target keyword '+pinned' is not supported by this command\n\n\nUsage: jp \
+         query [OPTIONS] [QUERY]...\n\nFor more information, try '--help'.\n"
+    );
+}
+
+// A value the flag's parser rejects reports the parser's own error, naming the
+// flag and the value, as clap does for any argument.
+#[test]
+fn a_value_the_flag_rejects_reports_the_parsers_error() {
     let Err(error) = Cli::try_parse_from(["jp", "query", "-tfoo,,bar"]) else {
         panic!("an empty tool name must be refused");
     };
 
     assert_eq!(
         error.render().to_string(),
-        "error: empty tool name in 'foo,,bar'\n\n\nUsage: jp query [OPTIONS] [QUERY]...\n\nFor \
-         more information, try '--help'.\n"
+        "error: invalid value 'foo,,bar' for '--tool [<tools>]': empty tool name in \
+         'foo,,bar'\n\nFor more information, try '--help'.\n"
     );
 }

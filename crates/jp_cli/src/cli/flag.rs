@@ -13,13 +13,23 @@
 //! Only a value written as its own argument, directly before free text, goes
 //! through [`OptionalValue::claim`].
 //!
+//! Each flag parses its values with a clap value parser, so help lists its
+//! possible values as for any other argument. clap runs that parser before any
+//! word is decided, though, and a word that is free text would fail it: the
+//! parser is wrapped to keep such a word for [`OptionalValue::claim`] instead
+//! of failing the whole command line.
+//!
 //! A flag decided by the word alone settles while the arguments are read.
 //! One that needs the configuration is a field of a command's [`Stage`], which
 //! holds it unsettled until the configuration is known.
 
 use std::{error::Error, ffi::OsStr, fmt, io, marker::PhantomData, sync::Arc};
 
-use clap::{Arg, ArgMatches, error::ErrorKind, value_parser};
+use clap::{
+    Arg, ArgMatches, Command,
+    builder::{PossibleValue, TypedValueParser},
+    error::ErrorKind,
+};
 use inquire::InquireError;
 use jp_inquire::{InlineOption, prompt::PromptBackend};
 
@@ -31,11 +41,10 @@ pub(crate) type SettleError = Box<dyn Error + Send + Sync>;
 
 /// A flag whose value is optional.
 ///
-/// Implementing [`parse`] alone gives a flag whose every value is its own;
-/// [`claim`] is for a flag whose value may be free text instead.
+/// The default [`claim`] makes every value the flag's; a flag whose value may
+/// be free text instead overrides it.
 ///
 /// [`claim`]: Self::claim
-/// [`parse`]: Self::parse
 pub(crate) trait OptionalValue {
     /// The clap argument id.
     const ID: &'static str;
@@ -49,7 +58,7 @@ pub(crate) trait OptionalValue {
     const CLAIMS_EVERY_SEPARATE_VALUE: bool = false;
 
     /// One value of the flag.
-    type Value: fmt::Debug;
+    type Value: fmt::Debug + Clone + Send + Sync + 'static;
 
     /// What deciding a word needs; `()` when the word alone decides.
     type Context: ?Sized;
@@ -63,20 +72,21 @@ pub(crate) trait OptionalValue {
     /// the flag is written without one.
     fn declare(arg: Arg) -> Arg;
 
-    /// Parse a value that is the flag's.
+    /// The parser for the flag's values.
     ///
-    /// # Errors
-    ///
-    /// Returns an error when the value is not one the flag accepts.
-    fn parse(value: &str) -> Result<Self::Value, clap::Error>;
+    /// Help lists its possible values, and its error reports a value the flag
+    /// rejects.
+    fn parser() -> impl TypedValueParser<Value = Self::Value>;
 
-    /// Decide whether a value written as its own argument is the flag's.
+    /// Decide what a value written as its own argument is.
     ///
-    /// # Errors
+    /// `parsed` is `word` as [`parser`] read it, or `None` when the parser
+    /// rejected it.
     ///
-    /// Returns an error when the value is the flag's and does not parse.
-    fn claim(value: &str, _cx: &Self::Context) -> Result<Claim<Self::Value>, clap::Error> {
-        Self::parse(value).map(Claim::Value)
+    /// [`parser`]: Self::parser
+    fn claim(word: &str, parsed: Option<Self::Value>, cx: &Self::Context) -> Claim<Self::Value> {
+        let _ = (word, cx);
+        Claim::from_parsed(parsed)
     }
 
     /// Combine the flag's values, in command-line order.
@@ -93,12 +103,27 @@ pub(crate) enum Claim<T> {
     /// The flag's value.
     Value(T),
 
+    /// The flag's, but rejected by its parser: the command line is invalid.
+    Invalid,
+
     /// The first word of the free text; the flag reads as written bare.
     Text,
 
     /// The first word of the free text, but only once the user agrees, because
     /// the flag written bare grants something.
     Confirm(Confirmation),
+}
+
+impl<T> Claim<T> {
+    /// The flag's value when it parsed, and invalid otherwise.
+    pub(crate) fn from_parsed(parsed: Option<T>) -> Self {
+        parsed.map_or(Self::Invalid, Self::Value)
+    }
+
+    /// The flag's value when it parsed, and free text otherwise.
+    pub(crate) fn value_or_text(parsed: Option<T>) -> Self {
+        parsed.map_or(Self::Text, Self::Value)
+    }
 }
 
 /// A question to put to the user before reading a value as free text.
@@ -189,8 +214,72 @@ pub(crate) fn flag_arg<F: OptionalValue>() -> Arg {
         Arg::new(F::ID)
             .num_args(0..=1)
             .default_missing_value("")
-            .value_parser(value_parser!(String)),
+            .value_parser(Lenient(F::parser())),
     )
+}
+
+/// One value of an [`OptionalValue`] flag, as clap matched it.
+#[derive(Debug, Clone)]
+pub(crate) enum Word<V> {
+    /// The flag written without a value.
+    Bare,
+
+    /// A value, with what the flag's parser made of it: `None` when the parser
+    /// rejected it.
+    Given { word: String, parsed: Option<V> },
+}
+
+/// A flag's value parser that keeps a word it rejects.
+///
+/// clap parses every value while matching, before anything can tell whether a
+/// word is the flag's or free text.
+/// Failing there would turn `jp q --fork what if` into an error before `--fork`
+/// gets to give `what` back.
+#[derive(Clone)]
+struct Lenient<P>(P);
+
+impl<P> TypedValueParser for Lenient<P>
+where
+    P: TypedValueParser,
+    P::Value: fmt::Debug,
+{
+    type Value = Word<P::Value>;
+
+    fn parse_ref(
+        &self,
+        cmd: &Command,
+        arg: Option<&Arg>,
+        value: &OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        if value.is_empty() {
+            return Ok(Word::Bare);
+        }
+
+        let word = value
+            .to_str()
+            .ok_or_else(|| clap::Error::new(ErrorKind::InvalidUtf8).with_cmd(cmd))?
+            .to_owned();
+        let parsed = self.0.parse_ref(cmd, arg, value).ok();
+
+        Ok(Word::Given { word, parsed })
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        self.0.possible_values()
+    }
+}
+
+/// The error `F`'s parser reports for `word`.
+///
+/// The rejection is not kept from matching, because a clap error cannot be
+/// cloned out of the matches; parsing the word again recreates it.
+fn rejection<F: OptionalValue>(word: &str) -> clap::Error {
+    let arg = flag_arg::<F>();
+    match F::parser().parse_ref(&Command::new("jp"), Some(&arg), OsStr::new(word)) {
+        Err(error) => error,
+        // Unreachable while the parser is deterministic.
+        Ok(_) => invalid_value(format!("invalid value '{word}' for '{arg}'")),
+    }
 }
 
 /// The values of an [`OptionalValue`] flag as written on the command line.
@@ -207,7 +296,7 @@ pub(crate) struct Flag<F: OptionalValue> {
 enum Read<V> {
     Bare,
     Value(V),
-    Undecided(String),
+    Undecided { word: String, parsed: Option<V> },
 }
 
 impl<F: OptionalValue> Flag<F> {
@@ -221,11 +310,11 @@ impl<F: OptionalValue> Flag<F> {
         spelling: &Spelling,
         text: &impl FreeText,
     ) -> Result<Self, clap::Error> {
-        let Ok(Some(occurrences)) = matches.try_get_raw_occurrences(F::ID) else {
+        let Ok(Some(occurrences)) = matches.try_get_occurrences::<Word<F::Value>>(F::ID) else {
             return Ok(Self::default());
         };
 
-        let occurrences: Vec<Vec<&OsStr>> = occurrences.map(Iterator::collect).collect();
+        let occurrences: Vec<Vec<&Word<F::Value>>> = occurrences.map(Iterator::collect).collect();
         let attached = spelling.attached(F::ID, occurrences.len());
         let mut indices = matches.indices_of(F::ID).into_iter().flatten();
 
@@ -239,20 +328,17 @@ impl<F: OptionalValue> Flag<F> {
                 let Some(index) = indices.next() else {
                     break;
                 };
-                let word = word
-                    .to_str()
-                    .ok_or_else(|| clap::Error::new(ErrorKind::InvalidUtf8))?;
 
                 let claimable = separate
                     && text.takes_words()
                     && (F::CLAIMS_EVERY_SEPARATE_VALUE || text.is_text(index + 1));
 
-                let read = if word.is_empty() {
-                    Read::Bare
-                } else if claimable {
-                    Read::Undecided(word.to_owned())
-                } else {
-                    Read::Value(F::parse(word)?)
+                let read = match word.clone() {
+                    Word::Bare => Read::Bare,
+                    Word::Given { word, parsed } if claimable => Read::Undecided { word, parsed },
+                    Word::Given { word, parsed } => {
+                        Read::Value(parsed.ok_or_else(|| rejection::<F>(&word))?)
+                    }
                 };
                 values.push((index, read));
             }
@@ -275,8 +361,9 @@ impl<F: OptionalValue> Flag<F> {
             let value = match read {
                 Read::Bare => None,
                 Read::Value(value) => Some(value),
-                Read::Undecided(word) => match F::claim(&word, cx)? {
+                Read::Undecided { word, parsed } => match F::claim(&word, parsed, cx) {
                     Claim::Value(value) => Some(value),
+                    Claim::Invalid => return Err(rejection::<F>(&word).into()),
                     Claim::Text => {
                         text.give(index, word);
                         None

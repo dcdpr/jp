@@ -10,7 +10,9 @@
 use std::collections::HashSet;
 
 use clap::{
-    Arg, ArgAction, ArgGroup, ArgMatches, Command, builder::TypedValueParser as _, value_parser,
+    Arg, ArgAction, ArgGroup, ArgMatches, Command,
+    builder::{BoolValueParser, NonEmptyStringValueParser, TypedValueParser},
+    value_parser,
 };
 use jp_config::{
     PartialAppConfig,
@@ -24,11 +26,22 @@ use crate::{
     Spelling,
     cli::flag::{
         ArgPrompts, Claim, Confirmation, Flag, FlagValues, FreeText, OptionalValue, Parsed, Settle,
-        SettleError, Settled, flag_arg, invalid_value,
+        SettleError, Settled, flag_arg,
     },
     cmd::{compact_flag::Compact, conversation_id::Ids},
     parser::{AttachmentUrlOrPath, split_list},
 };
+
+/// How a flag with an optional value reads a word written before the query.
+///
+/// Shown once, under `jp query --help`, rather than on each such flag.
+pub(crate) const VALUES_BEFORE_THE_QUERY: &str =
+    "Values before the query:
+  A flag whose value is optional reads the word after it as its value only when the word is one it \
+     accepts; otherwise the word starts the query, as in `jp q --fork what if we`. A value \
+     attached to its flag (`--fork=2`, `-k2`) is always the flag's. `-t` asks before reading a \
+     word that names no tool as the query, because it then enables every tool. Put the query \
+     after `--` to keep every value the flag's.";
 
 /// The `--id` flag `query` takes: one conversation, outside any session.
 type Target = Ids<false, false, false>;
@@ -583,24 +596,16 @@ impl OptionalValue for Fork {
             .help("Fork the conversation and start a new turn on the fork")
             .long_help(
                 "Fork the session's active conversation (or the one specified by --id) and start \
-                 a new turn on the fork.\n\nIf N is given, the fork keeps only the last N \
-                 turns.\n\nA value written directly before the query that is not a number is the \
-                 query's first word instead, and the fork keeps every turn: `jp q --fork what if \
-                 we` forks and asks \"what if we\". A value attached with `=` is always the \
-                 number of turns.",
+                 a new turn on the fork.\n\nIf N is given, the fork keeps only the last N turns.",
             )
     }
 
-    fn parse(value: &str) -> Result<usize, clap::Error> {
-        value.parse().map_err(|_| {
-            invalid_value(format!(
-                "invalid value for '--fork': expected a positive integer, got '{value}'"
-            ))
-        })
+    fn parser() -> impl TypedValueParser<Value = usize> {
+        parse_turns
     }
 
-    fn claim(value: &str, (): &()) -> Result<Claim<usize>, clap::Error> {
-        Ok(value.parse().map_or(Claim::Text, Claim::Value))
+    fn claim(_: &str, parsed: Option<usize>, (): &()) -> Claim<usize> {
+        Claim::value_or_text(parsed)
     }
 
     fn collect(values: FlagValues<usize>) -> Result<Self::Output, clap::Error> {
@@ -629,21 +634,16 @@ impl OptionalValue for Expiry {
                  but only until the conversation is no longer marked as active (e.g. when a new \
                  conversation is started), and when the expiration date is reached.\n\nThis \
                  differs from `--no-persist` in that the conversation can contain multiple turns, \
-                 as long as it remains active and not expired.\n\nA value written directly before \
-                 the query that is not a duration is the query's first word instead, and no \
-                 duration is set: `jp q -n --tmp quick question` asks \"quick question\". A value \
-                 attached with `=` is always the duration.",
+                 as long as it remains active and not expired.",
             )
     }
 
-    fn parse(value: &str) -> Result<humantime::Duration, clap::Error> {
-        value
-            .parse()
-            .map_err(|error| invalid_value(format!("invalid value '{value}' for '--tmp': {error}")))
+    fn parser() -> impl TypedValueParser<Value = humantime::Duration> {
+        parse_duration
     }
 
-    fn claim(value: &str, (): &()) -> Result<Claim<humantime::Duration>, clap::Error> {
-        Ok(value.parse().map_or(Claim::Text, Claim::Value))
+    fn claim(_: &str, parsed: Option<humantime::Duration>, (): &()) -> Claim<humantime::Duration> {
+        Claim::value_or_text(parsed)
     }
 
     fn collect(values: FlagValues<humantime::Duration>) -> Result<Self::Output, clap::Error> {
@@ -694,16 +694,12 @@ impl OptionalValue for Quote {
             )
     }
 
-    fn parse(value: &str) -> Result<bool, clap::Error> {
-        value.parse().map_err(|_| {
-            invalid_value(format!(
-                "invalid value '{value}' for '--quote': expected `true` or `false`"
-            ))
-        })
+    fn parser() -> impl TypedValueParser<Value = bool> {
+        BoolValueParser::new()
     }
 
-    fn claim(value: &str, (): &()) -> Result<Claim<bool>, clap::Error> {
-        Ok(value.parse().map_or(Claim::Text, Claim::Value))
+    fn claim(_: &str, parsed: Option<bool>, (): &()) -> Claim<bool> {
+        Claim::value_or_text(parsed)
     }
 
     fn collect(values: FlagValues<bool>) -> Result<Option<bool>, clap::Error> {
@@ -736,27 +732,25 @@ impl OptionalValue for ToolUse {
                  enabled tools. With `false`, it may use none.\n\nThis applies to a single query \
                  and is *not* persisted: the next query forces nothing, and a tool that was \
                  disabled stays disabled. To persist tool choice behavior, set the \
-                 `assistant.tool_choice` field in a configuration file.\n\nA value written \
-                 directly before the query names a tool when a tool by that name is configured; \
-                 otherwise it is the first word of the query, and the assistant must use one of \
-                 its tools: `jp q -u fix the bug`. A value attached with `=` always names a tool.",
+                 `assistant.tool_choice` field in a configuration file.",
             )
     }
 
-    fn parse(value: &str) -> Result<String, clap::Error> {
-        Ok(value.to_owned())
+    fn parser() -> impl TypedValueParser<Value = String> {
+        NonEmptyStringValueParser::new()
     }
 
     /// `true` and `false` are the flag's own spellings, never a tool name.
     ///
     /// A word naming no tool needs no confirmation: a bare `-u` only requires
     /// the assistant to call one of the tools it already has.
-    fn claim(value: &str, tools: &KnownTools) -> Result<Claim<String>, clap::Error> {
-        if matches!(value, "true" | "false") || tools.contains(value) {
-            return Ok(Claim::Value(value.to_owned()));
+    fn claim(_: &str, parsed: Option<String>, tools: &KnownTools) -> Claim<String> {
+        match parsed {
+            Some(name) if matches!(name.as_str(), "true" | "false") || tools.contains(&name) => {
+                Claim::Value(name)
+            }
+            _ => Claim::Text,
         }
-
-        Ok(Claim::Text)
     }
 
     fn collect(values: FlagValues<String>) -> Result<Self::Output, clap::Error> {
@@ -881,27 +875,22 @@ impl OptionalValue for EnableTools {
                  unaffected.\n\nName several tools at once by separating them with commas \
                  (`--tool=read,write`), or by providing this flag multiple times. Flags are \
                  evaluated left-to-right, so `--no-tools --tool=write` first disables everything, \
-                 then re-enables only 'write'.\n\nA value written directly before the query, as \
-                 in `jp q -t fix the bug`, names tools when every name in it is a configured \
-                 tool. Otherwise JP asks before enabling every tool and reading the value as the \
-                 first word of the query, and refuses when there is nobody to ask. Put the query \
-                 after `--` to enable every tool without being asked: `jp q -t -- fix the bug`. A \
-                 value attached with `=` (`-t=read`) always names tools.",
+                 then re-enables only 'write'.",
             )
     }
 
-    fn parse(value: &str) -> Result<Vec<String>, clap::Error> {
-        split_list(value, "tool name")
+    fn parser() -> impl TypedValueParser<Value = Vec<String>> {
+        parse_tool_names
     }
 
     /// A word naming no configured tool starts the query only once the user
     /// agrees, because `-t` written bare enables every tool.
-    fn claim(value: &str, tools: &KnownTools) -> Result<Claim<Vec<String>>, clap::Error> {
-        if let Some(names) = tool_names(value, tools) {
-            return Ok(Claim::Value(names));
+    fn claim(value: &str, parsed: Option<Vec<String>>, tools: &KnownTools) -> Claim<Vec<String>> {
+        if let Some(names) = known_tools(parsed, tools) {
+            return Claim::Value(names);
         }
 
-        Ok(Claim::Confirm(Confirmation {
+        Claim::Confirm(Confirmation {
             question: format!(
                 "`{value}` is not a configured tool.\nEnable every tool on this conversation, and \
                  start the query with `{value}`?"
@@ -911,7 +900,7 @@ impl OptionalValue for EnableTools {
                 "`{value}` is not a configured tool. To enable every tool and start the query \
                  with `{value}`, put the query after `--`: `-t -- {value} ...`"
             ),
-        }))
+        })
     }
 
     fn collect(values: FlagValues<Vec<String>>) -> Result<Self::Output, clap::Error> {
@@ -942,20 +931,18 @@ impl OptionalValue for DisableTools {
                  repeated flags.\n\nThe change applies to this query and every later one on the \
                  conversation; use `--tool` to turn tools back on. To suppress tools for a single \
                  query, use `--no-tool-use`.\n\nFlags are evaluated left-to-right together with \
-                 `--tool`.\n\nA value written directly before the query names tools when every \
-                 name in it is a configured tool; otherwise it is the first word of the query, \
-                 and the flag disables every tool. A value attached with `=` always names tools.",
+                 `--tool`.",
             )
     }
 
-    fn parse(value: &str) -> Result<Vec<String>, clap::Error> {
-        split_list(value, "tool name")
+    fn parser() -> impl TypedValueParser<Value = Vec<String>> {
+        parse_tool_names
     }
 
     /// A word naming no configured tool starts the query without asking:
     /// disabling every tool grants nothing.
-    fn claim(value: &str, tools: &KnownTools) -> Result<Claim<Vec<String>>, clap::Error> {
-        Ok(tool_names(value, tools).map_or(Claim::Text, Claim::Value))
+    fn claim(_: &str, parsed: Option<Vec<String>>, tools: &KnownTools) -> Claim<Vec<String>> {
+        Claim::value_or_text(known_tools(parsed, tools))
     }
 
     fn collect(values: FlagValues<Vec<String>>) -> Result<Self::Output, clap::Error> {
@@ -963,9 +950,22 @@ impl OptionalValue for DisableTools {
     }
 }
 
-/// The tools `value` names, when it is a valid list of known tools.
-fn tool_names(value: &str, tools: &KnownTools) -> Option<Vec<String>> {
-    split_list::<String>(value, "tool name")
-        .ok()
-        .filter(|names| names.iter().all(|name| tools.contains(name)))
+/// `names` when every one of them is a known tool.
+fn known_tools(names: Option<Vec<String>>, tools: &KnownTools) -> Option<Vec<String>> {
+    names.filter(|names| names.iter().all(|name| tools.contains(name)))
+}
+
+/// Parse a comma-separated list of tool names.
+fn parse_tool_names(value: &str) -> Result<Vec<String>, String> {
+    split_list(value, "tool name")
+}
+
+/// Parse the number of turns `--fork` keeps.
+fn parse_turns(value: &str) -> Result<usize, &'static str> {
+    value.parse().map_err(|_| "expected a positive integer")
+}
+
+/// Parse the duration `--tmp` keeps a conversation for.
+fn parse_duration(value: &str) -> Result<humantime::Duration, humantime::DurationError> {
+    value.parse()
 }

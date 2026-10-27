@@ -556,7 +556,7 @@ short_aliases: None
 index: None
 action: Append
 num_args: Some(0..=1)
-value_type: alloc::string::String
+value_type: jp_cli::cli::flag::Word<jp_cli::cmd::target::ConversationTarget>
 possible_values: []
 value_names: None
 value_delimiter: Some(',')
@@ -565,7 +565,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("Conversation ID or keyword")
-long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n\nConversation Aliases:\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  -                             read IDs from stdin, one per line\nWhen multiple IDs are given, only literal conversation IDs are accepted.\n\nOn `jp query`, a value written directly before the query that is neither a conversation ID nor one of the forms above is the query's first word instead, and the picker opens: `jp q -i fix the bug` picks a conversation and asks \"fix the bug\". Put the query after `--` to search the picker by title: `jp q -i auth -- fix the bug`.")
+long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n\nConversation Aliases:\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  -                             read IDs from stdin, one per line\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
 
 ### help
 short: Some('h')
@@ -725,7 +725,7 @@ long_help: Some("Print help (see a summary with '-h')")
 about: Some("Query the assistant")
 long_about: None
 after_help: None
-after_long_help: None
+after_long_help: Some("Values before the query:\n  A flag whose value is optional reads the word after it as its value only when the word is one it accepts; otherwise the word starts the query, as in `jp q --fork what if we`. A value attached to its flag (`--fork=2`, `-k2`) is always the flag's. `-t` asks before reading a word that names no tool as the query, because it then enables every tool. Put the query after `--` to keep every value the flag's.")
 visible_aliases: ["q"]
 hidden_aliases: []
 hidden: false
@@ -803,7 +803,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: alloc::string::String
+value_type: jp_cli::cli::flag::Word<jp_cli::cmd::target::ConversationTarget>
 possible_values: []
 value_names: None
 value_delimiter: None
@@ -812,7 +812,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("Conversation ID or keyword")
-long_help: Some("Conversation ID, Interactive Filter/Picker, or Alias.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n\nConversation Aliases:\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n\nOn `jp query`, a value written directly before the query that is neither a conversation ID nor one of the forms above is the query's first word instead, and the picker opens: `jp q -i fix the bug` picks a conversation and asks \"fix the bug\". Put the query after `--` to search the picker by title: `jp q -i auth -- fix the bug`.")
+long_help: Some("Conversation ID, Interactive Filter/Picker, or Alias.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n\nConversation Aliases:\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned")
 
 ### fork
 short: None
@@ -823,7 +823,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: alloc::string::String
+value_type: jp_cli::cli::flag::Word<usize>
 possible_values: []
 value_names: Some(["N"])
 value_delimiter: None
@@ -832,7 +832,7 @@ help_heading: None
 conflicts: ["new_conversation"]
 set: []
 help: Some("Fork the conversation and start a new turn on the fork")
-long_help: Some("Fork the session's active conversation (or the one specified by --id) and start a new turn on the fork.\n\nIf N is given, the fork keeps only the last N turns.\n\nA value written directly before the query that is not a number is the query's first word instead, and the fork keeps every turn: `jp q --fork what if we` forks and asks \"what if we\". A value attached with `=` is always the number of turns.")
+long_help: Some("Fork the session's active conversation (or the one specified by --id) and start a new turn on the fork.\n\nIf N is given, the fork keeps only the last N turns.")
 
 ### new_conversation
 short: Some('n')
@@ -1003,8 +1003,8 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: alloc::string::String
-possible_values: []
+value_type: jp_cli::cli::flag::Word<bool>
+possible_values: ["true", "false"]
 value_names: Some(["BOOL"])
 value_delimiter: None
 default_values: []
@@ -1203,7 +1203,7 @@ short_aliases: None
 index: None
 action: Append
 num_args: Some(0..=1)
-value_type: alloc::string::String
+value_type: jp_cli::cli::flag::Word<alloc::vec::Vec<alloc::string::String>>
 possible_values: []
 value_names: None
 value_delimiter: None
@@ -1212,7 +1212,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("The tool(s) to enable")
-long_help: Some("The tool(s) to enable.\n\nIf an existing tool is configured with a matching name, it is enabled for this query and every later one on the conversation; use `--no-tool` to turn it back off.\n\nTo run a disabled tool just once, use `--tool-use NAME` instead.\n\nIf no arguments are provided, every tool that allows it is enabled; a tool set to `explicit` or `always` is unaffected.\n\nName several tools at once by separating them with commas (`--tool=read,write`), or by providing this flag multiple times. Flags are evaluated left-to-right, so `--no-tools --tool=write` first disables everything, then re-enables only 'write'.\n\nA value written directly before the query, as in `jp q -t fix the bug`, names tools when every name in it is a configured tool. Otherwise JP asks before enabling every tool and reading the value as the first word of the query, and refuses when there is nobody to ask. Put the query after `--` to enable every tool without being asked: `jp q -t -- fix the bug`. A value attached with `=` (`-t=read`) always names tools.")
+long_help: Some("The tool(s) to enable.\n\nIf an existing tool is configured with a matching name, it is enabled for this query and every later one on the conversation; use `--no-tool` to turn it back off.\n\nTo run a disabled tool just once, use `--tool-use NAME` instead.\n\nIf no arguments are provided, every tool that allows it is enabled; a tool set to `explicit` or `always` is unaffected.\n\nName several tools at once by separating them with commas (`--tool=read,write`), or by providing this flag multiple times. Flags are evaluated left-to-right, so `--no-tools --tool=write` first disables everything, then re-enables only 'write'.")
 
 ### no_tools
 short: Some('T')
@@ -1223,7 +1223,7 @@ short_aliases: None
 index: None
 action: Append
 num_args: Some(0..=1)
-value_type: alloc::string::String
+value_type: jp_cli::cli::flag::Word<alloc::vec::Vec<alloc::string::String>>
 possible_values: []
 value_names: None
 value_delimiter: None
@@ -1232,7 +1232,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("Disable tool(s)")
-long_help: Some("Disable tool(s).\n\nIf provided without a value, every tool that allows it is disabled (a tool set to `explicit` or `always` is unaffected), otherwise name the tools to disable, separated by commas (`--no-tool=read,write`) or across repeated flags.\n\nThe change applies to this query and every later one on the conversation; use `--tool` to turn tools back on. To suppress tools for a single query, use `--no-tool-use`.\n\nFlags are evaluated left-to-right together with `--tool`.\n\nA value written directly before the query names tools when every name in it is a configured tool; otherwise it is the first word of the query, and the flag disables every tool. A value attached with `=` always names tools.")
+long_help: Some("Disable tool(s).\n\nIf provided without a value, every tool that allows it is disabled (a tool set to `explicit` or `always` is unaffected), otherwise name the tools to disable, separated by commas (`--no-tool=read,write`) or across repeated flags.\n\nThe change applies to this query and every later one on the conversation; use `--tool` to turn tools back on. To suppress tools for a single query, use `--no-tool-use`.\n\nFlags are evaluated left-to-right together with `--tool`.")
 
 ### expires_in
 short: None
@@ -1243,7 +1243,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: alloc::string::String
+value_type: jp_cli::cli::flag::Word<humantime::wrapper::Duration>
 possible_values: []
 value_names: Some(["DURATION"])
 value_delimiter: None
@@ -1252,7 +1252,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("Set the expiration date of the conversation")
-long_help: Some("Set the expiration date of the conversation.\n\nThe conversation is persisted, but only until the conversation is no longer marked as active (e.g. when a new conversation is started), and when the expiration date is reached.\n\nThis differs from `--no-persist` in that the conversation can contain multiple turns, as long as it remains active and not expired.\n\nA value written directly before the query that is not a duration is the query's first word instead, and no duration is set: `jp q -n --tmp quick question` asks \"quick question\". A value attached with `=` is always the duration.")
+long_help: Some("Set the expiration date of the conversation.\n\nThe conversation is persisted, but only until the conversation is no longer marked as active (e.g. when a new conversation is started), and when the expiration date is reached.\n\nThis differs from `--no-persist` in that the conversation can contain multiple turns, as long as it remains active and not expired.")
 
 ### title
 short: None
@@ -1303,7 +1303,7 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: alloc::string::String
+value_type: jp_cli::cli::flag::Word<alloc::string::String>
 possible_values: []
 value_names: Some(["TOOL"])
 value_delimiter: None
@@ -1312,7 +1312,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("The tool to use")
-long_help: Some("The tool to use.\n\nIf a value is provided, the tool matching the value will be used. The named tool runs for this query even when it is disabled, so it does not have to be enabled separately; a tool whose policy locks it off is refused.\n\nWithout a value, or with `true`, the assistant must use one of its enabled tools. With `false`, it may use none.\n\nThis applies to a single query and is *not* persisted: the next query forces nothing, and a tool that was disabled stays disabled. To persist tool choice behavior, set the `assistant.tool_choice` field in a configuration file.\n\nA value written directly before the query names a tool when a tool by that name is configured; otherwise it is the first word of the query, and the assistant must use one of its tools: `jp q -u fix the bug`. A value attached with `=` always names a tool.")
+long_help: Some("The tool to use.\n\nIf a value is provided, the tool matching the value will be used. The named tool runs for this query even when it is disabled, so it does not have to be enabled separately; a tool whose policy locks it off is refused.\n\nWithout a value, or with `true`, the assistant must use one of its enabled tools. With `false`, it may use none.\n\nThis applies to a single query and is *not* persisted: the next query forces nothing, and a tool that was disabled stays disabled. To persist tool choice behavior, set the `assistant.tool_choice` field in a configuration file.")
 
 ### no_tool_use
 short: Some('U')
@@ -1343,7 +1343,7 @@ short_aliases: None
 index: None
 action: Append
 num_args: Some(0..=1)
-value_type: alloc::string::String
+value_type: jp_cli::cli::flag::Word<jp_cli::cmd::compact_flag::CompactSpec>
 possible_values: []
 value_names: None
 value_delimiter: None
@@ -1352,7 +1352,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("Run conversation compaction rules")
-long_help: Some("Compact the conversation.\n\nWithout a value, applies the compaction rules from the resolved configuration.\n\nWith a DSL value (e.g. `--compact=s:..-3`), applies an inline compaction rule. Multiple `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare `--compact` includes config rules, each `--compact=SPEC` adds a DSL rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or a byte count). Each half of a tool call is judged on its own size; `omit` is judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 compacts through the third turn from the end, leaving the final two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, r,over=16kb+t=sres,over=1mb:..-3\n\nOn `jp query`, a value written directly before the query that is not a valid spec is the query's first word instead, and the flag applies the configured rules: `jp q -k what did we decide` compacts with the configured rules and asks \"what did we decide\". A value attached with `=` is always a spec.")
+long_help: Some("Compact the conversation.\n\nWithout a value, applies the compaction rules from the resolved configuration.\n\nWith a DSL value (e.g. `--compact=s:..-3`), applies an inline compaction rule. Multiple `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare `--compact` includes config rules, each `--compact=SPEC` adds a DSL rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or a byte count). Each half of a tool call is judged on its own size; `omit` is judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 compacts through the third turn from the end, leaving the final two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, r,over=16kb+t=sres,over=1mb:..-3")
 
 ### mount
 short: None
@@ -2658,7 +2658,7 @@ short_aliases: None
 index: None
 action: Append
 num_args: Some(0..=1)
-value_type: alloc::string::String
+value_type: jp_cli::cli::flag::Word<jp_cli::cmd::compact_flag::CompactSpec>
 possible_values: []
 value_names: None
 value_delimiter: None
@@ -2667,7 +2667,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("Run conversation compaction rules")
-long_help: Some("Compact the conversation.\n\nWithout a value, applies the compaction rules from the resolved configuration.\n\nWith a DSL value (e.g. `--compact=s:..-3`), applies an inline compaction rule. Multiple `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare `--compact` includes config rules, each `--compact=SPEC` adds a DSL rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or a byte count). Each half of a tool call is judged on its own size; `omit` is judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 compacts through the third turn from the end, leaving the final two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, r,over=16kb+t=sres,over=1mb:..-3\n\nOn `jp query`, a value written directly before the query that is not a valid spec is the query's first word instead, and the flag applies the configured rules: `jp q -k what did we decide` compacts with the configured rules and asks \"what did we decide\". A value attached with `=` is always a spec.")
+long_help: Some("Compact the conversation.\n\nWithout a value, applies the compaction rules from the resolved configuration.\n\nWith a DSL value (e.g. `--compact=s:..-3`), applies an inline compaction rule. Multiple `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare `--compact` includes config rules, each `--compact=SPEC` adds a DSL rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or a byte count). Each half of a tool call is judged on its own size; `omit` is judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 compacts through the third turn from the end, leaving the final two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, r,over=16kb+t=sres,over=1mb:..-3")
 
 ### title
 short: Some('t')
@@ -3052,7 +3052,7 @@ short_aliases: None
 index: None
 action: Append
 num_args: Some(0..=1)
-value_type: alloc::string::String
+value_type: jp_cli::cli::flag::Word<jp_cli::cmd::compact_flag::CompactSpec>
 possible_values: []
 value_names: None
 value_delimiter: None
@@ -3061,7 +3061,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("Run conversation compaction rules")
-long_help: Some("Compact the conversation.\n\nWithout a value, applies the compaction rules from the resolved configuration.\n\nWith a DSL value (e.g. `--compact=s:..-3`), applies an inline compaction rule. Multiple `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare `--compact` includes config rules, each `--compact=SPEC` adds a DSL rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or a byte count). Each half of a tool call is judged on its own size; `omit` is judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 compacts through the third turn from the end, leaving the final two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, r,over=16kb+t=sres,over=1mb:..-3\n\nOn `jp query`, a value written directly before the query that is not a valid spec is the query's first word instead, and the flag applies the configured rules: `jp q -k what did we decide` compacts with the configured rules and asks \"what did we decide\". A value attached with `=` is always a spec.")
+long_help: Some("Compact the conversation.\n\nWithout a value, applies the compaction rules from the resolved configuration.\n\nWith a DSL value (e.g. `--compact=s:..-3`), applies an inline compaction rule. Multiple `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare `--compact` includes config rules, each `--compact=SPEC` adds a DSL rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or a byte count). Each half of a tool call is judged on its own size; `omit` is judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 compacts through the third turn from the end, leaving the final two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, r,over=16kb+t=sres,over=1mb:..-3")
 
 ### help
 short: Some('h')
@@ -3278,7 +3278,7 @@ short_aliases: None
 index: None
 action: Append
 num_args: Some(0..=1)
-value_type: alloc::string::String
+value_type: jp_cli::cli::flag::Word<jp_cli::cmd::target::ConversationTarget>
 possible_values: []
 value_names: None
 value_delimiter: Some(',')
@@ -3287,7 +3287,7 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("Conversation ID or keyword")
-long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.\n\nOn `jp query`, a value written directly before the query that is neither a conversation ID nor one of the forms above is the query's first word instead, and the picker opens: `jp q -i fix the bug` picks a conversation and asks \"fix the bug\". Put the query after `--` to search the picker by title: `jp q -i auth -- fix the bug`.")
+long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
 
 ### ignore_case
 short: None
@@ -3611,7 +3611,7 @@ short_aliases: None
 index: None
 action: Append
 num_args: Some(0..=1)
-value_type: alloc::string::String
+value_type: jp_cli::cli::flag::Word<jp_cli::cmd::target::ConversationTarget>
 possible_values: []
 value_names: None
 value_delimiter: Some(',')
@@ -3620,7 +3620,7 @@ help_heading: None
 conflicts: []
 set: ["global"]
 help: Some("Conversation ID or keyword")
-long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.\n\nOn `jp query`, a value written directly before the query that is neither a conversation ID nor one of the forms above is the query's first word instead, and the picker opens: `jp q -i fix the bug` picks a conversation and asks \"fix the bug\". Put the query after `--` to search the picker by title: `jp q -i auth -- fix the bug`.")
+long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
 
 ### help
 short: Some('h')

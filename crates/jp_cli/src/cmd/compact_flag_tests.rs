@@ -17,11 +17,10 @@ fn a_command_without_query_words_rejects_a_word_that_is_no_spec() {
     let error = <WithoutQuery as clap::Parser>::try_parse_from(["fork", "-k", "what", "jp-c1"])
         .unwrap_err();
 
-    assert!(
-        error
-            .to_string()
-            .contains("invalid compact spec 'what': unknown policy 'what'"),
-        "unexpected error: {error}"
+    assert_eq!(
+        error.render().to_string(),
+        "error: invalid value 'what' for '--compact [<compact>]': unknown policy 'what'\n\nFor \
+         more information, try '--help'.\n"
     );
 }
 

@@ -78,6 +78,7 @@ impl Commands<Parsed> {
             .subcommand(
                 query::Query::augment(Command::new("query"))
                     .about("Query the assistant")
+                    .after_long_help(query::VALUES_BEFORE_THE_QUERY)
                     .visible_alias("q"),
             )
             .subcommand(

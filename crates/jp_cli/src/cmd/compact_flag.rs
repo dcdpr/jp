@@ -6,7 +6,7 @@
 
 use std::str::FromStr;
 
-use clap::{Arg, ArgAction, ArgMatches, Command};
+use clap::{Arg, ArgAction, ArgMatches, Command, builder::TypedValueParser};
 use jp_config::{
     conversation::compaction::{
         CompactionConfig, CompactionRuleConfig, PartialCompactionRuleConfig, PartialSummaryConfig,
@@ -15,7 +15,7 @@ use jp_config::{
     types::{byte_size::ByteSize, policy_spec::PolicySpec},
 };
 
-use crate::cli::flag::{Claim, Flag, FlagValues, OptionalValue, flag_arg, invalid_value};
+use crate::cli::flag::{Claim, Flag, FlagValues, OptionalValue, flag_arg};
 
 /// Shared compaction flag that can be embedded in any command.
 ///
@@ -127,22 +127,16 @@ impl OptionalValue for Compact {
                  for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 \
                  compacts through the third turn from the end, leaving the final two \
                  alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, \
-                 r,over=16kb+t=sres,over=1mb:..-3\n\nOn `jp query`, a value written directly \
-                 before the query that is not a valid spec is the query's first word instead, and \
-                 the flag applies the configured rules: `jp q -k what did we decide` compacts \
-                 with the configured rules and asks \"what did we decide\". A value attached with \
-                 `=` is always a spec.",
+                 r,over=16kb+t=sres,over=1mb:..-3",
             )
     }
 
-    fn parse(value: &str) -> Result<CompactSpec, clap::Error> {
-        value
-            .parse()
-            .map_err(|error| invalid_value(format!("invalid compact spec '{value}': {error}")))
+    fn parser() -> impl TypedValueParser<Value = CompactSpec> {
+        parse_spec
     }
 
-    fn claim(value: &str, (): &()) -> Result<Claim<CompactSpec>, clap::Error> {
-        Ok(value.parse().map_or(Claim::Text, Claim::Value))
+    fn claim(_: &str, parsed: Option<CompactSpec>, (): &()) -> Claim<CompactSpec> {
+        Claim::value_or_text(parsed)
     }
 
     fn collect(values: FlagValues<CompactSpec>) -> Result<CompactFlag, clap::Error> {
@@ -177,6 +171,11 @@ impl clap::FromArgMatches for CompactFlag {
         *self = Self::from_arg_matches(matches)?;
         Ok(())
     }
+}
+
+/// Parse an inline compaction spec.
+fn parse_spec(value: &str) -> Result<CompactSpec, String> {
+    value.parse()
 }
 
 // ── DSL types ───────────────────────────────────────────────────────────────

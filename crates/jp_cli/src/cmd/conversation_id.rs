@@ -81,7 +81,7 @@ impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> OptionalValue
             .long("id")
             .visible_alias("ids")
             .help(short_help())
-            .long_help(flag_long_help(SESSION, MULTI));
+            .long_help(long_help(SESSION, MULTI));
 
         if MULTI {
             arg = arg.action(ArgAction::Append).value_delimiter(',');
@@ -97,17 +97,17 @@ impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> OptionalValue
         arg
     }
 
-    fn parse(value: &str) -> Result<ConversationTarget, clap::Error> {
-        parse_target::<SESSION>(value)
+    fn parser() -> impl TypedValueParser<Value = ConversationTarget> {
+        TargetParser::<SESSION>
     }
 
     /// An ID, keyword, picker filter, or `-` is the flag's; free text, which
     /// would otherwise search the picker by title, and `help` are not.
-    fn claim(value: &str, (): &()) -> Result<Claim<ConversationTarget>, clap::Error> {
-        match ConversationTarget::parse(value) {
+    fn claim(word: &str, parsed: Option<ConversationTarget>, (): &()) -> Claim<ConversationTarget> {
+        match ConversationTarget::parse(word) {
             ConversationTarget::Help
-            | ConversationTarget::Picker(PickerFilter { query: Some(_), .. }) => Ok(Claim::Text),
-            _ => Self::parse(value).map(Claim::Value),
+            | ConversationTarget::Picker(PickerFilter { query: Some(_), .. }) => Claim::Text,
+            _ => Claim::from_parsed(parsed),
         }
     }
 
@@ -350,21 +350,6 @@ fn long_help(session: bool, multi: bool) -> String {
     if multi {
         s.push_str("\nWhen multiple IDs are given, only literal conversation IDs are accepted.");
     }
-
-    s
-}
-
-/// [`long_help`] for `--id`, which on `jp query` can give its value back to the
-/// query.
-fn flag_long_help(session: bool, multi: bool) -> String {
-    let mut s = long_help(session, multi);
-    s.truncate(s.trim_end().len());
-    s.push_str(
-        "\n\nOn `jp query`, a value written directly before the query that is neither a \
-         conversation ID nor one of the forms above is the query's first word instead, and the \
-         picker opens: `jp q -i fix the bug` picks a conversation and asks \"fix the bug\". Put \
-         the query after `--` to search the picker by title: `jp q -i auth -- fix the bug`.",
-    );
 
     s
 }

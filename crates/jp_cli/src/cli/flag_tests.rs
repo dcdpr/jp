@@ -1,9 +1,19 @@
 use std::{ffi::OsString, sync::Arc};
 
-use clap::{ArgAction, Command};
+use clap::{ArgAction, Command, ValueEnum, builder::EnumValueParser};
 use jp_inquire::prompt::MockPromptBackend;
 
 use super::*;
+
+/// How `--num` rejects `hello`: clap's own error for a value its parser
+/// refused.
+const NOT_A_NUMBER: &str = "error: invalid value 'hello' for '--num [<num>]': not a number\n\nFor \
+                            more information, try '--help'.\n";
+
+/// Parse a number for the test flags.
+fn number(value: &str) -> Result<u32, String> {
+    value.parse().map_err(|_| "not a number".to_owned())
+}
 
 /// `--num` / `-n`: a number, or the first word of the free text.
 enum Num {}
@@ -19,17 +29,49 @@ impl OptionalValue for Num {
         arg.short('n').long("num").action(ArgAction::Append)
     }
 
-    fn parse(value: &str) -> Result<u32, clap::Error> {
-        value
-            .parse()
-            .map_err(|_| invalid_value(format!("not a number: '{value}'")))
+    fn parser() -> impl TypedValueParser<Value = u32> {
+        number
     }
 
-    fn claim(value: &str, (): &()) -> Result<Claim<u32>, clap::Error> {
-        Ok(value.parse().map_or(Claim::Text, Claim::Value))
+    fn claim(_: &str, parsed: Option<u32>, (): &()) -> Claim<u32> {
+        Claim::value_or_text(parsed)
     }
 
     fn collect(values: FlagValues<u32>) -> Result<Self::Output, clap::Error> {
+        Ok(values)
+    }
+}
+
+/// The values of [`Mode`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ModeValue {
+    Fast,
+    Slow,
+}
+
+/// `--mode`: one of a fixed set of values, or the first word of the free text.
+enum Mode {}
+
+impl OptionalValue for Mode {
+    const ID: &'static str = "mode";
+
+    type Context = ();
+    type Output = FlagValues<ModeValue>;
+    type Value = ModeValue;
+
+    fn declare(arg: Arg) -> Arg {
+        arg.long("mode").help("The mode")
+    }
+
+    fn parser() -> impl TypedValueParser<Value = ModeValue> {
+        EnumValueParser::<ModeValue>::new()
+    }
+
+    fn claim(_: &str, parsed: Option<ModeValue>, (): &()) -> Claim<ModeValue> {
+        Claim::value_or_text(parsed)
+    }
+
+    fn collect(values: FlagValues<ModeValue>) -> Result<Self::Output, clap::Error> {
         Ok(values)
     }
 }
@@ -48,8 +90,8 @@ impl OptionalValue for Strict {
         arg.long("strict")
     }
 
-    fn parse(value: &str) -> Result<u32, clap::Error> {
-        Num::parse(value)
+    fn parser() -> impl TypedValueParser<Value = u32> {
+        number
     }
 
     fn collect(values: FlagValues<u32>) -> Result<Self::Output, clap::Error> {
@@ -73,12 +115,12 @@ impl OptionalValue for Any {
         arg.long("any")
     }
 
-    fn parse(value: &str) -> Result<u32, clap::Error> {
-        Num::parse(value)
+    fn parser() -> impl TypedValueParser<Value = u32> {
+        number
     }
 
-    fn claim(value: &str, cx: &()) -> Result<Claim<u32>, clap::Error> {
-        Num::claim(value, cx)
+    fn claim(_: &str, parsed: Option<u32>, (): &()) -> Claim<u32> {
+        Claim::value_or_text(parsed)
     }
 
     fn collect(values: FlagValues<u32>) -> Result<Self::Output, clap::Error> {
@@ -101,20 +143,20 @@ impl OptionalValue for Grant {
         arg.long("grant")
     }
 
-    fn parse(value: &str) -> Result<u32, clap::Error> {
-        Num::parse(value)
+    fn parser() -> impl TypedValueParser<Value = u32> {
+        number
     }
 
-    fn claim(value: &str, (): &()) -> Result<Claim<u32>, clap::Error> {
-        if let Ok(value) = value.parse() {
-            return Ok(Claim::Value(value));
+    fn claim(word: &str, parsed: Option<u32>, (): &()) -> Claim<u32> {
+        if let Some(value) = parsed {
+            return Claim::Value(value);
         }
 
-        Ok(Claim::Confirm(Confirmation {
-            question: format!("start with `{value}`?"),
+        Claim::Confirm(Confirmation {
+            question: format!("start with `{word}`?"),
             accept: "yes",
-            refusal: format!("`{value}` refused"),
-        }))
+            refusal: format!("`{word}` refused"),
+        })
     }
 
     fn collect(values: FlagValues<u32>) -> Result<Self::Output, clap::Error> {
@@ -187,6 +229,7 @@ fn matched(argv: &[&str]) -> (ArgMatches, Spelling) {
         .arg(flag_arg::<Strict>())
         .arg(flag_arg::<Any>())
         .arg(flag_arg::<Grant>())
+        .arg(flag_arg::<Mode>())
         .arg(Arg::new("x").short('x').action(ArgAction::SetTrue))
         .arg(Arg::new("words").action(ArgAction::Append).num_args(1..))
         .arg(
@@ -271,15 +314,15 @@ fn a_word_given_up_keeps_its_place_in_the_free_text() {
 fn an_attached_value_is_always_the_flags() {
     assert_eq!(
         decide::<Num>(&["--num=hello", "world"]),
-        Err("error: not a number: 'hello'".to_owned())
+        Err(NOT_A_NUMBER.to_owned())
     );
     assert_eq!(
         decide::<Num>(&["-nhello", "world"]),
-        Err("error: not a number: 'hello'".to_owned())
+        Err(NOT_A_NUMBER.to_owned())
     );
     assert_eq!(
         decide::<Num>(&["-n=hello", "world"]),
-        Err("error: not a number: 'hello'".to_owned())
+        Err(NOT_A_NUMBER.to_owned())
     );
 }
 
@@ -288,7 +331,7 @@ fn an_attached_value_is_always_the_flags() {
 fn a_word_with_nothing_after_it_is_the_flags() {
     assert_eq!(
         decide::<Num>(&["--num", "hello"]),
-        Err("error: not a number: 'hello'".to_owned())
+        Err(NOT_A_NUMBER.to_owned())
     );
 }
 
@@ -296,7 +339,7 @@ fn a_word_with_nothing_after_it_is_the_flags() {
 fn a_word_before_another_option_is_the_flags() {
     assert_eq!(
         decide::<Num>(&["--num", "hello", "-x", "world"]),
-        Err("error: not a number: 'hello'".to_owned())
+        Err(NOT_A_NUMBER.to_owned())
     );
 }
 
@@ -306,7 +349,7 @@ fn a_word_before_another_option_is_the_flags() {
 fn a_word_before_a_double_dash_is_the_flags() {
     assert_eq!(
         decide::<Num>(&["--num", "hello", "--", "world"]),
-        Err("error: not a number: 'hello'".to_owned())
+        Err(NOT_A_NUMBER.to_owned())
     );
 }
 
@@ -322,7 +365,11 @@ fn a_bare_flag_has_no_value() {
 fn a_flag_that_claims_nothing_keeps_every_word() {
     assert_eq!(
         decide::<Strict>(&["--strict", "hello", "world"]),
-        Err("error: not a number: 'hello'".to_owned())
+        Err(
+            "error: invalid value 'hello' for '--strict [<strict>]': not a number\n\nFor more \
+             information, try '--help'.\n"
+                .to_owned()
+        )
     );
     assert_eq!(
         decide::<Strict>(&["--strict", "3", "world"]),
@@ -366,6 +413,66 @@ fn a_word_needing_confirmation_is_refused_when_declined() {
     );
 }
 
+/// Decide `--mode` on `argv`: each of its values, and the free text after it.
+fn decide_mode(argv: &[&str]) -> Result<(Vec<Option<ModeValue>>, Vec<String>), String> {
+    let (matches, spelling) = matched(argv);
+    let mut words = Words::read(&matches);
+
+    let values = Flag::<Mode>::read(&matches, &spelling, &words)
+        .map_err(|error| error.to_string())?
+        .settle(&(), &ArgPrompts::default(), &mut words)
+        .map_err(|error| error.to_string())?;
+
+    let values = values
+        .into_indexed()
+        .into_iter()
+        .map(|(_, value)| value)
+        .collect();
+    Ok((values, words.into_words()))
+}
+
+// The flag's own parser stays in charge of its values, so help lists what an
+// enum flag accepts, as for any clap argument.
+#[test]
+fn help_lists_the_values_of_an_enum_flag() {
+    let mut cmd = Command::new("prog").arg(flag_arg::<Mode>());
+
+    assert_eq!(
+        cmd.render_help().to_string(),
+        "Usage: prog [OPTIONS]\n\nOptions:\n      --mode [<mode>]  The mode [possible values: \
+         fast, slow]\n  -h, --help           Print help\n"
+    );
+}
+
+#[test]
+fn an_enum_flag_parses_its_value_into_the_enum() {
+    assert_eq!(
+        decide_mode(&["--mode", "slow", "hello"]),
+        Ok((vec![Some(ModeValue::Slow)], words(&["hello"])))
+    );
+}
+
+#[test]
+fn an_enum_flag_gives_up_a_word_that_is_none_of_its_values() {
+    assert_eq!(
+        decide_mode(&["--mode", "what", "now"]),
+        Ok((vec![None], words(&["what", "now"])))
+    );
+}
+
+// The error is the enum parser's own, so it lists the values the flag takes.
+#[test]
+fn an_attached_value_an_enum_flag_rejects_lists_its_values() {
+    assert_eq!(
+        decide_mode(&["--mode=medium", "now"]),
+        Err(
+            "error: invalid value 'medium' for '--mode [<mode>]'\n  [possible values: fast, \
+             slow]\n\nFor more information, try '--help'.\n"
+                .to_owned()
+        )
+    );
+}
+
 // A command without free text has nowhere to put a word, so every value is
 // the flag's, wherever it sits.
 #[test]
@@ -374,5 +481,5 @@ fn a_command_without_free_text_keeps_every_word_for_the_flag() {
 
     let error = Flag::<Num>::strict(&matches).unwrap_err();
 
-    assert_eq!(error.to_string(), "error: not a number: 'hello'");
+    assert_eq!(error.to_string(), NOT_A_NUMBER);
 }
