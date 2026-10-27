@@ -1,0 +1,5246 @@
+---
+source: crates/jp_cli/src/lib_tests.rs
+expression: out
+---
+## jp
+about: Some("Jean-Pierre, a programmer's LLM toolkit.")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: true
+usage: Usage: jp [OPTIONS] <COMMAND>
+group Cli: []
+group Globals: ["config", "no_config", "verbose", "quiet", "no_interactive", "format", "persist", "workspace", "width", "log_format", "log_file", "log"]
+group RootOpts: ["threads"]
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: ["global"]
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### no_config
+short: None
+long: Some("no-cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["NO_CONFIG"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: Some("Global Options")
+conflicts: []
+set: ["global"]
+help: Some("Shorthand for `--cfg=NONE`: skip implicit config loading and start from program defaults")
+long_help: Some("Shorthand for `--cfg=NONE`: skip implicit config loading and start from program defaults.\n\nSubsequent `--cfg` values layer on top of the defaults.")
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: Some(["VERBOSE"])
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: ["global"]
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
+### quiet
+short: Some('q')
+long: Some("quiet")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["QUIET"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: Some("Global Options")
+conflicts: []
+set: ["global"]
+help: Some("Suppress chrome: progress indicators, status lines, and tool call headers")
+long_help: Some("Suppress chrome: progress indicators, status lines, and tool call headers.\n\nCommand output and the assistant's response still go to stdout, and a failing run still reports its error. Redirect them (`>/dev/null`, `2>/dev/null`) to drop those as well.\n\nTracing written to stderr by `-v` or `--log-file=-` is suppressed too. The trace log file still records the run in full.")
+
+### no_interactive
+short: None
+long: Some("no-interactive")
+visible_aliases: ["non-interactive"]
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["NO_INTERACTIVE"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: Some("Global Options")
+conflicts: []
+set: ["global"]
+help: Some("Assume no user is available to answer prompts")
+long_help: Some("Assume no user is available to answer prompts.\n\nEverything JP would ask about resolves the way it does when JP runs without a terminal: the workspace and conversation pickers, the lock-timeout prompt, and a third-party plugin's approval all fail, and a tool set to ask before running runs unconfirmed.\n\nA command with no answer to fall back on fails too: `jp init`, and any removal or archive it would have to confirm.\n\nSet `JP_NONINTERACTIVE=1` to apply this to every invocation in an environment, such as a script or a CI job.\n\nThis does not change output formatting; use `--format` for that.")
+
+### format
+short: Some('F')
+long: Some("format")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::CliFormat
+possible_values: ["auto", "text", "text-pretty", "json", "json-pretty"]
+value_names: Some(["FORMAT"])
+value_delimiter: None
+default_values: ["auto"]
+help_heading: Some("Global Options")
+conflicts: []
+set: ["global"]
+help: Some("The output format")
+long_help: None
+
+### persist
+short: Some('!')
+long: Some("no-persist")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: Some(['P'])
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["PERSIST"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: Some("Global Options")
+conflicts: []
+set: ["global"]
+help: Some("Disable persistence for the duration of the command.")
+long_help: Some("Persist modified state to disk.\n\nThis is enabled by default, but can be disabled to debug certain actions. It is also useful to send a query to the assistant, without adding that query to the conversation history.")
+
+### workspace
+short: Some('w')
+long: Some("workspace")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::workspace::target::WorkspaceTarget
+possible_values: []
+value_names: Some(["WORKSPACE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: ["global"]
+help: Some("The workspace to use for the command")
+long_help: Some("The workspace to use for the command.\n\nAccepts the workspace targeting grammar (see `jp w use help`): a workspace ID, a path, `cwd` / `.`, or `-` to read an ID from stdin. Interactive runs can also use the session keywords (`s`, `?s`), the pickers (`?`), and free-text matching.\n\nSelects the workspace for this invocation only; it does not change the session's active workspace (that is `jp w use`).\n\nOn `jp workspace use` and `jp workspace show` it names the workspace the subcommand acts on, as an alternative to their positional target.")
+
+### width
+short: None
+long: Some("width")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: u16
+possible_values: []
+value_names: Some(["COLUMNS"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: ["global"]
+help: Some("Lay output out against this many columns")
+long_help: Some("Lay output out against this many columns.\n\nDetected automatically when stdout is a terminal. Set it when stdout is a pipe that still renders for a human at a known width, such as a preview pane laid out by another program. `0` means unknown, which is the default when piped: content keeps its natural width instead of being fitted to a guess.")
+
+### log_format
+short: None
+long: Some("log-format")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::LogFormat
+possible_values: ["auto", "text", "json"]
+value_names: Some(["LOG_FORMAT"])
+value_delimiter: None
+default_values: ["auto"]
+help_heading: Some("Global Options")
+conflicts: []
+set: ["global"]
+help: Some("The format of the log output written to stderr")
+long_help: Some("The format of the log output written to stderr.\n\nDefaults to \"text\" when stderr is a terminal, and \"json\" when stderr is redirected to a file or pipe. Only takes effect when tracing is written to stderr (via `-v` or `--log-file=-`).")
+
+### log_file
+short: None
+long: Some("log-file")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["PATH"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: ["global"]
+help: Some("Write the full tracing log to the given file")
+long_help: Some("Write the full tracing log to the given file.\n\nUse `-` to stream logs to stderr instead. When unset, the log is written to a temporary file. `JP_DEBUG=1` announces its path before execution and keeps it afterward. Runs lasting at least five minutes repeat the path at completion. A failed run without `JP_DEBUG` reports the retained path at completion.")
+
+### log
+short: None
+long: Some("log")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["DIRECTIVE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: ["global"]
+help: Some("Filter log output by target and level")
+long_help: Some("Filter log output by target and level.\n\nAccepts a comma-separated list of `target=level` pairs. Levels are one of: off, error, warn, info, debug, trace. Targets match path prefixes.\n\nExamples: --log=tool::stderr=trace Show stderr output from local tools. --log=mcp::stderr=debug Show stderr from MCP servers. --log='jp_llm=trace,plugin=off' Trace jp_llm internals, silence plugins.\n\nComposes with `-v`: verbosity sets the baseline for jp's own modules; `--log` adds or overrides specific targets. Passing `--log` without `-v` still enables stderr log output.")
+
+### threads
+short: Some('t')
+long: Some("threads")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: core::num::nonzero::NonZero<usize>
+possible_values: []
+value_names: Some(["THREADS"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Number of threads to use for processing (default is number of available cores)")
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+### version
+short: Some('V')
+long: Some("version")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Version
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print version")
+long_help: None
+
+## jp init
+about: Some("Initialize a new workspace")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp init [OPTIONS] [PATH]
+group Init: ["path"]
+
+### path
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Set
+num_args: Some(1)
+value_type: camino::Utf8PathBuf
+possible_values: []
+value_names: Some(["PATH"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Path to initialize the workspace at. Defaults to the current directory")
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp config
+about: Some("Configuration management")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: ["cfg"]
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp config [OPTIONS] <COMMAND>
+group Config: []
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp config show
+about: Some("Show the current configuration")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp config show [OPTIONS]
+group Show: ["defaults", "themes"]
+
+### defaults
+short: None
+long: Some("defaults")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["DEFAULTS"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Show the default configurations")
+long_help: None
+
+### themes
+short: None
+long: Some("themes")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["THEMES"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("List available syntax highlighting themes")
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp config set
+about: Some("Set a configuration option")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp config set [OPTIONS]
+group Set: []
+group FileTarget: ["user_workspace", "user_global", "cwd"]
+
+### user_workspace
+short: None
+long: Some("user-workspace")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["USER_WORKSPACE"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["id"]
+set: []
+help: Some("Write to the workspace's user-specific configuration file")
+long_help: None
+
+### user_global
+short: None
+long: Some("user-global")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["USER_GLOBAL"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["id"]
+set: []
+help: Some("Write to the global user-specific configuration file")
+long_help: None
+
+### cwd
+short: None
+long: Some("cwd")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["CWD"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["id"]
+set: []
+help: Some("Write to the current-working-directory configuration file")
+long_help: None
+
+### id
+short: Some('i')
+long: Some("id")
+visible_aliases: ["ids"]
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(0..=1)
+value_type: jp_cli::cmd::target::ConversationTarget
+possible_values: []
+value_names: None
+value_delimiter: Some(',')
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n\nConversation Aliases:\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  -                             read IDs from stdin, one per line\nWhen multiple IDs are given, only literal conversation IDs are accepted.\n\nOn `jp query`, a value written directly before the query that is neither a conversation ID nor one of the forms above is the query's first word instead, and the picker opens: `jp q -i fix the bug` picks a conversation and asks \"fix the bug\". Put the query after `--` to search the picker by title: `jp q -i auth -- fix the bug`.")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp config fmt
+about: Some("Format a configuration file")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp config fmt [OPTIONS]
+group Fmt: []
+group Target: ["user_workspace", "user_global", "cwd"]
+
+### user_workspace
+short: None
+long: Some("user-workspace")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["USER_WORKSPACE"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("The workspace's user-specific configuration target")
+long_help: None
+
+### user_global
+short: None
+long: Some("user-global")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["USER_GLOBAL"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("The global user-specific configuration target")
+long_help: None
+
+### cwd
+short: None
+long: Some("cwd")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["CWD"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("The current-working-directory configuration target, recursively upwards")
+long_help: None
+
+### check
+short: None
+long: Some("check")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["CHECK"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Run fmt in check mode")
+long_help: None
+
+### all
+short: None
+long: Some("all")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["ALL"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Format all configuration files")
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp query
+about: Some("Query the assistant")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: ["q"]
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp query [OPTIONS] [QUERY]...
+group Query: []
+group QueryInputArgs: ["query", "escaped_query", "quote"]
+group new: ["new_conversation"]
+
+### template
+short: Some('%')
+long: Some("template")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["TEMPLATE"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Use the query string as a Jinja2 template")
+long_help: Some("Use the query string as a Jinja2 template.\n\nYou can provide values for template variables using the `template.values` config key.")
+
+### schema
+short: Some('s')
+long: Some("schema")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: schemars::schema::Schema
+possible_values: []
+value_names: Some(["SCHEMA"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Constrain the assistant's response to match a JSON schema")
+long_help: Some("Constrain the assistant's response to match a JSON schema.\n\nAccepts either a full JSON Schema object or a concise DSL:\n\n-s 'summary' → single string field -s 'name, age int, bio' → mixed types -s 'summary: a brief summary' → field with description\n\nSee: <https://jp.computer/rfd/030-schema-dsl>")
+
+### replay
+short: None
+long: Some("replay")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["REPLAY"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["new_conversation"]
+set: []
+help: Some("Replay the last message in the conversation")
+long_help: Some("Replay the last message in the conversation.\n\nIf a query is provided, it will be appended to the end of the previous message. If no query is provided, $EDITOR will open with the last message in the conversation.")
+
+### id
+short: Some('i')
+long: Some("id")
+visible_aliases: ["ids"]
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: jp_cli::cmd::target::ConversationTarget
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, or Alias.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n\nConversation Aliases:\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n\nOn `jp query`, a value written directly before the query that is neither a conversation ID nor one of the forms above is the query's first word instead, and the picker opens: `jp q -i fix the bug` picks a conversation and asks \"fix the bug\". Put the query after `--` to search the picker by title: `jp q -i auth -- fix the bug`.")
+
+### fork
+short: None
+long: Some("fork")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["N"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["new_conversation"]
+set: []
+help: Some("Fork the conversation and start a new turn on the fork")
+long_help: Some("Fork the session's active conversation (or the one specified by --id) and start a new turn on the fork.\n\nIf N is given, the fork keeps only the last N turns.\n\nA value written directly before the query that is not a number is the query's first word instead, and the fork keeps every turn: `jp q --fork what if we` forks and asks \"what if we\".")
+
+### new_conversation
+short: Some('n')
+long: Some("new")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["NEW_CONVERSATION"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["id"]
+set: []
+help: Some("Start a new conversation without any message history")
+long_help: None
+
+### local
+short: Some('l')
+long: Some("local")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["LOCAL"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["no_local"]
+set: []
+help: Some("Store the conversation locally, outside of the workspace")
+long_help: None
+
+### no_local
+short: Some('L')
+long: Some("no-local")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["NO_LOCAL"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["local"]
+set: []
+help: Some("Store the conversation in the current workspace")
+long_help: None
+
+### attachments
+short: Some('a')
+long: Some("attachment")
+visible_aliases: []
+hidden_aliases: ["attach"]
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::parser::AttachmentUrlOrPath
+possible_values: []
+value_names: Some(["ATTACHMENTS"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Add attachment to the configuration")
+long_help: None
+
+### edit
+short: Some('e')
+long: Some("edit")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["EDIT"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["no_edit"]
+set: []
+help: Some("Open an editor to compose the query")
+long_help: Some("Open an editor to compose the query.\n\nForces the editor open even when a query is provided inline (or piped on stdin). Use `--no-edit` (`-E`) to suppress it.\n\nTo change which editor is used, set `editor.cmd` in your config (or pass `--cfg editor.cmd=...`).")
+
+### no_edit
+short: Some('E')
+long: Some("no-edit")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["NO_EDIT"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["edit"]
+set: []
+help: Some("Do not edit the query")
+long_help: Some("Do not edit the query.\n\nSee `--edit` for more details.")
+
+### query
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1..)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["QUERY"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("The query to send. If not provided, uses `$JP_EDITOR`, `$VISUAL` or `$EDITOR` to open edit the query in an editor")
+long_help: Some("The query to send. If not provided, uses `$JP_EDITOR`, `$VISUAL` or `$EDITOR` to open edit the query in an editor.\n\nA query consisting of a single `@path` value is read from that file.")
+
+### escaped_query
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(2)
+action: Append
+num_args: Some(1..)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["ESCAPED_QUERY"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: ["hide", "last"]
+help: Some("Query words given after `--`")
+long_help: Some("Query words given after `--`.\n\nclap only fills this argument through the `--` separator, which makes it the record of which words were escaped. They are appended to `query` once `--quote` has been resolved, so `--` shields a `true` / `false` word from being read as the flag's value.")
+
+### quote
+short: None
+long: Some("quote")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: jp_cli::cmd::query::args::QuoteArg
+possible_values: []
+value_names: Some(["BOOL"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: ["require_equals"]
+help: Some("Pre-fill the editor with the last assistant message quoted as a markdown blockquote (each line prefixed with ` >  `)")
+long_help: Some("Pre-fill the editor with the last assistant message quoted as a markdown blockquote (each line prefixed with ` >  `).\n\nUseful for inline replies: open `$EDITOR` with the assistant's last response pre-quoted, then intersperse your replies between the quoted lines (mutt/email style). The complete buffer — quotes plus your replies — becomes your next message.\n\n`--quote=false` seeds the message verbatim, without the ` >  ` prefixes. `--quote=true` is the same as a bare `--quote`. Both values also work unattached (`--quote false`); any other word after `--quote` stays part of the query, so `jp q --quote what now?` still asks \"what now?\". To ask a question that *is* `true` or `false`, put it after `--`.\n\nForces the editor open by default; respects `--no-edit` / `--edit=false` if explicitly suppressed, in which case the quoted text is sent as-is and echoed to the terminal before the turn runs. Composes with `--replay`: the quote is taken from the stream *after* the replayed turn has been trimmed, i.e. the assistant message preceding the turn being replayed.\n\nIf no prior assistant message exists in this conversation, a warning is emitted and the editor opens with whatever other content was seeded (query, stdin, or empty).")
+
+### model
+short: Some('m')
+long: Some("model")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["MODEL"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("The model to use")
+long_help: None
+
+### auth
+short: None
+long: Some("auth")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_config::providers::llm::AuthEntry
+possible_values: []
+value_names: Some(["CHAIN"])
+value_delimiter: Some(',')
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Which credential to bill this turn to")
+long_help: Some("Which credential to bill this turn to.\n\nTakes the same entries as the `auth` chain in configuration, comma separated: a credential name, `api_key`, `subscription`, or `<kind>:<name>`. `api` and `sub` are accepted for the kinds.\n\nApplies to the provider the chosen model belongs to, and is recorded on the turn, so the rest of the conversation keeps billing the same way until another `--auth` changes it.")
+
+### parameters
+short: Some('p')
+long: Some("param")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_config::assignment::KvAssignment
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("The model parameters to use")
+long_help: None
+
+### reasoning
+short: Some('r')
+long: Some("reasoning")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_config::model::parameters::ReasoningConfig
+possible_values: []
+value_names: Some(["REASONING"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Enable reasoning")
+long_help: None
+
+### no_reasoning
+short: Some('R')
+long: Some("no-reasoning")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["NO_REASONING"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Disable reasoning")
+long_help: None
+
+### service_tier
+short: None
+long: Some("tier")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_config::model::parameters::ServiceTier
+possible_values: []
+value_names: Some(["TIER"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["no_service_tier"]
+set: []
+help: Some("Capacity tier to request from the provider")
+long_help: Some("Capacity tier to request from the provider.\n\nProviders sell more than one grade of capacity for the same model: `flex` is cheaper and slower, `priority` is faster and pricier, `standard` is the regular rate, and `off` asks for no tier at all.\n\nWhich tiers are available depends on the provider, the model, and the account; a provider that sells no equivalent refuses the query rather than falling back to a rung that costs something else. One that sells the tier but cannot serve this model with it may still fall back.\n\nApplies to this query and every later one on the conversation, because each tier is served from separate capacity and switching discards the prompt cache.")
+
+### no_service_tier
+short: None
+long: Some("no-tier")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["NO_SERVICE_TIER"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Stop asking for a capacity tier")
+long_help: Some("Stop asking for a capacity tier.\n\nShorthand for `--tier off`, which sends no tier and leaves the choice to whatever the account is set up for.\n\nThis is not `--tier standard`: `standard` names a rung and is sent as one.")
+
+### hide_reasoning
+short: None
+long: Some("hide-reasoning")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["HIDE_REASONING"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Do not display the reasoning content")
+long_help: Some("Do not display the reasoning content.\n\nThis does not stop the assistant from generating reasoning tokens to help with its accuracy, but it does not display them in the output.")
+
+### hide_tool_calls
+short: None
+long: Some("hide-tool-calls")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["HIDE_TOOL_CALLS"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Do not display tool calls")
+long_help: Some("Do not display tool calls.\n\nThis does not stop the assistant from running tool calls, but it does not display them in the output.")
+
+### tools
+short: Some('t')
+long: Some("tool")
+visible_aliases: []
+hidden_aliases: ["tools"]
+short_aliases: None
+index: None
+action: Append
+num_args: Some(0..=1)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("The tool(s) to enable")
+long_help: Some("The tool(s) to enable.\n\nIf an existing tool is configured with a matching name, it is enabled for this query and every later one on the conversation; use `--no-tool` to turn it back off.\n\nTo run a disabled tool just once, use `--tool-use NAME` instead.\n\nIf no arguments are provided, every tool that allows it is enabled; a tool set to `explicit` or `always` is unaffected.\n\nName several tools at once by separating them with commas (`--tool=read,write`), or by providing this flag multiple times. Flags are evaluated left-to-right, so `--no-tools --tool=write` first disables everything, then re-enables only 'write'.\n\nA value written directly before the query, as in `jp q -t fix the bug`, names tools when every name in it is a configured tool. Otherwise JP asks before enabling every tool and reading the value as the first word of the query, and refuses when there is nobody to ask. Put the query after `--` to enable every tool without being asked: `jp q -t -- fix the bug`.")
+
+### no_tools
+short: Some('T')
+long: Some("no-tool")
+visible_aliases: []
+hidden_aliases: ["no-tools"]
+short_aliases: None
+index: None
+action: Append
+num_args: Some(0..=1)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Disable tool(s)")
+long_help: Some("Disable tool(s).\n\nIf provided without a value, every tool that allows it is disabled (a tool set to `explicit` or `always` is unaffected), otherwise name the tools to disable, separated by commas (`--no-tool=read,write`) or across repeated flags.\n\nThe change applies to this query and every later one on the conversation; use `--tool` to turn tools back on. To suppress tools for a single query, use `--no-tool-use`.\n\nFlags are evaluated left-to-right together with `--tool`.\n\nA value written directly before the query names tools when every name in it is a configured tool; otherwise it is the first word of the query, and the flag disables every tool.")
+
+### expires_in
+short: None
+long: Some("tmp")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["DURATION"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Set the expiration date of the conversation")
+long_help: Some("Set the expiration date of the conversation.\n\nThe conversation is persisted, but only until the conversation is no longer marked as active (e.g. when a new conversation is started), and when the expiration date is reached.\n\nThis differs from `--no-persist` in that the conversation can contain multiple turns, as long as it remains active and not expired.\n\nA value written directly before the query that is not a duration is the query's first word instead, and no duration is set: `jp q -n --tmp quick question` asks \"quick question\".")
+
+### title
+short: None
+long: Some("title")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["TITLE"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["no_title"]
+set: []
+help: Some("Set a custom title for the conversation")
+long_help: Some("Set a custom title for the conversation.\n\nApplied to the resolved conversation (new, forked, or resumed) before the turn runs. Skips title auto-generation for new conversations — your title wins. Mutually exclusive with `--no-title`.")
+
+### no_title
+short: None
+long: Some("no-title")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["NO_TITLE"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["title"]
+set: []
+help: Some("Disable the title for the conversation")
+long_help: Some("Disable the title for the conversation.\n\nClears any existing title on the resolved conversation (new, forked, or resumed) and skips auto-generation for this run. Mutually exclusive with `--title`.")
+
+### tool_use
+short: Some('u')
+long: Some("tool-use")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["TOOL"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("The tool to use")
+long_help: Some("The tool to use.\n\nIf a value is provided, the tool matching the value will be used. The named tool runs for this query even when it is disabled, so it does not have to be enabled separately; a tool whose policy locks it off is refused.\n\nWithout a value, or with `true`, the assistant must use one of its enabled tools. With `false`, it may use none.\n\nThis applies to a single query and is *not* persisted: the next query forces nothing, and a tool that was disabled stays disabled. To persist tool choice behavior, set the `assistant.tool_choice` field in a configuration file.\n\nA value written directly before the query names a tool when a tool by that name is configured; otherwise it is the first word of the query, and the assistant must use one of its tools: `jp q -u fix the bug`.")
+
+### no_tool_use
+short: Some('U')
+long: Some("no-tool-use")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["NO_TOOL_USE"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Disable tool use by the assistant")
+long_help: Some("Disable tool use by the assistant.\n\nThis applies to a single query and is *not* persisted. To keep tools off, use `--no-tool`, which disables them for every future query on the conversation.")
+
+### compact
+short: Some('k')
+long: Some("compact")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(0..=1)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Run conversation compaction rules")
+long_help: Some("Compact the conversation.\n\nWithout a value, applies the compaction rules from the resolved configuration.\n\nWith a DSL value (e.g. `--compact=s:..-3`), applies an inline compaction rule. Multiple `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare `--compact` includes config rules, each `--compact=SPEC` adds a DSL rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or a byte count). Each half of a tool call is judged on its own size; `omit` is judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 compacts through the third turn from the end, leaving the final two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, r,over=16kb+t=sres,over=1mb:..-3\n\nOn `jp query`, a value written directly before the query that is not a valid spec is the query's first word instead, and the flag applies the configured rules: `jp q -k what did we decide` compacts with the configured rules and asks \"what did we decide\".")
+
+### mount
+short: None
+long: Some("mount")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["[TOOL:]NAME=PATH[:MODE]"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Mount an external path into the workspace as a symlink and grant the assistant access to it")
+long_help: Some("Mount an external path into the workspace as a symlink and grant the assistant access to it.\n\nForm: `[TOOL:]NAME=PATH[:MODE]`. `NAME` is the workspace-relative location for the symlink, `PATH` is the external target, and `MODE` is `ro` (default) or `rw`. `rw` requires a `TOOL:` prefix; without a `TOOL:` prefix the grant applies to all enabled local and command plugin tools. Repeat the flag to mount several paths.")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp attachment
+about: Some("Manage attachments")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: ["a"]
+hidden_aliases: ["attachments"]
+hidden: false
+external_subcommands: false
+usage: Usage: jp attachment [OPTIONS] <COMMAND>
+group Attachment: []
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp attachment add
+about: Some("Add attachment to context")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: ["a"]
+hidden: false
+external_subcommands: false
+usage: Usage: jp attachment add [OPTIONS] [ATTACHMENTS]...
+group Add: ["attachments"]
+
+### attachments
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1..)
+value_type: jp_cli::parser::AttachmentUrlOrPath
+possible_values: []
+value_names: Some(["ATTACHMENTS"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("One or more attachments to add to the context")
+long_help: Some("One or more attachments to add to the context.\n\nIf the attachment is pointing to a file, then a file attachment is added, otherwise the attachment type can be added as a prefix.\n\nFor example, to add a `summary` attachment, use `summary://<path>`.")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp attachment rm
+about: Some("Remove attachment from context")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: ["r"]
+hidden: false
+external_subcommands: false
+usage: Usage: jp attachment rm [OPTIONS] [ATTACHMENTS]...
+group Rm: ["attachments"]
+
+### attachments
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1..)
+value_type: jp_cli::parser::AttachmentUrlOrPath
+possible_values: []
+value_names: Some(["ATTACHMENTS"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: None
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp attachment ls
+about: Some("List attachments in context")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: ["l"]
+hidden: false
+external_subcommands: false
+usage: Usage: jp attachment ls [OPTIONS]
+group Ls: []
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp attachment print
+about: Some("Preview how an attachment will render for the LLM")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: ["p"]
+hidden: false
+external_subcommands: false
+usage: Usage: jp attachment print [OPTIONS] <ATTACHMENT>
+group Print: ["attachment"]
+
+### attachment
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Set
+num_args: Some(1)
+value_type: jp_cli::parser::AttachmentUrlOrPath
+possible_values: []
+value_names: Some(["ATTACHMENT"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: ["required"]
+help: Some("The attachment URL to preview")
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp aa
+about: None
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: true
+external_subcommands: false
+usage: Usage: jp aa [OPTIONS] [ATTACHMENTS]...
+group Add: ["attachments"]
+
+### attachments
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1..)
+value_type: jp_cli::parser::AttachmentUrlOrPath
+possible_values: []
+value_names: Some(["ATTACHMENTS"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("One or more attachments to add to the context")
+long_help: Some("One or more attachments to add to the context.\n\nIf the attachment is pointing to a file, then a file attachment is added, otherwise the attachment type can be added as a prefix.\n\nFor example, to add a `summary` attachment, use `summary://<path>`.")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation
+about: Some("Manage conversations")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: ["c"]
+hidden_aliases: ["conversations"]
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation [OPTIONS] <COMMAND>
+group Conversation: []
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation rm
+about: Some("Remove conversations")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: ["remove", "rem", "delete", "del"]
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation rm [OPTIONS] [id]...
+group Rm: []
+group creation_range: ["created_since", "created_before"]
+group ConfirmFlag: ["confirm", "no_confirm"]
+
+### id
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1)
+value_type: jp_cli::cmd::target::ConversationTarget
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
+
+### created_since
+short: None
+long: Some("created-since")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::time::TimeThreshold
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Match conversations created at or after the specified time.")
+long_help: Some("Match conversations created at or after the specified time.\n\nAccepts a conversation ID (uses its creation timestamp), a relative duration (e.g. `3w`, `30d`, `6h`), or an absolute date (e.g. `2026-01-01`). Composable with `--created-before`.")
+
+### created_before
+short: None
+long: Some("created-before")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::time::TimeThreshold
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Match conversations created before the specified time.")
+long_help: Some("Match conversations created before the specified time.\n\nAccepts the same formats as `--created-since`. The range is half-open (`--created-before` is exclusive), so `--created-since X --created-before Y` matches everything in `[X, Y)`.")
+
+### confirm
+short: None
+long: Some("confirm")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["CONFIRM"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Prompt for confirmation before each change")
+long_help: None
+
+### no_confirm
+short: Some('y')
+long: Some("no-confirm")
+visible_aliases: ["yes"]
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["NO_CONFIRM"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Skip confirmation prompts")
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation ls
+about: Some("List conversations")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: ["list"]
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation ls [OPTIONS] [id]...
+group Ls: []
+
+### id
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1)
+value_type: jp_cli::cmd::target::ConversationTarget
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
+
+### sort
+short: None
+long: Some("sort")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::conversation::ls::Sort
+possible_values: ["id", "created", "activity", "expires", "messages", "local"]
+value_names: Some(["SORT"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Sort conversations by a specific field")
+long_help: Some("Sort conversations by a specific field.\n\nDefaults to last activity (archived conversations default to archive time).")
+
+### descending
+short: None
+long: Some("descending")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["DESCENDING"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Sort conversations in descending order")
+long_help: None
+
+### limit
+short: None
+long: Some("limit")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: usize
+possible_values: []
+value_names: Some(["LIMIT"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Limit the number of conversations to display")
+long_help: None
+
+### full
+short: None
+long: Some("full")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["FULL"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Display full conversation details")
+long_help: None
+
+### local
+short: None
+long: Some("local")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["LOCAL"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Show only local conversations")
+long_help: None
+
+### archived
+short: None
+long: Some("archived")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["ARCHIVED"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Show archived conversations instead of live ones")
+long_help: None
+
+### labels
+short: None
+long: Some("label")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::cmd::label::LabelSelector
+possible_values: []
+value_names: Some(["KEY[=VALUE]"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Only show conversations carrying this label")
+long_help: Some("Only show conversations carrying this label.\n\n`key=value` matches when the key holds that value, a bare `key` matches any value. Repeat the flag to require several; every selector must match.")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation show
+about: Some("Show conversation details")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: ["s"]
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation show [OPTIONS] [id]...
+group Show: []
+
+### id
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1)
+value_type: jp_cli::cmd::target::ConversationTarget
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation use
+about: Some("Set the active conversation")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: ["u"]
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation use [OPTIONS] [id]
+group Use: []
+group creation_range: ["created_since", "created_before"]
+
+### id
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Set
+num_args: Some(0..=1)
+value_type: jp_cli::cmd::target::ConversationTarget
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, or Alias.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n")
+
+### grep
+short: None
+long: Some("grep")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["GREP"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Restrict picker candidates to conversations containing the pattern")
+long_help: Some("Restrict picker candidates to conversations containing the pattern.\n\nSubstring match against the title, labels, chat text, reasoning, structured output, tool calls, tool results, and inquiry questions. A label is matched as `key=value`, or as a bare key when it holds no value. Case-insensitive unless the pattern contains an uppercase character (smart-case). Composable with target keywords (`?`, `?p`, `?s`, `?a`) and with `--created-since` / `--created-before`.")
+
+### created_since
+short: None
+long: Some("created-since")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::time::TimeThreshold
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Match conversations created at or after the specified time.")
+long_help: Some("Match conversations created at or after the specified time.\n\nAccepts a conversation ID (uses its creation timestamp), a relative duration (e.g. `3w`, `30d`, `6h`), or an absolute date (e.g. `2026-01-01`). Composable with `--created-before`.")
+
+### created_before
+short: None
+long: Some("created-before")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::time::TimeThreshold
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Match conversations created before the specified time.")
+long_help: Some("Match conversations created before the specified time.\n\nAccepts the same formats as `--created-since`. The range is half-open (`--created-before` is exclusive), so `--created-since X --created-before Y` matches everything in `[X, Y)`.")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation edit
+about: Some("Edit conversation details")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: ["e"]
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation edit [OPTIONS] [id]...
+group Edit: []
+group property: ["local", "pin", "expires_at", "no_expires_at", "title", "no_title"]
+group file: ["events", "metadata", "base_config"]
+
+### id
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1)
+value_type: jp_cli::cmd::target::ConversationTarget
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
+
+### local
+short: None
+long: Some("local")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: bool
+possible_values: ["true", "false"]
+value_names: Some(["LOCAL"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Toggle whether the conversation is kept local to your machine")
+long_help: Some("Toggle whether the conversation is kept local to your machine.\n\nEvery conversation is stored durably on your machine. A non-local conversation is additionally projected into the workspace's `.jp/conversations/` directory so it can be committed to version control; a local conversation is not, keeping it out of version control. Without a value, toggles the current state.")
+
+### pin
+short: None
+long: Some("pin")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: bool
+possible_values: ["true", "false"]
+value_names: Some(["PIN"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Toggle pinning of the conversation")
+long_help: Some("Toggle pinning of the conversation.\n\nPinned conversations are displayed prominently in listings and pickers. Without a value, toggles the current pin state.")
+
+### expires_at
+short: None
+long: Some("tmp")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: jp_cli::cmd::conversation::edit::ExpirationDuration
+possible_values: []
+value_names: Some(["EXPIRES_AT"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["no_expires_at"]
+set: []
+help: Some("Toggle or set the expiration time of the conversation")
+long_help: Some("Toggle or set the expiration time of the conversation.\n\nWithout a value, toggles: removes expiration if set, or sets it to expire immediately (when no longer active) if unset.\n\nAccepts a duration (e.g. `1h`, `30m`) or `now` for immediate expiration.")
+
+### no_expires_at
+short: None
+long: Some("no-tmp")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["NO_EXPIRES_AT"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Remove the expiration time of the conversation")
+long_help: None
+
+### title
+short: None
+long: Some("title")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["TITLE"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["no_title"]
+set: []
+help: Some("Set the title of the conversation")
+long_help: Some("Set the title of the conversation.\n\nWithout a value, generates one with an LLM and offers the candidates as a picker — the same as `conversation title`, which additionally exposes the model and candidate count.")
+
+### no_title
+short: None
+long: Some("no-title")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["NO_TITLE"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Remove the title of the conversation")
+long_help: None
+
+### events
+short: Some('e')
+long: Some("events")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["EVENTS"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["local", "pin", "expires_at", "no_expires_at", "title", "no_title"]
+set: []
+help: Some("Open `events.json` in `$EDITOR`")
+long_help: Some("Open `events.json` in `$EDITOR`.\n\nEach entry carries an `event_id` identifying it. Keep it when you edit an entry's content, and drop it when you add one: a missing, empty, or duplicated ID is replaced on the next load.")
+
+### metadata
+short: Some('m')
+long: Some("metadata")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["METADATA"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["local", "pin", "expires_at", "no_expires_at", "title", "no_title"]
+set: []
+help: Some("Open `metadata.json` in `$EDITOR`")
+long_help: None
+
+### base_config
+short: Some('b')
+long: Some("base-config")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["BASE_CONFIG"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["local", "pin", "expires_at", "no_expires_at", "title", "no_title"]
+set: []
+help: Some("Open `base_config.json` in `$EDITOR`")
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation fork
+about: Some("Fork a conversation")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: ["f"]
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation fork [OPTIONS] [id]...
+group Fork: []
+group TurnSelection: ["first", "last", "turn", "from", "to", "keep_first", "keep_last"]
+
+### id
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1)
+value_type: jp_cli::cmd::target::ConversationTarget
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
+
+### activate
+short: Some('a')
+long: Some("activate")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["ACTIVATE"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: None
+long_help: None
+
+### first
+short: Some('f')
+long: Some("first")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: usize
+possible_values: []
+value_names: Some(["FIRST"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["turn", "from", "to"]
+set: []
+help: Some("Select the first N turns. Without a value, selects the first turn")
+long_help: Some("Select the first N turns. Without a value, selects the first turn.\n\nComposes with `--last`: the pair selects the leading and trailing windows and skips the turns in between.")
+
+### last
+short: Some('l')
+long: Some("last")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: usize
+possible_values: []
+value_names: Some(["LAST"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["turn", "from", "to"]
+set: []
+help: Some("Select the last N turns. Without a value, selects the last turn")
+long_help: Some("Select the last N turns. Without a value, selects the last turn.\n\nComposes with `--first`: the pair selects the leading and trailing windows and skips the turns in between.")
+
+### turn
+short: None
+long: Some("turn")
+visible_aliases: []
+hidden_aliases: ["turns"]
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::turn_selection::TurnSpec
+possible_values: []
+value_names: Some(["TURN"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["first", "last", "from", "to"]
+set: []
+help: Some("Select turns by number: a single turn (`3`), an inclusive range (`1..5`), or an open range like `10..` (turn 10 onward), `..10` (the first 10), or `..` (all). Numbers are 1-based and stable across new turns; `-N` instead counts from the end, so `-1` is the last turn and `-3..-2` the two turns before it")
+long_help: None
+
+### from
+short: None
+long: Some("from")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::turn_selection::CliRangeBound
+possible_values: []
+value_names: Some(["FROM"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Start of the range, inclusive")
+long_help: Some("Start of the range, inclusive.\n\nAccepts a 1-based turn number (`3`), a from-end offset (`-1` is the last turn), a relative duration (`5h`), a date (`2026-01-01`), an RFC 3339 timestamp, or `last-compaction` (the turn after the most recent compaction).\n\nA time-based value starts the selection at the first turn to *begin* after the given instant, so the turn that was already running at that instant is excluded. A bound never splits a turn.")
+
+### to
+short: None
+long: Some("to")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::turn_selection::CliRangeBound
+possible_values: []
+value_names: Some(["TO"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("End of the range, inclusive")
+long_help: Some("End of the range, inclusive.\n\nAccepts the same forms as `--from`, except `last-compaction`, which only makes sense as a start bound.\n\nA time-based value ends the selection at (and includes) the turn that was running at the given instant — the mirror of `--from`, which excludes it. A bound never splits a turn.")
+
+### keep_first
+short: None
+long: Some("keep-first")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_config::conversation::compaction::RuleBound
+possible_values: []
+value_names: Some(["KEEP_FIRST"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Protect the first N turns from the selection")
+long_help: Some("Protect the first N turns from the selection.\n\nAccepts a turn count (`2`), an absolute 1-based turn (`@3`), a from-end offset (`-3`), a duration (`5h`), or `last-compaction` (protect every turn through the most recent compaction). Composes with every other selector: the selection starts no earlier than the first unprotected turn.")
+
+### keep_last
+short: None
+long: Some("keep-last")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_config::conversation::compaction::RuleBound
+possible_values: []
+value_names: Some(["KEEP_LAST"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Protect the last N turns from the selection")
+long_help: Some("Protect the last N turns from the selection.\n\nAccepts the same forms as `--keep-first`, except `last-compaction`, which only makes sense at the start. Composes with every other selector: the selection ends no later than the last unprotected turn.")
+
+### no_turns
+short: Some('N')
+long: Some("no-turns")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["NO_TURNS"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["from", "to", "turn", "first", "last", "keep_first", "keep_last", "compact"]
+set: []
+help: Some("Fork without inheriting any turns")
+long_help: Some("Fork without inheriting any turns.\n\nThe fork keeps the source conversation's full effective configuration (base config plus every config delta) but starts with zero turns — equivalent to a fresh conversation whose config matches the source's current config. Cannot be combined with the turn-selection or `--compact` flags.")
+
+### compact
+short: Some('k')
+long: Some("compact")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(0..=1)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Run conversation compaction rules")
+long_help: Some("Compact the conversation.\n\nWithout a value, applies the compaction rules from the resolved configuration.\n\nWith a DSL value (e.g. `--compact=s:..-3`), applies an inline compaction rule. Multiple `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare `--compact` includes config rules, each `--compact=SPEC` adds a DSL rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or a byte count). Each half of a tool call is judged on its own size; `omit` is judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 compacts through the third turn from the end, leaving the final two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, r,over=16kb+t=sres,over=1mb:..-3\n\nOn `jp query`, a value written directly before the query that is not a valid spec is the query's first word instead, and the flag applies the configured rules: `jp q -k what did we decide` compacts with the configured rules and asks \"what did we decide\".")
+
+### title
+short: Some('t')
+long: Some("title")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["TITLE"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Set a custom title for the forked conversation")
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation compact
+about: Some("Compact a conversation to reduce context size")
+long_about: Some("Compact a conversation to reduce context size.\n\nAppends a compaction overlay that instructs the LLM projection layer to strip reasoning blocks and/or tool call content from the specified range. The original events are preserved.")
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation compact [OPTIONS] [id]...
+group Compact: []
+group TurnSelection: ["first", "last", "turn", "from", "to", "keep_first", "keep_last"]
+
+### id
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1)
+value_type: jp_cli::cmd::target::ConversationTarget
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
+
+### first
+short: Some('f')
+long: Some("first")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: usize
+possible_values: []
+value_names: Some(["FIRST"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["turn", "from", "to"]
+set: []
+help: Some("Select the first N turns. Without a value, selects the first turn")
+long_help: Some("Select the first N turns. Without a value, selects the first turn.\n\nComposes with `--last`: the pair selects the leading and trailing windows and skips the turns in between.")
+
+### last
+short: Some('l')
+long: Some("last")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: usize
+possible_values: []
+value_names: Some(["LAST"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["turn", "from", "to"]
+set: []
+help: Some("Select the last N turns. Without a value, selects the last turn")
+long_help: Some("Select the last N turns. Without a value, selects the last turn.\n\nComposes with `--first`: the pair selects the leading and trailing windows and skips the turns in between.")
+
+### turn
+short: None
+long: Some("turn")
+visible_aliases: []
+hidden_aliases: ["turns"]
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::turn_selection::TurnSpec
+possible_values: []
+value_names: Some(["TURN"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["first", "last", "from", "to"]
+set: []
+help: Some("Select turns by number: a single turn (`3`), an inclusive range (`1..5`), or an open range like `10..` (turn 10 onward), `..10` (the first 10), or `..` (all). Numbers are 1-based and stable across new turns; `-N` instead counts from the end, so `-1` is the last turn and `-3..-2` the two turns before it")
+long_help: None
+
+### from
+short: None
+long: Some("from")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::turn_selection::CliRangeBound
+possible_values: []
+value_names: Some(["FROM"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Start of the range, inclusive")
+long_help: Some("Start of the range, inclusive.\n\nAccepts a 1-based turn number (`3`), a from-end offset (`-1` is the last turn), a relative duration (`5h`), a date (`2026-01-01`), an RFC 3339 timestamp, or `last-compaction` (the turn after the most recent compaction).\n\nA time-based value starts the selection at the first turn to *begin* after the given instant, so the turn that was already running at that instant is excluded. A bound never splits a turn.")
+
+### to
+short: None
+long: Some("to")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::turn_selection::CliRangeBound
+possible_values: []
+value_names: Some(["TO"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("End of the range, inclusive")
+long_help: Some("End of the range, inclusive.\n\nAccepts the same forms as `--from`, except `last-compaction`, which only makes sense as a start bound.\n\nA time-based value ends the selection at (and includes) the turn that was running at the given instant — the mirror of `--from`, which excludes it. A bound never splits a turn.")
+
+### keep_first
+short: None
+long: Some("keep-first")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_config::conversation::compaction::RuleBound
+possible_values: []
+value_names: Some(["KEEP_FIRST"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Protect the first N turns from the selection")
+long_help: Some("Protect the first N turns from the selection.\n\nAccepts a turn count (`2`), an absolute 1-based turn (`@3`), a from-end offset (`-3`), a duration (`5h`), or `last-compaction` (protect every turn through the most recent compaction). Composes with every other selector: the selection starts no earlier than the first unprotected turn.")
+
+### keep_last
+short: None
+long: Some("keep-last")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_config::conversation::compaction::RuleBound
+possible_values: []
+value_names: Some(["KEEP_LAST"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Protect the last N turns from the selection")
+long_help: Some("Protect the last N turns from the selection.\n\nAccepts the same forms as `--keep-first`, except `last-compaction`, which only makes sense at the start. Composes with every other selector: the selection ends no later than the last unprotected turn.")
+
+### reasoning
+short: Some('r')
+long: Some("reasoning")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["REASONING"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["compact"]
+set: []
+help: Some("Strip reasoning (thinking) blocks from the compacted range")
+long_help: None
+
+### tools
+short: Some('t')
+long: Some("tools")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: jp_config::conversation::compaction::ToolCallsMode
+possible_values: []
+value_names: Some(["TOOLS"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["compact"]
+set: []
+help: Some("Strip tool call content from the compacted range")
+long_help: Some("Strip tool call content from the compacted range.\n\nUsed without a value, strips both requests and responses. Otherwise one of (with short aliases):\n\n- `strip` (`s`): strip request arguments and response content - `strip-requests` (`sreq`): strip request arguments only - `strip-responses` (`sres`): strip response content only - `omit` (`o`): remove tool call pairs entirely")
+
+### summary
+short: Some('s')
+long: Some("summary")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["SUMMARY"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["compact"]
+set: []
+help: Some("Replace the compacted turns with a summary")
+long_help: Some("Replace the compacted turns with a summary.\n\nWithout a value, the summary is generated by the assistant. With a value, that text is used verbatim and no model is called, e.g. `--summary \"we settled on the layered loader\"`.")
+
+### summary_context
+short: None
+long: Some("summary-context")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["SUMMARY_CONTEXT"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Extra guidance for the summarizer, e.g. \"focus on the architecture\"")
+long_help: Some("Extra guidance for the summarizer, e.g. \"focus on the architecture\".\n\nRides on the summarization request as supplementary context; it adds to the summarizer's instructions rather than replacing them. Applies to every rule in this invocation that generates a summary, overriding any `conversation.compaction.rules[].summary.context` they set themselves. Has no effect on a verbatim `--summary TEXT`, which calls no model.")
+
+### over
+short: None
+long: Some("over")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_config::types::byte_size::ByteSize
+possible_values: []
+value_names: Some(["SIZE"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["summary", "compact"]
+set: []
+help: Some("Only compact items larger than this")
+long_help: Some("Only compact items larger than this.\n\nAccepts a human-readable size (`512KB`, `1MB`) or a bare byte count. Applies to every mechanical policy this invocation sets; use the inline DSL (`-k 'r,over=16kb+t=sres,over=1mb'`) to give each policy its own threshold.\n\nEach half of a tool call is judged on its own size, so `--tools=strip` on a call with a short request and a huge response drops only the response. `--tools=omit` removes whole pairs, so it is judged on the two halves combined.")
+
+### model
+short: Some('m')
+long: Some("model")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["MODEL"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("The model to summarize with")
+long_help: Some("The model to summarize with.\n\nAccepts a model alias or a full `provider/name` ID, the same values as `jp query --model`. Overrides the summarizer model for every rule in this invocation, including rules that set their own `conversation.compaction.rules[].summary.model`. Only affects rules that generate a summary; without one, nothing calls an LLM.")
+
+### dry_run
+short: None
+long: Some("dry-run")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["DRY_RUN"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Preview what would change without applying")
+long_help: None
+
+### reset
+short: None
+long: Some("reset")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: usize
+possible_values: []
+value_names: Some(["INDEX"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["keep_first", "keep_last", "from", "to", "first", "last", "turn", "reasoning", "tools", "summary", "summary_context", "compact", "model", "over"]
+set: ["require_equals"]
+help: Some("Remove compaction events from the stream")
+long_help: Some("Remove compaction events from the stream.\n\nWithout a value, removes every compaction event, restoring the raw event history so the LLM sees all original events. With a value (`--reset=2`), removes only that compaction event, numbered as `jp conversation show` lists them. Mutually exclusive with the policy, range, and DSL flags: `--reset` undoes compaction, it does not re-compact in the same invocation. Composes with `--dry-run` to preview the removal.")
+
+### compact
+short: Some('k')
+long: Some("compact")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(0..=1)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Run conversation compaction rules")
+long_help: Some("Compact the conversation.\n\nWithout a value, applies the compaction rules from the resolved configuration.\n\nWith a DSL value (e.g. `--compact=s:..-3`), applies an inline compaction rule. Multiple `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare `--compact` includes config rules, each `--compact=SPEC` adds a DSL rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or a byte count). Each half of a tool call is judged on its own size; `omit` is judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 compacts through the third turn from the end, leaving the final two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, r,over=16kb+t=sres,over=1mb:..-3\n\nOn `jp query`, a value written directly before the query that is not a valid spec is the query's first word instead, and the flag applies the configured rules: `jp q -k what did we decide` compacts with the configured rules and asks \"what did we decide\".")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation title
+about: Some("Generate a conversation title with an LLM")
+long_about: Some("Generate a conversation title with an LLM.\n\nOffers the generated candidates as a picker, and applies the chosen one as the conversation's title. Use `edit --title \"TITLE\"` to set a title without involving a model.")
+after_help: None
+after_long_help: None
+visible_aliases: ["t"]
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation title [OPTIONS] [id]...
+group Title: []
+
+### id
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1)
+value_type: jp_cli::cmd::target::ConversationTarget
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
+
+### count
+short: Some('n')
+long: Some("count")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: usize
+possible_values: []
+value_names: Some(["COUNT"])
+value_delimiter: None
+default_values: ["3"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("How many candidate titles to generate")
+long_help: Some("How many candidate titles to generate.\n\nThe candidates are offered as a picker, which can also generate a fresh batch or take a hand-written title. Without a terminal to pick with, the first candidate is applied.")
+
+### model
+short: Some('m')
+long: Some("model")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["MODEL"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("The model to generate the title with")
+long_help: Some("The model to generate the title with.\n\nAccepts a model alias or a full `provider/name` ID, the same values as `jp query --model`. Overrides `conversation.title.generate.model` for this invocation.")
+
+### dry_run
+short: None
+long: Some("dry-run")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["DRY_RUN"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print the candidate titles without applying one")
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation grep
+about: Some("Search through conversation history")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: ["g"]
+hidden_aliases: ["rg"]
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation grep [OPTIONS] [PATTERN]...
+group Grep: []
+
+### pattern
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1..)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["PATTERN"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["patterns"]
+set: []
+help: Some("The search pattern")
+long_help: Some("The search pattern.\n\nMultiple words are joined with single spaces, so quoting is optional: `jp c grep two words` searches for `two words`. A pattern that starts with `-` still needs `--` ahead of it. To search for several separate patterns, use `-e` instead.")
+
+### patterns
+short: Some('e')
+long: Some("pattern")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["PATTERN"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("A pattern to search for. Repeat to give several")
+long_help: Some("A pattern to search for. Repeat to give several.\n\nA line matches when it contains any of the patterns. Replaces the positional pattern: `jp c grep -e alpha -e beta`.")
+
+### all_match
+short: None
+long: Some("all-match")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["ALL_MATCH"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["pattern"]
+set: []
+help: Some("Only report conversations that contain every `-e` pattern")
+long_help: Some("Only report conversations that contain every `-e` pattern.\n\nThe patterns may match in any order, on different lines, and in different parts of the conversation. Every line matching any of them is shown.")
+
+### id
+short: Some('i')
+long: Some("id")
+visible_aliases: ["ids"]
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(0..=1)
+value_type: jp_cli::cmd::target::ConversationTarget
+possible_values: []
+value_names: None
+value_delimiter: Some(',')
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.\n\nOn `jp query`, a value written directly before the query that is neither a conversation ID nor one of the forms above is the query's first word instead, and the picker opens: `jp q -i fix the bug` picks a conversation and asks \"fix the bug\". Put the query after `--` to search the picker by title: `jp q -i auth -- fix the bug`.")
+
+### ignore_case
+short: None
+long: Some("ignore-case")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["IGNORE_CASE"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["case_sensitive"]
+set: []
+help: Some("Match case-insensitively, overriding smart-case")
+long_help: None
+
+### case_sensitive
+short: None
+long: Some("case-sensitive")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["CASE_SENSITIVE"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Match case-sensitively, overriding smart-case")
+long_help: None
+
+### context
+short: None
+long: Some("context")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: usize
+possible_values: []
+value_names: Some(["CONTEXT"])
+value_delimiter: None
+default_values: ["0"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Number of context lines to show around each match")
+long_help: None
+
+### sort
+short: None
+long: Some("sort")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::conversation::grep::Sort
+possible_values: ["created", "activated", "updated"]
+value_names: Some(["SORT"])
+value_delimiter: None
+default_values: ["created"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Sort conversations by a field")
+long_help: None
+
+### descending
+short: None
+long: Some("descending")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["DESCENDING"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Reverse the sort order (newest/latest first)")
+long_help: None
+
+### regex
+short: Some('r')
+long: Some("regex")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["REGEX"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Treat every pattern as a regular expression instead of a literal")
+long_help: None
+
+### output
+short: None
+long: Some("output")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::conversation::grep::OutputKind
+possible_values: ["hits", "ids", "count", "text"]
+value_names: Some(["OUTPUT"])
+value_delimiter: None
+default_values: ["hits"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("What to emit for each conversation that contains a match")
+long_help: Some("What to emit for each conversation that contains a match.\n\n- `hits`: the matching lines with their coordinates. - `ids`: the conversation ID only. - `count`: the conversation ID and its number of matching lines. - `text`: the matched and context lines with no coordinates.")
+
+### heading
+short: None
+long: Some("heading")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["HEADING"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["no_heading"]
+set: []
+help: Some("Group hits under a per-conversation heading")
+long_help: Some("Group hits under a per-conversation heading.\n\nOn by default in the human format (`-F auto` on a terminal), off in the machine format.")
+
+### no_heading
+short: None
+long: Some("no-heading")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["NO_HEADING"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print one fully-qualified `ID:TURN:SCOPE:KIND:TEXT` line per hit instead of grouping them under headings")
+long_help: None
+
+### wrap
+short: None
+long: Some("wrap")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["WRAP"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["no_heading"]
+set: []
+help: Some("Wrap long lines instead of cutting them to fit")
+long_help: Some("Wrap long lines instead of cutting them to fit.\n\nWraps at the output width, so pair it with `--width` to pick a column: `jp c grep --width=100 --wrap PATTERN`. Has no effect when the output width is unknown, which is the case for a pipe with no `--width`. Groups hits under per-conversation headings even when piped, since a continuation row has no coordinate to carry.")
+
+### max_matches
+short: Some('m')
+long: Some("max-matches")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: core::num::nonzero::NonZero<usize>
+possible_values: []
+value_names: Some(["MAX_MATCHES"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Stop after this many matching lines per conversation")
+long_help: Some("Stop after this many matching lines per conversation.\n\nMust be at least 1: a cap of zero would discard every match and report the run as finding nothing.")
+
+### limit
+short: None
+long: Some("limit")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: core::num::nonzero::NonZero<usize>
+possible_values: []
+value_names: Some(["LIMIT"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Show at most this many conversations, in sort order")
+long_help: Some("Show at most this many conversations, in sort order.\n\nMust be at least 1: a cap of zero would discard real matches and report the run as finding nothing.")
+
+### labels
+short: None
+long: Some("label")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::cmd::label::LabelSelector
+possible_values: []
+value_names: Some(["KEY[=VALUE]"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Only search conversations carrying this label")
+long_help: Some("Only search conversations carrying this label.\n\n`key=value` matches when the key holds that value, a bare `key` matches any value. Repeat the flag to require several; every selector must match.")
+
+### scopes
+short: Some('s')
+long: Some("scope")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::cmd::conversation::grep::Scope
+possible_values: ["all", "chat", "tool", "title", "label", "user", "assistant", "reasoning", "structured", "tool-call", "tool-result", "inquiry"]
+value_names: Some(["SCOPES"])
+value_delimiter: Some(',')
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Restrict the search to specific parts of the conversation")
+long_help: Some("Restrict the search to specific parts of the conversation.\n\nRepeat the flag (`--scope user --scope assistant`) or comma-separate the values (`--scope user,assistant`). If omitted, every part is searched. Meta-scopes `chat` and `tool` expand to their concrete members.")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation label
+about: Some("Manage the labels on a conversation")
+long_about: Some("Manage the labels on a conversation.\n\n`jp c label add`, `set`, `rm`, and `ls`; a bare `jp c label` lists.")
+after_help: None
+after_long_help: None
+visible_aliases: ["l"]
+hidden_aliases: ["labels"]
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation label [OPTIONS] [COMMAND]
+group Label: []
+
+### id
+short: Some('i')
+long: Some("id")
+visible_aliases: ["ids"]
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(0..=1)
+value_type: jp_cli::cmd::target::ConversationTarget
+possible_values: []
+value_names: None
+value_delimiter: Some(',')
+default_values: []
+help_heading: None
+conflicts: []
+set: ["global"]
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.\n\nOn `jp query`, a value written directly before the query that is neither a conversation ID nor one of the forms above is the query's first word instead, and the picker opens: `jp q -i fix the bug` picks a conversation and asks \"fix the bug\". Put the query after `--` to search the picker by title: `jp q -i auth -- fix the bug`.")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation label add
+about: Some("Add values to the conversation's labels")
+long_about: Some("Add values to the conversation's labels.\n\nValues accumulate: a key that already holds values keeps them. Use `set` to replace what a key holds.")
+after_help: None
+after_long_help: None
+visible_aliases: ["a"]
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation label add [OPTIONS] <KEY[=VALUE]|:NAME>...
+group Values: ["labels"]
+
+### labels
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1..)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["KEY[=VALUE]|:NAME"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: ["required"]
+help: Some("The labels to apply, as `key=value` or a bare `key` for an empty value")
+long_help: Some("The labels to apply, as `key=value` or a bare `key` for an empty value.\n\n`:name` resolves the `conversation.labels.name` rule and applies whatever it produces. Values are taken literally, so they may contain commas. Naming one key several times acts on all of its values at once.")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation label set
+about: Some("Replace the values of the labels named")
+long_about: Some("Replace the values of the labels named.\n\nOnly the keys named are replaced; every other label is left alone. A bare `rm` clears them all.")
+after_help: None
+after_long_help: None
+visible_aliases: ["s"]
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation label set [OPTIONS] <KEY[=VALUE]|:NAME>...
+group Values: ["labels"]
+
+### labels
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1..)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["KEY[=VALUE]|:NAME"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: ["required"]
+help: Some("The labels to apply, as `key=value` or a bare `key` for an empty value")
+long_help: Some("The labels to apply, as `key=value` or a bare `key` for an empty value.\n\n`:name` resolves the `conversation.labels.name` rule and applies whatever it produces. Values are taken literally, so they may contain commas. Naming one key several times acts on all of its values at once.")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation label rm
+about: Some("Remove labels from the conversation")
+long_about: Some("Remove labels from the conversation.\n\nWith no arguments, removes every label.")
+after_help: None
+after_long_help: None
+visible_aliases: ["r"]
+hidden_aliases: ["remove", "del", "delete"]
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation label rm [OPTIONS] [KEY[=VALUE]]...
+group Rm: ["labels"]
+
+### labels
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1..)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["KEY[=VALUE]"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("The labels to remove, as a bare `key` or a `key=value` pair")
+long_help: Some("The labels to remove, as a bare `key` or a `key=value` pair.\n\nA bare key removes every value it holds. With none given, every label is removed.\n\nRemoving a label the conversation doesn't carry is not an error, but it is reported.")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation label ls
+about: Some("List the conversation's labels")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: ["list"]
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation label ls [OPTIONS]
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation print
+about: Some("Print conversation history to the terminal")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: ["p"]
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation print [OPTIONS] [id]...
+group Print: []
+group TurnSelection: ["first", "last", "turn", "from", "to", "keep_first", "keep_last"]
+
+### id
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1)
+value_type: jp_cli::cmd::target::ConversationTarget
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
+
+### first
+short: Some('f')
+long: Some("first")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: usize
+possible_values: []
+value_names: Some(["FIRST"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["turn", "from", "to"]
+set: []
+help: Some("Select the first N turns. Without a value, selects the first turn")
+long_help: Some("Select the first N turns. Without a value, selects the first turn.\n\nComposes with `--last`: the pair selects the leading and trailing windows and skips the turns in between.")
+
+### last
+short: Some('l')
+long: Some("last")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: usize
+possible_values: []
+value_names: Some(["LAST"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["turn", "from", "to"]
+set: []
+help: Some("Select the last N turns. Without a value, selects the last turn")
+long_help: Some("Select the last N turns. Without a value, selects the last turn.\n\nComposes with `--first`: the pair selects the leading and trailing windows and skips the turns in between.")
+
+### turn
+short: None
+long: Some("turn")
+visible_aliases: []
+hidden_aliases: ["turns"]
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::turn_selection::TurnSpec
+possible_values: []
+value_names: Some(["TURN"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["first", "last", "from", "to"]
+set: []
+help: Some("Select turns by number: a single turn (`3`), an inclusive range (`1..5`), or an open range like `10..` (turn 10 onward), `..10` (the first 10), or `..` (all). Numbers are 1-based and stable across new turns; `-N` instead counts from the end, so `-1` is the last turn and `-3..-2` the two turns before it")
+long_help: None
+
+### from
+short: None
+long: Some("from")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::turn_selection::CliRangeBound
+possible_values: []
+value_names: Some(["FROM"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Start of the range, inclusive")
+long_help: Some("Start of the range, inclusive.\n\nAccepts a 1-based turn number (`3`), a from-end offset (`-1` is the last turn), a relative duration (`5h`), a date (`2026-01-01`), an RFC 3339 timestamp, or `last-compaction` (the turn after the most recent compaction).\n\nA time-based value starts the selection at the first turn to *begin* after the given instant, so the turn that was already running at that instant is excluded. A bound never splits a turn.")
+
+### to
+short: None
+long: Some("to")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::turn_selection::CliRangeBound
+possible_values: []
+value_names: Some(["TO"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("End of the range, inclusive")
+long_help: Some("End of the range, inclusive.\n\nAccepts the same forms as `--from`, except `last-compaction`, which only makes sense as a start bound.\n\nA time-based value ends the selection at (and includes) the turn that was running at the given instant — the mirror of `--from`, which excludes it. A bound never splits a turn.")
+
+### keep_first
+short: None
+long: Some("keep-first")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_config::conversation::compaction::RuleBound
+possible_values: []
+value_names: Some(["KEEP_FIRST"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Protect the first N turns from the selection")
+long_help: Some("Protect the first N turns from the selection.\n\nAccepts a turn count (`2`), an absolute 1-based turn (`@3`), a from-end offset (`-3`), a duration (`5h`), or `last-compaction` (protect every turn through the most recent compaction). Composes with every other selector: the selection starts no earlier than the first unprotected turn.")
+
+### keep_last
+short: None
+long: Some("keep-last")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_config::conversation::compaction::RuleBound
+possible_values: []
+value_names: Some(["KEEP_LAST"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Protect the last N turns from the selection")
+long_help: Some("Protect the last N turns from the selection.\n\nAccepts the same forms as `--keep-first`, except `last-compaction`, which only makes sense at the start. Composes with every other selector: the selection ends no later than the last unprotected turn.")
+
+### current_config
+short: None
+long: Some("current-config")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["CURRENT_CONFIG"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Use the current workspace config instead of the per-turn config")
+long_help: Some("Use the current workspace config instead of the per-turn config.\n\nBy default, each turn is rendered with the config that was active when it was created. This flag overrides that and uses the current workspace config for all turns.")
+
+### style
+short: Some('s')
+long: Some("style")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::conversation::print::PrintStyle
+possible_values: ["user", "chat", "brief", "full"]
+value_names: Some(["STYLE"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Output style preset")
+long_help: Some("Output style preset.\n\n- `user`: Show only user messages. Hides assistant messages, reasoning, and tool calls entirely. - `chat`: Show only user and assistant messages. Hides reasoning and tool calls entirely. - `brief`: Hide reasoning, tool arguments, and tool results. Shows only user messages, assistant messages, and tool call headers. - `full`: Show everything including reasoning, tool arguments, and untruncated tool results.")
+
+### compacted
+short: None
+long: Some("compacted")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["COMPACTED"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print the compacted view (what the LLM sees) instead of the full history")
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation path
+about: Some("Print the filesystem path to a conversation")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation path [OPTIONS] [id]...
+group Path: []
+
+### id
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1)
+value_type: jp_cli::cmd::target::ConversationTarget
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
+
+### events
+short: None
+long: Some("events")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["EVENTS"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print the path to `events.json`")
+long_help: None
+
+### metadata
+short: None
+long: Some("metadata")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["METADATA"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print the path to `metadata.json`")
+long_help: None
+
+### base_config
+short: None
+long: Some("base-config")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["BASE_CONFIG"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print the path to `base_config.json`")
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation archive
+about: Some("Archive conversations")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: ["a"]
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation archive [OPTIONS] [id]...
+group Archive: []
+group creation_range: ["created_since", "created_before"]
+group ConfirmFlag: ["confirm", "no_confirm"]
+
+### id
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1)
+value_type: jp_cli::cmd::target::ConversationTarget
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
+
+### created_since
+short: None
+long: Some("created-since")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::time::TimeThreshold
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Match conversations created at or after the specified time.")
+long_help: Some("Match conversations created at or after the specified time.\n\nAccepts a conversation ID (uses its creation timestamp), a relative duration (e.g. `3w`, `30d`, `6h`), or an absolute date (e.g. `2026-01-01`). Composable with `--created-before`.")
+
+### created_before
+short: None
+long: Some("created-before")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::time::TimeThreshold
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Match conversations created before the specified time.")
+long_help: Some("Match conversations created before the specified time.\n\nAccepts the same formats as `--created-since`. The range is half-open (`--created-before` is exclusive), so `--created-since X --created-before Y` matches everything in `[X, Y)`.")
+
+### inactive_since
+short: None
+long: Some("inactive-since")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::time::TimeThreshold
+possible_values: []
+value_names: Some(["INACTIVE_SINCE"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["id"]
+set: []
+help: Some("Archive all conversations inactive since a given time")
+long_help: Some("Archive all conversations inactive since a given time.\n\nAccepts the same formats as `--created-since`. Filters on `last_activated_at` (when the conversation was last used) rather than its creation date, which makes this distinct from the `--created-since`/`--created-before` range.")
+
+### confirm
+short: None
+long: Some("confirm")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["CONFIRM"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Prompt for confirmation before each change")
+long_help: None
+
+### no_confirm
+short: Some('y')
+long: Some("no-confirm")
+visible_aliases: ["yes"]
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["NO_CONFIRM"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Skip confirmation prompts")
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp conversation unarchive
+about: Some("Unarchive conversations")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: ["ua"]
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp conversation unarchive [OPTIONS] [id]...
+group Unarchive: []
+
+### id
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Append
+num_args: Some(1)
+value_type: jp_cli::cmd::target::ConversationTarget
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n\nConversation Aliases:\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  -                             read IDs from stdin, one per line\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp plugin
+about: Some("Manage plugins")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp plugin [OPTIONS] <COMMAND>
+group PluginManagement: []
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp plugin list
+about: Some("List installed plugins, and the ones the registry offers")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: ["ls"]
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp plugin list [OPTIONS]
+group List: []
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp plugin install
+about: Some("Install a plugin from the registry, with the plugins it requires")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp plugin install [OPTIONS] <NAME>
+group Install: ["name"]
+
+### name
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Set
+num_args: Some(1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["NAME"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: ["required"]
+help: Some("Name of the plugin to install (e.g. \"serve-web\")")
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp plugin uninstall
+about: Some("Remove a plugin JP installed, and its approval")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp plugin uninstall [OPTIONS] <NAME>
+group Uninstall: ["name"]
+
+### name
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Set
+num_args: Some(1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["NAME"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: ["required"]
+help: Some("The plugin's name: its file name without `jp-`")
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp plugin update
+about: Some("Refresh the plugin registry, and update the plugins JP installed")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp plugin update [OPTIONS]
+group Update: []
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp plugin approve
+about: Some("Approve a plugin binary, so it runs without asking")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp plugin approve [OPTIONS] <PATH>
+group Approve: ["path"]
+
+### path
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Set
+num_args: Some(1)
+value_type: camino::Utf8PathBuf
+possible_values: []
+value_names: Some(["PATH"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: ["required"]
+help: Some("Path to the plugin binary, a file named `jp-<name>`")
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp plugin revoke
+about: Some("Withdraw a plugin's approval, so it asks again before it runs")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp plugin revoke [OPTIONS] <NAME>
+group Revoke: ["name"]
+
+### name
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Set
+num_args: Some(1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["NAME"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: ["required"]
+help: Some("The plugin's name: its file name without `jp-`")
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp workspace
+about: Some("Manage workspaces")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: ["w"]
+hidden_aliases: ["workspaces"]
+hidden: false
+external_subcommands: false
+usage: Usage: jp workspace [OPTIONS] <COMMAND>
+group Workspace: []
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp workspace use
+about: Some("Select the session's active workspace")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: ["u"]
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp workspace use [OPTIONS] [TARGET]
+group Use: ["target", "always"]
+
+### target
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::workspace::target::WorkspaceTarget
+possible_values: []
+value_names: Some(["TARGET"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("The workspace to select. See `jp w use help` for the grammar")
+long_help: Some("The workspace to select. See `jp w use help` for the grammar.\n\nAlso settable with the global `--workspace` flag, but not both at once. Defaults to the previously active workspace (`s`), or the picker (`?`) when the session has none.")
+
+### always
+short: None
+long: Some("always")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["ALWAYS"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Keep using this workspace even from inside another one")
+long_help: Some("Keep using this workspace even from inside another one.\n\nWithout it, standing in a different workspace makes JP ask which of the two you meant. With it, the selection wins and JP stops asking; every run from elsewhere reports the workspace it used.\n\nA later `jp workspace use` without `--always` releases it, and `jp workspace use cwd` clears the selection outright.")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp workspace ls
+about: Some("List known workspaces and their checkouts")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: ["list"]
+hidden: false
+external_subcommands: false
+usage: Usage: jp workspace ls [OPTIONS]
+group Ls: []
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp workspace show
+about: Some("Show a workspace: identity, checkouts, and how it resolves")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: ["s"]
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp workspace show [OPTIONS] [TARGET]
+group Show: ["target"]
+
+### target
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::workspace::target::WorkspaceTarget
+possible_values: []
+value_names: Some(["TARGET"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("The workspace to show. See `jp w use help` for the grammar")
+long_help: Some("The workspace to show. See `jp w use help` for the grammar.\n\nAlso settable with the global `--workspace` flag, but not both at once. Defaults to the session's active workspace, then the cwd-derived one.")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp provider
+about: Some("Manage provider credentials")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp provider [OPTIONS] <COMMAND>
+group Provider: []
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp provider llm
+about: Some("Model providers: the services that answer a query")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp provider llm [OPTIONS] <COMMAND>
+group Llm: []
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp provider llm auth
+about: Some("Manage the credentials a model provider is reached with")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp provider llm auth [OPTIONS] <COMMAND>
+group Auth: []
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp provider llm auth login
+about: Some("Log in to a provider and register a named subscription")
+long_about: Some("Log in to a provider and register a named subscription.\n\nAnthropic uses Claude Code's sign-in with an isolated configuration directory. JP registers the login without copying its tokens.")
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp provider llm auth login [OPTIONS] <TARGET>
+group Login: ["target", "name", "device_auth", "import_codex", "setup_token", "direct", "config_dir"]
+
+### target
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::provider::AuthTarget
+possible_values: []
+value_names: Some(["TARGET"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: ["required"]
+help: Some("The provider to log in to, e.g. `anthropic`")
+long_help: None
+
+### name
+short: None
+long: Some("name")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["NAME"])
+value_delimiter: None
+default_values: ["default"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("The name to store the credential under, selected from an `auth` chain as `subscription:<name>`")
+long_help: Some("The name to store the credential under, selected from an `auth` chain as `subscription:<name>`.\n\nThe kind keywords `api_key`, `api`, `subscription`, `sub`, and `profile` are reserved for new credentials.")
+
+### device_auth
+short: None
+long: Some("device-auth")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["DEVICE_AUTH"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["setup_token", "import_codex"]
+set: []
+help: Some("Sign in by entering a code on the provider's website, instead of capturing a browser redirect on localhost")
+long_help: Some("Sign in by entering a code on the provider's website, instead of capturing a browser redirect on localhost.\n\nUse this on a machine whose browser cannot reach back to it, or where the callback port is unavailable.")
+
+### import_codex
+short: None
+long: Some("import-codex")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["IMPORT_CODEX"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["setup_token", "device_auth"]
+set: []
+help: Some("Copy the credential the Codex CLI already holds, instead of signing in")
+long_help: Some("Copy the credential the Codex CLI already holds, instead of signing in.\n\nReads `$CODEX_HOME/auth.json` (`~/.codex/auth.json` by default). The credential is copied, not moved: refreshing it through JP rotates the refresh token, which ends the Codex CLI's own session.")
+
+### setup_token
+short: None
+long: Some("setup-token")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["SETUP_TOKEN"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Store a long-lived setup token read from the first line of stdin, instead of running the browser login")
+long_help: Some("Store a long-lived setup token read from the first line of stdin, instead of running the browser login.\n\nRun the provider's token command, then paste the value it prints at JP's prompt; the prompt names the command and the token's shape. A token command that runs interactively cannot be the source of a pipe, since a pipeline's stages all start at once; piping from a non-interactive source (a clipboard tool, a file) works.")
+
+### direct
+short: None
+long: Some("direct")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: Some(["DIRECT"])
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: ["config_dir"]
+set: []
+help: Some("Opt in to direct Anthropic subscription tokens and their account-policy risk. Requires `--setup-token`. Queries also require `subscription_flow=direct`")
+long_help: None
+
+### config_dir
+short: None
+long: Some("config-dir")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: camino::Utf8PathBuf
+possible_values: []
+value_names: Some(["CONFIG_DIR"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: ["setup_token", "device_auth", "import_codex"]
+set: []
+help: Some("Use an existing runtime login directory instead of allocating one. Must be absolute. Existing registrations retain their original directory. For Anthropic, the default is `<JP user data dir>/data/claude/<name>`")
+long_help: None
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp provider llm auth list
+about: Some("List named subscriptions, API keys, and their state")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: ["ls"]
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp provider llm auth list [OPTIONS]
+group List: []
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp provider llm auth logout
+about: Some("Log out of a named subscription and remove its registration")
+long_about: None
+after_help: None
+after_long_help: None
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: false
+usage: Usage: jp provider llm auth logout [OPTIONS] <TARGET>
+group Logout: ["target", "name"]
+
+### target
+short: None
+long: None
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: Some(1)
+action: Set
+num_args: Some(1)
+value_type: jp_cli::cmd::provider::AuthTarget
+possible_values: []
+value_names: Some(["TARGET"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: ["required"]
+help: Some("The provider to log out of, e.g. `anthropic`")
+long_help: None
+
+### name
+short: None
+long: Some("name")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: alloc::string::String
+possible_values: []
+value_names: Some(["NAME"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("The name of the credential to remove")
+long_help: Some("The name of the credential to remove.\n\nWhen omitted, removes the sole stored credential.")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")

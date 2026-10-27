@@ -1,8 +1,8 @@
-use std::{env, fs, sync::Arc};
+use std::{env, fmt::Write as _, fs, sync::Arc};
 
 use camino::Utf8PathBuf;
 use camino_tempfile::tempdir;
-use clap::CommandFactory;
+use clap::{Arg, Command, CommandFactory};
 use jp_config::{
     AppConfig, PartialAppConfig,
     model::id::{PartialModelIdConfig, ProviderId},
@@ -288,6 +288,135 @@ fn tracing_guard_persist_keeps_temp_file_on_disk() {
 #[test]
 fn test_cli() {
     Cli::command().debug_assert();
+}
+
+/// The whole command-line surface, as clap resolves it.
+///
+/// Pins every flag's spelling, arity, value type, relations, and help text, so
+/// a change to how the commands are declared can only change what a user sees
+/// on purpose.
+#[test]
+fn command_line_surface() {
+    let mut cli = Cli::command().term_width(100).max_term_width(100);
+    cli.build();
+
+    let mut out = String::new();
+    describe_command(&mut out, &cli, "jp", &[]);
+    insta::assert_snapshot!(out);
+}
+
+/// Append `cmd`, its arguments, and then its subcommands to `out`.
+///
+/// `inherited` names the global arguments an ancestor already described, which
+/// clap copies into every subcommand.
+fn describe_command(out: &mut String, cmd: &Command, path: &str, inherited: &[String]) {
+    let text = |s: Option<&clap::builder::StyledStr>| s.map(ToString::to_string);
+    let hidden: Vec<_> = cmd
+        .get_all_aliases()
+        .filter(|a| !cmd.get_visible_aliases().any(|v| v == *a))
+        .collect();
+
+    writeln!(out, "## {path}").unwrap();
+    writeln!(out, "about: {:?}", text(cmd.get_about())).unwrap();
+    writeln!(out, "long_about: {:?}", text(cmd.get_long_about())).unwrap();
+    writeln!(out, "after_help: {:?}", text(cmd.get_after_help())).unwrap();
+    writeln!(
+        out,
+        "after_long_help: {:?}",
+        text(cmd.get_after_long_help())
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "visible_aliases: {:?}",
+        cmd.get_visible_aliases().collect::<Vec<_>>()
+    )
+    .unwrap();
+    writeln!(out, "hidden_aliases: {hidden:?}").unwrap();
+    writeln!(out, "hidden: {}", cmd.is_hide_set()).unwrap();
+    writeln!(
+        out,
+        "external_subcommands: {}",
+        cmd.is_allow_external_subcommands_set()
+    )
+    .unwrap();
+    writeln!(out, "usage: {}", cmd.clone().render_usage()).unwrap();
+    for group in cmd.get_groups() {
+        let args: Vec<_> = group.get_args().map(ToString::to_string).collect();
+        writeln!(out, "group {}: {args:?}", group.get_id()).unwrap();
+    }
+    writeln!(out).unwrap();
+
+    let mut globals = inherited.to_vec();
+    for arg in cmd.get_arguments() {
+        let id = arg.get_id().to_string();
+        if arg.is_global_set() {
+            if inherited.contains(&id) {
+                continue;
+            }
+            globals.push(id);
+        }
+
+        describe_arg(out, cmd, arg);
+    }
+
+    for sub in cmd.get_subcommands() {
+        describe_command(out, sub, &format!("{path} {}", sub.get_name()), &globals);
+    }
+}
+
+/// Append one argument of `cmd` to `out`.
+fn describe_arg(out: &mut String, cmd: &Command, arg: &Arg) {
+    let text = |s: Option<&clap::builder::StyledStr>| s.map(ToString::to_string);
+    let aliases = arg.get_all_aliases().unwrap_or_default();
+    let visible = arg.get_visible_aliases().unwrap_or_default();
+    let hidden: Vec<_> = aliases.iter().filter(|a| !visible.contains(a)).collect();
+    let possible: Vec<_> = arg
+        .get_possible_values()
+        .iter()
+        .map(|v| v.get_name().to_owned())
+        .collect();
+    let conflicts: Vec<_> = cmd
+        .get_arg_conflicts_with(arg)
+        .iter()
+        .map(|a| a.get_id().to_string())
+        .collect();
+    let flags = [
+        ("required", arg.is_required_set()),
+        ("global", arg.is_global_set()),
+        ("hide", arg.is_hide_set()),
+        ("last", arg.is_last_set()),
+        ("require_equals", arg.is_require_equals_set()),
+        ("trailing_var_arg", arg.is_trailing_var_arg_set()),
+        ("allow_hyphen_values", arg.is_allow_hyphen_values_set()),
+        ("exclusive", arg.is_exclusive_set()),
+    ];
+    let set: Vec<_> = flags
+        .iter()
+        .filter(|(_, on)| *on)
+        .map(|(name, _)| *name)
+        .collect();
+
+    writeln!(out, "### {}", arg.get_id()).unwrap();
+    writeln!(out, "short: {:?}", arg.get_short()).unwrap();
+    writeln!(out, "long: {:?}", arg.get_long()).unwrap();
+    writeln!(out, "visible_aliases: {visible:?}").unwrap();
+    writeln!(out, "hidden_aliases: {hidden:?}").unwrap();
+    writeln!(out, "short_aliases: {:?}", arg.get_all_short_aliases()).unwrap();
+    writeln!(out, "index: {:?}", arg.get_index()).unwrap();
+    writeln!(out, "action: {:?}", arg.get_action()).unwrap();
+    writeln!(out, "num_args: {:?}", arg.get_num_args()).unwrap();
+    writeln!(out, "value_type: {:?}", arg.get_value_parser().type_id()).unwrap();
+    writeln!(out, "possible_values: {possible:?}").unwrap();
+    writeln!(out, "value_names: {:?}", arg.get_value_names()).unwrap();
+    writeln!(out, "value_delimiter: {:?}", arg.get_value_delimiter()).unwrap();
+    writeln!(out, "default_values: {:?}", arg.get_default_values()).unwrap();
+    writeln!(out, "help_heading: {:?}", arg.get_help_heading()).unwrap();
+    writeln!(out, "conflicts: {conflicts:?}").unwrap();
+    writeln!(out, "set: {set:?}").unwrap();
+    writeln!(out, "help: {:?}", text(arg.get_help())).unwrap();
+    writeln!(out, "long_help: {:?}", text(arg.get_long_help())).unwrap();
+    writeln!(out).unwrap();
 }
 
 #[test]
