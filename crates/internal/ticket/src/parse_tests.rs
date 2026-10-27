@@ -21,7 +21,7 @@ const WITH_COMMENTS: &str = indoc! {"
     - **Status**: In Progress
     - **Authors**: Jean Mertz
     - **Date**: 2026-08-05
-    - **Implements**: 095
+    - **Promoted to**: 095
 
     The header renders one column left of the body below 80 columns.
 
@@ -63,7 +63,7 @@ fn reads_optional_metadata_fields() {
     let ticket = document(WITH_COMMENTS).unwrap();
 
     assert_eq!(ticket.metadata.status, Status::InProgress);
-    assert_eq!(ticket.metadata.implements.as_deref(), Some("095"));
+    assert_eq!(ticket.metadata.promoted_to.as_deref(), Some("095"));
     assert_eq!(ticket.metadata.github, None);
     assert!(ticket.metadata.labels.is_empty());
 }
@@ -363,7 +363,7 @@ fn rejects_a_missing_required_field() {
 }
 
 /// A field the format doesn't define is skipped rather than refused, so a
-/// ticket carrying a `Kind` or a `Blocked by` line still reads.
+/// ticket carrying a `Kind`, `Blocked by`, or `Implements` line still reads.
 #[test]
 fn ignores_a_field_the_format_does_not_define() {
     let source = indoc! {"
@@ -373,6 +373,7 @@ fn ignores_a_field_the_format_does_not_define() {
         - **Kind**: Enhancement
         - **Authors**: jean
         - **Date**: 2026-08-05
+        - **Implements**: 095
         - **Blocked by**: T-02wt0kx
     "};
 

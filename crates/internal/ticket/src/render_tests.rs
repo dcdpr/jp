@@ -14,7 +14,6 @@ fn draft<'a>(
         title,
         authors,
         date: "2026-08-05",
-        implements: None,
         labels,
         description,
     }

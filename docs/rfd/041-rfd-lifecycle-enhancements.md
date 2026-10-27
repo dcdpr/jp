@@ -78,9 +78,10 @@ relationships to be resolved before both RFDs reach Discussion.
 
 > [!TIP]
 > This section is superseded by [RFD 100].
-> Implementation work is tracked in tickets: `rfd-promote` offers to turn each
-> phase of the Implementation Plan into a ticket carrying `Implements: NNN`, and
-> one ticket serves as both the tracking item and the prioritised work item.
+> Implementation work is tracked in tickets: `jp rfd promote` offers to file a
+> tracking ticket, labelled `tracking-rfd=NNN`, holding the Implementation Plan,
+> and that one ticket serves as both the tracking item and the prioritised work
+> item.
 > No GitHub tracking issue is created, and the `Tracking Issue` metadata field
 > is retired.
 >

@@ -83,7 +83,6 @@ fn write_ticket(dir: &Utf8TempDir) -> (Utf8PathBuf, String) {
         title: "Wrapping is wrong",
         authors: "jp",
         date: "2026-08-05",
-        implements: None,
         labels: &Labels::default(),
         description: "Something is wrong.",
     });
@@ -229,7 +228,6 @@ fn a_label_another_ticket_holds_goes_back_to_the_editor() {
             title: "Tracks 116",
             authors: "jp",
             date: "2026-08-05",
-            implements: None,
             labels: &held,
             description: "",
         }),

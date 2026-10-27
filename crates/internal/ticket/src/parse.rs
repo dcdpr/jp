@@ -275,7 +275,6 @@ fn metadata<'a>(pairs: impl Iterator<Item = (&'a str, &'a str)>) -> Result<Metad
     let mut label_tokens = vec![];
     let mut authors = None;
     let mut date = None;
-    let mut implements = None;
     let mut promoted_to = None;
     let mut github = None;
 
@@ -287,7 +286,6 @@ fn metadata<'a>(pairs: impl Iterator<Item = (&'a str, &'a str)>) -> Result<Metad
             "label" => label_tokens.push(unescaped(value)),
             "authors" => authors = Some(value.to_owned()),
             "date" => date = Some(value.to_owned()),
-            "implements" => implements = Some(value.to_owned()),
             "promoted to" => promoted_to = Some(value.to_owned()),
             "github" => github = Some(value.to_owned()),
             _ => {}
@@ -299,7 +297,6 @@ fn metadata<'a>(pairs: impl Iterator<Item = (&'a str, &'a str)>) -> Result<Metad
         labels: Labels::from_tokens_lossy(label_tokens).0,
         authors: authors.ok_or(ParseError::MissingField("Authors"))?,
         date: date.ok_or(ParseError::MissingField("Date"))?,
-        implements,
         promoted_to,
         github,
     })

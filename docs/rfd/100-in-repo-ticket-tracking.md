@@ -90,9 +90,9 @@ one `fs_read_file`, one `cat`, or one page on the website.
 - **Status**: In Progress
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-05
-- **Implements**: 095
 - **Label**: client=cli
 - **Label**: package=jp_printer
+- **Label**: relevant-rfd=095
 - **Label**: type=bug
 
 The header renders one column left of the body when `style.parameters` is
@@ -132,7 +132,6 @@ parses with a three-line regex and renders as visible content.
 | `Status`      | yes      | `Todo`, `In Progress`, `Done`    |
 | `Authors`     | yes      |                                  |
 | `Date`        | yes      | `YYYY-MM-DD`                     |
-| `Implements`  | no       | The RFD this ticket implements   |
 | `Promoted to` | no       | The RFD this ticket became       |
 | `GitHub`      | no       | `#123`, set by import            |
 | `Label`       | no       | One `key=value` pair, repeatable |
@@ -406,9 +405,9 @@ They are imported as tickets, one way only.
 
 Each import replaces the ticket's content — title, description, comments —
 wholesale, and never touches the metadata block.
-GitHub owns what was written on GitHub; the repository owns `Status`,
-`Implements`, and the labels, so an imported ticket can be triaged and moved
-across the board without the next import undoing it.
+GitHub owns what was written on GitHub; the repository owns `Status` and the
+labels, so an imported ticket can be triaged and moved across the board without
+the next import undoing it.
 
 Imported tickets are read-only for discussion: replies go on GitHub and arrive
 on the next import, so there is no divergence to reconcile and nothing is ever

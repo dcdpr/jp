@@ -12,7 +12,6 @@ fn draft<'a>(title: &'a str, labels: &'a Labels) -> NewTicket<'a> {
         title,
         authors: "john",
         date: DATE,
-        implements: None,
         labels,
         description: "Description.",
     }
@@ -55,7 +54,6 @@ fn create_writes_a_file_named_for_its_id() {
         title: "Tool call header misaligned",
         authors: "John Doe",
         date: DATE,
-        implements: None,
         labels: &Labels::default(),
         description: "The header renders one column left of the body.",
     })
@@ -346,7 +344,7 @@ fn re_importing_replaces_content_and_keeps_triage() {
     // Local triage between imports.
     let source = fs::read_to_string(&first.path).unwrap();
     let triaged = render::set_metadata(&source, "Status", "In Progress").unwrap();
-    let triaged = render::set_metadata(&triaged, "Implements", "095").unwrap();
+    let triaged = render::set_metadata(&triaged, "Promoted to", "095").unwrap();
     fs::write(&first.path, triaged).unwrap();
 
     let second = import(
@@ -363,7 +361,7 @@ fn re_importing_replaces_content_and_keeps_triage() {
     assert_eq!(ticket.title, "Crash, revised");
     assert_eq!(ticket.description, "Second telling.");
     assert_eq!(ticket.metadata.status, Status::InProgress);
-    assert_eq!(ticket.metadata.implements.as_deref(), Some("095"));
+    assert_eq!(ticket.metadata.promoted_to.as_deref(), Some("095"));
     assert_eq!(ticket.metadata.github.as_deref(), Some("#123"));
 }
 
@@ -475,7 +473,6 @@ fn editing_only_the_description_leaves_the_filename_alone() {
             title: "A quite different title",
             authors: "john",
             date: DATE,
-            implements: None,
             labels: &Labels::default(),
             description: "Body.",
         }),

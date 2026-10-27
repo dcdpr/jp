@@ -3,9 +3,9 @@
 //! The import is one-way and wholesale: the title, description, and comments
 //! are replaced by whatever upstream says, and the metadata block is never
 //! touched.
-//! GitHub owns what was written on GitHub; the repository owns `Status`,
-//! `Implements`, and the labels, so an imported ticket can be triaged and moved
-//! across the board without the next import undoing it.
+//! GitHub owns what was written on GitHub; the repository owns `Status` and the
+//! labels, so an imported ticket can be triaged and moved across the board
+//! without the next import undoing it.
 //!
 //! Imported text is untrusted.
 //! [`escape`] neutralises it before it reaches the working tree, so the site

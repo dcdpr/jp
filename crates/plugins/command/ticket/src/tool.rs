@@ -289,7 +289,6 @@ fn refuse(message: impl Into<String>) -> Answer {
 
 fn create(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall, preview: bool) -> Answer {
     let title = args.required::<String>("title")?;
-    let implements = args.optional::<String>("implements")?;
     let body = args.optional::<String>("body")?;
 
     // Checked before the action split so a preview fails too: an unattended
@@ -324,7 +323,6 @@ fn create(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall, preview:
         title: &title,
         authors: tickets.author,
         date: &date,
-        implements: implements.as_deref(),
         labels: &labels,
         description: body.as_deref().unwrap_or_default(),
     };
@@ -867,7 +865,6 @@ fn render_ticket(id: TicketId, ticket: &Ticket, path: &str, parts: Parts) -> Str
     out.push_str(&format!("- **Authors**: {}\n", metadata.authors));
     out.push_str(&format!("- **Date**: {}\n", metadata.date));
     for (label, value) in [
-        ("Implements", &metadata.implements),
         ("Promoted to", &metadata.promoted_to),
         ("GitHub", &metadata.github),
     ] {

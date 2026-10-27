@@ -90,10 +90,6 @@ enum Command {
         #[arg(long)]
         body: Option<String>,
 
-        /// The RFD this work implements, e.g. `045`.
-        #[arg(long)]
-        implements: Option<String>,
-
         /// A `key=value` label from the board's vocabulary.
         /// Repeat for more than one; `jp ticket labels` lists the ones the
         /// board requires.
@@ -616,7 +612,6 @@ fn compose_missing(
             title: None,
             author,
             body,
-            implements,
             labels,
         } => {
             // Checked before composing, so labels the board refuses, or that
@@ -630,7 +625,6 @@ fn compose_missing(
                 title: Some(title),
                 author,
                 body,
-                implements,
                 labels,
             })
         }
@@ -1252,13 +1246,11 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             title,
             author,
             body,
-            implements,
             labels,
         } => add(dir, &ctx.options.vocabulary()?, &NewTicket {
             title: &required(title, "title")?,
             authors: &resolve_author(author, config)?,
             date: &Local::now().format("%Y-%m-%d").to_string(),
-            implements: implements.as_deref(),
             labels: &resolve_labels(ctx.options, &labels)?,
             description: body.as_deref().unwrap_or_default(),
         }),

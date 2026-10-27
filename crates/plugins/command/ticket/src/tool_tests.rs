@@ -181,7 +181,6 @@ fn draft<'a>(title: &'a str, labels: &'a Labels) -> NewTicket<'a> {
         title,
         authors: "jp",
         date: DATE,
-        implements: None,
         labels,
         description: "Something is wrong.",
     }
@@ -271,9 +270,8 @@ fn create_writes_where_the_options_say_and_as_whom() {
 
 #[test]
 fn create_preview_renders_the_file_that_will_be_written() {
-    let labels = Labels::default();
+    let labels = Labels::from_tokens(["relevant-rfd=045"]).unwrap();
     let mut new = draft("Tool call header misaligned", &labels);
-    new.implements = Some("045");
     new.description = "The header renders one column left of the body.";
 
     let out = strip_ansi(preview_create(&new));
@@ -289,7 +287,7 @@ fn create_preview_renders_the_file_that_will_be_written() {
             "> - **Status**: Todo\n",
             "> - **Authors**: jp\n",
             "> - **Date**: 2026-08-05\n",
-            "> - **Implements**: 045\n",
+            "> - **Label**: relevant-rfd=045\n",
             "> \n",
             "> The header renders one column left of the body.\n",
         )

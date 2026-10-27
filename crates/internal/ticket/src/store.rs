@@ -534,7 +534,6 @@ pub fn import(dir: &Utf8Path, vocabulary: &Vocabulary, upstream: &Import<'_>) ->
             title: &title,
             authors: upstream.authors,
             date: upstream.date,
-            implements: None,
             labels: upstream.labels,
             description: "",
         })?;

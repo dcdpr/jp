@@ -166,7 +166,6 @@ pub(crate) fn track(
         title: &title,
         authors: &filer.author,
         date: &filer.date,
-        implements: None,
         labels: &labels,
         description: &description(id, &link, plan.as_deref()),
     })

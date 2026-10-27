@@ -27,7 +27,6 @@ fn write_ticket(dir: &Utf8TempDir, body: &str, status: Status) {
         title: body,
         authors: "john",
         date: "2026-08-05",
-        implements: None,
         labels: &Labels::default(),
         description: "",
     });

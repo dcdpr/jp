@@ -87,7 +87,6 @@ fn write_ticket(dir: &Utf8Path, body: &str, title: &str, status: Status) -> Tick
         title,
         authors: "john",
         date: "2026-08-05",
-        implements: None,
         labels: &Labels::default(),
         description: "",
     });
@@ -104,7 +103,6 @@ fn add_labelled(dir: &Utf8TempDir, title: &str, labels: &[&str]) -> TicketId {
         title: Some(title.to_owned()),
         author: Some("john".to_owned()),
         body: None,
-        implements: None,
         labels: labels.iter().map(|label| (*label).to_owned()).collect(),
     })
     .unwrap();
@@ -279,13 +277,11 @@ fn add_takes_a_title_and_defaults_the_author() {
             title,
             author,
             body,
-            implements,
             labels,
         } => {
             assert_eq!(title.as_deref(), Some("Tool call header misaligned"));
             assert_eq!(author, None);
             assert_eq!(body, None);
-            assert_eq!(implements, None);
             assert!(labels.is_empty());
         }
         other => panic!("expected add, got {other:?}"),
@@ -656,7 +652,6 @@ fn rename_moves_the_file() {
         title: Some("Tool call header misaligned".to_owned()),
         author: Some("John Doe".to_owned()),
         body: None,
-        implements: None,
         labels: vec![],
     })
     .unwrap();
@@ -1126,7 +1121,6 @@ fn commands_run_against_the_resolved_directory() {
         title: Some("Tool call header misaligned".to_owned()),
         author: Some("John Doe".to_owned()),
         body: Some("The header renders one column left of the body.".to_owned()),
-        implements: None,
         labels: vec![],
     })
     .unwrap();
@@ -1463,7 +1457,6 @@ fn show_json_carries_the_id() {
         title: Some("Tool call header misaligned".to_owned()),
         author: Some("john".to_owned()),
         body: Some("The header renders one column left.".to_owned()),
-        implements: None,
         labels: vec![],
     })
     .unwrap();
@@ -1820,7 +1813,6 @@ fn an_unknown_label_is_refused_with_the_known_set() {
         title: Some("Typo".to_owned()),
         author: Some("john".to_owned()),
         body: None,
-        implements: None,
         labels: vec!["client=mcaos".to_owned()],
     })
     .unwrap_err();
@@ -1954,7 +1946,6 @@ fn a_broken_vocabulary_fails_what_labels_or_files() {
             title: Some("Unlabelled".to_owned()),
             author: Some("john".to_owned()),
             body: None,
-            implements: None,
             labels: vec![],
         },
         &options,
@@ -1998,7 +1989,6 @@ fn adding_a_ticket_without_a_required_label_is_refused() {
                 title: Some("Header misaligned".to_owned()),
                 author: Some("john".to_owned()),
                 body: None,
-                implements: None,
                 labels: labels.iter().map(|label| (*label).to_owned()).collect(),
             },
             &typed(),
@@ -2028,7 +2018,6 @@ fn the_labels_are_checked_before_the_composer_opens() {
             title: None,
             author: None,
             body: None,
-            implements: None,
             labels: vec![],
         },
         &mut &b""[..],
@@ -2053,7 +2042,6 @@ fn relabelling_cannot_drop_a_required_label() {
             title: Some("Header misaligned".to_owned()),
             author: Some("john".to_owned()),
             body: None,
-            implements: None,
             labels: vec!["type=bug".to_owned()],
         },
         &typed(),
@@ -2114,7 +2102,6 @@ fn add_unique(dir: &Utf8TempDir, title: &str, labels: &[&str]) -> Result<Output,
             title: Some(title.to_owned()),
             author: Some("john".to_owned()),
             body: None,
-            implements: None,
             labels: labels.iter().map(|label| (*label).to_owned()).collect(),
         },
         &unique_board(),
@@ -2157,7 +2144,6 @@ fn a_taken_label_is_refused_before_the_composer_opens() {
             title: None,
             author: None,
             body: None,
-            implements: None,
             labels: vec!["rfd=116".to_owned()],
         },
         &mut &b""[..],
@@ -2246,7 +2232,6 @@ fn unreadable_tickets_are_warned_about_separately() {
         title: Some("Readable".to_owned()),
         author: Some("john".to_owned()),
         body: None,
-        implements: None,
         labels: vec![],
     })
     .unwrap();

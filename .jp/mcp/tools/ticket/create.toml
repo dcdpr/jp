@@ -54,20 +54,6 @@ type = "string"
 required = false
 summary = "The description, as markdown. Omit for a ticket whose title says everything."
 
-[conversation.tools.ticket_create.parameters.implements]
-type = "string"
-required = false
-summary = "The RFD this work comes from, e.g. `045`."
-description = """
-Set this when the work comes from an accepted RFD, whether the ticket covers the
-whole implementation or one phase of it.
-
-The RFD's *tracking* ticket carries this field together with the label
-`type=tracking`, and that one ticket is what the RFD priority board reports as
-in development. An RFD has at most one, filed by `rfd_track`, so name
-`type=tracking` here only when the RFD has none.
-"""
-
 # Not marked required here: `jp ticket tools sync` marks it when the board
 # requires a label, and a value set here would compete with that one.
 [conversation.tools.ticket_create.parameters.labels]

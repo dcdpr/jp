@@ -121,21 +121,18 @@ pub struct Metadata {
     pub labels: Labels,
     pub authors: String,
     pub date: String,
-    pub implements: Option<String>,
     pub promoted_to: Option<String>,
     pub github: Option<String>,
 }
 
 /// The parts of a ticket that are settled when it is filed.
 ///
-/// A struct rather than a run of positional arguments: five of these are
+/// A struct rather than a run of positional arguments: four of these are
 /// strings, and at a call site nothing would catch two of them being swapped.
 pub struct NewTicket<'a> {
     pub title: &'a str,
     pub authors: &'a str,
     pub date: &'a str,
-    /// The RFD this work comes from, if any.
-    pub implements: Option<&'a str>,
     pub labels: &'a Labels,
     pub description: &'a str,
 }

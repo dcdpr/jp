@@ -41,7 +41,6 @@ export function parseTicket(content, filename) {
         authors: field(content, 'Authors'),
         date: field(content, 'Date'),
         labels: readLabels(content),
-        implements: field(content, 'Implements'),
         promotedTo: field(content, 'Promoted to'),
         github: field(content, 'GitHub'),
         comments: countComments(content),

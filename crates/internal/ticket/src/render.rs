@@ -14,18 +14,15 @@ use crate::{Comment, LABEL_KEY, NewTicket, Status, parse};
 
 /// Render a new ticket, opened at `Todo`.
 ///
-/// The optional fields are written last, in the same place [`set_metadata`]
-/// would put them, so a ticket that gains one later looks like one that was
-/// filed with it.
+/// The labels are written last, where [`set_repeated_metadata`] adds them to a
+/// ticket that has none, so a ticket labelled later looks like one that was
+/// filed with them.
 #[must_use]
 pub fn ticket(new: &NewTicket<'_>) -> String {
     let mut out = format!("# {}\n\n", new.title);
     out.push_str(&format!("- **Status**: {}\n", Status::Todo));
     out.push_str(&format!("- **Authors**: {}\n", new.authors));
     out.push_str(&format!("- **Date**: {}\n", new.date));
-    if let Some(rfd) = new.implements {
-        out.push_str(&format!("- **Implements**: {rfd}\n"));
-    }
     for token in new.labels.to_tokens() {
         out.push_str(&format!("- **{LABEL_KEY}**: {token}\n"));
     }
