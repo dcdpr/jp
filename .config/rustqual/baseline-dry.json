@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.6524402689728913,
-  "iosp_score": 0.8124057721300884,
+  "quality_score": 0.6532554059080634,
+  "iosp_score": 0.812768701633706,
   "violations": 871,
-  "total": 6515,
+  "total": 6528,
   "complexity_warnings": 0,
   "magic_number_warnings": 0,
   "nesting_depth_warnings": 0,
@@ -11,7 +11,7 @@
   "unsafe_warnings": 0,
   "error_handling_warnings": 0,
   "duplicate_groups": 29,
-  "dead_code_warnings": 263,
+  "dead_code_warnings": 262,
   "dead_type_warnings": 28,
   "fragment_groups": 58,
   "boilerplate_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 0,
   "structural_coupling_warnings": 0,
-  "total_findings": 1294,
+  "total_findings": 1293,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -3163,17 +3163,17 @@
     {
       "name": "compile_fs",
       "file": "crates/jp_cli/src/access/compile.rs",
-      "line": 74
+      "line": 76
     },
     {
       "name": "compile_tool_policy",
       "file": "crates/jp_cli/src/access/compile.rs",
-      "line": 147
+      "line": 150
     },
     {
       "name": "compile_policy",
       "file": "crates/jp_cli/src/access/compile.rs",
-      "line": 174
+      "line": 177
     },
     {
       "name": "Commands::run",
@@ -3876,24 +3876,24 @@
       "line": 90
     },
     {
-      "name": "Context::resolve",
+      "name": "FsRule::workspace_exclusion",
       "file": "crates/jp_tool/src/access.rs",
-      "line": 636
+      "line": 408
     },
     {
       "name": "normalize_lexical",
       "file": "crates/jp_tool/src/access.rs",
-      "line": 693
+      "line": 600
     },
     {
       "name": "canonicalize_workspace_target",
       "file": "crates/jp_tool/src/access.rs",
-      "line": 719
+      "line": 633
     },
     {
       "name": "AnswerType::deserialize",
       "file": "crates/jp_tool/src/lib.rs",
-      "line": 406
+      "line": 407
     },
     {
       "name": "validate_node",
