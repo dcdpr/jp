@@ -384,8 +384,8 @@ symlink at the workspace level with its own rule and approval.
 #### Targets that contain the workspace
 
 An approved target may be an ancestor of the workspace: from a workspace at
-`~/w/a/b`, `--mount up=..` approves `up -> ~/w/a` so the assistant can reach
-the rest of the repository the workspace sits in.
+`~/w/a/b`, `--mount up=..` approves `up -> ~/w/a` so the assistant can reach the
+rest of the repository the workspace sits in.
 The mount grants the target minus the workspace.
 Policy compilation adds a deny-all rule at the path where the workspace
 reappears inside the mount (`up/b`), next to the mount rule:
@@ -398,8 +398,8 @@ reappears inside the mount (`up/b`), next to the mount rule:
   The cooperative checker rejects it and names `src/lib.rs` as the path to use,
   so a workspace file is reached through its workspace path only.
 - Tool call: move or delete `up/b` (or `top/a`, for a mount `top=../..`).
-  Rejected: a mount cannot move, delete, or write as a whole any directory
-  the workspace lies inside.
+  Rejected: a mount cannot move, delete, or write as a whole any directory the
+  workspace lies inside.
   The check is made on the canonical location, so an alias inside the target
   (`up/current/...` with `current -> releases/v1`) is rejected the same way.
   A symlink to such a directory can itself be moved or deleted, and files in
