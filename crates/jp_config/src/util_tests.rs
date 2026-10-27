@@ -703,6 +703,86 @@ fn test_find_file_in_load_path_substitutes_an_unmatched_extension() {
     );
 }
 
+/// YAML merge keys (`<<: *anchor`) copy the anchored mapping's entries into the
+/// merging mapping, with the merging mapping's own keys taking precedence.
+#[test]
+fn test_load_partial_at_path_yaml_merge_key() {
+    let yaml = indoc::indoc! {"
+        providers:
+          llm:
+            deepseek: &shared
+              api_key_env: SHARED_KEY
+              base_url: https://shared.example.com
+            google:
+              <<: *shared
+              base_url: https://google.example.com
+    "};
+
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(&root.join("config.yaml"), yaml);
+
+    let partial = load_partial_at_path(root.join("config.yaml"))
+        .unwrap()
+        .unwrap();
+    let json = serde_json::to_value(&partial).unwrap();
+
+    assert_eq!(
+        json.pointer("/providers/llm/deepseek"),
+        Some(&json!({
+            "api_key_env": "SHARED_KEY",
+            "base_url": "https://shared.example.com",
+        }))
+    );
+    assert_eq!(
+        json.pointer("/providers/llm/google"),
+        Some(&json!({
+            "api_key_env": "SHARED_KEY",
+            "base_url": "https://google.example.com",
+        }))
+    );
+}
+
+/// An empty YAML file is an empty configuration, as it is for TOML and JSON.
+#[test]
+fn test_load_partial_at_path_empty_yaml() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(&root.join("config.yaml"), "");
+
+    let partial = load_partial_at_path(root.join("config.yaml"))
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(partial, PartialAppConfig::empty());
+}
+
+/// A type error in a YAML file names the offending key.
+#[test]
+fn test_load_partial_at_path_yaml_type_error() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(
+        &root.join("config.yaml"),
+        indoc::indoc!(
+            "
+                providers:
+                  llm:
+                    google:
+                      base_url: [1, 2]
+            "
+        ),
+    );
+
+    let error = load_partial_at_path(root.join("config.yaml")).unwrap_err();
+    let Error::Schematic(schematic::ConfigError::Parser { error, .. }) = error else {
+        panic!("expected a parser error, got {error:?}");
+    };
+
+    assert_eq!(error.message, "expected string scalar at line 4, column 17");
+    assert_eq!(error.path, "providers.llm.google.base_url");
+}
+
 #[test]
 fn test_load_partial_at_path_self_extending_cycle() {
     let tmp = tempdir().unwrap();
