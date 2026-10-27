@@ -125,7 +125,7 @@ impl Iterator for IntoIter {
                 }
                 EventPayload::Compaction(_)
                 | EventPayload::Overlay(_)
-                | EventPayload::Unknown(_) => {}
+                | EventPayload::Unknown { .. } => {}
             }
         }
     }
@@ -140,7 +140,7 @@ impl DoubleEndedIterator for IntoIter {
                 EventPayload::ConfigDelta(_)
                 | EventPayload::Compaction(_)
                 | EventPayload::Overlay(_)
-                | EventPayload::Unknown(_) => {
+                | EventPayload::Unknown { .. } => {
                     // A delta/compaction at the very end of the list affects
                     // nothing that follows it, and it doesn't affect previous
                     // items. We simply discard it.
@@ -211,7 +211,7 @@ impl<'a> Iterator for Iter<'a> {
                 }
                 EventPayload::Compaction(_)
                 | EventPayload::Overlay(_)
-                | EventPayload::Unknown(_) => {}
+                | EventPayload::Unknown { .. } => {}
             }
         }
 
@@ -280,7 +280,7 @@ impl<'a> Iterator for IterMut<'a> {
                 }
                 EventPayload::Compaction(_)
                 | EventPayload::Overlay(_)
-                | EventPayload::Unknown(_) => {}
+                | EventPayload::Unknown { .. } => {}
             }
         }
 
