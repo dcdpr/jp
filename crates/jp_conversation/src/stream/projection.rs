@@ -211,7 +211,7 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>, event_ids: &mut EventIds) -
             // Config deltas carry global state; unknown (forward-compat) events
             // are opaque. Both pass through projection verbatim — the iterators
             // skip unknown events, so they stay invisible to providers.
-            EventPayload::ConfigDelta(_) | EventPayload::Unknown(_) => {
+            EventPayload::ConfigDelta(_) | EventPayload::Unknown { .. } => {
                 projected.push(event);
                 event_origins.push(TurnOrigin::Kept(turn));
             }
@@ -493,7 +493,7 @@ pub(super) fn assign_turn_indices(events: &[InternalEvent]) -> Vec<usize> {
             EventPayload::ConfigDelta(_)
             | EventPayload::Compaction(_)
             | EventPayload::Overlay(_)
-            | EventPayload::Unknown(_) => {
+            | EventPayload::Unknown { .. } => {
                 indices.push(turn);
             }
         }

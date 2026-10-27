@@ -223,7 +223,7 @@ impl ConversationStream {
             EventPayload::Event(_)
             | EventPayload::Compaction(_)
             | EventPayload::Overlay(_)
-            | EventPayload::Unknown(_) => None,
+            | EventPayload::Unknown { .. } => None,
         });
 
         for delta in iter {
@@ -746,20 +746,29 @@ impl ConversationStream {
     /// Pops the last [`ConversationEvent`] from the stream, returning it
     /// wrapped in a [`ConversationEventWithConfig`], containing the
     /// [`PartialAppConfig`] at the time the event was added.
+    ///
+    /// Turn entries this build cannot read that follow the popped event (a chat
+    /// response a newer jp wrote in reply to it) are removed with it.
     #[must_use]
     pub fn pop(&mut self) -> Option<ConversationEventWithConfig> {
-        // The last conversation event, ignoring any trailing overlays
+        // The event `last_turn_event` returns, ignoring any trailing overlays
         // (`ConfigDelta`/`Compaction`) that follow it. Those overlays are left
         // in place rather than discarded — a `Compaction` references turn
         // ranges and applies regardless of tail position.
-        let pos = self
-            .events
-            .iter()
-            .rposition(|e| e.scope() == EventScope::Turn)?;
+        let pos = self.events.iter().rposition(|e| e.as_event().is_some())?;
 
         let config = self
             .last()
             .map_or_else(|| self.base_config.to_partial(), |v| v.config);
+
+        // Any turn-scoped entry after `pos` is unreadable. Left behind, it
+        // would read as part of the turn before once the popped event is gone.
+        let mut index = 0;
+        self.events.retain(|e| {
+            let keep = index <= pos || e.scope() == EventScope::Global;
+            index += 1;
+            keep
+        });
 
         let internal = self.events.remove(pos);
         let event_id = internal.event_id.clone();
@@ -831,6 +840,12 @@ impl ConversationStream {
     /// [`ConfigDelta`]s are always preserved: they apply to the conversation as
     /// a whole, regardless of position.
     ///
+    /// A turn entry this build cannot read (a chat response a newer jp wrote)
+    /// has no event to pass to `f`.
+    /// It is kept or dropped with the readable event before it, which shares
+    /// its turn because a chat response never opens one; with no event before
+    /// it, it is kept.
+    ///
     /// [`Compaction`] overlays are dropped **selectively** when this call
     /// removes turn-scoped events.
     /// An overlay whose turn range lies entirely before the earliest removed
@@ -847,6 +862,18 @@ impl ConversationStream {
     ///
     /// [RFD 097]: https://jp.computer/rfd/097
     pub fn retain(&mut self, mut f: impl FnMut(&ConversationEvent) -> bool) {
+        let mut previous = true;
+        let mut decide = |entry: &InternalEvent| match entry.scope() {
+            EventScope::Global => true,
+            EventScope::Turn => match entry.as_event() {
+                Some(event) => {
+                    previous = f(event);
+                    previous
+                }
+                None => previous,
+            },
+        };
+
         // Fast path: with no overlays present there's nothing to invalidate, so
         // skip the turn-index bookkeeping.
         if !self
@@ -854,10 +881,7 @@ impl ConversationStream {
             .iter()
             .any(|e| matches!(&e.payload, EventPayload::Compaction(_)))
         {
-            self.events.retain(|event| match event.scope() {
-                EventScope::Global => true,
-                EventScope::Turn => event.as_event().is_some_and(&mut f),
-            });
+            self.events.retain(|event| decide(event));
             return;
         }
 
@@ -867,10 +891,7 @@ impl ConversationStream {
         let mut first_removed_turn: Option<usize> = None;
         let mut index = 0;
         self.events.retain(|event| {
-            let keep = match event.scope() {
-                EventScope::Global => true,
-                EventScope::Turn => event.as_event().is_some_and(&mut f),
-            };
+            let keep = decide(event);
             if !keep {
                 let turn = turn_indices[index];
                 first_removed_turn = Some(first_removed_turn.map_or(turn, |m| m.min(turn)));
@@ -954,7 +975,7 @@ impl ConversationStream {
                 EventPayload::ConfigDelta(_)
                 | EventPayload::Compaction(_)
                 | EventPayload::Overlay(_)
-                | EventPayload::Unknown(_) => true,
+                | EventPayload::Unknown { .. } => true,
                 EventPayload::Event(e) => e.is_turn_start(),
             }
         });
