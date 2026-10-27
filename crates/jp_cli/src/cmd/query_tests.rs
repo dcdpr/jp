@@ -3180,6 +3180,52 @@ fn pending_trim_pop_request_removes_stale_turn_start() {
     assert_no_adjacent_turn_starts(&stream);
 }
 
+/// `--replay` on a turn holding a chat response this build cannot read (one a
+/// newer jp wrote) removes it with the rest of the turn, instead of leaving it
+/// behind to be read as part of the turn before.
+#[test]
+fn pending_trim_replay_removes_an_unreadable_chat_response_with_its_turn() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("first question");
+    stream.push_event(ConversationEvent::now(ChatResponse::message(
+        "first answer",
+    )));
+    stream.start_turn("second question");
+    stream.push_event(ConversationEvent::now(ChatResponse::message(
+        "second answer",
+    )));
+
+    let (base_config, mut events) = stream.to_parts().unwrap();
+    let answer = events
+        .iter()
+        .position(|e| e.get("message").and_then(Value::as_str) == Some("second answer"))
+        .unwrap();
+    events.insert(
+        answer,
+        serde_json::json!({
+            "type": "chat_response",
+            "timestamp": "2025-01-01 00:00:00.0",
+            "commentary": "Checking the second question."
+        }),
+    );
+    let mut stream =
+        ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty()).unwrap();
+
+    PendingStreamTrim {
+        replay_turn: true,
+        pop_request: false,
+    }
+    .apply(&mut stream);
+    stream.start_turn("second question, revised");
+
+    let (_, events) = stream.to_parts().unwrap();
+    assert!(
+        !events.iter().any(|e| e.get("commentary").is_some()),
+        "the replayed turn's unreadable chat response survived: {events:#?}"
+    );
+    assert_eq!(turn_start_count(&stream), 2);
+}
+
 #[test]
 fn pending_trim_default_is_noop() {
     let mut stream = ConversationStream::new_test();

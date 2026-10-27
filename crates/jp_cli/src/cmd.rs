@@ -572,6 +572,19 @@ impl From<crate::error::Error> for Error {
             Mcp(error) => return error.into(),
             McpEndpoint(error) => [("message", error.to_string())].into(),
             McpHost(error) => with_cause(&error, "MCP Host control failed"),
+            McpConnectionLost => [
+                (
+                    "message",
+                    "Lost the connection to the JP MCP Server, so the turn ended".to_owned(),
+                ),
+                (
+                    "suggestion",
+                    "The tool calls it could not complete are recorded in the conversation. \
+                     Continue the conversation to retry them on a new connection."
+                        .to_owned(),
+                ),
+            ]
+            .into(),
             Llm(error) => return error.into(),
             Io(error) => return error.into(),
             Url(error) => return error.into(),

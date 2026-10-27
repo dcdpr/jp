@@ -50,8 +50,7 @@ use super::{
 /// A caller waiting on a call it has heard nothing from cannot tell a slow tool
 /// from a dead one, and clients commonly abandon such a call after a few
 /// minutes.
-/// This sits well inside those limits, and inside the idle window the transport
-/// applies to a session carrying no traffic.
+/// This sits well inside those limits.
 const PROGRESS_HEARTBEAT: Duration = Duration::from_secs(30);
 
 /// Failure starting, connecting to, or stopping the in-process endpoint.
@@ -109,6 +108,16 @@ impl Endpoint {
         service: Service,
         heartbeat: Duration,
     ) -> Result<Self, EndpointError> {
+        Self::start_with(service, heartbeat, session_manager()).await
+    }
+
+    /// Start the endpoint, choosing how often a running call reports liveness
+    /// and how sessions are kept.
+    async fn start_with(
+        service: Service,
+        heartbeat: Duration,
+        sessions: LocalSessionManager,
+    ) -> Result<Self, EndpointError> {
         let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).await?;
         let address = listener.local_addr()?;
         let origin = format!("http://{address}");
@@ -133,7 +142,7 @@ impl Endpoint {
                     heartbeat,
                 })
             },
-            Arc::new(LocalSessionManager::default()),
+            Arc::new(sessions),
             config,
         );
         let router = Router::new().nest_service("/mcp", transport);
@@ -193,6 +202,23 @@ impl Drop for Endpoint {
         self.service.stop();
         self.cancellation.cancel();
     }
+}
+
+/// How the endpoint keeps its MCP sessions.
+///
+/// A session lasts until its client closes it or the endpoint shuts down, with
+/// no idle window.
+/// Nothing travels on the Host's session while a model is generating, which can
+/// outlast any fixed window, and an expired session fails every later call on
+/// it.
+/// The endpoint lives only as long as its turn, so a session a client abandons
+/// without closing is bounded by that.
+fn session_manager() -> LocalSessionManager {
+    let mut sessions = LocalSessionManager::default();
+    // Assigned on a default value because rmcp marks the config
+    // `#[non_exhaustive]`, which rules out struct-update syntax downstream.
+    sessions.session_config.keep_alive = None;
+    sessions
 }
 
 #[derive(Clone)]

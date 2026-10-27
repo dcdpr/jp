@@ -960,6 +960,42 @@ async fn a_protocol_failure_is_reported_as_a_failure_not_as_tool_output() {
     fixture.shutdown().await;
 }
 
+/// A call on a Host connection the JP MCP Server no longer serves fails as a
+/// lost connection, which no later call on it can recover from, rather than as
+/// a failure of this one call.
+#[tokio::test]
+async fn a_call_on_a_lost_connection_reports_the_connection_lost() {
+    let mut fixture = Fixture::inquiring("allow").await;
+    // Stopping the endpoint under the Host's connection leaves the Host holding
+    // a session nothing serves, as an expired session does.
+    fixture
+        .owner
+        .endpoint
+        .take()
+        .expect("the fixture started an endpoint")
+        .shutdown()
+        .await
+        .unwrap();
+    let executor = fixture.executor(&json!({}));
+
+    let result = timeout(
+        Duration::from_secs(5),
+        executor.prepare(false, CancellationToken::new()),
+    )
+    .await
+    .expect("a call on a lost connection must still end");
+
+    let ExecutorResult::Failed(error) = result else {
+        panic!("a call that never reached the server did not run, got {result:?}")
+    };
+    assert!(
+        matches!(error, ExecutorError::ConnectionLost(_)),
+        "expected a lost connection, got {error:?}"
+    );
+    assert_eq!(fixture.attempts(), 0);
+    fixture.shutdown().await;
+}
+
 /// A tool that does its work and then never reports back.
 struct VanishingTool(Arc<AtomicUsize>);
 
@@ -999,9 +1035,13 @@ async fn a_call_lost_after_release_is_not_reported_as_unexecuted() {
     .await
     .expect("a lost call must still end");
 
+    let ExecutorResult::OutcomeUnknown(error) = result else {
+        panic!("a call lost after release may have run, got {result:?}")
+    };
+    // One tool failing leaves the connection the other calls use intact.
     assert!(
-        matches!(result, ExecutorResult::OutcomeUnknown(_)),
-        "a call lost after release may have run, got {result:?}"
+        !error.is_connection_lost(),
+        "a failed tool is not a lost connection, got {error:?}"
     );
     assert_eq!(fixture.attempts(), 1);
     fixture.shutdown().await;
