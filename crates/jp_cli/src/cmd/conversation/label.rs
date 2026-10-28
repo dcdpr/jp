@@ -7,6 +7,7 @@
 //! The conversation is named with `--id`, which is accepted on either side of
 //! the verb.
 
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_inquire::prompt::TerminalPromptBackend;
@@ -15,6 +16,7 @@ use jp_workspace::ConversationHandle;
 use serde_json::{Value, json};
 
 use crate::{
+    cli::{CommandArgs, many, unread_subcommand},
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::FlagIds,
@@ -28,70 +30,144 @@ use crate::{
     output::print_json,
 };
 
-/// Manage labels on a conversation.
-#[derive(Debug, clap::Args)]
+/// `jp conversation label`: manage labels on a conversation.
+#[derive(Debug)]
 pub(crate) struct Label {
     /// The conversation to act on.
     ///
     /// Accepted before or after the verb; defaults to the session's active
     /// conversation.
-    #[command(flatten)]
     target: FlagIds<true, true, true>,
 
-    #[command(subcommand)]
+    /// The verb, or none to list.
     command: Option<Commands>,
 }
 
-#[derive(Debug, clap::Subcommand)]
+impl CommandArgs for Label {
+    fn augment(cmd: Command) -> Command {
+        FlagIds::<true, true, true>::augment(cmd)
+            .subcommand(
+                Values::augment(Command::new("add"))
+                    .about("Add values to the conversation's labels")
+                    .long_about(
+                        "Add values to the conversation's labels.\n\nValues accumulate: a key \
+                         that already holds values keeps them. Use `set` to replace what a key \
+                         holds.",
+                    )
+                    .visible_alias("a"),
+            )
+            .subcommand(
+                Values::augment(Command::new("set"))
+                    .about("Replace the values of the labels named")
+                    .long_about(
+                        "Replace the values of the labels named.\n\nOnly the keys named are \
+                         replaced; every other label is left alone. A bare `rm` clears them all.",
+                    )
+                    .visible_alias("s"),
+            )
+            .subcommand(
+                Rm::augment(Command::new("rm"))
+                    .about("Remove labels from the conversation")
+                    .long_about(
+                        "Remove labels from the conversation.\n\nWith no arguments, removes every \
+                         label.",
+                    )
+                    .visible_alias("r")
+                    .aliases(["remove", "del", "delete"]),
+            )
+            .subcommand(
+                Command::new("ls")
+                    .about("List the conversation's labels")
+                    .alias("list"),
+            )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        let command = match matches.subcommand() {
+            None => None,
+            Some(("add", sub)) => Some(Commands::Add(Values::from_matches(sub)?)),
+            Some(("set", sub)) => Some(Commands::Set(Values::from_matches(sub)?)),
+            Some(("rm", sub)) => Some(Commands::Rm(Rm::from_matches(sub)?)),
+            Some(("ls", _)) => Some(Commands::Ls),
+            Some((name, _)) => return Err(unread_subcommand(name)),
+        };
+
+        Ok(Self {
+            target: FlagIds::from_matches(matches)?,
+            command,
+        })
+    }
+}
+
+#[derive(Debug)]
 enum Commands {
-    /// Add values to the conversation's labels.
-    ///
-    /// Values accumulate: a key that already holds values keeps them.
-    /// Use `set` to replace what a key holds.
-    #[command(name = "add", visible_alias = "a")]
     Add(Values),
-
-    /// Replace the values of the labels named.
-    ///
-    /// Only the keys named are replaced; every other label is left alone.
-    /// A bare `rm` clears them all.
-    #[command(name = "set", visible_alias = "s")]
     Set(Values),
-
-    /// Remove labels from the conversation.
-    ///
-    /// With no arguments, removes every label.
-    #[command(name = "rm", visible_alias = "r", aliases = ["remove", "del", "delete"])]
     Rm(Rm),
-
-    /// List the conversation's labels.
-    #[command(name = "ls", alias = "list")]
     Ls,
 }
 
-#[derive(Debug, clap::Args)]
+/// The labels `add` and `set` apply.
+#[derive(Debug)]
 pub(crate) struct Values {
-    /// The labels to apply, as `key=value` or a bare `key` for an empty value.
-    ///
-    /// `:name` resolves the `conversation.labels.name` rule and applies
-    /// whatever it produces.
-    /// Values are taken literally, so they may contain commas.
-    /// Naming one key several times acts on all of its values at once.
-    #[arg(value_name = "KEY[=VALUE]|:NAME", required = true)]
+    /// `key=value`, a bare `key`, or a `:name` rule to resolve.
     labels: Vec<String>,
 }
 
-#[derive(Debug, clap::Args)]
+impl CommandArgs for Values {
+    fn augment(cmd: Command) -> Command {
+        cmd.arg(
+            Arg::new("labels")
+                .action(ArgAction::Append)
+                .num_args(1..)
+                .required(true)
+                .value_name("KEY[=VALUE]|:NAME")
+                .help("The labels to apply, as `key=value` or a bare `key` for an empty value")
+                .long_help(
+                    "The labels to apply, as `key=value` or a bare `key` for an empty \
+                     value.\n\n`:name` resolves the `conversation.labels.name` rule and applies \
+                     whatever it produces. Values are taken literally, so they may contain \
+                     commas. Naming one key several times acts on all of its values at once.",
+                ),
+        )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            labels: many(matches, "labels"),
+        })
+    }
+}
+
+/// The labels `rm` removes, or none to remove every label.
+#[derive(Debug)]
 pub(crate) struct Rm {
-    /// The labels to remove, as a bare `key` or a `key=value` pair.
-    ///
-    /// A bare key removes every value it holds.
-    /// With none given, every label is removed.
-    ///
-    /// Removing a label the conversation doesn't carry is not an error, but it
-    /// is reported.
-    #[arg(value_name = "KEY[=VALUE]")]
+    /// A bare `key`, or a `key=value` pair.
     labels: Vec<String>,
+}
+
+impl CommandArgs for Rm {
+    fn augment(cmd: Command) -> Command {
+        cmd.arg(
+            Arg::new("labels")
+                .action(ArgAction::Append)
+                .num_args(1..)
+                .value_name("KEY[=VALUE]")
+                .help("The labels to remove, as a bare `key` or a `key=value` pair")
+                .long_help(
+                    "The labels to remove, as a bare `key` or a `key=value` pair.\n\nA bare key \
+                     removes every value it holds. With none given, every label is \
+                     removed.\n\nRemoving a label the conversation doesn't carry is not an error, \
+                     but it is reported.",
+                ),
+        )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            labels: many(matches, "labels"),
+        })
+    }
 }
 
 impl Label {

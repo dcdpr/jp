@@ -3,8 +3,10 @@
 use std::{ffi::OsStr, ops::Deref, str::FromStr};
 
 use chrono::{DateTime, Utc};
-use clap::{Arg, ArgGroup, ArgMatches, Command, FromArgMatches, builder::TypedValueParser};
+use clap::{Arg, ArgGroup, ArgMatches, Command, builder::TypedValueParser};
 use jp_conversation::ConversationId;
+
+use crate::cli::CommandArgs;
 
 /// A point in time parsed from a conversation ID, a relative duration (`3w`,
 /// `30d`), or an absolute date/datetime (`2026-01-01`, RFC 3339).
@@ -100,10 +102,6 @@ impl FromStr for TimeThreshold {
 ///   (`EXCLUSIVE = true`, the default); commands like `c use` use it as a
 ///   candidate-set filter that composes with target keywords like `?p`
 ///   (`EXCLUSIVE = false`).
-///
-/// Because clap's derive macro doesn't evaluate const generics in `#[arg]`
-/// attributes, this type implements [`clap::Args`] and [`clap::FromArgMatches`]
-/// manually.
 #[derive(Debug)]
 pub(crate) struct CreationRange<const EXCLUSIVE: bool = true> {
     pub since: Option<TimeThreshold>,
@@ -154,8 +152,8 @@ impl TypedValueParser for TimeThresholdParser {
     }
 }
 
-impl<const EXCLUSIVE: bool> clap::Args for CreationRange<EXCLUSIVE> {
-    fn augment_args(cmd: Command) -> Command {
+impl<const EXCLUSIVE: bool> CommandArgs for CreationRange<EXCLUSIVE> {
+    fn augment(cmd: Command) -> Command {
         let since_help = "Match conversations created at or after the specified time.";
         let since_long_help = "Match conversations created at or after the specified \
                                time.\n\nAccepts a conversation ID (uses its creation timestamp), \
@@ -191,27 +189,11 @@ impl<const EXCLUSIVE: bool> clap::Args for CreationRange<EXCLUSIVE> {
         .group(group)
     }
 
-    fn augment_args_for_update(cmd: Command) -> Command {
-        Self::augment_args(cmd)
-    }
-}
-
-impl<const EXCLUSIVE: bool> FromArgMatches for CreationRange<EXCLUSIVE> {
-    fn from_arg_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
         Ok(Self {
             since: matches.get_one::<TimeThreshold>("created_since").copied(),
             before: matches.get_one::<TimeThreshold>("created_before").copied(),
         })
-    }
-
-    fn update_from_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), clap::Error> {
-        if let Some(v) = matches.get_one::<TimeThreshold>("created_since").copied() {
-            self.since = Some(v);
-        }
-        if let Some(v) = matches.get_one::<TimeThreshold>("created_before").copied() {
-            self.before = Some(v);
-        }
-        Ok(())
     }
 }
 

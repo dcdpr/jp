@@ -1,10 +1,13 @@
 use std::fs;
 
+use clap::{ArgMatches, Command};
 use jp_config::PartialAppConfig;
 use jp_conversation::stream::ApplyDelta;
 use jp_workspace::ConversationHandle;
 
+use super::Target;
 use crate::{
+    cli::CommandArgs,
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::FlagIds,
@@ -14,13 +17,38 @@ use crate::{
     ctx::Ctx,
 };
 
-#[derive(Debug, clap::Args)]
+/// `jp config set`.
+///
+/// Writes to the conversations `--id` names, or else to one configuration file:
+/// the workspace's, when no target flag is given.
+#[derive(Debug)]
 pub(crate) struct Set {
-    #[command(flatten)]
-    file_target: FileTarget,
-
-    #[command(flatten)]
+    file_target: Target,
     conversation: FlagIds<false, true>,
+}
+
+impl CommandArgs for Set {
+    fn augment(cmd: Command) -> Command {
+        let cmd = Target::augment(
+            cmd,
+            "FileTarget",
+            [
+                "Write to the workspace's user-specific configuration file",
+                "Write to the global user-specific configuration file",
+                "Write to the current-working-directory configuration file",
+            ],
+            Some("id"),
+        );
+
+        FlagIds::<false, true>::augment(cmd)
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            file_target: Target::from_matches(matches),
+            conversation: FlagIds::from_matches(matches)?,
+        })
+    }
 }
 
 impl Set {
@@ -74,13 +102,7 @@ impl Set {
     }
 
     fn set_in_file(self, ctx: &mut Ctx, config_delta: &PartialAppConfig) -> Output {
-        let target = super::Target {
-            user_workspace: self.file_target.user_workspace,
-            user_global: self.file_target.user_global,
-            cwd: self.file_target.cwd,
-        };
-
-        let Some(mut config) = target.config_file(ctx)? else {
+        let Some(mut config) = self.file_target.config_file(ctx)? else {
             return Err("No configuration file found for the given target.".into());
         };
 
@@ -99,27 +121,6 @@ impl Set {
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
         ConversationLoadRequest::explicit_or_none(&self.conversation)
     }
-}
-
-/// File target for `config set`.
-///
-/// Mutually exclusive with `--id` (conversation targeting).
-/// When none of these flags are set and no `--id` is given, the workspace
-/// config file is used as the default.
-#[derive(Debug, Clone, Copy, Default, PartialEq, clap::Args)]
-#[group(required = false, multiple = false)]
-struct FileTarget {
-    /// Write to the workspace's user-specific configuration file.
-    #[arg(long, conflicts_with = "id")]
-    user_workspace: bool,
-
-    /// Write to the global user-specific configuration file.
-    #[arg(long, conflicts_with = "id")]
-    user_global: bool,
-
-    /// Write to the current-working-directory configuration file.
-    #[arg(long, conflicts_with = "id")]
-    cwd: bool,
 }
 
 #[cfg(test)]
