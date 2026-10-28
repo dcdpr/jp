@@ -1,11 +1,11 @@
 # Port the httpmock fork's record feature off serde_yaml
 
 - **Status**: Done
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-10-27
 - **Label**: domain=tooling
 - **Label**: package=jp_test
+- **Label**: type=task
 
 `serde_yaml` is deprecated, and its `unsafe-libyaml` backend is flagged
 unmaintained by RUSTSEC-2024-0449.
