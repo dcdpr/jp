@@ -499,6 +499,18 @@ fn jp_config(root: &Utf8Path) -> Value {
     serde_json::to_value(config).unwrap()
 }
 
+/// The root of JP's own repository, whose site is synced from this binary.
+///
+/// Read when the test runs rather than with `env!`: a target directory shared
+/// between worktrees can run a binary another worktree compiled, whose baked-in
+/// path names that worktree.
+fn jp_root() -> Utf8PathBuf {
+    let manifest = env::var("CARGO_MANIFEST_DIR")
+        .expect("CARGO_MANIFEST_DIR: run tests via `cargo test` or `cargo nextest`");
+
+    Utf8PathBuf::from(manifest).join("../../../..")
+}
+
 /// JP's own site is synced from this binary, like any other project's.
 ///
 /// Fails when a file in the crate's `site/` changed without JP's copy being
@@ -508,7 +520,7 @@ fn jp_config(root: &Utf8Path) -> Value {
 /// the test expects.
 #[test]
 fn jp_site_is_synced() {
-    let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let root = jp_root();
     let config = jp_config(&root);
     let options = Options::from_config(&config).unwrap();
     let settings = snapshot(&root, &options, &config, None).unwrap();

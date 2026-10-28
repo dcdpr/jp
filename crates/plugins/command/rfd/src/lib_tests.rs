@@ -1,4 +1,4 @@
-use std::{fs, slice};
+use std::{env, fs, slice};
 
 use camino_tempfile::Utf8TempDir;
 use chrono::NaiveDate;
@@ -13,6 +13,19 @@ use super::*;
 
 fn parse(args: &[&str]) -> Result<Args, ClapError> {
     Args::try_parse_from(iter::once("jp rfd").chain(args.iter().copied()))
+}
+
+/// The root of JP's own repository, for the tests that read its RFDs, board,
+/// and tool definitions.
+///
+/// Read when the test runs rather than with `env!`: a target directory shared
+/// between worktrees can run a binary another worktree compiled, whose baked-in
+/// path names that worktree.
+pub(crate) fn jp_root() -> Utf8PathBuf {
+    let manifest = env::var("CARGO_MANIFEST_DIR")
+        .expect("CARGO_MANIFEST_DIR: run tests via `cargo test` or `cargo nextest`");
+
+    Utf8PathBuf::from(manifest).join("../../../..")
 }
 
 /// A workspace holding one RFD, `042`, planned first and in development, and

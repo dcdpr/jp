@@ -1,9 +1,8 @@
-use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::priority::PRIORITY_FILE;
+use crate::{priority::PRIORITY_FILE, tests::jp_root};
 
 /// An RFD document carrying `fields` in its metadata block.
 fn rfd(heading: &str, fields: &[(&str, &str)]) -> String {
@@ -416,10 +415,7 @@ fn load_warns_about_what_it_could_not_read() {
 /// JP's own RFDs and board read cleanly, whatever they currently hold.
 #[test]
 fn the_jp_board_loads() {
-    let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../..")
-        .canonicalize_utf8()
-        .unwrap();
+    let root = jp_root().canonicalize_utf8().unwrap();
 
     let tickets = root.join("docs/ticket");
     let Loaded { board, .. } = load(

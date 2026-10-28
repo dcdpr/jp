@@ -1,3 +1,5 @@
+use std::env;
+
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use serde_json::json;
@@ -19,9 +21,22 @@ fn vocabulary() -> Vocabulary {
     .unwrap()
 }
 
+/// The root of JP's own repository, for the tests that read its tool
+/// definitions and configuration.
+///
+/// Read when the test runs rather than with `env!`: a target directory shared
+/// between worktrees can run a binary another worktree compiled, whose baked-in
+/// path names that worktree.
+fn jp_root() -> Utf8PathBuf {
+    let manifest = env::var("CARGO_MANIFEST_DIR")
+        .expect("CARGO_MANIFEST_DIR: run tests via `cargo test` or `cargo nextest`");
+
+    Utf8PathBuf::from(manifest).join("../../../..")
+}
+
 /// JP's own definitions of the tools this plugin serves.
 fn jp_definitions() -> Utf8PathBuf {
-    Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../.jp/mcp/tools/ticket")
+    jp_root().join(".jp/mcp/tools/ticket")
 }
 
 /// Every file in `dir`, parsed, by file name.
@@ -579,7 +594,7 @@ fn jp_definitions_advertise_what_the_tools_accept() {
 /// never turn a second file into a failing test.
 #[test]
 fn the_jp_board_vocabulary_parses() {
-    let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../.jp/config.toml");
+    let path = jp_root().join(".jp/config.toml");
     let config: toml::Value = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
 
     let labels = ["plugins", "command", "ticket", "options", "labels"]

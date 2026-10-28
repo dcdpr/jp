@@ -3,7 +3,7 @@ use camino_tempfile::Utf8TempDir;
 use serde_json::json;
 
 use super::*;
-use crate::tool::TOOLS;
+use crate::{tests::jp_root, tool::TOOLS};
 
 fn categories() -> Vec<String> {
     vec!["design".to_owned(), "guide".to_owned()]
@@ -11,7 +11,7 @@ fn categories() -> Vec<String> {
 
 /// JP's own definitions of the RFD tools.
 fn jp_definitions() -> Utf8PathBuf {
-    Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../.jp/mcp/tools/rfd")
+    jp_root().join(".jp/mcp/tools/rfd")
 }
 
 /// Every file in `dir`, parsed, by file name.

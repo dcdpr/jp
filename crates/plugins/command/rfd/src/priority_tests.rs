@@ -1,8 +1,8 @@
-use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use serde_json::json;
 
 use super::*;
+use crate::tests::jp_root;
 
 fn board(raw: &Value) -> Priority {
     Priority::normalize(raw)
@@ -116,7 +116,7 @@ fn the_board_file_is_written_the_way_the_site_writes_it() {
 /// command from leaving a formatting diff behind.
 #[test]
 fn the_jp_board_file_round_trips() {
-    let dir = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../docs/rfd");
+    let dir = jp_root().join("docs/rfd");
     let source = fs::read_to_string(dir.join(PRIORITY_FILE)).unwrap();
 
     let priority = read(&dir).unwrap().unwrap();

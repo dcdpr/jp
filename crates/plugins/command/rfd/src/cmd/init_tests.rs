@@ -1,11 +1,12 @@
 use std::fs;
 
-use camino::Utf8PathBuf;
-
 use super::*;
-use crate::cmd::{
-    draft::{self, Draft},
-    tests::Workspace,
+use crate::{
+    cmd::{
+        draft::{self, Draft},
+        tests::Workspace,
+    },
+    tests::jp_root,
 };
 
 fn categories(list: &[&str]) -> Vec<String> {
@@ -46,7 +47,7 @@ fn init_sets_up_the_rfd_directory() {
 /// The templates a new project starts with are JP's own.
 #[test]
 fn the_default_templates_are_the_ones_jp_uses() {
-    let jp = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../docs/rfd");
+    let jp = jp_root().join("docs/rfd");
 
     for (category, template) in TEMPLATES {
         let ours = fs::read_to_string(jp.join(format!("000-{category}-template.md"))).unwrap();
