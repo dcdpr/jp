@@ -89,6 +89,7 @@ expression: v
       "start_local": false
     },
     "style": {
+      "sanitize": "strip",
       "code": {
         "color": true,
         "line_numbers": false,

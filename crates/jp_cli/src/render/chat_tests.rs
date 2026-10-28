@@ -1,6 +1,10 @@
 use std::fmt::Write as _;
 
-use jp_config::{AppConfig, style::typewriter::DelayDuration, types::color::Color};
+use jp_config::{
+    AppConfig,
+    style::{Sanitization, typewriter::DelayDuration},
+    types::color::Color,
+};
 use jp_printer::{OutputFormat, OutputWidth, SharedBuffer, TerminalCapability};
 
 use super::*;
@@ -2188,4 +2192,174 @@ fn test_extend_across_tool_calls_disabled_ends_the_region_at_the_tool_call() {
         !output.contains("\x1b[48;5;236m\x1b[K\x1b[49m"),
         "the separator before the tool call must be unshaded, got: {output:?}"
     );
+}
+
+/// A replay renderer showing untrusted content under `sanitize`, with reasoning
+/// rendered in full and unshaded.
+fn create_sanitizing_renderer(
+    sanitize: Sanitization,
+) -> (ChatRenderer, SharedBuffer, SharedBuffer) {
+    let mut config = AppConfig::new_test();
+    config.style.sanitize = sanitize;
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = None;
+    create_renderer_with_config(config)
+}
+
+#[test]
+fn a_model_message_cannot_move_the_cursor_or_color_its_text() {
+    let (mut renderer, out, _) = create_sanitizing_renderer(Sanitization::Strip);
+
+    renderer.render_response(&ChatResponse::message(
+        "Hello \x1b[31mred\x1b[0m \x1b[2Jworld\r\n\n",
+    ));
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "Hello red world\n\n");
+}
+
+#[test]
+fn a_character_reference_in_a_model_message_cannot_clear_the_screen() {
+    let (mut renderer, out, _) = create_sanitizing_renderer(Sanitization::Strip);
+
+    renderer.render_response(&ChatResponse::message("Clear &#27;[2J done\n\n"));
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "Clear [2J done\n\n");
+}
+
+#[test]
+fn a_sequence_split_across_chunks_is_recognized_whole() {
+    let (mut renderer, out, _) = create_sanitizing_renderer(Sanitization::Strip);
+
+    renderer.render_response(&ChatResponse::message("Hello \x1b["));
+    renderer.render_response(&ChatResponse::message("2Jworld\n\n"));
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "Hello world\n\n");
+}
+
+#[test]
+fn a_sequence_cut_short_by_a_kind_change_does_not_swallow_the_next_kind() {
+    // The reasoning ends mid-sequence. The message that follows is filtered on
+    // its own, so its opening `2J` is text rather than the end of a sequence the
+    // reasoning started.
+    let (mut renderer, out, _) = create_sanitizing_renderer(Sanitization::Strip);
+
+    renderer.render_response(&ChatResponse::reasoning("Think \x1b["));
+    renderer.render_response(&ChatResponse::message("2Jhello\n\n"));
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "Think\n\n2Jhello\n\n");
+}
+
+#[test]
+fn visualize_marks_a_sequence_left_unfinished_where_its_region_ends() {
+    let (mut renderer, out, _) = create_sanitizing_renderer(Sanitization::Visualize);
+
+    renderer.render_response(&ChatResponse::reasoning("Think \x1b["));
+    renderer.render_response(&ChatResponse::message("2Jhello\n\n"));
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "Think \u{241b}\n\n2Jhello\n\n");
+}
+
+#[test]
+fn visualize_marks_what_a_model_message_lost() {
+    let (mut renderer, out, _) = create_sanitizing_renderer(Sanitization::Visualize);
+
+    renderer.render_response(&ChatResponse::message("a\x1b[2Jb &#27;c\n\n"));
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "a\u{241b}b \u{241b}c\n\n");
+}
+
+#[test]
+fn off_shows_a_model_message_as_written() {
+    let (mut renderer, out, _) = create_sanitizing_renderer(Sanitization::Off);
+
+    renderer.render_response(&ChatResponse::message("a\x1b[31mb\n\n"));
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "a\x1b[31mb\n\n");
+}
+
+#[test]
+fn reasoning_is_filtered_like_a_message() {
+    let (mut renderer, out, _) = create_sanitizing_renderer(Sanitization::Strip);
+
+    renderer.render_response(&ChatResponse::reasoning(
+        "Think \x1b[31mred\x1b]0;title\x07 &#27;[1A\n\n",
+    ));
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "Think red [1A\n\n");
+}
+
+#[test]
+fn escape_sequences_do_not_spend_the_reasoning_budget() {
+    // The budget counts what is shown: an escape the filter drops neither uses
+    // up characters nor gets cut in half by the truncation.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display =
+        ReasoningDisplayConfig::Truncate(TruncateChars { characters: 10 });
+    config.style.reasoning.background = None;
+    let (mut renderer, out, _) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::reasoning("\x1b[31mABCDEFGHIJKLMN\n\n"));
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "ABCDEFGHIJ...\n\n");
+}
+
+#[test]
+fn reasoning_the_filter_removes_entirely_supplies_no_separation() {
+    let (renderer, _, _) = create_sanitizing_renderer(Sanitization::Strip);
+
+    assert!(!renderer.reasoning_supplies_separation("\x1b[2J"));
+    assert!(renderer.reasoning_supplies_separation("\x1b[2Jtext"));
+}
+
+#[test]
+fn a_user_message_keeps_its_colors_and_closes_them_before_its_line_break() {
+    // A pasted colored log should look like the log, but nothing it leaves
+    // open may color what JP writes next, and the line break must not be
+    // written under a background it left open.
+    let (mut renderer, out, _) = create_sanitizing_renderer(Sanitization::Strip);
+
+    renderer.render_request("\x1b[41mfailed\x1b[2J build\r\n");
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "\x1b[41mfailed build\x1b[0m\n\n");
+}
+
+#[test]
+fn a_character_reference_in_a_user_message_cannot_clear_the_screen() {
+    // It can still color the text: it is the user's own message.
+    let (mut renderer, out, _) = create_sanitizing_renderer(Sanitization::Strip);
+
+    renderer.render_request("Clear&#27;[2J now &#27;[31mred");
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "Clear now \x1b[31mred\x1b[0m\n\n");
+}
+
+#[test]
+fn a_user_message_closes_its_span_under_off() {
+    // `off` shows the message as written, and the reset still ends it.
+    let (mut renderer, out, _) = create_sanitizing_renderer(Sanitization::Off);
+
+    renderer.render_request("\x1b[2Jcleared");
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "\x1b[2Jcleared\x1b[0m\n\n");
 }

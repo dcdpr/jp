@@ -1,7 +1,7 @@
 use clap::Parser as _;
 use jp_config::{PartialAppConfig, model::id::PartialModelIdOrAliasConfig};
 
-use super::{DEFAULT_COUNT, IntoPartialAppConfig as _, Title};
+use super::{DEFAULT_COUNT, IntoPartialAppConfig as _, MANUAL, MORE, Title, picker_rows};
 
 /// Parse a `Title` from `jp conversation title <args>` for flag tests.
 fn parse_title(args: &[&str]) -> Title {
@@ -14,6 +14,20 @@ fn parse_title(args: &[&str]) -> Title {
     let mut argv = vec!["title"];
     argv.extend_from_slice(args);
     TestCli::try_parse_from(argv).unwrap().title
+}
+
+#[test]
+fn the_picker_shows_titles_as_plain_lines_then_its_actions() {
+    // The row is redrawn as the cursor moves: a line break or an escape in a
+    // generated title would put the picker out of step with the screen.
+    let titles = ["Fix the\x1b[2J build".to_owned(), "Two\nlines".to_owned()];
+
+    assert_eq!(picker_rows(&titles), [
+        "Fix the[2J build",
+        "Twolines",
+        MORE,
+        MANUAL
+    ]);
 }
 
 #[test]

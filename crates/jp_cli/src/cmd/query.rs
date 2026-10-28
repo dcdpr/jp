@@ -3085,6 +3085,8 @@ fn mount_partial_rule(rule_path: &str, write: bool) -> PartialFsRuleConfig {
 }
 
 /// Set the terminal title to show the active conversation.
+///
+/// `set_title` removes any control character from the title it writes.
 fn set_terminal_title(id: ConversationId, title: Option<&str>) {
     let display = match title {
         Some(t) => format!("{id}: {t}"),

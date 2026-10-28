@@ -10,6 +10,7 @@ use comrak::{
 use jp_term::{
     ansi::{self, AnsiState, Segment},
     background::{DefaultBackground, line_fill},
+    sanitize::{ContentClass, SanitizeMode},
 };
 use syntect::{highlighting::Theme, parsing::SyntaxSet};
 use two_face::syntax;
@@ -84,6 +85,15 @@ pub struct TerminalOptions {
     /// sets this so the terminal item still gets its separator, instead of
     /// gluing the next content directly onto the last item.
     pub force_trailing_separator: bool,
+
+    /// Where the markdown comes from, and the sanitizer mode it is shown under.
+    ///
+    /// The parser decodes character references after the caller filtered the
+    /// source, so `&#27;` becomes a real `ESC` the source filter never saw.
+    /// With a policy set, text nodes, link and image destinations and titles,
+    /// and code block info strings are filtered again before they are written.
+    /// `None` writes decoded text as it is, for markdown JP composes itself.
+    pub content: Option<(ContentClass, SanitizeMode)>,
 }
 
 /// A formatter for markdown text.
@@ -298,6 +308,7 @@ impl Formatter {
             default_background: options.default_background.as_ref(),
             inline_code_bg: self.inline_code_bg.as_ref(),
             indent: options.indent,
+            content: options.content,
         };
 
         let mut buf = String::new();

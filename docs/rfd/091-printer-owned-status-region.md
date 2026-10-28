@@ -963,6 +963,11 @@ all four are the region's or the client's job.
   `jp_term` — instead of defining one; if this RFD lands first, its narrow
   filter is a candidate for replacement once that shared owner exists.
 
+  > [!TIP]
+  > [RFD 096] keeps this filter separate from its content sanitizer: status rows
+  > keep their stricter policy and ignore `style.sanitize`, and the two share
+  > only SGR parsing and conceal removal.
+
 ## Implementation Plan
 
 Each phase is independently reviewable and mergeable.

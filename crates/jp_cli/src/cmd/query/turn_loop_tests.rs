@@ -1900,7 +1900,7 @@ impl PromptBackend for DelayedPromptBackend {
         options: Vec<String>,
         default: Option<usize>,
         writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<usize, InquireError> {
         self.started.notify_one();
         std::thread::sleep(self.delay);
         self.inner.select(message, options, default, writer)
@@ -6577,7 +6577,7 @@ impl PromptBackend for ObservingPromptBackend {
         options: Vec<String>,
         default: Option<usize>,
         writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<usize, InquireError> {
         self.observe();
         self.inner.select(message, options, default, writer)
     }
@@ -9667,7 +9667,7 @@ async fn a_formatters_question_is_answered_before_the_call_runs() {
             chrome.lock().as_str(),
             "\n── \x1b[1mjp\x1b[0m \x1b[2m(anthropic/test)\x1b[0m \
              ─────────────────────────────────────────────────────────\n\nCalling tool \
-             \x1b[38;5;11m\x1b[1mhttp_tool\x1b[0m\n\nconfirm = true\n\nconfirmed\n\n"
+             \x1b[38;5;11m\x1b[1mhttp_tool\x1b[0m\n\nconfirm = true\x1b[0m\n\nconfirmed\x1b[0m\n\n"
         );
         owner.shutdown().await.unwrap();
     })
@@ -9784,10 +9784,10 @@ async fn an_approval_prompt_shows_the_call_its_formatter_describes_with_the_answ
             seen,
             "\n── \x1b[1mjp\x1b[0m \x1b[2m(anthropic/test)\x1b[0m \
              ─────────────────────────────────────────────────────────\n\nCalling tool \
-             \x1b[38;5;11m\x1b[1mhttp_tool\x1b[0m\n\nconfirm = true\n"
+             \x1b[38;5;11m\x1b[1mhttp_tool\x1b[0m\n\nconfirm = true\x1b[0m\n"
         );
         // Only the result follows: the call was already described.
-        assert_eq!(after, "\nconfirmed\n\n");
+        assert_eq!(after, "\nconfirmed\x1b[0m\n\n");
         owner.shutdown().await.unwrap();
     })
     .await

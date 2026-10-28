@@ -144,6 +144,30 @@ fn details_show_the_title_as_a_row_beneath_the_heading() {
     );
 }
 
+/// The block is written by the prompt widget, which draws without the printer's
+/// filter, so the title is filtered on its way in.
+/// The `ESC` that opens each sequence goes, and what follows it is left as
+/// plain text.
+#[test]
+fn details_show_a_title_as_plain_text() {
+    let id = make_id(1000);
+    let workspace = workspace_with(id, Conversation {
+        title: Some("Rework\x1b[2J the\r config".to_owned()),
+        ..titled_conversation()
+    });
+    let lock = lock_for(&workspace, id);
+
+    let details =
+        action_details(&lock, Some(id), false).with_heading("Removing conversation jp-c10000");
+
+    assert_eq!(
+        details.to_string(),
+        "Removing conversation jp-c10000\n\n             ID  jp-c10000\n          Title  \
+         Rework[2J the config\n Last Activated  Currently Active\n         Pinned  Yes\n          \
+         Local  No\n         Labels\n                 1. crate\n                     jp_config"
+    );
+}
+
 /// A conversation is "Currently Active" only when the session activated *it*.
 /// With no session, or one pointing elsewhere, the row carries the activation
 /// timestamp and the payload reports `active: false`.

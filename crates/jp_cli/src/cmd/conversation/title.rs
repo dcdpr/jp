@@ -7,6 +7,7 @@ use jp_llm::{
     provider,
     title::{self, TitleRequest},
 };
+use jp_term::sanitize::strip_controls;
 use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
@@ -166,24 +167,38 @@ pub(super) async fn select(
 
         // Discarded candidates stay selectable: a user who asked for more may
         // still prefer one of the earlier suggestions.
-        let mut choices = candidates.clone();
-        choices.extend(rejected.iter().cloned());
-        choices.push(MORE.to_owned());
-        choices.push(MANUAL.to_owned());
+        let mut titles = candidates.clone();
+        titles.extend(rejected.iter().cloned());
 
         let mut writer = ctx.printer.prompt_writer();
-        let choice =
-            inquire::Select::new("Conversation Title", choices).prompt_with_writer(&mut writer)?;
+        let index = inquire::Select::new("Conversation Title", picker_rows(&titles))
+            .raw_prompt_with_writer(&mut writer)?
+            .index;
 
-        match choice.as_str() {
-            MORE => rejected.extend(candidates),
-            MANUAL => {
+        // The rows are the titles in order, then the two actions, so the index
+        // names the title as the model wrote it.
+        match index.checked_sub(titles.len()) {
+            None => return Ok(titles.swap_remove(index)),
+            Some(0) => rejected.extend(candidates),
+            Some(_) => {
                 let title = inquire::Text::new("Title").prompt_with_writer(&mut writer)?;
                 return Ok(title.trim().to_owned());
             }
-            _ => return Ok(choice),
         }
     }
+}
+
+/// The title picker's rows: each title as one line of plain text, then the
+/// action that generates more and the one that takes a hand-written title.
+///
+/// A picker row is redrawn in place as the cursor moves, so a title keeps no
+/// control character there, whatever `style.sanitize` says.
+fn picker_rows(titles: &[String]) -> Vec<String> {
+    titles
+        .iter()
+        .map(|title| strip_controls(title, &[]))
+        .chain([MORE.to_owned(), MANUAL.to_owned()])
+        .collect()
 }
 
 /// Generate `count` candidate titles for a conversation.

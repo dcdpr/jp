@@ -3,9 +3,9 @@ pub(crate) mod datetime;
 pub(crate) mod workspace;
 
 use indexmap::IndexSet;
-use jp_config::types::color::Color;
+use jp_config::{style::Sanitization, types::color::Color};
 use jp_conversation::{ByteSize, Compaction, Labels, ToolCallPolicy};
-use jp_term::table::DetailItem;
+use jp_term::{sanitize::SanitizeMode, table::DetailItem};
 use serde_json::json;
 use url::Url;
 
@@ -216,6 +216,15 @@ pub(crate) fn color_to_bg_param(color: Color) -> String {
     match color {
         Color::Ansi256(n) => format!("48;5;{n}"),
         Color::Rgb { r, g, b } => format!("48;2;{r};{g};{b}"),
+    }
+}
+
+/// The sanitizer mode the `style.sanitize` setting names.
+pub(crate) const fn sanitize_mode(setting: Sanitization) -> SanitizeMode {
+    match setting {
+        Sanitization::Strip => SanitizeMode::Strip,
+        Sanitization::Visualize => SanitizeMode::Visualize,
+        Sanitization::Off => SanitizeMode::Off,
     }
 }
 

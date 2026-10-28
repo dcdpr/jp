@@ -24,6 +24,7 @@ use jp_printer::Printer;
 use jp_term::background::DefaultBackground;
 
 use super::{ChatRenderer, RenderFlow, StructuredRenderer};
+use crate::format::sanitize_mode;
 
 /// Fallback label used when no [`assistant.name`][an] is configured.
 ///
@@ -90,9 +91,10 @@ impl TurnView {
         model_id: Option<String>,
         flow: RenderFlow,
     ) -> Self {
+        let sanitize = sanitize_mode(style.sanitize);
         Self {
             chat: ChatRenderer::new(printer.clone(), style, flow),
-            structured: StructuredRenderer::new(printer),
+            structured: StructuredRenderer::new(printer, sanitize),
             assistant_name,
             model_id,
             flow,
@@ -337,11 +339,12 @@ impl TurnView {
         model_id: Option<String>,
     ) {
         self.flush();
+        let sanitize = sanitize_mode(style.sanitize);
         self.chat = ChatRenderer::new(printer.clone(), style, self.flow);
         if let Some(flag) = &self.tool_drawn {
             self.chat.set_tool_drawn(Arc::clone(flag));
         }
-        self.structured = StructuredRenderer::new(printer);
+        self.structured = StructuredRenderer::new(printer, sanitize);
         self.assistant_name = assistant_name;
         self.model_id = model_id;
     }

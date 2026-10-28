@@ -8,7 +8,10 @@ use std::{
 
 use jp_config::{
     AppConfig,
-    style::reasoning::{ReasoningDisplayConfig, TruncateChars},
+    style::{
+        Sanitization,
+        reasoning::{ReasoningDisplayConfig, TruncateChars},
+    },
     types::color::Color,
 };
 use jp_conversation::event::ChatResponse;
@@ -192,6 +195,39 @@ fn a_structured_response_closes_the_region_for_later_prompts() {
     }
     printer.flush();
     assert_eq!(*out.lock(), "Interrupted");
+}
+
+#[test]
+fn structured_output_is_shown_the_way_style_sanitize_asks() {
+    // A schema asking for a string stores the model's escape in the value, and
+    // this is where it reaches the terminal. The live flow keeps the role
+    // header off stdout, so the answer is all that lands there.
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let style = AppConfig::new_test().style;
+    let mut view = TurnView::new(printer.clone(), style, None, None, RenderFlow::Live);
+
+    view.render_chat_response(&ChatResponse::structured(json!("\u{1b}[31mred")));
+    printer.flush();
+
+    assert_eq!(*out.lock(), "```json\nred\n```\n");
+}
+
+#[test]
+fn a_rebuilt_view_shows_structured_output_under_the_new_setting() {
+    // Replay rebuilds the view for every turn from that turn's config.
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let style = AppConfig::new_test().style;
+    let mut view = TurnView::new(printer.clone(), style.clone(), None, None, RenderFlow::Live);
+
+    let mut off = style;
+    off.sanitize = Sanitization::Off;
+    view.reconfigure(printer.clone(), off, None, None);
+    view.render_chat_response(&ChatResponse::structured(json!("\u{1b}[31mred")));
+    printer.flush();
+
+    assert_eq!(*out.lock(), "```json\n\x1b[31mred\n```\n");
 }
 
 #[test]

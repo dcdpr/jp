@@ -17,7 +17,7 @@ use tokio::runtime::{Handle, Runtime};
 
 use crate::{
     Globals, Result, bootstrap::ExecutionContext, config_pipeline::ConfigResetEvents,
-    signals::SignalRouter,
+    format::sanitize_mode, signals::SignalRouter,
 };
 
 /// Context for the CLI application
@@ -136,6 +136,11 @@ impl Ctx {
         let is_tty = io::stdout().is_terminal();
         let width = printer.output_width().columns();
 
+        // Every command prints through this printer, so its floor is what keeps
+        // stored text from reaching the terminal unfiltered when a command does
+        // not filter it itself.
+        printer.set_sanitize_mode(sanitize_mode(config.style.sanitize));
+
         let interactive = crate::interactive(args.no_interactive, is_tty);
 
         Self {
@@ -220,6 +225,8 @@ impl Ctx {
     /// rather than a mutation: assembling a config is still the partial API's
     /// job.
     pub(crate) fn swap_config(&mut self, config: Arc<AppConfig>) -> Arc<AppConfig> {
+        self.printer
+            .set_sanitize_mode(sanitize_mode(config.style.sanitize));
         std::mem::replace(&mut self.config, config)
     }
 
@@ -314,3 +321,7 @@ impl Drop for Ctx {
         self.printer.shutdown();
     }
 }
+
+#[cfg(test)]
+#[path = "ctx_tests.rs"]
+mod tests;

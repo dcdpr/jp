@@ -1,4 +1,7 @@
-use jp_term::background::BackgroundFill;
+use jp_term::{
+    background::BackgroundFill,
+    sanitize::{ContentClass, SanitizeMode},
+};
 
 use super::*;
 
@@ -1488,5 +1491,118 @@ fn test_terminal_no_end_list_marker_between_adjacent_lists() {
     assert!(
         !out.contains("end list"),
         "Unexpected `<!-- end list -->` marker in terminal output: {out:?}"
+    );
+}
+
+/// Format `input` as one block of `class` content shown under `mode`.
+fn format_as(input: &str, class: ContentClass, mode: SanitizeMode) -> String {
+    Formatter::new()
+        .format_terminal_with(input, &TerminalOptions {
+            content: Some((class, mode)),
+            suppress_trailing_separator: true,
+            ..Default::default()
+        })
+        .unwrap()
+}
+
+#[test]
+fn a_character_reference_in_model_output_cannot_write_an_escape() {
+    // The parser decodes `&#27;` into a real `ESC` after the source filter has
+    // run, so the formatter filters decoded text again.
+    assert_eq!(
+        format_as(
+            "Clear &#27;[2J here",
+            ContentClass::ModelOutput,
+            SanitizeMode::Strip
+        ),
+        "Clear [2J here\n"
+    );
+}
+
+#[test]
+fn visualize_marks_the_control_character_a_reference_decoded_to() {
+    assert_eq!(
+        format_as(
+            "Clear &#27;[2J here",
+            ContentClass::ModelOutput,
+            SanitizeMode::Visualize
+        ),
+        "Clear \u{241b}[2J here\n"
+    );
+}
+
+#[test]
+fn link_destinations_and_titles_are_filtered_after_decoding() {
+    assert_eq!(
+        format_as(
+            "[a](http://x/&#27;[2J \"t&#27;[1A\")",
+            ContentClass::ModelOutput,
+            SanitizeMode::Strip
+        ),
+        "[a](http://x/[2J \"t[1A\")\n"
+    );
+    assert_eq!(
+        format_as(
+            "![a](http://x/&#7; \"&#27;b\")",
+            ContentClass::ModelOutput,
+            SanitizeMode::Strip
+        ),
+        "![a](http://x/ \"b\")\n"
+    );
+    assert_eq!(
+        format_as(
+            "<http://x/&#27;>",
+            ContentClass::ModelOutput,
+            SanitizeMode::Strip
+        ),
+        "<http://x/>\n"
+    );
+}
+
+#[test]
+fn a_fence_info_string_is_filtered_after_decoding() {
+    // CommonMark decodes references in the info string as well.
+    assert_eq!(
+        format_as(
+            "```&#27;[2J\ncode\n```",
+            ContentClass::ModelOutput,
+            SanitizeMode::Strip
+        ),
+        "```[2J\ncode\n```\n"
+    );
+}
+
+#[test]
+fn a_table_cell_is_filtered_after_decoding() {
+    // Cells render through a formatter of their own, which inherits the policy.
+    assert_eq!(
+        format_as(
+            "| h |\n|---|\n| &#27;[2J |",
+            ContentClass::ModelOutput,
+            SanitizeMode::Strip
+        ),
+        "| h   |\n|-----|\n| [2J |\n"
+    );
+}
+
+#[test]
+fn a_user_message_keeps_the_styling_a_reference_decodes_to() {
+    // A user typing `&#27;[31m` gets red, but nothing that moves the cursor or
+    // clears the screen.
+    assert_eq!(
+        format_as(
+            "&#27;[31mred&#27;[0m and &#27;[2Jgone",
+            ContentClass::UserMessage,
+            SanitizeMode::Strip
+        ),
+        "\x1b[31mred\x1b[0m and gone\n"
+    );
+}
+
+#[test]
+fn decoded_text_is_written_as_decoded_under_off() {
+    assert_eq!(
+        format_as("a&#27;[2Jb", ContentClass::ModelOutput, SanitizeMode::Off),
+        "a\x1b[2Jb\n"
     );
 }

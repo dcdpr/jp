@@ -281,6 +281,7 @@ Ok(
                 default_id: None,
             },
             style: PartialStyleConfig {
+                sanitize: None,
                 code: PartialCodeConfig {
                     color: Some(
                         true,

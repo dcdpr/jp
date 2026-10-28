@@ -75,3 +75,7 @@ impl Show {
         ConversationLoadRequest::explicit_or_session(&self.target)
     }
 }
+
+#[cfg(test)]
+#[path = "show_tests.rs"]
+mod tests;

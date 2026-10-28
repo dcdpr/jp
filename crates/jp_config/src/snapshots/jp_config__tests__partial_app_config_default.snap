@@ -133,6 +133,7 @@ PartialAppConfig {
         default_id: None,
     },
     style: PartialStyleConfig {
+        sanitize: None,
         code: PartialCodeConfig {
             color: None,
             line_numbers: None,
