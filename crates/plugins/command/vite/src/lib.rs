@@ -3,19 +3,19 @@
 //!
 //! A command plugin providing three commands: `jp vite init`, `jp vite sync`,
 //! and `jp vite serve`.
-//! The site's own files are built into the binary ([`site`]): the loaders for
-//! both document kinds, the components, the styles, the dev-server middleware,
-//! and a configuration fragment, which go to the project's
-//! `.vitepress/jp-vite/` with a snapshot of the settings they read
-//! ([`settings`]); and a starting index and board page for the RFD and ticket
-//! directories.
-//! `init` writes the files that stay the project's own ([`init`]); `sync`
-//! rewrites the owned ones and creates the pages a project doesn't have
-//! ([`sync`]), only where git can restore what it overwrites ([`git`]); and
-//! `serve` runs the dev server ([`serve`]).
+//! The site's own files are built into the binary (the `site` module): the
+//! loaders for both document kinds, the components, the styles, the dev-server
+//! middleware, and a configuration fragment, which go to the project's
+//! `.vitepress/jp-vite/` with a snapshot of the settings they read (the
+//! `settings` module); and a starting index and board page for the RFD and
+//! ticket directories.
+//! Each command has a module of its own: `init` writes the files that stay the
+//! project's own; `sync` rewrites the owned ones and creates the pages a
+//! project doesn't have, only where git can restore what it overwrites (the
+//! `git` module); and `serve` runs the dev server.
 //!
 //! Settings come from `plugins.command.vite.options`, and from `jp rfd`'s and
-//! `jp ticket`'s options ([`options`]).
+//! `jp ticket`'s options, read by the `options` module.
 //!
 //! See: `docs/rfd/116-shareable-rfd-ticket-and-site-tooling.md`, "Site"
 

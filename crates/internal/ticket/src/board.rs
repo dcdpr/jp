@@ -17,8 +17,8 @@
 //! A new ticket therefore enters its column unranked, and a board needs no
 //! order file until something is ranked.
 //!
-//! [`Order`] is the file's contents and the pure operations on them; [`read`],
-//! [`write`], [`rank`], and [`move_to`] touch the disk.
+//! [`Order`] is the file's contents and the pure operations on them;
+//! [`read()`], [`write()`], [`rank()`], and [`move_to()`] touch the disk.
 
 use std::{
     cmp::Ordering,

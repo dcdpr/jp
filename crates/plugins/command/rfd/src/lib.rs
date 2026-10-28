@@ -2,20 +2,21 @@
 //!
 //! A command plugin providing `jp rfd` and its subcommands, and the tools the
 //! assistant reaches through `source = "plugin.command.rfd.<tool>"`.
-//! An `init` carrying a tool call is answered by [`tool`]; any other runs the
-//! command its arguments name.
+//! An `init` carrying a tool call is answered by the `tool` module; any other
+//! runs the command its arguments name.
 //!
-//! Settings come from `plugins.command.rfd.options` ([`options`]).
+//! Settings come from `plugins.command.rfd.options`, read by the `options`
+//! module.
 //! The RFD directory is resolved against the workspace root from the host's
 //! `init` message, so the commands work from any subdirectory.
 //!
-//! [`board`] reads the RFDs, the priority board, and the tickets naming each
-//! RFD ([`links`]) into one view, and [`render`] prints it.
-//! [`cmd`] holds the commands that change RFDs, which write every metadata
-//! change through [`document::Document`].
+//! `board` reads the RFDs, the priority board, and the tickets naming each RFD
+//! (`links`) into one view, and `render` prints it.
+//! `cmd` holds the commands that change RFDs, which write every metadata change
+//! through `document::Document`.
 //! A command that asks the user something, or reads an RFD's plan through a
-//! model, reaches the host through a [`Session`]; a tool call has no host to
-//! ask, so its plan stays pending.
+//! model, reaches the host through a `Session`; a tool call has no host to ask,
+//! so `promote` offers no tracking ticket there.
 //!
 //! See: `docs/rfd/001-jp-rfd-process.md`,
 //! `docs/rfd/116-shareable-rfd-ticket-and-site-tooling.md`

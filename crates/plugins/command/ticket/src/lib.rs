@@ -2,10 +2,11 @@
 //!
 //! A command plugin providing `jp ticket` and its subcommands, and the tools
 //! the assistant reaches through `source = "plugin.command.ticket.<tool>"`.
-//! An `init` carrying a tool call is answered by [`tool`]; any other runs the
-//! command its arguments name.
+//! An `init` carrying a tool call is answered by the `tool` module; any other
+//! runs the command its arguments name.
 //!
-//! Settings come from `plugins.command.ticket.options` ([`options`]).
+//! Settings come from `plugins.command.ticket.options`, read by the `options`
+//! module.
 //! The ticket directory is resolved against the workspace root from the host's
 //! `init` message, so the commands work from any subdirectory.
 //!
