@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.6543470471954526,
-  "iosp_score": 0.8135964912280702,
-  "violations": 935,
-  "total": 6958,
+  "quality_score": 0.653798771774759,
+  "iosp_score": 0.8132350009966115,
+  "violations": 937,
+  "total": 6959,
   "complexity_warnings": 0,
   "magic_number_warnings": 0,
   "nesting_depth_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 0,
   "structural_coupling_warnings": 0,
-  "total_findings": 1386,
+  "total_findings": 1388,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -553,12 +553,17 @@
     {
       "name": "renumber",
       "file": "crates/plugins/command/rfd/src/cmd/renumber.rs",
-      "line": 36
+      "line": 38
     },
     {
       "name": "rewrite_references",
       "file": "crates/plugins/command/rfd/src/cmd/renumber.rs",
-      "line": 160
+      "line": 162
+    },
+    {
+      "name": "repromote",
+      "file": "crates/plugins/command/rfd/src/cmd/renumber.rs",
+      "line": 220
     },
     {
       "name": "init",
@@ -613,22 +618,22 @@
     {
       "name": "handle_command",
       "file": "crates/plugins/command/rfd/src/lib.rs",
-      "line": 500
+      "line": 501
     },
     {
       "name": "execute",
       "file": "crates/plugins/command/rfd/src/lib.rs",
-      "line": 607
+      "line": 608
     },
     {
       "name": "promote",
       "file": "crates/plugins/command/rfd/src/lib.rs",
-      "line": 763
+      "line": 764
     },
     {
       "name": "read_message",
       "file": "crates/plugins/command/rfd/src/lib.rs",
-      "line": 919
+      "line": 920
     },
     {
       "name": "load",
@@ -639,6 +644,11 @@
       "name": "answer",
       "file": "crates/plugins/command/rfd/src/tool.rs",
       "line": 72
+    },
+    {
+      "name": "show",
+      "file": "crates/plugins/command/rfd/src/tool.rs",
+      "line": 385
     },
     {
       "name": "Document::insert_before_sections",
@@ -738,7 +748,7 @@
     {
       "name": "check",
       "file": "crates/plugins/command/ticket/src/edit.rs",
-      "line": 182
+      "line": 203
     },
     {
       "name": "init",
@@ -763,67 +773,67 @@
     {
       "name": "handle_command",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 537
+      "line": 538
     },
     {
       "name": "compose_missing",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 657
+      "line": 658
     },
     {
       "name": "with_show_alias",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1022
+      "line": 1023
     },
     {
       "name": "show_board",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1500
+      "line": 1501
     },
     {
       "name": "board_row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1550
+      "line": 1551
     },
     {
       "name": "import_all",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1597
+      "line": 1598
     },
     {
       "name": "label",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1775
+      "line": 1776
     },
     {
       "name": "label_refusal",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1826
+      "line": 1827
     },
     {
       "name": "list_labels",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1850
+      "line": 1851
     },
     {
       "name": "describe_vocabulary",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1907
+      "line": 1908
     },
     {
       "name": "show",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2019
+      "line": 2020
     },
     {
       "name": "row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2140
+      "line": 2141
     },
     {
       "name": "read_message",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2209
+      "line": 2210
     },
     {
       "name": "answer",
@@ -1583,7 +1593,7 @@
     {
       "name": "slug",
       "file": "crates/internal/ticket/src/store.rs",
-      "line": 996
+      "line": 1014
     },
     {
       "name": "escape",
