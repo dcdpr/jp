@@ -1,7 +1,6 @@
 use std::path::Path;
 
-use serde::de::{DeserializeOwned, IntoDeserializer};
-use serde_yaml::{Deserializer, Error, Value};
+use serde::de::DeserializeOwned;
 
 use crate::config::{
     error::ConfigError,
@@ -25,29 +24,24 @@ impl<T: DeserializeOwned> SourceFormat<T> for YamlFormat {
         content: &str,
         _cache_path: Option<&Path>,
     ) -> Result<T, ConfigError> {
-        fn create_parser_error(path: String, error: &Error) -> ParserError {
-            ParserError {
-                path,
-                message: error.to_string(),
-            }
-        }
-
-        // First pass, convert string to value
-        let de = Deserializer::from_str(content);
-
-        let mut result: Value = serde_path_to_error::deserialize(de)
-            .map_err(|error| create_parser_error(error.path().to_string(), &error.into_inner()))?;
-
-        // Applies anchors/aliases/references
-        result
-            .apply_merge()
-            .map_err(|error| create_parser_error(String::new(), &error))?;
-
-        // Second pass, convert value to struct
-        let de = result.into_deserializer();
-
-        let result: T = serde_path_to_error::deserialize(de)
-            .map_err(|error| create_parser_error(error.path().to_string(), &error.into_inner()))?;
+        // Anchors, aliases, and merge keys (`<<: *anchor`) are resolved by the
+        // deserializer itself, so the document maps straight onto `T`.
+        //
+        // A failure has to leave the closure as an `Err`: on `Ok`, the caller
+        // checks that the input was fully consumed, and a document abandoned
+        // mid-way is reported as "multiple YAML documents" instead of the
+        // actual error. The path travels out on the side.
+        let mut path = String::new();
+        let result = serde_saphyr::with_deserializer_from_str(content, |de| {
+            serde_path_to_error::deserialize::<_, T>(de).map_err(|error| {
+                path = error.path().to_string();
+                error.into_inner()
+            })
+        })
+        .map_err(|error| ParserError {
+            path,
+            message: error.without_snippet().to_string(),
+        })?;
 
         Ok(result)
     }
