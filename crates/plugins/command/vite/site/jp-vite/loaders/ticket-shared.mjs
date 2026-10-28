@@ -140,8 +140,8 @@ export function findUnknownLabels(tickets, vocabulary) {
         .map(([id, unknown]) => `  ${id}: ${unknown.join(', ')}`)
         .join('\n')
     return `Tickets carry labels the vocabulary doesn't define:\n${report}\n\n` +
-        `Add them to \`plugins.command.ticket.options.labels\`, or fix the tickets ` +
-        `(\`jp ticket label <id> --label key=value\`).`
+        `Add them to \`plugins.command.ticket.options.labels\`, or take them off the ` +
+        `tickets (\`jp ticket label rm --id <id> key=value\`).`
 }
 
 // Tickets carrying too few or too many values of a key the vocabulary bounds
@@ -172,8 +172,8 @@ export function findMiscountedLabels(tickets, vocabulary) {
     if (offenders.length === 0) return null
 
     return `Tickets carry too few or too many labels of one key:\n${offenders.join('\n')}\n\n` +
-        `Fix the tickets (\`jp ticket label <id> --label key=value\`), or change the key's ` +
-        `\`min\` and \`max\` in \`plugins.command.ticket.options.labels\`.`
+        `Set what each ticket carries (\`jp ticket label set --id <id> key=value\`), or ` +
+        `change the key's \`min\` and \`max\` in \`plugins.command.ticket.options.labels\`.`
 }
 
 // Labels the vocabulary lets one ticket carry, found on several.
@@ -209,8 +209,9 @@ export function findSharedLabels(tickets, vocabulary) {
 
     const report = shared.map(({ name, ids }) => `  ${name}: ${ids.join(', ')}`).join('\n')
     return `Labels the board lets one ticket carry are on several:\n${report}\n\n` +
-        `Keep each on one ticket (\`jp ticket label <id> --label key=value\`), or drop ` +
-        `\`unique\` from the key in \`plugins.command.ticket.options.labels\`.`
+        `Keep each on one ticket by taking it off the others ` +
+        `(\`jp ticket label rm --id <id> key=value\`), or drop \`unique\` from the key in ` +
+        `\`plugins.command.ticket.options.labels\`.`
 }
 
 // A key's bounds in words, as the count they ask for.

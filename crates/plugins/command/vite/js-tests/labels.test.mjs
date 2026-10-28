@@ -45,8 +45,8 @@ test('each ticket names the keys it carries too few or too many of', () => {
         'Tickets carry too few or too many labels of one key:\n'
             + '  T-02wt0k1: 0 `type` (needs exactly 1)\n'
             + '  T-02wt0k2: 2 `type` (needs exactly 1), 2 `team` (needs at most 1)\n\n'
-            + 'Fix the tickets (`jp ticket label <id> --label key=value`), or change the key\'s '
-            + '`min` and `max` in `plugins.command.ticket.options.labels`.',
+            + 'Set what each ticket carries (`jp ticket label set --id <id> key=value`), or '
+            + 'change the key\'s `min` and `max` in `plugins.command.ticket.options.labels`.',
     )
 })
 
@@ -69,8 +69,8 @@ test('a key taking any value accepts every value, but not the key alone', () => 
         findUnknownLabels(tickets, OPEN),
         'Tickets carry labels the vocabulary doesn\'t define:\n'
             + '  T-02wt0k2: rfd, rfd=, area=docs\n\n'
-            + 'Add them to `plugins.command.ticket.options.labels`, or fix the tickets '
-            + '(`jp ticket label <id> --label key=value`).',
+            + 'Add them to `plugins.command.ticket.options.labels`, or take them off the '
+            + 'tickets (`jp ticket label rm --id <id> key=value`).',
     )
 })
 
@@ -99,8 +99,9 @@ test('a label on several tickets names them all', () => {
             + '  rfd=abc: T-02wt0k1, T-02wt0k2\n'
             + '  focus: T-02wt0k1, T-02wt0k3\n'
             + '  owner: T-02wt0k1, T-02wt0k2\n\n'
-            + 'Keep each on one ticket (`jp ticket label <id> --label key=value`), or drop '
-            + '`unique` from the key in `plugins.command.ticket.options.labels`.',
+            + 'Keep each on one ticket by taking it off the others '
+            + '(`jp ticket label rm --id <id> key=value`), or drop `unique` from the key in '
+            + '`plugins.command.ticket.options.labels`.',
     )
 })
 
@@ -112,7 +113,7 @@ test('only labels under the key itself count', () => {
         findMiscountedLabels([ticket('T-02wt0k1', ['typed=x'])], vocabulary),
         'Tickets carry too few or too many labels of one key:\n'
             + '  T-02wt0k1: 0 `type` (needs exactly 1)\n\n'
-            + 'Fix the tickets (`jp ticket label <id> --label key=value`), or change the key\'s '
-            + '`min` and `max` in `plugins.command.ticket.options.labels`.',
+            + 'Set what each ticket carries (`jp ticket label set --id <id> key=value`), or '
+            + 'change the key\'s `min` and `max` in `plugins.command.ticket.options.labels`.',
     )
 })
