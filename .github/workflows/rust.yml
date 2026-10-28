@@ -206,14 +206,6 @@ jobs:
         if: ${{ steps.task.outputs.run == 'true' && matrix.task == 'test' }}
         shell: bash
         run: cargo metadata --locked --format-version 1 > /dev/null
-      # `.config/insta.yaml` rewrites a mismatched snapshot and lets the test
-      # pass, which suits local work. On CI a mismatch must fail the job, so the
-      # tasks running nextest directly turn that off. `insta` is left out: its
-      # `--check` already fails on a mismatch, and cargo-insta rejects `--check`
-      # once `INSTA_UPDATE=no` lets the config's `auto_accept_unseen` apply.
-      - if: ${{ steps.task.outputs.run == 'true' && (matrix.task == 'test' || matrix.task == 'coverage') }}
-        shell: bash
-        run: echo "INSTA_UPDATE=no" >> "$GITHUB_ENV"
       - if: ${{ steps.task.outputs.run == 'true' && matrix.task == 'typecheck-js' }}
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       - if: ${{ steps.task.outputs.run == 'true' }}
