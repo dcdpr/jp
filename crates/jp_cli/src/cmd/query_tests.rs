@@ -4684,6 +4684,50 @@ fn a_lone_unknown_word_after_tool_use_is_still_rejected() {
     );
 }
 
+/// How `-t` rejects an empty value.
+const EMPTY_TOOL: &str = "error: invalid value '' for '--tool [<tools>]': empty tool name in \
+                          ''\n\nFor more information, try '--help'.\n";
+
+// `-t "$TOOL"` with `TOOL` unset must not read as a bare `-t`, which enables
+// every tool, nor skip the question a bare `-t` before the query asks.
+#[test]
+fn an_empty_tool_value_is_rejected() {
+    for args in [
+        &["-t", "", "explain"][..],
+        &["-t=", "explain"][..],
+        &["-t", ""][..],
+    ] {
+        assert_eq!(
+            parse_query(args).unwrap_err().render().to_string(),
+            EMPTY_TOOL,
+            "{args:?}"
+        );
+    }
+
+    assert_eq!(
+        parse_query(&["-T", "", "explain"])
+            .unwrap_err()
+            .render()
+            .to_string(),
+        "error: invalid value '' for '--no-tool [<no_tools>]': empty tool name in ''\n\nFor more \
+         information, try '--help'.\n"
+    );
+}
+
+// An empty value is no word of the query, so `--fork "" hello` is a mistake to
+// report, not a fork of every turn asking " hello".
+#[test]
+fn an_empty_fork_value_is_rejected() {
+    for args in [&["--fork", "", "hello"][..], &["--fork=", "hello"][..]] {
+        assert_eq!(
+            parse_query(args).unwrap_err().render().to_string(),
+            "error: invalid value '' for '--fork [<N>]': expected a positive integer\n\nFor more \
+             information, try '--help'.\n",
+            "{args:?}"
+        );
+    }
+}
+
 #[test]
 fn empty_name_between_commas_is_rejected() {
     let error = parse_query(&["-tfoo,,bar"]).unwrap_err();

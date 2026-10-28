@@ -361,6 +361,55 @@ fn a_bare_flag_has_no_value() {
     );
 }
 
+/// How `--num` rejects an empty value.
+const EMPTY_IS_NOT_A_NUMBER: &str = "error: invalid value '' for '--num [<num>]': not a \
+                                     number\n\nFor more information, try '--help'.\n";
+
+// An empty value is what an unset shell variable gives, as in `--num="$n"`; it
+// must reach the flag's parser rather than read as the flag written bare.
+#[test]
+fn an_attached_empty_value_goes_to_the_parser() {
+    assert_eq!(
+        decide::<Num>(&["--num=", "world"]),
+        Err(EMPTY_IS_NOT_A_NUMBER.to_owned())
+    );
+    assert_eq!(
+        decide::<Num>(&["-n="]),
+        Err(EMPTY_IS_NOT_A_NUMBER.to_owned())
+    );
+}
+
+// An empty word is no word of free text, so it is never given back.
+#[test]
+fn a_separate_empty_value_before_free_text_is_the_flags() {
+    assert_eq!(
+        decide::<Num>(&["--num", "", "world"]),
+        Err(EMPTY_IS_NOT_A_NUMBER.to_owned())
+    );
+    assert_eq!(
+        decide::<Any>(&["--any", ""]),
+        Err(
+            "error: invalid value '' for '--any [<any>]': not a number\n\nFor more information, \
+             try '--help'.\n"
+                .to_owned()
+        )
+    );
+}
+
+// Written bare, a flag that grants something asks first; an empty value it
+// cannot parse is an error instead, and asks nothing.
+#[test]
+fn an_empty_value_skips_the_confirmation() {
+    assert_eq!(
+        settle::<Grant>(&["--grant", "", "world"], &answering('y')),
+        Err(
+            "error: invalid value '' for '--grant [<grant>]': not a number\n\nFor more \
+             information, try '--help'.\n"
+                .to_owned()
+        )
+    );
+}
+
 #[test]
 fn a_flag_that_claims_nothing_keeps_every_word() {
     assert_eq!(

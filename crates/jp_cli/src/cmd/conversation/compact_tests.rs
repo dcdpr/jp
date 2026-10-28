@@ -351,6 +351,27 @@ fn reset_takes_an_optional_compaction_index() {
     assert_eq!(rejection(&["--reset=x"]), ErrorKind::ValueValidation);
 }
 
+// `--reset="$i"` with `i` unset must not widen into removing every compaction
+// event, which is what a bare `--reset` does.
+#[test]
+fn reset_rejects_an_empty_index() {
+    let error = parse_args::<Compact>(&["--reset="]).unwrap_err();
+
+    assert_eq!(
+        error.render().to_string(),
+        "error: invalid value '' for '--reset[=<INDEX>]': invalid compaction index ''\n\nFor more \
+         information, try '--help'.\n"
+    );
+}
+
+// An empty verbatim summary would otherwise ask the model to write one.
+#[test]
+fn summary_rejects_an_empty_text() {
+    assert_eq!(rejection(&["--summary="]), ErrorKind::InvalidValue);
+    assert_eq!(rejection(&["--summary", ""]), ErrorKind::InvalidValue);
+    assert_eq!(parse_compact(&["--summary"]).summary, Some(None));
+}
+
 #[test]
 fn reset_index_addresses_compactions_in_stream_order() {
     let mut stream = ConversationStream::new_test();

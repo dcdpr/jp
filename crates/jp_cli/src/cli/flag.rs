@@ -68,8 +68,11 @@ pub(crate) trait OptionalValue {
 
     /// Declare the flag on `arg`.
     ///
-    /// `arg` already reads an optional value as text, and an empty value where
-    /// the flag is written without one.
+    /// `arg` already reads an optional value with [`parser`], keeping a word it
+    /// rejects, and tells the flag written without a value apart from one
+    /// written with an empty value.
+    ///
+    /// [`parser`]: Self::parser
     fn declare(arg: Arg) -> Arg;
 
     /// The parser for the flag's values.
@@ -208,12 +211,20 @@ impl<V> Default for FlagValues<V> {
     }
 }
 
+/// The value clap records for a flag written without one.
+///
+/// A command line cannot carry a NUL byte on any platform, so no value the user
+/// writes is mistaken for it.
+/// An empty value, as `--flag="$unset"` gives, is the user's, and goes to the
+/// flag's parser like any other.
+const BARE: &str = "\0";
+
 /// The argument `F` declares.
 pub(crate) fn flag_arg<F: OptionalValue>() -> Arg {
     F::declare(
         Arg::new(F::ID)
             .num_args(0..=1)
-            .default_missing_value("")
+            .default_missing_value(BARE)
             .value_parser(Lenient(F::parser())),
     )
 }
@@ -251,7 +262,7 @@ where
         arg: Option<&Arg>,
         value: &OsStr,
     ) -> Result<Self::Value, clap::Error> {
-        if value.is_empty() {
+        if value == BARE {
             return Ok(Word::Bare);
         }
 
@@ -329,9 +340,12 @@ impl<F: OptionalValue> Flag<F> {
                     break;
                 };
 
+                // An empty value is no word of free text: giving it back would
+                // read the flag as bare, which is the reading it was not.
                 let claimable = separate
                     && text.takes_words()
-                    && (F::CLAIMS_EVERY_SEPARATE_VALUE || text.is_text(index + 1));
+                    && (F::CLAIMS_EVERY_SEPARATE_VALUE || text.is_text(index + 1))
+                    && !matches!(word, Word::Given { word, .. } if word.is_empty());
 
                 let read = match word.clone() {
                     Word::Bare => Read::Bare,
