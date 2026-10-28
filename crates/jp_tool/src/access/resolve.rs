@@ -325,8 +325,8 @@ impl crate::Context {
     /// `input` must be workspace-relative; the check joins it against the
     /// workspace root and resolves it itself, following every symlink.
     /// Do not pre-resolve paths against the root before calling.
-    /// To act on a symlink entry rather than its target, use
-    /// [`Context::resolve`] with [`Resolve::Entry`] and [`Context::authorize`].
+    /// To act on a symlink entry rather than its target, use [`Self::resolve`]
+    /// with [`Resolve::Entry`] and [`Self::authorize`].
     ///
     /// # Errors
     ///
@@ -339,7 +339,7 @@ impl crate::Context {
     ///
     /// # Errors
     ///
-    /// See [`Context::check_read`].
+    /// See [`Self::check_read`].
     pub fn check_create(&self, input: &Utf8Path) -> Result<Utf8PathBuf, FsAccessError> {
         self.check_capability(input, Capability::Create)
     }
@@ -348,7 +348,7 @@ impl crate::Context {
     ///
     /// # Errors
     ///
-    /// See [`Context::check_read`].
+    /// See [`Self::check_read`].
     pub fn check_update(&self, input: &Utf8Path) -> Result<Utf8PathBuf, FsAccessError> {
         self.check_capability(input, Capability::Update)
     }
@@ -357,7 +357,7 @@ impl crate::Context {
     ///
     /// # Errors
     ///
-    /// See [`Context::check_read`].
+    /// See [`Self::check_read`].
     pub fn check_delete(&self, input: &Utf8Path) -> Result<Utf8PathBuf, FsAccessError> {
         self.check_capability(input, Capability::Delete)
     }
@@ -366,7 +366,7 @@ impl crate::Context {
     ///
     /// # Errors
     ///
-    /// See [`Context::check_read`].
+    /// See [`Self::check_read`].
     pub fn check_execute(&self, input: &Utf8Path) -> Result<Utf8PathBuf, FsAccessError> {
         self.check_capability(input, Capability::Execute)
     }
