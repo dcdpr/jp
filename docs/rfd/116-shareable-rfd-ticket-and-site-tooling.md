@@ -1,6 +1,6 @@
 # RFD 116: Shareable RFD, Ticket, and Site Tooling
 
-- **Status**: Discussion
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-30
@@ -64,13 +64,16 @@ separate crate, because conversations use it too.
 Each declares in its manifest the lowest plugin protocol it needs: 12 for `jp
 ticket` and `jp rfd`, which serve tools, and 10 for `jp vite`, which reloads
 configuration.
-Everything this RFD needs from `jp` is on `main`.
+One thing is new in `jp`: protocol 13 adds `edit_files`, which opens files in
+the user's editor for `jp ticket edit`.
+`jp ticket` checks for it when it needs it, so a `jp` speaking 12 still runs
+every other command.
 
 The dependencies run one way:
 
 - `jp ticket` knows nothing about RFDs.
-  An RFD appears in a ticket only as an opaque id, in `Implements` and `Promoted
-  to`.
+  An RFD appears in a ticket only as an opaque id: in `Promoted to`, and in the
+  labels `jp rfd` reads as links to an RFD (see [RFDs](#rfds)).
 - `jp rfd` links the `ticket` library for the two things that cross over:
   tracking tickets, and seeding a draft from a ticket.
   Both plugins write through that library, so the ticket format still has one
@@ -112,6 +115,12 @@ run = "allow"
 [plugins.command.rfd.options]
 dir = "docs/rfd"
 categories = ["design", "decision", "guide", "process"]
+# The label a tracking ticket names its RFD under, and the labels it is filed
+# with besides.
+tracking.key = "tracking-rfd"
+tracking.labels = ["type=tracking"]
+# The label any other ticket names an RFD its work belongs to under.
+relevant.key = "relevant-rfd"
 
 [plugins.command.vite]
 run = "allow"
@@ -123,9 +132,11 @@ dir = "docs"
 repository = "https://github.com/dcdpr/jp"
 ```
 
-Every option is optional, and the values shown are the defaults except three:
-`assistant` defaults to `assistant`, `labels` to no vocabulary, and `repository`
-to git's `origin` remote.
+Every option is optional, and the values shown are the defaults except four:
+`assistant` defaults to `assistant`, `labels` to no vocabulary,
+`tracking.labels` to none, and `repository` to git's `origin` remote.
+A board without a vocabulary takes any `key` or `key=value` label; one with a
+vocabulary takes only the labels it defines.
 
 Each setting has one owner.
 A plugin that needs another's setting reads it from the full configuration in
@@ -135,6 +146,11 @@ options.
 
 The label vocabulary moves out of `.labels.json` into `options.labels`, in the
 same shape: a description per key, its values, and the values retired from it.
+A key can also bound how many of its values one ticket carries, with `min` and
+`max`, so `min = 1, max = 1` makes every ticket carry exactly one.
+`values = []` makes a key take any value, such as an RFD number, and `unique`
+holds a key (`"key"`) or each of its values (`"key-value"`) to one ticket on the
+board.
 Whether contributors may redefine it in their own config layers is the
 workspace's call, as for any other setting.
 
@@ -160,10 +176,37 @@ keeps the workspace's `dir`.
 
 The commands are the existing `jp ticket` commands, with these changes:
 
-- `rename` replaces `edit --title`.
+- `edit` takes `--title` and a repeatable `--label` beside `--body` and
+  `--status`, so a script changes several parts in one command.
+  With none of them, it opens the ticket's file in the user's editor, through
+  the host's `edit_files` (protocol 13), and checks the file when the editor
+  closes.
+  `rename` and `label` stay, as the commands to find for changing one part.
+- `label` adds and removes labels rather than replacing them, so a write never
+  drops a label it doesn't name: its `add` keeps what a ticket carries, `set`
+  replaces what the keys it names hold, `rm` takes a label or, for a bare key,
+  every label under it, and `ls` lists them.
+  The labels are bare arguments, so `--id` names the tickets, on either side of
+  the verb; repeat it, or separate ids with commas, to change several tickets at
+  once, all of them or none.
+  Without it, the user picks one.
+  A label written as a ticket id, `T-02wt0kx`, is refused, since it was meant as
+  a ticket.
+  `edit --label` stays the one write that sets the whole list, and names the
+  labels it removed.
 - `status ID STATUS` moves a ticket to any column; `close` stays as the
   shorthand for Done.
-- `block ID BLOCKER` writes the `Blocked by` field, and `--clear` removes it.
+  With `--before` or `--after` naming a ticket already in that column, it lands
+  next to that ticket; the neighbour is checked before anything is written.
+- The `Blocked by` field is dropped, with nothing in its place: a project that
+  marks blocked tickets does it with a label.
+  Nothing read the field beyond displaying it.
+- The `Kind` field is dropped too, with `add`'s kind argument and picker,
+  `--kind` on `edit`, `list`, and `import`, the kind column of `list` and
+  `board`, and the tools' `kind` parameters.
+  What kind of work a ticket is becomes a label, so each board defines its own
+  kinds; JP's is `type`, which every ticket carries once (`min = 1, max = 1`).
+  `import` takes `--label` for the tickets it creates.
 - `board` prints the board: Todo, In Progress, and Done in turn, each in board
   order, with Done capped at `board.done_limit`.
   The columns are stacked rather than side by side, which would wrap below about
@@ -178,7 +221,8 @@ The commands are the existing `jp ticket` commands, with these changes:
   102], and no other project has tickets to migrate.
 
 The board order stays in `.board.json` in the ticket directory.
-`board` reads it, and `rank` and the site's board write it.
+`board` and `ticket_list` read it; `rank`, `status --before|--after`, and the
+site's board write it.
 A ticket the file doesn't name sorts below the ranked ones, so the file needs no
 setup and `init` doesn't create it.
 
@@ -204,7 +248,7 @@ jp rfd track ID
 jp rfd start ID
 jp rfd stop ID
 jp rfd list [CATEGORY]
-jp rfd show ID
+jp rfd show ID [--body]
 jp rfd rank ID (--before OTHER | --after OTHER | --backlog)
 jp rfd init
 ```
@@ -223,19 +267,54 @@ An outcome that changes on purpose is listed in this RFD before it lands.
 The ones made here:
 
 - `draft --from-ticket` replaces `just ticket-promote`.
-- The tracking label comes from configuration.
+- A tracking ticket names its RFD in a label, `tracking-rfd=116`, and any other
+  ticket whose work belongs to an RFD in another, `relevant-rfd=116`, where the
+  recipes used an `Implements` field and a `type=tracking` label.
+  Both keys are settings, `tracking.key` and `relevant.key`, as are the labels a
+  tracking ticket is filed with besides, `tracking.labels`.
+  `renumber` rewrites both labels along with the RFD's id, which the recipe
+  never did for `Implements`.
 - `extend` takes its arguments in the same order as `require`, source first.
   `jp rfd extend 116 100` records that 116 extends 100, and `jp rfd require 116
   072` that 116 requires 072.
   `just rfd-extend NNN MMM` reads the other way round, meaning MMM extends NNN.
   A relationship written backwards still parses and silently changes the
   promotion gates, so the two commands share one order.
-- `promote` to Implemented removes the `Requires` entries that name the
-  promoted RFD from every dependent, drafts included.
+- `promote` to Implemented removes the `Requires` entries that name the promoted
+  RFD from every dependent, drafts included.
   The recipe finds dependents through the promoted RFD's `Required by` line,
   which never lists a draft, so a draft's `Requires` survives and fails the docs
   build.
   The port finds dependents by reading every RFD's `Requires`.
+- `abandon` writes the notice block [RFD 001] specifies, where the recipe added
+  a one-line `> **Abandoned**:` note.
+- A field a command adds goes above `Summary`, which [RFD 001] keeps last.
+  The recipes put `Superseded by` and `Supersedes` after `Date`.
+- An RFD added to a relationship field that wraps goes after its last line; the
+  recipe appended it to the first, inside the wrapped value.
+- `supersede` adds to an RFD's `Supersedes` rather than replacing it, so an RFD
+  that supersedes two keeps both.
+- A title is written as given.
+  The recipe built the heading with `sed`, so a `/` or `&` in a title broke it,
+  and `AUTHOR` or `DATE` in one was replaced.
+- A rewritten reference matches the whole slug: a longer slug that starts with
+  the old one is left alone, where the recipes rewrote its start.
+  `rename` rewrites a link written without `.md` too, as `renumber` and
+  `promote` do.
+- `jp -F json rfd list` gives each RFD's `file`, relative to the workspace,
+  where the recipe gave its site `path`: `jp rfd` doesn't know where a site
+  serves it.
+  Neither plugin has a `--json` flag: `jp -F json` makes `list` and `show` print
+  JSON.
+- Ids are read leniently, so `42`, `RFD 042`, `d5`, and `D5` each name an RFD.
+  The recipe found no draft by `D5`.
+- A missing `drafts/` directory holds no drafts, and an unreadable
+  `.priority.json` is reported, with every RFD listed as unranked.
+  `just rfd-list` failed on the first and read the second as empty.
+- Accepting an RFD with nobody to ask files no tracking ticket, where the recipe
+  filed one: the host answers a prompt nobody saw the same way as one cancelled.
+- `track` uses the first of two tracking tickets by id and warns, naming both,
+  where the recipe took the first silently.
 
 Three delegations carry over:
 
@@ -271,8 +350,11 @@ Tracking needs tickets.
 In a project without a ticket directory, `promote` skips the tracking offer,
 `list` shows no RFD in development, and `track`, `start`, `stop`, and `draft
 --from-ticket` fail with a message saying so.
-Tracking tickets carry the label `type=tracking`, which the ticket vocabulary
-has to define; `track` refuses when it doesn't, naming the entry to add.
+A board that defines labels has to define the tracking key, open to any value
+(`values = []`), for a ticket to carry it: `track` and `start` refuse until it
+does, printing the entry to add, and `promote` skips the offer and says why.
+`show` lists the tickets naming an RFD, the tracking one first, and names the
+labels a missing tracking ticket takes.
 
 ### Parity
 
@@ -280,24 +362,48 @@ Every verb that applies to both document kinds exists for both, and every
 command that makes sense for the assistant exists as a tool.
 Bold entries are new.
 
-| Verb             | `jp rfd` CLI / tool                                                         | `jp ticket` CLI / tool                                      |
-| ---------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| Create           | `draft` / `rfd_draft`                                                       | `add` / `ticket_create`                                     |
-| Show             | **`show`** / **`rfd_show`**                                                 | `show` / `ticket_show`                                      |
-| List             | `list` / **`rfd_list`**                                                     | `list` / `ticket_list`                                      |
-| Board            | `list`                                                                      | **`board`** / not a tool                                    |
-| Rank             | **`rank`** / not a tool                                                     | **`rank`** / not a tool                                     |
-| Rename           | `rename` / `rfd_rename`                                                     | **`rename`** / `ticket_rename`                              |
-| Edit body        | not applicable                                                              | `edit` / **`ticket_edit`**                                  |
-| Change status    | `promote` / `rfd_promote`                                                   | **`status`**, `close` / **`ticket_status`**, `ticket_close` |
-| Relate           | `extend`, `require`, `supersede` / same                                     | **`block`** / **`ticket_block`**                            |
-| Retire           | `abandon` / `rfd_abandon`                                                   | `delete` / not a tool                                       |
-| Renumber         | `renumber` / `rfd_renumber`                                                 | not applicable                                              |
-| Track            | `track`, `start`, `stop` / **`rfd_track`**, **`rfd_start`**, **`rfd_stop`** | not applicable                                              |
-| Discuss          | not applicable                                                              | `comment` / `ticket_comment`                                |
-| Label            | not applicable                                                              | `label`, `labels` / `ticket_label`, **`ticket_labels`**     |
-| Ticket to RFD    | **`draft --from-ticket`** / `rfd_draft` with **`ticket`**                   | `promote --to` / not a tool                                 |
-| Tool definitions | **`tools init`**, **`tools sync`**                                          | **`tools init`**, **`tools sync`**                          |
+| Verb             | `jp rfd` CLI / tool                                       | `jp ticket` CLI / tool                        |
+| ---------------- | --------------------------------------------------------- | --------------------------------------------- |
+| Create           | `draft` / `rfd_draft`                                     | `add` / `ticket_create`                       |
+| Show             | **`show`** / **`rfd_show`**                               | `show` / `ticket_show`                        |
+| List             | `list` / **`rfd_list`**                                   | `list` / `ticket_list`                        |
+| Board            | `list`                                                    | **`board`** / not a tool                      |
+| Rank             | **`rank`** / not a tool                                   | **`rank`** / not a tool                       |
+| Rename           | `rename` / `rfd_rename`                                   | **`rename`**, `edit` / **`ticket_edit`**      |
+| Edit body        | not applicable                                            | `edit` / **`ticket_edit`**                    |
+| Change status    | `promote` / `rfd_promote`                                 | **`status`**, `close` / **`ticket_edit`**     |
+| Relate           | `extend`, `require`, `supersede` / same                   | not applicable                                |
+| Retire           | `abandon` / `rfd_abandon`                                 | `delete` / not a tool                         |
+| Renumber         | `renumber` / `rfd_renumber`                               | not applicable                                |
+| Track            | `track`, `start`, `stop` / `ticket_create`, `ticket_edit` | not applicable                                |
+| Discuss          | not applicable                                            | `comment` / `ticket_comment`                  |
+| Label            | not applicable                                            | `label`, `labels`, `edit` / **`ticket_edit`** |
+| Ticket to RFD    | **`draft --from-ticket`** / `rfd_draft` with **`ticket`** | `promote --to` / not a tool                   |
+| Tool definitions | **`tools init`**, **`tools sync`**                        | **`tools init`**, **`tools sync`**            |
+
+Tracking an RFD is ticket work, so the assistant does it with the ticket tools:
+`rfd_show` names the labels a missing tracking ticket takes, `ticket_create`
+files it, and `ticket_edit` moves it to start or stop the work.
+Tools of its own would cost three definitions on every turn for that.
+
+One tool, `ticket_edit`, makes every change to a ticket: it takes any of
+`title`, `description`, `status`, `add_labels`, and `remove_labels`, and changes
+only what it is given.
+Labels are added and removed rather than replaced, so a call can't drop one it
+doesn't name, and a key a ticket carries one of changes in one call: the bare
+key in `remove_labels`, the new label in `add_labels`.
+Each tool a model is offered costs context on every turn, and providers cap how
+many it can be offered; a command costs nothing until it runs, so the CLI keeps
+its separate commands.
+
+For the same reason, `ticket_show` returns a ticket's metadata unless the call
+asks for its `description` or `comments`, and ends by naming what it left out.
+There is no tool listing the label vocabulary: the label parameters of
+`ticket_create`, `ticket_edit`, and `ticket_list` already offer every value.
+`ticket_list` returns tickets in board order, so its first Todo line is the next
+ticket to work on.
+It pages a long listing, and its `query` finds the tickets whose title,
+description, or comments mention a piece of text.
 
 `import`, `refresh`, `delete`, `board`, and `rank` stay CLI-only.
 `import` reaches GitHub over the network, `refresh` rewrites what the current
@@ -331,6 +437,9 @@ answer, so the plugin keeps no state between calls.
 The tools keep their current behavior, including `ticket_create` asking for a
 shorter title when the title would not fit the filename, and
 `options.max_title_length`.
+Every tool holds to the call's access policy, refusing to read or write a
+document directory the policy doesn't grant, which the `jp-tools` handlers never
+checked.
 
 The plugin owns what each tool does; each project owns its tool configuration.
 A project can expose `create` as `track`, choose its own `summary` text, and set
@@ -347,10 +456,16 @@ to appear.
 
 `tools sync PATH` regenerates what the definitions mirror from configuration:
 the label tokens offered by the `ticket_*` tools, and the categories offered by
-`rfd_draft`.
+`rfd_draft` and `rfd_list`.
 It finds the tools by their source, not their key: a tool keyed `ticket_create`
 and one keyed `track`, both with `source = "plugin.command.ticket.create"`, get
 the tokens, each under its own key.
+It writes only into a tool whose definition declares the parameter, and names
+the ones it leaves out: values alone would make a parameter without a type,
+which drops the tool from every conversation.
+When the board bounds a key, it describes the bounds beside the labels of
+`ticket_create` and `ticket_edit`, and marks `ticket_create`'s labels required
+when a key needs one, so the assistant knows before its first call.
 It rewrites only the file it generated, and rewrites it whole, so edits to the
 definitions survive and a tool removed from the configuration drops out of it.
 It replaces `just ticket-labels-sync`.
@@ -372,14 +487,23 @@ The site files split into two groups:
 - **Owned by `jp vite`.** Everything under `.vitepress/jp-vite/`: the loaders
   for both document kinds, components, styles, the dev-server middleware, a
   config fragment, and the settings snapshot.
-  Also the pages for each workflow the project has: the index, priority, and
-  drafts index pages in the RFD directory, and the index and board pages in the
-  ticket directory, each when that directory exists.
 - **Owned by the project.** `config.mts`, the theme entry, the homepage, and
-  every other page.
+  every page, the RFD and ticket pages included.
   `config.mts` imports the fragment and merges it; the theme entry registers the
   components from `jp-vite/theme`.
   `init` writes both once and never touches them again.
+
+`sync` creates the pages for each workflow the project has when they are
+missing: the index, priority, and drafts index pages in the RFD directory, and
+the index and board pages in the ticket directory.
+A page that exists is never changed, so a project writes its own around the
+list.
+Each page renders its list with one tag the theme entry registers, so it reads
+the same wherever the page sits:
+
+- `<RfdIndex />` and `<RfdDraftIndex />`, the published and the draft RFDs.
+- `<RfdBoard />`, the priority board.
+- `<TicketIndex />` and `<TicketBoard />`, the tickets and their board.
 
 Both loaders ship together, because the RFD board reads tracking tickets.
 Without a ticket directory the ticket loader reads no tickets, as it does today.
@@ -395,9 +519,12 @@ resolve.
 `sync` therefore writes what they need into the owned `jp-vite/settings.json`:
 both directories, the categories, the label vocabulary, the Done limit, the
 repository, and the revision `jp-vite` was built from.
+A link to a repository file points at the default branch (`/blob/HEAD/`), since
+`repository` names no branch; JP's site links to `main` today.
 
 `jp vite sync` rewrites the owned files from the binary, the snapshot among
-them, including the pages for a workflow added since the last sync.
+them, and creates the pages a workflow is missing, including one added since the
+last sync.
 It lists the files it will write and asks once before writing any of them.
 It requires the project to be in git, and refuses when an owned file is modified
 or untracked, since git cannot restore an edit it never recorded.
@@ -407,7 +534,7 @@ restores the last committed version.
 `--yes` skips the question for scripts; it does not imply `--force`.
 
 `sync --check` writes nothing, and fails when any owned file differs from what
-`sync` would write.
+`sync` would write, or a page is missing.
 A CI job with `jp` installed runs it to catch a configuration change committed
 without its sync.
 
@@ -430,6 +557,22 @@ directory the site displays.
 The RFD priority board writes `.priority.json` itself, into the RFD directory
 the snapshot names: it posts the whole layout, milestones included, which no `jp
 rfd` command takes.
+
+A drag on the ticket board is one command: `jp ticket status`, with `--before`
+or `--after` naming the card it landed next to, so the column and the place in
+it change together or not at all.
+Only the moved card gets a rank, where the board writes every column's whole
+order today.
+
+The priority board writes no ticket.
+It shows which RFDs are in development, and links each RFD with tickets to the
+ticket board narrowed to them, `?any-label=tracking-rfd=116` and
+`&any-label=relevant-rfd=116` with the configured keys.
+The ticket board filters by labels and knows nothing about RFDs: `?label=` keeps
+the tickets carrying every term, `?any-label=` those carrying any.
+Work starts by dragging the tracking ticket to In Progress there.
+A dev-server request runs `jp` without a terminal, and one still running after
+15 seconds is stopped.
 
 Styling and component changes therefore land in `jp vite`, and every project
 receives them on its next sync.
@@ -458,8 +601,11 @@ writes.
 ### Validation
 
 The site's validation stays in JavaScript for now: duplicate ids, the
-relationship graph and its status gate, board consistency, summaries, and
-unknown labels, the last checked against the vocabulary in the snapshot.
+relationship graph and its status gate, board consistency, summaries, unknown
+labels, checked against the vocabulary in the snapshot, and link labels that
+name no RFD, or name one by an id spelled another way.
+The link check runs with the RFD loaders, which read the tickets anyway, so the
+ticket loaders stay free of RFDs.
 The loaders that run it are owned files, so `jp vite sync` distributes them
 unchanged.
 
@@ -626,8 +772,10 @@ Point the ticket board writer at `jp ticket status` and `jp ticket rank`, and
 the priority writer at the snapshot's RFD directory.
 The `/__rfd-development` endpoint stays on the recipes until Phase 4 moves it.
 Move the label vocabulary from `.labels.json` into
-`plugins.command.ticket.options.labels`, and run `sync --check` in JP's site
-workflow.
+`plugins.command.ticket.options.labels`.
+JP checks its synced copy with a `jp-vite` test, `jp_site_is_synced`, which CI
+runs whenever the site files, the synced copy, or `.jp/config.toml` change;
+`sync --check` in the site workflow would build `jp` on every docs change.
 JP's own site becomes the first project synced from the binary.
 
 Depends on Phase 2, so the revision check finds a `jp rfd` for JP's RFD
@@ -638,6 +786,10 @@ Independent of Phases 3 and 4.
 
 Remove the ported recipes, `ticket-promote` among them, and point JP's RFD tool
 configuration at `plugin.command.rfd`.
+JP keeps `just rfd-promote` as a wrapper around `jp rfd promote`, because
+publishing a draft also archives the review and triage conversations JP's own
+workflow titles after the draft id, and its `rfd_promote` tool keeps calling the
+recipe for the same reason.
 The remaining `ticket-*` recipes keep calling `jp ticket`, which still works.
 Update the references in [RFD 001] and [RFD 100] to `just rfd-*`, `just
 ticket-promote`, `just ticket-labels-sync`, and `.labels.json`.
