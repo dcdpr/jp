@@ -9,9 +9,8 @@ version = "0.11.3"
 [dependencies]
 indexmap = { workspace = true, features = ["serde", "std"] }
 relative-path = { workspace = true, optional = true, features = ["alloc"] }
-serde = { workspace = true, optional = true, features = ["derive"] }
+serde = { workspace = true, optional = true, features = ["derive", "std"] }
 serde_json = { workspace = true, optional = true, features = ["std"] }
-serde_yaml = { workspace = true, optional = true }
 toml = { workspace = true, optional = true, features = ["serde"] }
 url = { workspace = true, optional = true }
 
@@ -22,7 +21,6 @@ schematic_types = { path = ".", features = [
     "serde",
     "serde_json",
     "serde_toml",
-    "serde_yaml",
     "url",
 ] }
 insta = { workspace = true }
@@ -34,7 +32,6 @@ relative_path = ["dep:relative-path"]
 serde = ["dep:serde"]
 serde_json = ["dep:serde_json"]
 serde_toml = ["dep:toml"]
-serde_yaml = ["dep:serde_yaml"]
 url = ["dep:url"]
 
 [lints]
