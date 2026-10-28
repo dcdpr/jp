@@ -27,7 +27,7 @@ use ticket::TicketId;
 
 use crate::{
     Output, author,
-    board::{self, Board},
+    board::{self, Loaded},
     cmd::{self, draft::Draft},
     document::{self, Document},
     id::RfdId,
@@ -235,13 +235,16 @@ impl<'a> Place<'a> {
     }
 
     /// Read the board, the way the reading tools start.
-    fn board(&self) -> Result<Board, String> {
+    ///
+    /// The warnings name what couldn't be read, such as a broken board file; a
+    /// tool passes them on, since the board it shows is incomplete without
+    /// them.
+    fn board(&self) -> Result<Loaded, String> {
         board::load(
             &self.paths.root,
             &self.paths.rfds,
             Some((&self.paths.tickets, &self.links)),
         )
-        .map(|loaded| loaded.board)
     }
 }
 
@@ -369,8 +372,13 @@ fn list(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
     );
     let full = args.flag("full")?;
 
-    let board = place.board()?;
-    Ok(render::list_text(&board, category.as_deref(), sections, full).into())
+    let Loaded { board, warnings } = place.board()?;
+
+    Ok(reported(Output {
+        text: render::list_text(&board, category.as_deref(), sections, full),
+        warnings,
+        ..Output::default()
+    }))
 }
 
 /// Show one RFD, the way `jp rfd show` prints it.
@@ -380,7 +388,7 @@ fn show(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
 
     let id = args.id("id")?;
     let with_body = args.flag("body")?;
-    let board = place.board()?;
+    let Loaded { board, warnings } = place.board()?;
     let path = place.paths.resolve(id)?;
     let file = place.paths.show(&path);
     let Some(entry) = board.entry(&file) else {
@@ -403,7 +411,11 @@ fn show(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
         text.push_str(&format!("\n{untracked}"));
     }
 
-    Ok(text.into())
+    Ok(reported(Output {
+        text,
+        warnings,
+        ..Output::default()
+    }))
 }
 
 /// `text` in a markdown code fence longer than any run of backticks inside it,

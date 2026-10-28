@@ -783,6 +783,40 @@ fn relabel_changes_each_ticket_from_its_own_labels() {
     assert_eq!(labels_of(&dir, second), ["client=cli", "package=jp_config"]);
 }
 
+/// A ticket that can't take its new labels is found before any ticket is
+/// written, so the others in the batch are left as they were.
+#[test]
+fn relabel_refuses_a_ticket_without_a_metadata_block_before_writing_any() {
+    let dir = Utf8TempDir::new().unwrap();
+    let vocabulary = test_vocabulary();
+    let good = new_ticket(&dir, "Good");
+    let bare = new_ticket(&dir, "Bare");
+    let bare_path = locate(dir.path(), bare).unwrap();
+    fs::write(&bare_path, "# Bare\n\nNo metadata here.\n").unwrap();
+    let good_path = locate(dir.path(), good).unwrap();
+    let before = fs::read_to_string(&good_path).unwrap();
+
+    let error = relabel(dir.path(), &vocabulary, &[good, bare], |current| {
+        let mut tokens = current.to_tokens();
+        tokens.push("client=cli".to_owned());
+        tokens
+    })
+    .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "{bare}: {bare} is not a well-formed ticket: Ticket title is not followed by a \
+             metadata block."
+        )
+    );
+    assert_eq!(fs::read_to_string(&good_path).unwrap(), before);
+    assert_eq!(
+        fs::read_to_string(&bare_path).unwrap(),
+        "# Bare\n\nNo metadata here.\n"
+    );
+}
+
 /// One ticket the board refuses stops the whole write, and the refusal names it
 /// among the others.
 #[test]

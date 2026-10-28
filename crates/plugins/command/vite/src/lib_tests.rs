@@ -394,6 +394,31 @@ fn sync_refuses_to_overwrite_what_git_has_not_recorded() {
     );
 }
 
+/// A project that ignores the synced files still has nothing to restore a hand
+/// edit from, so an ignored file is refused like any untracked one.
+#[test]
+fn sync_refuses_to_overwrite_an_ignored_file() {
+    let root = project();
+    fs::write(root.path().join(".gitignore"), "docs/.vitepress/jp-vite/\n").unwrap();
+    commit(root.path());
+    exchange(&[init(root.path(), &["sync", "--yes"])]);
+    let config = root.path().join("docs/.vitepress/jp-vite/config.mjs");
+    fs::write(&config, "Edited by hand").unwrap();
+
+    let (_, code, reason) = printed(&exchange(&[init(root.path(), &["sync", "--yes"])]));
+
+    assert_eq!(code, 1);
+    assert_eq!(
+        reason.as_deref(),
+        Some(
+            "Git couldn't restore these files, so `jp vite sync` leaves them:\n  \
+             docs/.vitepress/jp-vite/config.mjs (not tracked)\nCommit them, or run `jp vite sync \
+             --force` to overwrite them anyway."
+        )
+    );
+    assert_eq!(fs::read_to_string(&config).unwrap(), "Edited by hand");
+}
+
 /// A file that doesn't exist yet risks nothing, and the snapshot, the pages,
 /// and the loaders of a new install are all new.
 #[test]

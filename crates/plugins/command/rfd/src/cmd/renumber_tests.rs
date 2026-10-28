@@ -217,6 +217,48 @@ fn the_tickets_linked_to_a_published_rfd_follow_it() {
     );
 }
 
+/// A ticket promoted to a published RFD follows it, or a later RFD given the
+/// old number would read as the one the ticket became.
+#[test]
+fn a_ticket_promoted_to_a_published_rfd_follows_it() {
+    let workspace = workspace();
+    workspace.write(
+        "docs/ticket/02wt0k1-became-an-rfd.md",
+        &ticket(
+            "Became an RFD",
+            "Done",
+            &[("Promoted to", "042")],
+            "Moved to 042.",
+        ),
+    );
+
+    let output = renumber(
+        &workspace.paths,
+        &Links::default(),
+        "042",
+        Some("097"),
+        true,
+    )
+    .unwrap();
+
+    assert_eq!(
+        workspace.read("docs/ticket/02wt0k1-became-an-rfd.md"),
+        ticket(
+            "Became an RFD",
+            "Done",
+            &[("Promoted to", "097")],
+            "Moved to 042.",
+        )
+    );
+    assert!(
+        output
+            .text
+            .contains("  updated 042 -> 097 references in docs/ticket/02wt0k1-became-an-rfd.md\n"),
+        "{}",
+        output.text
+    );
+}
+
 /// A bare `042` is too common a token to rewrite; `RFD 042` and the file name
 /// are not.
 #[test]

@@ -59,6 +59,10 @@ pub(crate) fn unrecorded(
             "--porcelain=v1",
             "-z",
             "--untracked-files=all",
+            // An ignored file is as untracked as any other, and git has no
+            // copy of it to restore. With `--untracked-files=all`, ignored
+            // directories are listed file by file.
+            "--ignored=traditional",
             "--no-renames",
             "--",
         ])
@@ -81,15 +85,17 @@ pub(crate) fn unrecorded(
     Ok(found)
 }
 
-/// Read `git status --porcelain=v1 -z --no-renames` output, keeping the entries
-/// below `prefix`, as paths relative to it.
+/// Read `git status --porcelain=v1 -z --no-renames --ignored` output, keeping
+/// the entries below `prefix`, as paths relative to it.
+///
+/// An ignored file (`!!`) is read as untracked: git keeps no copy of either.
 fn parse_status(output: &str, prefix: &str) -> Vec<(Utf8PathBuf, Unrecorded)> {
     output
         .split('\0')
         .filter_map(|entry| {
             let (code, path) = (entry.get(..2)?, entry.get(3..)?);
             let path = path.strip_prefix(prefix)?;
-            let why = if code == "??" {
+            let why = if code == "??" || code == "!!" {
                 Unrecorded::Untracked
             } else {
                 Unrecorded::Modified

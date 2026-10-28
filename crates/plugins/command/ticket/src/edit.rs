@@ -116,7 +116,8 @@ pub(crate) fn through_host(
 /// The editor writes the file itself.
 /// A file that no longer reads as a ticket, or carries a label the board
 /// refuses, is offered back to the editor; an edit given up on, or abandoned in
-/// the editor, is undone.
+/// the editor, is undone, and so is one the command fails on before it is
+/// accepted.
 /// A changed title moves the file to the name it produces, as `rename` does.
 pub(crate) fn in_editor(
     dir: &Utf8Path,
@@ -125,33 +126,17 @@ pub(crate) fn in_editor(
     editing: &mut impl Editing,
 ) -> Result<Output, String> {
     let path = store::locate_ticket(dir, id).map_err(|error| error.to_string())?;
-    let read =
-        || fs::read_to_string(&path).map_err(|error| format!("failed to read {path}: {error}"));
-    let original = read()?;
-    let undo = || {
-        fs::write(&path, &original).map_err(|error| format!("failed to restore {path}: {error}"))
-    };
+    let original = read(&path)?;
 
-    let edited = loop {
-        if !editing.open(&path)? {
-            undo()?;
-            return Err(format!(
-                "The editor exited with an error; {id} is unchanged."
-            ));
-        }
-
-        let edited = read()?;
-        if edited == original {
-            return Ok(format!("{path}: unchanged\n").into());
-        }
-
-        match check(dir, id, &edited, &original, options)? {
-            Ok(()) => break edited,
-            Err(problem) if editing.again(&format!("{id} can't be saved: {problem}")) => {}
-            Err(problem) => {
-                undo()?;
-                return Err(format!("{id} is unchanged: {problem}"));
-            }
+    let edited = match settle(dir, id, &path, &original, options, editing) {
+        Ok(Some(edited)) => edited,
+        Ok(None) => return Ok(format!("{path}: unchanged\n").into()),
+        // Whatever the editor left is unchecked, so it doesn't stay on disk.
+        Err(error) => {
+            return Err(match fs::write(&path, &original) {
+                Ok(()) => error,
+                Err(restore) => format!("{error}\nfailed to restore {path}: {restore}"),
+            });
         }
     };
 
@@ -171,6 +156,42 @@ pub(crate) fn in_editor(
         format!("Edited {to}, renamed from {from}\n")
     }
     .into())
+}
+
+/// Open the editor on `path` until it leaves a ticket the board accepts,
+/// returning it, or `None` when the file comes back as `original`.
+///
+/// An error leaves on disk whatever the editor wrote, for the caller to undo.
+fn settle(
+    dir: &Utf8Path,
+    id: TicketId,
+    path: &Utf8Path,
+    original: &str,
+    options: &Options,
+    editing: &mut impl Editing,
+) -> Result<Option<String>, String> {
+    loop {
+        if !editing.open(path)? {
+            return Err(format!(
+                "The editor exited with an error; {id} is unchanged."
+            ));
+        }
+
+        let edited = read(path)?;
+        if edited == original {
+            return Ok(None);
+        }
+
+        match check(dir, id, &edited, original, options)? {
+            Ok(()) => return Ok(Some(edited)),
+            Err(problem) if editing.again(&format!("{id} can't be saved: {problem}")) => {}
+            Err(problem) => return Err(format!("{id} is unchanged: {problem}")),
+        }
+    }
+}
+
+fn read(path: &Utf8Path) -> Result<String, String> {
+    fs::read_to_string(path).map_err(|error| format!("failed to read {path}: {error}"))
 }
 
 /// Whether `edited` is ticket `id` as the board accepts it: one that parses,

@@ -6,19 +6,21 @@
 //! stays right and only the name changes.
 //!
 //! References are rewritten in the RFDs, the drafts, and the tickets: the file
-//! name everywhere, and `RFD <old>`, plus a draft's bare `D05` and the labels
-//! that link a ticket to the RFD ([`Links`]), unless another file still holds
-//! the old id, which would make every such mention ambiguous.
+//! name everywhere, and `RFD <old>`, plus a draft's bare `D05`, the labels that
+//! link a ticket to the RFD ([`Links`]), and a ticket's `Promoted to`, unless
+//! another file still holds the old id, which would make every such mention
+//! ambiguous.
 //! Mentions elsewhere in the workspace are reported, not rewritten.
 
 use std::fs;
 
 use camino::{Utf8Path, Utf8PathBuf};
+use ticket::render;
 
 use super::{Leftovers, listed, stem};
 use crate::{
     Output,
-    document::Document,
+    document::{Document, Header},
     id::{self, RfdId},
     links::Links,
     paths::{self, Paths},
@@ -194,6 +196,7 @@ fn rewrite_references(
             let mut changed = references::rewrite_file(&file, &rules)?;
             if unique && dir == paths.tickets {
                 changed |= links.relink(&file, old, new)?;
+                changed |= repromote(&file, old, new)?;
             }
 
             if changed {
@@ -207,6 +210,27 @@ fn rewrite_references(
     }
 
     Ok(updated)
+}
+
+/// Point the `Promoted to` field of the ticket file at `path` at `new` when it
+/// names `old`, returning whether the file changed.
+///
+/// Only the metadata block is read and written, so a bare number in the
+/// ticket's prose stays as written.
+fn repromote(path: &Utf8Path, old: RfdId, new: RfdId) -> Result<bool, String> {
+    let source = paths::read(path)?;
+    let lines: Vec<&str> = source.lines().collect();
+    let promoted = Header::of(&lines).field("Promoted to");
+    if promoted.and_then(|value| value.parse::<RfdId>().ok()) != Some(old) {
+        return Ok(false);
+    }
+
+    let Some(updated) = render::set_metadata(&source, "Promoted to", &new.to_string()) else {
+        return Ok(false);
+    };
+    paths::write(path, &updated)?;
+
+    Ok(true)
 }
 
 /// The RFD and file `given` names: an id, or a file name with or without a

@@ -326,49 +326,67 @@ const ticketWriter = {
             const parsed = await readJson(req, res, 256 * 1024)
             if (parsed === undefined) return
 
-            // Flags are built here rather than taken from the client, so a
-            // request can only ask for what the CLI already offers.
-            const text = (value) => (typeof value === 'string' ? value : '')
-            const flag = (name, value) => (text(value) ? [name, text(value)] : [])
-            // One `--label` per label. `edit` replaces the whole set with them,
-            // so the index sends labels only when they changed.
-            const labels = (value) => (Array.isArray(value) ? value : [])
-                .map(text)
-                .filter(Boolean)
-                .flatMap(label => ['--label', label])
-            let args
-            switch (parsed.action) {
-                case 'add':
-                    if (!text(parsed.title)) {
-                        return refuse(res, 400, 'add needs a title')
-                    }
-                    args = ['ticket', 'add', text(parsed.title),
-                        ...flag('--body', parsed.body),
-                        ...labels(parsed.labels)]
-                    break
-                case 'edit': {
-                    // One `edit`; a new title also moves the file to its slug.
-                    args = ['ticket', 'edit', text(parsed.id),
-                        ...flag('--title', parsed.title),
-                        ...flag('--body', parsed.body),
-                        ...flag('--status', parsed.status),
-                        ...labels(parsed.labels)]
-                    // With nothing to change, `jp ticket edit` opens an editor,
-                    // which a dev-server request has no terminal for.
-                    if (args.length === 3) return reply(res, 200, { ok: true, output: '' })
-                    break
-                }
-                case 'delete':
-                    args = ['ticket', 'delete', text(parsed.id)]
-                    break
-                default:
-                    return refuse(res, 400, 'expected action: add, edit, or delete')
-            }
+            const { commands, refusal: invalid } = ticketCommands(parsed)
+            if (invalid) return refuse(res, 400, invalid)
 
-            const { ok, output } = await jp(args)
-            reply(res, ok ? 200 : 500, { ok, output })
+            // In order, stopping at the first that fails.
+            const outputs = []
+            for (const args of commands) {
+                const { ok, output } = await jp(args)
+                if (output) outputs.push(output)
+                if (!ok) return reply(res, 500, { ok, output: outputs.join('\n') })
+            }
+            reply(res, 200, { ok: true, output: outputs.join('\n') })
         }))
     },
+}
+
+// The `jp` commands a ticket-index request runs, in order, as `{ commands }`,
+// or why it is refused, as `{ refusal }`.
+//
+// Flags are built here rather than taken from the client, so a request can only
+// ask for what the CLI already offers.
+export function ticketCommands(parsed) {
+    const text = (value) => (typeof value === 'string' ? value : '')
+    const flag = (name, value) => (text(value) ? [name, text(value)] : [])
+    // `labels` left out leaves the labels alone; an empty list clears them.
+    const named = Array.isArray(parsed.labels)
+        ? parsed.labels.map(text).filter(Boolean)
+        : null
+    // One `--label` per label. `edit` replaces the whole set with them, so the
+    // index sends labels only when they changed.
+    const labels = (named ?? []).flatMap(label => ['--label', label])
+
+    switch (parsed.action) {
+        case 'add':
+            if (!text(parsed.title)) return { refusal: 'add needs a title' }
+            return {
+                commands: [['ticket', 'add', text(parsed.title),
+                    ...flag('--body', parsed.body),
+                    ...labels]],
+            }
+        case 'edit': {
+            const id = text(parsed.id)
+            // `edit` takes no `--label` to mean none, so an empty list is a
+            // `label rm` naming nothing, which takes every label off.
+            const clear = named !== null && named.length === 0
+                ? [['ticket', 'label', 'rm', '--id', id]]
+                : []
+            // One `edit`; a new title also moves the file to its slug.
+            const edit = ['ticket', 'edit', id,
+                ...flag('--title', parsed.title),
+                ...flag('--body', parsed.body),
+                ...flag('--status', parsed.status),
+                ...labels]
+            // With nothing to change, `jp ticket edit` opens an editor, which a
+            // dev-server request has no terminal for.
+            return { commands: [...clear, ...(edit.length > 3 ? [edit] : [])] }
+        }
+        case 'delete':
+            return { commands: [['ticket', 'delete', text(parsed.id)]] }
+        default:
+            return { refusal: 'expected action: add, edit, or delete' }
+    }
 }
 
 // What the tickets say about each RFD (`/rfd/priority`): which are in

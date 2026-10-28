@@ -22,6 +22,10 @@ struct Scripted {
 
     /// The problems the user was asked about, in order.
     asked: Vec<String>,
+
+    /// Whether opening the editor once the scripted edits run out fails as an
+    /// interrupt at the host does; otherwise that open panics.
+    interrupted: bool,
 }
 
 impl Scripted {
@@ -36,10 +40,18 @@ impl Scripted {
         self.again = again.into_iter().collect();
         self
     }
+
+    fn interrupted(mut self) -> Self {
+        self.interrupted = true;
+        self
+    }
 }
 
 impl Editing for Scripted {
     fn open(&mut self, path: &Utf8Path) -> Result<bool, String> {
+        if self.edits.is_empty() && self.interrupted {
+            return Err("Interrupted.".to_owned());
+        }
         let (content, saved) = self
             .edits
             .pop_front()
@@ -273,6 +285,49 @@ fn an_edit_that_leaves_the_labels_alone_needs_no_vocabulary() {
     .unwrap();
 
     assert_eq!(output.text, format!("Edited {path}\n"));
+}
+
+/// A vocabulary that can't be read fails the command once the labels changed,
+/// and the edit it couldn't check doesn't stay behind.
+#[test]
+fn an_edit_checked_against_a_broken_vocabulary_is_undone() {
+    let dir = Utf8TempDir::new().unwrap();
+    let (path, original) = write_ticket(&dir);
+    let edited = original.replace(
+        "- **Status**: Todo\n",
+        "- **Status**: Todo\n- **Label**: client=cli\n",
+    );
+    let mut editing = Scripted::editing([(Some(edited), true)]);
+
+    let error = in_editor(
+        dir.path(),
+        id(),
+        &options_with(&json!("not a map")),
+        &mut editing,
+    )
+    .unwrap_err();
+
+    assert!(
+        error.starts_with("`plugins.command.ticket.options.labels`: "),
+        "{error}"
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+}
+
+/// Interrupting the editor opened again on a file that failed its check leaves
+/// the ticket as it was, not as the failed edit.
+#[test]
+fn an_interrupted_retry_is_undone() {
+    let dir = Utf8TempDir::new().unwrap();
+    let (path, original) = write_ticket(&dir);
+    let mut editing = Scripted::editing([(Some("no heading here\n".to_owned()), true)])
+        .answering([true])
+        .interrupted();
+
+    let error = in_editor(dir.path(), id(), &options(), &mut editing).unwrap_err();
+
+    assert_eq!(error, "Interrupted.");
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
 }
 
 #[test]

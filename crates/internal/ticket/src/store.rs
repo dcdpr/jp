@@ -434,18 +434,39 @@ pub fn relabel(
         let path = locate(dir, id)?;
         let source = fs::read_to_string(&path)?;
         let before = parse::labels(&source);
-        match vocabulary.resolve_against(&change(&before), &before) {
-            Ok(after) => planned.push((
-                Relabeled {
-                    id,
-                    path,
-                    before,
-                    after,
-                },
-                source,
-            )),
-            Err(rejected) => refused.push((id, Error::Rejected(rejected))),
-        }
+        let after = match vocabulary.resolve_against(&change(&before), &before) {
+            Ok(after) => after,
+            Err(rejected) => {
+                refused.push((id, Error::Rejected(rejected)));
+                continue;
+            }
+        };
+
+        // Rendered here rather than at the write, so a ticket that can't take
+        // its new labels refuses the batch before any ticket is written.
+        let updated = if after == before {
+            None
+        } else if let Some(updated) =
+            render::set_repeated_metadata(&source, LABEL_KEY, &after.to_tokens())
+        {
+            Some(updated)
+        } else {
+            refused.push((id, Error::Malformed {
+                id,
+                error: ParseError::MissingMetadata,
+            }));
+            continue;
+        };
+
+        planned.push((
+            Relabeled {
+                id,
+                path,
+                before,
+                after,
+            },
+            updated,
+        ));
     }
 
     let writing: Vec<(TicketId, &Labels)> = planned
@@ -467,11 +488,8 @@ pub fn relabel(
     }
 
     let mut done = vec![];
-    for (ticket, source) in planned {
-        if ticket.after != ticket.before {
-            let updated =
-                render::set_repeated_metadata(&source, LABEL_KEY, &ticket.after.to_tokens())
-                    .ok_or(ParseError::MissingMetadata)?;
+    for (ticket, updated) in planned {
+        if let Some(updated) = updated {
             fs::write(&ticket.path, updated)?;
         }
         done.push(ticket);

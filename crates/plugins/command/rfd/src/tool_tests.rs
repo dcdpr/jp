@@ -139,6 +139,38 @@ fn list_takes_the_sections_and_category_the_command_does() {
     );
 }
 
+/// A board file that doesn't parse leaves every RFD unranked, so the default
+/// listing comes back empty; the assistant has to be told why.
+#[test]
+fn list_says_when_it_could_not_read_the_board() {
+    let root = workspace();
+    let board = root.path().join("docs/rfd/.priority.json");
+    fs::write(&board, "<<<<<<< HEAD\n{}\n").unwrap();
+
+    let out = content(run_tool(&root, "list", json!({})));
+
+    let unranked = format!("No matching RFDs.\n{board} is not valid JSON (");
+    assert!(out.starts_with(&unranked), "{out}");
+    assert!(out.ends_with("); every RFD reads as unranked.\n"), "{out}");
+}
+
+/// A ticket that can't be read may be the tracking one, so `show` saying the
+/// RFD isn't in development has to say it may be wrong.
+#[test]
+fn show_says_when_it_could_not_read_a_ticket() {
+    let root = workspace();
+    let tickets = root.path().join("docs/ticket");
+    fs::write(tickets.join("02wt0k9-broken.md"), "no heading\n").unwrap();
+
+    let out = content(run_tool(&root, "show", json!({ "id": "D05" })));
+
+    let warning = format!(
+        "```\n1 ticket file in {tickets} could not be read; an RFD whose tracking ticket is among \
+         them does not show as in development.\n"
+    );
+    assert!(out.ends_with(&warning), "{out}");
+}
+
 #[test]
 fn show_prints_one_rfd_as_markdown() {
     let root = workspace();

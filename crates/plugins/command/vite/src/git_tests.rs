@@ -96,6 +96,42 @@ fn a_staged_change_is_still_unrecorded() {
     )]);
 }
 
+/// `git status` leaves ignored files out unless asked, and git has no more copy
+/// of an ignored file than of any other untracked one.
+#[test]
+fn ignored_files_are_untracked() {
+    let top = repository();
+    let root = top.path().join("sub");
+    fs::write(
+        top.path().join(".gitignore"),
+        "sub/docs/generated/\nsub/docs/rfd/notes.md\n",
+    )
+    .unwrap();
+    git(top.path(), &["add", ".gitignore"]);
+    git(top.path(), &["commit", "--quiet", "-m", "Ignore"]);
+    fs::create_dir_all(root.join("docs/generated")).unwrap();
+    fs::write(root.join("docs/generated/config.mjs"), "Edited by hand").unwrap();
+    fs::write(root.join("docs/rfd/notes.md"), "Notes").unwrap();
+
+    let found = unrecorded(&root, "sub/", &[
+        Utf8PathBuf::from("docs/generated/config.mjs"),
+        Utf8PathBuf::from("docs/rfd/notes.md"),
+        Utf8PathBuf::from("docs/rfd/index.md"),
+    ])
+    .unwrap();
+
+    assert_eq!(found, [
+        (
+            Utf8PathBuf::from("docs/generated/config.mjs"),
+            Unrecorded::Untracked
+        ),
+        (
+            Utf8PathBuf::from("docs/rfd/notes.md"),
+            Unrecorded::Untracked
+        ),
+    ]);
+}
+
 #[test]
 fn the_origin_remote_is_read_as_configured() {
     let top = repository();
@@ -115,10 +151,12 @@ fn the_origin_remote_is_read_as_configured() {
 
 #[test]
 fn status_entries_are_read_below_the_prefix() {
-    let output = "?? sub/docs/new.md\0 M sub/docs/index.md\0M  other/file.md\0";
+    let output =
+        "?? sub/docs/new.md\0 M sub/docs/index.md\0!! sub/docs/ignored.md\0M  other/file.md\0";
 
     assert_eq!(parse_status(output, "sub/"), [
         (Utf8PathBuf::from("docs/new.md"), Unrecorded::Untracked),
         (Utf8PathBuf::from("docs/index.md"), Unrecorded::Modified),
+        (Utf8PathBuf::from("docs/ignored.md"), Unrecorded::Untracked),
     ]);
 }
