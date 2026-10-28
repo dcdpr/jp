@@ -225,6 +225,23 @@ Set configuration in conversation <conversation id>
 This appends a delta to the conversation's event stream, leaving earlier turns
 untouched.
 
+An option is cleared by querying with it set to `null`:
+
+```bash
+$ jp query --id <conversation id> --cfg assistant.name:=null "..."
+```
+
+A cleared option stays cleared for the rest of the conversation.
+Later turns run without it even when a configuration file sets that option.
+The conversation records the option as empty, and the file layer cannot fill it
+back in.
+
+Two things retire a clear:
+
+- Setting a value at the same path, such as `--cfg assistant.name=Bot`.
+- A reset (`--cfg=WORKSPACE`), which discards everything the conversation
+  accumulated, including its clears.
+
 To edit the files directly, use `jp conversation edit`:
 
 ```bash

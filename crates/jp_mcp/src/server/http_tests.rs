@@ -11,15 +11,15 @@ use jp_config::{
 };
 use jp_tool::{Outcome, ToolDefinition, ToolDocs, ToolResult};
 use reqwest::Client as HttpClient;
-use rmcp::model::CallToolRequestParams;
+use rmcp::{ServiceError as McpCallError, model::CallToolRequestParams};
 use serde_json::{Map, Value, json};
-use tokio::time::{Duration, timeout};
+use tokio::time::{Duration, sleep, timeout};
 
 use super::*;
 use crate::{
     Client, Content,
     server::{
-        InvocationContext,
+        CommandPlugins, InvocationContext,
         builtin::{BuiltinExecutors, BuiltinTool},
         service::{
             Admission, CallRequest, ConfiguredTool, HostReceiver, Interaction, ReleaseDecision,
@@ -61,6 +61,7 @@ fn setup() -> (Service, HostReceiver, Arc<AtomicUsize>) {
         Client::default(),
         BuiltinExecutors::new().register("count", Count(count.clone())),
         no_commands(),
+        CommandPlugins::default(),
         "/tmp".into(),
         InvocationContext::default(),
     )
@@ -241,6 +242,51 @@ async fn endpoint_shutdown_cancels_waiting_call_and_closes_listener() {
     );
     assert_eq!(count.load(Ordering::SeqCst), 0);
     client.cancel().await.unwrap();
+}
+
+/// A session given an idle window is gone once the window passes with no
+/// traffic, and every request on it fails from then on.
+///
+/// This is how a turn lost its tools: a model took longer to answer than the
+/// window, and nothing was sent on the session while it did.
+#[tokio::test]
+async fn a_session_with_an_idle_window_expires_once_it_passes() {
+    let (service, _host, count) = setup();
+    let mut sessions = LocalSessionManager::default();
+    sessions.session_config.keep_alive = Some(Duration::from_millis(100));
+    let endpoint = Endpoint::start_with(service, PROGRESS_HEARTBEAT, sessions)
+        .await
+        .unwrap();
+    let client = endpoint.connect().await.unwrap();
+    client.peer().list_all_tools().await.unwrap();
+
+    sleep(Duration::from_millis(500)).await;
+
+    let error = timeout(Duration::from_secs(2), client.peer().list_all_tools())
+        .await
+        .unwrap()
+        .unwrap_err();
+    let McpCallError::TransportSend(error) = error else {
+        panic!("expected a transport failure, got {error:?}")
+    };
+    assert!(
+        error.to_string().contains("Session expired (HTTP 404)"),
+        "expected an expired session, got {error}"
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 0);
+    drop(client.cancel().await);
+    endpoint.shutdown().await.unwrap();
+}
+
+/// The endpoint's sessions have no idle window.
+///
+/// A turn can wait on a model for longer than any fixed window, and nothing is
+/// sent on the Host's session meanwhile.
+/// The endpoint ends with its turn, which is what bounds a session's life
+/// instead.
+#[test]
+fn the_endpoint_never_expires_an_idle_session() {
+    assert_eq!(session_manager().session_config.keep_alive, None);
 }
 
 #[tokio::test]

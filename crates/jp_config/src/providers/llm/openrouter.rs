@@ -48,10 +48,18 @@ pub struct OpenrouterConfig {
     /// Environment variable that contains the API key.
     ///
     /// A map names several keys, each selectable from the `auth` chain as
-    /// `api_key:<name>`:
+    /// `api_key:<name>`.
+    /// Each key is a variable, or a list read the same way as below:
     ///
     /// ```toml
     /// api_key_env = { work = "WORK_OPENROUTER_KEY", personal = "MY_OPENROUTER_KEY" }
+    /// ```
+    ///
+    /// A list is one key, read from the first variable that holds a non-empty
+    /// value:
+    ///
+    /// ```toml
+    /// api_key_env = ["WORK_OPENROUTER_KEY", "MY_OPENROUTER_KEY"]
     /// ```
     #[setting(default = "OPENROUTER_API_KEY")]
     pub api_key_env: ApiKeyEnv,
@@ -90,7 +98,7 @@ impl AssignKeyValue for PartialOpenrouterConfig {
                     value => Err(format!("expected a string, got {value}").into()),
                 })?;
             }
-            "api_key_env" => self.api_key_env = kv.try_some_object_or_from_str()?,
+            "api_key_env" => self.api_key_env = kv.try_some_value()?,
             "app_name" => self.app_name = kv.try_some_string()?,
             "app_referrer" => self.app_referrer = kv.try_some_string()?,
             "base_url" => self.base_url = kv.try_some_string()?,

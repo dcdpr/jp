@@ -583,6 +583,17 @@ pub enum Error {
         tier: ServiceTier,
     },
 
+    /// The provider always constrains structured output to closed objects, and
+    /// the schema has an object that closing would change.
+    ///
+    /// Refused rather than closed: a free-form object would only ever come back
+    /// as `{}`, and a map type would lose its extra keys.
+    #[error(
+        "The `{provider}` provider cannot constrain structured output to this schema: it contains \
+         an object with no declared properties, or one that allows additional properties"
+    )]
+    UnsupportedOutputSchema { provider: ProviderId },
+
     #[error("Invalid JSON: {0}")]
     Json(#[from] serde_json::Error),
 

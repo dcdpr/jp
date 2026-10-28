@@ -14,7 +14,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use camino_tempfile::tempdir;
 use futures::{StreamExt as _, stream};
 use indexmap::IndexMap;
-use inquire::{InquireError, TextAnswer};
+use inquire::InquireError;
 use jp_config::{
     AppConfig, Config as _, PartialAppConfig,
     assistant::{
@@ -72,7 +72,7 @@ use crate::{
         tool::{
             ToolCoordinator,
             executor::{
-                Executor, ExecutorResult, ExecutorSource, PermissionInfo,
+                Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo,
                 mock::{
                     MockExecutor, TestExecutorSource, asking_formatter, asking_formatter_runner,
                     no_commands,
@@ -715,6 +715,7 @@ async fn two_client_replies_during_a_tool_both_reach_the_conversation() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1893,17 +1894,6 @@ impl PromptBackend for DelayedPromptBackend {
         )
     }
 
-    fn text(
-        &self,
-        message: &str,
-        default: Option<&str>,
-        writer: &mut dyn Write,
-    ) -> Result<TextAnswer, InquireError> {
-        self.started.notify_one();
-        std::thread::sleep(self.delay);
-        self.inner.text(message, default, writer)
-    }
-
     fn select(
         &self,
         message: &str,
@@ -1959,6 +1949,7 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2107,6 +2098,7 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: Some(CUSTOM_CANCELLATION_RESPONSE.to_string()),
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2214,6 +2206,111 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
     assert!(test_result.is_ok(), "Test timed out after 10 seconds");
 }
 
+/// A tool call that loses the Host's connection to the JP MCP Server ends the
+/// turn with an error naming that, instead of handing the failure to the
+/// assistant as a tool result to retry against a connection that is gone.
+///
+/// The call's response is still recorded, so the request stays paired, and no
+/// follow-up request is sent.
+#[tokio::test]
+async fn a_lost_connection_ends_the_turn_with_an_error() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let mut config = AppConfig::new_test();
+    config.conversation.tools.insert(
+        "lost_tool".to_string(),
+        ToolConfig::from_partial(
+            serde_json::from_value(json!({"source": "builtin", "run": "allow"})).unwrap(),
+            vec![],
+        )
+        .unwrap(),
+    );
+
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+        .unwrap();
+    let conv_id = lock.id();
+
+    let provider = Arc::new(SequentialMockProvider::with_tool_then_message(
+        "call_lost",
+        "lost_tool",
+        "This follow-up should never be requested.",
+    ));
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let (router, _signals) = test_router();
+
+    let executor_source = TestExecutorSource::new().with_executor("lost_tool", |request| {
+        Box::new(MockExecutor::ending_with(
+            &request.id,
+            &request.name,
+            ExecutorResult::OutcomeUnknown(ExecutorError::ConnectionLost(Box::new(
+                std::io::Error::other("Session expired (HTTP 404)"),
+            ))),
+        ))
+    });
+
+    let result = timeout(
+        Duration::from_secs(10),
+        run_turn_loop(
+            Arc::clone(&provider) as Arc<dyn Provider>,
+            &model,
+            &config,
+            &router,
+            Utf8Path::new("/tmp"),
+            InvocationContext::default(),
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            Arc::new(printer),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            ChatRequest::from("Please use a tool"),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
+        ),
+    )
+    .await
+    .expect("the turn ends");
+
+    assert!(
+        matches!(result, Err(Error::McpConnectionLost)),
+        "expected the lost connection to end the turn, got {result:?}"
+    );
+    assert_eq!(
+        provider.call_index.load(Ordering::SeqCst),
+        1,
+        "a lost connection must not trigger a follow-up request"
+    );
+    assert!(
+        !router.shutdown_token().is_cancelled(),
+        "a lost connection ends the turn, not the process"
+    );
+
+    // Tool response content is base64-encoded in the raw events file.
+    let content = fs
+        .read_test_events_raw(&conv_id)
+        .expect("events should be persisted");
+    let recorded = STANDARD.encode(
+        "Tool 'lost_tool' may have run, but JP lost the call before its result arrived. Check \
+         whether its effects took place before calling it again.",
+    );
+    assert!(
+        content.contains(&recorded),
+        "the lost call's response must be recorded.\nFile contents:\n{content}"
+    );
+}
+
 /// A Ctrl-C pressed while a tool question prompt is active is declined by the
 /// tool handler and lands on the turn-level handler, which ends the turn
 /// gracefully once the tool completes: no follow-up request is sent.
@@ -2250,6 +2347,7 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2586,6 +2684,7 @@ async fn test_tool_restart_on_interrupt() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2741,6 +2840,7 @@ async fn test_merged_stream_exits_after_tool_response() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2853,6 +2953,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2887,6 +2988,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
                 MockExecutor::completed(&req.id, &req.name, "mock output").with_permission_info(
                     PermissionInfo {
                         tool_id: req.id.clone(),
+                        state_key: req.id.clone(),
                         tool_name: req.name.clone(),
                         tool_source: ToolSource::Local { tool: None },
                         run_mode: RunMode::Ask,
@@ -2996,6 +3098,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3030,6 +3133,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
                 MockExecutor::completed(&req.id, &req.name, "should not see this")
                     .with_permission_info(PermissionInfo {
                         tool_id: req.id.clone(),
+                        state_key: req.id.clone(),
                         tool_name: req.name.clone(),
                         tool_source: ToolSource::Local { tool: None },
                         run_mode: RunMode::Ask,
@@ -3150,6 +3254,7 @@ async fn test_permission_prompt_follows_interactive_not_is_tty() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3182,6 +3287,7 @@ async fn test_permission_prompt_follows_interactive_not_is_tty() {
                 MockExecutor::completed(&req.id, &req.name, "mock output").with_permission_info(
                     PermissionInfo {
                         tool_id: req.id.clone(),
+                        state_key: req.id.clone(),
                         tool_name: req.name.clone(),
                         tool_source: ToolSource::Local { tool: None },
                         run_mode: RunMode::Ask,
@@ -3276,6 +3382,7 @@ async fn test_tool_call_with_run_mode_allow() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3414,6 +3521,7 @@ async fn test_tool_call_with_run_mode_skip() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3453,6 +3561,7 @@ async fn test_tool_call_with_run_mode_skip() {
                 )
                 .with_permission_info(PermissionInfo {
                     tool_id: req.id.clone(),
+                    state_key: req.id.clone(),
                     tool_name: req.name.clone(),
                     tool_source: ToolSource::Local { tool: None },
                     run_mode: RunMode::Skip,
@@ -3568,6 +3677,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
         // tool_unattended runs automatically
         config
@@ -3589,6 +3699,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3648,6 +3759,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                     MockExecutor::completed(&req.id, &req.name, "ask tool output")
                         .with_permission_info(PermissionInfo {
                             tool_id: req.id.clone(),
+                            state_key: req.id.clone(),
                             tool_name: req.name.clone(),
                             tool_source: ToolSource::Local { tool: None },
                             run_mode: RunMode::Ask,
@@ -3776,6 +3888,7 @@ async fn test_tool_call_returns_error() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -5080,6 +5193,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
         config
             .conversation
@@ -5100,6 +5214,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -5272,6 +5387,7 @@ async fn test_single_tool_call_rendered_with_args() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -5376,6 +5492,283 @@ async fn test_single_tool_call_rendered_with_args() {
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// Answers `contents of <path>` for the `path` it is given, failing for
+/// `bad.rs`, and records the order it ran in.
+struct PathReader(Arc<Mutex<Vec<String>>>);
+
+#[async_trait]
+impl BuiltinTool for PathReader {
+    async fn execute(&self, arguments: &Value, _: &IndexMap<String, Value>) -> Outcome {
+        let path = arguments["path"].as_str().unwrap_or_default().to_owned();
+        self.0.lock().unwrap().push(path.clone());
+        if path == "bad.rs" {
+            return Outcome::Error {
+                message: "no such file".into(),
+                trace: vec![],
+                transient: false,
+            };
+        }
+        Outcome::Success {
+            content: format!("contents of {path}"),
+        }
+    }
+}
+
+/// What one turn calling a fan-out tool left behind.
+struct FanOutTurn {
+    /// The one response recorded for the call.
+    response: ToolCallResponse,
+
+    /// The `path` of every time the tool ran, in order.
+    runs: Vec<String>,
+
+    /// What the terminal showed on stderr.
+    chrome: String,
+}
+
+/// Run one turn in which the assistant calls `fs_read_file`, configured by
+/// `tool`, with `arguments`, against the real execution service.
+#[expect(
+    clippy::too_many_lines,
+    reason = "One end-to-end fixture: workspace, service, provider, and the turn"
+)]
+async fn fan_out_turn(tool: Value, arguments: &Value) -> FanOutTurn {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+
+    let mut config = AppConfig::new_test();
+    config.style.tool_call.show = true;
+    let partial: PartialToolConfig = serde_json::from_value(tool).unwrap();
+    config.conversation.tools.insert(
+        "fs_read_file".into(),
+        ToolConfig::from_partial(partial, vec![]).unwrap(),
+    );
+    let storage = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
+    let mut workspace = Workspace::in_memory(root).with_backend(storage);
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+
+    let definitions = vec![ToolDefinition {
+        name: "fs_read_file".into(),
+        docs: ToolDocs::default(),
+        parameters: json!({
+            "type": "object",
+            "properties": { "path": { "type": "string" } },
+            "required": ["path"],
+        }),
+    }];
+    let runs = Arc::new(Mutex::new(Vec::new()));
+    let (source, owner) = TerminalExecutorSource::start(
+        BuiltinExecutors::new().register("fs_read_file", PathReader(runs.clone())),
+        no_commands(),
+        &definitions,
+        &config.conversation.tools,
+        Arc::new(ApprovalStore::default()),
+        InvocationContext::default(),
+        &Client::default(),
+        root.to_owned(),
+    )
+    .await
+    .unwrap();
+    // What production hands the provider: the service's advertisement.
+    let tools = source.advertised();
+
+    let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        responses: vec![
+            vec![
+                Event::tool_call_start(0, "call_1".to_string(), "fs_read_file".to_string()),
+                Event::tool_call_args(0, arguments.to_string()),
+                Event::flush(0),
+                Event::Finished(FinishReason::Completed),
+            ],
+            vec![
+                Event::message(0, "Done.\n\n"),
+                Event::flush(0),
+                Event::Finished(FinishReason::Completed),
+            ],
+        ],
+        call_index: AtomicUsize::new(0),
+        model: ModelDetails::empty(id::ModelIdConfig {
+            provider: ProviderId::Test,
+            name: "fan-out-mock".parse().expect("valid name"),
+        }),
+    });
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+    let router = detached_router();
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+
+    run_turn_loop(
+        provider,
+        &model,
+        &config,
+        &router,
+        root,
+        InvocationContext::default(),
+        false,
+        &[],
+        &lock,
+        ToolChoice::Auto,
+        &tools,
+        printer.clone(),
+        Arc::new(MockPromptBackend::new()),
+        ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)),
+        ChatRequest::from("Read the files"),
+        PendingStreamTrim::default(),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
+    )
+    .await
+    .unwrap();
+    owner.shutdown().await.unwrap();
+    printer.flush();
+
+    let responses = lock
+        .events()
+        .iter()
+        .filter_map(|event| event.event.as_tool_call_response())
+        .filter(|response| response.id == "call_1")
+        .cloned()
+        .collect::<Vec<_>>();
+    let [response] = <[_; 1]>::try_from(responses).expect("one call is answered once");
+    let runs = runs.lock().unwrap().clone();
+    let chrome = err.lock().clone();
+    FanOutTurn {
+        response,
+        runs,
+        chrome,
+    }
+}
+
+/// One provider tool call carrying three operations runs the tool three times
+/// and answers with one response holding all three results.
+///
+/// This is fan-out end to end through the execution service: the envelope goes
+/// in, three separate executions come out, the terminal shows three headers,
+/// and the provider gets back the single response its one call is waiting for.
+#[tokio::test]
+async fn a_fanned_out_call_runs_every_operation_and_answers_once() {
+    let turn = timeout(
+        Duration::from_secs(10),
+        fan_out_turn(
+            json!({"source": "builtin", "run": "allow", "fan_out": true}),
+            &json!({ "ops": [{ "path": "a.rs" }, { "path": "b.rs" }, { "path": "c.rs" }] }),
+        ),
+    )
+    .await
+    .expect("the turn ends");
+
+    // Counted rather than read off the response: running one operation and
+    // printing three sections would pass the text assertion below.
+    let mut runs = turn.runs.clone();
+    runs.sort();
+    assert_eq!(runs, vec!["a.rs", "b.rs", "c.rs"], "one run per operation");
+    assert_eq!(
+        turn.response.result,
+        Ok(
+            "[1/3] ok\ncontents of a.rs\n\n[2/3] ok\ncontents of b.rs\n\n[3/3] ok\ncontents of \
+             c.rs\n"
+                .to_owned()
+        )
+    );
+
+    // Three operations render as three calls, matching what a model that
+    // issued them separately would have shown.
+    assert_eq!(
+        turn.chrome.matches("Calling tool").count(),
+        3,
+        "one header per operation.\nChrome:\n{}",
+        turn.chrome
+    );
+    assert!(
+        !turn.chrome.contains("ops"),
+        "the envelope must not reach the terminal.\nChrome:\n{}",
+        turn.chrome
+    );
+}
+
+/// A `stop` policy that rules out the operations after a failure still ends the
+/// turn.
+///
+/// The second operation never runs, so no tool attempt is left to report it;
+/// the service settling it as not run is what lets the Host finish.
+#[tokio::test]
+async fn a_stop_policy_that_rules_out_the_rest_ends_the_turn() {
+    let turn = timeout(
+        Duration::from_secs(10),
+        fan_out_turn(
+            json!({
+                "source": "builtin",
+                "run": "allow",
+                "fan_out": { "concurrency": 1, "on_error": "stop" },
+            }),
+            &json!({ "ops": [{ "path": "bad.rs" }, { "path": "good.rs" }] }),
+        ),
+    )
+    .await
+    .expect("the turn ends");
+
+    assert_eq!(turn.runs, vec!["bad.rs"], "the second operation never ran");
+    // Nothing succeeded, so the call is recorded as the error it is: the
+    // provider is told so, and replay shows it in the error style.
+    assert_eq!(
+        turn.response.result,
+        Err(
+            "[1/2] error\nno such file\n\n[2/2] not run (stopped after operation 1 failed)\n"
+                .to_owned()
+        )
+    );
+}
+
+/// A malformed envelope answers with a message naming what went wrong, and the
+/// tool never runs.
+#[tokio::test]
+async fn a_fanned_out_call_with_an_empty_envelope_is_refused() {
+    let turn = timeout(
+        Duration::from_secs(10),
+        fan_out_turn(
+            json!({"source": "builtin", "run": "allow", "fan_out": true}),
+            &json!({ "ops": [] }),
+        ),
+    )
+    .await
+    .expect("the turn ends");
+
+    assert!(
+        turn.runs.is_empty(),
+        "a call with no operations runs nothing"
+    );
+    assert_eq!(
+        turn.response.result,
+        Err(
+            "Tool 'fs_read_file' was called with an empty `ops` array, so there was nothing to \
+             do. Include at least one operation."
+                .to_owned()
+        )
+    );
+}
+
+/// A call to a fan-out tool without the envelope runs as an ordinary call.
+#[tokio::test]
+async fn a_bare_call_to_a_fan_out_tool_runs_once_unframed() {
+    let turn = timeout(
+        Duration::from_secs(10),
+        fan_out_turn(
+            json!({"source": "builtin", "run": "allow", "fan_out": true}),
+            &json!({ "path": "a.rs" }),
+        ),
+    )
+    .await
+    .expect("the turn ends");
+
+    assert_eq!(turn.runs, vec!["a.rs"]);
+    assert_eq!(turn.response.result, Ok("contents of a.rs".to_owned()));
 }
 
 /// An executor that writes to the stderr sink the coordinator hands it, then
@@ -5488,6 +5881,7 @@ fn talking_tool_config(names: &[&str]) -> AppConfig {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
     }
 
@@ -5994,6 +6388,7 @@ async fn a_tool_can_opt_out_of_the_progress_window() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -6174,16 +6569,6 @@ impl PromptBackend for ObservingPromptBackend {
             help,
             output,
         )
-    }
-
-    fn text(
-        &self,
-        message: &str,
-        default: Option<&str>,
-        writer: &mut dyn Write,
-    ) -> Result<TextAnswer, InquireError> {
-        self.observe();
-        self.inner.text(message, default, writer)
     }
 
     fn select(
@@ -6538,6 +6923,7 @@ fn inquiry_tool_config(questions: &[&str]) -> ToolConfig {
         options: IndexMap::default().into(),
         access: None,
         cancellation_response: None,
+        fan_out: None,
     }
 }
 
@@ -7668,6 +8054,7 @@ async fn test_parallel_tools_one_with_inquiry() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -8090,6 +8477,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
                 options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
+                fan_out: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -8519,6 +8907,7 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
             options: IndexMap::default().into(),
             access: None,
             cancellation_response: None,
+            fan_out: None,
         });
 
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -8644,6 +9033,7 @@ async fn a_tool_that_does_not_join_reasoning_renders_unshaded_live() {
             options: IndexMap::default().into(),
             access: None,
             cancellation_response: None,
+            fan_out: None,
         });
 
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));

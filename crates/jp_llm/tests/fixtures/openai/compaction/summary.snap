@@ -13,7 +13,7 @@ expression: request
     {
       "type": "message",
       "role": "user",
-      "content": "[Summary of previous conversation]"
+      "content": "[Summary of the earlier part of this conversation. The messages after it are still in your context.]"
     },
     {
       "type": "message",

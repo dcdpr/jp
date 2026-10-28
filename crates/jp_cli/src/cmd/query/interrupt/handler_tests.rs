@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use inquire::{InquireError, TextAnswer};
+use inquire::InquireError;
 use jp_editor::MockEditorBackend;
 use jp_inquire::{
     InlineOption, ReplyEditMode, ReplyOutcome,
@@ -71,15 +71,6 @@ impl PromptBackend for UnavailableBackend {
         _help: Option<&str>,
         _output: Box<dyn std::io::Write + Send>,
     ) -> Result<ReplyOutcome, InquireError> {
-        Err(InquireError::NotTTY)
-    }
-
-    fn text(
-        &self,
-        _message: &str,
-        _default: Option<&str>,
-        _writer: &mut dyn std::io::Write,
-    ) -> Result<TextAnswer, InquireError> {
         Err(InquireError::NotTTY)
     }
 

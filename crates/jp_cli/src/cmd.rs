@@ -453,6 +453,19 @@ impl From<crate::error::Error> for Error {
             Mcp(error) => return error.into(),
             McpEndpoint(error) => [("message", error.to_string())].into(),
             McpHost(error) => with_cause(&error, "MCP Host control failed"),
+            McpConnectionLost => [
+                (
+                    "message",
+                    "Lost the connection to the JP MCP Server, so the turn ended".to_owned(),
+                ),
+                (
+                    "suggestion",
+                    "The tool calls it could not complete are recorded in the conversation. \
+                     Continue the conversation to retry them on a new connection."
+                        .to_owned(),
+                ),
+            ]
+            .into(),
             Llm(error) => return error.into(),
             Io(error) => return error.into(),
             Url(error) => return error.into(),
@@ -538,6 +551,14 @@ impl From<crate::error::Error> for Error {
             ]
             .into(),
             MissingEditor => [("message", "Missing editor".to_owned())].into(),
+            NonInteractiveEditor { suggestion } => [
+                (
+                    "message",
+                    "Cannot open the editor: nobody is present to close it".to_owned(),
+                ),
+                ("suggestion", suggestion.to_owned()),
+            ]
+            .into(),
             Schema(error) => [("message", "Invalid schema".to_owned()), ("error", error)].into(),
             StructuredData(error) => [
                 ("message", "No structured output".to_owned()),
@@ -604,6 +625,17 @@ impl From<crate::error::Error> for Error {
             )]
             .into(),
             Compaction(error) => [("message", "Compaction error".into()), ("error", error)].into(),
+            // One line, no suggestion: the neighbouring variants' `suggestion`
+            // field renders as an extra row under the message, which is more
+            // than this is worth saying.
+            NothingToCompact { id, turns } => [(
+                "message",
+                format!(
+                    "No turns to compact in conversation {id}, the selection resolves to 0 of its \
+                     {turns} turns."
+                ),
+            )]
+            .into(),
             SummaryOverlap {
                 authored,
                 from,
@@ -831,6 +863,11 @@ impl From<jp_llm::Error> for Error {
                 ("message", "Unsupported service tier".into()),
                 ("provider", provider.to_string()),
                 ("tier", tier.to_string()),
+            ]
+            .into(),
+            error @ UnsupportedOutputSchema { .. } => [
+                ("message", "Unsupported structured output schema".into()),
+                ("error", error.to_string()),
             ]
             .into(),
             Stream(stream_error) => [

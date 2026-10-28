@@ -362,6 +362,8 @@ pub struct ToolInputSchema {
     ///
     /// Keys here serialize alongside the fields above, so avoid repeating
     /// `type`, `properties`, `required`, or `additionalProperties`.
+    /// The exception is an `additionalProperties` that is a schema rather than
+    /// a boolean, which lives here while `additional_properties` is `None`.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, Value>,
 }
@@ -390,9 +392,16 @@ impl From<serde_json::Map<String, Value>> for ToolInputSchema {
             .filter_map(|v| v.as_str().map(str::to_owned))
             .collect();
 
-        let additional_properties = schema
-            .remove("additionalProperties")
-            .and_then(|v| v.as_bool());
+        // A schema for the extra keys has no place in the boolean field, so it
+        // stays among the extras rather than being dropped.
+        let additional_properties = match schema.remove("additionalProperties") {
+            Some(Value::Bool(allowed)) => Some(allowed),
+            Some(other) => {
+                schema.insert("additionalProperties".to_owned(), other);
+                None
+            }
+            None => None,
+        };
 
         Self {
             kind: ToolInputSchemaKind::Object,

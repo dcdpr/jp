@@ -53,7 +53,7 @@ use super::{
         signals::InterruptUi,
     },
     stream::{
-        ResponseBoundary, StreamErrorOutcome, StreamRetryState, can_restart_agent,
+        ResponseBoundary, StreamErrorOutcome, StreamRetryState, agent_restart_is_safe,
         commit_partial_response, handle_stream_error,
     },
     tool::{
@@ -649,8 +649,11 @@ async fn drive_turn(
                                 Ok(event) => event,
                                 Err(e) => {
                                     tool_renderer.cancel_all();
+                                    // Retryable or not, an agent stream with a
+                                    // call of unknown outcome ends the turn:
+                                    // restarting it could run that call twice.
                                     if matches!(execution, ToolExecution::Agent { .. })
-                                        && !can_restart_agent(&e, &conv.events())
+                                        && !agent_restart_is_safe(&conv.events())
                                     {
                                         commit_partial_response(
                                             &mut turn_coordinator,
@@ -1027,6 +1030,22 @@ async fn drive_turn(
                         )
                         .await?;
                         break;
+                    }
+
+                    // The Host lost its connection to the JP MCP Server, so
+                    // nothing more can run this turn. Persist the responses
+                    // so every tool call keeps a matching response, then end
+                    // the turn with an error instead of asking the assistant
+                    // to retry on a connection that is gone.
+                    ExecutionOutcome::ConnectionLost => {
+                        commit_tool_responses(
+                            execution_result,
+                            tool_coordinator,
+                            &mut turn_coordinator,
+                            &mut conv,
+                        )
+                        .await?;
+                        return Err(Error::McpConnectionLost);
                     }
 
                     // The next loop iteration re-executes the cancelled

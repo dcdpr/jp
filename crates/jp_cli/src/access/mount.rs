@@ -7,7 +7,7 @@
 //! - `MODE` is `ro` (default) or `rw`.
 //!   `rw` requires an explicit `TOOL:` prefix.
 //! - `TOOL:` scopes the grant to a single tool; without it the grant expands to
-//!   all enabled local tools.
+//!   all enabled local and command plugin tools.
 
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use jp_config::conversation::tool::access::FsRuleConfig;
@@ -24,7 +24,8 @@ pub enum MountMode {
 /// A parsed `--mount` specification.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MountSpec {
-    /// Single tool the grant applies to, or `None` for all enabled local tools.
+    /// Single tool the grant applies to, or `None` for all enabled local and
+    /// command plugin tools.
     pub tool: Option<String>,
     /// Workspace-relative symlink location, as typed (relative to CWD).
     pub name: String,

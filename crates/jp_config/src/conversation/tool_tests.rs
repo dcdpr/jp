@@ -8,6 +8,94 @@ use crate::{
     util::build,
 };
 
+/// Build a config from `assignments`, each written as `--cfg` takes it.
+fn build_assigned(assignments: &[&str]) -> Result<crate::AppConfig, String> {
+    use crate::assignment::{AssignKeyValue as _, KvAssignment};
+
+    let mut partial = PartialAppConfig::new_test();
+    for assignment in assignments {
+        partial
+            .assign(assignment.parse::<KvAssignment>().unwrap())
+            .unwrap();
+    }
+    build(partial).map_err(|error| error.to_string())
+}
+
+/// A tool that runs as a subprocess can be asked to format its own arguments.
+#[test]
+fn parameters_tool_is_accepted_on_local_and_command_tools() {
+    let config = build_assigned(&[
+        "conversation.tools.ticket_create.source=plugin.command.ticket.create",
+        "conversation.tools.ticket_create.style.parameters=tool",
+        "conversation.tools.word_count.source=local",
+        "conversation.tools.word_count.command=wc",
+        "conversation.tools.word_count.style.parameters=tool",
+    ])
+    .unwrap();
+
+    for name in ["ticket_create", "word_count"] {
+        assert_eq!(
+            config
+                .conversation
+                .tools
+                .get(name)
+                .unwrap()
+                .style()
+                .parameters,
+            style::ParametersStyle::Tool
+        );
+    }
+}
+
+/// A builtin or MCP tool has nothing JP can ask to format its arguments, and a
+/// call announced by an empty formatter would show no arguments at all.
+#[test]
+fn parameters_tool_is_rejected_on_an_mcp_tool() {
+    let error = build_assigned(&[
+        "conversation.tools.notes.source=mcp.grizzly",
+        "conversation.tools.notes.style.parameters=tool",
+    ])
+    .unwrap_err();
+
+    assert!(
+        error.contains(
+            "conversation.tools.notes: `style.parameters = \"tool\"` is only supported on local \
+             and command plugin tools, but 'notes' is a mcp tool"
+        ),
+        "unexpected error: {error}"
+    );
+}
+
+/// The `'*'` block reaches every tool without a style of its own, so setting
+/// `tool` there is rejected when a builtin or MCP tool would inherit it.
+#[test]
+fn parameters_tool_in_the_defaults_is_rejected_when_an_mcp_tool_inherits_it() {
+    let error = build_assigned(&[
+        "conversation.tools.*.style.parameters=tool",
+        "conversation.tools.notes.source=mcp.grizzly",
+    ])
+    .unwrap_err();
+
+    assert!(
+        error.contains(
+            "conversation.tools.'*'.style.parameters: `tool` is only supported on local and \
+             command plugin tools, but 'notes' is a mcp tool that inherits it; set it on each \
+             tool instead"
+        ),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn parameters_tool_in_the_defaults_is_accepted_when_only_subprocess_tools_inherit_it() {
+    let config = build_assigned(&[
+        "conversation.tools.*.style.parameters=tool",
+        "conversation.tools.ticket_create.source=plugin.command.ticket.create",
+    ]);
+
+    assert!(config.is_ok(), "{config:?}");
+}
+
 /// A tool opting out of the progress window keeps that answer through the whole
 /// loader, not just when the style is built in memory.
 ///
@@ -191,9 +279,106 @@ fn access_on_mcp_tool_is_rejected_by_validation() {
 
     let err = build(partial).unwrap_err().to_string();
     assert!(
-        err.contains("only supported on local tools"),
+        err.contains(
+            "conversation.tools.my_mcp: `access` is only supported on local and command plugin \
+             tools, but 'my_mcp' is a mcp tool"
+        ),
         "unexpected error: {err}"
     );
+}
+
+/// A command plugin tool is a subprocess like a local tool, so it takes the
+/// same grants.
+#[test]
+fn access_on_command_tool_is_accepted_by_validation() {
+    use crate::{
+        PartialAppConfig,
+        conversation::tool::access::{PartialAccessConfig, PartialFsRuleConfig},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("ticket_create".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::CommandPlugin {
+                plugin: "ticket".to_owned(),
+                tool: Some("create".to_owned()),
+            }),
+            access: Some(PartialAccessConfig {
+                fs: vec![PartialFsRuleConfig {
+                    path: Some(".".to_owned()),
+                    read: Some(true),
+                    ..Default::default()
+                }]
+                .into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
+    let config = build(partial).unwrap();
+    let access = config
+        .conversation
+        .tools
+        .get("ticket_create")
+        .unwrap()
+        .access()
+        .expect("the tool's own grants")
+        .clone();
+
+    assert_eq!(access.fs.len(), 1);
+    assert_eq!(access.fs[0].path, ".");
+}
+
+/// A `'*'` block restricts every subprocess-backed tool, command plugin tools
+/// included: one left out would run unrestricted under a policy the user
+/// believes covers it.
+#[test]
+fn defaults_access_applies_to_a_command_tool_without_its_own() {
+    use crate::{
+        PartialAppConfig,
+        conversation::tool::access::{PartialAccessConfig, PartialFsRuleConfig},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools.defaults.access = Some(PartialAccessConfig {
+        fs: vec![PartialFsRuleConfig {
+            path: Some("src".to_owned()),
+            read: Some(true),
+            ..Default::default()
+        }]
+        .into(),
+        ..Default::default()
+    });
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("ticket_create".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::CommandPlugin {
+                plugin: "ticket".to_owned(),
+                tool: Some("create".to_owned()),
+            }),
+            ..Default::default()
+        });
+
+    let config = build(partial).unwrap();
+    let access = config
+        .conversation
+        .tools
+        .get("ticket_create")
+        .unwrap()
+        .access()
+        .expect("inherited from the '*' block")
+        .clone();
+
+    assert_eq!(access.fs.len(), 1);
+    assert_eq!(access.fs[0].path, "src");
+    assert_eq!(access.fs[0].read, Some(true));
 }
 
 #[test]
@@ -1440,11 +1625,21 @@ fn the_tool_source_pattern_agrees_with_the_parser() {
         "mcp.bookworm",
         "mcp.bookworm.crate_readme",
         "mcp.bookworm.a.b",
-        // Rejected by the parser: no server named, an empty server, or a
-        // prefix that is not a source at all.
+        "plugin.command.ticket",
+        "plugin.command.ticket.create",
+        // Rejected by the parser: no server or plugin named, an empty one,
+        // a plugin kind JP does not have, or a prefix that is not a source at
+        // all.
         "mcp",
         "mcp.",
         "mcp..tool",
+        "plugin",
+        "plugin.",
+        "plugin.command",
+        "plugin.command.",
+        "plugin.command..create",
+        "plugin.wasm.ticket",
+        "command.ticket",
         "nonsense",
         "",
         "builtinx",
@@ -1511,6 +1706,75 @@ fn test_tool_source_mcp_roundtrip_without_tool() {
 
     let parsed: ToolSource = serde_json::from_str(&serialized).unwrap();
     assert_eq!(parsed, original);
+}
+
+#[test]
+fn test_tool_source_command_plugin_parses_plugin_only() {
+    let parsed: ToolSource = "plugin.command.ticket".parse().unwrap();
+    assert_eq!(parsed, ToolSource::CommandPlugin {
+        plugin: "ticket".to_owned(),
+        tool: None,
+    });
+}
+
+#[test]
+fn test_tool_source_command_plugin_parses_plugin_and_tool() {
+    let parsed: ToolSource = "plugin.command.ticket.create".parse().unwrap();
+    assert_eq!(parsed, ToolSource::CommandPlugin {
+        plugin: "ticket".to_owned(),
+        tool: Some("create".to_owned()),
+    });
+}
+
+#[test]
+fn test_tool_source_command_plugin_rejects_missing_plugin() {
+    for input in [
+        "plugin",
+        "plugin.",
+        "plugin.command",
+        "plugin.command.",
+        "plugin.command..create",
+    ] {
+        let err = input.parse::<ToolSource>().unwrap_err();
+        assert_eq!(
+            err,
+            "A plugin tool source must name the plugin: use `plugin.command.<plugin>` or \
+             `plugin.command.<plugin>.<tool>`.",
+            "for {input:?}"
+        );
+    }
+}
+
+/// Only command plugins serve tools; another kind is named as unknown rather
+/// than read as a plugin called `wasm`.
+#[test]
+fn test_tool_source_rejects_an_unknown_plugin_kind() {
+    let err = "plugin.wasm.ticket".parse::<ToolSource>().unwrap_err();
+    assert_eq!(err, "Unknown plugin kind: wasm, must be: command");
+}
+
+#[test]
+fn test_tool_source_command_plugin_roundtrip() {
+    for (original, serialized) in [
+        (
+            ToolSource::CommandPlugin {
+                plugin: "ticket".to_owned(),
+                tool: Some("create".to_owned()),
+            },
+            r#""plugin.command.ticket.create""#,
+        ),
+        (
+            ToolSource::CommandPlugin {
+                plugin: "ticket".to_owned(),
+                tool: None,
+            },
+            r#""plugin.command.ticket""#,
+        ),
+    ] {
+        assert_eq!(serde_json::to_string(&original).unwrap(), serialized);
+        let parsed: ToolSource = serde_json::from_str(serialized).unwrap();
+        assert_eq!(parsed, original);
+    }
 }
 
 #[test]
@@ -1741,6 +2005,204 @@ fn test_delta_enable_records_only_changed_subfield() {
         Some(PartialEnableConfig {
             state: Some(false),
             allow_toggle: None,
+        })
+    );
+}
+
+#[test]
+fn fan_out_bool_shorthand_means_enabled_and_unbounded() {
+    let partial: PartialFanOutConfig = serde_json::from_value(json!(true)).expect("parses");
+
+    assert_eq!(partial, PartialFanOutConfig::ON);
+    assert_eq!(
+        partial.effective(),
+        Some(FanOut {
+            concurrency: None,
+            on_error: FanOutOnError::Continue,
+        })
+    );
+}
+
+#[test]
+fn fan_out_false_resolves_to_no_fan_out() {
+    let partial: PartialFanOutConfig = serde_json::from_value(json!(false)).expect("parses");
+
+    assert_eq!(partial.effective(), None);
+}
+
+#[test]
+fn fan_out_table_form_is_enabled_without_naming_enabled() {
+    let partial: PartialFanOutConfig =
+        serde_json::from_value(json!({ "concurrency": 1, "on_error": "stop" })).expect("parses");
+
+    let resolved = partial.effective().expect("the table form enables fan-out");
+    assert_eq!(resolved, FanOut {
+        concurrency: Some(1),
+        on_error: FanOutOnError::Stop,
+    });
+    assert!(resolved.is_sequential());
+    assert!(resolved.stops_on_error());
+}
+
+/// A tool that accepts operations and then runs none of them is not a state any
+/// configuration should reach by accident, so `0` reads as unbounded.
+#[test]
+fn fan_out_concurrency_of_zero_reads_as_unbounded() {
+    let partial: PartialFanOutConfig =
+        serde_json::from_value(json!({ "concurrency": 0 })).expect("parses");
+
+    assert_eq!(
+        partial.effective(),
+        Some(FanOut {
+            concurrency: None,
+            on_error: FanOutOnError::Continue,
+        })
+    );
+}
+
+#[test]
+fn fan_out_rejects_an_unknown_field() {
+    let err = serde_json::from_value::<PartialFanOutConfig>(json!({ "mode": "sequential" }))
+        .expect_err("an unknown field is rejected");
+
+    assert!(
+        err.to_string().contains("unknown field `mode`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn fan_out_resolves_from_toml_through_the_loader() {
+    let loaded: PartialAppConfig = toml::from_str(
+        r#"
+[conversation.tools.'*']
+run = "allow"
+
+[conversation.tools.reader]
+source = "local"
+fan_out = true
+
+[conversation.tools.writer]
+source = "local"
+fan_out = { concurrency = 1, on_error = "stop" }
+
+[conversation.tools.plain]
+source = "local"
+"#,
+    )
+    .expect("the fixture parses");
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools = loaded.conversation.tools;
+
+    let config = build(partial).expect("the fixture resolves");
+    let tools = &config.conversation.tools;
+
+    assert_eq!(
+        tools.get("reader").expect("reader is configured").fan_out(),
+        Some(FanOut {
+            concurrency: None,
+            on_error: FanOutOnError::Continue,
+        })
+    );
+    assert_eq!(
+        tools.get("writer").expect("writer is configured").fan_out(),
+        Some(FanOut {
+            concurrency: Some(1),
+            on_error: FanOutOnError::Stop,
+        })
+    );
+    assert_eq!(
+        tools.get("plain").expect("plain is configured").fan_out(),
+        None,
+        "a tool that says nothing takes one operation per call"
+    );
+}
+
+/// Fan-out rewrites a tool's argument shape, so a `'*'` block must not reach a
+/// tool that never asked for it.
+#[test]
+fn fan_out_is_not_inherited_from_the_defaults_block() {
+    let loaded: PartialAppConfig = toml::from_str(
+        r#"
+[conversation.tools.'*']
+run = "allow"
+
+[conversation.tools.plain]
+source = "local"
+"#,
+    )
+    .expect("the fixture parses");
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools = loaded.conversation.tools;
+
+    let config = build(partial).expect("the fixture resolves");
+
+    assert_eq!(
+        config
+            .conversation
+            .tools
+            .get("plain")
+            .expect("plain is configured")
+            .fan_out(),
+        None
+    );
+}
+
+#[test]
+fn fan_out_assign_kv_accepts_the_shorthand_and_the_subfields() {
+    use crate::assignment::KvAssignment;
+
+    let mut tool = PartialToolConfig::default();
+
+    tool.assign(KvAssignment::try_from_cli("fan_out", "true").expect("parses"))
+        .expect("assigns");
+    assert_eq!(tool.fan_out, Some(PartialFanOutConfig::ON));
+
+    tool.assign(KvAssignment::try_from_cli("fan_out.concurrency", "4").expect("parses"))
+        .expect("assigns");
+    tool.assign(KvAssignment::try_from_cli("fan_out.on_error", "stop").expect("parses"))
+        .expect("assigns");
+
+    assert_eq!(
+        tool.fan_out
+            .as_ref()
+            .and_then(PartialFanOutConfig::effective),
+        Some(FanOut {
+            concurrency: Some(4),
+            on_error: FanOutOnError::Stop,
+        })
+    );
+}
+
+#[test]
+fn fan_out_delta_records_only_the_changed_subfield() {
+    use crate::delta::PartialConfigDelta as _;
+
+    let prev = PartialToolConfig {
+        fan_out: Some(PartialFanOutConfig {
+            enabled: Some(true),
+            concurrency: Some(4),
+            on_error: Some(FanOutOnError::Continue),
+        }),
+        ..Default::default()
+    };
+    let next = PartialToolConfig {
+        fan_out: Some(PartialFanOutConfig {
+            enabled: Some(true),
+            concurrency: Some(1),
+            on_error: Some(FanOutOnError::Continue),
+        }),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        prev.delta(next).fan_out,
+        Some(PartialFanOutConfig {
+            enabled: None,
+            concurrency: Some(1),
+            on_error: None,
         })
     );
 }

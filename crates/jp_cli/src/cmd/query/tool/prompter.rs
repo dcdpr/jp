@@ -496,20 +496,15 @@ impl ToolPrompter {
                 })
             }
             AnswerType::Text => {
-                let default_str = question.default.as_ref().and_then(|v| v.as_str());
-                let shown_default = default_str.map(|default| strip_controls(default, &[]));
+                let seed = question
+                    .default
+                    .as_ref()
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
 
-                let answer =
-                    self.prompt_backend
-                        .text(&text, shown_default.as_deref(), &mut writer)?;
-
-                // An accepted default carries the text the prompt showed; the
-                // tool gets back the default it offered. Typed text is the
-                // answer as typed, even when it matches what was shown.
-                let answer = match default_str {
-                    Some(default) if answer.is_default => default.to_owned(),
-                    _ => answer.value,
-                };
+                // The seed keeps its control characters: the widget paints them
+                // as stand-ins and submits the buffer as it was seeded.
+                let answer = self.prompt_text(&text, seed)?;
 
                 Ok(QuestionResult {
                     answer: Value::String(answer),
@@ -523,6 +518,25 @@ impl ToolPrompter {
                     answer: Value::String(answer),
                     persist_level: jp_tool::PersistLevel::None,
                 })
+            }
+        }
+    }
+
+    /// Ask for a free-text answer in the inline reply widget, seeded with
+    /// `seed`.
+    ///
+    /// An empty or whitespace-only submission is refused: the prompt opens
+    /// again with `seed` restored and a note that an answer is required.
+    /// Cancelling returns [`InquireError::OperationCanceled`].
+    fn prompt_text(&self, message: &str, seed: &str) -> Result<String, Error> {
+        let mut prompt = message.to_owned();
+        loop {
+            match self.inline_edit(&prompt, seed)? {
+                InlineEditResult::Cancelled => return Err(InquireError::OperationCanceled.into()),
+                InlineEditResult::Submitted(answer) if answer.trim().is_empty() => {
+                    prompt = format!("An answer is required. {message}");
+                }
+                InlineEditResult::Submitted(answer) => return Ok(answer),
             }
         }
     }
@@ -584,18 +598,27 @@ fn build_permission_question(tool_name: &str, tool_source: &ToolSource) -> Strin
         ToolSource::Builtin { .. } => "built-in",
         ToolSource::Local { .. } => "local",
         ToolSource::Mcp { .. } => "mcp",
+        ToolSource::CommandPlugin { .. } => "plugin",
     };
 
     let mut question = format!("Run {} {} tool", source_type, tool_name.yellow().bold());
 
-    if let ToolSource::Mcp { server, .. } = tool_source {
-        question = format!(
-            "{} from {} server?",
-            question,
-            server.as_str().blue().bold()
-        );
-    } else {
-        question.push('?');
+    match tool_source {
+        ToolSource::Mcp { server, .. } => {
+            question = format!(
+                "{} from {} server?",
+                question,
+                server.as_str().blue().bold()
+            );
+        }
+        ToolSource::CommandPlugin { plugin, .. } => {
+            question = format!(
+                "{} from {} plugin?",
+                question,
+                plugin.as_str().blue().bold()
+            );
+        }
+        ToolSource::Builtin { .. } | ToolSource::Local { .. } => question.push('?'),
     }
 
     question

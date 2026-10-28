@@ -76,6 +76,11 @@ pub(crate) enum Error {
     #[error("MCP Host control failed: {0}")]
     McpHost(#[source] ExecutorError),
 
+    /// The Host lost its connection to the JP MCP Server mid-turn, so the turn
+    /// ended with the calls it could not complete.
+    #[error("Lost the connection to the JP MCP Server")]
+    McpConnectionLost,
+
     #[error("LLM error")]
     Llm(#[from] jp_llm::Error),
 
@@ -160,6 +165,12 @@ pub(crate) enum Error {
     #[error("Missing editor")]
     MissingEditor,
 
+    /// `suggestion` names what the caller can do instead, and differs per
+    /// command: a query has text to send without an editor, an explicit edit
+    /// has nothing to fall back to.
+    #[error("Editor unavailable in a non-interactive invocation")]
+    NonInteractiveEditor { suggestion: &'static str },
+
     #[error("Task error: {0}")]
     Task(Box<dyn std::error::Error + Send + Sync>),
 
@@ -235,6 +246,23 @@ pub(crate) enum Error {
 
     #[error("Compaction error: {0}")]
     Compaction(String),
+
+    /// The compaction rules and turn selection together named no turn.
+    ///
+    /// Names the conversation and its size, and nothing else.
+    /// The bounds that came up empty are usually config the user never typed (a
+    /// rule's `keep_first` / `keep_last`), so naming them as a range would read
+    /// as a range they asked for.
+    /// A malformed range they did type is rejected earlier, by
+    /// [`crate::cmd::turn_selection::TurnSelection::check_turn_range`].
+    ///
+    /// The id matters because one invocation can name several conversations,
+    /// and the whole run is refused when any of them would compact nothing.
+    #[error(
+        "No turns to compact in conversation {id}, the selection resolves to 0 of its {turns} \
+         turns."
+    )]
+    NothingToCompact { id: ConversationId, turns: usize },
 
     /// A summary range would have to grow over text that cannot be re-derived.
     ///

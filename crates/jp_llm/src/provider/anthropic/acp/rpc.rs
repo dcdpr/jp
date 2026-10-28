@@ -124,9 +124,6 @@ pub(super) enum Inbound {
 }
 
 /// Handles everything the agent initiates.
-///
-/// Boxed rather than generic because one connection has exactly one handler and
-/// it captures the whole translation state.
 pub(super) type Handler =
     Box<dyn Fn(Inbound) -> BoxFuture<'static, Result<Value, RpcError>> + Send + Sync>;
 

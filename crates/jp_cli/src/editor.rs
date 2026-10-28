@@ -25,7 +25,7 @@ use jp_printer::Printer;
 pub(crate) use parser::CUT_MARKER;
 pub(crate) use parser::draft_query_text;
 use sha2::{Digest as _, Sha256};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::{
     editor::parser::QueryDocument,
@@ -49,8 +49,11 @@ pub(crate) fn build_editor_backend(
     config: &EditorConfig,
     printer: &Printer,
 ) -> Option<Arc<dyn EditorBackend>> {
+    let command = config.resolve()?.to_string();
+
     config.command().map(|cmd| {
         Arc::new(SuspendingEditor {
+            command,
             inner: Arc::new(TerminalEditorBackend::new(cmd)),
             printer: printer.clone(),
         }) as Arc<dyn EditorBackend>
@@ -64,6 +67,12 @@ pub(crate) fn build_editor_backend(
 /// Suspending erases any status region and blocks redraws until the child
 /// exits, so the printer's worker never writes into the editor's display.
 struct SuspendingEditor {
+    /// The resolved editor command line (`code --wait`).
+    ///
+    /// Logged before each edit so a trace shows which program was handed the
+    /// terminal.
+    command: String,
+
     /// The backend that actually spawns the editor.
     inner: Arc<dyn EditorBackend>,
 
@@ -73,11 +82,13 @@ struct SuspendingEditor {
 
 impl EditorBackend for SuspendingEditor {
     fn edit_text(&self, content: &str) -> EditorResult<(EditOutcome, String)> {
+        info!(editor = %self.command, "Opening configured editor.");
         let _pause = self.printer.suspend_status();
         self.inner.edit_text(content)
     }
 
     fn edit_file(&self, req: EditRequest<'_>) -> EditorResult<EditOutcome> {
+        info!(editor = %self.command, "Opening configured editor.");
         let _pause = self.printer.suspend_status();
         self.inner.edit_file(req)
     }
@@ -290,9 +301,19 @@ pub(crate) fn edit_query(
         doc.query = query;
     }
 
-    let config_value = build_config_text(config);
-    if doc.meta.config.value.is_empty() {
-        doc.meta.config.value = &config_value;
+    // A draft kept from an earlier run carries the config that run pre-filled.
+    // Show this run's config instead, keeping only what the user edited.
+    let seed = config_seed(config);
+    let seed_json = serde_json::to_string(&seed)
+        .ok()
+        .filter(|json| !json.contains("-->"));
+    let block = match reconcile_config_block(doc.meta.config.value, doc.meta.config.seed, &seed) {
+        ConfigBlock::Keep => None,
+        ConfigBlock::Replace(block) => Some(block),
+    };
+    if let Some(block) = &block {
+        doc.meta.config.value = block;
+        doc.meta.config.seed = seed_json.as_deref();
     }
 
     if let Some(error) = config_error {
@@ -319,7 +340,14 @@ pub(crate) fn edit_query(
     let mut partial = PartialAppConfig::empty();
     if !doc.meta.config.value.is_empty() {
         match toml::from_str::<PartialAppConfig>(doc.meta.config.value) {
-            Ok(v) => partial = v,
+            // A block that did not parse when the editor opened was shown with
+            // the seed it was written with. Now that it reads, the pre-filled
+            // fields the user left alone take this run's values; for a block
+            // that was refreshed on open this changes nothing.
+            Ok(v) => match parse_seed(doc.meta.config.seed) {
+                Some(stored) => partial = refresh_untouched(v, Some(&stored), &seed),
+                None => partial = v,
+            },
             Err(error) => {
                 let error = error.to_string();
                 return edit_query(config, conversation_root, stream, "", editor, Some(&error));
@@ -331,11 +359,13 @@ pub(crate) fn edit_query(
     Ok((doc.query.to_owned(), partial))
 }
 
-fn build_config_text(config: &AppConfig) -> String {
-    let model_id = &config.assistant.model.id;
-    let mut active_config = PartialAppConfig::empty();
-    active_config.assistant.model.id = model_id.to_partial();
-    active_config.assistant.model.parameters.reasoning = config
+/// The config a draft's block is pre-filled with.
+///
+/// A field added here must also be refreshed by [`refresh_untouched`].
+fn config_seed(config: &AppConfig) -> PartialAppConfig {
+    let mut seed = PartialAppConfig::empty();
+    seed.assistant.model.id = config.assistant.model.id.to_partial();
+    seed.assistant.model.parameters.reasoning = config
         .assistant
         .model
         .parameters
@@ -343,7 +373,90 @@ fn build_config_text(config: &AppConfig) -> String {
         .map(|v| v.to_partial())
         .or(Some(PartialReasoningConfig::Auto));
 
-    toml::to_string_pretty(&active_config).unwrap_or_default()
+    seed
+}
+
+/// What to do with a draft's config block when the editor opens it.
+#[derive(Debug, PartialEq)]
+enum ConfigBlock {
+    /// Show the block exactly as stored, with its stored seed.
+    Keep,
+
+    /// Show this TOML instead, with the current seed.
+    Replace(String),
+}
+
+/// Bring a stored config block up to date with the config of this run.
+///
+/// The pre-filled fields the user left alone take `seed`'s values, and every
+/// other field is kept as written; see [`refresh_untouched`].
+///
+/// A block that is not valid TOML is kept as it is, with its stored seed: its
+/// fields cannot be read, and the parse error it produces reopens the editor on
+/// it.
+/// [`edit_query`] refreshes it once the user's fix makes it read.
+fn reconcile_config_block(
+    block: &str,
+    stored_seed: Option<&str>,
+    seed: &PartialAppConfig,
+) -> ConfigBlock {
+    let render = |partial: &PartialAppConfig| {
+        ConfigBlock::Replace(toml::to_string_pretty(partial).unwrap_or_default())
+    };
+
+    if block.is_empty() {
+        return render(seed);
+    }
+
+    let Ok(stored) = toml::from_str::<PartialAppConfig>(block) else {
+        return ConfigBlock::Keep;
+    };
+
+    let stored_seed = parse_seed(stored_seed);
+    let refreshed = refresh_untouched(stored.clone(), stored_seed.as_ref(), seed);
+    if stored_seed.is_none() && refreshed != stored {
+        warn!("Refreshing the pre-filled config of a query draft written without a seed.");
+    }
+
+    render(&refreshed)
+}
+
+/// Read a draft's stored config seed, if it has a readable one.
+fn parse_seed(json: Option<&str>) -> Option<PartialAppConfig> {
+    json.and_then(|json| serde_json::from_str(json).ok())
+}
+
+/// Give the pre-filled fields of `block` that the user left alone the values
+/// `seed` has.
+///
+/// A pre-filled field counts as left alone while it still holds the value
+/// `stored_seed` filled it with.
+/// Without a `stored_seed` nothing tells an edit apart from a pre-filled value,
+/// so every pre-filled field takes `seed`'s value.
+///
+/// Every field the block was not pre-filled with is the user's own addition and
+/// is returned exactly as written, merge strategy included: diffing it against
+/// a seed that never held it would read it as a change from nothing, and lose
+/// the strategy that says how it merges.
+///
+/// Covers the same fields [`config_seed`] fills.
+fn refresh_untouched(
+    mut block: PartialAppConfig,
+    stored_seed: Option<&PartialAppConfig>,
+    seed: &PartialAppConfig,
+) -> PartialAppConfig {
+    let stored = stored_seed.map(|stored| &stored.assistant.model);
+    let model = &mut block.assistant.model;
+
+    if stored.is_none_or(|stored| stored.id == model.id) {
+        model.id = seed.assistant.model.id.clone();
+    }
+
+    if stored.is_none_or(|stored| stored.parameters.reasoning == model.parameters.reasoning) {
+        model.parameters.reasoning = seed.assistant.model.parameters.reasoning.clone();
+    }
+
+    block
 }
 
 fn build_history_text(history: &ConversationStream) -> String {
@@ -459,3 +572,7 @@ fn inquiry_answer_line(response: &InquiryResponse) -> String {
 #[cfg(test)]
 #[path = "editor_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "editor_draft_tests.rs"]
+mod draft_tests;

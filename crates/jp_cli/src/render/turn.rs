@@ -11,10 +11,7 @@ use std::{collections::HashMap, sync::Arc};
 use chrono::Utc;
 use jp_config::{
     PartialAppConfig,
-    conversation::tool::{
-        ToolConfigWithDefaults, ToolsConfig,
-        style::{DisplayStyleConfig, ParametersStyle},
-    },
+    conversation::tool::{ToolConfigWithDefaults, ToolsConfig, style::DisplayStyleConfig},
     model::id::PartialModelIdOrAliasConfig,
     style::{StyleConfig, reasoning::ReasoningDisplayConfig, typewriter::DelayDuration},
 };
@@ -22,6 +19,7 @@ use jp_conversation::{
     EventKind,
     stream::{TurnOrigin, turn_iter::Turn},
 };
+use jp_mcp::server::fan_out;
 use jp_printer::{ErrChannel, Printer};
 use tracing::warn;
 
@@ -206,13 +204,26 @@ impl TurnRenderer {
                     self.tool.set_region(&req.id, region);
 
                     if chrome_visible {
-                        self.tool
-                            .render_tool_call(&req.name, &req.arguments, &style.parameters);
+                        // A fanned-out call was shown live as one header per
+                        // operation, so replay reproduces that rather than
+                        // printing the envelope the provider was sent.
+                        // A call that does not fan out has one set of
+                        // arguments and renders as the single header it always
+                        // did.
+                        let operations = tool_cfg
+                            .as_ref()
+                            .and_then(ToolConfigWithDefaults::fan_out)
+                            .and(fan_out::expand(&req.arguments).ok())
+                            .unwrap_or_else(|| vec![req.arguments.clone()]);
 
-                        // Show stored custom-formatter output when replaying
-                        // a tool call that was originally rendered with a
-                        // Custom parameters style.
-                        if matches!(style.parameters, ParametersStyle::Custom(_))
+                        for arguments in &operations {
+                            self.tool
+                                .render_tool_call(&req.name, arguments, &style.parameters);
+                        }
+
+                        // Show stored formatter output when replaying a tool
+                        // call whose parameters style ran a formatter.
+                        if style.parameters.runs_formatter()
                             && let Some(rendered) = get_rendered_arguments(event_with_cfg.event)
                         {
                             self.tool.render_formatted_arguments(&rendered);

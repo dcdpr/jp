@@ -68,10 +68,18 @@ pub struct OpenaiConfig {
     /// Environment variable that contains the API key.
     ///
     /// A map names several keys, each selectable from the `auth` chain as
-    /// `api_key:<name>`:
+    /// `api_key:<name>`.
+    /// Each key is a variable, or a list read the same way as below:
     ///
     /// ```toml
     /// api_key_env = { work = "WORK_OPENAI_KEY", personal = "MY_OPENAI_KEY" }
+    /// ```
+    ///
+    /// A list is one key, read from the first variable that holds a non-empty
+    /// value:
+    ///
+    /// ```toml
+    /// api_key_env = ["WORK_OPENAI_KEY", "MY_OPENAI_KEY"]
     /// ```
     #[setting(default = "OPENAI_API_KEY")]
     pub api_key_env: ApiKeyEnv,
@@ -128,7 +136,7 @@ impl AssignKeyValue for PartialOpenaiConfig {
                     value => Err(format!("expected a string, got {value}").into()),
                 })?;
             }
-            "api_key_env" => self.api_key_env = kv.try_some_object_or_from_str()?,
+            "api_key_env" => self.api_key_env = kv.try_some_value()?,
             "base_url" => self.base_url = kv.try_some_string()?,
             "base_url_env" => self.base_url_env = kv.try_some_string()?,
             "codex_base_url" => self.codex_base_url = kv.try_some_string()?,

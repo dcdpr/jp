@@ -235,8 +235,8 @@ fn action_details(
                 .map(|title| strip_controls(title, &[])),
         )
         .with_event_count(events.len())
-        .with_turn_count(events.iter_turns().len())
-        .with_last_message_at(events.last().map(|v| v.event.timestamp))
+        .with_turn_count(events.turn_count())
+        .with_last_message_at(events.last_turn_event().map(|event| event.timestamp))
         .with_last_activated_at(Some(meta.last_activated_at))
         .with_pinned_flag(meta.is_pinned())
         .with_local_flag(matches!(lock.projection(), Projection::LocalOnly))

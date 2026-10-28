@@ -30,6 +30,71 @@ fn plugin(name: &str, dir: &str, command: &[&str]) -> LocalPlugin {
     }
 }
 
+/// A tool names its plugin by name, and the lookup finds that binary and
+/// nothing else.
+#[test]
+fn by_name_finds_the_plugin_with_that_name() {
+    let local = [
+        plugin("ticket", "/bin", &["ticket"]),
+        plugin("metrics", "/bin", &["metrics"]),
+    ];
+
+    let named = by_name("ticket", &local, None).unwrap().unwrap();
+
+    assert_eq!(named.plugin.path, Utf8PathBuf::from("/bin/jp-ticket"));
+    assert_eq!(named.official, None);
+}
+
+#[test]
+fn by_name_finds_nothing_for_an_absent_plugin() {
+    let local = [plugin("metrics", "/bin", &["metrics"])];
+
+    assert_eq!(by_name("ticket", &local, None).unwrap(), None);
+}
+
+/// Two binaries with one name would share one approval; a tool call refuses
+/// both, as a command does.
+#[test]
+fn by_name_refuses_a_name_two_binaries_share() {
+    let local = [
+        plugin("ticket", "/install", &["ticket"]),
+        plugin("ticket", "/bin", &["tickets"]),
+    ];
+
+    assert_eq!(
+        by_name("ticket", &local, None).unwrap_err(),
+        RouteError::SameName {
+            name: "ticket".to_owned(),
+            paths: vec!["/install/jp-ticket".into(), "/bin/jp-ticket".into()],
+        }
+    );
+}
+
+/// The official entry decides whether the binary is the published release, so
+/// it travels with the plugin; a third-party catalog entry with the same id
+/// does not make a binary official.
+#[test]
+fn by_name_carries_the_official_entry() {
+    let local = [
+        plugin("serve-web", "/install", &["serve", "web"]),
+        plugin("metrics", "/bin", &["metrics"]),
+    ];
+    let registry = registry();
+
+    let official = by_name("serve-web", &local, Some(&registry))
+        .unwrap()
+        .unwrap();
+    let third_party = by_name("metrics", &local, Some(&registry))
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        official.official.map(|entry| entry.id.as_str()),
+        Some("serve-web")
+    );
+    assert_eq!(third_party.official, None);
+}
+
 fn without_manifest(name: &str, dir: &str) -> LocalPlugin {
     LocalPlugin {
         manifest: ManifestState::Missing,

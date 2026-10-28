@@ -18,10 +18,11 @@ extends = [
 reasoning.display = "timer"
 
 [conversation.tools]
-# The triager replies to existing review threads. Each reply is gated on
-# user approval — the tool's parameters formatter shows a preview of the
-# parent comment + proposed reply before posting.
-github_pr_review_add_reply = { run = "ask" }
+# The triager replies to existing review threads. Replies and comments are
+# posted to the pending draft review without a prompt; the user curates the
+# draft on GitHub before submitting it.
+github_pr_review_add_reply.run = "unattended"
+github_pr_review_add_comment.run = "unattended"
 # `github_pulls` is redundant: the PR's title, description, and unified
 # diff are in the attached `gh:pull/N/diff` resource. Skip the duplicate
 # fetch.

@@ -15,6 +15,10 @@ run = "unattended"
 # log stays retrievable (issue #626).
 options.suppress = [".git/", "**/target/"]
 
+# No `fan_out` here on purpose. `prefixes` and `extensions` already scope a
+# single walk, so listing several trees is one operation with several filters,
+# not several operations. Fanning out would walk the workspace once per
+# operation and return the same files split across sections.
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "List files in the project's local filesystem."

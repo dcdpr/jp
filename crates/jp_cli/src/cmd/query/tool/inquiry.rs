@@ -294,19 +294,8 @@ impl InquiryBackend for LlmInquiryBackend {
         // Append the user-facing question with the structured output schema.
         // The caller is responsible for any context events (e.g. a
         // ToolCallResponse) that should precede this in the stream.
-        //
-        // The request carries the turn's tool definitions for prompt caching,
-        // and the history shows the tool being called, so a model left to
-        // guess reads the question as a cue to call the tool again. Saying
-        // plainly that it cannot, and that only the answer is wanted, keeps
-        // the reply to the value the tool asked for.
         events.start_turn(ChatRequest {
-            content: format!(
-                "The tool `{tool_name}` asked a question before it can continue.\n\n{}\n\nYou \
-                 cannot call tools here. Reply with only the answer to this question, based on \
-                 the conversation so far.",
-                question.text,
-            ),
+            content: inquiry_prompt(tool_name, question),
             schema: Some(create_inquiry_schema(question)),
             author: None,
         });
@@ -407,6 +396,29 @@ impl InquiryBackend for MockInquiryBackend {
             .cloned()
             .ok_or_else(|| InquiryError::Other(format!("No mock answer for inquiry: {inquiry_id}")))
     }
+}
+
+/// The request text that puts `question` to the assistant.
+///
+/// The question's preamble comes first: it is the tool's supporting material,
+/// and can describe arguments the conversation doesn't show, since arguments
+/// the user edited at the approval prompt never reach the stream.
+fn inquiry_prompt(tool_name: &str, question: &Question) -> String {
+    let asked = match &question.pre_amble {
+        Some(pre_amble) => format!("{pre_amble}\n\n{}", question.text),
+        None => question.text.clone(),
+    };
+
+    // The request carries the turn's tool definitions for prompt caching, and
+    // the history shows the tool being called, so a model left to guess reads
+    // the question as a cue to call the tool again. Saying plainly that it
+    // cannot, and that only the answer is wanted, keeps the reply to the value
+    // the tool asked for.
+    format!(
+        "The tool `{tool_name}` asked a question before it can continue.\n\n{asked}\n\nYou cannot \
+         call tools here. Reply with only the answer to this question, based on the conversation \
+         so far.",
+    )
 }
 
 /// Find the iteration index of the second-to-last provider-visible event.

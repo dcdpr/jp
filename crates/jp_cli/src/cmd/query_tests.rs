@@ -242,6 +242,66 @@ fn mount_seeds_an_unconfigured_tool_from_the_defaults() {
     assert_eq!(seed.fs[0].path.as_deref(), Some("src"));
 }
 
+/// Which tools a bare `--mount` (no `TOOL:` prefix) grants the mounted path to.
+///
+/// Every tool that runs as a subprocess JP starts gets it, and nothing else: a
+/// local or command plugin tool left out would lose access the user mounted for
+/// it, and a builtin or MCP tool given a rule would carry a grant nothing
+/// enforces.
+#[test]
+fn a_bare_mount_reaches_every_enabled_subprocess_tool() {
+    let mut partial = PartialAppConfig::new_test();
+    for (name, source) in [
+        ("local_tool", ToolSource::Local { tool: None }),
+        ("plugin_tool", ToolSource::CommandPlugin {
+            plugin: "ticket".to_owned(),
+            tool: None,
+        }),
+        ("mcp_tool", ToolSource::Mcp {
+            server: "server".to_owned(),
+            tool: None,
+        }),
+        ("builtin_tool", ToolSource::Builtin { tool: None }),
+    ] {
+        partial
+            .conversation
+            .tools
+            .tools
+            .insert(name.to_owned(), PartialToolConfig {
+                source: Some(source),
+                ..Default::default()
+            });
+    }
+
+    inject_mounts(
+        &mut partial,
+        &["notes=/elsewhere/notes".to_owned()],
+        Utf8Path::new("/ws"),
+        Utf8Path::new("/ws"),
+        None,
+    )
+    .unwrap();
+
+    let mut granted: Vec<&str> = partial
+        .conversation
+        .tools
+        .tools
+        .iter()
+        .filter(|(_, cfg)| {
+            cfg.access.as_ref().is_some_and(|access| {
+                access
+                    .fs
+                    .iter()
+                    .any(|rule| rule.path.as_deref() == Some("notes"))
+            })
+        })
+        .map(|(name, _)| name.as_str())
+        .collect();
+    granted.sort_unstable();
+
+    assert_eq!(granted, ["local_tool", "plugin_tool"]);
+}
+
 fn make_id(secs: u64) -> ConversationId {
     ConversationId::try_from(DateTime::<Utc>::UNIX_EPOCH + std::time::Duration::from_secs(secs))
         .unwrap()
@@ -348,6 +408,7 @@ async fn an_interrupt_during_mcp_startup_stops_the_turn_before_it_runs() {
         attachments: vec![],
         printer: Arc::new(printer),
         approvals: Arc::new(crate::access::approvals::ApprovalStore::default()),
+        command_plugins: CommandPlugins::default(),
         chat_request: ChatRequest::from("hello"),
         workspace_id: workspace.id().clone(),
         pending_trim: PendingStreamTrim::default(),
@@ -435,6 +496,7 @@ async fn a_client_stop_during_mcp_startup_stops_the_turn_before_it_runs() {
         attachments: vec![],
         printer: Arc::new(printer),
         approvals: Arc::new(crate::access::approvals::ApprovalStore::default()),
+        command_plugins: CommandPlugins::default(),
         chat_request: ChatRequest::from("hello"),
         workspace_id: workspace.id().clone(),
         pending_trim: PendingStreamTrim::default(),
@@ -2258,6 +2320,7 @@ fn edit_message_synthesizes_when_no_edit_without_query() {
             &stream,
             &mut pending_trim,
             false,
+            true,
             &config,
             root,
             &Printer::sink(),
@@ -2279,6 +2342,7 @@ fn edit_message_synthesizes_when_no_edit_without_query() {
             &stream,
             &mut pending_trim,
             false,
+            true,
             &config,
             root,
             &Printer::sink(),
@@ -2318,6 +2382,7 @@ fn edit_message_quote_without_editor_is_synthesized() {
             &stream,
             &mut pending_trim,
             false,
+            true,
             &config,
             Utf8Path::new("/tmp"),
             &Printer::sink(),
@@ -2351,6 +2416,7 @@ fn edit_message_skips_editor_when_no_edit_with_piped_stdin() {
             &stream,
             &mut pending_trim,
             true,
+            true,
             &config,
             root,
             &Printer::sink(),
@@ -2360,6 +2426,188 @@ fn edit_message_skips_editor_when_no_edit_with_piped_stdin() {
     assert_eq!(source, QuerySource::Inline);
     assert_eq!(request.content, "hi");
     assert!(partial.is_empty());
+}
+
+#[test]
+fn edit_message_skips_editor_when_non_interactive() {
+    // A query arriving on stdin with nobody at the terminal: the editor would
+    // block on a buffer no one can save, so the piped text is sent as-is.
+    //
+    // The configured editor names a program that cannot be spawned, so
+    // reaching the editor branch fails loudly instead of passing by accident.
+    let dir = Utf8TempDir::new().unwrap();
+    let mut config = AppConfig::new_test();
+    config.editor.cmd = Some(CommandConfigOrString::String(
+        "jp-editor-that-does-not-exist".to_owned(),
+    ));
+
+    let mut request = ChatRequest::from("piped payload");
+    let stream = ConversationStream::new_test();
+    let mut pending_trim = PendingStreamTrim::default();
+    let (source, partial) = Query::default()
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            true,
+            false,
+            &config,
+            dir.path(),
+            &Printer::sink(),
+        )
+        .unwrap();
+
+    assert_eq!(source, QuerySource::Inline);
+    assert_eq!(request.content, "piped payload");
+    assert!(partial.is_empty());
+    // The draft file is written before the editor is spawned, so its absence
+    // proves the editor branch was never entered.
+    assert!(!dir.path().join(editor::QUERY_FILENAME).exists());
+
+    // The same call with a user present does reach the editor, which proves
+    // the assertions above are pinned on interactivity and not on some other
+    // reason to skip.
+    let mut request = ChatRequest::from("piped payload");
+    let mut pending_trim = PendingStreamTrim::default();
+    let error = Query::default()
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            true,
+            true,
+            &config,
+            dir.path(),
+            &Printer::sink(),
+        )
+        .unwrap_err();
+
+    assert_matches!(error, Error::Editor(_));
+}
+
+#[test]
+fn edit_message_rejects_a_forced_editor_when_non_interactive() {
+    // `--quote` seeds the request with the assistant's own last message, for
+    // the user to reply between the quoted lines. With nobody to compose that
+    // reply, sending the seed would submit the assistant's words as the user's
+    // turn and persist it, so the run fails instead.
+    //
+    // `--edit` shares the condition, so it needs no test of its own.
+    let mut config = AppConfig::new_test();
+    config.editor.cmd = Some(CommandConfigOrString::String(
+        "jp-editor-that-does-not-exist".to_owned(),
+    ));
+
+    let query = Query {
+        input: QueryInput {
+            quote: Some(true),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let mut request = ChatRequest::from(" >  quoted reply");
+    let stream = ConversationStream::new_test();
+    let mut pending_trim = PendingStreamTrim::default();
+    let error = query
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            false,
+            false,
+            &config,
+            Utf8Path::new("/tmp"),
+            &Printer::sink(),
+        )
+        .unwrap_err();
+
+    let Error::NonInteractiveEditor { suggestion } = error else {
+        panic!("expected a non-interactive editor error, got: {error:?}");
+    };
+    assert_eq!(
+        suggestion,
+        "Run this from a terminal, or pass --no-edit instead to send the text as-is."
+    );
+    assert_eq!(
+        request.content, " >  quoted reply",
+        "the seed stays put rather than becoming the turn"
+    );
+}
+
+#[test]
+fn edit_message_forced_editor_without_text_suggests_a_placeholder() {
+    // A bare `jp -e`, or `--quote` on a conversation with no assistant message
+    // to quote: the editor is forced and the request is empty, so `--no-edit`
+    // would synthesize rather than send anything the caller wrote. Advice to
+    // send "the text as-is" would name text that does not exist.
+    //
+    // Passing the query as an argument is not the escape here: `--edit` and
+    // `--quote` force the editor regardless of a positional query, so the run
+    // would fail the same way again.
+    let mut config = AppConfig::new_test();
+    config.editor.cmd = Some(CommandConfigOrString::String(
+        "jp-editor-that-does-not-exist".to_owned(),
+    ));
+
+    let query = Query {
+        edit: true,
+        ..Default::default()
+    };
+
+    let mut request = ChatRequest::default();
+    let stream = ConversationStream::new_test();
+    let mut pending_trim = PendingStreamTrim::default();
+    let error = query
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            false,
+            false,
+            &config,
+            Utf8Path::new("/tmp"),
+            &Printer::sink(),
+        )
+        .unwrap_err();
+
+    let Error::NonInteractiveEditor { suggestion } = error else {
+        panic!("expected a non-interactive editor error, got: {error:?}");
+    };
+    assert_eq!(
+        suggestion,
+        "Run this from a terminal, or use --no-edit to send a placeholder message."
+    );
+}
+
+#[test]
+fn edit_message_without_a_query_is_an_error_when_non_interactive() {
+    // Nothing to send and no way to compose it: erroring out is the only
+    // honest outcome. The run used to hang in the editor instead.
+    let dir = Utf8TempDir::new().unwrap();
+    let mut config = AppConfig::new_test();
+    config.editor.cmd = Some(CommandConfigOrString::String(
+        "jp-editor-that-does-not-exist".to_owned(),
+    ));
+
+    let mut request = ChatRequest::default();
+    let stream = ConversationStream::new_test();
+    let mut pending_trim = PendingStreamTrim::default();
+    let error = Query::default()
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            false,
+            false,
+            &config,
+            dir.path(),
+            &Printer::sink(),
+        )
+        .unwrap_err();
+
+    assert_matches!(error, Error::NonInteractiveEditor { .. });
+    assert!(!dir.path().join(editor::QUERY_FILENAME).exists());
 }
 
 #[test]
@@ -2928,6 +3176,52 @@ fn pending_trim_pop_request_removes_stale_turn_start() {
     assert_no_adjacent_turn_starts(&stream);
 }
 
+/// `--replay` on a turn holding a chat response this build cannot read (one a
+/// newer jp wrote) removes it with the rest of the turn, instead of leaving it
+/// behind to be read as part of the turn before.
+#[test]
+fn pending_trim_replay_removes_an_unreadable_chat_response_with_its_turn() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("first question");
+    stream.push_event(ConversationEvent::now(ChatResponse::message(
+        "first answer",
+    )));
+    stream.start_turn("second question");
+    stream.push_event(ConversationEvent::now(ChatResponse::message(
+        "second answer",
+    )));
+
+    let (base_config, mut events) = stream.to_parts().unwrap();
+    let answer = events
+        .iter()
+        .position(|e| e.get("message").and_then(Value::as_str) == Some("second answer"))
+        .unwrap();
+    events.insert(
+        answer,
+        serde_json::json!({
+            "type": "chat_response",
+            "timestamp": "2025-01-01 00:00:00.0",
+            "commentary": "Checking the second question."
+        }),
+    );
+    let mut stream =
+        ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty()).unwrap();
+
+    PendingStreamTrim {
+        replay_turn: true,
+        pop_request: false,
+    }
+    .apply(&mut stream);
+    stream.start_turn("second question, revised");
+
+    let (_, events) = stream.to_parts().unwrap();
+    assert!(
+        !events.iter().any(|e| e.get("commentary").is_some()),
+        "the replayed turn's unreadable chat response survived: {events:#?}"
+    );
+    assert_eq!(turn_start_count(&stream), 2);
+}
+
 #[test]
 fn pending_trim_default_is_noop() {
     let mut stream = ConversationStream::new_test();
@@ -3020,6 +3314,7 @@ fn built_request_against(args: &[&str], stream: &ConversationStream) -> String {
             "",
             resolved.as_deref(),
             stream,
+            true,
             &AppConfig::new_test(),
             Utf8Path::new("/tmp"),
             &Printer::sink(),
@@ -3107,6 +3402,7 @@ fn build_conversation_prepends_query_to_piped_stdin() {
             "piped payload",
             Some("look at this"),
             &ConversationStream::new_test(),
+            true,
             &AppConfig::new_test(),
             Utf8Path::new("/tmp"),
             &Printer::sink(),
@@ -3203,7 +3499,7 @@ fn editor_ctx(
     // it five times with backoff is time these tests would only spend waiting.
     config.assistant.request.max_retries = 0;
 
-    let ctx = Ctx::new(
+    let mut ctx = Ctx::new(
         crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         Some(fs),
@@ -3213,6 +3509,12 @@ fn editor_ctx(
         Some(session.clone()),
         printer,
     );
+
+    // Opening the editor is the path these tests exercise, and the editor only
+    // opens for a user who can close it. `Ctx::new` reads that off the
+    // process's own stdout, which the in-memory printer does not replace, so
+    // pin it rather than inherit whatever the test binary was launched with.
+    ctx.term.interactive = true;
 
     (ctx, out, err, tmp)
 }

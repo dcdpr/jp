@@ -36,7 +36,16 @@ struct TestFailure {
     #[serde(rename = "crate")]
     krate: String,
     path: String,
-    output: String,
+
+    /// Why nextest failed the test when it was not the test's own assertion,
+    /// such as `time limit exceeded` for one it killed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+
+    /// What the test printed; absent for a test nextest killed or failed on its
+    /// own terms.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output: Option<String>,
 }
 
 pub(crate) async fn cargo_test(
@@ -114,51 +123,18 @@ fn cargo_test_impl<R: ProcessRunner>(
     // The filter is positional, so it stays last.
     args.push(&test_name);
 
-    let ProcessOutput { stdout, stderr, .. } = runner.run_with_env("cargo", &args, root, &env)?;
+    let ProcessOutput {
+        stdout,
+        stderr,
+        status,
+    } = runner.run_with_env("cargo", &args, root, &env)?;
 
-    let mut total_tests = 0;
-    let mut ran_tests = 0;
-    let mut failed_tests = 0;
-    let mut spent_bytes = 0;
-    let mut failure = vec![];
-    for l in stdout.lines().filter_map(|s| from_str::<Value>(s).ok()) {
-        let kind = l.get("type").and_then(Value::as_str).unwrap_or_default();
-        let event = l.get("event").and_then(Value::as_str).unwrap_or_default();
-
-        if kind != "test" || event == "started" {
-            continue;
-        }
-        total_tests += 1;
-        if event != "ignored" {
-            ran_tests += 1;
-        }
-        if event != "failed" {
-            continue;
-        }
-
-        let Some(name) = l.get("name").and_then(Value::as_str) else {
-            continue;
-        };
-        let Some(stdout) = l.get("stdout").and_then(Value::as_str) else {
-            continue;
-        };
-
-        let (krate, path) = name.split_once('$').unwrap_or(("", name));
-        let krate = krate.split_once("::").unwrap_or((krate, "")).0;
-
-        failed_tests += 1;
-        if spent_bytes >= MAX_TEST_OUTPUT_BUDGET_BYTES {
-            continue;
-        }
-
-        let output = truncate(stdout, MAX_TEST_OUTPUT_BYTES);
-        spent_bytes += output.len() + name.len() + FAILURE_BLOCK_OVERHEAD_BYTES;
-        failure.push(TestFailure {
-            krate: krate.to_owned(),
-            path: path.to_owned(),
-            output,
-        });
-    }
+    let RunSummary {
+        total_tests,
+        ran_tests,
+        failed_tests,
+        failure,
+    } = parse_run(&stdout);
 
     if ran_tests == 0 {
         Err(format!(
@@ -185,7 +161,84 @@ fn cargo_test_impl<R: ProcessRunner>(
         }
     }
 
+    // Nextest exits non-zero whenever the run failed. With no failure parsed
+    // above, the reason is somewhere the parse does not look (a changed output
+    // format, a setup script, a binary that crashed outside any test), and
+    // reporting the summary alone would read as a green run.
+    if failed_tests == 0 && !status.is_success() {
+        response.push_str(&format!(
+            "\nHowever, nextest exited with status {status}, so the run did not succeed even \
+             though no failing test was reported. Its error output follows:\n\n{}",
+            truncate(&stderr, MAX_DIAGNOSTIC_BYTES)
+        ));
+    }
+
     Ok(response.into())
+}
+
+/// What nextest's `libtest-json-plus` output says about a run.
+struct RunSummary {
+    total_tests: usize,
+    ran_tests: usize,
+    failed_tests: usize,
+
+    /// The failures to show, which is fewer than `failed_tests` once their
+    /// combined size reaches [`MAX_TEST_OUTPUT_BUDGET_BYTES`].
+    failure: Vec<TestFailure>,
+}
+
+fn parse_run(stdout: &str) -> RunSummary {
+    let mut summary = RunSummary {
+        total_tests: 0,
+        ran_tests: 0,
+        failed_tests: 0,
+        failure: vec![],
+    };
+    let mut spent_bytes = 0;
+    for l in stdout.lines().filter_map(|s| from_str::<Value>(s).ok()) {
+        let kind = l.get("type").and_then(Value::as_str).unwrap_or_default();
+        let event = l.get("event").and_then(Value::as_str).unwrap_or_default();
+
+        if kind != "test" || event == "started" {
+            continue;
+        }
+        summary.total_tests += 1;
+        if event != "ignored" {
+            summary.ran_tests += 1;
+        }
+        if event != "failed" {
+            continue;
+        }
+
+        // Counted before anything else is read: nextest writes a test it
+        // killed for exceeding its slow-timeout, and a flaky test configured to
+        // fail, as `failed` with a `reason` and no `stdout`.
+        summary.failed_tests += 1;
+        if spent_bytes >= MAX_TEST_OUTPUT_BUDGET_BYTES {
+            continue;
+        }
+
+        let name = l.get("name").and_then(Value::as_str).unwrap_or("<unnamed>");
+        let (krate, path) = name.split_once('$').unwrap_or(("", name));
+        let krate = krate.split_once("::").unwrap_or((krate, "")).0;
+        let reason = l.get("reason").and_then(Value::as_str).map(str::to_owned);
+        let output = l
+            .get("stdout")
+            .and_then(Value::as_str)
+            .map(|stdout| truncate(stdout, MAX_TEST_OUTPUT_BYTES));
+
+        spent_bytes += output.as_ref().map_or(0, String::len)
+            + reason.as_ref().map_or(0, String::len)
+            + name.len()
+            + FAILURE_BLOCK_OVERHEAD_BYTES;
+        summary.failure.push(TestFailure {
+            krate: krate.to_owned(),
+            path: path.to_owned(),
+            reason,
+            output,
+        });
+    }
+    summary
 }
 
 #[cfg(test)]

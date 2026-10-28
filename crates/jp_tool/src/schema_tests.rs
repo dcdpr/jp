@@ -322,6 +322,220 @@ mod has_unconstrained_node {
         })));
     }
 
+    /// An object with no `properties` keyword accepts any keys.
+    #[test]
+    fn finds_an_object_property_that_declares_no_properties() {
+        assert!(has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": { "body": { "type": "object" } }
+        })));
+    }
+
+    #[test]
+    fn finds_a_free_form_object_nested_in_array_items() {
+        assert!(has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": {
+                "rows": { "type": "array", "items": { "type": ["object", "null"] } }
+            }
+        })));
+    }
+
+    /// An empty `properties` map declares no keys either.
+    #[test]
+    fn finds_an_object_property_with_an_empty_properties_map() {
+        assert!(has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": { "body": { "type": "object", "properties": {} } }
+        })));
+    }
+
+    /// An object with no declared keys that is already closed accepts only
+    /// `{}`.
+    /// Strict mode adds nothing to it, so it counts as open rather than risk
+    /// the shape OpenAI's strict validator refuses.
+    #[test]
+    fn finds_a_closed_object_property_that_declares_no_properties() {
+        assert!(has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": {
+                "body": { "type": "object", "properties": {}, "additionalProperties": false }
+            }
+        })));
+    }
+
+    #[test]
+    fn finds_an_object_that_allows_additional_properties() {
+        assert!(has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "additionalProperties": true
+                }
+            }
+        })));
+    }
+
+    /// `additionalProperties: {}` is an empty schema, which admits any value.
+    #[test]
+    fn finds_an_object_with_an_empty_additional_properties_schema() {
+        assert!(has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "additionalProperties": {}
+                }
+            }
+        })));
+    }
+
+    /// A map type: declared keys plus any number of typed extra keys.
+    #[test]
+    fn finds_an_object_with_an_additional_properties_schema() {
+        assert!(has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": {
+                "headers": {
+                    "type": "object",
+                    "properties": { "host": { "type": "string" } },
+                    "additionalProperties": { "type": "string" }
+                }
+            }
+        })));
+    }
+
+    /// Listing properties without mentioning `additionalProperties` is how
+    /// schemas usually declare a fixed shape; strict mode closing it keeps the
+    /// declared keys.
+    #[test]
+    fn reports_a_nested_object_with_declared_properties() {
+        assert!(!has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } }
+                },
+                "meta": {
+                    "type": "object",
+                    "properties": { "id": { "type": "string" } },
+                    "additionalProperties": false
+                }
+            }
+        })));
+    }
+
+    /// A nullable free-form object, as Pydantic writes `Optional[dict]`.
+    #[test]
+    fn finds_a_free_form_object_inside_any_of() {
+        assert!(has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": {
+                "meta": { "anyOf": [{ "type": "object" }, { "type": "null" }] }
+            }
+        })));
+    }
+
+    #[test]
+    fn finds_a_free_form_object_inside_one_of_and_all_of() {
+        assert!(has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": {
+                "meta": { "oneOf": [{ "type": "string" }, { "type": "object" }] }
+            }
+        })));
+        assert!(has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": {
+                "meta": { "allOf": [{ "type": "object", "additionalProperties": true }] }
+            }
+        })));
+    }
+
+    /// Composition branches are walked like any other node, so a nested object
+    /// inside a branch that declares its properties stays closed.
+    #[test]
+    fn reports_any_of_branches_with_declared_properties() {
+        assert!(!has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": {
+                "meta": {
+                    "anyOf": [
+                        { "type": "object", "properties": { "id": { "type": "string" } } },
+                        { "type": "null" }
+                    ]
+                }
+            }
+        })));
+    }
+
+    /// A root that admits keys beyond its declared ones is a map type, the same
+    /// as one nested below it.
+    #[test]
+    fn finds_a_root_that_allows_additional_properties() {
+        assert!(has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "additionalProperties": { "type": "string" }
+        })));
+        assert!(has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "additionalProperties": true
+        })));
+    }
+
+    /// A root composed with `allOf` gets its keys from the branches, so they
+    /// are walked like its own properties.
+    #[test]
+    fn finds_a_free_form_object_inside_a_root_all_of() {
+        assert!(has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "allOf": [{
+                "type": "object",
+                "properties": { "body": { "type": "object" } }
+            }]
+        })));
+    }
+
+    #[test]
+    fn reports_a_root_all_of_with_declared_properties() {
+        assert!(!has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": { "id": { "type": "string" } },
+            "allOf": [{
+                "type": "object",
+                "properties": { "name": { "type": "string" } }
+            }]
+        })));
+    }
+
+    /// An empty root that is already closed is the canonical strict shape for a
+    /// tool with no parameters.
+    #[test]
+    fn ignores_a_closed_empty_root_object() {
+        assert!(!has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        })));
+    }
+
+    /// A tool with no parameters has an empty root object; that is the
+    /// canonical strict shape and stays strict.
+    #[test]
+    fn ignores_an_empty_root_object() {
+        assert!(!has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": {}
+        })));
+    }
+
     #[test]
     fn reports_a_fully_typed_document() {
         assert!(!has_unconstrained_node(&json!({

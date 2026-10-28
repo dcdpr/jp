@@ -1133,6 +1133,76 @@ fn summary_is_injected_as_its_own_turn() {
     )));
 }
 
+/// The text of the synthetic request introducing the (single) injected summary.
+fn summary_marker_text(stream: &ConversationStream) -> String {
+    stream
+        .iter()
+        .find_map(|e| match &e.event.kind {
+            EventKind::ChatRequest(r) if r.content.starts_with("[Summary") => {
+                Some(r.content.clone())
+            }
+            _ => None,
+        })
+        .expect("projection injects a summary request")
+}
+
+#[test]
+fn summary_marker_for_a_leading_summary() {
+    let mut stream = message_turns(3);
+    stream.add_compaction(Compaction::new(0, 1).with_summary(SummaryPolicy::generated("s")));
+
+    stream.apply_projection();
+
+    assert_eq!(
+        summary_marker_text(&stream),
+        "[Summary of the earlier part of this conversation. The messages after it are still in \
+         your context.]"
+    );
+}
+
+#[test]
+fn summary_marker_for_a_middle_summary() {
+    // The case the marker exists for: a model told the summary replaces
+    // "previous conversation" treats the kept turns above it as trimmed.
+    let mut stream = message_turns(4);
+    stream.add_compaction(Compaction::new(1, 2).with_summary(SummaryPolicy::generated("s")));
+
+    stream.apply_projection();
+
+    assert_eq!(
+        summary_marker_text(&stream),
+        "[Summary of a middle part of this conversation. The messages before and after it are \
+         still in your context.]"
+    );
+}
+
+#[test]
+fn summary_marker_for_a_trailing_summary() {
+    let mut stream = message_turns(3);
+    stream.add_compaction(Compaction::new(1, 2).with_summary(SummaryPolicy::generated("s")));
+
+    stream.apply_projection();
+
+    assert_eq!(
+        summary_marker_text(&stream),
+        "[Summary of the latest part of this conversation. The messages before it are still in \
+         your context.]"
+    );
+}
+
+#[test]
+fn summary_marker_for_a_summary_of_every_turn() {
+    let mut stream = message_turns(2);
+    stream.add_compaction(Compaction::new(0, 1).with_summary(SummaryPolicy::generated("s")));
+
+    stream.apply_projection();
+
+    assert_eq!(
+        summary_marker_text(&stream),
+        "[Summary of this conversation so far.]"
+    );
+}
+
 #[test]
 fn distinct_adjacent_summaries_with_identical_text_stay_separate() {
     // Two distinct single-turn summary compactions over adjacent turns that

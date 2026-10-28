@@ -2,6 +2,8 @@ use std::fmt;
 
 const CONVERSATION_MARKER: &str = "\n<!-- CONVERSATION_MARKER -->\n";
 const CONFIG_HEADER: &str = "\n# Active Configuration\n";
+const SEED_OPEN: &str = "<!-- CONFIG_SEED: ";
+const SEED_CLOSE: &str = " -->";
 pub(crate) const CUT_MARKER: &str = indoc::indoc!(
     "
     ---------------------------------------8<---------------------------------------
@@ -31,6 +33,14 @@ pub struct QueryMetaSection<'s> {
 pub struct QueryConfigSection<'s> {
     pub value: &'s str,
     pub error: Option<&'s str>,
+
+    /// The config the block was pre-filled with when the draft was written, as
+    /// single-line JSON.
+    ///
+    /// Stored in a hidden comment below the block, so a later session can tell
+    /// the values the user edited apart from the ones it pre-filled.
+    /// `None` for a draft written without one.
+    pub seed: Option<&'s str>,
 }
 
 #[derive(Debug, PartialEq, Default)]
@@ -106,6 +116,10 @@ impl fmt::Display for QueryConfigSection<'_> {
         }
         f.write_str("```\n")?;
 
+        if let Some(seed) = self.seed {
+            write!(f, "\n{SEED_OPEN}{seed}{SEED_CLOSE}\n")?;
+        }
+
         Ok(())
     }
 }
@@ -157,6 +171,16 @@ impl<'s> TryFrom<&'s str> for QueryConfigSection<'s> {
             .map(|(_, b)| b.trim())
             .ok_or(Error::MissingConfigHeader)?;
 
+        // The seed comment follows the code block, so it is split off before
+        // the block's closing fence is searched for.
+        let (s, seed) = match s.rsplit_once(SEED_OPEN) {
+            Some((before, after)) => match after.split_once(SEED_CLOSE) {
+                Some((seed, _)) => (before.trim(), Some(seed.trim())),
+                None => (s, None),
+            },
+            None => (s, None),
+        };
+
         // Find the error message, if any.
         let mut n = 0;
         let error = if s.starts_with("> ERROR:") {
@@ -184,7 +208,7 @@ impl<'s> TryFrom<&'s str> for QueryConfigSection<'s> {
             .ok_or(Error::MissingConfigCodeBlock)?
             .trim();
 
-        Ok(Self { value, error })
+        Ok(Self { value, error, seed })
     }
 }
 

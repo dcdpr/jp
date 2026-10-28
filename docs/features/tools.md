@@ -14,12 +14,14 @@ definition.
 
 Every tool has a `source`:
 
-| Source                | Definition                                                                      |
-| --------------------- | ------------------------------------------------------------------------------- |
-| `builtin`             | Implemented inside JP.                                                          |
-| `local`               | Runs a configured command. JP configuration defines its parameters.             |
-| `mcp.<server>`        | Uses the same-named tool from an MCP server. The server defines its parameters. |
-| `mcp.<server>.<tool>` | Uses a differently named tool from an MCP server. This allows a local alias.    |
+| Source                           | Definition                                                                         |
+| -------------------------------- | ---------------------------------------------------------------------------------- |
+| `builtin`                        | Implemented inside JP.                                                             |
+| `local`                          | Runs a configured command. JP configuration defines its parameters.                |
+| `mcp.<server>`                   | Uses the same-named tool from an MCP server. The server defines its parameters.    |
+| `mcp.<server>.<tool>`            | Uses a differently named tool from an MCP server. This allows a local alias.       |
+| `plugin.command.<plugin>`        | Asks a command plugin to answer the call. JP configuration defines its parameters. |
+| `plugin.command.<plugin>.<tool>` | Asks a command plugin for a differently named tool.                                |
 
 For example, a local tool starts with a complete definition:
 
@@ -44,6 +46,23 @@ source = "mcp.notes.create_note"
 
 JP fetches the MCP tool definition from the server when resolving the tools for
 a query.
+
+A command plugin tool runs through the plugin, which receives
+`plugins.command.<plugin>.options` as the query resolved them:
+
+```toml
+[conversation.tools.ticket_create]
+source = "plugin.command.ticket.create"
+
+[conversation.tools.ticket_create.style]
+# Ask the plugin to describe the call before it runs.
+parameters = "tool"
+```
+
+`style.parameters = "tool"` asks the tool itself to format its arguments: a
+local tool's command, or the plugin, runs with the action `format_arguments`
+instead of `run`.
+Only local and command plugin tools support it.
 
 ## Parameter Schemas
 

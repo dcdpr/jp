@@ -36,7 +36,7 @@ use jp_credentials::{
 use tracing::{debug, warn};
 
 use super::{acp::Error as AcpError, oauth};
-use crate::{credential::Credential, error::StreamError};
+use crate::{credential::Credential, error::StreamError, provider::api_key_chain};
 
 /// Errors from walking the credential chain.
 #[derive(Debug, thiserror::Error)]
@@ -891,12 +891,12 @@ fn walk_chain(
                 // A name no key answers to is a config mistake, not a
                 // credential to fall past: the next entry would bill a
                 // different key.
-                let variable = config
+                let variables = config
                     .api_key_env
-                    .variable(name.as_deref())
+                    .variables(name.as_deref())
                     .map_err(ResolveError::ApiKeyEnv)?;
 
-                if let Some(key) = super::super::api_key_chain::read_key(variable) {
+                if let Some(key) = api_key_chain::read_first_key(variables) {
                     return Ok((
                         Landing::Ready(Credential::ApiKey(key)),
                         Selected {
@@ -909,8 +909,9 @@ fn walk_chain(
 
                 // Under the single-entry default chain, a missing key is
                 // the same failure it was before chains existed.
+                let variable = api_key_chain::describe_variables(variables);
                 if config.auth.len() == 1 {
-                    return Err(ResolveError::MissingEnv(variable.to_owned()));
+                    return Err(ResolveError::MissingEnv(variable));
                 }
 
                 skip(

@@ -20,6 +20,8 @@
 //! config cannot be finalized and the conversation still fails to load.
 //! Both passes exist to keep that last resort from being reached.
 
+use std::collections::BTreeMap;
+
 use jp_config::{
     AppConfig, PartialAppConfig, Schema, SchemaType,
     schema::{ReferenceType, SchemaField, StructType, UnionType},
@@ -46,9 +48,10 @@ pub fn deserialize_partial_config(mut value: Value) -> PartialAppConfig {
     let schema = AppConfig::schema();
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    if stripped > 0 {
+    if stripped.count() > 0 {
         warn!(
-            count = stripped,
+            count = stripped.count(),
+            fields = %json!(stripped.by_parent),
             "Stripped unknown fields from stored config.",
         );
     }
@@ -239,9 +242,45 @@ fn migrate_legacy_rule_bounds(value: &mut Value) {
 /// When two variants could, the union is left alone: the value could belong to
 /// either, and stripping it against the wrong one deletes valid data.
 ///
-/// Returns the number of keys removed.
-fn strip_unknown_fields(value: &mut Value, schema: &Schema) -> usize {
-    strip_schema(value, schema, &mut Vec::new())
+/// Returns the removed keys, grouped by the object that held them.
+fn strip_unknown_fields(value: &mut Value, schema: &Schema) -> Stripped {
+    let mut stripped = Stripped::default();
+    strip_schema(value, schema, &mut Vec::new(), &mut stripped);
+    stripped
+}
+
+/// The keys a strip removed, and where the walk currently is.
+#[derive(Debug, Default)]
+struct Stripped {
+    /// The keys and array indices leading from the root to the value being
+    /// walked.
+    path: Vec<String>,
+
+    /// Removed keys, by the dotted path of the object that held them.
+    ///
+    /// Keys removed from the root object are listed under `.`.
+    by_parent: BTreeMap<String, Vec<String>>,
+}
+
+impl Stripped {
+    /// How many keys were removed.
+    fn count(&self) -> usize {
+        self.by_parent.values().map(Vec::len).sum()
+    }
+
+    /// Record `key` as removed from the object at the current path.
+    fn record(&mut self, key: &str) {
+        let parent = if self.path.is_empty() {
+            ".".to_owned()
+        } else {
+            self.path.join(".")
+        };
+
+        self.by_parent
+            .entry(parent)
+            .or_default()
+            .push(key.to_owned());
+    }
 }
 
 /// The named schemas enclosing the current position, innermost last.
@@ -253,19 +292,22 @@ type Enclosing<'a> = Vec<(&'a str, &'a Schema)>;
 
 /// Walk a value against a schema, recording the schema's name for any reference
 /// below it to resolve against.
-fn strip_schema<'a>(value: &mut Value, schema: &'a Schema, enclosing: &mut Enclosing<'a>) -> usize {
+fn strip_schema<'a>(
+    value: &mut Value,
+    schema: &'a Schema,
+    enclosing: &mut Enclosing<'a>,
+    stripped: &mut Stripped,
+) {
     let name = schema.name.as_deref();
     if let Some(name) = name {
         enclosing.push((name, schema));
     }
 
-    let stripped = strip_schema_type(value, &schema.ty, enclosing);
+    strip_schema_type(value, &schema.ty, enclosing, stripped);
 
     if name.is_some() {
         enclosing.pop();
     }
-
-    stripped
 }
 
 /// Walk a value against a schema's shape.
@@ -273,15 +315,21 @@ fn strip_schema_type<'a>(
     value: &mut Value,
     ty: &'a SchemaType,
     enclosing: &mut Enclosing<'a>,
-) -> usize {
+    stripped: &mut Stripped,
+) {
     match ty {
-        SchemaType::Struct(struct_type) => strip_struct(value, struct_type, enclosing),
-        SchemaType::Array(array_type) => strip_items(value, &array_type.items_type, enclosing),
-        SchemaType::Object(object_type) => {
-            strip_map_values(value, &object_type.value_type, enclosing)
+        SchemaType::Struct(struct_type) => strip_struct(value, struct_type, enclosing, stripped),
+        SchemaType::Array(array_type) => {
+            strip_items(value, &array_type.items_type, enclosing, stripped);
         }
-        SchemaType::Union(union_type) => sole_matching_variant(union_type, value)
-            .map_or(0, |inner| strip_schema(value, inner, enclosing)),
+        SchemaType::Object(object_type) => {
+            strip_map_values(value, &object_type.value_type, enclosing, stripped);
+        }
+        SchemaType::Union(union_type) => {
+            if let Some(inner) = sole_matching_variant(union_type, value) {
+                strip_schema(value, inner, enclosing, stripped);
+            }
+        }
         // A recursive type (`conversation.tools.<name>.parameters.<name>` is
         // the one that reaches disk, through `items` and `properties`) is
         // described once and referred to by name below that.
@@ -289,9 +337,12 @@ fn strip_schema_type<'a>(
         // Resolving to the named schema's shape rather than back through
         // [`strip_schema`] keeps a reference from resolving to another
         // reference, so this cannot cycle without descending into the value.
-        SchemaType::Reference(reference) => resolve(reference, enclosing)
-            .map_or(0, |target| strip_schema_type(value, target, enclosing)),
-        _ => 0,
+        SchemaType::Reference(reference) => {
+            if let Some(target) = resolve(reference, enclosing) {
+                strip_schema_type(value, target, enclosing, stripped);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -437,22 +488,25 @@ fn strip_struct<'a>(
     value: &mut Value,
     struct_type: &'a StructType,
     enclosing: &mut Enclosing<'a>,
-) -> usize {
+    stripped: &mut Stripped,
+) {
     let Some(obj) = value.as_object_mut() else {
-        return 0;
+        return;
     };
 
     let flattened = flattened_field_schema(struct_type);
     let entry_schema = flattened.and_then(map_value_schema);
     let has_flatten = struct_type.fields.values().any(|f| f.flatten);
 
-    let mut stripped = if has_flatten {
-        0
-    } else {
-        let before = obj.len();
-        obj.retain(|key, _| struct_type.fields.contains_key(key));
-        before - obj.len()
-    };
+    if !has_flatten {
+        obj.retain(|key, _| {
+            let known = struct_type.fields.contains_key(key);
+            if !known {
+                stripped.record(key);
+            }
+            known
+        });
+    }
 
     // A flattened map stating a strategy puts the wrapper's own keys where
     // entries otherwise sit: `value` holds the map, and the metadata beside it
@@ -462,29 +516,36 @@ fn strip_struct<'a>(
         if let Some(entry_schema) = entry_schema
             && let Some(Value::Object(entries)) = obj.get_mut("value")
         {
-            for entry in entries.values_mut() {
-                stripped += strip_schema(entry, entry_schema, enclosing);
+            stripped.path.push("value".to_owned());
+            for (key, entry) in entries.iter_mut() {
+                stripped.path.push(key.clone());
+                strip_schema(entry, entry_schema, enclosing, stripped);
+                stripped.path.pop();
             }
+            stripped.path.pop();
         }
 
-        return stripped;
+        return;
     }
 
     for (key, child) in obj.iter_mut() {
         // The flattened field's own name is not a key in the serialized form,
         // so a key matching it is an entry of the map it flattens, not that
         // field.
-        match struct_type.fields.get(key).filter(|field| !field.flatten) {
-            Some(field) => stripped += strip_schema(child, &field.schema, enclosing),
-            None => {
-                if let Some(entry_schema) = entry_schema {
-                    stripped += strip_schema(child, entry_schema, enclosing);
-                }
-            }
-        }
-    }
+        let schema = struct_type
+            .fields
+            .get(key)
+            .filter(|field| !field.flatten)
+            .map(|field| &field.schema)
+            .or(entry_schema);
+        let Some(schema) = schema else {
+            continue;
+        };
 
-    stripped
+        stripped.path.push(key.clone());
+        strip_schema(child, schema, enclosing, stripped);
+        stripped.path.pop();
+    }
 }
 
 /// The value schema of a struct's single flattened map field, if it has one.
@@ -536,15 +597,17 @@ fn strip_items<'a>(
     value: &mut Value,
     items_schema: &'a Schema,
     enclosing: &mut Enclosing<'a>,
-) -> usize {
+    stripped: &mut Stripped,
+) {
     let Some(items) = value.as_array_mut() else {
-        return 0;
+        return;
     };
 
-    items
-        .iter_mut()
-        .map(|item| strip_schema(item, items_schema, enclosing))
-        .sum()
+    for (index, item) in items.iter_mut().enumerate() {
+        stripped.path.push(index.to_string());
+        strip_schema(item, items_schema, enclosing, stripped);
+        stripped.path.pop();
+    }
 }
 
 /// Walk each value of a map against the map's value schema.
@@ -554,14 +617,17 @@ fn strip_map_values<'a>(
     value: &mut Value,
     value_schema: &'a Schema,
     enclosing: &mut Enclosing<'a>,
-) -> usize {
+    stripped: &mut Stripped,
+) {
     let Some(obj) = value.as_object_mut() else {
-        return 0;
+        return;
     };
 
-    obj.values_mut()
-        .map(|child| strip_schema(child, value_schema, enclosing))
-        .sum()
+    for (key, child) in obj.iter_mut() {
+        stripped.path.push(key.clone());
+        strip_schema(child, value_schema, enclosing, stripped);
+        stripped.path.pop();
+    }
 }
 
 #[cfg(test)]

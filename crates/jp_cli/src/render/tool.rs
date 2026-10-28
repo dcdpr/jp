@@ -754,9 +754,9 @@ fn format_args(
     }
 
     match style {
-        // Off and Custom produce no inline output.
-        // Custom content is rendered separately via render_approved.
-        ParametersStyle::Off | ParametersStyle::Custom(_) => String::new(),
+        // Off produces no inline output, and a formatter's content is rendered
+        // separately via render_approved.
+        ParametersStyle::Off | ParametersStyle::Custom(_) | ParametersStyle::Tool => String::new(),
 
         ParametersStyle::Json => format_args_json(filtered, mode),
 

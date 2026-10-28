@@ -1,6 +1,11 @@
 
 # cargo-vet audits file
 
+[[audits.annotate-snippets]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.12.17"
+
 [[audits.axum-core]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -96,6 +101,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.4.2 -> 0.4.3"
 
+[[audits.granit-parser]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "2.0.0"
+
 [[audits.hashlink]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -130,6 +140,11 @@ version = "0.13.0"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.1.1 -> 0.2.5"
+
+[[audits.libc]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.190 -> 0.2.191"
 
 [[audits.libsqlite3-sys]]
 who = "Jean Mertz <git@jeanmertz.com>"
@@ -175,6 +190,11 @@ version = "0.27.0"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.15.0"
+
+[[audits.nix]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.30.1 -> 0.31.3"
 
 [[audits.ollama-rs]]
 who = "Jean Mertz <git@jeanmertz.com>"
@@ -316,6 +336,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.8.3"
 
+[[audits.ruzstd]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.8.3 -> 0.9.1"
+
 [[audits.schemars]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -336,10 +361,20 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.26.0 -> 0.33.0"
 
+[[audits.serde-saphyr]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "2.0.0"
+
 [[audits.servo_arc]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.4.0 -> 0.4.3"
+
+[[audits.signal-hook-mio]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.4 -> 0.2.5"
 
 [[audits.simd-adler32]]
 who = "Jean Mertz <git@jeanmertz.com>"
@@ -441,6 +476,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "2.4.2 -> 8.6.0"
 
+[[audits.zip]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "8.6.0 -> 9.0.5"
+
 [[audits.zlib-rs]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -490,13 +530,13 @@ end = "2027-02-13"
 
 [[trusted.async-stream]]
 criteria = "safe-to-deploy"
-user-id = 10
+user-id = 10 # Carl Lerche (carllerche)
 start = "2019-06-07"
 end = "2027-02-13"
 
 [[trusted.async-stream-impl]]
 criteria = "safe-to-deploy"
-user-id = 10
+user-id = 10 # Carl Lerche (carllerche)
 start = "2019-08-13"
 end = "2027-02-13"
 
@@ -860,6 +900,12 @@ user-id = 359 # Sean McArthur (seanmonstar)
 start = "2019-09-09"
 end = "2027-02-13"
 
+[[trusted.mio]]
+criteria = "safe-to-deploy"
+user-id = 6025 # Thomas de Zeeuw (Thomasdezeeuw)
+start = "2019-12-17"
+end = "2027-10-28"
+
 [[trusted.new_debug_unreachable]]
 criteria = "safe-to-deploy"
 user-id = 2017 # Matt Brubeck (mbrubeck)
@@ -1106,6 +1152,12 @@ user-id = 6741 # Alice Ryhl (Darksonn)
 start = "2021-10-13"
 end = "2027-02-13"
 
+[[trusted.socket2]]
+criteria = "safe-to-deploy"
+user-id = 6025 # Thomas de Zeeuw (Thomasdezeeuw)
+start = "2020-09-09"
+end = "2027-10-28"
+
 [[trusted.syn]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
@@ -1216,7 +1268,7 @@ end = "2027-02-13"
 
 [[trusted.tower-layer]]
 criteria = "safe-to-deploy"
-user-id = 10
+user-id = 10 # Carl Lerche (carllerche)
 start = "2019-04-27"
 end = "2027-02-13"
 
@@ -1369,6 +1421,12 @@ criteria = "safe-to-deploy"
 user-id = 145038 # Guy Bedford (guybedford)
 start = "2026-01-14"
 end = "2027-03-04"
+
+[[trusted.webpki-roots]]
+criteria = "safe-to-deploy"
+user-id = 2751 # Joe Birr-Pixton (ctz)
+start = "2019-07-21"
+end = "2027-10-28"
 
 [[trusted.winapi-util]]
 criteria = "safe-to-deploy"

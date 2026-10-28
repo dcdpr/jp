@@ -260,6 +260,56 @@ async fn llm_backend_asks_for_only_the_answer() {
     );
 }
 
+/// The question's preamble reaches the model ahead of the question.
+///
+/// It can describe arguments the history doesn't carry, such as ones the user
+/// edited at the approval prompt, so without it the model answers about the
+/// call it first made.
+#[tokio::test]
+async fn llm_backend_includes_the_preamble() {
+    let inquiry_id = tool_call_inquiry_id("call_prompt", "shorter_title", 1);
+    let (provider, requests) =
+        structured_provider(json!({ "answer": "Short title" })).capturing_requests();
+    let backend = LlmInquiryBackend::new(
+        test_inquiry_config(provider),
+        IndexMap::new(),
+        vec![],
+        vec![],
+        discard_notices(),
+    );
+    let question = Question::text("shorter_title", "Shorter title, at most 60 characters?")
+        .unwrap()
+        .with_preamble("The title is 71 characters: An edited title");
+
+    backend
+        .inquire(
+            test_events(),
+            &inquiry_id,
+            "ticket_create",
+            &question,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("the inquiry resolves");
+
+    let sent = requests.lock().expect("not poisoned");
+    let query = sent.first().expect("one request was sent");
+    let asked = query
+        .thread
+        .events
+        .iter()
+        .filter_map(|event| event.event.as_chat_request())
+        .next_back()
+        .expect("the question was asked");
+    assert_eq!(
+        asked.content,
+        "The tool `ticket_create` asked a question before it can continue.\n\nThe title is 71 \
+         characters: An edited title\n\nShorter title, at most 60 characters?\n\nYou cannot call \
+         tools here. Reply with only the answer to this question, based on the conversation so \
+         far."
+    );
+}
+
 /// An inquiry that runs on another credential says so.
 ///
 /// The inquiry model can differ from the assistant's, so the turn's own stream

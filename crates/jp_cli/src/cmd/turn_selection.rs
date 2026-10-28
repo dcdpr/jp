@@ -166,6 +166,17 @@ impl TurnPos {
         let (Self::Absolute(n) | Self::FromEnd(n)) = self;
         n == 0 || n > count
     }
+
+    /// The 1-based turn this position names in a conversation of `count` turns.
+    ///
+    /// Only meaningful for a position [`Self::out_of_range`] accepts, which is
+    /// what keeps the from-end arithmetic inside the conversation.
+    fn turn_number(self, count: usize) -> usize {
+        match self {
+            Self::Absolute(n) => n,
+            Self::FromEnd(n) => count.saturating_sub(n).saturating_add(1),
+        }
+    }
 }
 
 impl fmt::Display for TurnPos {
@@ -470,7 +481,7 @@ pub(crate) struct TurnSelection {
     /// Numbers are 1-based and stable across new turns; `-N` instead counts
     /// from the end, so `-1` is the last turn and `-3..-2` the two turns before
     /// it.
-    #[arg(long, value_parser = parse_turn, allow_negative_numbers = true, conflicts_with_all = ["first", "last", "from", "to"])]
+    #[arg(long, alias = "turns", value_parser = parse_turn, allow_negative_numbers = true, conflicts_with_all = ["first", "last", "from", "to"])]
     turn: Option<TurnSpec>,
 
     /// Start of the range, inclusive.
@@ -617,10 +628,18 @@ impl TurnSelection {
         Ok(())
     }
 
-    /// Reject a `--turn` endpoint the conversation does not have.
+    /// Reject a `--turn` value the conversation cannot honour.
     ///
-    /// `--turn` names specific turns, so an endpoint outside the conversation
-    /// is an error rather than a clamped selection (unlike `--first`/`--last`).
+    /// Two ways it cannot.
+    /// An endpoint outside the conversation is an error rather than a clamped
+    /// selection, because `--turn` names specific turns (unlike
+    /// `--first`/`--last`).
+    /// A range whose end precedes its start names no turn in any conversation,
+    /// so it is rejected as malformed rather than resolved into an empty
+    /// selection.
+    ///
+    /// The endpoint check runs first: a from-end position only has a turn
+    /// number once it is known to fall inside the conversation.
     pub(crate) fn check_turn_range(&self, count: usize) -> Result<(), String> {
         let ends = match self.turn.as_ref() {
             Some(TurnSpec::Single(pos)) => [Some(*pos), None],
@@ -628,16 +647,33 @@ impl TurnSelection {
             None => return Ok(()),
         };
 
-        match ends
+        if let Some(pos) = ends
             .into_iter()
             .flatten()
             .find(|pos| pos.out_of_range(count))
         {
-            Some(pos) => Err(format!(
+            return Err(format!(
                 "turn {pos} out of range (conversation has {count} turns)"
-            )),
-            None => Ok(()),
+            ));
         }
+
+        // An open end is the start or end of the conversation, so it can never
+        // precede its sibling.
+        let Some(TurnSpec::Range(Some(from), Some(to))) = self.turn.as_ref() else {
+            return Ok(());
+        };
+
+        let (from_turn, to_turn) = (from.turn_number(count), to.turn_number(count));
+        if to_turn < from_turn {
+            // Both spellings are shown: the range as written, and the turns a
+            // from-end position resolves to, which is where the crossing is
+            // visible.
+            return Err(format!(
+                "range {from}..{to} is not valid: turn {to_turn} comes before turn {from_turn}"
+            ));
+        }
+
+        Ok(())
     }
 
     /// The base windows named by the positive selectors, with unresolved

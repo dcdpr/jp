@@ -107,6 +107,7 @@ use jp_llm::{event::NoticeSink, provider};
 use jp_mcp::{
     StartupSet,
     server::{
+        CommandPlugins, PluginInit,
         builtin::{BuiltinExecutors, describe_tools::DescribeTools},
         tool_definitions,
     },
@@ -147,6 +148,10 @@ use crate::{
         conversation::fork,
         label::resolve::{Resolver, Trigger},
         lock::{LockRequest, acquire_lock},
+        plugin::{
+            dispatch::well_known_paths,
+            tool::{admit_turn_plugins, without_unadmitted_plugins},
+        },
     },
     config_pipeline::{self, ConfigReset, ConfigResetEvents},
     ctx::{IntoPartialAppConfig, McpServerScope},
@@ -385,7 +390,7 @@ pub(crate) struct Query {
     /// `NAME` is the workspace-relative location for the symlink, `PATH` is the
     /// external target, and `MODE` is `ro` (default) or `rw`.
     /// `rw` requires a `TOOL:` prefix; without a `TOOL:` prefix the grant
-    /// applies to all enabled local tools.
+    /// applies to all enabled local and command plugin tools.
     /// Repeat the flag to mount several paths.
     #[arg(long = "mount", value_name = "[TOOL:]NAME=PATH[:MODE]", action = ArgAction::Append)]
     mount: Vec<String>,
@@ -574,6 +579,7 @@ impl Query {
                 &piped,
                 query.as_deref(),
                 stream,
+                ctx.term.interactive,
                 &cfg,
                 &conversation_path,
                 &ctx.printer,
@@ -899,6 +905,7 @@ impl Query {
         piped: &str,
         query: Option<&str>,
         stream: &ConversationStream,
+        interactive: bool,
         config: &AppConfig,
         conversation_root: &Utf8Path,
         printer: &Printer,
@@ -955,6 +962,7 @@ impl Query {
             view,
             &mut pending_trim,
             !piped.is_empty(),
+            interactive,
             config,
             conversation_root,
             printer,
@@ -1036,12 +1044,16 @@ impl Query {
     }
 
     // Open the editor for the query, if requested.
+    //
+    // `interactive` says whether a user is present to close the editor; when
+    // they are not, the editor is never opened.
     fn edit_message(
         &self,
         request: &mut ChatRequest,
         stream: &ConversationStream,
         pending_trim: &mut PendingStreamTrim,
         piped: bool,
+        interactive: bool,
         config: &AppConfig,
         conversation_root: &Utf8Path,
         printer: &Printer,
@@ -1098,12 +1110,44 @@ impl Query {
             return Ok((source, PartialAppConfig::empty()));
         }
 
+        // The editor is a child process that paints the whole screen and
+        // exits when a person saves and closes it. With nobody there it blocks
+        // forever on a buffer no one will close, so a non-interactive
+        // invocation is treated like having no editor configured: send whatever
+        // the request already holds, and fail when it holds nothing. The one
+        // exception is a caller that asked for the editor by name, below.
         let backend = match editor::build_editor_backend(&config.editor, printer) {
-            None if !request.is_empty() => {
+            Some(backend) if interactive => backend,
+            // `--edit` and `--quote` ask for the editor explicitly, so the
+            // seeded text was never meant to be sent unread: with `--quote` it
+            // is the assistant's own last message, waiting for a reply between
+            // the lines.
+            Some(_) if self.force_edit() => {
+                return Err(Error::NonInteractiveEditor {
+                    // Without text there is nothing to "send as-is": `--no-edit`
+                    // on an empty request replays the trailing request or sends
+                    // `continue`, the same fallback the empty arm below names.
+                    suggestion: if request.is_empty() {
+                        "Run this from a terminal, or use --no-edit to send a placeholder message."
+                    } else {
+                        "Run this from a terminal, or pass --no-edit instead to send the text \
+                         as-is."
+                    },
+                });
+            }
+            backend if !request.is_empty() => {
+                if backend.is_some() {
+                    debug!("Not opening the editor: the invocation is non-interactive.");
+                }
                 return Ok((source, PartialAppConfig::empty()));
             }
             None => return Err(Error::MissingEditor),
-            Some(backend) => backend,
+            Some(_) => {
+                return Err(Error::NonInteractiveEditor {
+                    suggestion: "Pass the query as an argument or on stdin, or use --no-edit to \
+                                 send a placeholder message.",
+                });
+            }
         };
 
         let (content, editor_provided_config) = editor::edit_query(
@@ -1139,6 +1183,7 @@ impl Query {
         tools: &[ToolDefinition],
         printer: Arc<Printer>,
         approvals: Arc<ApprovalStore>,
+        command_plugins: CommandPlugins,
         chat_request: ChatRequest,
         invocation: InvocationContext,
         pending_trim: PendingStreamTrim,
@@ -1187,6 +1232,7 @@ impl Query {
         let (executor_source, execution_owner) = TerminalExecutorSource::start_with_metadata(
             builtin_executors,
             Arc::new(SystemProcessRunner),
+            command_plugins,
             tools,
             &cfg.conversation.tools,
             approvals,
@@ -1196,12 +1242,15 @@ impl Query {
             provider.mcp_tool_metadata(&model),
         )
         .await?;
+        // What the service advertises, which is what the provider is shown: a
+        // fan-out tool appears with its envelope.
+        let tools = executor_source.advertised();
         let tool_coordinator =
             ToolCoordinator::new(cfg.conversation.tools.clone(), Box::new(executor_source))
                 .with_interrupt(cfg.interrupt.tool_call.clone());
         let prompt_backend = Arc::new(TerminalPromptBackend);
 
-        let result = run_turn_loop(
+        let result = Box::pin(run_turn_loop(
             provider,
             &model,
             cfg,
@@ -1212,7 +1261,7 @@ impl Query {
             attachments,
             lock,
             tool_choice,
-            tools,
+            &tools,
             printer,
             prompt_backend,
             tool_coordinator,
@@ -1220,7 +1269,7 @@ impl Query {
             pending_trim,
             turn_interrupt,
             interrupts,
-        )
+        ))
         .await;
         if let Err(error) = execution_owner.shutdown().await {
             if result.is_ok() {
@@ -1473,6 +1522,11 @@ pub(crate) struct TurnInputs {
     /// Standing decisions about which tool calls may run unattended.
     approvals: Arc<ApprovalStore>,
 
+    /// The command plugins admitted for this turn, sharing `config` with it.
+    ///
+    /// A tool on any other plugin is left out of the turn.
+    command_plugins: CommandPlugins,
+
     /// The request that starts the turn.
     chat_request: ChatRequest,
 
@@ -1539,9 +1593,24 @@ impl TurnInputs {
 
         debug!(count = attachments.len(), "Attachments loaded.");
 
+        // Admitted here, before the turn starts, so a prompt asking whether to
+        // trust a plugin binary never opens inside a tool call.
+        //
+        // The turn's config, not the context's: a plugin serving a tool sees
+        // the options this query resolved, including conversation config and
+        // `--cfg`, rather than resolving its own from the root.
+        let command_plugins = admit_turn_plugins(&config, interactive, &printer, PluginInit {
+            workspace_id: ctx.workspace.id().to_string(),
+            storage: ctx.storage_path().map(ToOwned::to_owned),
+            paths: well_known_paths(ctx.user_storage_path()),
+            config: config.clone(),
+            log_level: ctx.term.args.verbose,
+        })?;
+
         Ok(Self {
             workspace_root: ctx.workspace.root().to_path_buf(),
             approvals: Arc::new(load_approval_store(ctx.fs_backend.as_deref())),
+            command_plugins,
             workspace_id: ctx.workspace.id().clone(),
             signals: ctx.signals.clone(),
             mcp_client: ctx.mcp_client.clone(),
@@ -1588,8 +1657,10 @@ impl TurnInputs {
                 );
 
                 let forced_tool = cfg.assistant.tool_choice.function_name();
+                let offered =
+                    without_unadmitted_plugins(cfg.conversation.tools.iter(), &self.command_plugins);
                 let tools = tool_definitions(
-                    cfg.conversation.tools.iter(),
+                    offered.into_iter(),
                     &self.mcp_client,
                     forced_tool,
                 )
@@ -1643,6 +1714,7 @@ impl TurnInputs {
             &tools,
             self.printer,
             self.approvals,
+            self.command_plugins,
             self.chat_request,
             // Built from the lock the turn actually runs against, so it cannot
             // name one conversation while the events land in another.
@@ -2530,9 +2602,20 @@ fn apply_mounts(
     }
 
     let workspace = workspace.ok_or("`--mount` requires a workspace")?;
-    let root = workspace.root().to_owned();
     let cwd = current_dir_utf8()?;
 
+    inject_mounts(partial, mounts, workspace.root(), &cwd, merged_config)
+}
+
+/// The pure half of [`apply_mounts`]: add the grants `mounts` name to
+/// `partial`, resolving each `NAME` against `cwd` inside `root`.
+fn inject_mounts(
+    partial: &mut PartialAppConfig,
+    mounts: &[String],
+    root: &Utf8Path,
+    cwd: &Utf8Path,
+    merged_config: Option<&PartialAppConfig>,
+) -> BoxedResult<()> {
     // Resolve the tool set and the global enable default from the merged
     // config (the fully-layered view) so a bare mount expands over the tools
     // actually enabled in the resolved config, honoring `*` defaults.
@@ -2542,14 +2625,14 @@ fn apply_mounts(
     let mut plans = Vec::new();
     for spec in mounts {
         let spec = MountSpec::parse(spec)?;
-        let rule_path = spec.resolve_name(&cwd, &root)?.as_str().to_owned();
+        let rule_path = spec.resolve_name(cwd, root)?.as_str().to_owned();
 
         let targets = match &spec.tool {
             Some(tool) => vec![(tool.clone(), mount_access_seed(tools_config, tool))],
             None => tools_config
                 .tools
                 .iter()
-                .filter(|(_, cfg)| is_enabled_local(cfg, &default_enable))
+                .filter(|(_, cfg)| is_enabled_subprocess(cfg, &default_enable))
                 .map(|(name, _)| (name.clone(), mount_access_seed(tools_config, name)))
                 .collect(),
         };
@@ -2968,13 +3051,14 @@ fn declares_rules(access: &PartialAccessConfig) -> bool {
     !access.fs.is_empty() || !access.env.is_empty()
 }
 
-/// Whether a partial tool config is an enabled local tool.
+/// Whether a partial tool config is an enabled tool that runs as a subprocess
+/// JP starts: a local command or a command plugin.
 ///
 /// The tool's own `enable` takes precedence over the global `*` default; a tool
 /// whose effective `state` resolves to `false` is not part of a bare mount's
 /// scope.
-fn is_enabled_local(cfg: &PartialToolConfig, default_enable: &PartialEnableConfig) -> bool {
-    matches!(cfg.source, Some(ToolSource::Local { .. }))
+fn is_enabled_subprocess(cfg: &PartialToolConfig, default_enable: &PartialEnableConfig) -> bool {
+    cfg.source.as_ref().is_some_and(ToolSource::is_subprocess)
         && effective_enable(cfg.enable.as_ref(), default_enable).state
 }
 

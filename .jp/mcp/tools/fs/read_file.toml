@@ -14,6 +14,12 @@ run = "unattended"
 options.suppress = [".git/"]
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+
+# Reads are independent of each other and have no side effects, so they run
+# unbounded and every failure is reported rather than stopping the rest: a
+# missing file in one operation says nothing about the next.
+fan_out = true
+
 summary = "Read the contents of a file in the project's local filesystem."
 description = """
 You can use `fs_grep_files` to search for specific patterns in the file

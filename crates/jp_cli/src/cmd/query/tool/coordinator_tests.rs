@@ -6,7 +6,6 @@ use std::{
 use async_trait::async_trait;
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
-use inquire::TextAnswer;
 use jp_config::{
     AppConfig,
     conversation::tool::{ToolConfig, ToolSource, style::PartialDisplayStyleConfig},
@@ -32,7 +31,7 @@ use crate::{
     access::approvals::ApprovalStore,
     cmd::query::{
         tool::{
-            executor::mock::{MockExecutor, TestExecutorSource},
+            executor::mock::{MockExecutor, ScriptedFanOut, TestExecutorSource},
             inquiry::MockInquiryBackend,
             mcp_executor::TerminalExecutorSource,
         },
@@ -360,6 +359,7 @@ fn test_pre_render_for_prompt_function_call_fires_before_approval() {
         .with_arguments(args)
         .with_permission_info(PermissionInfo {
             tool_id: "call-1".into(),
+            state_key: "call-1".into(),
             tool_name: "fs_delete_file".into(),
             tool_source: ToolSource::Builtin { tool: None },
             run_mode: RunMode::Ask,
@@ -414,6 +414,31 @@ fn test_pre_render_for_prompt_custom_defers_until_the_service_formats() {
     printer.flush();
     // Nothing at all is printed: not the formatter's output, and not a header
     // with nothing under it.
+    assert_eq!(strip_ansi(&stderr.lock()), "");
+}
+
+/// A tool that formats its own arguments runs a program to do so, exactly as a
+/// configured command does, so it defers the same way.
+#[test]
+fn test_pre_render_for_prompt_tool_style_defers_until_the_service_formats() {
+    let coordinator = coordinator_with_style("ticket_create", ParametersStyle::Tool);
+
+    let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let tool_renderer = ToolRenderer::new(
+        ErrChannel::new(printer.clone()),
+        jp_config::AppConfig::new_test().style,
+    );
+
+    let executor = MockExecutor::completed("call-1", "ticket_create", "done");
+    let result = coordinator.pre_render_for_prompt(&executor, &tool_renderer);
+
+    assert!(
+        matches!(result, PreRender::Deferred),
+        "an unformatted tool style should defer rendering, got: {result:?}"
+    );
+
+    printer.flush();
     assert_eq!(strip_ansi(&stderr.lock()), "");
 }
 
@@ -546,6 +571,7 @@ async fn an_edit_at_the_approval_prompt_draws_the_call_again() {
             arguments: std::sync::Mutex::new(request.arguments.clone()),
             permission_info: PermissionInfo {
                 tool_id: request.id.clone(),
+                state_key: request.id.clone(),
                 tool_name: request.name.clone(),
                 tool_source: ToolSource::Builtin { tool: None },
                 run_mode: RunMode::Ask,
@@ -601,6 +627,489 @@ async fn an_edit_at_the_approval_prompt_draws_the_call_again() {
     );
 }
 
+/// A call carrying two operations of `my_tool`, which asks before running.
+///
+/// Each operation's executor records in `settlements` what it is settled with;
+/// the call is recorded with `folded`.
+fn fanned_out_source(
+    settlements: &Arc<std::sync::Mutex<Vec<Review>>>,
+    folded: &ToolCallResponse,
+) -> TestExecutorSource {
+    let (settlements, folded) = (Arc::clone(settlements), folded.clone());
+    TestExecutorSource::new().with_call("my_tool", move |request| {
+        let operations = (0..2)
+            .map(|op| {
+                Box::new(
+                    MockExecutor::completed(&request.id, &request.name, &format!("ran {op}"))
+                        .for_operation(op)
+                        .with_settlements(Arc::clone(&settlements))
+                        .with_permission_info(PermissionInfo {
+                            tool_id: request.id.clone(),
+                            state_key: format!("{}#{op}", request.id),
+                            tool_name: request.name.clone(),
+                            tool_source: ToolSource::Builtin { tool: None },
+                            run_mode: RunMode::Ask,
+                            arguments: Value::Object(Map::new()),
+                        }),
+                ) as Box<dyn Executor>
+            })
+            .collect();
+        CallExecutors {
+            operations,
+            fan_out: Some(Arc::new(ScriptedFanOut(folded.clone()))),
+        }
+    })
+}
+
+fn ask_tools() -> ToolsConfig {
+    let tool_config = ToolConfig::from_partial(
+        jp_config::conversation::tool::PartialToolConfig {
+            source: Some(ToolSource::Builtin { tool: None }),
+            run: Some(RunMode::Ask),
+            ..Default::default()
+        },
+        vec![],
+    )
+    .expect("valid tool config");
+    let mut tools_config = jp_config::AppConfig::new_test().conversation.tools;
+    tools_config.insert("my_tool".to_string(), tool_config);
+    tools_config
+}
+
+/// Each operation of a fanned-out call is asked about and settled on its own,
+/// and the call is recorded once, with the response its operations fold into.
+///
+/// The prompt state check is the regression this guards: every prompt state
+/// change has to name the operation, not the tool call id the operations share.
+/// A prompt state left under the shared id makes `is_prompting` report true for
+/// the rest of the turn, so every Ctrl-C is declined as though a prompt were
+/// still open and the tool cancellation menu never appears.
+#[tokio::test]
+async fn a_fanned_out_call_asks_about_each_operation_and_records_once() {
+    let settlements = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let folded = ToolCallResponse {
+        id: "call_1".into(),
+        result: Ok("[1/2] ok\nran 0\n\n[2/2] ok\nran 1\n".into()),
+    };
+    let mut coordinator = ToolCoordinator::new(
+        ask_tools(),
+        Box::new(fanned_out_source(&settlements, &folded)),
+    );
+    let printer = Arc::new(Printer::sink());
+    let (_workspace, lock) = test_lock();
+    let conv = lock.as_mut();
+    let mut turn_state = TurnState::default();
+
+    let result = drive(
+        &mut coordinator,
+        vec![ToolCallRequest {
+            id: "call_1".into(),
+            name: "my_tool".into(),
+            arguments: Map::new(),
+        }],
+        // One approval per operation.
+        Arc::new(MockPromptBackend::new().with_inline_responses(['y', 'y'])),
+        Arc::new(MockInquiryBackend::new(HashMap::new())),
+        &mut turn_state,
+        &conv,
+        &printer,
+    )
+    .await;
+
+    assert_eq!(result.outcome, ExecutionOutcome::Completed);
+    assert_eq!(
+        result
+            .reviews
+            .iter()
+            .map(|(id, review)| (id.as_str(), review.response.clone()))
+            .collect::<Vec<_>>(),
+        vec![("call_1", folded)],
+        "the call is recorded once, with its folded response"
+    );
+
+    let mut settled = settlements
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|review| review.response.result.clone())
+        .collect::<Vec<_>>();
+    settled.sort();
+    assert_eq!(
+        settled,
+        vec![Ok("ran 0".to_owned()), Ok("ran 1".to_owned())],
+        "each operation is settled with its own result"
+    );
+
+    assert!(
+        !coordinator.is_prompting(),
+        "no prompt state is left behind once the operations are approved"
+    );
+}
+
+/// A call that finds the Host's connection to the JP MCP Server gone when it is
+/// submitted.
+struct Disconnected {
+    tool_id: String,
+    tool_name: String,
+
+    /// What the call waits for before reporting the lost connection, if
+    /// anything.
+    after: Option<Arc<Notify>>,
+}
+
+#[async_trait]
+impl Executor for Disconnected {
+    fn tool_id(&self) -> &str {
+        &self.tool_id
+    }
+
+    fn tool_name(&self) -> &str {
+        &self.tool_name
+    }
+
+    fn arguments(&self) -> Map<String, Value> {
+        Map::new()
+    }
+
+    fn permission_info(&self) -> Option<PermissionInfo> {
+        None
+    }
+
+    fn set_arguments(&self, _: Value) {}
+
+    async fn prepare(&self, _: bool, _: CancellationToken) -> ExecutorResult {
+        if let Some(after) = &self.after {
+            after.notified().await;
+        }
+        ExecutorResult::Failed(ExecutorError::ConnectionLost(Box::new(io::Error::other(
+            "Session expired (HTTP 404)",
+        ))))
+    }
+
+    async fn execute(
+        &self,
+        _: &IndexMap<String, Value>,
+        _: CancellationToken,
+        _: Option<jp_mcp::server::StderrSink>,
+    ) -> ExecutorResult {
+        panic!("a call that was never admitted must not be released")
+    }
+}
+
+/// Once the Host's connection to the JP MCP Server is lost, nothing in the
+/// batch can run: every call is recorded as not executed, none is put to the
+/// user, and the batch reports the lost connection so the turn ends.
+///
+/// The second call asks before running, and the prompt backend holds no answer:
+/// a prompt shown for it would settle it as a failed prompt instead.
+#[tokio::test]
+async fn a_lost_connection_settles_every_call_without_asking() {
+    let mut tools = ask_tools();
+    tools.insert(
+        "lost_tool".to_owned(),
+        ToolConfig::from_partial(
+            serde_json::from_value(json!({"source": "builtin", "run": "allow"})).unwrap(),
+            vec![],
+        )
+        .unwrap(),
+    );
+    let source = TestExecutorSource::new()
+        .with_executor("lost_tool", |request| {
+            Box::new(Disconnected {
+                tool_id: request.id,
+                tool_name: request.name,
+                after: None,
+            })
+        })
+        .with_executor("my_tool", |request| {
+            Box::new(
+                MockExecutor::completed(&request.id, &request.name, "ran").with_permission_info(
+                    PermissionInfo {
+                        tool_id: request.id.clone(),
+                        state_key: request.id.clone(),
+                        tool_name: request.name.clone(),
+                        tool_source: ToolSource::Builtin { tool: None },
+                        run_mode: RunMode::Ask,
+                        arguments: Value::Object(Map::new()),
+                    },
+                ),
+            )
+        });
+    let mut coordinator = ToolCoordinator::new(tools, Box::new(source));
+    let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let (_workspace, lock) = test_lock();
+    let mut turn_state = TurnState::default();
+
+    let result = drive(
+        &mut coordinator,
+        vec![
+            ToolCallRequest {
+                id: "call_1".into(),
+                name: "lost_tool".into(),
+                arguments: Map::new(),
+            },
+            ToolCallRequest {
+                id: "call_2".into(),
+                name: "my_tool".into(),
+                arguments: Map::new(),
+            },
+        ],
+        Arc::new(MockPromptBackend::new()),
+        Arc::new(MockInquiryBackend::new(HashMap::new())),
+        &mut turn_state,
+        &lock.as_mut(),
+        &printer,
+    )
+    .await;
+
+    assert_eq!(result.outcome, ExecutionOutcome::ConnectionLost);
+    assert_eq!(
+        result
+            .reviews
+            .iter()
+            .map(|(id, review)| (id.as_str(), review.response.result.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "call_1",
+                Err(
+                    "Tool 'lost_tool' was not executed: JP could not complete the call. You may \
+                     retry it."
+                        .to_owned()
+                )
+            ),
+            (
+                "call_2",
+                Err(
+                    "Tool 'my_tool' was not executed: JP could not complete the call. You may \
+                     retry it."
+                        .to_owned()
+                )
+            ),
+        ]
+    );
+    printer.flush();
+    assert_eq!(strip_ansi(&stderr.lock()), "");
+}
+
+/// A prompt already open when the connection is lost is waited for before the
+/// calls are handed back, and its answer changes nothing.
+///
+/// The prompt runs on a thread of its own and owns the terminal until it is
+/// answered.
+/// Returning while it is open would leave it on screen over the turn's error,
+/// with its answer sent to a batch that no longer exists.
+#[tokio::test]
+async fn a_lost_connection_waits_for_an_open_prompt() {
+    let mut tools = ask_tools();
+    tools.insert(
+        "lost_tool".to_owned(),
+        ToolConfig::from_partial(
+            serde_json::from_value(json!({"source": "builtin", "run": "allow"})).unwrap(),
+            vec![],
+        )
+        .unwrap(),
+    );
+    let (answer, answers) = std::sync::mpsc::channel();
+    let prompts = Arc::new(HeldPromptBackend::new(answers));
+    // The connection is lost only once the first call's approval prompt is
+    // open, so the loss always lands while it is waiting for an answer.
+    let opened = Arc::clone(&prompts.opened);
+    let source = TestExecutorSource::new()
+        .with_executor("my_tool", |request| {
+            Box::new(
+                MockExecutor::completed(&request.id, &request.name, "ran").with_permission_info(
+                    PermissionInfo {
+                        tool_id: request.id.clone(),
+                        state_key: request.id.clone(),
+                        tool_name: request.name.clone(),
+                        tool_source: ToolSource::Builtin { tool: None },
+                        run_mode: RunMode::Ask,
+                        arguments: Value::Object(Map::new()),
+                    },
+                ),
+            )
+        })
+        .with_executor("lost_tool", move |request| {
+            Box::new(Disconnected {
+                tool_id: request.id,
+                tool_name: request.name,
+                after: Some(Arc::clone(&opened)),
+            })
+        });
+    let mut coordinator = ToolCoordinator::new(tools, Box::new(source));
+    let printer = Arc::new(Printer::sink());
+    let (_workspace, lock) = test_lock();
+    let conv = lock.as_mut();
+    let mut turn_state = TurnState::default();
+
+    let driving = drive(
+        &mut coordinator,
+        vec![
+            ToolCallRequest {
+                id: "call_1".into(),
+                name: "my_tool".into(),
+                arguments: Map::new(),
+            },
+            ToolCallRequest {
+                id: "call_2".into(),
+                name: "lost_tool".into(),
+                arguments: Map::new(),
+            },
+        ],
+        prompts.clone(),
+        Arc::new(MockInquiryBackend::new(HashMap::new())),
+        &mut turn_state,
+        &conv,
+        &printer,
+    );
+    tokio::pin!(driving);
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), &mut driving)
+            .await
+            .is_err(),
+        "the calls were handed back while the approval prompt was still open"
+    );
+    answer.send('y').unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(5), driving)
+        .await
+        .expect("answering the prompt lets the calls be handed back");
+
+    assert_eq!(result.outcome, ExecutionOutcome::ConnectionLost);
+    assert_eq!(
+        result
+            .reviews
+            .iter()
+            .map(|(id, review)| (id.as_str(), review.response.result.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "call_1",
+                Err(
+                    "Tool 'my_tool' was not executed: JP could not complete the call. You may \
+                     retry it."
+                        .to_owned()
+                )
+            ),
+            (
+                "call_2",
+                Err(
+                    "Tool 'lost_tool' was not executed: JP could not complete the call. You may \
+                     retry it."
+                        .to_owned()
+                )
+            ),
+        ],
+        "approving the call after the connection was lost does not run it"
+    );
+    assert_eq!(prompts.shown.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+/// Tools named `name` whose calls an argument formatter describes, and which
+/// run without asking.
+fn described_tools(name: &str) -> ToolsConfig {
+    let partial: jp_config::conversation::tool::PartialToolConfig = serde_json::from_value(json!({
+        "source": "builtin", "run": "allow",
+        "style": {"parameters": "describe"},
+    }))
+    .unwrap();
+    let mut tools = jp_config::AppConfig::new_test().conversation.tools;
+    tools.insert(
+        name.into(),
+        ToolConfig::from_partial(partial, vec![]).unwrap(),
+    );
+    tools
+}
+
+/// Take `request` to its response twice without draining what was stored in
+/// between, the way a restart hands the calls still without a response back to
+/// the coordinator before anything is persisted, then drain.
+async fn described_twice(
+    coordinator: &mut ToolCoordinator,
+    request: &ToolCallRequest,
+) -> HashMap<String, String> {
+    let printer = Arc::new(Printer::sink());
+    let (_workspace, lock) = test_lock();
+    let conv = lock.as_mut();
+    for _ in 0..2 {
+        drive(
+            coordinator,
+            vec![request.clone()],
+            Arc::new(MockPromptBackend::new()),
+            Arc::new(MockInquiryBackend::new(HashMap::new())),
+            &mut TurnState::default(),
+            &conv,
+            &printer,
+        )
+        .await;
+    }
+    coordinator.drain_rendered_arguments()
+}
+
+/// A call's stored description is the one it was last shown with.
+///
+/// Announced again after a restart, a call replaces its description rather than
+/// adding a second copy, which replay would print twice.
+#[tokio::test]
+async fn announcing_a_call_again_replaces_its_stored_description() {
+    let source = TestExecutorSource::new().with_executor("example", |request| {
+        Box::new(
+            MockExecutor::completed(&request.id, &request.name, "ran").with_formatted("described"),
+        )
+    });
+    let mut coordinator = ToolCoordinator::new(described_tools("example"), Box::new(source));
+    let request = ToolCallRequest {
+        id: "call-1".into(),
+        name: "example".into(),
+        arguments: Map::new(),
+    };
+
+    let stored = described_twice(&mut coordinator, &request).await;
+
+    assert_eq!(
+        stored,
+        HashMap::from([("call-1".to_owned(), "described".to_owned())])
+    );
+}
+
+/// A fanned-out call's description holds each operation's once, in the order
+/// the assistant wrote them, however often the call is announced.
+#[tokio::test]
+async fn a_fanned_out_calls_description_holds_each_operation_once_in_order() {
+    let source = TestExecutorSource::new().with_call("example", |request| CallExecutors {
+        operations: ["first", "second"]
+            .into_iter()
+            .enumerate()
+            .map(|(op, description)| {
+                Box::new(
+                    MockExecutor::completed(&request.id, &request.name, "ran")
+                        .for_operation(op)
+                        .with_formatted(description),
+                ) as Box<dyn Executor>
+            })
+            .collect(),
+        fan_out: Some(Arc::new(ScriptedFanOut(ToolCallResponse {
+            id: request.id.clone(),
+            result: Ok("ran".into()),
+        }))),
+    });
+    let mut coordinator = ToolCoordinator::new(described_tools("example"), Box::new(source));
+    let request = ToolCallRequest {
+        id: "call-1".into(),
+        name: "example".into(),
+        arguments: Map::new(),
+    };
+
+    let stored = described_twice(&mut coordinator, &request).await;
+
+    assert_eq!(
+        stored,
+        HashMap::from([("call-1".to_owned(), "first\nsecond".to_owned())])
+    );
+}
+
 #[test]
 fn test_permission_decision_cache_is_isolated_from_answers() {
     let mut coordinator = ToolCoordinator::new(
@@ -611,6 +1120,7 @@ fn test_permission_decision_cache_is_isolated_from_answers() {
 
     let info = PermissionInfo {
         tool_id: "call_1".into(),
+        state_key: "call_1".into(),
         tool_name: "my_tool".into(),
         tool_source: ToolSource::Builtin { tool: None },
         run_mode: RunMode::Ask,
@@ -917,9 +1427,7 @@ async fn a_remembered_no_stops_a_later_calls_formatter() {
         drive(
             &mut coordinator,
             requests,
-            Arc::new(HeldPromptBackend {
-                answers: std::sync::Mutex::new(answers),
-            }),
+            Arc::new(HeldPromptBackend::new(answers)),
             Arc::new(MockInquiryBackend::new(HashMap::new())),
             &mut TurnState::default(),
             &lock.as_mut(),
@@ -1074,6 +1582,22 @@ async fn an_unanswered_formatter_question_settles_the_call() {
 /// that fails the test if anything else is asked.
 struct HeldPromptBackend {
     answers: std::sync::Mutex<std::sync::mpsc::Receiver<char>>,
+
+    /// Notified each time an inline select opens.
+    opened: Arc<Notify>,
+
+    /// How many inline selects have opened.
+    shown: std::sync::atomic::AtomicUsize,
+}
+
+impl HeldPromptBackend {
+    fn new(answers: std::sync::mpsc::Receiver<char>) -> Self {
+        Self {
+            answers: std::sync::Mutex::new(answers),
+            opened: Arc::new(Notify::new()),
+            shown: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
 }
 
 impl PromptBackend for HeldPromptBackend {
@@ -1084,6 +1608,8 @@ impl PromptBackend for HeldPromptBackend {
         _default: Option<char>,
         _writer: &mut dyn std::io::Write,
     ) -> Result<char, InquireError> {
+        self.shown.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.opened.notify_one();
         self.answers
             .lock()
             .unwrap()
@@ -1100,15 +1626,6 @@ impl PromptBackend for HeldPromptBackend {
         _help: Option<&str>,
         _output: Box<dyn std::io::Write + Send>,
     ) -> Result<ReplyOutcome, InquireError> {
-        panic!("unexpected prompt: {message}")
-    }
-
-    fn text(
-        &self,
-        message: &str,
-        _default: Option<&str>,
-        _writer: &mut dyn std::io::Write,
-    ) -> Result<TextAnswer, InquireError> {
         panic!("unexpected prompt: {message}")
     }
 
@@ -1174,6 +1691,7 @@ impl Executor for AskingFormatter {
     fn permission_info(&self) -> Option<PermissionInfo> {
         self.asks.then(|| PermissionInfo {
             tool_id: self.tool_id.clone(),
+            state_key: self.tool_id.clone(),
             tool_name: self.tool_name.clone(),
             tool_source: ToolSource::Builtin { tool: None },
             run_mode: RunMode::Ask,
@@ -1275,6 +1793,7 @@ async fn a_remembered_no_while_a_later_call_asks(
                     .with_arguments(request.arguments.clone())
                     .with_permission_info(PermissionInfo {
                         tool_id: request.id.clone(),
+                        state_key: request.id.clone(),
                         tool_name: request.name.clone(),
                         tool_source: ToolSource::Builtin { tool: None },
                         run_mode: RunMode::Ask,
@@ -1309,9 +1828,7 @@ async fn a_remembered_no_while_a_later_call_asks(
     });
 
     let (answer, answers) = std::sync::mpsc::channel();
-    let prompts: Arc<dyn PromptBackend> = Arc::new(HeldPromptBackend {
-        answers: std::sync::Mutex::new(answers),
-    });
+    let prompts: Arc<dyn PromptBackend> = Arc::new(HeldPromptBackend::new(answers));
     let assistant = Arc::new(SilentAssistant::default());
     let inquiry_backend: Arc<dyn InquiryBackend> = assistant.clone();
     let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);

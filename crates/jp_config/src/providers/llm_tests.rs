@@ -20,6 +20,36 @@ fn test_provider_config_anthropic() {
 }
 
 #[test]
+fn api_key_env_assigns_a_list_of_variables() {
+    let mut p = PartialLlmProviderConfig::default();
+
+    let kv =
+        KvAssignment::try_from_cli("vllm.api_key_env:", r#"["WORK_KEY", "USER_KEY"]"#).unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(
+        p.vllm.api_key_env,
+        Some(ApiKeyEnv::FirstOf(vec![
+            "WORK_KEY".to_owned(),
+            "USER_KEY".to_owned()
+        ]))
+    );
+}
+
+#[test]
+fn api_key_env_assigns_a_map_of_variables() {
+    let mut p = PartialLlmProviderConfig::default();
+
+    let kv = KvAssignment::try_from_cli("vllm.api_key_env:", r#"{"work": "WORK_KEY"}"#).unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(
+        p.vllm.api_key_env,
+        Some(ApiKeyEnv::Many(
+            [("work".to_owned(), "WORK_KEY".into())].into()
+        ))
+    );
+}
+
+#[test]
 fn test_provider_config_openai() {
     let mut p = PartialLlmProviderConfig::default();
 

@@ -6,8 +6,6 @@ use duct::Expression;
 use schematic::{Config, ConfigEnum};
 use serde::{Deserialize, Serialize};
 
-#[cfg(unix)]
-use crate::types::command::shell_command_line;
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{
@@ -18,7 +16,7 @@ use crate::{
     internal::merge::vec_with_strategy,
     partial::{ToPartial, partial_opt, partial_opt_config},
     types::{
-        command::{CommandConfigOrString, PartialCommandConfigOrString},
+        command::{CommandConfig, CommandConfigOrString, PartialCommandConfigOrString},
         vec::MergeableVec,
     },
 };
@@ -232,11 +230,24 @@ impl EditorConfig {
     ///   Values with unbalanced quoting are skipped.
     #[must_use]
     pub fn command(&self) -> Option<Expression> {
+        Some(editor_expression(&self.resolve()?))
+    }
+
+    /// Resolve which program the editor settings name: `cmd` when set,
+    /// otherwise the first `envs` entry holding an installed program.
+    ///
+    /// Returns `None` when neither `cmd` is set nor any configured environment
+    /// variable resolves to an installed program.
+    ///
+    /// An env-var value is split with [`shlex::split`], so `JP_EDITOR="code
+    /// -w"` resolves to the program `code` with the argument `-w`, and `shell`
+    /// is never set on that path.
+    #[must_use]
+    pub fn resolve(&self) -> Option<CommandConfig> {
         self.cmd
             .clone()
             .map(CommandConfigOrString::command)
             .filter(|c| !c.program.trim().is_empty())
-            .map(|c| editor_expression(&c.program, &c.args, c.shell))
             .or_else(|| {
                 self.envs.iter().find_map(|v| {
                     let value = env::var(v).ok()?;
@@ -245,8 +256,12 @@ impl EditorConfig {
                     if which::which(&program).is_err() {
                         return None;
                     }
-                    let args: Vec<String> = parts.collect();
-                    Some(duct::cmd(program, args))
+
+                    Some(CommandConfig {
+                        program,
+                        args: parts.collect(),
+                        shell: false,
+                    })
                 })
             })
     }
@@ -259,16 +274,15 @@ impl EditorConfig {
 /// missing program is a spawn error; `shell = true` wraps the command in
 /// `/bin/sh -c`, forwarding the appended path(s) via `"$@"`.
 #[cfg(unix)]
-fn editor_expression(program: &str, args: &[String], shell: bool) -> Expression {
-    if !shell {
-        return duct::cmd(program, args.to_vec());
+fn editor_expression(cmd: &CommandConfig) -> Expression {
+    if !cmd.shell {
+        return duct::cmd(&cmd.program, cmd.args.clone());
     }
 
-    // `program` is shell syntax and used verbatim; `args` are shell-quoted.
     // `sh -c <script>` assigns the first trailing operand to `$0`, so set an
     // explicit `$0` (`jp-editor`) and forward the appended path(s) via `"$@"`.
     // A script that already references its arguments is left untouched.
-    let mut script = shell_command_line(program, args);
+    let mut script = cmd.shell_command_line();
     if !(script.contains("$@") || script.contains("$*")) {
         script.push_str(r#" "$@""#);
     }
@@ -282,15 +296,15 @@ fn editor_expression(program: &str, args: &[String], shell: bool) -> Expression 
 /// `shell = true` is logged as unsupported and degraded to a direct spawn; use
 /// `shell = false` and wrap any shell logic in a script on these platforms.
 #[cfg(not(unix))]
-fn editor_expression(program: &str, args: &[String], shell: bool) -> Expression {
-    if shell {
+fn editor_expression(cmd: &CommandConfig) -> Expression {
+    if cmd.shell {
         tracing::warn!(
             "`editor.cmd` with `shell = true` is not supported on this platform; running the \
              program directly. Use `shell = false` and wrap any shell logic in a script."
         );
     }
 
-    duct::cmd(program, args.to_vec())
+    duct::cmd(&cmd.program, cmd.args.clone())
 }
 
 #[cfg(test)]

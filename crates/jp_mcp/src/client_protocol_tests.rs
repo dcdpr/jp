@@ -31,7 +31,7 @@ use super::{Client, McpServerId};
 use crate::{
     Content,
     server::{
-        Answers, Execution, ExecutionOutcome,
+        Answers, CommandPlugins, Execution, ExecutionOutcome,
         builtin::BuiltinExecutors,
         execute,
         http::Endpoint,
@@ -113,6 +113,7 @@ async fn upstream_receives_context_options_and_accumulated_answers() {
         conversation_id: "conversation-1".into(),
     };
     let builtins = BuiltinExecutors::new();
+    let command_plugins = CommandPlugins::default();
     // One context for both attempts, which is what the service does: the second
     // attempt differs only by the answer it carries.
     let execution = Execution {
@@ -126,6 +127,7 @@ async fn upstream_receives_context_options_and_accumulated_answers() {
         invocation: &invocation,
         builtins: &builtins,
         runner: &no_commands(),
+        command_plugins: &command_plugins,
         upstream: &client,
         cancellation: CancellationToken::new(),
         stderr: None,
@@ -182,6 +184,7 @@ async fn native_service(upstream: &Client) -> (Service, HostReceiver) {
         upstream.clone(),
         BuiltinExecutors::new(),
         no_commands(),
+        CommandPlugins::default(),
         "/work".into(),
         InvocationContext::default(),
     )
@@ -357,6 +360,7 @@ async fn native_upstream_result_survives_host_projection_and_http_delivery() {
             upstream,
             BuiltinExecutors::new(),
             no_commands(),
+            CommandPlugins::default(),
             "/work".into(),
             InvocationContext::default(),
         )

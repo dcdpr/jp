@@ -1,0 +1,56 @@
+# Structural quality checks, DRY pass: duplicates and dead code over production
+# code only.
+#
+# Paired with `config.toml`, which runs every other dimension across the full
+# workspace. See that file for why the two passes are split.
+#
+# Excluding test files here is safe because nothing in this pass depends on
+# them: `[test_quality]` is off, so TQ-003 cannot mistake an untested-looking
+# function for a real finding, and DRY-002 already ignores calls from
+# `#[cfg(test)]` code when deciding deadness — the dead-code count is identical
+# (256) with and without these globs. What the exclusion removes is ~2038
+# DRY-003 fragments and ~210 DRY-001 duplicate test functions, both of which
+# are the deliberate self-contained-test shape rather than copy-paste.
+#
+# Two dimensions cannot be disabled and will appear in this pass as well as in
+# the main one: IOSP has no `enabled` key, and MAGIC_NUMBER survives
+# `[complexity] enabled = false` (every other complexity rule is correctly
+# silenced). Both are absorbed by this pass's own baseline and do not affect the
+# regression gate.
+#
+# The same inconsistency produces three `ORPHAN_SUPPRESSION` findings here, on
+# the `qual:allow(complexity, magic_numbers)` markers in the provider model
+# catalogues. With `[complexity]` off, rustqual sees no complexity finding to
+# match them against and calls them stale — while MAGIC_NUMBER fires anyway.
+# They suppress correctly in the main pass (498 findings down to 193). Baselined
+# here; not worth excluding the provider files from DRY detection to silence.
+
+exclude_files = [
+    "**/*_tests.rs",
+    "**/tests.rs",
+    "**/tests/**",
+]
+
+[duplicates]
+enabled = true
+
+[boilerplate]
+enabled = false
+
+[complexity]
+enabled = false
+
+[srp]
+enabled = false
+
+[coupling]
+enabled = false
+
+[structural]
+enabled = false
+
+[test_quality]
+enabled = false
+
+[architecture]
+enabled = false

@@ -18,7 +18,7 @@ fn strip_noop_when_all_fields_known() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 0);
+    assert_eq!(stripped.count(), 0);
     assert_eq!(
         value,
         json!({
@@ -40,7 +40,7 @@ fn strip_removes_unknown_top_level_field() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 1);
+    assert_eq!(stripped.count(), 1);
     assert_eq!(value, json!({ "style": {} }));
 }
 
@@ -57,7 +57,7 @@ fn strip_removes_unknown_nested_field() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 1);
+    assert_eq!(stripped.count(), 1);
     assert_eq!(
         value,
         json!({
@@ -85,7 +85,7 @@ fn strip_removes_multiple_unknown_fields_at_different_levels() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 3);
+    assert_eq!(stripped.count(), 3);
     assert_eq!(
         value,
         json!({
@@ -96,6 +96,41 @@ fn strip_removes_multiple_unknown_fields_at_different_levels() {
             }
         })
     );
+    assert_eq!(
+        json!(stripped.by_parent),
+        json!({
+            ".": ["gone_top"],
+            "style": ["gone_mid"],
+            "style.code": ["gone_leaf"],
+        })
+    );
+}
+
+/// The keys a plugin config lost when installing stopped being configurable, as
+/// a conversation stored before that still carries them.
+#[test]
+fn strip_groups_removed_fields_by_the_object_that_held_them() {
+    let schema = AppConfig::schema();
+    let mut value = json!({
+        "plugins": {
+            "auto_install": true,
+            "command": {
+                "serve-web": { "install": true, "run": "deny" },
+                "ticket": { "install": false }
+            }
+        }
+    });
+
+    let stripped = strip_unknown_fields(&mut value, &schema);
+    assert_eq!(stripped.count(), 3);
+    assert_eq!(
+        json!(stripped.by_parent),
+        json!({
+            "plugins": ["auto_install"],
+            "plugins.command.serve-web": ["install"],
+            "plugins.command.ticket": ["install"],
+        })
+    );
 }
 
 #[test]
@@ -104,7 +139,7 @@ fn strip_leaves_non_object_values_untouched() {
     let mut value = json!("just a string");
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 0);
+    assert_eq!(stripped.count(), 0);
     assert_eq!(value, json!("just a string"));
 }
 
@@ -114,7 +149,7 @@ fn strip_empty_object_is_noop() {
     let mut value = json!({});
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 0);
+    assert_eq!(stripped.count(), 0);
 }
 
 #[test]
@@ -128,7 +163,7 @@ fn strip_removes_entire_unknown_nested_section() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 1);
+    assert_eq!(stripped.count(), 1);
     assert_eq!(value, json!({}));
 }
 
@@ -147,7 +182,7 @@ fn strip_with_minimal_synthetic_schema() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 1);
+    assert_eq!(stripped.count(), 1);
     assert_eq!(value, json!({ "keep": true }));
 }
 
@@ -169,7 +204,7 @@ fn strip_descends_into_flattened_map_entries() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 1);
+    assert_eq!(stripped.count(), 1);
     assert_eq!(
         value,
         json!({
@@ -202,7 +237,7 @@ fn strip_keeps_tool_names_at_the_flattened_level() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 0);
+    assert_eq!(stripped.count(), 0);
     assert_eq!(
         value,
         json!({
@@ -231,7 +266,7 @@ fn strip_descends_into_a_tool_named_after_the_flattened_field() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 1);
+    assert_eq!(stripped.count(), 1);
     assert_eq!(
         value,
         json!({
@@ -262,7 +297,7 @@ fn strip_descends_into_a_flattened_map_stating_a_strategy() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 1);
+    assert_eq!(stripped.count(), 1);
     assert_eq!(
         value,
         json!({
@@ -289,7 +324,7 @@ fn strip_descends_into_array_items() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 1);
+    assert_eq!(stripped.count(), 1);
     assert_eq!(
         value,
         json!({ "assistant": { "instructions": [{ "title": "t" }] } })
@@ -312,7 +347,7 @@ fn strip_descends_into_mergeable_vec_items() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 1);
+    assert_eq!(stripped.count(), 1);
     assert_eq!(
         value,
         json!({
@@ -342,7 +377,7 @@ fn strip_descends_into_nested_maps() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 1);
+    assert_eq!(stripped.count(), 1);
     assert_eq!(
         value,
         json!({
@@ -376,7 +411,7 @@ fn strip_resolves_a_reference_to_the_type_it_names() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 1);
+    assert_eq!(stripped.count(), 1);
     assert_eq!(
         value,
         json!({
@@ -419,7 +454,7 @@ fn strip_resolves_a_reference_reached_through_a_map() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 1);
+    assert_eq!(stripped.count(), 1);
     assert_eq!(
         value["conversation"]["tools"]["fs_modify_file"]["parameters"]["patch"]["properties"]
             ["old"],
@@ -451,7 +486,7 @@ fn strip_resolves_a_reference_at_every_depth_it_recurses() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 1);
+    assert_eq!(stripped.count(), 1);
     assert_eq!(
         value["conversation"]["tools"]["fs_modify_file"]["parameters"]["patterns"]["items"]
             ["items"],
@@ -477,7 +512,7 @@ fn strip_descends_into_the_one_union_variant_that_fits() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 2);
+    assert_eq!(stripped.count(), 2);
     assert_eq!(
         value,
         json!({
@@ -521,7 +556,7 @@ fn strip_descends_into_a_per_question_instructions_wrapper() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 1);
+    assert_eq!(stripped.count(), 1);
     assert_eq!(
         value["conversation"]["tools"]["fs_modify_file"]["questions"]["apply_changes"]["target"]
             ["instructions"]["value"][0],
@@ -576,7 +611,7 @@ fn strip_leaves_a_union_alone_when_two_variants_fit() {
     let mut value = json!({ "a": true, "b": false });
     let stripped = strip_unknown_fields(&mut value, &schema);
 
-    assert_eq!(stripped, 0, "neither variant may claim the value");
+    assert_eq!(stripped.count(), 0, "neither variant may claim the value");
     assert_eq!(value, json!({ "a": true, "b": false }));
 }
 
@@ -594,7 +629,7 @@ fn strip_leaves_free_form_tool_options_alone() {
     });
 
     let stripped = strip_unknown_fields(&mut value, &schema);
-    assert_eq!(stripped, 0);
+    assert_eq!(stripped.count(), 0);
     assert_eq!(
         value,
         json!({
@@ -789,7 +824,7 @@ fn strip_directly_on_delta_subtree() {
     });
 
     let stripped = strip_unknown_fields(&mut delta_value, &schema);
-    assert_eq!(stripped, 1, "should have stripped 'removed_field'");
+    assert_eq!(stripped.count(), 1, "should have stripped 'removed_field'");
     assert_eq!(
         delta_value,
         json!({ "style": { "code": { "color": false } } })

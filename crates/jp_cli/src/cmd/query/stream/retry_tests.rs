@@ -67,16 +67,15 @@ fn make_test_lock() -> (Workspace, ConversationLock) {
 }
 
 #[test]
-fn agent_restart_requires_committed_tool_results_and_a_credential_change() {
+fn agent_restart_requires_committed_tool_results() {
     let mut events = ConversationStream::new_test();
-    let error = StreamError::subscription_exhausted("spent", None, None).with_credential_change();
-    assert!(can_restart_agent(&error, &events));
+    assert!(agent_restart_is_safe(&events));
     let timestamp = datetime!(2026-07-03 12:00:00 Z);
     events.extend([ConversationEvent::new(
         ToolCallRequest::new("call-fixed".into(), "write".into(), Map::new()),
         timestamp,
     )]);
-    assert!(!can_restart_agent(&error, &events));
+    assert!(!agent_restart_is_safe(&events));
     events.extend([ConversationEvent::new(
         ToolCallResponse {
             id: "call-fixed".into(),
@@ -84,11 +83,7 @@ fn agent_restart_requires_committed_tool_results_and_a_credential_change() {
         },
         timestamp,
     )]);
-    assert!(can_restart_agent(&error, &events));
-    assert!(!can_restart_agent(
-        &StreamError::transient("connection lost"),
-        &events
-    ));
+    assert!(agent_restart_is_safe(&events));
 }
 
 #[test]

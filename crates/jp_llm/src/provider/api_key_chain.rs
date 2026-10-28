@@ -27,6 +27,21 @@ pub fn read_key(variable: &str) -> Option<String> {
     env::var(variable).ok().filter(|key| !key.trim().is_empty())
 }
 
+/// Read the key from the first of `variables` that holds one, in order.
+///
+/// Each variable is read as [`read_key`] reads it, so a blank value falls
+/// through to the next.
+#[must_use]
+pub fn read_first_key(variables: &[String]) -> Option<String> {
+    variables.iter().find_map(|variable| read_key(variable))
+}
+
+/// Name `variables` in a message saying none of them holds a key.
+#[must_use]
+pub(crate) fn describe_variables(variables: &[String]) -> String {
+    variables.join(" or ")
+}
+
 /// Why an API-key chain produced no credential.
 #[derive(Debug, thiserror::Error)]
 pub enum ChainError {
@@ -106,19 +121,20 @@ pub(crate) fn resolve(
 
         // A name no key answers to is a config mistake, not a credential to
         // fall past: the next entry would bill a different key.
-        let variable = keys
-            .variable(name)
+        let variables = keys
+            .variables(name)
             .map_err(|source| ChainError::UnknownKey {
                 provider: provider.to_owned(),
                 source,
             })?;
 
-        if let Some(key) = read_key(variable) {
+        if let Some(key) = read_first_key(variables) {
             return Ok((key, AuthEntry::ApiKey(name.map(str::to_owned))));
         }
 
+        let variable = describe_variables(variables);
         if chain.len() == 1 {
-            return Err(ChainError::MissingEnv(variable.to_owned()));
+            return Err(ChainError::MissingEnv(variable));
         }
 
         debug!(provider, %entry, variable, "Skipping API key with no value.");

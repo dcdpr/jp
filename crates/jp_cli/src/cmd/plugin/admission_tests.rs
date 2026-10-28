@@ -136,6 +136,7 @@ fn a_sha1_pin_is_compared_with_the_binarys_sha1() {
             false,
             &printer
         )
+        .map(drop)
         .map_err(|error| error.message.unwrap_or_default()),
         Ok(())
     );
@@ -150,6 +151,7 @@ fn a_sha1_pin_is_compared_with_the_binarys_sha1() {
             false,
             &printer
         )
+        .map(drop)
         .map_err(|error| error.message.unwrap_or_default()),
         Err(format!(
             "plugin `webui` binary checksum mismatch.\nexpected: bbb\nactual:   \
@@ -327,6 +329,7 @@ fn without_a_terminal_only_an_approved_binary_runs() {
             false,
             &printer,
         )
+        .map(drop)
         .map_err(|error| error.message.unwrap_or_default())
     };
 
@@ -358,6 +361,44 @@ fn without_a_terminal_only_an_approved_binary_runs() {
              config."
         ))
     );
+}
+
+/// Admission hands back the digest it decided on, so a caller that pins the
+/// binary for later checks pins the approved contents, not whatever is on disk
+/// by the time it reads the file again.
+#[test]
+fn admission_returns_the_digest_it_decided_on() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("jp-webui");
+    std::fs::write(&path, "v1").unwrap();
+    let plugin = LocalPlugin {
+        path: path.clone(),
+        ..plugin("webui")
+    };
+    let approved = registry::sha256_file(&path).unwrap();
+    let mut approvals = ApprovalStore::load_from(Some(tmp.path().join("approvals.json")));
+    approvals
+        .record("webui", ApprovedPlugin {
+            path: path.clone(),
+            sha256: approved.clone(),
+            approved_at: Utc::now(),
+            installed: false,
+            manifest: None,
+        })
+        .unwrap();
+    let (printer, _out, _err) = Printer::memory(jp_printer::OutputFormat::Text);
+
+    let decided = admit(
+        &plugin,
+        Official::default(),
+        &AppConfig::new_test().plugins,
+        &mut approvals,
+        false,
+        &printer,
+    )
+    .map_err(|error| error.message.unwrap_or_default());
+
+    assert_eq!(decided, Ok(approved));
 }
 
 #[test]

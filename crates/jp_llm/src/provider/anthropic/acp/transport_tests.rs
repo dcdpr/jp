@@ -249,6 +249,53 @@ fn project_directory_is_scoped_by_host_identity_not_worktree_path() {
     assert_eq!(project_name(&context), "jp-c987654321-otvo8");
 }
 
+/// Where [`NativeArtifact::write`] puts the transcript for `session`.
+fn transcript_path(directory: &Utf8Path, session: Uuid) -> Utf8PathBuf {
+    directory
+        .join("projects")
+        .join("jp-c123-otvo8")
+        .join(format!("{session}.jsonl"))
+}
+
+#[test]
+fn the_transcript_is_removed_after_the_request() {
+    let directory = camino_tempfile::tempdir().unwrap();
+    let artifact = NativeArtifact::write(
+        &prepared(),
+        directory.path(),
+        directory.path(),
+        "jp-c123-otvo8",
+        false,
+    )
+    .unwrap();
+    let path = transcript_path(directory.path(), artifact.session.unwrap());
+    assert!(path.exists());
+
+    drop(artifact);
+
+    assert!(!path.exists());
+}
+
+#[test]
+fn a_kept_transcript_outlives_the_request() {
+    // `JP_DEBUG` keeps the file: it is the only record of what JP handed
+    // Claude Code, which the trace log cannot show.
+    let directory = camino_tempfile::tempdir().unwrap();
+    let artifact = NativeArtifact::write(
+        &prepared(),
+        directory.path(),
+        directory.path(),
+        "jp-c123-otvo8",
+        true,
+    )
+    .unwrap();
+    let path = transcript_path(directory.path(), artifact.session.unwrap());
+
+    drop(artifact);
+
+    assert!(path.exists());
+}
+
 #[test]
 fn storage_options_do_not_select_a_different_login_directory() {
     let mut environment = BTreeMap::new();

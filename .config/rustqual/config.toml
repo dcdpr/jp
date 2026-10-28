@@ -1,0 +1,35 @@
+# Structural quality checks, main pass: every dimension except DRY, across the
+# full workspace including test files.
+#
+# Run via `just qual`; gated on CI by `just qual-ci`.
+#
+# ## Why DRY is disabled here
+#
+# rustqual's DRY dimension is all-or-nothing. Turning off `[duplicates]`
+# disables DRY-002 (dead code) and DRY-006 (dead types) along with DRY-003
+# (repeated fragments) — verified, not assumed: the dead-code count goes 256 to
+# 0 on this workspace when the section is disabled.
+#
+# DRY-003 fires ~2038 times inside `*_tests.rs`, on the repeated setup blocks
+# that make each `#[test]` self-contained. That shape is deliberate here (see
+# the testing guidance in the contributor docs: prefer duplication over a
+# shared fixture helper), so those findings are noise rather than signal.
+#
+# The resolution is a second pass, `dry.toml`, which enables DRY over
+# production code only. Test files cannot simply be excluded from *this* pass
+# instead, because doing so would take the Test Quality dimension with them:
+# TQ-001/002/003 all need `#[test]` functions in the parse.
+
+[duplicates]
+enabled = false
+
+# rustqual judges test code by production thresholds unless told otherwise.
+# Several test functions here are deliberately long and self-contained, so
+# `LONG_FN` and `SRP_MODULE` fire on files that are working as intended. Left
+# unset so the baseline records the real numbers; raise these if the findings
+# turn out to obscure genuine regressions rather than merely sit in the
+# baseline.
+#
+# [tests]
+# max_function_lines = 150
+# file_length        = 800

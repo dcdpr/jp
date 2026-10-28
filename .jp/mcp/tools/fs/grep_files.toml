@@ -17,6 +17,13 @@ options.suppress = [".git/", "**/target/"]
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
+
+# Searches are independent and have no side effects, so they run unbounded and
+# every failure is reported rather than stopping the rest. Note that several
+# patterns over the same paths are usually one alternation (`a|b`) rather than
+# several operations; fan-out is for searches that differ in their paths too.
+fan_out = true
+
 summary = "Grep files in the project's local filesystem."
 description = """
 Results are grouped by file. Each group opens with a header naming the file and
