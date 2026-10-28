@@ -1032,6 +1032,22 @@ async fn drive_turn(
                         break;
                     }
 
+                    // The Host lost its connection to the JP MCP Server, so
+                    // nothing more can run this turn. Persist the responses
+                    // so every tool call keeps a matching response, then end
+                    // the turn with an error instead of asking the assistant
+                    // to retry on a connection that is gone.
+                    ExecutionOutcome::ConnectionLost => {
+                        commit_tool_responses(
+                            execution_result,
+                            tool_coordinator,
+                            &mut turn_coordinator,
+                            &mut conv,
+                        )
+                        .await?;
+                        return Err(Error::McpConnectionLost);
+                    }
+
                     // The next loop iteration re-executes the cancelled
                     // batch.
                     ExecutionOutcome::Restart => {

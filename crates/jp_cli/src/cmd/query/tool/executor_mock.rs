@@ -102,15 +102,24 @@ impl MockExecutor {
     }
 
     fn new(tool_id: &str, tool_name: &str, result: Result<String, String>) -> Self {
+        Self::ending_with(
+            tool_id,
+            tool_name,
+            ExecutorResult::Completed(ToolCallResponse {
+                id: tool_id.to_owned(),
+                result,
+            }),
+        )
+    }
+
+    /// Creates a mock executor whose execution ends in `result`.
+    pub(crate) fn ending_with(tool_id: &str, tool_name: &str, result: ExecutorResult) -> Self {
         Self {
             tool_id: tool_id.to_owned(),
             tool_name: tool_name.to_owned(),
             arguments: Map::new(),
             permission_info: None,
-            result: Mutex::new(Some(ExecutorResult::Completed(ToolCallResponse {
-                id: tool_id.to_owned(),
-                result,
-            }))),
+            result: Mutex::new(Some(result)),
             op: None,
             settlements: None,
             formatted: None,

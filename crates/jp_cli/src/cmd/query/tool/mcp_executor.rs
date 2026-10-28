@@ -1107,7 +1107,7 @@ impl PendingCall {
             result = task => {
                 self.task = None;
                 self.phase = Phase::Finished;
-                let result = result?.map_err(|error| ExecutorError::Transport(Box::new(error)))?;
+                let result = result?.map_err(ExecutorError::from_mcp_call)?;
                 Ok(Received::Finished(
                     from_mcp(result).map_err(ExecutorError::MalformedResult)?,
                 ))

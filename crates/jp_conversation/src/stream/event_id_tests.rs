@@ -118,7 +118,7 @@ fn an_unknown_entry_keeps_its_id_on_the_wrapper_only() {
     let raw = r#"{"event_id":"Future ID!","type":"future_event","nested":{"event_id":"not-the-wrapper"}}"#;
     let entry = from_str::<StoredEvent>(raw).unwrap().into_entry();
 
-    let EventPayload::Unknown(payload) = &entry.payload else {
+    let EventPayload::Unknown { value: payload, .. } = &entry.payload else {
         panic!("expected an unknown payload");
     };
     assert_eq!(entry.event_id, EventId::fixed("Future ID!"));

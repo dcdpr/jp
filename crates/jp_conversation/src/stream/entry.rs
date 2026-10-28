@@ -26,7 +26,7 @@ use tracing::warn;
 use super::config_delta::{self, ConfigDelta};
 use crate::{
     Compaction, EventId, EventOverlay,
-    event::{ConversationEvent, EventKind},
+    event::{ChatResponse, ConversationEvent, EventKind},
     storage::{decode_event_value, encode_event},
 };
 
@@ -74,15 +74,24 @@ pub(super) enum EventPayload {
     /// building the LLM request.
     /// Does not modify or delete any existing events.
     Overlay(EventOverlay),
-    /// An event whose `type` tag this build does not recognize.
+    /// An entry this build cannot read: an unrecognized `type` tag, or a chat
+    /// response with no content key this build knows.
     ///
     /// Conversations are an append-only log that a newer `jp` may have written.
-    /// Rather than fail the entire stream load on an unknown event kind, the
-    /// raw JSON is retained verbatim so it round-trips losslessly on the next
-    /// save.
-    /// Unknown events are invisible to event iteration, config resolution, and
+    /// Rather than fail the entire stream load, the raw JSON is retained
+    /// verbatim so it round-trips losslessly on the next save.
+    /// Unknown entries are invisible to event iteration, config resolution, and
     /// providers.
-    Unknown(Value),
+    Unknown {
+        /// The stored JSON, without the `event_id` the wrapper holds.
+        value: Value,
+
+        /// Whether turn pruning removes the entry with its turn.
+        ///
+        /// A known `type` tag says which turn the entry belongs to; an unknown
+        /// one does not, so such an entry is global.
+        scope: EventScope,
+    },
 }
 
 impl Serialize for EventPayload {
@@ -141,7 +150,7 @@ impl Serialize for EventPayload {
                 }
                 .serialize(serializer)
             }
-            Self::Unknown(value) => value.serialize(serializer),
+            Self::Unknown { value, .. } => value.serialize(serializer),
         }
     }
 }
@@ -190,7 +199,36 @@ impl<'de> Deserialize<'de> for EventPayload {
                 );
             }
             warn!(%tag, "Unknown conversation event kind; preserving raw event.");
-            return Ok(Self::Unknown(value));
+            return Ok(Self::Unknown {
+                value,
+                scope: EventScope::Global,
+            });
+        }
+
+        // `ChatResponse` is untagged: its content key selects the variant, so a
+        // variant added by a newer jp arrives under a known `type` tag. One
+        // with no known content key is preserved the same way, but stays
+        // turn-scoped: it answers the request before it, and pruning that turn
+        // must take it along.
+        if tag == "chat_response"
+            && !ChatResponse::CONTENT_KEYS
+                .iter()
+                .any(|key| value.get(key).is_some())
+        {
+            #[cfg(debug_assertions)]
+            {
+                let mut probe = value.clone();
+                decode_event_value(&mut probe);
+                debug_assert!(
+                    serde_json::from_value::<ConversationEvent>(probe).is_err(),
+                    "a ChatResponse content key is missing from ChatResponse::CONTENT_KEYS",
+                );
+            }
+            warn!("Unknown chat response variant; preserving raw event.");
+            return Ok(Self::Unknown {
+                value,
+                scope: EventScope::Turn,
+            });
         }
 
         // Decode base64-encoded storage fields before deserializing.
@@ -210,10 +248,13 @@ impl<'de> Deserialize<'de> for EventPayload {
 /// Adding a new `EventPayload` variant forces a classification here:
 /// [`InternalEvent::scope`] is an exhaustive match, so no pruning caller can
 /// silently mistreat it.
+///
+/// A turn-scoped entry is not always a readable event: a chat response a newer
+/// jp wrote is [`EventPayload::Unknown`] with [`EventScope::Turn`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum EventScope {
-    /// Survives turn pruning: config deltas and compaction overlays apply to
-    /// the conversation regardless of position.
+    /// Survives turn pruning: config deltas, compaction and patch overlays, and
+    /// entries of an unknown kind apply regardless of position.
     Global,
     /// Belongs to a turn and is removed when that turn is pruned.
     Turn,
@@ -228,7 +269,7 @@ impl InternalEvent {
             EventPayload::ConfigDelta(_)
             | EventPayload::Compaction(_)
             | EventPayload::Overlay(_)
-            | EventPayload::Unknown(_) => None,
+            | EventPayload::Unknown { .. } => None,
         }
     }
 
@@ -240,7 +281,7 @@ impl InternalEvent {
             EventPayload::ConfigDelta(_)
             | EventPayload::Compaction(_)
             | EventPayload::Overlay(_)
-            | EventPayload::Unknown(_) => None,
+            | EventPayload::Unknown { .. } => None,
         }
     }
 
@@ -251,8 +292,8 @@ impl InternalEvent {
         match &self.payload {
             EventPayload::ConfigDelta(_)
             | EventPayload::Compaction(_)
-            | EventPayload::Overlay(_)
-            | EventPayload::Unknown(_) => EventScope::Global,
+            | EventPayload::Overlay(_) => EventScope::Global,
+            EventPayload::Unknown { scope, .. } => *scope,
             EventPayload::Event(_) => EventScope::Turn,
         }
     }

@@ -807,6 +807,31 @@ fn a_delta_may_introduce_a_model_alias_the_base_config_never_had() {
 }
 
 #[test]
+fn last_carries_the_config_before_it_and_not_after() {
+    let mut before = PartialAppConfig::empty();
+    before.conversation.tools.defaults.run = Some(RunMode::Allow);
+    let mut after = PartialAppConfig::empty();
+    after.conversation.tools.defaults.run = Some(RunMode::Skip);
+
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("first");
+    stream.add_config_delta(before);
+    stream.push(ConversationEvent::now(ChatResponse::message("last")));
+    stream.add_config_delta(after);
+
+    let last = stream.last().unwrap();
+    assert_eq!(
+        last.event.as_chat_response(),
+        Some(&ChatResponse::message("last"))
+    );
+    // A delta applies to the events after it, so the trailing one is excluded.
+    assert_eq!(
+        last.config.conversation.tools.defaults.run,
+        Some(RunMode::Allow)
+    );
+}
+
+#[test]
 fn pop_and_trim_preserve_trailing_config_delta() {
     // The other global event variant: a config delta must survive the same
     // pruning paths as a compaction.
@@ -3058,7 +3083,10 @@ fn test_internal_event_preserves_unknown_kind_verbatim() {
     let internal = serde_json::from_value::<StoredEvent>(raw.clone())
         .unwrap()
         .into_entry();
-    assert!(matches!(&internal.payload, EventPayload::Unknown(_)));
+    assert!(matches!(&internal.payload, EventPayload::Unknown {
+        scope: EventScope::Global,
+        ..
+    }));
 
     // The payload round-trips byte-for-byte: no decode/re-encode is applied,
     // so the newer jp reads back exactly what it wrote.
@@ -3094,6 +3122,222 @@ fn test_from_parts_tolerates_unknown_event_kind() {
         round_tripped.contains(&unknown),
         "unknown event must round-trip through to_parts"
     );
+}
+
+#[test]
+fn test_internal_event_preserves_unknown_chat_response_verbatim() {
+    // A chat response written by a newer jp, selected by a content key this
+    // build doesn't know.
+    let raw = serde_json::json!({
+        "event_id": "future1",
+        "type": "chat_response",
+        "timestamp": "2025-01-01 00:00:00.0",
+        "commentary": "Found it. Editing the parser next.",
+        "metadata": { "foo": "YmFy" }
+    });
+
+    let internal = serde_json::from_value::<StoredEvent>(raw.clone())
+        .unwrap()
+        .into_entry();
+    assert!(matches!(&internal.payload, EventPayload::Unknown {
+        scope: EventScope::Turn,
+        ..
+    }));
+
+    let serialized = serde_json::to_value(&internal).unwrap();
+    assert_eq!(serialized, raw);
+}
+
+#[test]
+fn test_from_parts_tolerates_unknown_chat_response() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+
+    let (base_config, mut events) = stream.to_parts().unwrap();
+
+    let unknown = serde_json::json!({
+        "event_id": "future1",
+        "type": "chat_response",
+        "timestamp": "2025-01-01 00:01:00.0",
+        "commentary": "Found it. Editing the parser next."
+    });
+    events.push(unknown.clone());
+
+    let result =
+        ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty()).unwrap();
+
+    // TurnStart + ChatRequest; the unknown chat response is not an event here.
+    assert_eq!(result.len(), 2);
+
+    let (_, round_tripped) = result.to_parts().unwrap();
+    assert!(
+        round_tripped.contains(&unknown),
+        "unknown chat response must round-trip through to_parts"
+    );
+}
+
+#[test]
+fn test_malformed_known_chat_response_fails_deserialization() {
+    // A known content key with a value of the wrong type is corruption, not a
+    // newer format, and keeps failing loudly.
+    let raw = serde_json::json!({
+        "type": "chat_response",
+        "timestamp": "2025-01-01 00:00:00.0",
+        "message": 5
+    });
+
+    assert!(serde_json::from_value::<StoredEvent>(raw).is_err());
+}
+
+/// A `commentary` chat response as a newer jp stores it; this build cannot read
+/// it.
+fn future_commentary(text: &str) -> Value {
+    serde_json::json!({
+        "type": "chat_response",
+        "timestamp": "2025-01-01 00:00:00.0",
+        "commentary": text
+    })
+}
+
+/// Reload `stream` from storage with a future commentary entry inserted
+/// directly before each message named in `before_messages`.
+fn reload_with_commentary(
+    stream: &ConversationStream,
+    before_messages: &[&str],
+) -> ConversationStream {
+    let (base_config, mut events) = stream.to_parts().unwrap();
+    for message in before_messages {
+        let pos = events
+            .iter()
+            .position(|e| e.get("message").and_then(Value::as_str) == Some(message))
+            .unwrap();
+        events.insert(pos, future_commentary(&format!("before {message}")));
+    }
+    ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty()).unwrap()
+}
+
+/// Two turns, each holding an unreadable commentary entry before its answer.
+fn two_turns_with_future_commentary() -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("q0");
+    stream.push(ConversationEvent::now(ChatResponse::message("a0")));
+    stream.start_turn("q1");
+    stream.push(ConversationEvent::now(ChatResponse::message("a1")));
+    reload_with_commentary(&stream, &["a0", "a1"])
+}
+
+/// The stream's entries in order, one short label each.
+fn entry_labels(stream: &ConversationStream) -> Vec<String> {
+    stream
+        .events
+        .iter()
+        .map(|entry| match &entry.payload {
+            EventPayload::Event(event) => match &event.kind {
+                EventKind::TurnStart(_) => "turn".to_owned(),
+                EventKind::ChatRequest(request) => format!("request {}", request.content),
+                EventKind::ChatResponse(ChatResponse::Message { message }) => {
+                    format!("message {message}")
+                }
+                other => other.as_str().to_owned(),
+            },
+            EventPayload::Unknown { value, .. } => format!(
+                "unknown {}",
+                value
+                    .get("commentary")
+                    .and_then(Value::as_str)
+                    .unwrap_or("?")
+            ),
+            EventPayload::ConfigDelta(_) => "config delta".to_owned(),
+            EventPayload::Compaction(_) => "compaction".to_owned(),
+            EventPayload::Overlay(_) => "overlay".to_owned(),
+        })
+        .collect()
+}
+
+#[test]
+fn replaying_a_turn_removes_its_unreadable_chat_response() {
+    let mut stream = two_turns_with_future_commentary();
+
+    let request = stream.trim_chat_request().unwrap();
+    stream.trim_trailing_empty_turn();
+    stream.start_turn(request);
+
+    assert_eq!(entry_labels(&stream), [
+        "turn",
+        "request q0",
+        "unknown before a0",
+        "message a0",
+        "turn",
+        "request q1",
+    ]);
+}
+
+#[test]
+fn retain_turns_drops_an_unreadable_chat_response_with_its_turn() {
+    let mut stream = two_turns_with_future_commentary();
+
+    stream.retain_turns(|turn| turn == 0);
+
+    assert_eq!(entry_labels(&stream), [
+        "turn",
+        "request q0",
+        "unknown before a0",
+        "message a0",
+    ]);
+}
+
+#[test]
+fn retain_turns_keeps_an_unreadable_chat_response_in_a_kept_turn() {
+    let mut stream = two_turns_with_future_commentary();
+
+    stream.retain_turns(|turn| turn == 1);
+
+    assert_eq!(entry_labels(&stream), [
+        "turn",
+        "request q1",
+        "unknown before a1",
+        "message a1",
+    ]);
+}
+
+#[test]
+fn retain_last_turns_drops_an_unreadable_chat_response_from_earlier_turns() {
+    let mut stream = two_turns_with_future_commentary();
+
+    stream.retain_last_turns(1);
+
+    assert_eq!(entry_labels(&stream), [
+        "turn",
+        "request q1",
+        "unknown before a1",
+        "message a1",
+    ]);
+}
+
+#[test]
+fn popping_a_request_takes_the_unreadable_chat_response_after_it() {
+    // An interrupted turn: the request, and commentary a newer jp wrote in
+    // response, with no answer yet. Replaying the last request pops it.
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("q0");
+    stream.push(ConversationEvent::now(ChatResponse::message("a0")));
+    stream.start_turn("q1");
+    let (base_config, mut events) = stream.to_parts().unwrap();
+    events.push(future_commentary("working on q1"));
+    let mut stream =
+        ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty()).unwrap();
+
+    let popped = stream.pop_if(ConversationEvent::is_chat_request).unwrap();
+    stream.trim_trailing_empty_turn();
+    stream.start_turn(popped.event.into_chat_request().unwrap());
+
+    assert_eq!(entry_labels(&stream), [
+        "turn",
+        "request q0",
+        "message a0",
+        "turn",
+        "request q1",
+    ]);
 }
 
 /// Characterization test: extending an empty stream from a source stream
