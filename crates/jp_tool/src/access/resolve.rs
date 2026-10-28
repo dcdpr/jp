@@ -171,6 +171,17 @@ pub fn resolve_path(
 
     let (ancestor, missing) = canonicalize_existing_ancestor(&root_canonical, followed)?;
 
+    // Anything appended below the ancestor needs it to be a directory. Unix
+    // reports a file in the middle of a path as `ENOTDIR` while canonicalizing,
+    // but Windows reports it as not found, which would otherwise read as a
+    // component that does not exist yet.
+    if (!missing.is_empty() || entry_name.is_some()) && !ancestor.is_dir() {
+        return Err(io_error(
+            &ancestor,
+            &io::Error::from(io::ErrorKind::NotADirectory),
+        ));
+    }
+
     let mut absolute = ancestor.clone();
     for name in missing.iter().rev().map(String::as_str).chain(entry_name) {
         absolute.push(name);

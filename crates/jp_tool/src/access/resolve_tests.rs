@@ -211,16 +211,23 @@ mod target {
     }
 
     /// A file where a directory is expected fails rather than resolving to a
-    /// path nothing can be created at.
+    /// path nothing can be created at, on every platform and in both modes.
     #[test]
     fn a_file_as_a_parent_is_an_io_error() {
         let (_dir, root) = workspace();
         std::fs::write(root.join("file.txt"), "").unwrap();
 
-        assert!(matches!(
-            resolve(&root, "file.txt/child", Resolve::Target),
-            Err(FsAccessError::Io { .. })
-        ));
+        for (input, mode) in [
+            ("file.txt/child", Resolve::Target),
+            ("file.txt/child", Resolve::Entry),
+            ("file.txt/a/b", Resolve::Target),
+            ("file.txt/a/b", Resolve::Entry),
+        ] {
+            assert!(
+                matches!(resolve(&root, input, mode), Err(FsAccessError::Io { .. })),
+                "input: {input}, mode: {mode:?}"
+            );
+        }
     }
 }
 
