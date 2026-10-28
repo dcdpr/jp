@@ -1,19 +1,11 @@
-use clap::Parser as _;
 use jp_config::{PartialAppConfig, model::id::PartialModelIdOrAliasConfig};
 
 use super::{DEFAULT_COUNT, IntoPartialAppConfig as _, Title};
+use crate::cli::parse_args;
 
 /// Parse a `Title` from `jp conversation title <args>` for flag tests.
 fn parse_title(args: &[&str]) -> Title {
-    #[derive(clap::Parser)]
-    struct TestCli {
-        #[command(flatten)]
-        title: Title,
-    }
-
-    let mut argv = vec!["title"];
-    argv.extend_from_slice(args);
-    TestCli::try_parse_from(argv).unwrap().title
+    parse_args(args).unwrap()
 }
 
 #[test]
@@ -25,13 +17,13 @@ fn count_defaults_to_three() {
 /// time rather than producing an empty picker.
 #[test]
 fn count_of_zero_is_rejected() {
-    #[derive(clap::Parser)]
-    struct TestCli {
-        #[command(flatten)]
-        title: Title,
-    }
+    let error = parse_args::<Title>(&["--count", "0"]).unwrap_err();
 
-    assert!(TestCli::try_parse_from(["title", "--count", "0"]).is_err());
+    assert_eq!(
+        error.render().to_string(),
+        "error: invalid value '0' for '--count <COUNT>': at least one title must be \
+         generated\n\nFor more information, try '--help'.\n"
+    );
 }
 
 /// `--model` reaches the title generator through `assistant.model`, which is

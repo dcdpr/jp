@@ -1,10 +1,12 @@
 use chrono::{DateTime, Local, Utc};
+use clap::{ArgMatches, Command};
 use comfy_table::Row;
 use jp_printer::Printer;
 use jp_workspace::roots;
 
 use crate::{
     DEFAULT_STORAGE_DIR,
+    cli::CommandArgs,
     cmd::{Output, workspace::target::TargetEnv},
     output::{print_json, print_table},
 };
@@ -14,8 +16,18 @@ use crate::{
 /// Reads the user-global registries only — no workspace is bootstrapped, so
 /// the listing works from anywhere (RFD 087).
 /// One row per live checkout; the session-active checkout is marked with `*`.
-#[derive(Debug, clap::Args)]
+#[derive(Debug)]
 pub(crate) struct Ls {}
+
+impl CommandArgs for Ls {
+    fn augment(cmd: Command) -> Command {
+        cmd
+    }
+
+    fn from_matches(_: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {})
+    }
+}
 
 impl Ls {
     #[expect(clippy::unused_self, clippy::unnecessary_wraps)]

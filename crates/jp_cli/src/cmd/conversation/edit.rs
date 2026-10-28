@@ -2,6 +2,10 @@ use std::{fmt::Write as _, fs, str::FromStr, time::Duration};
 
 use camino::Utf8PathBuf;
 use chrono::Utc;
+use clap::{
+    Arg, ArgAction, ArgGroup, ArgMatches, Command,
+    builder::{BoolValueParser, NonEmptyStringValueParser, TypedValueParser},
+};
 use crossterm::style::Stylize as _;
 use inquire::Confirm;
 use jp_config::PartialAppConfig;
@@ -15,6 +19,10 @@ use jp_workspace::ConversationHandle;
 
 use super::{path::resolve_paths, title};
 use crate::{
+    cli::{
+        CommandArgs,
+        flag::{Flag, FlagValues, OptionalValue, flag_arg},
+    },
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
@@ -25,68 +33,246 @@ use crate::{
     error::Error,
 };
 
-#[derive(Debug, clap::Args)]
+/// `jp conversation edit`.
+///
+/// Either changes properties of the conversation (`--local`, `--pin`, `--tmp`,
+/// `--title`, and their negations), or opens its files in `$EDITOR`; never
+/// both.
+#[derive(Debug)]
 pub(crate) struct Edit {
-    #[command(flatten)]
     target: PositionalIds<true, true>,
 
-    /// Toggle whether the conversation is kept local to your machine.
-    ///
-    /// Every conversation is stored durably on your machine.
-    /// A non-local conversation is additionally projected into the workspace's
-    /// `.jp/conversations/` directory so it can be committed to version
-    /// control; a local conversation is not, keeping it out of version control.
-    /// Without a value, toggles the current state.
-    #[arg(long, group = "property")]
+    /// `--local[=BOOL]`; `Some(None)` toggles.
     local: Option<Option<bool>>,
 
-    /// Toggle pinning of the conversation.
-    ///
-    /// Pinned conversations are displayed prominently in listings and pickers.
-    /// Without a value, toggles the current pin state.
-    #[arg(long, group = "property")]
+    /// `--pin[=BOOL]`; `Some(None)` toggles.
     pin: Option<Option<bool>>,
 
-    /// Toggle or set the expiration time of the conversation.
-    ///
-    /// Without a value, toggles: removes expiration if set, or sets it to
-    /// expire immediately (when no longer active) if unset.
-    ///
-    /// Accepts a duration (e.g. `1h`, `30m`) or `now` for immediate expiration.
-    #[arg(long = "tmp", group = "property", conflicts_with = "no_expires_at")]
+    /// `--tmp[=DURATION]`; `Some(None)` toggles.
     expires_at: Option<Option<ExpirationDuration>>,
 
-    /// Remove the expiration time of the conversation.
-    #[arg(long = "no-tmp", group = "property")]
+    /// `--no-tmp`.
     no_expires_at: bool,
 
-    /// Set the title of the conversation.
-    ///
-    /// Without a value, generates one with an LLM and offers the candidates as
-    /// a picker — the same as `conversation title`, which additionally exposes
-    /// the model and candidate count.
-    #[arg(long, group = "property", conflicts_with = "no_title")]
+    /// `--title[=TITLE]`; `Some(None)` generates one.
     title: Option<Option<String>>,
 
-    /// Remove the title of the conversation.
-    #[arg(long, group = "property")]
+    /// `--no-title`.
     no_title: bool,
 
-    /// Open `events.json` in `$EDITOR`.
-    ///
-    /// Each entry carries an `event_id` identifying it.
-    /// Keep it when you edit an entry's content, and drop it when you add one:
-    /// a missing, empty, or duplicated ID is replaced on the next load.
-    #[arg(long, short = 'e', group = "file", conflicts_with = "property")]
+    /// Open `events.json`.
     events: bool,
 
-    /// Open `metadata.json` in `$EDITOR`.
-    #[arg(long, short = 'm', group = "file", conflicts_with = "property")]
+    /// Open `metadata.json`.
     metadata: bool,
 
-    /// Open `base_config.json` in `$EDITOR`.
-    #[arg(long, short = 'b', group = "file", conflicts_with = "property")]
+    /// Open `base_config.json`.
     base_config: bool,
+}
+
+/// The group of flags that change a property of the conversation.
+const PROPERTY: &str = "property";
+
+/// The group of flags that name a file to open.
+const FILE: &str = "file";
+
+impl CommandArgs for Edit {
+    fn augment(cmd: Command) -> Command {
+        let file = |id: &'static str, short: char, long: &'static str, help: &'static str| {
+            Arg::new(id)
+                .short(short)
+                .long(long)
+                .action(ArgAction::SetTrue)
+                .group(FILE)
+                .conflicts_with(PROPERTY)
+                .help(help)
+        };
+
+        PositionalIds::<true, true>::augment(cmd)
+            .group(ArgGroup::new(PROPERTY).multiple(false))
+            .group(ArgGroup::new(FILE).multiple(false))
+            .arg(flag_arg::<Local>())
+            .arg(flag_arg::<Pin>())
+            .arg(flag_arg::<Expiry>())
+            .arg(
+                Arg::new("no_expires_at")
+                    .long("no-tmp")
+                    .action(ArgAction::SetTrue)
+                    .group(PROPERTY)
+                    .help("Remove the expiration time of the conversation"),
+            )
+            .arg(flag_arg::<Title>())
+            .arg(
+                Arg::new("no_title")
+                    .long("no-title")
+                    .action(ArgAction::SetTrue)
+                    .group(PROPERTY)
+                    .help("Remove the title of the conversation"),
+            )
+            .arg(
+                file("events", 'e', "events", "Open `events.json` in `$EDITOR`").long_help(
+                    "Open `events.json` in `$EDITOR`.\n\nEach entry carries an `event_id` \
+                     identifying it. Keep it when you edit an entry's content, and drop it when \
+                     you add one: a missing, empty, or duplicated ID is replaced on the next load.",
+                ),
+            )
+            .arg(file(
+                "metadata",
+                'm',
+                "metadata",
+                "Open `metadata.json` in `$EDITOR`",
+            ))
+            .arg(file(
+                "base_config",
+                'b',
+                "base-config",
+                "Open `base_config.json` in `$EDITOR`",
+            ))
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            target: PositionalIds::from_matches(matches)?,
+            local: Flag::<Local>::strict(matches)?,
+            pin: Flag::<Pin>::strict(matches)?,
+            expires_at: Flag::<Expiry>::strict(matches)?,
+            no_expires_at: matches.get_flag("no_expires_at"),
+            title: Flag::<Title>::strict(matches)?,
+            no_title: matches.get_flag("no_title"),
+            events: matches.get_flag("events"),
+            metadata: matches.get_flag("metadata"),
+            base_config: matches.get_flag("base_config"),
+        })
+    }
+}
+
+/// `--local[=BOOL]`: keep the conversation out of the workspace, or toggle it.
+enum Local {}
+
+impl OptionalValue for Local {
+    const ID: &'static str = "local";
+
+    type Context = ();
+    type Output = Option<Option<bool>>;
+    type Value = bool;
+
+    fn declare(arg: Arg) -> Arg {
+        arg.long("local")
+            .value_name("LOCAL")
+            .group(PROPERTY)
+            .help("Toggle whether the conversation is kept local to your machine")
+            .long_help(
+                "Toggle whether the conversation is kept local to your machine.\n\nEvery \
+                 conversation is stored durably on your machine. A non-local conversation is \
+                 additionally projected into the workspace's `.jp/conversations/` directory so it \
+                 can be committed to version control; a local conversation is not, keeping it out \
+                 of version control. Without a value, toggles the current state.",
+            )
+    }
+
+    fn parser() -> impl TypedValueParser<Value = bool> {
+        BoolValueParser::new()
+    }
+
+    fn collect(values: FlagValues<bool>) -> Result<Self::Output, clap::Error> {
+        Ok(values.last())
+    }
+}
+
+/// `--pin[=BOOL]`: pin or unpin the conversation, or toggle it.
+enum Pin {}
+
+impl OptionalValue for Pin {
+    const ID: &'static str = "pin";
+
+    type Context = ();
+    type Output = Option<Option<bool>>;
+    type Value = bool;
+
+    fn declare(arg: Arg) -> Arg {
+        arg.long("pin")
+            .value_name("PIN")
+            .group(PROPERTY)
+            .help("Toggle pinning of the conversation")
+            .long_help(
+                "Toggle pinning of the conversation.\n\nPinned conversations are displayed \
+                 prominently in listings and pickers. Without a value, toggles the current pin \
+                 state.",
+            )
+    }
+
+    fn parser() -> impl TypedValueParser<Value = bool> {
+        BoolValueParser::new()
+    }
+
+    fn collect(values: FlagValues<bool>) -> Result<Self::Output, clap::Error> {
+        Ok(values.last())
+    }
+}
+
+/// `--tmp[=DURATION]`: set when the conversation expires, or toggle it.
+enum Expiry {}
+
+impl OptionalValue for Expiry {
+    const ID: &'static str = "expires_at";
+
+    type Context = ();
+    type Output = Option<Option<ExpirationDuration>>;
+    type Value = ExpirationDuration;
+
+    fn declare(arg: Arg) -> Arg {
+        arg.long("tmp")
+            .value_name("EXPIRES_AT")
+            .group(PROPERTY)
+            .conflicts_with("no_expires_at")
+            .help("Toggle or set the expiration time of the conversation")
+            .long_help(
+                "Toggle or set the expiration time of the conversation.\n\nWithout a value, \
+                 toggles: removes expiration if set, or sets it to expire immediately (when no \
+                 longer active) if unset.\n\nAccepts a duration (e.g. `1h`, `30m`) or `now` for \
+                 immediate expiration.",
+            )
+    }
+
+    fn parser() -> impl TypedValueParser<Value = ExpirationDuration> {
+        parse_expiration
+    }
+
+    fn collect(values: FlagValues<ExpirationDuration>) -> Result<Self::Output, clap::Error> {
+        Ok(values.last())
+    }
+}
+
+/// `--title[=TITLE]`: set the title, or generate one.
+enum Title {}
+
+impl OptionalValue for Title {
+    const ID: &'static str = "title";
+
+    type Context = ();
+    type Output = Option<Option<String>>;
+    type Value = String;
+
+    fn declare(arg: Arg) -> Arg {
+        arg.long("title")
+            .value_name("TITLE")
+            .group(PROPERTY)
+            .conflicts_with("no_title")
+            .help("Set the title of the conversation")
+            .long_help(
+                "Set the title of the conversation.\n\nWithout a value, generates one with an LLM \
+                 and offers the candidates as a picker — the same as `conversation title`, which \
+                 additionally exposes the model and candidate count.",
+            )
+    }
+
+    fn parser() -> impl TypedValueParser<Value = String> {
+        NonEmptyStringValueParser::new()
+    }
+
+    fn collect(values: FlagValues<String>) -> Result<Self::Output, clap::Error> {
+        Ok(values.last())
+    }
 }
 
 impl Edit {
@@ -323,6 +509,11 @@ impl Edit {
         ctx.printer.println("Conversation(s) updated.");
         Ok(())
     }
+}
+
+/// Parse the `--tmp` duration.
+fn parse_expiration(value: &str) -> std::result::Result<ExpirationDuration, String> {
+    value.parse()
 }
 
 /// Duration value for `--tmp`, supporting `now` as an alias for zero duration.

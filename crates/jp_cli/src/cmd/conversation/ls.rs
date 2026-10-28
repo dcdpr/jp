@@ -1,4 +1,5 @@
 use chrono::{DateTime, FixedOffset, Local, Utc};
+use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::{Color, Stylize as _};
 use jp_conversation::{Conversation, ConversationId};
@@ -11,6 +12,7 @@ use jp_term::{
 use jp_workspace::ConversationHandle;
 
 use crate::{
+    cli::{CommandArgs, many},
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
@@ -20,45 +22,97 @@ use crate::{
     output::print_table,
 };
 
-#[derive(Debug, clap::Args)]
+/// `jp conversation ls`.
+#[derive(Debug)]
 pub(crate) struct Ls {
-    #[command(flatten)]
     target: PositionalIds<true, true>,
 
-    /// Sort conversations by a specific field.
-    ///
-    /// Defaults to last activity (archived conversations default to archive
-    /// time).
-    #[arg(long)]
+    /// The field to sort by, or last activity (archive time for archived
+    /// conversations).
     sort: Option<Sort>,
 
-    /// Sort conversations in descending order.
-    #[arg(long)]
+    /// Sort in descending order.
     descending: bool,
 
-    /// Limit the number of conversations to display.
-    #[arg(long)]
+    /// How many conversations to display at most.
     limit: Option<usize>,
 
     /// Display full conversation details.
-    #[arg(long)]
     full: bool,
 
     /// Show only local conversations.
-    #[arg(long)]
     local: bool,
 
     /// Show archived conversations instead of live ones.
-    #[arg(long)]
     archived: bool,
 
-    /// Only show conversations carrying this label.
-    ///
-    /// `key=value` matches when the key holds that value, a bare `key` matches
-    /// any value.
-    /// Repeat the flag to require several; every selector must match.
-    #[arg(long = "label", value_name = "KEY[=VALUE]")]
+    /// Only show conversations carrying every one of these labels.
     labels: Vec<LabelSelector>,
+}
+
+impl CommandArgs for Ls {
+    fn augment(cmd: Command) -> Command {
+        let flag = |id: &'static str, help: &'static str| {
+            Arg::new(id).long(id).action(ArgAction::SetTrue).help(help)
+        };
+
+        PositionalIds::<true, true>::augment(cmd)
+            .arg(
+                Arg::new("sort")
+                    .long("sort")
+                    .value_name("SORT")
+                    .value_parser(value_parser!(Sort))
+                    .help("Sort conversations by a specific field")
+                    .long_help(
+                        "Sort conversations by a specific field.\n\nDefaults to last activity \
+                         (archived conversations default to archive time).",
+                    ),
+            )
+            .arg(flag("descending", "Sort conversations in descending order"))
+            .arg(
+                Arg::new("limit")
+                    .long("limit")
+                    .value_name("LIMIT")
+                    .value_parser(value_parser!(usize))
+                    .help("Limit the number of conversations to display"),
+            )
+            .arg(flag("full", "Display full conversation details"))
+            .arg(flag("local", "Show only local conversations"))
+            .arg(flag(
+                "archived",
+                "Show archived conversations instead of live ones",
+            ))
+            .arg(
+                label_filter_arg("Only show conversations carrying this label").long_help(
+                    "Only show conversations carrying this label.\n\n`key=value` matches when the \
+                     key holds that value, a bare `key` matches any value. Repeat the flag to \
+                     require several; every selector must match.",
+                ),
+            )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            target: PositionalIds::from_matches(matches)?,
+            sort: matches.get_one("sort").copied(),
+            descending: matches.get_flag("descending"),
+            limit: matches.get_one("limit").copied(),
+            full: matches.get_flag("full"),
+            local: matches.get_flag("local"),
+            archived: matches.get_flag("archived"),
+            labels: many(matches, "labels"),
+        })
+    }
+}
+
+/// The repeatable `--label KEY[=VALUE]` filter, described by `help`.
+pub(super) fn label_filter_arg(help: &'static str) -> Arg {
+    Arg::new("labels")
+        .long("label")
+        .action(ArgAction::Append)
+        .value_name("KEY[=VALUE]")
+        .value_parser(value_parser!(LabelSelector))
+        .help(help)
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]

@@ -2335,6 +2335,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "clap",
+ "clap_lex",
  "clean-path",
  "comfy-table",
  "comrak",

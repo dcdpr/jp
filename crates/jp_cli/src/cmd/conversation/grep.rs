@@ -1,6 +1,7 @@
 use std::{collections::HashSet, fmt::Write as _, num::NonZeroUsize, ops::Range};
 
 use chrono::{DateTime, Utc};
+use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_term::{
@@ -14,7 +15,9 @@ use rayon::prelude::*;
 use serde_json::json;
 use tracing::warn;
 
+use super::ls::label_filter_arg;
 use crate::{
+    cli::{CommandArgs, many, required},
     cmd::{
         ConversationLoadRequest, Error, Output,
         conversation_id::FlagIds,
@@ -63,136 +66,290 @@ const CONTEXT_KIND: char = 'c';
 /// `compact` accept, so a title hit's coordinate stays usable as-is.
 const WHOLE_CONVERSATION: &str = "..";
 
-#[derive(Debug, Default, clap::Args)]
+/// `jp conversation grep`.
+#[derive(Debug, Default)]
 pub(crate) struct Grep {
-    /// The search pattern.
-    ///
-    /// Multiple words are joined with single spaces, so quoting is optional:
-    /// `jp c grep two words` searches for `two words`.
-    /// A pattern that starts with `-` still needs `--` ahead of it.
-    /// To search for several separate patterns, use `-e` instead.
-    // Required unless `-e` is given, because a `Vec` positional is optional by
-    // default in clap, and `num_args` only constrains values per occurrence.
-    // Without it a bare `jp c grep` compiles the empty pattern, which matches
-    // every line of every conversation.
-    #[arg(
-        value_name = "PATTERN",
-        required_unless_present = "patterns",
-        conflicts_with = "patterns",
-        num_args = 1..
-    )]
+    /// The positional pattern, as the words the shell split it into.
     pattern: Vec<String>,
 
-    /// A pattern to search for.
-    /// Repeat to give several.
-    ///
-    /// A line matches when it contains any of the patterns.
-    /// Replaces the positional pattern: `jp c grep -e alpha -e beta`.
-    #[arg(long = "pattern", short = 'e', value_name = "PATTERN")]
+    /// The `-e` patterns.
     patterns: Vec<String>,
 
     /// Only report conversations that contain every `-e` pattern.
-    ///
-    /// The patterns may match in any order, on different lines, and in
-    /// different parts of the conversation.
-    /// Every line matching any of them is shown.
-    // The conflict is what rejects `--all-match alpha beta`: clap waives a
-    // `requires` whose target conflicts with an argument that is present, and
-    // the positional conflicts with `-e`.
-    #[arg(long, requires = "patterns", conflicts_with = "pattern")]
     all_match: bool,
 
-    #[command(flatten)]
     target: FlagIds<true, true>,
 
     /// Match case-insensitively, overriding smart-case.
-    #[arg(long, conflicts_with = "case_sensitive")]
     ignore_case: bool,
 
     /// Match case-sensitively, overriding smart-case.
-    #[arg(long)]
     case_sensitive: bool,
 
     /// Number of context lines to show around each match.
-    #[arg(long, default_value_t = 0)]
     context: usize,
 
     /// Sort conversations by a field.
-    #[arg(long, value_enum, default_value_t)]
     sort: Sort,
 
-    /// Reverse the sort order (newest/latest first).
-    #[arg(long)]
+    /// Reverse the sort order.
     descending: bool,
 
     /// Treat every pattern as a regular expression instead of a literal.
-    #[arg(long, short)]
     regex: bool,
 
     /// What to emit for each conversation that contains a match.
-    ///
-    /// - `hits`: the matching lines with their coordinates.
-    /// - `ids`: the conversation ID only.
-    /// - `count`: the conversation ID and its number of matching lines.
-    /// - `text`: the matched and context lines with no coordinates.
-    #[arg(long, value_enum, default_value_t)]
     output: OutputKind,
 
     /// Group hits under a per-conversation heading.
-    ///
-    /// On by default in the human format (`-F auto` on a terminal), off in the
-    /// machine format.
-    #[arg(long, conflicts_with = "no_heading")]
     heading: bool,
 
-    /// Print one fully-qualified `ID:TURN:SCOPE:KIND:TEXT` line per hit instead
-    /// of grouping them under headings.
-    #[arg(long)]
+    /// Print one fully-qualified line per hit.
     no_heading: bool,
 
     /// Wrap long lines instead of cutting them to fit.
-    ///
-    /// Wraps at the output width, so pair it with `--width` to pick a column:
-    /// `jp c grep --width=100 --wrap PATTERN`.
-    /// Has no effect when the output width is unknown, which is the case for a
-    /// pipe with no `--width`.
-    /// Groups hits under per-conversation headings even when piped, since a
-    /// continuation row has no coordinate to carry.
-    #[arg(long, conflicts_with = "no_heading")]
     wrap: bool,
 
     /// Stop after this many matching lines per conversation.
-    ///
-    /// Must be at least 1: a cap of zero would discard every match and report
-    /// the run as finding nothing.
-    #[arg(long, short = 'm')]
     max_matches: Option<NonZeroUsize>,
 
     /// Show at most this many conversations, in sort order.
-    ///
-    /// Must be at least 1: a cap of zero would discard real matches and report
-    /// the run as finding nothing.
-    #[arg(long)]
     limit: Option<NonZeroUsize>,
 
-    /// Only search conversations carrying this label.
-    ///
-    /// `key=value` matches when the key holds that value, a bare `key` matches
-    /// any value.
-    /// Repeat the flag to require several; every selector must match.
-    #[arg(long = "label", value_name = "KEY[=VALUE]")]
+    /// Only search conversations carrying every one of these labels.
     labels: Vec<LabelSelector>,
 
-    /// Restrict the search to specific parts of the conversation.
-    ///
-    /// Repeat the flag (`--scope user --scope assistant`) or comma-separate the
-    /// values (`--scope user,assistant`).
-    /// If omitted, every part is searched.
-    /// Meta-scopes `chat` and `tool` expand to their concrete members.
-    // One value per occurrence: a multi-value `--scope` would swallow the
-    // positional pattern that follows it in every documented example.
-    #[arg(long = "scope", short = 's', value_enum, value_delimiter = ',')]
+    /// Restrict the search to these parts of the conversation.
     scopes: Vec<Scope>,
+}
+
+impl CommandArgs for Grep {
+    #[expect(clippy::too_many_lines)]
+    fn augment(cmd: Command) -> Command {
+        let flag = |id: &'static str, long: &'static str, help: &'static str| {
+            Arg::new(id)
+                .long(long)
+                .action(ArgAction::SetTrue)
+                .help(help)
+        };
+
+        let cmd = cmd
+            .arg(
+                // Required unless `-e` is given, because a repeated positional is
+                // optional by default, and `num_args` only constrains values per
+                // occurrence. Without it a bare `jp c grep` compiles the empty
+                // pattern, which matches every line of every conversation.
+                Arg::new("pattern")
+                    .action(ArgAction::Append)
+                    .num_args(1..)
+                    .value_name("PATTERN")
+                    .required_unless_present("patterns")
+                    .conflicts_with("patterns")
+                    .help("The search pattern")
+                    .long_help(
+                        "The search pattern.\n\nMultiple words are joined with single spaces, so \
+                         quoting is optional: `jp c grep two words` searches for `two words`. A \
+                         pattern that starts with `-` still needs `--` ahead of it. To search for \
+                         several separate patterns, use `-e` instead.",
+                    ),
+            )
+            .arg(
+                Arg::new("patterns")
+                    .short('e')
+                    .long("pattern")
+                    .action(ArgAction::Append)
+                    .value_name("PATTERN")
+                    .help("A pattern to search for. Repeat to give several")
+                    .long_help(
+                        "A pattern to search for. Repeat to give several.\n\nA line matches when \
+                         it contains any of the patterns. Replaces the positional pattern: `jp c \
+                         grep -e alpha -e beta`.",
+                    ),
+            )
+            .arg(
+                // The conflict is what rejects `--all-match alpha beta`: clap
+                // waives a `requires` whose target conflicts with an argument
+                // that is present, and the positional conflicts with `-e`.
+                flag(
+                    "all_match",
+                    "all-match",
+                    "Only report conversations that contain every `-e` pattern",
+                )
+                .requires("patterns")
+                .conflicts_with("pattern")
+                .long_help(
+                    "Only report conversations that contain every `-e` pattern.\n\nThe patterns \
+                     may match in any order, on different lines, and in different parts of the \
+                     conversation. Every line matching any of them is shown.",
+                ),
+            );
+
+        FlagIds::<true, true>::augment(cmd)
+            .arg(
+                flag(
+                    "ignore_case",
+                    "ignore-case",
+                    "Match case-insensitively, overriding smart-case",
+                )
+                .conflicts_with("case_sensitive"),
+            )
+            .arg(flag(
+                "case_sensitive",
+                "case-sensitive",
+                "Match case-sensitively, overriding smart-case",
+            ))
+            .arg(
+                Arg::new("context")
+                    .long("context")
+                    .value_name("CONTEXT")
+                    .value_parser(value_parser!(usize))
+                    .default_value("0")
+                    .help("Number of context lines to show around each match"),
+            )
+            .arg(
+                Arg::new("sort")
+                    .long("sort")
+                    .value_name("SORT")
+                    .value_parser(value_parser!(Sort))
+                    .default_value("created")
+                    .help("Sort conversations by a field"),
+            )
+            .arg(flag(
+                "descending",
+                "descending",
+                "Reverse the sort order (newest/latest first)",
+            ))
+            .arg(
+                flag(
+                    "regex",
+                    "regex",
+                    "Treat every pattern as a regular expression instead of a literal",
+                )
+                .short('r'),
+            )
+            .arg(
+                Arg::new("output")
+                    .long("output")
+                    .value_name("OUTPUT")
+                    .value_parser(value_parser!(OutputKind))
+                    .default_value("hits")
+                    .help("What to emit for each conversation that contains a match")
+                    .long_help(
+                        "What to emit for each conversation that contains a match.\n\n- `hits`: \
+                         the matching lines with their coordinates.\n- `ids`: the conversation ID \
+                         only.\n- `count`: the conversation ID and its number of matching \
+                         lines.\n- `text`: the matched and context lines with no coordinates.",
+                    ),
+            )
+            .arg(
+                flag(
+                    "heading",
+                    "heading",
+                    "Group hits under a per-conversation heading",
+                )
+                .conflicts_with("no_heading")
+                .long_help(
+                    "Group hits under a per-conversation heading.\n\nOn by default in the human \
+                     format (`-F auto` on a terminal), off in the machine format.",
+                ),
+            )
+            .arg(flag(
+                "no_heading",
+                "no-heading",
+                "Print one fully-qualified `ID:TURN:SCOPE:KIND:TEXT` line per hit instead of \
+                 grouping them under headings",
+            ))
+            .arg(
+                flag(
+                    "wrap",
+                    "wrap",
+                    "Wrap long lines instead of cutting them to fit",
+                )
+                .conflicts_with("no_heading")
+                .long_help(
+                    "Wrap long lines instead of cutting them to fit.\n\nWraps at the output \
+                     width, so pair it with `--width` to pick a column: `jp c grep --width=100 \
+                     --wrap PATTERN`. Has no effect when the output width is unknown, which is \
+                     the case for a pipe with no `--width`. Groups hits under per-conversation \
+                     headings even when piped, since a continuation row has no coordinate to \
+                     carry.",
+                ),
+            )
+            .arg(
+                Arg::new("max_matches")
+                    .short('m')
+                    .long("max-matches")
+                    .value_name("MAX_MATCHES")
+                    .value_parser(value_parser!(NonZeroUsize))
+                    .help("Stop after this many matching lines per conversation")
+                    .long_help(
+                        "Stop after this many matching lines per conversation.\n\nMust be at \
+                         least 1: a cap of zero would discard every match and report the run as \
+                         finding nothing.",
+                    ),
+            )
+            .arg(
+                Arg::new("limit")
+                    .long("limit")
+                    .value_name("LIMIT")
+                    .value_parser(value_parser!(NonZeroUsize))
+                    .help("Show at most this many conversations, in sort order")
+                    .long_help(
+                        "Show at most this many conversations, in sort order.\n\nMust be at least \
+                         1: a cap of zero would discard real matches and report the run as \
+                         finding nothing.",
+                    ),
+            )
+            .arg(
+                label_filter_arg("Only search conversations carrying this label").long_help(
+                    "Only search conversations carrying this label.\n\n`key=value` matches when \
+                     the key holds that value, a bare `key` matches any value. Repeat the flag to \
+                     require several; every selector must match.",
+                ),
+            )
+            .arg(
+                // One value per occurrence: a multi-value `--scope` would swallow
+                // the positional pattern that follows it in every documented
+                // example.
+                Arg::new("scopes")
+                    .short('s')
+                    .long("scope")
+                    .action(ArgAction::Append)
+                    .value_name("SCOPES")
+                    .value_parser(value_parser!(Scope))
+                    .value_delimiter(',')
+                    .help("Restrict the search to specific parts of the conversation")
+                    .long_help(
+                        "Restrict the search to specific parts of the conversation.\n\nRepeat the \
+                         flag (`--scope user --scope assistant`) or comma-separate the values \
+                         (`--scope user,assistant`). If omitted, every part is searched. \
+                         Meta-scopes `chat` and `tool` expand to their concrete members.",
+                    ),
+            )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            pattern: many(matches, "pattern"),
+            patterns: many(matches, "patterns"),
+            all_match: matches.get_flag("all_match"),
+            target: FlagIds::from_matches(matches)?,
+            ignore_case: matches.get_flag("ignore_case"),
+            case_sensitive: matches.get_flag("case_sensitive"),
+            context: required(matches, "context")?,
+            sort: required(matches, "sort")?,
+            descending: matches.get_flag("descending"),
+            regex: matches.get_flag("regex"),
+            output: required(matches, "output")?,
+            heading: matches.get_flag("heading"),
+            no_heading: matches.get_flag("no_heading"),
+            wrap: matches.get_flag("wrap"),
+            max_matches: matches.get_one("max_matches").copied(),
+            limit: matches.get_one("limit").copied(),
+            labels: many(matches, "labels"),
+            scopes: many(matches, "scopes"),
+        })
+    }
 }
 
 impl Grep {

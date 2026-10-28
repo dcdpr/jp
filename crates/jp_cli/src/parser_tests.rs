@@ -38,12 +38,7 @@ fn split_list_keeps_a_single_value_whole() {
 fn split_list_rejects_an_empty_item() {
     for value in ["read,,write", "read,", ",read", "read, ,write"] {
         let error = split_list::<String>(value, "tool name").unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains(&format!("empty tool name in '{value}'")),
-            "unexpected message for {value:?}: {error}"
-        );
+        assert_eq!(error, format!("empty tool name in '{value}'"));
     }
 }
 
@@ -51,9 +46,9 @@ fn split_list_rejects_an_empty_item() {
 fn split_list_reports_the_item_that_failed_to_parse() {
     let error = split_list::<u8>("1,300,3", "count").unwrap_err();
 
-    assert!(
-        error.to_string().contains("invalid count '300'"),
-        "unexpected message: {error}"
+    assert_eq!(
+        error,
+        "invalid count '300': number too large to fit in target type"
     );
 }
 

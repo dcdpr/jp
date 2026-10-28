@@ -59,6 +59,7 @@ clap = { workspace = true, features = [
     "usage",
     "wrap_help",
 ] }
+clap_lex = { workspace = true }
 clean-path = { workspace = true }
 comfy-table = { workspace = true, features = ["tty", "custom_styling"] }
 comrak = { workspace = true }

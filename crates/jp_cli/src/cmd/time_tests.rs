@@ -1,9 +1,8 @@
 use chrono::{DateTime, TimeZone as _, Utc};
-use clap::Parser;
 use jp_conversation::ConversationId;
 
 use super::*;
-use crate::cmd::conversation_id::PositionalIds;
+use crate::{cli::parse_args, cmd::conversation_id::PositionalIds};
 
 #[test]
 fn parse_relative_duration_weeks() {
@@ -185,55 +184,26 @@ fn creation_range_unset_accepts_everything() {
 // lock in the parse behaviour so a future refactor can't silently break the
 // conflict, the duration syntax, or the conversation-ID shorthand.
 
-#[derive(Debug, Parser)]
-#[command(name = "test-creation-range")]
-struct RangeWithIds {
-    #[command(flatten)]
-    _target: PositionalIds<true, true>,
-
-    #[command(flatten)]
-    range: CreationRange,
-}
+/// The range next to the positional `id` its `conflicts_with` refers to.
+type RangeWithIds = (PositionalIds<true, true>, CreationRange);
 
 #[test]
 fn clap_parses_created_since_and_created_before() {
-    let cmd = RangeWithIds::try_parse_from([
-        "test-creation-range",
-        "--created-since",
-        "3w",
-        "--created-before",
-        "1d",
-    ])
-    .unwrap();
-    assert!(cmd.range.since.is_some());
-    assert!(cmd.range.before.is_some());
-    assert!(cmd.range.is_set());
+    let (_, range) =
+        parse_args::<RangeWithIds>(&["--created-since", "3w", "--created-before", "1d"]).unwrap();
+    assert!(range.since.is_some());
+    assert!(range.before.is_some());
+    assert!(range.is_set());
 }
 
 #[test]
 fn clap_conflicts_range_with_positional_id() {
     let id = ConversationId::try_from(Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()).unwrap();
-    let err = RangeWithIds::try_parse_from([
-        "test-creation-range",
-        &id.to_string(),
-        "--created-since",
-        "3w",
-    ])
-    .unwrap_err();
+    let err = parse_args::<RangeWithIds>(&[&id.to_string(), "--created-since", "3w"]).unwrap_err();
     assert!(
         err.to_string().contains("cannot be used with"),
         "expected clap conflict error, got: {err}"
     );
-}
-
-#[derive(Debug, Parser)]
-#[command(name = "test-creation-range-permissive")]
-struct PermissiveRangeWithIds {
-    #[command(flatten)]
-    _target: PositionalIds<true, true>,
-
-    #[command(flatten)]
-    range: CreationRange<false>,
 }
 
 #[test]
@@ -242,12 +212,11 @@ fn clap_permissive_range_composes_with_positional_id() {
     // It must *not* conflict with the positional id, so combinations like
     // `jp c use ?p --created-since 3w` parse successfully.
     let id = ConversationId::try_from(Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()).unwrap();
-    let cmd = PermissiveRangeWithIds::try_parse_from([
-        "test-creation-range-permissive",
+    let (_, range) = parse_args::<(PositionalIds<true, true>, CreationRange<false>)>(&[
         &id.to_string(),
         "--created-since",
         "3w",
     ])
     .expect("non-exclusive range should compose with positional id");
-    assert!(cmd.range.since.is_some());
+    assert!(range.since.is_some());
 }

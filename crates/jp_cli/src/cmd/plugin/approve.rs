@@ -2,6 +2,7 @@
 
 use camino::{Utf8Path, Utf8PathBuf, absolute_utf8};
 use chrono::Utc;
+use clap::{Arg, ArgMatches, Command, value_parser};
 use jp_config::{PartialAppConfig, plugins::command::RunPolicy};
 use jp_plugin::{PROTOCOL_VERSION, registry::ApprovedPlugin};
 use jp_printer::Printer;
@@ -13,17 +14,39 @@ use super::{
     discovery::{self, LocalPlugin, Location, ManifestState},
     dispatch, registry,
 };
-use crate::{KeyValueOrPath, cmd, load_user_global_partial};
+use crate::{
+    KeyValueOrPath,
+    cli::{CommandArgs, required},
+    cmd, load_user_global_partial,
+};
 
 /// Approve a plugin binary, so it runs without asking.
 ///
 /// Naming the file is the consent to run it once: JP asks it to describe
 /// itself, checks the answer against the binary's manifest, and remembers this
 /// file with these contents.
-#[derive(Debug, clap::Args)]
+#[derive(Debug)]
 pub(crate) struct Approve {
     /// Path to the plugin binary, a file named `jp-<name>`.
     path: Utf8PathBuf,
+}
+
+impl CommandArgs for Approve {
+    fn augment(cmd: Command) -> Command {
+        cmd.arg(
+            Arg::new("path")
+                .required(true)
+                .value_name("PATH")
+                .value_parser(value_parser!(Utf8PathBuf))
+                .help("Path to the plugin binary, a file named `jp-<name>`"),
+        )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            path: required(matches, "path")?,
+        })
+    }
 }
 
 impl Approve {

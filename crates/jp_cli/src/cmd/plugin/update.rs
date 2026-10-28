@@ -6,6 +6,7 @@
 //! This is the only place an installed plugin is updated: running a plugin
 //! never reaches the network.
 
+use clap::{ArgMatches, Command};
 use jp_config::PartialAppConfig;
 use jp_plugin::registry::{Registry, RegistryPlugin};
 use jp_printer::Printer;
@@ -15,11 +16,21 @@ use super::{
     discovery::{self, LocalPlugin, Location},
     install, registry,
 };
-use crate::{KeyValueOrPath, cmd, load_user_global_partial};
+use crate::{KeyValueOrPath, cli::CommandArgs, cmd, load_user_global_partial};
 
 /// Refresh the plugin registry, and update the plugins JP installed.
-#[derive(Debug, clap::Args)]
+#[derive(Debug)]
 pub(crate) struct Update;
+
+impl CommandArgs for Update {
+    fn augment(cmd: Command) -> Command {
+        cmd
+    }
+
+    fn from_matches(_: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self)
+    }
+}
 
 impl Update {
     #[allow(clippy::unused_self)]

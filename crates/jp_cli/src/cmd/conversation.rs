@@ -1,8 +1,12 @@
+use clap::{ArgMatches, Command};
 use jp_config::PartialAppConfig;
 use jp_workspace::{ConversationHandle, Workspace};
 
 use super::{ConversationLoadRequest, Output};
-use crate::ctx::{Ctx, IntoPartialAppConfig};
+use crate::{
+    cli::{CommandArgs, subcommand_of, unread_subcommand},
+    ctx::{Ctx, IntoPartialAppConfig},
+};
 
 mod archive;
 pub(crate) mod compact;
@@ -20,10 +24,125 @@ mod title;
 mod unarchive;
 mod use_;
 
-#[derive(Debug, clap::Args)]
+/// `jp conversation`.
+#[derive(Debug)]
 pub(crate) struct Conversation {
-    #[command(subcommand)]
     command: Commands,
+}
+
+impl CommandArgs for Conversation {
+    fn augment(cmd: Command) -> Command {
+        cmd.subcommand_required(true)
+            .arg_required_else_help(true)
+            .subcommand(
+                rm::Rm::augment(Command::new("rm"))
+                    .about("Remove conversations")
+                    .aliases(["remove", "rem", "delete", "del"]),
+            )
+            .subcommand(
+                ls::Ls::augment(Command::new("ls"))
+                    .about("List conversations")
+                    .alias("list"),
+            )
+            .subcommand(
+                show::Show::augment(Command::new("show"))
+                    .about("Show conversation details")
+                    .visible_alias("s"),
+            )
+            .subcommand(
+                use_::Use::augment(Command::new("use"))
+                    .about("Set the active conversation")
+                    .visible_alias("u"),
+            )
+            .subcommand(
+                edit::Edit::augment(Command::new("edit"))
+                    .about("Edit conversation details")
+                    .visible_alias("e"),
+            )
+            .subcommand(
+                fork::Fork::augment(Command::new("fork"))
+                    .about("Fork a conversation")
+                    .visible_alias("f"),
+            )
+            .subcommand(
+                compact::Compact::augment(Command::new("compact"))
+                    .about("Compact a conversation to reduce context size")
+                    .long_about(
+                        "Compact a conversation to reduce context size.\n\nAppends a compaction \
+                         overlay that instructs the LLM projection layer to strip reasoning \
+                         blocks and/or tool call content from the specified range. The original \
+                         events are preserved.",
+                    ),
+            )
+            .subcommand(
+                title::Title::augment(Command::new("title"))
+                    .about("Generate a conversation title with an LLM")
+                    .long_about(
+                        "Generate a conversation title with an LLM.\n\nOffers the generated \
+                         candidates as a picker, and applies the chosen one as the conversation's \
+                         title. Use `edit --title \"TITLE\"` to set a title without involving a \
+                         model.",
+                    )
+                    .visible_alias("t"),
+            )
+            .subcommand(
+                grep::Grep::augment(Command::new("grep"))
+                    .about("Search through conversation history")
+                    .visible_alias("g")
+                    .alias("rg"),
+            )
+            .subcommand(
+                label::Label::augment(Command::new("label"))
+                    .about("Manage the labels on a conversation")
+                    .long_about(
+                        "Manage the labels on a conversation.\n\n`jp c label add`, `set`, `rm`, \
+                         and `ls`; a bare `jp c label` lists.",
+                    )
+                    .visible_alias("l")
+                    .alias("labels"),
+            )
+            .subcommand(
+                print::Print::augment(Command::new("print"))
+                    .about("Print conversation history to the terminal")
+                    .visible_alias("p"),
+            )
+            .subcommand(
+                path::Path::augment(Command::new("path"))
+                    .about("Print the filesystem path to a conversation"),
+            )
+            .subcommand(
+                archive::Archive::augment(Command::new("archive"))
+                    .about("Archive conversations")
+                    .visible_alias("a"),
+            )
+            .subcommand(
+                unarchive::Unarchive::augment(Command::new("unarchive"))
+                    .about("Unarchive conversations")
+                    .visible_alias("ua"),
+            )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        let command = match subcommand_of(matches)? {
+            ("rm", sub) => Commands::Remove(rm::Rm::from_matches(sub)?),
+            ("ls", sub) => Commands::List(ls::Ls::from_matches(sub)?),
+            ("show", sub) => Commands::Show(show::Show::from_matches(sub)?),
+            ("use", sub) => Commands::Use(use_::Use::from_matches(sub)?),
+            ("edit", sub) => Commands::Edit(edit::Edit::from_matches(sub)?),
+            ("fork", sub) => Commands::Fork(fork::Fork::from_matches(sub)?),
+            ("compact", sub) => Commands::Compact(compact::Compact::from_matches(sub)?),
+            ("title", sub) => Commands::Title(title::Title::from_matches(sub)?),
+            ("grep", sub) => Commands::Grep(grep::Grep::from_matches(sub)?),
+            ("label", sub) => Commands::Label(label::Label::from_matches(sub)?),
+            ("print", sub) => Commands::Print(print::Print::from_matches(sub)?),
+            ("path", sub) => Commands::Path(path::Path::from_matches(sub)?),
+            ("archive", sub) => Commands::Archive(archive::Archive::from_matches(sub)?),
+            ("unarchive", sub) => Commands::Unarchive(unarchive::Unarchive::from_matches(sub)?),
+            (name, _) => return Err(unread_subcommand(name)),
+        };
+
+        Ok(Self { command })
+    }
 }
 
 impl Conversation {
@@ -92,72 +211,20 @@ impl IntoPartialAppConfig for Conversation {
     }
 }
 
-#[derive(Debug, clap::Subcommand)]
+#[derive(Debug)]
 enum Commands {
-    /// Remove conversations.
-    #[command(name = "rm", aliases = ["remove", "rem", "delete", "del"])]
     Remove(rm::Rm),
-
-    /// List conversations.
-    #[command(name = "ls", alias = "list")]
     List(ls::Ls),
-
-    /// Show conversation details.
-    #[command(name = "show", visible_alias = "s")]
     Show(show::Show),
-
-    /// Set the active conversation.
-    #[command(name = "use", visible_alias = "u")]
     Use(use_::Use),
-
-    /// Edit conversation details.
-    #[command(name = "edit", visible_alias = "e")]
     Edit(edit::Edit),
-
-    /// Fork a conversation.
-    #[command(name = "fork", visible_alias = "f")]
     Fork(fork::Fork),
-
-    /// Compact a conversation to reduce context size.
-    ///
-    /// Appends a compaction overlay that instructs the LLM projection layer to
-    /// strip reasoning blocks and/or tool call content from the specified
-    /// range.
-    /// The original events are preserved.
-    #[command(name = "compact")]
     Compact(compact::Compact),
-
-    /// Generate a conversation title with an LLM.
-    ///
-    /// Offers the generated candidates as a picker, and applies the chosen one
-    /// as the conversation's title.
-    /// Use `edit --title "TITLE"` to set a title without involving a model.
-    #[command(name = "title", visible_alias = "t")]
     Title(title::Title),
-
-    /// Search through conversation history.
-    #[command(name = "grep", alias = "rg", visible_alias = "g")]
     Grep(grep::Grep),
-
-    /// Manage the labels on a conversation.
-    ///
-    /// `jp c label add`, `set`, `rm`, and `ls`; a bare `jp c label` lists.
-    #[command(name = "label", visible_alias = "l", alias = "labels")]
     Label(label::Label),
-
-    /// Print conversation history to the terminal.
-    #[command(name = "print", visible_alias = "p")]
     Print(print::Print),
-
-    /// Print the filesystem path to a conversation.
-    #[command(name = "path")]
     Path(path::Path),
-
-    /// Archive conversations.
-    #[command(name = "archive", visible_alias = "a")]
     Archive(archive::Archive),
-
-    /// Unarchive conversations.
-    #[command(name = "unarchive", visible_alias = "ua")]
     Unarchive(unarchive::Unarchive),
 }

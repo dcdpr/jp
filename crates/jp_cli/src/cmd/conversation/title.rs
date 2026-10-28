@@ -1,5 +1,6 @@
 //! LLM-driven conversation title generation.
 
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use jp_config::{AppConfig, PartialAppConfig};
 use jp_conversation::ConversationStream;
 use jp_llm::{
@@ -10,6 +11,7 @@ use jp_llm::{
 use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
+    cli::{CommandArgs, required},
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
@@ -30,30 +32,68 @@ const MORE: &str = "More...";
 /// Picker entry that takes a hand-written title instead of a generated one.
 const MANUAL: &str = "Manually enter a title";
 
-#[derive(Debug, clap::Args)]
+/// `jp conversation title`.
+#[derive(Debug)]
 pub(crate) struct Title {
-    #[command(flatten)]
     target: PositionalIds<true, true>,
 
     /// How many candidate titles to generate.
-    ///
-    /// The candidates are offered as a picker, which can also generate a fresh
-    /// batch or take a hand-written title.
-    /// Without a terminal to pick with, the first candidate is applied.
-    #[arg(long, short = 'n', default_value_t = DEFAULT_COUNT, value_parser = parse_count)]
     count: usize,
 
     /// The model to generate the title with.
-    ///
-    /// Accepts a model alias or a full `provider/name` ID, the same values as
-    /// `jp query --model`.
-    /// Overrides `conversation.title.generate.model` for this invocation.
-    #[arg(long, short = 'm')]
     model: Option<String>,
 
     /// Print the candidate titles without applying one.
-    #[arg(long)]
     dry_run: bool,
+}
+
+impl CommandArgs for Title {
+    fn augment(cmd: Command) -> Command {
+        PositionalIds::<true, true>::augment(cmd)
+            .arg(
+                Arg::new("count")
+                    .short('n')
+                    .long("count")
+                    .value_name("COUNT")
+                    .value_parser(parse_count)
+                    // clap takes the default as text; `title_tests` pins it to
+                    // `DEFAULT_COUNT`.
+                    .default_value("3")
+                    .help("How many candidate titles to generate")
+                    .long_help(
+                        "How many candidate titles to generate.\n\nThe candidates are offered as \
+                         a picker, which can also generate a fresh batch or take a hand-written \
+                         title. Without a terminal to pick with, the first candidate is applied.",
+                    ),
+            )
+            .arg(
+                Arg::new("model")
+                    .short('m')
+                    .long("model")
+                    .value_name("MODEL")
+                    .help("The model to generate the title with")
+                    .long_help(
+                        "The model to generate the title with.\n\nAccepts a model alias or a full \
+                         `provider/name` ID, the same values as `jp query --model`. Overrides \
+                         `conversation.title.generate.model` for this invocation.",
+                    ),
+            )
+            .arg(
+                Arg::new("dry_run")
+                    .long("dry-run")
+                    .action(ArgAction::SetTrue)
+                    .help("Print the candidate titles without applying one"),
+            )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> std::result::Result<Self, clap::Error> {
+        Ok(Self {
+            target: PositionalIds::from_matches(matches)?,
+            count: required(matches, "count")?,
+            model: matches.get_one("model").cloned(),
+            dry_run: matches.get_flag("dry_run"),
+        })
+    }
 }
 
 fn parse_count(s: &str) -> std::result::Result<usize, String> {
