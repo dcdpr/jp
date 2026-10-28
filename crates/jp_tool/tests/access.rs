@@ -2,9 +2,7 @@
 //! symlink resolution and nested-escape boundary introduced by RFD D43.
 
 use camino::Utf8PathBuf;
-use jp_tool::{
-    AccessPolicy, Action, Capability, Context, EntryKind, FsAccessError, FsRule, Resolve,
-};
+use jp_tool::{AccessPolicy, Action, Capability, Context, FsAccessError, FsRule};
 
 fn ctx(root: Utf8PathBuf, access: Option<AccessPolicy>) -> Context {
     Context {
@@ -262,6 +260,8 @@ fn a_mount_cannot_move_the_workspace_or_a_directory_holding_it() {
 #[cfg(unix)]
 #[test]
 fn a_mount_can_remove_a_link_to_a_directory_holding_the_workspace() {
+    use jp_tool::{EntryKind, Resolve};
+
     let (_grand, ctx) = ancestor_mount();
 
     let link = ctx.resolve("up/current".into(), Resolve::Entry).unwrap();
