@@ -224,11 +224,12 @@ mod target {
     }
 }
 
+/// Every case here involves a symlink, so the module is Unix-only.
+#[cfg(unix)]
 mod entry {
     use super::*;
 
     /// Deleting or renaming the entry acts on the link, not its target.
-    #[cfg(unix)]
     #[test]
     fn a_final_symlink_is_left_as_named() {
         use std::os::unix::fs::symlink;
@@ -249,7 +250,6 @@ mod entry {
     }
 
     /// A broken link is an entry like any other: it can be deleted or renamed.
-    #[cfg(unix)]
     #[test]
     fn a_final_dangling_symlink_is_accepted() {
         use std::os::unix::fs::symlink;
@@ -264,7 +264,6 @@ mod entry {
         assert_eq!(resolved.kind, Some(EntryKind::Symlink));
     }
 
-    #[cfg(unix)]
     #[test]
     fn the_parent_must_stay_inside() {
         use std::os::unix::fs::symlink;
@@ -287,7 +286,6 @@ mod entry {
 
     /// The mount link itself is a workspace entry; only a path through it
     /// reaches back in.
-    #[cfg(unix)]
     #[test]
     fn a_mount_link_is_an_entry_not_a_way_back_in() {
         use std::os::unix::fs::symlink;
