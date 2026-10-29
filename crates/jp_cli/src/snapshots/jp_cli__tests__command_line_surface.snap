@@ -1360,14 +1360,14 @@ action: Append
 num_args: Some(1)
 value_type: alloc::string::String
 possible_values: []
-value_names: Some(["[TOOL:]NAME=PATH[:MODE]"])
+value_names: Some(["[TOOL:][NAME=]PATH[:MODE]"])
 value_delimiter: None
 default_values: []
 help_heading: None
 conflicts: []
 set: []
 help: Some("Mount an external path into the workspace as a symlink and grant the assistant access to it")
-long_help: Some("Mount an external path into the workspace as a symlink and grant the assistant access to it.\n\nForm: `[TOOL:]NAME=PATH[:MODE]`. `NAME` is the workspace-relative location for the symlink, `PATH` is the external target, and `MODE` is `ro` (default) or `rw`. `rw` requires a `TOOL:` prefix; without a `TOOL:` prefix the grant applies to all enabled local and command plugin tools. Repeat the flag to mount several paths.")
+long_help: Some("Mount an external path into the workspace as a symlink and grant the assistant access to it.\n\nForm: `[TOOL:][NAME=]PATH[:MODE]`. `NAME` is the workspace-relative location for the symlink, `PATH` is the external target, and `MODE` is `ro` (default) or `rw`. Without `NAME=`, `PATH` must exist and the symlink is named after its last segment; a leading `TOOL:` is then a tool only if the rest of the path exists and the whole value does not. `rw` requires a `TOOL:` prefix; without a `TOOL:` prefix the grant applies to all enabled local and command plugin tools. Repeat the flag to mount several paths.")
 
 ### help
 short: Some('h')
