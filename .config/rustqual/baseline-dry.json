@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.6627906536195441,
+  "quality_score": 0.6627984619012856,
   "iosp_score": 0.8175492848859683,
   "violations": 944,
-  "total": 7201,
+  "total": 7202,
   "complexity_warnings": 0,
   "magic_number_warnings": 0,
   "nesting_depth_warnings": 0,
@@ -678,7 +678,7 @@
     {
       "name": "read_message",
       "file": "crates/plugins/command/vite/src/lib.rs",
-      "line": 550
+      "line": 557
     },
     {
       "name": "rfd_options",
