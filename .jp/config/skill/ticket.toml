@@ -2,26 +2,31 @@
 tag = "ticket_skill"
 title = "Skill: Tickets"
 content = """\
-You have been given the ticket skill. Tickets are work items — bugs, features, \
-chores — tracked as markdown files under `docs/ticket/`, alongside the RFDs. \
-The following tools help you with this:
+You have been given the ticket skill. Tickets are work items tracked as \
+markdown files under `docs/ticket/`, alongside the RFDs. The following tools \
+help you with this:
 
-- ticket_list: List tickets by id, with status, kind, labels, and comment \
-count. Filter by status, kind, or label.
-- ticket_show: Read one ticket in full, with its comments numbered for replies.
+- ticket_list: List tickets in board order, Todo first and the top of each \
+column first, with status, labels, and comment count. Filter by status, \
+label, or text the ticket mentions; a long listing comes a page at a time.
+- ticket_show: Read one ticket's metadata; ask for its description or its \
+comments, numbered for replies, when you need them.
 - ticket_create: File a new ticket, at status Todo.
 - ticket_comment: Append a comment to a ticket's discussion, optionally \
 replying to an earlier one.
-- ticket_rename: Give a ticket a new title, moving its file to match.
-- ticket_label: Replace the labels on an existing ticket.
-- ticket_close: Mark a ticket Done.
+- ticket_edit: Change a ticket's title, description, status, or labels, any \
+of them in one call. Status `done` closes it.
 
-Labels group tickets by area of the system, orthogonally to kind. Each one is a \
-`key=value` pair (`client=cli`, `package=jp_config`), and a key may be named \
-more than once, which is how a ticket spanning two crates says so. The set is \
-closed and lives in `docs/ticket/.labels.json`; the tools advertise it, and a \
-label outside it is refused. `ticket_label` writes the whole set, so read the \
-ticket first when you mean to keep the labels it already carries.
+Labels classify tickets: `type` says what kind of work a ticket is (`bug`, \
+`feature`, `task`, ...), and every ticket carries exactly one; the other keys \
+say which part of the system it lands in, or which RFD its work belongs to \
+(`tracking-rfd`, `relevant-rfd`). Each one is a `key=value` pair \
+(`client=cli`, `package=jp_config`), and a key may be named more than once, \
+which is how a ticket spanning two crates says so. The labels live in \
+`plugins.command.ticket.options.labels`; the tools describe them, and a \
+label outside them, or a ticket without its `type`, is refused. `ticket_edit` \
+adds and removes labels, leaving the rest: to change a key a ticket carries \
+one of, such as `type`, remove the bare key and add the new label in one call.
 
 Write a ticket when the work is clear enough to start, and an RFD when it needs \
 a design first. The signal is whether there is a decision to argue about, not \
@@ -30,22 +35,21 @@ implemented policy question is an RFD. A ticket whose discussion turns into a \
 disagreement about approach should be promoted to an RFD draft rather than \
 settled in its comments.
 
-Search tickets with `fs_grep_files` over `docs/ticket/`; the id in a ticket's \
+Find tickets mentioning something with `ticket_list`'s `query`, and use \
+`fs_grep_files` over `docs/ticket/` for a pattern; the id in a ticket's \
 filename is the one the tools accept.
 
 These tools own the directory: `fs_create_file`, `fs_delete_file`, and \
-`fs_move_file` all refuse paths under `docs/ticket/`. Editing a ticket's body \
-in place is still `fs_modify_file`.
+`fs_move_file` all refuse paths under `docs/ticket/`. `ticket_edit` replaces a \
+ticket's whole description; a small change in place is still `fs_modify_file`.
 """
 
 [conversation.tools]
-ticket_list = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-ticket_show = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+ticket_list = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+ticket_show = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
 
 # The writing tools inherit the workspace's `run = "ask"` default: filing,
-# commenting, renaming, and closing all leave a diff someone has to review.
-ticket_create = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-ticket_comment = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-ticket_rename = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-ticket_close = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-ticket_label = { enable = true, result = "unattended", style.inline_results = "off", style.error.inline_results = "full", style.results_file_link = "off" }
+# commenting, and editing all leave a diff someone has to review.
+ticket_create = { enable = true, result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+ticket_comment = { enable = true, result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+ticket_edit = { enable = true, result = "allow", style.inline_results = "full", style.results_file_link = "off" }

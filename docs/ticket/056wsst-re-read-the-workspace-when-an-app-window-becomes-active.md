@@ -1,11 +1,10 @@
 # Re-read the workspace when an app window becomes active
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-08-19
-- **Implements**: 099
 - **Label**: client=macos
+- **Label**: relevant-rfd=099
 - **Label**: type=enhancement
 
 `jp_workspace_conversations` and `jp_workspace_events` re-read the conversation

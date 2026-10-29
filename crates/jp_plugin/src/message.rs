@@ -61,6 +61,9 @@ pub enum HostToPlugin {
     /// Response to `compose`.
     Composed(ComposeResponse),
 
+    /// Response to `edit_files`: the editor has exited.
+    Edited(EditedResponse),
+
     /// Successful completion of a request with no response payload.
     ///
     /// The answer to `archive_conversation` and `set_title`.
@@ -121,6 +124,9 @@ pub enum PluginToHost {
     /// Ask the host to collect text from the user.
     Compose(ComposeRequest),
 
+    /// Ask the host to open files in the user's editor.
+    EditFiles(EditFilesRequest),
+
     /// Move a conversation to the archive.
     ArchiveConversation(ConversationRequest),
 
@@ -176,6 +182,7 @@ impl PluginToHost {
             Self::ReadEvents(m) => m.id.as_deref(),
             Self::ReadConfig(m) => m.id.as_deref(),
             Self::Compose(m) => m.id.as_deref(),
+            Self::EditFiles(m) => m.id.as_deref(),
             Self::Query(m) => m.id.as_deref(),
             Self::ArchiveConversation(m) | Self::ReadDraft(m) => m.id.as_deref(),
             Self::SetTitle(m) => m.id.as_deref(),
@@ -988,6 +995,40 @@ pub struct ComposeResponse {
     pub values: Vec<String>,
 }
 
+/// Ask the host to open files in the user's editor, and wait until it exits.
+///
+/// The editor runs on the host for the reason composition does: the host owns
+/// the terminal, and knows which editor the configuration names (`editor.cmd`,
+/// then the `JP_EDITOR`, `VISUAL`, and `EDITOR` variables).
+///
+/// The host answers with [`HostToPlugin::Edited`] once the editor exits, or
+/// with an error when there is no terminal to open it on or no editor to open.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EditFilesRequest {
+    /// Optional request correlation ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    /// The files to open, as absolute paths.
+    pub paths: Vec<Utf8PathBuf>,
+}
+
+/// Response to `edit_files`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EditedResponse {
+    /// Optional request correlation ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    /// Whether the editor exited cleanly.
+    ///
+    /// `false` when it exited with an error, which is how most editors report
+    /// an edit the user abandoned (`:cq` in Vim).
+    /// The files may have been written either way; reading them back is the
+    /// plugin's job.
+    pub saved: bool,
+}
+
 /// Print user-facing output through JP's printer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PrintMessage {
@@ -1119,6 +1160,16 @@ pub struct ExitMessage {
     /// Omit for successful exits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+
+    /// Whether a non-zero code reports a result rather than a failure, as a
+    /// check that found problems does.
+    ///
+    /// `jp` still exits with the code; it skips what it does only for a run
+    /// that broke, such as keeping the trace log and naming where it went.
+    /// Ignored with a code of 0, and by a `jp` that predates it, which treats
+    /// the exit as a failure.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub expected: bool,
 }
 
 /// Wrap a field that is present on the wire, including `null`, in `Some`.

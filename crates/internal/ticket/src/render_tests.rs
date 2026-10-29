@@ -1,22 +1,19 @@
 use indoc::indoc;
 
 use super::*;
-use crate::{Kind, Labels, Vocabulary, parse};
+use crate::{Labels, Vocabulary, parse};
 
 /// A ticket with everything but the parts under test fixed.
 fn draft<'a>(
     title: &'a str,
-    kind: Kind,
     authors: &'a str,
     labels: &'a Labels,
     description: &'a str,
 ) -> NewTicket<'a> {
     NewTicket {
-        kind,
         title,
         authors,
         date: "2026-08-05",
-        implements: None,
         labels,
         description,
     }
@@ -35,7 +32,6 @@ fn new_comment(from: &str, body: &str, re: Option<&str>) -> Comment {
 fn renders_a_new_ticket() {
     let out = ticket(&draft(
         "Tool call header misaligned",
-        Kind::Bug,
         "John Doe",
         &Labels::default(),
         "The header renders one column left of the body.",
@@ -45,7 +41,6 @@ fn renders_a_new_ticket() {
             # Tool call header misaligned
 
             - **Status**: Todo
-            - **Kind**: Bug
             - **Authors**: John Doe
             - **Date**: 2026-08-05
 
@@ -57,7 +52,6 @@ fn renders_a_new_ticket() {
 fn renders_a_new_ticket_without_a_description() {
     let out = ticket(&draft(
         "Bump the deny list",
-        Kind::Chore,
         "john",
         &Labels::default(),
         "   ",
@@ -67,7 +61,6 @@ fn renders_a_new_ticket_without_a_description() {
             # Bump the deny list
 
             - **Status**: Todo
-            - **Kind**: Chore
             - **Authors**: john
             - **Date**: 2026-08-05
         "});
@@ -77,7 +70,6 @@ fn renders_a_new_ticket_without_a_description() {
 fn first_comment_opens_the_comments_section() {
     let document = ticket(&draft(
         "Tool call header misaligned",
-        Kind::Bug,
         "John Doe",
         &Labels::default(),
         "The header renders one column left of the body.",
@@ -92,7 +84,6 @@ fn first_comment_opens_the_comments_section() {
             # Tool call header misaligned
 
             - **Status**: Todo
-            - **Kind**: Bug
             - **Authors**: John Doe
             - **Date**: 2026-08-05
 
@@ -134,7 +125,6 @@ fn later_comments_are_a_pure_append() {
     let document = append_comment(
         &ticket(&draft(
             "Tool call header misaligned",
-            Kind::Bug,
             "John Doe",
             &Labels::default(),
             "Description.",
@@ -166,7 +156,6 @@ fn appended_comments_parse_back() {
         &append_comment(
             &ticket(&draft(
                 "Round trip",
-                Kind::Feature,
                 "john",
                 &Labels::default(),
                 "Description.",
@@ -191,7 +180,6 @@ fn replaces_a_metadata_field() {
         # Tool call header misaligned
 
         - **Status**: Todo
-        - **Kind**: Bug
         - **Authors**: John Doe
         - **Date**: 2026-08-05
 
@@ -212,7 +200,6 @@ fn only_the_header_block_is_rewritten() {
         # Quoting metadata
 
         - **Status**: Todo
-        - **Kind**: Bug
         - **Authors**: john
         - **Date**: 2026-08-05
 
@@ -242,7 +229,6 @@ fn adds_a_field_the_ticket_lacks() {
         # Tool call header misaligned
 
         - **Status**: Todo
-        - **Kind**: Bug
         - **Authors**: john
         - **Date**: 2026-08-05
 
@@ -255,7 +241,6 @@ fn adds_a_field_the_ticket_lacks() {
             # Tool call header misaligned
 
             - **Status**: Todo
-            - **Kind**: Bug
             - **Authors**: john
             - **Date**: 2026-08-05
             - **GitHub**: #123
@@ -267,16 +252,19 @@ fn adds_a_field_the_ticket_lacks() {
 #[test]
 fn reports_a_document_with_no_metadata_block() {
     assert_eq!(set_metadata("# Bare\n\nProse.\n", "Status", "Done"), None);
-    assert_eq!(remove_metadata("# Bare\n\nProse.\n", "Label"), None);
+    assert_eq!(
+        set_repeated_metadata("# Bare\n\nProse.\n", "Label", &[]),
+        None
+    );
 }
 
+/// No values is how labels are cleared.
 #[test]
-fn removing_a_repeated_field_drops_every_line() {
+fn writing_no_values_drops_every_line() {
     let document = indoc! {"
         # Tool call header misaligned
 
         - **Status**: Todo
-        - **Kind**: Bug
         - **Authors**: john
         - **Date**: 2026-08-05
         - **Label**: client=cli
@@ -285,13 +273,12 @@ fn removing_a_repeated_field_drops_every_line() {
         Description.
     "};
 
-    let out = remove_metadata(document, "Label").unwrap();
+    let out = set_repeated_metadata(document, "Label", &[]).unwrap();
 
     assert_eq!(out, indoc! {"
             # Tool call header misaligned
 
             - **Status**: Todo
-            - **Kind**: Bug
             - **Authors**: john
             - **Date**: 2026-08-05
 
@@ -302,19 +289,21 @@ fn removing_a_repeated_field_drops_every_line() {
 /// Clearing labels on a ticket that has none is not an error, so a caller
 /// doesn't have to read the ticket first to know which write to make.
 #[test]
-fn removing_a_field_the_ticket_lacks_changes_nothing() {
+fn writing_no_values_to_a_field_the_ticket_lacks_changes_nothing() {
     let document = indoc! {"
         # Tool call header misaligned
 
         - **Status**: Todo
-        - **Kind**: Bug
         - **Authors**: john
         - **Date**: 2026-08-05
 
         Description.
     "};
 
-    assert_eq!(remove_metadata(document, "Label").unwrap(), document);
+    assert_eq!(
+        set_repeated_metadata(document, "Label", &[]).unwrap(),
+        document
+    );
 }
 
 /// The replacement lands where the old run was, so relabelling doesn't shuffle
@@ -361,19 +350,12 @@ fn renders_one_line_per_label() {
         ])
         .unwrap();
 
-    let out = ticket(&draft(
-        "Labelled",
-        Kind::Bug,
-        "john",
-        &labels,
-        "Description.",
-    ));
+    let out = ticket(&draft("Labelled", "john", &labels, "Description."));
 
     assert_eq!(out, indoc! {"
             # Labelled
 
             - **Status**: Todo
-            - **Kind**: Bug
             - **Authors**: john
             - **Date**: 2026-08-05
             - **Label**: client=cli

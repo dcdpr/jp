@@ -1,7 +1,12 @@
-//! `jp-ticket`: read and write the in-repo tickets under `docs/ticket/`.
+//! `jp-ticket`: read and write a workspace's in-repo tickets.
 //!
-//! A command plugin providing `jp ticket create`, `comment`, `close`, and
-//! `list`.
+//! A command plugin providing `jp ticket` and its subcommands, and the tools
+//! the assistant reaches through `source = "plugin.command.ticket.<tool>"`.
+//! An `init` carrying a tool call is answered by the `tool` module; any other
+//! runs the command its arguments name.
+//!
+//! Settings come from `plugins.command.ticket.options`, read by the `options`
+//! module.
 //! The ticket directory is resolved against the workspace root from the host's
 //! `init` message, so the commands work from any subdirectory.
 //!
@@ -9,29 +14,61 @@
 //! argument layer over it.
 //!
 //! See: `docs/rfd/072-command-plugin-system.md`,
-//! `docs/rfd/100-in-repo-ticket-tracking.md`
+//! `docs/rfd/100-in-repo-ticket-tracking.md`,
+//! `docs/rfd/116-shareable-rfd-ticket-and-site-tooling.md`
 
-use std::io::{self, BufRead, Write};
+mod definitions;
+mod edit;
+mod label;
+mod options;
+mod tool;
+
+use std::{
+    fs,
+    io::{self, BufRead, Write},
+};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{Local, SecondsFormat, Utc};
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{ArgGroup, CommandFactory, Parser, Subcommand};
 use jp_github::models::issues::{Comment as IssueComment, Issue};
 use jp_plugin::message::{
     ComposeMode, ComposeOption, ComposeRequest, DescribeResponse, ExitMessage, HostToPlugin,
-    InitMessage, LogMessage, PluginToHost, PrintMessage,
+    InitMessage, OutputFormat, PluginToHost, PrintMessage, ToolCall, ToolOutcomeMessage,
 };
 use serde::Serialize;
 use serde_json::Value;
 use ticket::{
-    Comment, Kind, LABELS_FILE, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId,
-    Vocabulary, import::Import, render, store,
+    Comment, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId, Unique, Vocabulary,
+    board::{self, Place},
+    check::Problem,
+    import::Import,
+    store,
 };
 
+use crate::options::{LABELS_KEY, Options, leftover_labels_file};
+
+/// What `jp ticket --version` prints after the command's name: the plugin's
+/// version, and the revision of the site files it was built alongside.
+///
+/// `jp vite serve` reads the revision out of the parentheses, to tell whether
+/// the site's loaders read what this plugin writes.
+const VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (site ",
+    env!("JP_SITE_REVISION"),
+    ")"
+);
+
 #[derive(Debug, Parser)]
-#[command(name = "jp ticket", about = "Track work items as markdown files.")]
+#[command(
+    name = "jp ticket",
+    version = VERSION,
+    about = "Track work items as markdown files."
+)]
 struct Args {
     /// Directory holding the ticket files, relative to the workspace root.
+    /// Defaults to `plugins.command.ticket.options.dir`, then `docs/ticket`.
     #[arg(long)]
     dir: Option<Utf8PathBuf>,
 
@@ -43,10 +80,6 @@ struct Args {
 enum Command {
     /// File a ticket, at status Todo.
     Add {
-        /// Kind of work: `bug`, `feature`, or `chore`.
-        /// Omit it to choose.
-        kind: Option<Kind>,
-
         /// One-line summary of the work.
         /// Omit it to compose the ticket inline.
         title: Option<String>,
@@ -60,12 +93,9 @@ enum Command {
         #[arg(long)]
         body: Option<String>,
 
-        /// The RFD this work implements, e.g. `045`.
-        #[arg(long)]
-        implements: Option<String>,
-
         /// A `key=value` label from the board's vocabulary.
-        /// Repeat for more than one.
+        /// Repeat for more than one; `jp ticket labels` lists the ones the
+        /// board requires.
         #[arg(long = "label")]
         labels: Vec<String>,
     },
@@ -90,19 +120,20 @@ enum Command {
         body: Option<String>,
     },
 
-    /// Replace a ticket's labels.
+    /// Add, set, remove, or list a ticket's labels.
     ///
-    /// The whole set is written: pass every label the ticket should end up
-    /// with, or none to clear them.
+    /// Name the tickets with `--id`, before or after the verb; repeat it, or
+    /// separate ids with commas, to change several at once, all of them or
+    /// none.
+    /// Without it, you choose one.
+    /// Without a verb, lists the labels.
     Label {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
-        /// Omit it to choose.
-        id: Option<TicketId>,
+        /// A ticket to act on: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        #[arg(long = "id", short = 'i', global = true, value_delimiter = ',')]
+        ids: Vec<TicketId>,
 
-        /// A `key=value` label from the board's vocabulary.
-        /// Repeat for more than one.
-        #[arg(long = "label")]
-        labels: Vec<String>,
+        #[command(subcommand)]
+        verb: Option<LabelVerb>,
     },
 
     /// List the labels the board defines.
@@ -115,15 +146,48 @@ enum Command {
         id: Option<TicketId>,
     },
 
-    /// Rewrite a ticket's title, description, kind, or status.
+    /// Move a ticket to another column of the board.
     ///
-    /// Metadata and comments the flags don't name are left alone.
+    /// Without `--before` or `--after` it joins the column below the tickets
+    /// ranked there.
+    /// With one, it lands next to that ticket, which has to be in the column
+    /// already; that is checked before anything changes.
+    Status {
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        id: TicketId,
+
+        /// The column: `todo`, `in progress`, or `done`.
+        status: Status,
+
+        /// Place it directly above this ticket.
+        #[arg(long, conflicts_with = "after")]
+        before: Option<TicketId>,
+
+        /// Place it directly below this ticket.
+        #[arg(long)]
+        after: Option<TicketId>,
+    },
+
+    /// Give a ticket a new title, moving its file to match.
+    Rename {
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        id: TicketId,
+
+        /// New one-line summary.
+        title: String,
+    },
+
+    /// Change a ticket's title, description, status, or labels.
+    ///
+    /// Without any of those flags, opens the ticket's file in your editor: the
+    /// one `editor.cmd` names, or `JP_EDITOR`, `VISUAL`, or `EDITOR`.
+    /// What the flags don't name is left alone.
     Edit {
         /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
         /// Omit it to choose.
         id: Option<TicketId>,
 
-        /// New one-line summary.
+        /// New one-line summary; the file moves to match, as with `rename`.
         #[arg(long)]
         title: Option<String>,
 
@@ -131,13 +195,14 @@ enum Command {
         #[arg(long)]
         body: Option<String>,
 
-        /// New kind: `bug`, `feature`, or `chore`.
-        #[arg(long)]
-        kind: Option<Kind>,
-
         /// New status: `todo`, `in progress`, or `done`.
         #[arg(long)]
         status: Option<Status>,
+
+        /// A `key=value` label; the ticket ends up with exactly the ones named.
+        /// Repeat for more than one.
+        #[arg(long = "label")]
+        labels: Vec<String>,
     },
 
     /// Delete a ticket outright.
@@ -151,14 +216,32 @@ enum Command {
     },
 
     /// Read one ticket, with its comments numbered for replies.
+    ///
+    /// With `jp -F json`, the ticket is printed as JSON.
     Show {
         /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
         /// Omit it to choose.
         id: Option<TicketId>,
+    },
 
-        /// Print JSON instead of markdown.
-        #[arg(long)]
-        json: bool,
+    /// Print the board: Todo, In Progress, and Done, each in board order.
+    ///
+    /// Done shows its top `board.done_limit` tickets; `list` shows them all.
+    Board,
+
+    /// Move a ticket next to another in the same column of the board.
+    #[command(group(ArgGroup::new("place").required(true)))]
+    Rank {
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        id: TicketId,
+
+        /// Place it directly above this ticket.
+        #[arg(long, group = "place")]
+        before: Option<TicketId>,
+
+        /// Place it directly below this ticket.
+        #[arg(long, group = "place")]
+        after: Option<TicketId>,
     },
 
     /// Record that a ticket became an RFD, and close it.
@@ -188,61 +271,149 @@ enum Command {
         base: String,
     },
 
-    /// Convert tickets left in the pre-RFD-102 `NNNN-slug.md` format.
-    ///
-    /// Transitional: run it on a branch cut before the id change, after
-    /// rebasing.
-    /// Delete this command once no such branch is left.
-    Migrate,
-
     /// Import GitHub issues as tickets, or refresh ones already imported.
     Import {
         /// Issue numbers.
         /// Omit them to pick from the open issues.
         numbers: Vec<u64>,
 
-        /// Repository to read the issue from, as `owner/name`.
-        #[arg(long, default_value = "dcdpr/jp")]
+        /// Repository to read the issues from, as `owner/name`.
+        #[arg(long)]
         repo: String,
 
-        /// Kind to file a newly imported issue under.
-        #[arg(long, default_value = "bug")]
-        kind: Kind,
+        /// A `key=value` label each newly imported issue is filed with.
+        /// Repeat for more than one; a refreshed ticket keeps its own.
+        #[arg(long = "label")]
+        labels: Vec<String>,
     },
 
     /// List tickets, ordered by id.
+    ///
+    /// With `jp -F json`, the tickets are printed as JSON.
     List {
         /// Only tickets at this status: `todo`, `in progress`, or `done`.
         #[arg(long)]
         status: Option<Status>,
-
-        /// Only tickets of this kind: `bug`, `feature`, or `chore`.
-        #[arg(long)]
-        kind: Option<Kind>,
 
         /// Only tickets carrying this label, as `key` or `key=value`.
         /// Repeat to require several.
         #[arg(long = "label")]
         labels: Vec<String>,
 
-        /// Print JSON instead of a table.
+        /// Only tickets whose title, description, or comments contain this
+        /// text, ignoring case.
         #[arg(long)]
-        json: bool,
+        query: Option<String>,
+    },
+
+    /// Check every ticket against the board's rules, and exit 1 if any breaks
+    /// one.
+    ///
+    /// A write is checked when it is made, so this is what catches a ticket
+    /// edited by hand, or filed before a rule was added: one that doesn't
+    /// parse, carries a label the board doesn't define, breaks a key's `min` or
+    /// `max`, or shares a label the board lets one ticket carry.
+    /// Also names files `jp ticket` can't read as tickets.
+    ///
+    /// With `jp -F json`, the problems are printed as JSON.
+    Check,
+
+    /// Create the ticket directory.
+    Init,
+
+    /// Write the tool definitions that offer the tickets to the assistant.
+    Tools {
+        #[command(subcommand)]
+        command: ToolsCommand,
     },
 }
 
-/// One ticket in `show --json` output.
+/// What `label` does to the tickets it names.
+#[derive(Debug, Subcommand)]
+enum LabelVerb {
+    /// Add labels; the ticket keeps the ones it carries.
+    ///
+    /// A key the board holds to one label is changed with `set` instead.
+    #[command(visible_alias = "a")]
+    Add {
+        /// A label to add, as `key=value`, or a bare `key` the board takes
+        /// without a value.
+        #[arg(value_name = "KEY=VALUE", required = true)]
+        labels: Vec<String>,
+    },
+
+    /// Replace what each named key holds; every other label stays.
+    ///
+    /// `set type=bug` swaps whatever `type` holds for `bug`, and naming a key
+    /// twice gives it both values.
+    #[command(visible_alias = "s")]
+    Set {
+        /// A label to set, as `key=value`.
+        #[arg(value_name = "KEY=VALUE", required = true)]
+        labels: Vec<String>,
+    },
+
+    /// Remove labels: `key=value` takes that label, a bare `key` every label
+    /// under it.
+    ///
+    /// With none named, removes every label.
+    /// Naming one the ticket doesn't carry isn't an error, but is reported.
+    #[command(visible_alias = "r", aliases = ["remove", "del", "delete"])]
+    Rm {
+        /// A label to remove, as `key=value`, or a bare `key` for all of them.
+        #[arg(value_name = "KEY[=VALUE]")]
+        labels: Vec<String>,
+    },
+
+    /// List the labels, one per line.
+    #[command(alias = "list")]
+    Ls,
+}
+
+impl LabelVerb {
+    /// The labels the verb names.
+    fn labels(&self) -> &[String] {
+        match self {
+            Self::Add { labels } | Self::Set { labels } | Self::Rm { labels } => labels,
+            Self::Ls => &[],
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum ToolsCommand {
+    /// Write a starting set of tool definitions, one file per tool.
+    ///
+    /// Refuses to overwrite a file that exists.
+    /// The workspace configuration has to load the directory for the tools to
+    /// appear.
+    Init {
+        /// Directory to write them into, relative to the workspace root.
+        path: Utf8PathBuf,
+    },
+
+    /// Regenerate what the tool definitions mirror from configuration.
+    ///
+    /// Writes the board's labels into the schemas of the tools that take them,
+    /// found by their `source`, as a file of its own that is rewritten whole.
+    Sync {
+        /// Directory holding the definitions, relative to the workspace root.
+        path: Utf8PathBuf,
+    },
+}
+
+/// One ticket in `jp -F json ticket show` output.
 #[derive(Serialize)]
 struct Detail<'a> {
-    /// Carried explicitly: the document has no id, and `just ticket-promote`
-    /// reads this field.
+    /// Carried explicitly: the document has no id of its own, and a caller that
+    /// reads one ticket needs it to name the ticket again.
     id: TicketId,
     #[serde(flatten)]
     ticket: &'a Ticket,
     path: &'a str,
 }
 
-/// One ticket in `list --json` output.
+/// One ticket in `jp -F json ticket list` output.
 #[derive(Serialize)]
 struct Row<'a> {
     id: TicketId,
@@ -253,28 +424,58 @@ struct Row<'a> {
     path: &'a str,
 }
 
-/// What a subcommand produced: text for the user, warnings for the log.
+/// What a subcommand produced: text for the user, and warnings.
 ///
-/// Warnings stay out of the text so `--json` output survives a pipe into `jq`.
+/// Warnings stay out of the text so `jp -F json` output survives a pipe into
+/// `jq`.
 #[derive(Debug, Default)]
 struct Output {
     text: String,
+
+    /// Whether `text` is one JSON value, which a JSON output format prints as a
+    /// record of its own.
+    json: bool,
+
     warnings: Vec<String>,
+
+    /// The exit code, for a command that reports a result by it: `check` exits
+    /// 1 when it finds a problem, after printing what it found.
+    code: u8,
 }
 
 impl From<String> for Output {
     fn from(text: String) -> Self {
         Self {
             text,
-            warnings: vec![],
+            ..Self::default()
         }
     }
 }
 
+/// What a command runs against.
+struct Context<'a> {
+    /// The ticket directory.
+    dir: Utf8PathBuf,
+
+    /// The workspace root, which a relative path on the command line resolves
+    /// against.
+    root: &'a Utf8Path,
+
+    /// The configuration the host resolved.
+    config: &'a Value,
+
+    /// The plugin's own settings.
+    options: &'a Options,
+
+    /// How `jp` was asked to print: `-F json` makes `show` and `list` JSON.
+    format: OutputFormat,
+}
+
 /// Serve one plugin session: read the host's first message and answer it.
 ///
-/// A `describe` is answered and ends the session; an `init` runs the command
-/// its arguments name.
+/// A `describe` is answered and ends the session.
+/// An `init` carrying a tool call is answered with the call's outcome; any
+/// other `init` runs the command its arguments name.
 pub fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String> {
     match read_message(&mut stdin)? {
         HostToPlugin::Describe => send_describe(&mut stdout),
@@ -283,7 +484,11 @@ pub fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String
                 Ok(ready) => send(&mut stdout, &PluginToHost::Ready(ready))?,
                 Err(exit) => return send(&mut stdout, &PluginToHost::Exit(exit)),
             }
-            handle_command(&init, &mut stdin, &mut stdout)
+
+            match &init.tool {
+                Some(call) => answer_tool_call(&init, call, &mut stdout),
+                None => handle_command(&init, &mut stdin, &mut stdout),
+            }
         }
         other => Err(format!("expected init or describe, got: {other:?}")),
     }
@@ -291,21 +496,61 @@ pub fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String
 
 /// The protocol version this plugin needs from the host.
 ///
-/// Composition (`compose` / `composed`) arrived in 2.
-/// Running against an older `jp` means every interactive path sends a message
-/// the host cannot read, so the handshake refuses it up front rather than
-/// discovering it mid-prompt.
-const REQUIRED_PROTOCOL: u32 = 2;
+/// 12 is the first to carry tool calls (`tool` on `init`, answered with
+/// `tool_outcome`), which is how the `ticket_*` tools reach this plugin.
+const REQUIRED_PROTOCOL: u32 = 12;
 
 /// Where this plugin attaches to `jp`, readable from the binary without running
 /// it.
 ///
 /// `protocol` has to match `REQUIRED_PROTOCOL`.
 pub static MANIFEST: &str = jp_plugin::manifest!(
-    protocol: 2,
+    protocol: 12,
     description: "Track work items as markdown files",
     command: ["ticket"],
 );
+
+/// Answer the tool call `init` carried, then exit.
+///
+/// The host closed stdin after `init`, so nothing here may ask it anything.
+/// Options the plugin can't read end the call as a failed plugin run rather
+/// than as an outcome: the assistant can't fix the configuration.
+fn answer_tool_call(
+    init: &InitMessage,
+    call: &ToolCall,
+    stdout: &mut impl Write,
+) -> Result<(), String> {
+    let options = match Options::read(&init.options) {
+        Ok(options) => options,
+        Err(message) => return send_exit(stdout, 1, Some(&message)),
+    };
+
+    let outcome = serde_json::to_value(tool::run(init, call, &options))
+        .map_err(|error| format!("failed to serialize the tool outcome: {error}"))?;
+    send(
+        stdout,
+        &PluginToHost::ToolOutcome(ToolOutcomeMessage { outcome }),
+    )?;
+
+    send_exit(stdout, 0, None)
+}
+
+impl Command {
+    /// The ticket an `edit` opens in the editor: one that names a ticket and
+    /// nothing to change.
+    fn opens_editor(&self) -> Option<TicketId> {
+        match self {
+            Self::Edit {
+                id: Some(id),
+                title: None,
+                body: None,
+                status: None,
+                labels,
+            } if labels.is_empty() => Some(*id),
+            _ => None,
+        }
+    }
+}
 
 fn handle_command(
     init: &InitMessage,
@@ -326,29 +571,49 @@ fn handle_command(
         Err(error) => return send_exit(stdout, 1, Some(&error.to_string())),
     };
 
-    let dir = resolve_dir(&init.workspace.root, args.dir.as_deref());
+    let options = match Options::read(&init.options) {
+        Ok(options) => options,
+        Err(message) => return send_exit(stdout, 1, Some(&message)),
+    };
+    let dir = resolve_dir(
+        &init.workspace.root,
+        args.dir.as_deref().unwrap_or(&options.dir),
+    );
 
-    let command = match compose_missing(&dir, args.command, stdin, stdout) {
+    let command = match compose_missing(&dir, &options, args.command, stdin, stdout) {
         Ok(command) => command,
         Err(message) => return send_exit(stdout, 1, Some(&message)),
     };
 
-    match execute(&dir, command, &init.config) {
+    let ctx = Context {
+        dir,
+        root: &init.workspace.root,
+        config: &init.config,
+        options: &options,
+        format: init.output_format,
+    };
+
+    let result = match command.opens_editor() {
+        // The editor runs on the host, so this one command needs the protocol
+        // stream that `execute` doesn't get.
+        Some(id) => edit::through_host(init.version, &ctx.dir, id, &options, stdin, stdout),
+        None => execute(&ctx, command),
+    };
+
+    match result {
         Ok(output) => {
+            // On stderr, which `--quiet` silences, rather than in the log,
+            // which only `-v` shows: a warning names something to check now.
             for warning in &output.warnings {
-                send(
-                    stdout,
-                    &PluginToHost::Log(LogMessage {
-                        level: "warn".to_owned(),
-                        message: warning.clone(),
-                        fields: serde_json::Map::new(),
-                    }),
-                )?;
+                print_to(stdout, &format!("Warning: {warning}\n"), "chrome")?;
             }
-            if !output.text.is_empty() {
+            if output.json {
+                print_json(stdout, &output.text)?;
+            } else if !output.text.is_empty() {
                 print(stdout, &output.text)?;
             }
-            send_exit(stdout, 0, None)
+            // No reason: the text already says what the code reports.
+            send_result(stdout, output.code)
         }
         Err(message) => send_exit(stdout, 1, Some(&message)),
     }
@@ -410,27 +675,29 @@ const UNTITLED: &str = "untitled";
 /// the host owns the terminal and the editor the `Ctrl+X` escape opens.
 fn compose_missing(
     dir: &Utf8Path,
+    options: &Options,
     command: Command,
     stdin: &mut impl BufRead,
     stdout: &mut impl Write,
 ) -> Result<Command, String> {
     match command {
         Command::Add {
-            kind,
-            title,
+            title: None,
             author,
             body,
-            implements,
             labels,
-        } if kind.is_none() || title.is_none() => {
-            let (kind, title, body) = compose_add(kind, title, body, stdin, stdout)?;
+        } => {
+            // Checked before composing, so labels the board refuses, or that
+            // another ticket holds, don't cost the user what they typed.
+            let resolved = resolve_labels(options, &labels)?;
+            store::check_unique(dir, &options.vocabulary()?, &resolved, None)
+                .map_err(|error| error.to_string())?;
+            let (title, body) = compose_add(body, stdin, stdout)?;
 
             Ok(Command::Add {
-                kind: Some(kind),
                 title: Some(title),
                 author,
                 body,
-                implements,
                 labels,
             })
         }
@@ -442,6 +709,7 @@ fn compose_missing(
             body,
         } => compose_missing(
             dir,
+            options,
             Command::Comment {
                 id: Some(pick_ticket(dir, stdin, stdout, "Comment on", false)?),
                 author,
@@ -479,29 +747,37 @@ fn compose_missing(
             id: Some(pick_ticket(dir, stdin, stdout, "Close", true)?),
         }),
 
-        Command::Show { id: None, json } => Ok(Command::Show {
+        Command::Show { id: None } => Ok(Command::Show {
             id: Some(pick_ticket(dir, stdin, stdout, "Show", false)?),
-            json,
         }),
 
         Command::Edit {
             id: None,
             title,
             body,
-            kind,
             status,
+            labels,
         } => Ok(Command::Edit {
             id: Some(pick_ticket(dir, stdin, stdout, "Edit", false)?),
             title,
             body,
-            kind,
             status,
-        }),
-
-        Command::Label { id: None, labels } => Ok(Command::Label {
-            id: Some(pick_ticket(dir, stdin, stdout, "Label", false)?),
             labels,
         }),
+
+        Command::Label { ids, verb } => {
+            // Before the picker, so an id written where a label goes is caught
+            // whether or not `--id` named the tickets.
+            refuse_ticket_ids(verb.as_ref().map_or(&[][..], LabelVerb::labels))?;
+
+            let ids = if ids.is_empty() {
+                vec![pick_ticket(dir, stdin, stdout, "Label", false)?]
+            } else {
+                ids
+            };
+
+            Ok(Command::Label { ids, verb })
+        }
 
         Command::Delete { id: None } => Ok(Command::Delete {
             id: Some(pick_ticket(dir, stdin, stdout, "Delete", false)?),
@@ -516,11 +792,11 @@ fn compose_missing(
         Command::Import {
             numbers,
             repo,
-            kind,
+            labels,
         } if numbers.is_empty() => Ok(Command::Import {
             numbers: pick_issues(&repo, stdin, stdout)?,
             repo,
-            kind,
+            labels,
         }),
 
         other => Ok(other),
@@ -574,29 +850,6 @@ fn pick_issues(
         .collect()
 }
 
-/// Ask which kind of work a ticket describes.
-fn pick_kind(stdin: &mut impl BufRead, stdout: &mut impl Write) -> Result<Kind, String> {
-    let chosen = compose(stdin, stdout, ComposeRequest {
-        id: None,
-        message: "Kind of work".to_owned(),
-        mode: ComposeMode::Select {
-            options: [Kind::Bug, Kind::Feature, Kind::Chore]
-                .into_iter()
-                .map(|kind| ComposeOption {
-                    value: kind.to_string(),
-                    label: kind.to_string(),
-                })
-                .collect(),
-            default: None,
-        },
-        help: None,
-    })?;
-
-    chosen
-        .parse()
-        .map_err(|_| format!("`{chosen}` is not a kind."))
-}
-
 /// Ask for a one-line title on its own.
 ///
 /// For when the description is already settled and only the summary is missing.
@@ -618,16 +871,12 @@ fn ask_title(stdin: &mut impl BufRead, stdout: &mut impl Write) -> Result<String
 /// Compose a ticket's title and description, asking for the title separately
 /// when the text has no subject line.
 fn compose_ticket(
-    kind: Option<Kind>,
     stdin: &mut impl BufRead,
     stdout: &mut impl Write,
 ) -> Result<(String, Option<String>), String> {
     let composed = compose(stdin, stdout, ComposeRequest {
         id: None,
-        message: kind.map_or_else(
-            || "New ticket".to_owned(),
-            |kind| format!("New {kind} ticket"),
-        ),
+        message: "New ticket".to_owned(),
         mode: ComposeMode::Buffer { initial_text: None },
         help: Some("First line is the title, then a blank line, then the description.".to_owned()),
     })?;
@@ -642,32 +891,21 @@ fn compose_ticket(
     }
 }
 
-/// Ask for the kind, title, and description a new ticket is missing.
+/// Ask for the title, and the description when there is none either, of a
+/// ticket filed without a title.
 fn compose_add(
-    kind: Option<Kind>,
-    title: Option<String>,
     body: Option<String>,
     stdin: &mut impl BufRead,
     stdout: &mut impl Write,
-) -> Result<(Kind, String, Option<String>), String> {
-    // Kind first: it frames what you're about to write. The title is read out
-    // of the composed text, or asked for last.
-    let kind = match kind {
-        Some(kind) => kind,
-        None => pick_kind(stdin, stdout)?,
-    };
-
+) -> Result<(String, Option<String>), String> {
     // A description given on the command line is a description, not a draft of
     // the whole ticket. Composing from it would read its one line back as a
     // title and file the ticket with no description at all, quietly turning an
     // explicit `--body` into something else.
-    let (title, body) = match (title, body) {
-        (Some(title), body) => (title, body),
-        (None, Some(body)) => (ask_title(stdin, stdout)?, Some(body)),
-        (None, None) => compose_ticket(Some(kind), stdin, stdout)?,
-    };
-
-    Ok((kind, title, body))
+    match body {
+        Some(body) => Ok((ask_title(stdin, stdout)?, Some(body))),
+        None => compose_ticket(stdin, stdout),
+    }
 }
 
 /// Ask which ticket to act on.
@@ -886,6 +1124,7 @@ fn refresh(dir: &Utf8Path, path: &Utf8Path, base: &str) -> Result<Output, String
     let done = store::reassign(dir, &path, bucket).map_err(|error| error.to_string())?;
     let mut output = Output::from(format!("{} -> {} at {}\n", done.old, done.new, done.path));
 
+    let old = done.old.to_string();
     let new = done.new.to_string();
     let mut ambiguous = vec![];
 
@@ -896,20 +1135,20 @@ fn refresh(dir: &Utf8Path, path: &Utf8Path, base: &str) -> Result<Output, String
     // The rename put this file here a line ago, so a read failure is not one of
     // the expected cases `rewrite` tolerates.
     match std::fs::read_to_string(&done.path) {
-        Ok(source) if source.contains(&done.old) => ambiguous.push(done.path.clone()),
+        Ok(source) if source.contains(&old) => ambiguous.push(done.path.clone()),
         Ok(_) => {}
         Err(error) => return Err(format!("{}: {error}", done.path)),
     }
 
-    for file in changed.iter().chain([&dir.join(".board.json")]) {
+    for file in changed.iter().chain([&dir.join(board::BOARD_FILE)]) {
         if *file == path {
             continue;
         }
-        if names_on_base(dir, base, file, &done.old) {
+        if names_on_base(dir, base, file, &old) {
             ambiguous.push(file.clone());
             continue;
         }
-        if rewrite(file, &done.old, &new)? {
+        if rewrite(file, &old, &new)? {
             output.text.push_str(&format!("  rewrote {file}\n"));
         }
     }
@@ -921,99 +1160,12 @@ fn refresh(dir: &Utf8Path, path: &Utf8Path, base: &str) -> Result<Output, String
             .collect::<Vec<_>>()
             .join(", ");
         output.warnings.push(format!(
-            "{} already appeared in these files on {base}, so the occurrence may belong to the \
-             ticket that kept the id. Left alone for you to sort out: {names}.",
-            done.old
+            "{old} already appeared in these files on {base}, so the occurrence may belong to the \
+             ticket that kept the id. Left alone for you to sort out: {names}."
         ));
     }
 
     Ok(output)
-}
-
-/// Convert every ticket left in the pre-RFD-102 format.
-///
-/// Each one lands in the bucket of the commit that added it, so a branch's
-/// tickets keep their order against those already on `main`.
-fn migrate(dir: &Utf8Path) -> Result<Output, String> {
-    let entries = std::fs::read_dir(dir).map_err(|error| error.to_string())?;
-
-    let mut legacy: Vec<Utf8PathBuf> = vec![];
-    for entry in entries {
-        let path = entry.map_err(|error| error.to_string())?.path();
-        let Ok(path) = Utf8PathBuf::try_from(path) else {
-            continue;
-        };
-        if path.file_name().is_some_and(legacy_filename) && path.extension() == Some("md") {
-            legacy.push(path);
-        }
-    }
-    legacy.sort();
-
-    if legacy.is_empty() {
-        return Ok("No tickets to migrate.\n".to_owned().into());
-    }
-
-    let mut output = Output::default();
-    let mut renamed = vec![];
-    for path in &legacy {
-        let bucket = created_bucket(dir, path)?;
-        let done = store::reassign(dir, path, bucket).map_err(|error| error.to_string())?;
-
-        // A pre-RFD-102 ticket embedded its id in the heading and in reply
-        // targets. `reassign` only renames, so those are converted here — and
-        // before the cross-file rewrite below, which would otherwise turn a
-        // reply into `T-<new>#1` and leave the ticket naming itself again.
-        let source = std::fs::read_to_string(&done.path).map_err(|error| error.to_string())?;
-        let converted = render::strip_ids(&source, &done.old);
-        if converted != source {
-            std::fs::write(&done.path, converted).map_err(|error| error.to_string())?;
-        }
-
-        output
-            .text
-            .push_str(&format!("{} -> {} at {}\n", done.old, done.new, done.path));
-        renamed.push((done.old, done.new.to_string()));
-    }
-
-    // References are rewritten after every rename, so a ticket that names
-    // another one is fixed whichever order they were converted in.
-    let mut targets: Vec<Utf8PathBuf> = store::list(dir)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .map(|entry| entry.path)
-        .collect();
-    targets.push(dir.join(".board.json"));
-
-    for target in targets {
-        for (old, new) in &renamed {
-            if rewrite(&target, old, new)? {
-                output
-                    .text
-                    .push_str(&format!("  rewrote {old} in {target}\n"));
-            }
-        }
-    }
-
-    output.warnings.push(
-        "References outside `docs/ticket/` were not touched. Commit messages naming the old ids \
-         stay dangling."
-            .to_owned(),
-    );
-
-    Ok(output)
-}
-
-/// Whether `name` opens with the pre-RFD-102 `NNNN-` id.
-///
-/// Indexed through the bytes rather than by slicing the string: a name whose
-/// fourth byte falls mid-character, `aéé.md`, would panic a byte range.
-fn legacy_filename(name: &str) -> bool {
-    let bytes = name.as_bytes();
-
-    bytes
-        .get(..4)
-        .is_some_and(|id| id.iter().all(u8::is_ascii_digit))
-        && bytes.get(4) == Some(&b'-')
 }
 
 /// Run git inside `dir`, so the repository found is the one holding the tickets
@@ -1030,9 +1182,9 @@ fn git(dir: &Utf8Path, args: &[&str]) -> Option<String> {
 
 /// Resolve a user-supplied ticket path to one that exists.
 ///
-/// A relative path is taken against the repository root first — the spelling
-/// `just ticket-refresh` documents — then against the ticket directory, so
-/// naming a file from inside `docs/ticket/` works too.
+/// A relative path is taken against the repository root first, as in
+/// `docs/ticket/02wt0kx-slug.md`, then against the ticket directory, so naming
+/// a file from inside `docs/ticket/` works too.
 /// Everything downstream gets an absolute path: git runs in the ticket
 /// directory, where a workspace-relative path would resolve against the wrong
 /// place and silently match no commit.
@@ -1155,88 +1307,84 @@ fn git_config(key: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-/// Resolve the ticket directory against the workspace root.
+/// Resolve a directory against the workspace root.
 ///
-/// An absolute `--dir` is taken as given; a relative one, and the default, hang
-/// off the root so the commands behave the same from any subdirectory.
-fn resolve_dir(root: &Utf8Path, dir: Option<&Utf8Path>) -> Utf8PathBuf {
-    match dir {
-        Some(dir) if dir.is_absolute() => dir.to_path_buf(),
-        Some(dir) => root.join(dir),
-        None => root.join(store::DEFAULT_DIR),
+/// An absolute path is taken as given; a relative one hangs off the root, so
+/// the commands behave the same from any subdirectory.
+fn resolve_dir(root: &Utf8Path, dir: &Utf8Path) -> Utf8PathBuf {
+    if dir.is_absolute() {
+        dir.to_path_buf()
+    } else {
+        root.join(dir)
     }
 }
 
-fn execute(dir: &Utf8Path, command: Command, config: &Value) -> Result<Output, String> {
+fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
+    let dir = ctx.dir.as_path();
+    let config = ctx.config;
+
     match command {
         Command::Add {
-            kind,
             title,
             author,
             body,
-            implements,
             labels,
-        } => add(
-            dir,
-            required(kind, "kind")?,
-            &required(title, "title")?,
-            &resolve_author(author, config)?,
-            body.as_deref().unwrap_or_default(),
-            implements.as_deref(),
-            &labels,
-        ),
+        } => add(dir, &ctx.options.vocabulary()?, &NewTicket {
+            title: &required(title, "title")?,
+            authors: &resolve_author(author, config)?,
+            date: &Local::now().format("%Y-%m-%d").to_string(),
+            labels: &resolve_labels(ctx.options, &labels)?,
+            description: body.as_deref().unwrap_or_default(),
+        }),
 
         Command::Comment {
             id,
             author,
             re,
             body,
-        } => {
-            let id = required(id, "ticket id")?;
-            let author = resolve_author(author, config)?;
-            let body = body.unwrap_or_default();
-            if body.trim().is_empty() {
-                return Err("Refusing to write an empty comment; pass --body.".to_owned());
-            }
+        } => comment(
+            dir,
+            required(id, "ticket id")?,
+            &resolve_author(author, config)?,
+            re,
+            &body.unwrap_or_default(),
+        ),
 
-            let date = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
-            let position = store::append_comment(dir, id, &author, &date, re, body.trim())
-                .map_err(|error| error.to_string())?;
-
-            Ok(format!("Added {id}#{position} by {author}\n").into())
+        Command::Label { ids, verb } => {
+            label(dir, ctx.options, &ids, &verb.unwrap_or(LabelVerb::Ls))
         }
 
-        Command::Label { id, labels } => relabel(dir, required(id, "ticket id")?, &labels),
+        Command::Labels => vocabulary_listing(dir, ctx.options),
 
-        Command::Labels => vocabulary_listing(dir),
+        Command::Close { id } => move_ticket(dir, required(id, "ticket id")?, Status::Done, None),
 
-        Command::Close { id } => {
-            let id = required(id, "ticket id")?;
-            let (path, previous) = store::close(dir, id).map_err(|error| error.to_string())?;
+        Command::Status {
+            id,
+            status,
+            before,
+            after,
+        } => move_ticket(dir, id, status, placement(before, after)),
 
-            Ok(match previous {
-                Status::Done => format!("{path}: already Done\n"),
-                previous => format!("{path}: {previous} -> Done\n"),
-            }
-            .into())
-        }
+        Command::Rename { id, title } => rename(dir, id, &title),
 
-        Command::Show { id, json } => show(dir, required(id, "ticket id")?, json),
+        Command::Show { id } => show(dir, required(id, "ticket id")?, ctx.format.is_json()),
 
         Command::Edit {
             id,
             title,
             body,
-            kind,
             status,
-        } => edit(
-            dir,
-            required(id, "ticket id")?,
-            title.as_deref(),
-            body.as_deref(),
-            kind,
+            labels,
+        } => edit(dir, ctx.options, required(id, "ticket id")?, &Changes {
+            title,
+            body,
             status,
-        ),
+            labels,
+        }),
+
+        Command::Board => show_board(dir, ctx.options.board.done_limit),
+
+        Command::Rank { id, before, after } => rank(dir, id, before, after),
 
         Command::Delete { id } => {
             let id = required(id, "ticket id")?;
@@ -1254,41 +1402,264 @@ fn execute(dir: &Utf8Path, command: Command, config: &Value) -> Result<Output, S
 
         Command::Refresh { path, base } => refresh(dir, &path, &base),
 
-        Command::Migrate => migrate(dir),
-
         Command::Import {
             numbers,
             repo,
-            kind,
-        } => {
-            if numbers.is_empty() {
-                return Err("No issue numbers given, and no terminal to ask for one.".to_owned());
-            }
-
-            let mut output = Output::default();
-            for number in numbers {
-                output
-                    .text
-                    .push_str(&import(dir, number, &repo, kind)?.text);
-            }
-
-            Ok(output)
-        }
+            labels,
+        } => import_all(dir, ctx.options, &numbers, &repo, &labels),
 
         Command::List {
             status,
-            kind,
             labels,
-            json,
-        } => list(dir, status, kind, &labels, json),
+            query,
+        } => list(
+            dir,
+            &Filter {
+                status,
+                labels: &labels,
+                query: query.as_deref(),
+            },
+            ctx.format.is_json(),
+        ),
+
+        Command::Check => check(dir, ctx.options, ctx.format.is_json()),
+
+        Command::Init => init_dir(dir),
+
+        Command::Tools { command } => tools(ctx, command),
     }
+}
+
+/// Append a comment to a ticket, replying to the one at position `re` if given.
+fn comment(
+    dir: &Utf8Path,
+    id: TicketId,
+    author: &str,
+    re: Option<usize>,
+    body: &str,
+) -> Result<Output, String> {
+    if body.trim().is_empty() {
+        return Err("Refusing to write an empty comment; pass --body.".to_owned());
+    }
+
+    let date = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    let position = store::append_comment(dir, id, author, &date, re, body.trim())
+        .map_err(|error| error.to_string())?;
+
+    Ok(format!("Added {id}#{position} by {author}\n").into())
+}
+
+/// Move a ticket to the column `status` names, next to the ticket `at` names.
+fn move_ticket(
+    dir: &Utf8Path,
+    id: TicketId,
+    status: Status,
+    at: Option<(Place, TicketId)>,
+) -> Result<Output, String> {
+    let board::Moved { path, previous } =
+        board::move_to(dir, id, status, at).map_err(|error| error.to_string())?;
+    let next_to = at.map(|(place, other)| format!("{} {other}", relation(place)));
+
+    Ok(match next_to {
+        None if previous == status => format!("{path}: already {status}\n"),
+        None => format!("{path}: {previous} -> {status}\n"),
+        Some(next_to) if previous == status => format!("{path}: {next_to} in {status}\n"),
+        Some(next_to) => format!("{path}: {previous} -> {status}, {next_to}\n"),
+    }
+    .into())
+}
+
+/// The place `--before` or `--after` names, if either does.
+fn placement(before: Option<TicketId>, after: Option<TicketId>) -> Option<(Place, TicketId)> {
+    before
+        .map(|other| (Place::Before, other))
+        .or(after.map(|other| (Place::After, other)))
+}
+
+/// How a ticket placed at `place` sits relative to the one it is placed by.
+fn relation(place: Place) -> &'static str {
+    match place {
+        Place::Before => "above",
+        Place::After => "below",
+    }
+}
+
+/// Write the tool definitions, or what they mirror from configuration.
+fn tools(ctx: &Context<'_>, command: ToolsCommand) -> Result<Output, String> {
+    match command {
+        ToolsCommand::Init { path } => definitions::init(&resolve_dir(ctx.root, &path)),
+        ToolsCommand::Sync { path } => definitions::sync(
+            &resolve_dir(ctx.root, &path),
+            ctx.config,
+            &ctx.options.vocabulary()?,
+        ),
+    }
+}
+
+/// Give a ticket a new title, moving its file to the slug the title produces.
+fn rename(dir: &Utf8Path, id: TicketId, title: &str) -> Result<Output, String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("Refusing to give a ticket an empty title.".to_owned());
+    }
+
+    let done = store::edit(dir, id, Some(title), None).map_err(|error| error.to_string())?;
+
+    Ok(if done.from == done.to {
+        format!("Retitled {}\n", done.to)
+    } else {
+        format!("Renamed {} -> {}\n", done.from, done.to)
+    }
+    .into())
+}
+
+/// Print the board, one column after another.
+///
+/// Stacked rather than side by side, which would wrap on a narrow terminal.
+/// Done is cut to its top `done_limit` tickets, and its heading says how many
+/// there are.
+fn show_board(dir: &Utf8Path, done_limit: usize) -> Result<Output, String> {
+    let entries = store::list(dir).map_err(|error| error.to_string())?;
+    let order = board::read(dir).map_err(|error| error.to_string())?;
+
+    let mut warnings = vec![];
+    let mut tickets: Vec<(TicketId, &Ticket)> = vec![];
+    for entry in &entries {
+        match &entry.ticket {
+            Ok(ticket) => tickets.push((entry.id, ticket)),
+            Err(error) => warnings.push(format!("{}: {error}", entry.path)),
+        }
+    }
+
+    let mut columns = vec![];
+    for status in [Status::Todo, Status::InProgress, Status::Done] {
+        let column: Vec<TicketId> = tickets
+            .iter()
+            .filter(|(_, ticket)| ticket.metadata.status == status)
+            .map(|(id, _)| *id)
+            .collect();
+        let laid_out = order.arrange(status, &column);
+
+        let total = laid_out.len();
+        let shown = if status == Status::Done {
+            total.min(done_limit)
+        } else {
+            total
+        };
+
+        let mut text = if shown < total {
+            format!("{status} ({total}, showing {shown})\n")
+        } else {
+            format!("{status} ({total})\n")
+        };
+        for id in &laid_out[..shown] {
+            if let Some((_, ticket)) = tickets.iter().find(|(candidate, _)| candidate == id) {
+                text.push_str(&board_row(*id, ticket));
+            }
+        }
+        columns.push(text);
+    }
+
+    Ok(Output {
+        text: columns.join("\n"),
+        warnings,
+        ..Output::default()
+    })
+}
+
+/// One line of a board column: the status is the column's, so it is left out.
+fn board_row(id: TicketId, ticket: &Ticket) -> String {
+    let id = id.to_string();
+    let labels = if ticket.metadata.labels.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", ticket.metadata.labels)
+    };
+
+    format!("{id:<9} {}{labels}\n", ticket.title)
+}
+
+/// Move a ticket directly above or below another in its column.
+fn rank(
+    dir: &Utf8Path,
+    id: TicketId,
+    before: Option<TicketId>,
+    after: Option<TicketId>,
+) -> Result<Output, String> {
+    let (place, other) =
+        placement(before, after).ok_or("Pass one of --before or --after.".to_owned())?;
+
+    let status = board::rank(dir, id, place, other).map_err(|error| error.to_string())?;
+
+    Ok(format!("{id} now sits {} {other} in {status}\n", relation(place)).into())
+}
+
+/// Create the ticket directory.
+///
+/// One that exists already is left as it is.
+/// The board's order file is not created: a board ranks nothing until a ticket
+/// is ranked, and needs no file for that.
+fn init_dir(dir: &Utf8Path) -> Result<Output, String> {
+    if dir.is_dir() {
+        return Ok(format!("{dir} already exists.\n").into());
+    }
+
+    fs::create_dir_all(dir).map_err(|error| format!("failed to create {dir}: {error}"))?;
+
+    Ok(format!("Created {dir}\n").into())
+}
+
+/// Import each of `numbers` from `repo`, stopping at the first that fails.
+///
+/// A ticket the import creates is filed with the `requested` labels, which are
+/// needed only then: a ticket refreshed from upstream keeps its own, so the
+/// board's vocabulary is read, and can refuse, only for an issue imported for
+/// the first time.
+fn import_all(
+    dir: &Utf8Path,
+    options: &Options,
+    numbers: &[u64],
+    repo: &str,
+    requested: &[String],
+) -> Result<Output, String> {
+    if numbers.is_empty() {
+        return Err("No issue numbers given, and no terminal to ask for one.".to_owned());
+    }
+
+    let mut output = Output::default();
+    for &number in numbers {
+        // Decided before anything is fetched, so a refusal costs no request.
+        let refresh = store::imported(dir, number)
+            .map_err(|error| error.to_string())?
+            .is_some();
+        let (vocabulary, labels) = if refresh {
+            (Vocabulary::default(), Labels::default())
+        } else {
+            let vocabulary = options.vocabulary()?;
+            let labels = resolve_labels(options, requested)?;
+            store::check_unique(dir, &vocabulary, &labels, None)
+                .map_err(|error| error.to_string())?;
+            (vocabulary, labels)
+        };
+        output
+            .text
+            .push_str(&import(dir, &vocabulary, number, repo, &labels)?.text);
+    }
+
+    Ok(output)
 }
 
 /// Fetch a GitHub issue and write it into a ticket.
 ///
 /// One way only: replies belong on GitHub and arrive on the next import, so
 /// nothing is ever written back.
-fn import(dir: &Utf8Path, number: u64, repo: &str, kind: Kind) -> Result<Output, String> {
+fn import(
+    dir: &Utf8Path,
+    vocabulary: &Vocabulary,
+    number: u64,
+    repo: &str,
+    labels: &Labels,
+) -> Result<Output, String> {
     let (owner, name) = repo
         .split_once('/')
         .ok_or_else(|| format!("`{repo}` is not an `owner/name` pair."))?;
@@ -1316,12 +1687,12 @@ fn import(dir: &Utf8Path, number: u64, repo: &str, kind: Kind) -> Result<Output,
         .collect();
 
     let count = comments.len();
-    let imported = store::import(dir, &Import {
+    let imported = store::import(dir, vocabulary, &Import {
         number,
         title: &issue.title,
         description: issue.body.as_deref().unwrap_or_default(),
         comments,
-        kind,
+        labels,
         authors: &format!("gh:{}", issue.user.login),
         date: &issue.created_at.format("%Y-%m-%d").to_string(),
     })
@@ -1389,77 +1760,313 @@ fn token() -> Option<String> {
 }
 
 /// File a ticket at `Todo`.
-fn add(
-    dir: &Utf8Path,
-    kind: Kind,
-    title: &str,
-    author: &str,
-    body: &str,
-    implements: Option<&str>,
-    labels: &[String],
-) -> Result<Output, String> {
-    let labels = resolve_labels(dir, labels)?;
-    let date = Local::now().format("%Y-%m-%d").to_string();
-
-    let (id, path) = store::create(dir, &NewTicket {
-        kind,
-        title,
-        authors: author,
-        date: &date,
-        implements,
-        labels: &labels,
-        description: body,
-    })
-    .map_err(|error| error.to_string())?;
+///
+/// `new.labels` are resolved already, and `vocabulary` holds them to the keys
+/// it lets one ticket carry.
+fn add(dir: &Utf8Path, vocabulary: &Vocabulary, new: &NewTicket<'_>) -> Result<Output, String> {
+    let (id, path) = store::create(dir, vocabulary, new).map_err(|error| error.to_string())?;
 
     Ok(format!("Created {path} ({id})\n").into())
 }
 
-/// Replace a ticket's labels with the set the caller named.
+/// Refuse a label written as a ticket id, `T-02wt0kx`: it names a ticket to act
+/// on, which `--id` takes.
 ///
-/// Checked against the ticket rather than against the vocabulary alone, so a
-/// retired value the ticket already carries can be listed again and kept.
-fn relabel(dir: &Utf8Path, id: TicketId, requested: &[String]) -> Result<Output, String> {
-    let vocabulary = read_vocabulary(dir)?;
-    let (path, applied) =
-        store::set_labels(dir, id, &vocabulary, requested).map_err(|error| error.to_string())?;
+/// Only the form ids are printed in, `T-` and seven characters, is refused.
+/// An id without the `T`, such as `02wt0kx`, can't start a label key, so the
+/// board refuses it anyway; one without the dash can't be told from a word,
+/// since `tracking` reads as the id `T-rack1ng`.
+fn refuse_ticket_ids(labels: &[String]) -> Result<(), String> {
+    let Some(id) = labels.iter().map(|label| label.trim()).find(|label| {
+        label
+            .get(..2)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("t-"))
+            && label.parse::<TicketId>().is_ok()
+    }) else {
+        return Ok(());
+    };
 
-    Ok(if applied.is_empty() {
-        format!("{path}: labels cleared\n")
-    } else {
-        format!("{path}: {applied}\n")
+    Err(format!(
+        "`{id}` is a ticket id, not a label; name each ticket to change with its own `--id`, as \
+         in `--id {id}`."
+    ))
+}
+
+/// Run a label verb on every ticket `ids` names, all of them or none.
+fn label(
+    dir: &Utf8Path,
+    options: &Options,
+    ids: &[TicketId],
+    verb: &LabelVerb,
+) -> Result<Output, String> {
+    if ids.is_empty() {
+        return Err("No ticket given; name one with `--id`.".to_owned());
     }
-    .into())
+    if matches!(verb, LabelVerb::Ls) {
+        return list_labels(dir, ids);
+    }
+
+    // `add` and `set` are checked by the board; a label to remove has to be
+    // one before it can match anything.
+    if let LabelVerb::Rm { labels } = verb {
+        Labels::from_tokens(labels).map_err(|error| format!("{error}."))?;
+    }
+
+    let relabeled = store::relabel(dir, &options.vocabulary()?, ids, |current| {
+        relabelled(verb, current)
+    })
+    .map_err(|error| label_refusal(&error, verb))?;
+
+    let (adding, removing) = match verb {
+        LabelVerb::Add { labels } => (&labels[..], &[][..]),
+        LabelVerb::Rm { labels } => (&[][..], &labels[..]),
+        LabelVerb::Set { .. } | LabelVerb::Ls => (&[][..], &[][..]),
+    };
+    let mut out = String::new();
+    for ticket in &relabeled {
+        let what = label::describe(&ticket.before, &ticket.after, adding, removing);
+        out.push_str(&format!("{}: {what}\n", ticket.path));
+    }
+
+    Ok(out.into())
+}
+
+/// The whole set a ticket carrying `current` ends up with after `verb`.
+fn relabelled(verb: &LabelVerb, current: &Labels) -> Vec<String> {
+    match verb {
+        LabelVerb::Add { labels } => label::add(current, labels),
+        LabelVerb::Set { labels } => label::set(current, labels),
+        LabelVerb::Rm { labels } if labels.is_empty() => vec![],
+        LabelVerb::Rm { labels } => label::remove(current, labels),
+        LabelVerb::Ls => current.to_tokens(),
+    }
+}
+
+/// A relabel's refusal, pointing `add` at `set` when it overfilled a key the
+/// board bounds, since adding can't make room.
+fn label_refusal(error: &store::Error, verb: &LabelVerb) -> String {
+    fn overfilled(error: &store::Error) -> bool {
+        match error {
+            store::Error::Rejected(rejected) => rejected
+                .miscounted
+                .iter()
+                .any(|miscount| miscount.max.is_some_and(|max| miscount.given.len() > max)),
+            store::Error::Refused(refused) => refused.iter().any(|(_, error)| overfilled(error)),
+            _ => false,
+        }
+    }
+
+    let mut text = error.to_string();
+    if matches!(verb, LabelVerb::Add { .. }) && overfilled(error) {
+        text.push_str("\nReplace what a key holds with `jp ticket label set`.");
+    }
+
+    text
+}
+
+/// List the labels of every ticket `ids` names, one per line.
+///
+/// With several tickets, each line starts with its ticket's id, the way `grep`
+/// names the file a match came from.
+fn list_labels(dir: &Utf8Path, ids: &[TicketId]) -> Result<Output, String> {
+    let entries = store::list(dir).map_err(|error| error.to_string())?;
+
+    let mut named: Vec<TicketId> = vec![];
+    for id in ids {
+        if !named.contains(id) {
+            named.push(*id);
+        }
+    }
+
+    let mut out = String::new();
+    for id in &named {
+        let entry = entries
+            .iter()
+            .find(|entry| entry.id == *id)
+            .ok_or_else(|| format!("No ticket {id}."))?;
+        let ticket = entry
+            .ticket
+            .as_ref()
+            .map_err(|error| format!("{id} is not a well-formed ticket: {error}"))?;
+
+        for token in ticket.metadata.labels.to_tokens() {
+            if named.len() > 1 {
+                out.push_str(&format!("{id}: "));
+            }
+            out.push_str(&format!("{token}\n"));
+        }
+    }
+
+    Ok(out.into())
 }
 
 /// Check labels for a ticket being filed.
 ///
-/// Both the refusal and the vocabulary's own error carry enough to act on, so
-/// they are handed to the user as they are.
-fn resolve_labels(dir: &Utf8Path, requested: &[String]) -> Result<Labels, String> {
-    read_vocabulary(dir)?
+/// The vocabulary is read even when no labels are named, since it can require
+/// some.
+/// Both its refusal and its own error carry enough to act on, so they are
+/// handed to the user as they are.
+fn resolve_labels(options: &Options, requested: &[String]) -> Result<Labels, String> {
+    options
+        .vocabulary()?
         .resolve(requested)
         .map_err(|error| error.to_string())
 }
 
-fn read_vocabulary(dir: &Utf8Path) -> Result<Vocabulary, String> {
-    store::vocabulary(dir).map_err(|error| error.to_string())
+/// `jp -F json ticket check` output.
+#[derive(Serialize)]
+struct CheckReport<'a> {
+    /// How many ticket files were read.
+    tickets: usize,
+    problems: Vec<Finding<'a>>,
+}
+
+/// One problem in `jp -F json ticket check` output.
+#[derive(Serialize)]
+struct Finding<'a> {
+    /// `legacy_name`, `duplicate`, `malformed`, `labels`, or `shared`.
+    kind: &'static str,
+
+    /// The tickets the problem is on.
+    ids: Vec<TicketId>,
+
+    /// The files the problem is in; empty for a label several tickets share.
+    paths: Vec<&'a Utf8Path>,
+
+    /// The problem in words, as the text output prints it.
+    message: String,
+}
+
+impl<'a> From<&'a Problem> for Finding<'a> {
+    fn from(problem: &'a Problem) -> Self {
+        let (kind, ids, paths) = match problem {
+            Problem::LegacyName(path) => ("legacy_name", vec![], vec![path.as_path()]),
+            Problem::Duplicate { id, paths } => (
+                "duplicate",
+                vec![*id],
+                paths.iter().map(Utf8PathBuf::as_path).collect(),
+            ),
+            Problem::Malformed { id, path, .. } => ("malformed", vec![*id], vec![path.as_path()]),
+            Problem::Labels { id, path, .. } => ("labels", vec![*id], vec![path.as_path()]),
+            Problem::Shared { ids, .. } => ("shared", ids.clone(), vec![]),
+        };
+
+        Self {
+            kind,
+            ids,
+            paths,
+            message: problem.to_string(),
+        }
+    }
+}
+
+/// Check every ticket in `dir` against the board's rules, exiting 1 when one
+/// breaks any.
+fn check(dir: &Utf8Path, options: &Options, json: bool) -> Result<Output, String> {
+    let report = store::check(dir, &options.vocabulary()?).map_err(|error| error.to_string())?;
+    let code = u8::from(!report.problems.is_empty());
+
+    if json {
+        let text = serde_json::to_string(&CheckReport {
+            tickets: report.tickets,
+            problems: report.problems.iter().map(Finding::from).collect(),
+        })
+        .map_err(|error| format!("failed to serialize the check: {error}"))?;
+
+        return Ok(Output {
+            text,
+            json: true,
+            code,
+            ..Output::default()
+        });
+    }
+
+    let checked = counted(report.tickets, "ticket", "tickets");
+    if report.problems.is_empty() {
+        return Ok(format!("Checked {checked}: no problems.\n").into());
+    }
+
+    let mut text = report
+        .problems
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    text.push_str(&format!(
+        "\n\nChecked {checked}: {}.\n",
+        counted(report.problems.len(), "problem", "problems")
+    ));
+    let labels = report
+        .problems
+        .iter()
+        .any(|problem| matches!(problem, Problem::Labels { .. } | Problem::Shared { .. }));
+    if labels {
+        text.push_str(
+            "Change a ticket's labels with `jp ticket label add`, `set`, or `rm`; `--id` takes \
+             several tickets, comma-separated. `jp ticket labels` lists the labels the board \
+             defines.\n",
+        );
+    }
+
+    Ok(Output {
+        text,
+        code,
+        ..Output::default()
+    })
+}
+
+/// `count` with the noun that fits it: `1 ticket`, `2 tickets`.
+fn counted(count: usize, one: &str, many: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { many })
 }
 
 /// List the labels the board defines, with what each one covers.
-fn vocabulary_listing(dir: &Utf8Path) -> Result<Output, String> {
-    let vocabulary = read_vocabulary(dir)?;
+fn vocabulary_listing(dir: &Utf8Path, options: &Options) -> Result<Output, String> {
+    let vocabulary = options.vocabulary()?;
+    let leftover = leftover_labels_file(dir);
+
+    Ok(describe_vocabulary(&vocabulary, leftover.as_deref().map(Utf8Path::as_str)).into())
+}
+
+/// Describe the labels a board defines, with what each one covers.
+///
+/// `leftover` names the file a board defined its labels in before they moved
+/// into its options, for a board that defines none and still has it.
+fn describe_vocabulary(vocabulary: &Vocabulary, leftover: Option<&str>) -> String {
     if vocabulary.is_empty() {
-        return Ok(format!(
-            "This board defines no labels. Add them to {}.\n",
-            dir.join(LABELS_FILE)
-        )
-        .into());
+        let mut text = format!(
+            "This board defines no labels, so a ticket takes any `key` or `key=value` label. List \
+             them in `{LABELS_KEY}` to hold tickets to a fixed set.\n"
+        );
+        if let Some(file) = leftover {
+            text.push_str(&format!("{file} is no longer read: move its keys there.\n"));
+        }
+        return text;
     }
 
     let mut out = String::new();
     for (key, facet) in vocabulary.facets() {
-        out.push_str(&format!("{key}  {}\n", facet.description()));
+        let mut notes = vec![];
+        if let Some(bound) = facet.bound() {
+            notes.push(format!("{bound} per ticket"));
+        }
+        match facet.unique() {
+            Some(Unique::KeyValue) if !facet.is_bare() => {
+                notes.push("each value on one ticket only".to_owned());
+            }
+            Some(_) => notes.push("on one ticket only".to_owned()),
+            None => {}
+        }
+        let notes = if notes.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", notes.join("; "))
+        };
+
+        out.push_str(&format!("{key}  {}{notes}\n", facet.description()));
+        if facet.is_open() {
+            out.push_str(&format!("  {key}=<any value>\n"));
+        }
         for value in facet.values() {
             out.push_str(&format!("  {key}={value}\n"));
         }
@@ -1473,44 +2080,67 @@ fn vocabulary_listing(dir: &Utf8Path) -> Result<Output, String> {
         out.push_str("A retired label stays on a ticket that carries it, but can't be added.\n");
     }
 
-    Ok(out.into())
+    out
+}
+
+/// What `edit` changes; `None`, or no labels, leaves that part as it is.
+struct Changes {
+    title: Option<String>,
+    body: Option<String>,
+    status: Option<Status>,
+    labels: Vec<String>,
 }
 
 /// Apply an edit, touching only the parts the caller named.
+///
+/// Labels are written first: the vocabulary can still refuse them, and a
+/// refused edit should change nothing.
+/// The title goes last, since it moves the file.
 fn edit(
     dir: &Utf8Path,
+    options: &Options,
     id: TicketId,
-    title: Option<&str>,
-    body: Option<&str>,
-    kind: Option<Kind>,
-    status: Option<Status>,
+    changes: &Changes,
 ) -> Result<Output, String> {
     let failed = |error: store::Error| error.to_string();
 
-    // A new title moves the file to the matching slug, so the report names the
-    // path the ticket left as well as the one it landed on.
-    let mut moved_from = None;
-    let mut path = if title.is_some() || body.is_some() {
-        let done = store::edit(dir, id, title, body).map_err(failed)?;
-        if done.from != done.to {
-            moved_from = Some(done.from);
+    if changes
+        .title
+        .as_deref()
+        .is_some_and(|title| title.trim().is_empty())
+    {
+        return Err("Refusing to give a ticket an empty title.".to_owned());
+    }
+
+    let mut path = store::locate_ticket(dir, id).map_err(failed)?;
+    let mut removed = vec![];
+    if !changes.labels.is_empty() {
+        let vocabulary = options.vocabulary()?;
+        let relabeled =
+            store::relabel(dir, &vocabulary, &[id], |_| changes.labels.clone()).map_err(failed)?;
+        if let Some(ticket) = relabeled.into_iter().next() {
+            removed = label::difference(&ticket.before, &ticket.after).0;
+            path = ticket.path;
         }
-        done.to
-    } else {
-        store::locate_ticket(dir, id).map_err(failed)?
-    };
-
-    if let Some(kind) = kind {
-        path = store::set_field(dir, id, "Kind", &kind.to_string()).map_err(failed)?;
     }
-    if let Some(status) = status {
-        path = store::set_field(dir, id, "Status", &status.to_string()).map_err(failed)?;
+    if let Some(status) = changes.status {
+        path = store::set_status(dir, id, status).map_err(failed)?.0;
+    }
+    if changes.title.is_some() || changes.body.is_some() {
+        let title = changes.title.as_deref().map(str::trim);
+        path = store::edit(dir, id, title, changes.body.as_deref())
+            .map_err(failed)?
+            .to;
     }
 
-    Ok(match moved_from {
-        Some(from) => format!("Edited {path} (was {from})\n").into(),
-        None => format!("Edited {path}\n").into(),
-    })
+    // `--label` sets the whole list, so a label left off it goes; saying which
+    // is the only way to notice one that went by mistake.
+    let mut text = format!("Edited {path}\n");
+    if !removed.is_empty() {
+        text.push_str(&format!("Removed labels: {}\n", removed.join(", ")));
+    }
+
+    Ok(text.into())
 }
 
 /// Read one ticket, as markdown or as JSON for scripting.
@@ -1536,15 +2166,18 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
         })
         .map_err(|error| format!("failed to serialize {id}: {error}"))?;
 
-        return Ok(format!("{json}\n").into());
+        return Ok(Output {
+            text: format!("{json}\n"),
+            json: true,
+            ..Output::default()
+        });
     }
 
     // The rendered view names the ticket even though the file doesn't: the id
-    // is what a reply or a `Blocked by` has to quote.
+    // is what a reply or a later reference has to quote.
     let mut out = format!("# {}: {}\n\n", entry.id, ticket.title);
     out.push_str(&format!("- **Path**: {}\n", entry.path));
     out.push_str(&format!("- **Status**: {}\n", ticket.metadata.status));
-    out.push_str(&format!("- **Kind**: {}\n", ticket.metadata.kind));
     for token in ticket.metadata.labels.to_tokens() {
         out.push_str(&format!("- **Label**: {token}\n"));
     }
@@ -1565,18 +2198,23 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
     Ok(out.into())
 }
 
+/// What `list` narrows the tickets to; `None`, or no labels, keeps them all.
+struct Filter<'a> {
+    status: Option<Status>,
+    labels: &'a [String],
+    query: Option<&'a str>,
+}
+
 /// List tickets, filtered by whatever the caller named.
 ///
 /// Labels are matched as written on the ticket rather than through the
 /// vocabulary, so a ticket carrying a label the board has since dropped can
 /// still be found and fixed.
-fn list(
-    dir: &Utf8Path,
-    status: Option<Status>,
-    kind: Option<Kind>,
-    labels: &[String],
-    json: bool,
-) -> Result<Output, String> {
+fn list(dir: &Utf8Path, filter: &Filter<'_>, json: bool) -> Result<Output, String> {
+    let query = filter
+        .query
+        .map(str::trim)
+        .filter(|query| !query.is_empty());
     let entries = store::list(dir).map_err(|error| error.to_string())?;
 
     let mut warnings = vec![];
@@ -1587,11 +2225,13 @@ fn list(
             Err(error) => warnings.push(format!("{}: {error}", entry.path)),
         }
     }
-    let selectors = Selector::parse_all(labels).map_err(|error| error.to_string())?;
+    let selectors = Selector::parse_all(filter.labels).map_err(|error| error.to_string())?;
     tickets.retain(|(_, ticket, _)| {
-        status.is_none_or(|status| status == ticket.metadata.status)
-            && kind.is_none_or(|kind| kind == ticket.metadata.kind)
+        filter
+            .status
+            .is_none_or(|status| status == ticket.metadata.status)
             && ticket.metadata.labels.matches(&selectors)
+            && query.is_none_or(|query| ticket.mentions(query))
     });
 
     let text = if json {
@@ -1617,29 +2257,25 @@ fn list(
             .collect()
     };
 
-    Ok(Output { text, warnings })
+    Ok(Output {
+        text,
+        json,
+        warnings,
+        ..Output::default()
+    })
 }
 
 /// One line of the human-readable listing.
 fn row(id: TicketId, ticket: &Ticket) -> String {
     let id = id.to_string();
     let status = ticket.metadata.status.to_string();
-    let kind = ticket.metadata.kind.to_string();
-    let blocked = ticket
-        .metadata
-        .blocked_by
-        .as_deref()
-        .map_or_else(String::new, |by| format!(" (blocked by {by})"));
     let labels = if ticket.metadata.labels.is_empty() {
         String::new()
     } else {
         format!(" [{}]", ticket.metadata.labels)
     };
 
-    format!(
-        "{id:<9} {status:<12} {kind:<8} {}{labels}{blocked}\n",
-        ticket.title
-    )
+    format!("{id:<9} {status:<12} {}{labels}\n", ticket.title)
 }
 
 /// The usage text, rendered from the same clap definition the commands parse.
@@ -1660,23 +2296,56 @@ fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
 }
 
 fn print(stdout: &mut impl Write, text: &str) -> Result<(), String> {
+    print_to(stdout, text, "content")
+}
+
+/// Print `text`, one JSON value, for the host to emit as a record of its own.
+fn print_json(stdout: &mut impl Write, text: &str) -> Result<(), String> {
     send(
         stdout,
         &PluginToHost::Print(PrintMessage {
             text: text.to_owned(),
-            channel: "content".into(),
+            channel: "content".to_owned(),
+            format: "json".into(),
+            language: None,
+        }),
+    )
+}
+
+/// Print `text` on the host's output channel `channel`.
+fn print_to(stdout: &mut impl Write, text: &str, channel: &str) -> Result<(), String> {
+    send(
+        stdout,
+        &PluginToHost::Print(PrintMessage {
+            text: text.to_owned(),
+            channel: channel.to_owned(),
             format: "plain".into(),
             language: None,
         }),
     )
 }
 
+/// End the session with a failure, or with success when `code` is 0.
 fn send_exit(stdout: &mut impl Write, code: u8, reason: Option<&str>) -> Result<(), String> {
     send(
         stdout,
         &PluginToHost::Exit(ExitMessage {
             code,
             reason: reason.map(String::from),
+            expected: false,
+        }),
+    )
+}
+
+/// End the session with the code a command chose to report its result by, which
+/// `jp` doesn't treat as a failure.
+fn send_result(stdout: &mut impl Write, code: u8) -> Result<(), String> {
+    send(
+        stdout,
+        &PluginToHost::Exit(ExitMessage {
+            code,
+            reason: None,
+            expected: code != 0,
         }),
     )
 }

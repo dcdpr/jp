@@ -2,21 +2,37 @@
 enable = false
 run = "ask"
 source = "local"
-command = "just rfd-promote {{tool.arguments.nnn}}"
-description = """Promote an RFD to the next stage (Draft -> Discussion -> Accepted -> Implemented).
+# `just rfd-promote` runs `jp rfd promote`, then archives the review and triage
+# conversations JP's own workflow titles after a draft it publishes.
+command = "just rfd-promote {{tool.arguments.id}}"
+summary = "Advance an RFD one status: Draft, Discussion, Accepted, Implemented."
+description = """
+A draft is published under the next permanent number: its file moves out of
+`docs/rfd/drafts/`, and every reference to its draft id in the RFDs, the drafts,
+and the tickets is rewritten. A draft that requires, extends, or mentions
+another draft is refused, since a published RFD may not name one. Publishing a
+draft also archives its review and triage conversations, which are titled after
+the draft id.
 
-For drafts (DNN-prefixed), assigns a permanent number and moves the file \
-from `docs/rfd/drafts/` up to `docs/rfd/`. When promoting to Accepted, offers \
-to file the RFD's tracking ticket, with its Implementation Plan as the \
-description."""
+Discussion to Accepted, and Accepted to Implemented, wait until every RFD this
+one requires or extends has got that far. An Implemented RFD drops its
+`Requires` links in both directions, and leaves the priority board.
+
+The promoted file is reflowed the way the markdown formatter lays it out.
+"""
+
+examples = """
+```json
+{"id": "D05"}
+```
+"""
 
 [conversation.tools.rfd_promote.style]
+parameters = "function_call"
 inline_results = "full"
 results_file_link = "off"
-parameters = "function_call"
 
-[conversation.tools.rfd_promote.parameters.nnn]
-description = """ID of the RFD to promote. Accepts a permanent number (41, 041) or a \
-draft ID (D01)."""
-required = true
+[conversation.tools.rfd_promote.parameters.id]
 type = "string"
+required = true
+summary = "The RFD: a number such as `42` or `042`, or a draft id such as `D05`."

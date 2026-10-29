@@ -29,9 +29,124 @@ arguments = [
 
 # `jp ticket` is served by a plugin in this repository, installed with
 # `just _install-ticket` and found on $PATH. It is deliberately absent from the
-# published registry, so approve it here rather than on every invocation.
+# published registry, so approve it here rather than on every invocation. The
+# binary is rebuilt often, and an approval is pinned to its contents.
 [plugins.command.ticket]
-run = "unattended"
+run = "allow"
+
+# Tickets and comments the assistant files through the `ticket_*` tools are
+# attributed to `jp`.
+[plugins.command.ticket.options]
+assistant = "jp"
+
+# The labels a ticket can carry: each key, what it covers, and the values it
+# takes. `jp ticket tools sync .jp/mcp/tools/ticket` mirrors them into the
+# `ticket_*` tool definitions, and `jp vite sync` into the site.
+[plugins.command.ticket.options.labels.client]
+description = "The client surface"
+values = ["cli", "macos", "web"]
+
+[plugins.command.ticket.options.labels.llm-provider]
+description = "The provider related to the ticket, if any"
+values = ["anthropic", "cerebras", "google", "llamacpp", "ollama", "openai", "openrouter"]
+
+[plugins.command.ticket.options.labels.domain]
+description = "The subsystem, across whatever crates it spans."
+values = ["conversation", "llm", "mcp", "plugins", "storage", "tooling"]
+
+# What kind of work a ticket is: every ticket carries exactly one.
+[plugins.command.ticket.options.labels.type]
+description = "The type of ticket"
+min = 1
+max = 1
+values = [
+    "bug",
+    "enhancement",
+    "feature",
+    "follow-up",
+    "pre-rfd",
+    "question",
+    "task",
+    "tracking",
+]
+
+# The RFD a tracking ticket stands for. A ticket tracks at most one RFD, and an
+# RFD has at most one tracking ticket.
+[plugins.command.ticket.options.labels.tracking-rfd]
+description = "The RFD whose implementation this ticket tracks."
+values = []
+max = 1
+unique = "key-value"
+
+# Any other RFD a ticket's work belongs to, such as one phase of its
+# Implementation Plan.
+[plugins.command.ticket.options.labels.relevant-rfd]
+description = "An RFD this ticket's work belongs to."
+values = []
+
+[plugins.command.ticket.options.labels.package]
+description = "Any relevant packages"
+values = [
+    "bookworm",
+    "comfort",
+    "grizzly",
+    "jp_attachment",
+    "jp_attachment_agentic_shepherd",
+    "jp_attachment_bear_note",
+    "jp_attachment_cmd_output",
+    "jp_attachment_file_content",
+    "jp_attachment_github",
+    "jp_attachment_http_content",
+    "jp_attachment_internal",
+    "jp_attachment_mcp_resources",
+    "jp_cli",
+    "jp_config",
+    "jp_conversation",
+    "jp_editor",
+    "jp_github",
+    "jp_id",
+    "jp_inquire",
+    "jp_label",
+    "jp_llm",
+    "jp_macro",
+    "jp_mcp",
+    "jp_md",
+    "jp_openrouter",
+    "jp_plugin",
+    "jp_printer",
+    "jp_storage",
+    "jp_task",
+    "jp_term",
+    "jp_test",
+    "jp_tombmap",
+    "jp_tool",
+    "jp_workspace",
+    "json_edit",
+    "schematic",
+    "xct2cli",
+]
+
+# `jp rfd` is served the same way, installed with `just _install-rfd`. Its
+# directories and link labels are left at their defaults, which are JP's layout.
+[plugins.command.rfd]
+run = "allow"
+
+# A tracking ticket carries `type=tracking` beside its `tracking-rfd` link, since
+# every ticket here carries exactly one `type`.
+[plugins.command.rfd.options.tracking]
+labels = ["type=tracking"]
+
+# `jp vite` keeps the site's RFD and ticket pages in step with the two plugins
+# above, installed with `just _install-vite`. The site reads its settings from
+# `docs/.vitepress/jp-vite/settings.json`, which `jp vite sync` writes from
+# this configuration.
+[plugins.command.vite]
+run = "allow"
+
+# Pinned rather than read from each contributor's `origin` remote, so everyone
+# writes the same settings.
+[plugins.command.vite.options]
+repository = "https://github.com/dcdpr/jp"
 
 [providers.llm.aliases]
 # Anthropic aliases
@@ -101,17 +216,17 @@ run = "ask"
 [conversation.labels.branch]
 value.cmd = "git branch --show-current"
 apply_on = { new = true, fork = true }
-run = "unattended"
+run = "allow"
 optional = true
 
 [conversation.labels.commit]
 value.cmd = "git rev-parse --short HEAD"
 apply_on = { new = true, fork = true }
-run = "unattended"
+run = "allow"
 optional = true
 
 [conversation.labels.worktree]
 value.cmd = { program = 'basename "$(git rev-parse --show-toplevel)"', shell = true }
 apply_on = { new = true, fork = true }
-run = "unattended"
+run = "allow"
 optional = true

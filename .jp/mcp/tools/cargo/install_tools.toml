@@ -1,6 +1,6 @@
 [conversation.tools.cargo_install_tools]
 enable = false
-run = "unattended"
+run = "allow"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "Rebuild and install the `jp-tools` binary that serves these local tools."

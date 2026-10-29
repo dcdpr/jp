@@ -1,0 +1,25 @@
+[package]
+description = "The revision of the site files `jp vite` writes into a project."
+name = "site-revision"
+
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+# No dependencies: the build scripts of `jp-vite`, `jp-ticket`, and `jp-rfd`
+# run this, and a dependency here is compiled for each of them.
+
+[dev-dependencies]
+camino-tempfile = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false

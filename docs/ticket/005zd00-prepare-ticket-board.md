@@ -1,7 +1,6 @@
 # prepare ticket board
 
 - **Status**: Done
-- **Kind**: Chore
 - **Authors**: Jean Mertz
 - **Date**: 2026-08-06
 - **Label**: domain=tooling

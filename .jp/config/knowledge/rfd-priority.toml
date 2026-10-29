@@ -1,14 +1,14 @@
 [[conversation.attachments]]
 type = "cmd"
-path = "just"
-params.args = ["rfd-list", "--all"]
+path = "jp"
+params.args = ["rfd", "list", "--all"]
 params.description = "RFD status and development priority"
 
 [[assistant.instructions]]
 title = "RFD Status and Priority"
 items = [
     """\
-    A listing of every RFD is attached (the output of `just rfd-list --all`): \
+    A listing of every RFD is attached (the output of `jp rfd list --all`): \
     its status (Draft, Discussion, Accepted, Implemented, Superseded, \
     Abandoned), its development-priority rank, and whether it is currently in \
     development (`*`).\

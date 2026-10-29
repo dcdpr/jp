@@ -7,9 +7,9 @@
 //! # Tool call header misaligned
 //!
 //! - **Status**: Todo
-//! - **Kind**: Bug
 //! - **Authors**: John Doe
 //! - **Date**: 2026-08-05
+//! - **Label**: type=bug
 //!
 //! The header renders one column left of the body below 80 columns.
 //!
@@ -31,12 +31,15 @@
 //!
 //! [`id`] defines the identifier, [`parse`] reads a document, [`render`] writes
 //! one, [`store`] holds the file operations (id allocation, create, comment,
-//! close, list, import), and [`import`] carries the rules for content that
-//! comes from upstream.
+//! close, list, import), [`board`] holds the order within each column of the
+//! board, and [`import`] carries the rules for content that comes from
+//! upstream.
 //!
-//! Labels are `key=value` annotations from [`jp_label`]; the board's vocabulary
-//! lives in `.labels.json` next to the ticket files and is read by
-//! [`store::vocabulary`].
+//! Labels are `key=value` annotations from [`jp_label`], and are how a board
+//! classifies its tickets: what kind of work a ticket is, which part of the
+//! system it touches.
+//! The board's vocabulary is the caller's to read, from wherever it keeps its
+//! configuration, and a label write takes it as a [`Vocabulary`].
 //!
 //! The id is in the filename and nowhere else, so renaming a ticket is a rename
 //! and there is no second copy to keep in step.
@@ -47,6 +50,8 @@ use std::{fmt, str::FromStr};
 
 use serde::Serialize;
 
+pub mod board;
+pub mod check;
 pub mod id;
 pub mod import;
 pub mod parse;
@@ -54,10 +59,7 @@ pub mod render;
 pub mod store;
 
 pub use id::TicketId;
-pub use jp_label::{Labels, Selector, Vocabulary};
-
-/// The vocabulary file, inside the ticket directory.
-pub const LABELS_FILE: &str = ".labels.json";
+pub use jp_label::{Labels, Selector, Unique, Vocabulary};
 
 /// The metadata key one label is written under.
 ///
@@ -105,40 +107,6 @@ impl FromStr for Status {
     }
 }
 
-/// What kind of work a ticket describes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub enum Kind {
-    Bug,
-    Feature,
-    Chore,
-}
-
-impl fmt::Display for Kind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Bug => "Bug",
-            Self::Feature => "Feature",
-            Self::Chore => "Chore",
-        })
-    }
-}
-
-impl FromStr for Kind {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "bug" => Ok(Self::Bug),
-            "feature" => Ok(Self::Feature),
-            "chore" => Ok(Self::Chore),
-            _ => Err(ParseError::InvalidValue {
-                field: "Kind",
-                value: s.to_owned(),
-            }),
-        }
-    }
-}
-
 /// A ticket's metadata block.
 ///
 /// The repository owns every field here: a GitHub import replaces the title,
@@ -146,7 +114,6 @@ impl FromStr for Kind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Metadata {
     pub status: Status,
-    pub kind: Kind,
     /// The labels the ticket carries.
     ///
     /// Read as written, without checking them against the vocabulary: a
@@ -155,23 +122,18 @@ pub struct Metadata {
     pub labels: Labels,
     pub authors: String,
     pub date: String,
-    pub blocked_by: Option<String>,
-    pub implements: Option<String>,
     pub promoted_to: Option<String>,
     pub github: Option<String>,
 }
 
 /// The parts of a ticket that are settled when it is filed.
 ///
-/// A struct rather than a run of positional arguments: five of these are
+/// A struct rather than a run of positional arguments: four of these are
 /// strings, and at a call site nothing would catch two of them being swapped.
 pub struct NewTicket<'a> {
-    pub kind: Kind,
     pub title: &'a str,
     pub authors: &'a str,
     pub date: &'a str,
-    /// The RFD this work comes from, if any.
-    pub implements: Option<&'a str>,
     pub labels: &'a Labels,
     pub description: &'a str,
 }
@@ -201,6 +163,23 @@ pub struct Ticket {
     pub metadata: Metadata,
     pub description: String,
     pub comments: Vec<Comment>,
+}
+
+impl Ticket {
+    /// Whether `query` appears in the title, the description, or a comment,
+    /// ignoring case.
+    ///
+    /// The metadata block is not searched: labels and status have filters of
+    /// their own.
+    #[must_use]
+    pub fn mentions(&self, query: &str) -> bool {
+        let query = query.to_lowercase();
+        let contains = |text: &str| text.to_lowercase().contains(&query);
+
+        contains(&self.title)
+            || contains(&self.description)
+            || self.comments.iter().any(|comment| contains(&comment.body))
+    }
 }
 
 /// A document that doesn't hold a well-formed ticket.

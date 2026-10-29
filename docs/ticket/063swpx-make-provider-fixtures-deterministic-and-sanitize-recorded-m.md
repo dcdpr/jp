@@ -1,7 +1,6 @@
 # Make provider fixtures deterministic and sanitize recorded machine data
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-21
 - **Label**: domain=llm

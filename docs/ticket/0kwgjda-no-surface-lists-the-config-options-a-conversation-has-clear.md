@@ -1,7 +1,6 @@
 # No surface lists the config options a conversation has cleared
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-09-16
 - **Label**: client=cli

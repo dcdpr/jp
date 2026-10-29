@@ -1,7 +1,6 @@
 # Thinking blocks are repaired after a 400 JP could have predicted
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-09-22
 - **Label**: domain=llm

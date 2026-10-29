@@ -1,12 +1,12 @@
 # Cancelling a local tool leaves the processes it started running
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-10-01
 - **Label**: domain=plugins
 - **Label**: package=jp_cli
 - **Label**: package=jp_mcp
+- **Label**: type=bug
 
 A cancelled local tool call kills only the process JP spawned.
 `run_tool_command` puts the child in its own process group

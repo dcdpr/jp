@@ -1,7 +1,6 @@
 # Command outcome messages emit prose in `--format=json`
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-15
 - **Label**: client=cli

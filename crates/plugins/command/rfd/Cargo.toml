@@ -1,0 +1,60 @@
+[package]
+name = "jp-rfd"
+description = "Write and track RFDs, design documents with a lifecycle."
+
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+# No `[package.metadata.jp-registry]`: a project installs this plugin with
+# `cargo install`, from a checkout or from JP's repository at a pinned revision,
+# so it is deliberately absent from the published registry. `jp` finds it on
+# `$PATH`.
+
+[dependencies]
+comfort = { workspace = true }
+jp_label = { workspace = true }
+jp_plugin = { workspace = true }
+jp_tool = { workspace = true }
+ticket = { workspace = true }
+
+camino = { workspace = true, features = ["serde1"] }
+chrono = { workspace = true }
+clap = { workspace = true, features = ["derive", "error-context", "help", "std", "usage"] }
+ignore = { workspace = true }
+regex = { workspace = true, features = ["std", "perf", "unicode-perl"] }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+
+[build-dependencies]
+# `--version` reports the revision of the site files `jp vite` writes, which
+# read what this plugin writes.
+site-revision = { workspace = true }
+
+[dev-dependencies]
+# Checks that the configuration `track` asks its plan query to run under names
+# keys `jp` knows.
+jp_config = { workspace = true }
+
+camino-tempfile = { workspace = true }
+toml = { workspace = true, features = ["parse", "serde"] }
+
+[lints]
+workspace = true
+
+[lib]
+name = "jp_rfd"
+path = "src/lib.rs"
+doctest = false
+
+# The binary is a shell around the library, and carries no tests of its own.
+[[bin]]
+name = "jp-rfd"
+path = "src/main.rs"
+test = false

@@ -36,10 +36,10 @@ whose diff was truncated.
 """
 
 [conversation.tools]
-git_diff = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-git_diff_file = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-git_status = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-git_log = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-git_show = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-git_diff_commit = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-git_blame = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+git_diff = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+git_diff_file = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+git_status = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+git_log = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+git_show = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+git_diff_commit = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+git_blame = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }

@@ -1,27 +1,50 @@
 [conversation.tools.rfd_draft]
 enable = false
 run = "ask"
-source = "local"
-command = "just rfd-draft {{tool.arguments.variant}} {{tool.arguments.title}}"
-description = "Create a new RFD document."
+source = "plugin.command.rfd.draft"
+summary = "Create an RFD draft from its category's template."
+description = """
+Writes the draft into `docs/rfd/drafts/` under the first free draft id (`D01` to
+`D99`), named after its title, with the author and today's date filled in. The
+draft carries the template's sections for you to write.
+
+With `ticket`, the draft is seeded from that ticket: its title, unless `title`
+is given too, and its description as the draft's summary. The ticket then
+records the draft it became and is closed. Running it again for the same ticket
+reports the draft rather than writing a second one.
+"""
+
+examples = """
+A new design draft:
+```json
+{"category": "design", "title": "Tool Output Limits"}
+```
+
+A draft seeded from a ticket:
+```json
+{"category": "design", "ticket": "T-02wt0kx"}
+```
+"""
 
 [conversation.tools.rfd_draft.style]
+parameters = "function_call"
 inline_results = "full"
 results_file_link = "off"
-parameters = "function_call"
 
-[conversation.tools.rfd_draft.parameters.variant]
-description = "RFD variant to create."
-required = true
+# The accepted values live in `synced.toml`, generated from
+# `plugins.command.rfd.options.categories` by
+# `jp rfd tools sync .jp/mcp/tools/rfd`.
+[conversation.tools.rfd_draft.parameters.category]
 type = "string"
-enum = [
-    "design",
-    "decision",
-    "guide",
-    "process",
-]
+required = true
+summary = "The kind of document, which picks the template."
 
 [conversation.tools.rfd_draft.parameters.title]
-description = "Title of the RFD."
-required = true
 type = "string"
+required = false
+summary = "The title, which also names the file. Required unless `ticket` is given."
+
+[conversation.tools.rfd_draft.parameters.ticket]
+type = "string"
+required = false
+summary = "A ticket to seed the draft from, such as `T-02wt0kx`."

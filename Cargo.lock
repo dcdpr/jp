@@ -2146,6 +2146,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "jp-rfd"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "chrono",
+ "clap",
+ "comfort",
+ "ignore",
+ "jp_config",
+ "jp_label",
+ "jp_plugin",
+ "jp_tool",
+ "regex",
+ "serde",
+ "serde_json",
+ "site-revision",
+ "ticket",
+ "toml",
+]
+
+[[package]]
 name = "jp-serve-web"
 version = "0.1.0"
 dependencies = [
@@ -2172,12 +2194,34 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "clap",
+ "comfort",
  "jp_github",
+ "jp_md",
+ "jp_plugin",
+ "jp_tool",
+ "serde",
+ "serde_json",
+ "site-revision",
+ "strip-ansi-escapes",
+ "ticket",
+ "tokio",
+ "toml",
+]
+
+[[package]]
+name = "jp-vite"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "clap",
+ "jp_config",
+ "jp_label",
  "jp_plugin",
  "serde",
  "serde_json",
- "ticket",
- "tokio",
+ "site-revision",
+ "toml",
 ]
 
 [[package]]
@@ -4639,6 +4683,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
 
 [[package]]
+name = "site-revision"
+version = "0.1.0"
+dependencies = [
+ "camino-tempfile",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5137,7 +5188,6 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "clean-path",
- "comfort",
  "convert_case 0.11.0",
  "crossbeam-channel",
  "crossterm",
@@ -5167,7 +5217,6 @@ dependencies = [
  "similar",
  "strip-ansi-escapes",
  "test-log",
- "ticket",
  "tokio",
  "toml",
  "url",

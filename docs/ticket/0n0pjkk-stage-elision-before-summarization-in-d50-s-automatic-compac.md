@@ -1,7 +1,6 @@
 # Stage elision before summarization in D50's automatic compaction
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-18
 - **Label**: domain=conversation

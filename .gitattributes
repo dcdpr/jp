@@ -1,2 +1,19 @@
 **/fixtures/**/*.{snap,yml} linguist-generated
 **/Cargo.lock linguist-generated
+
+# Files a plugin builds in and writes out, and the checked-in copies tests
+# compare against what it writes, byte for byte. Checked out with LF everywhere,
+# so a Windows checkout builds the same output and the same site revision.
+crates/plugins/command/rfd/templates/** text eol=lf
+crates/plugins/command/rfd/tools/** text eol=lf
+crates/plugins/command/ticket/tools/** text eol=lf
+crates/plugins/command/vite/init/** text eol=lf
+crates/plugins/command/vite/site/** text eol=lf
+docs/.vitepress/jp-vite/** text eol=lf
+docs/rfd/000-*-template.md text eol=lf
+docs/rfd/.priority.json text eol=lf
+docs/ticket/.board.json text eol=lf
+
+# Written by `jp vite sync` from the plugin's own copy, so GitHub collapses it
+# in review.
+docs/.vitepress/jp-vite/** linguist-generated

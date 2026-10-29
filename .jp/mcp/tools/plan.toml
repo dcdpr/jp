@@ -1,6 +1,6 @@
 [conversation.tools.plan]
 enable = true # always enabled by default, could perhaps be done via a skill, but seems overkill
-run = "unattended"
+run = "allow"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "Create and step through an ordered checklist while working a multi-step task."

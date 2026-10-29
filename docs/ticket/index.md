@@ -15,12 +15,7 @@ Write a ticket when the work is clear enough to start, and an [RFD] when it
 needs a design first.
 See [RFD 100] for the format and the process.
 
-<script setup>
-import { data } from '../.vitepress/loaders/tickets.data.js'
-import TicketIndex from '../.vitepress/theme/TicketIndex.vue'
-</script>
-
-<TicketIndex :tickets="data.tickets" />
+<TicketIndex />
 
 [RFD]: ../rfd/
 [RFD 100]: ../rfd/100-in-repo-ticket-tracking

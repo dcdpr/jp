@@ -1,7 +1,6 @@
 # Cover nested .ignore re-inclusion in the fs walker tests
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-19
 - **Label**: domain=tooling

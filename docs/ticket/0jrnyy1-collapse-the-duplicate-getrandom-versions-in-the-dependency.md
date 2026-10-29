@@ -1,7 +1,6 @@
 # Collapse the duplicate getrandom versions in the dependency graph
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-14
 - **Label**: domain=tooling

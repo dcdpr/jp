@@ -1,0 +1,82 @@
+[conversation.tools.ticket_edit]
+source = "plugin.command.ticket.edit"
+summary = "Change a ticket's title, description, status, or labels."
+description = """
+Change any part of a ticket in one call: pass what changes, and the rest stays
+as it is.
+
+- `title` renames the ticket and moves its file to match.
+- `description` replaces the old one outright, so pass all of it, not just what
+  changed. Read it first with `ticket_show`, passing `description: true`.
+- `status` moves it between `todo`, `in progress`, and `done`; `done` closes
+  it.
+- `remove_labels` takes labels off: `key=value` that label, a bare `key`
+  every label under it. `add_labels` then puts labels on. The labels neither
+  names stay, so there is no need to read the ticket first.
+
+To add to the discussion instead, use `ticket_comment`.
+"""
+
+examples = """
+Start work on a ticket:
+```json
+{"id": "T-02wt0kx", "status": "in progress"}
+```
+
+Close it:
+```json
+{"id": "T-02wt0kx", "status": "done"}
+```
+
+Retitle it and add a label:
+```json
+{"id": "T-02wt0kx", "title": "Header misaligned below 80 columns", "add_labels": ["client=cli"]}
+```
+
+Replace whatever `client` holds:
+```json
+{"id": "T-02wt0kx", "remove_labels": ["client"], "add_labels": ["client=macos"]}
+```
+"""
+
+[conversation.tools.ticket_edit.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.ticket_edit.parameters.id]
+type = "string"
+required = true
+summary = "The ticket to change: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`."
+
+[conversation.tools.ticket_edit.parameters.title]
+type = "string"
+required = false
+summary = "A new one-line title. The file moves to match."
+
+[conversation.tools.ticket_edit.parameters.description]
+type = "string"
+required = false
+summary = "The whole new description, as markdown."
+
+[conversation.tools.ticket_edit.parameters.status]
+type = "string"
+required = false
+enum = ["todo", "in progress", "done"]
+summary = "The column to move it to; `done` closes it."
+
+[conversation.tools.ticket_edit.parameters.add_labels]
+type = "array"
+required = false
+summary = "`key=value` labels to put on the ticket; it keeps the ones it carries."
+
+[conversation.tools.ticket_edit.parameters.add_labels.items]
+type = "string"
+
+[conversation.tools.ticket_edit.parameters.remove_labels]
+type = "array"
+required = false
+summary = "Labels to take off: `key=value` that label, a bare `key` all under it."
+
+[conversation.tools.ticket_edit.parameters.remove_labels.items]
+type = "string"

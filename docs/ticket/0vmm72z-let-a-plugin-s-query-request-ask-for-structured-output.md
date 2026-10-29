@@ -1,12 +1,12 @@
 # Let a plugin's query request ask for structured output
 
 - **Status**: Done
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-10-01
 - **Label**: domain=plugins
 - **Label**: package=jp_cli
 - **Label**: package=jp_plugin
+- **Label**: type=feature
 
 A plugin can run a turn through the host with `query`, but `QueryRequest`
 carries only `conversation`, `content`, `new`, `title`, and `cfg`

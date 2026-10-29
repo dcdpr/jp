@@ -464,12 +464,14 @@ plugin.
 
 The single ticket that stands for an RFD's implementation as a whole, carrying
 its implementation plan as the description.
-It is the ticket whose `Implements` field names the RFD and whose labels include
-`type=tracking`; an RFD has at most one.
+It is the ticket labelled `tracking-rfd=NNN`; an RFD has at most one.
+The key is a setting of `jp rfd`, `tracking.key`, as the phase tickets' is
+`relevant.key`.
 Whether that ticket is In Progress is what "this RFD is in development" means.
 
-**Not the same as** a phase ticket, which names the same RFD in `Implements` but
-carries no `type=tracking` label and covers one slice of the work.
+**Not the same as** a phase ticket, which is labelled `relevant-rfd=NNN` and
+covers one slice of the work, as does any other ticket whose work belongs to the
+RFD.
 
 ### Turn
 

@@ -1,7 +1,6 @@
 # Let cargo_check narrow its clippy scope
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-08-19
 - **Label**: domain=tooling

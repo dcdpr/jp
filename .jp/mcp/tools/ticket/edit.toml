@@ -1,0 +1,90 @@
+[conversation.tools.ticket_edit]
+enable = false
+source = "plugin.command.ticket.edit"
+summary = "Change a ticket's title, description, status, or labels."
+description = """
+Change any part of a ticket in one call: pass what changes, and the rest stays
+as it is.
+
+- `title` renames the ticket and moves its file to match.
+- `description` replaces the old one outright, so pass all of it, not just what
+  changed. Read it first with `ticket_show`, passing `description: true`.
+- `status` moves it between `todo`, `in progress`, and `done`; `done` closes
+  it. Move a ticket to `in progress` when work on it starts, and back to `todo`
+  when it stops before it is finished.
+- `remove_labels` takes labels off: `key=value` that label, a bare `key`
+  every label under it. `add_labels` then puts labels on. The labels neither
+  names stay, its `tracking-rfd` and `relevant-rfd` links among them, so there
+  is no need to read the ticket first. The labels are defined in the workspace
+  configuration; one outside them is refused, and the refusal names the ones
+  you can use.
+
+To add to the discussion instead, use `ticket_comment`.
+"""
+
+examples = """
+Start work on a ticket:
+```json
+{"id": "T-02wt0kx", "status": "in progress"}
+```
+
+Close it:
+```json
+{"id": "T-02wt0kx", "status": "done"}
+```
+
+Retitle it and add labels, naming one key twice:
+```json
+{"id": "T-02wt0kx", "title": "Header misaligned below 80 columns", "add_labels": ["client=cli", "package=jp_cli", "package=jp_config"]}
+```
+
+Change its `type`, which a ticket carries exactly one of:
+```json
+{"id": "T-02wt0kx", "remove_labels": ["type"], "add_labels": ["type=bug"]}
+```
+"""
+
+[conversation.tools.ticket_edit.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.ticket_edit.parameters.id]
+type = "string"
+required = true
+summary = "The ticket to change: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`."
+
+[conversation.tools.ticket_edit.parameters.title]
+type = "string"
+required = false
+summary = "A new one-line title. The file moves to match."
+
+[conversation.tools.ticket_edit.parameters.description]
+type = "string"
+required = false
+summary = "The whole new description, as markdown."
+
+[conversation.tools.ticket_edit.parameters.status]
+type = "string"
+required = false
+enum = ["todo", "in progress", "done"]
+summary = "The column to move it to; `done` closes it."
+
+[conversation.tools.ticket_edit.parameters.add_labels]
+type = "array"
+required = false
+summary = "`key=value` labels to put on the ticket; it keeps the ones it carries."
+
+# The accepted values live in `synced.toml`, generated from
+# `plugins.command.ticket.options.labels` by
+# `jp ticket tools sync .jp/mcp/tools/ticket`.
+[conversation.tools.ticket_edit.parameters.add_labels.items]
+type = "string"
+
+[conversation.tools.ticket_edit.parameters.remove_labels]
+type = "array"
+required = false
+summary = "Labels to take off: `key=value` that label, a bare `key` all under it."
+
+[conversation.tools.ticket_edit.parameters.remove_labels.items]
+type = "string"

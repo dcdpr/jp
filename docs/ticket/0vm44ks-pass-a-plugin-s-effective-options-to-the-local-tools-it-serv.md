@@ -1,11 +1,11 @@
 # Pass a plugin's effective options to the local tools it serves
 
 - **Status**: Done
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-10-01
 - **Label**: domain=plugins
 - **Label**: package=jp_mcp
+- **Label**: type=feature
 
 A local tool whose command runs a command plugin (`jp ticket tool {{context}}
 {{tool}}`) gets a child `jp` that resolves configuration on its own, from the

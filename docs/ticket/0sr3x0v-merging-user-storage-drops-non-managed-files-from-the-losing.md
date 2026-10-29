@@ -1,7 +1,6 @@
 # Merging user storage drops non-managed files from the losing conversation copy
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-27
 - **Label**: domain=storage

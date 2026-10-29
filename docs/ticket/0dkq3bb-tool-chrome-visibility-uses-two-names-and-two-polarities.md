@@ -1,9 +1,9 @@
 # Tool chrome visibility uses two names and two polarities
 
 - **Status**: Todo
-- **Kind**: Enhancement
 - **Authors**: jp
 - **Date**: 2026-09-07
+- **Label**: type=enhancement
 
 The same question is asked twice with different words pointing in opposite
 directions:

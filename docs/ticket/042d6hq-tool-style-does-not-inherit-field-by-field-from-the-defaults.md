@@ -1,7 +1,6 @@
 # Tool style does not inherit field-by-field from the '*' defaults
 
 - **Status**: Done
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-11
 - **Label**: package=jp_config

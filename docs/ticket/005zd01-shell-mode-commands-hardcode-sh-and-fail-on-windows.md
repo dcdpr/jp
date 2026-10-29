@@ -1,7 +1,6 @@
 # Shell-mode commands hardcode `sh` and fail on Windows
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-14
 - **Label**: package=jp_config

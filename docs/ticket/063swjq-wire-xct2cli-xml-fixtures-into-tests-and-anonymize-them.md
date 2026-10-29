@@ -1,7 +1,6 @@
 # Wire xct2cli XML fixtures into tests and anonymize them
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-21
 - **Label**: package=xct2cli

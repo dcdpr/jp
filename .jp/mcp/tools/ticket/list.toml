@@ -1,14 +1,20 @@
 [conversation.tools.ticket_list]
 enable = false
-source = "local"
-command = "just serve-tools {{context}} {{tool}}"
-summary = "List the tickets in the repository, ordered by id."
+source = "plugin.command.ticket.list"
+summary = "List the tickets in the repository, in board order."
 description = """
-One line per ticket: id, status, kind, title, labels, and comment count.
+One line per ticket: id, status, title, labels, and comment count.
+
+Tickets come in board order: Todo, In Progress, then Done, each column top
+first. The first Todo ticket is the next one to work on.
 
 Use it to find what is open before filing something new, and to resolve a title
 you half-remember into an id for `ticket_show`. Filter by status to read one
-column of the board, or by label to read one area of the system.
+column of the board, by label to read one area of the system, or by `query` to
+find the tickets that mention something.
+
+A long listing comes a page at a time: the result ends with the page it shows,
+how many there are, and the `page` to ask for next.
 
 Files that don't parse as tickets are named at the end rather than skipped
 silently.
@@ -27,7 +33,17 @@ Only what is being worked on:
 
 Only open bugs:
 ```json
-{"status": "todo", "kind": "bug"}
+{"status": "todo", "labels": ["type=bug"]}
+```
+
+Every ticket mentioning the wrap width, in its title, description, or comments:
+```json
+{"query": "wrap width"}
+```
+
+The second page of the open tickets:
+```json
+{"status": "todo", "page": 2}
 ```
 
 Only tickets touching the CLI client and the config crate:
@@ -52,11 +68,15 @@ required = false
 enum = ["todo", "in progress", "done"]
 summary = "Only tickets at this status."
 
-[conversation.tools.ticket_list.parameters.kind]
+[conversation.tools.ticket_list.parameters.query]
 type = "string"
 required = false
-enum = ["bug", "feature", "chore"]
-summary = "Only tickets of this kind."
+summary = "Only tickets whose title, description, or comments contain this text, ignoring case."
+
+[conversation.tools.ticket_list.parameters.page]
+type = "integer"
+required = false
+summary = "Which page of the listing to show, counting from 1. Defaults to 1."
 
 [conversation.tools.ticket_list.parameters.labels]
 type = "array"
@@ -70,7 +90,8 @@ Retired values are accepted here, which is how you find the tickets still
 carrying one.
 """
 
-# The accepted values live in `labels.toml`, generated from
-# `docs/ticket/.labels.json` by `just ticket-labels-sync`.
+# The accepted values live in `synced.toml`, generated from
+# `plugins.command.ticket.options.labels` by
+# `jp ticket tools sync .jp/mcp/tools/ticket`.
 [conversation.tools.ticket_list.parameters.labels.items]
 type = "string"

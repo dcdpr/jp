@@ -7,7 +7,8 @@ description = """
 The file must exist, be a regular file, and have no uncommitted changes.
 
 Tickets and RFDs cannot be deleted here. Retiring one is a status change:
-`ticket_close` for a ticket, `rfd_abandon` or `rfd_supersede` for an RFD.
+`ticket_edit` with `status: done` for a ticket, `rfd_abandon` or
+`rfd_supersede` for an RFD.
 Removing the file itself is the user's call.
 """
 

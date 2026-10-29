@@ -74,17 +74,25 @@ pub fn title(source: &str) -> Option<String> {
 /// the file.
 #[must_use]
 pub fn labels(source: &str) -> Labels {
+    Labels::from_tokens_lossy(label_tokens(source)).0
+}
+
+/// The value of every label line in a document's metadata block, as written.
+///
+/// Keeps a value that isn't a well-formed label, so a caller can report it.
+/// Tolerant of a malformed header, as [`labels`] is.
+#[must_use]
+pub fn label_tokens(source: &str) -> Vec<String> {
     let doc = Doc::new(source);
     let Some(header) = doc.metadata_range() else {
-        return Labels::default();
+        return vec![];
     };
 
-    let tokens = header
+    header
         .filter_map(|i| meta_line(doc.lines[i]))
         .filter(|(key, _)| key.eq_ignore_ascii_case(LABEL_KEY))
-        .map(|(_, value)| unescaped(value));
-
-    Labels::from_tokens_lossy(tokens).0
+        .map(|(_, value)| unescaped(value))
+        .collect()
 }
 
 /// Undo the escaping a markdown formatter applies inside a metadata value.
@@ -272,26 +280,20 @@ fn without_comments_heading(text: String) -> String {
 /// replaces the line it targets.
 fn metadata<'a>(pairs: impl Iterator<Item = (&'a str, &'a str)>) -> Result<Metadata, ParseError> {
     let mut status = None;
-    let mut kind = None;
     let mut label_tokens = vec![];
     let mut authors = None;
     let mut date = None;
-    let mut blocked_by = None;
-    let mut implements = None;
     let mut promoted_to = None;
     let mut github = None;
 
     for (key, value) in pairs {
         match key.to_ascii_lowercase().as_str() {
             "status" => status = Some(value.parse()?),
-            "kind" => kind = Some(value.parse()?),
             // Repeated once per pair, so every occurrence contributes rather
             // than the last one winning.
             "label" => label_tokens.push(unescaped(value)),
             "authors" => authors = Some(value.to_owned()),
             "date" => date = Some(value.to_owned()),
-            "blocked by" => blocked_by = Some(value.to_owned()),
-            "implements" => implements = Some(value.to_owned()),
             "promoted to" => promoted_to = Some(value.to_owned()),
             "github" => github = Some(value.to_owned()),
             _ => {}
@@ -300,12 +302,9 @@ fn metadata<'a>(pairs: impl Iterator<Item = (&'a str, &'a str)>) -> Result<Metad
 
     Ok(Metadata {
         status: status.ok_or(ParseError::MissingField("Status"))?,
-        kind: kind.ok_or(ParseError::MissingField("Kind"))?,
         labels: Labels::from_tokens_lossy(label_tokens).0,
         authors: authors.ok_or(ParseError::MissingField("Authors"))?,
         date: date.ok_or(ParseError::MissingField("Date"))?,
-        blocked_by,
-        implements,
         promoted_to,
         github,
     })

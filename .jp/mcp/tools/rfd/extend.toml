@@ -1,21 +1,37 @@
 [conversation.tools.rfd_extend]
 enable = false
 run = "ask"
-source = "local"
-command = "just rfd-extend {{tool.arguments.nnn}} {{tool.arguments.mmm}}"
-description = "Record that RFD MMM extends RFD NNN, updating both documents."
+source = "plugin.command.rfd.extend"
+summary = "Record that one RFD builds on another's design."
+description = """
+`id` extends `target`: `id` gets `Extends: RFD <target>`, and `target` gets
+`Extended by: RFD <id>`.
+
+Extending implies depending, so `id` can't be accepted before `target` is, and
+not implemented before `target` is. A link that would close a loop through
+`Requires` and `Extends` is refused, and so is a target `id` already requires.
+A published RFD can't extend a draft. A draft can extend a published RFD; the
+published one gets its back-link when the draft is promoted.
+"""
+
+examples = """
+RFD 116 builds on RFD 100:
+```json
+{"id": "116", "target": "100"}
+```
+"""
 
 [conversation.tools.rfd_extend.style]
+parameters = "function_call"
 inline_results = "full"
 results_file_link = "off"
-parameters = "function_call"
 
-[conversation.tools.rfd_extend.parameters.nnn]
-description = "ID of the RFD being extended (the older, established RFD). Must be in Accepted or Implemented status."
-required = true
+[conversation.tools.rfd_extend.parameters.id]
 type = "string"
+required = true
+summary = "The RFD that extends the other, usually the newer one."
 
-[conversation.tools.rfd_extend.parameters.mmm]
-description = "ID of the RFD that extends the other (the newer RFD)."
-required = true
+[conversation.tools.rfd_extend.parameters.target]
 type = "string"
+required = true
+summary = "The RFD it builds on. Not an Abandoned or Superseded one."

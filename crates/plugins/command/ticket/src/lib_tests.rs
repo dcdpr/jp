@@ -1,6 +1,9 @@
 use camino_tempfile::Utf8TempDir;
 use clap::CommandFactory;
-use jp_plugin::message::{OutputFormat, WorkspaceInfo};
+use jp_plugin::message::{
+    EditFilesRequest, EditedResponse, ErrorResponse, OutputFormat, ToolAction, WorkspaceInfo,
+};
+use serde_json::{Map, json};
 
 use super::*;
 
@@ -12,43 +15,94 @@ fn parse(args: &[&str]) -> Result<Args, clap::Error> {
 
 /// Every command that writes needs an author; the tests supply one rather than
 /// depending on the machine's git config.
+///
+/// The board defines [`labelled`]'s vocabulary, so label writes have something
+/// to check against.
 fn run_command(dir: &Utf8TempDir, command: Command) -> Result<Output, String> {
-    execute(
-        dir.path(),
-        command,
-        &serde_json::json!({
-          "user": {
-            "name": "tester"
-          }
-        }),
-    )
+    run_with_options(dir.path(), command, &labelled())
 }
 
-/// Give a board a vocabulary, so label writes have something to check against.
-fn write_vocabulary(dir: &Utf8TempDir) {
-    std::fs::create_dir_all(dir.path()).unwrap();
-    std::fs::write(
-        dir.path().join(LABELS_FILE),
-        r#"{
-            "client": {"description": "The client.", "values": ["cli", "macos"]},
+/// The plugin's default options, with a label vocabulary.
+fn labelled() -> Options {
+    let options = json!({
+        "labels": {
+            "client": { "description": "The client.", "values": ["cli", "macos"] },
             "package": {
                 "description": "The crate.",
                 "values": ["jp_cli", "jp_config"],
                 "retired": ["jp_legacy"]
             }
-        }"#,
+        }
+    });
+    let Value::Object(options) = options else {
+        unreachable!("options are an object");
+    };
+
+    Options::read(&options).unwrap()
+}
+
+/// Run a command against `dir` as both the workspace root and the ticket
+/// directory, with the plugin's default options.
+fn run_in(dir: &Utf8Path, command: Command) -> Result<Output, String> {
+    run_with_options(dir, command, &Options::default())
+}
+
+fn run_with_options(dir: &Utf8Path, command: Command, options: &Options) -> Result<Output, String> {
+    run_with(dir, command, options, OutputFormat::default())
+}
+
+/// [`run_command`], as `jp -F json` runs it.
+fn run_json(dir: &Utf8TempDir, command: Command) -> Result<Output, String> {
+    run_with(dir.path(), command, &labelled(), OutputFormat::Json)
+}
+
+fn run_with(
+    dir: &Utf8Path,
+    command: Command,
+    options: &Options,
+    format: OutputFormat,
+) -> Result<Output, String> {
+    let config = serde_json::json!({
+      "user": {
+        "name": "tester"
+      }
+    });
+
+    execute(
+        &Context {
+            dir: dir.to_path_buf(),
+            root: dir,
+            config: &config,
+            options,
+            format,
+        },
+        command,
     )
-    .unwrap();
+}
+
+/// Write a ticket under a fixed id at `status`, so a test can name it in the
+/// board's order file.
+fn write_ticket(dir: &Utf8Path, body: &str, title: &str, status: Status) -> TicketId {
+    let document = ticket::render::ticket(&NewTicket {
+        title,
+        authors: "john",
+        date: "2026-08-05",
+        labels: &Labels::default(),
+        description: "",
+    });
+    let document = ticket::render::set_metadata(&document, "Status", &status.to_string()).unwrap();
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join(format!("{body}-slug.md")), document).unwrap();
+
+    body.parse().unwrap()
 }
 
 /// File a labelled ticket and hand back its id.
 fn add_labelled(dir: &Utf8TempDir, title: &str, labels: &[&str]) -> TicketId {
     run_command(dir, Command::Add {
-        kind: Some(Kind::Bug),
         title: Some(title.to_owned()),
         author: Some("john".to_owned()),
         body: None,
-        implements: None,
         labels: labels.iter().map(|label| (*label).to_owned()).collect(),
     })
     .unwrap();
@@ -172,7 +226,11 @@ fn init(root: &Utf8Path, args: &[&str]) -> HostToPlugin {
 }
 
 fn init_at(version: u32, root: &Utf8Path, args: &[&str]) -> HostToPlugin {
-    HostToPlugin::Init(Box::new(InitMessage {
+    HostToPlugin::Init(Box::new(init_message(version, root, args)))
+}
+
+fn init_message(version: u32, root: &Utf8Path, args: &[&str]) -> InitMessage {
+    InitMessage {
         version,
         workspace: WorkspaceInfo {
             root: root.to_path_buf(),
@@ -190,7 +248,18 @@ fn init_at(version: u32, root: &Utf8Path, args: &[&str]) -> HostToPlugin {
         log_level: 0,
         output_format: OutputFormat::default(),
         tool: None,
-    }))
+    }
+}
+
+/// An `init` carrying the plugin's `options`.
+fn init_with_options(root: &Utf8Path, args: &[&str], options: serde_json::Value) -> HostToPlugin {
+    let mut message = init_message(jp_plugin::PROTOCOL_VERSION, root, args);
+    let serde_json::Value::Object(options) = options else {
+        panic!("options are an object");
+    };
+    message.options = options;
+
+    HostToPlugin::Init(Box::new(message))
 }
 
 #[test]
@@ -199,38 +268,39 @@ fn cli_definition_is_valid() {
 }
 
 #[test]
-fn add_takes_a_kind_and_a_title_and_defaults_the_author() {
-    let args = parse(&["add", "bug", "Tool call header misaligned"]).unwrap();
+fn add_takes_a_title_and_defaults_the_author() {
+    let args = parse(&["add", "Tool call header misaligned"]).unwrap();
 
     assert_eq!(args.dir, None);
     match args.command {
         Command::Add {
-            kind,
             title,
             author,
             body,
-            implements,
             labels,
         } => {
-            assert_eq!(kind, Some(Kind::Bug));
             assert_eq!(title.as_deref(), Some("Tool call header misaligned"));
             assert_eq!(author, None);
             assert_eq!(body, None);
-            assert_eq!(implements, None);
             assert!(labels.is_empty());
         }
         other => panic!("expected add, got {other:?}"),
     }
 }
 
+/// A title is one argument, so `add bug "Title"` is refused rather than filing
+/// a ticket titled `bug`.
 #[test]
-fn add_rejects_an_unknown_kind() {
-    let error = parse(&["add", "task", "Title"]).unwrap_err();
+fn add_takes_one_title() {
+    let error = parse(&["add", "bug", "Title"]).unwrap_err();
 
-    assert!(error.to_string().contains("`task` is not a valid `Kind`"));
+    assert!(
+        error.to_string().contains("unexpected argument 'Title'"),
+        "{error}"
+    );
     assert!(
         error.use_stderr(),
-        "a bad kind is a failure, not help output"
+        "a stray argument is a failure, not help output"
     );
 }
 
@@ -261,17 +331,11 @@ fn a_bare_id_is_a_show() {
         "t-02WT0KX",
     ]] {
         match parse(args).unwrap().command {
-            Command::Show { id, json } => {
+            Command::Show { id } => {
                 assert_eq!(id, Some("T-02wt0kx".parse().unwrap()), "{args:?}");
-                assert!(!json);
             }
             other => panic!("expected show for {args:?}, got {other:?}"),
         }
-    }
-
-    match parse(&["T-02wt0kx", "--json"]).unwrap().command {
-        Command::Show { json, .. } => assert!(json),
-        other => panic!("expected show, got {other:?}"),
     }
 }
 
@@ -288,7 +352,8 @@ fn subcommands_are_not_mistaken_for_ids() {
     );
 
     for name in [
-        "add", "comment", "close", "show", "promote", "import", "list",
+        "add", "comment", "close", "show", "promote", "import", "list", "status", "rename",
+        "board", "rank", "init", "tools",
     ] {
         assert_eq!(
             with_show_alias(&[name.to_owned()]),
@@ -359,7 +424,7 @@ fn an_explicit_body_is_not_read_back_as_the_title() {
     let dir = Utf8TempDir::new().unwrap();
 
     let messages = exchange_with(
-        &init(dir.path(), &["add", "bug", "--body", "Steps to reproduce"]),
+        &init(dir.path(), &["add", "--body", "Steps to reproduce"]),
         &[composed("Header misaligned")],
     );
 
@@ -434,14 +499,12 @@ fn list_filters_are_optional() {
     match args.command {
         Command::List {
             status,
-            kind,
             labels,
-            json,
+            query,
         } => {
+            assert_eq!(query, None);
             assert_eq!(status, Some(Status::InProgress));
-            assert_eq!(kind, None);
             assert!(labels.is_empty());
-            assert!(!json);
         }
         other => panic!("expected list, got {other:?}"),
     }
@@ -477,16 +540,283 @@ fn labelling_without_an_id_offers_the_picker() {
 
     let error = compose_missing(
         dir.path(),
-        Command::Label {
-            id: None,
-            labels: vec!["client=cli".to_owned()],
-        },
+        &labelled(),
+        label_on(&[], LabelVerb::Add {
+            labels: owned(&["client=cli"]),
+        }),
         &mut &b""[..],
         &mut Vec::new(),
     )
     .unwrap_err();
 
     assert_eq!(error, "No tickets to choose from.");
+}
+
+/// `jp ticket label VERB` on the tickets `ids` names.
+fn label_on(ids: &[TicketId], verb: LabelVerb) -> Command {
+    Command::Label {
+        ids: ids.to_vec(),
+        verb: Some(verb),
+    }
+}
+
+fn owned(labels: &[&str]) -> Vec<String> {
+    labels.iter().map(|label| (*label).to_owned()).collect()
+}
+
+/// `--id` names the tickets on either side of the verb, repeated or
+/// comma-separated, so labels stay bare arguments.
+#[test]
+fn label_takes_its_tickets_with_id_on_either_side_of_the_verb() {
+    let expected = ["T-02wt0kx".parse::<TicketId>().unwrap()];
+    for args in [
+        &["label", "--id", "T-02wt0kx", "add", "client=cli"][..],
+        &["label", "add", "--id", "T-02wt0kx", "client=cli"][..],
+        &["label", "a", "-i", "02wt0kx", "client=cli"][..],
+    ] {
+        match parse(args).unwrap().command {
+            Command::Label {
+                ids,
+                verb: Some(LabelVerb::Add { labels }),
+            } => {
+                assert_eq!(ids, expected, "{args:?}");
+                assert_eq!(labels, ["client=cli"], "{args:?}");
+            }
+            other => panic!("expected label add, got {other:?}"),
+        }
+    }
+
+    match parse(&[
+        "label",
+        "rm",
+        "--id",
+        "T-02wt0kx,T-02wt0k1",
+        "-i",
+        "T-02wt0k2",
+    ])
+    .unwrap()
+    .command
+    {
+        Command::Label { ids, .. } => assert_eq!(ids.len(), 3),
+        other => panic!("expected label rm, got {other:?}"),
+    }
+}
+
+#[test]
+fn label_verbs_take_what_they_need() {
+    assert!(matches!(
+        parse(&["label"]).unwrap().command,
+        Command::Label { verb: None, .. }
+    ));
+    assert!(matches!(
+        parse(&["label", "ls", "--id", "T-02wt0kx"])
+            .unwrap()
+            .command,
+        Command::Label {
+            verb: Some(LabelVerb::Ls),
+            ..
+        }
+    ));
+    assert!(parse(&["label", "add"]).is_err());
+    assert!(parse(&["label", "set"]).is_err());
+    assert!(parse(&["label", "rm"]).is_ok());
+
+    // The form that replaced every label fails rather than doing something
+    // else.
+    assert!(parse(&["label", "T-02wt0kx", "--label", "client=cli"]).is_err());
+}
+
+/// A ticket id written where a label goes is refused before the picker opens,
+/// and when `--id` named the tickets, where nothing else would catch it.
+#[test]
+fn a_label_written_as_a_ticket_id_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    let named = "T-02wt0k1".parse::<TicketId>().unwrap();
+
+    for ids in [&[][..], &[named][..]] {
+        let error = compose_missing(
+            dir.path(),
+            &labelled(),
+            label_on(ids, LabelVerb::Add {
+                labels: owned(&["T-02wt0kx", "client=cli"]),
+            }),
+            &mut &b""[..],
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            "`T-02wt0kx` is a ticket id, not a label; name each ticket to change with its own \
+             `--id`, as in `--id T-02wt0kx`."
+        );
+    }
+
+    // Only the form `jp ticket` prints ids in: a word is a label.
+    assert!(refuse_ticket_ids(&owned(&["blocked", "tracking", "t-shirt-size"])).is_ok());
+}
+
+/// `jp vite serve` reads the revision of the site files this plugin was built
+/// alongside out of the parentheses.
+#[test]
+fn the_version_names_the_site_revision() {
+    let error = parse(&["--version"]).unwrap_err();
+
+    assert!(!error.use_stderr());
+    assert_eq!(error.to_string(), format!("jp ticket {VERSION}\n"));
+
+    let revision = VERSION
+        .split_once("(site ")
+        .and_then(|(_, rest)| rest.strip_suffix(')'))
+        .unwrap();
+    assert_eq!(revision.len(), 16, "{VERSION}");
+    assert!(revision.chars().all(|c| c.is_ascii_hexdigit()), "{VERSION}");
+}
+
+/// A board whose every ticket carries exactly one `type`, and each of whose
+/// `rfd` values one ticket may carry.
+fn checked_board() -> Value {
+    json!({
+        "labels": {
+            "type": {
+                "description": "The kind of work.",
+                "values": ["bug", "task"],
+                "min": 1,
+                "max": 1
+            },
+            "rfd": { "description": "The RFD.", "values": [], "unique": "key-value" }
+        }
+    })
+}
+
+fn options_from(options: Value) -> Options {
+    let Value::Object(options) = options else {
+        unreachable!("options are an object");
+    };
+
+    Options::read(&options).unwrap()
+}
+
+/// Write a ticket under a fixed id carrying `labels`, as a hand edit would:
+/// nothing checks them on the way in.
+fn write_with_labels(dir: &Utf8Path, body: &str, labels: &[(&str, &str)]) {
+    let labels: Labels = labels.iter().map(|(key, value)| (*key, [*value])).collect();
+    let document = ticket::render::ticket(&NewTicket {
+        title: "A ticket",
+        authors: "john",
+        date: "2026-08-05",
+        labels: &labels,
+        description: "",
+    });
+    fs::write(dir.join(format!("{body}-slug.md")), document).unwrap();
+}
+
+#[test]
+fn check_reports_a_board_meeting_every_rule_and_exits_zero() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_with_labels(dir.path(), "0aaaaaa", &[("type", "bug"), ("rfd", "116")]);
+    write_with_labels(dir.path(), "0bbbbbb", &[("type", "task"), ("rfd", "117")]);
+
+    let output =
+        run_with_options(dir.path(), Command::Check, &options_from(checked_board())).unwrap();
+
+    assert_eq!(output.text, "Checked 2 tickets: no problems.\n");
+    assert_eq!(output.code, 0);
+}
+
+#[test]
+fn check_lists_every_problem_and_exits_one() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_with_labels(dir.path(), "0aaaaaa", &[("type", "bug"), ("rfd", "116")]);
+    write_with_labels(dir.path(), "0bbbbbb", &[]);
+    write_with_labels(dir.path(), "0cccccc", &[("type", "task"), ("rfd", "116")]);
+
+    let output =
+        run_with_options(dir.path(), Command::Check, &options_from(checked_board())).unwrap();
+
+    assert_eq!(
+        output.text,
+        "T-0bbbbbb: `type` label missing: add one of type=bug, type=task.\n`rfd=116` is on \
+         T-0aaaaaa, T-0cccccc, and the board lets one ticket carry each `rfd` value.\n\nChecked 3 \
+         tickets: 2 problems.\nChange a ticket's labels with `jp ticket label add`, `set`, or \
+         `rm`; `--id` takes several tickets, comma-separated. `jp ticket labels` lists the labels \
+         the board defines.\n"
+    );
+    assert_eq!(output.code, 1);
+}
+
+/// The report reaches the host as output, and the exit carries no reason, so
+/// `jp` prints the report once rather than again as an error.
+/// The exit is marked as a result, so `jp` doesn't treat it as a failed run.
+#[test]
+fn check_prints_its_report_and_then_exits_one() {
+    let root = Utf8TempDir::new().unwrap();
+    let dir = root.path().join(store::DEFAULT_DIR);
+    fs::create_dir_all(&dir).unwrap();
+    write_with_labels(&dir, "0bbbbbb", &[]);
+
+    let messages = exchange(&init_with_options(root.path(), &["check"], checked_board()));
+
+    assert_eq!(messages[1..], [
+        PluginToHost::Print(PrintMessage {
+            text: "T-0bbbbbb: `type` label missing: add one of type=bug, type=task.\n\nChecked 1 \
+                   ticket: 1 problem.\nChange a ticket's labels with `jp ticket label add`, \
+                   `set`, or `rm`; `--id` takes several tickets, comma-separated. `jp ticket \
+                   labels` lists the labels the board defines.\n"
+                .to_owned(),
+            channel: "content".to_owned(),
+            format: "plain".into(),
+            language: None,
+        }),
+        PluginToHost::Exit(ExitMessage {
+            code: 1,
+            reason: None,
+            expected: true,
+        }),
+    ]);
+}
+
+#[test]
+fn check_under_json_prints_one_record_per_problem() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_with_labels(dir.path(), "0bbbbbb", &[]);
+    fs::write(dir.path().join("0001-old.md"), "# Old\n").unwrap();
+
+    let output = run_with(
+        dir.path(),
+        Command::Check,
+        &options_from(checked_board()),
+        OutputFormat::Json,
+    )
+    .unwrap();
+
+    assert!(output.json);
+    assert_eq!(output.code, 1);
+    let legacy = dir.path().join("0001-old.md");
+    let ticket = dir.path().join("0bbbbbb-slug.md");
+    assert_eq!(
+        serde_json::from_str::<Value>(&output.text).unwrap(),
+        json!({
+            "tickets": 1,
+            "problems": [
+                {
+                    "kind": "legacy_name",
+                    "ids": [],
+                    "paths": [legacy],
+                    "message": format!(
+                        "{legacy} is named in the four-digit `NNNN-slug.md` form, which no \
+                         command reads. Rename it to the `<id>-slug.md` form."
+                    ),
+                },
+                {
+                    "kind": "labels",
+                    "ids": ["T-0bbbbbb"],
+                    "paths": [ticket],
+                    "message": "T-0bbbbbb: `type` label missing: add one of type=bug, type=task.",
+                },
+            ],
+        })
+    );
 }
 
 /// `--help` reaches us as an error, but it is output, not a failure.
@@ -502,29 +832,75 @@ fn help_is_not_a_failure() {
 fn the_ticket_directory_follows_the_workspace_root() {
     let root = Utf8Path::new("/repo");
 
-    assert_eq!(resolve_dir(root, None), "/repo/docs/ticket");
     assert_eq!(
-        resolve_dir(root, Some(Utf8Path::new("tmp/t"))),
-        "/repo/tmp/t"
+        resolve_dir(root, Utf8Path::new("docs/ticket")),
+        "/repo/docs/ticket"
     );
+    assert_eq!(resolve_dir(root, Utf8Path::new("/elsewhere")), "/elsewhere");
+}
+
+/// `--dir` names the directory for one run; without it, the configured one
+/// applies.
+#[test]
+fn the_ticket_directory_comes_from_the_options_unless_dir_names_one() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    exchange(&init_with_options(
+        dir.path(),
+        &["add", "Filed in the configured place"],
+        serde_json::json!({ "dir": "work/items" }),
+    ));
+    exchange(&init_with_options(
+        dir.path(),
+        &["--dir", "elsewhere", "add", "Filed where --dir says"],
+        serde_json::json!({ "dir": "work/items" }),
+    ));
+
     assert_eq!(
-        resolve_dir(root, Some(Utf8Path::new("/elsewhere"))),
-        "/elsewhere"
+        store::list(&dir.path().join("work/items")).unwrap().len(),
+        1
     );
+    assert_eq!(store::list(&dir.path().join("elsewhere")).unwrap().len(), 1);
+    assert!(!dir.path().join("docs/ticket").exists());
+}
+
+/// Options the plugin can't read end the run before anything is written, with a
+/// reason naming the setting.
+#[test]
+fn unreadable_options_end_the_run() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let messages = exchange(&init_with_options(
+        dir.path(),
+        &["board"],
+        serde_json::json!({ "board": { "done_limit": "eight" } }),
+    ));
+
+    match messages.as_slice() {
+        [PluginToHost::Ready(_), PluginToHost::Exit(exit)] => {
+            assert_eq!(exit.code, 1);
+            assert!(
+                exit.reason
+                    .as_deref()
+                    .is_some_and(|reason| reason.starts_with("`plugins.command.ticket.options`")),
+                "{:?}",
+                exit.reason
+            );
+        }
+        other => panic!("unexpected exchange: {other:?}"),
+    }
 }
 
 /// A retitle moves the file with it, so a filename never disagrees with the
 /// heading it carries.
 /// Both paths are reported: the old one is what the caller was holding.
 #[test]
-fn editing_the_title_renames_the_file() {
+fn rename_moves_the_file() {
     let dir = Utf8TempDir::new().unwrap();
     run_command(&dir, Command::Add {
-        kind: Some(Kind::Bug),
         title: Some("Tool call header misaligned".to_owned()),
         author: Some("John Doe".to_owned()),
         body: None,
-        implements: None,
         labels: vec![],
     })
     .unwrap();
@@ -540,17 +916,476 @@ fn editing_the_title_renames_the_file() {
         .path()
         .join(format!("{prefix}the-wrap-calculation-is-off.md"));
 
+    let renamed = run_command(&dir, Command::Rename {
+        id,
+        title: "The wrap calculation is off".to_owned(),
+    })
+    .unwrap();
+
+    assert_eq!(renamed.text, format!("Renamed {before} -> {after}\n"));
+    assert!(!before.exists());
+
+    // A title that slugs to the name the file has leaves it where it is.
+    let retitled = run_command(&dir, Command::Rename {
+        id,
+        title: "The wrap calculation is off!".to_owned(),
+    })
+    .unwrap();
+    assert_eq!(retitled.text, format!("Retitled {after}\n"));
+}
+
+#[test]
+fn edit_takes_every_part_of_a_ticket() {
+    let args = parse(&[
+        "edit",
+        "T-02wt0kx",
+        "--title",
+        "New",
+        "--label",
+        "client=cli",
+        "--label",
+        "package=jp_cli",
+    ])
+    .unwrap();
+
+    match args.command {
+        Command::Edit { title, labels, .. } => {
+            assert_eq!(title.as_deref(), Some("New"));
+            assert_eq!(labels, ["client=cli", "package=jp_cli"]);
+        }
+        other => panic!("expected edit, got {other:?}"),
+    }
+}
+
+#[test]
+fn edit_rewrites_the_description_and_keeps_the_title() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_ticket(dir.path(), "02wt0kx", "Kept title", Status::Todo);
+
+    let edited = run_command(&dir, Command::Edit {
+        id: Some(id),
+        title: None,
+        body: Some("A new description.".to_owned()),
+        status: None,
+        labels: vec![],
+    })
+    .unwrap();
+
+    let path = dir.path().join("02wt0kx-slug.md");
+    assert_eq!(edited.text, format!("Edited {path}\n"));
+    let ticket = ticket::parse::document(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(ticket.title, "Kept title");
+    assert_eq!(ticket.description, "A new description.");
+}
+
+/// A new title moves the file, as `rename` does, and the labels named are the
+/// ones the ticket ends up with.
+#[test]
+fn edit_changes_the_title_and_the_labels_at_once() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_ticket(dir.path(), "02wt0kx", "Wrapping is wrong", Status::Todo);
+
     let edited = run_command(&dir, Command::Edit {
         id: Some(id),
         title: Some("The wrap calculation is off".to_owned()),
         body: None,
-        kind: None,
         status: None,
+        labels: vec!["client=cli".to_owned()],
     })
     .unwrap();
 
-    assert_eq!(edited.text, format!("Edited {after} (was {before})\n"));
-    assert!(!before.exists());
+    let path = dir.path().join("02wt0kx-the-wrap-calculation-is-off.md");
+    assert_eq!(edited.text, format!("Edited {path}\n"));
+    let ticket = ticket::parse::document(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(ticket.title, "The wrap calculation is off");
+    assert_eq!(ticket.metadata.labels.to_tokens(), ["client=cli"]);
+}
+
+/// `--label` sets the whole list, so `edit` says which labels that took off.
+#[test]
+fn edit_reports_the_labels_it_removes() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = add_labelled(&dir, "Relabel me", &["client=macos", "package=jp_cli"]);
+    let path = store::locate_ticket(dir.path(), id).unwrap();
+
+    let edited = run_command(&dir, Command::Edit {
+        id: Some(id),
+        title: None,
+        body: None,
+        status: None,
+        labels: owned(&["client=cli"]),
+    })
+    .unwrap();
+
+    assert_eq!(
+        edited.text,
+        format!("Edited {path}\nRemoved labels: client=macos, package=jp_cli\n")
+    );
+    assert_eq!(labels_of(&dir, id), ["client=cli"]);
+}
+
+/// Labels are checked before anything is written, so a refused one leaves the
+/// title, and the file's name, as they were.
+#[test]
+fn edit_refuses_a_label_before_changing_anything() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_ticket(dir.path(), "02wt0kx", "Wrapping is wrong", Status::Todo);
+    let path = dir.path().join("02wt0kx-slug.md");
+    let before = std::fs::read_to_string(&path).unwrap();
+
+    let error = run_command(&dir, Command::Edit {
+        id: Some(id),
+        title: Some("The wrap calculation is off".to_owned()),
+        body: None,
+        status: None,
+        labels: vec!["client=windows".to_owned()],
+    })
+    .unwrap_err();
+
+    assert!(error.contains("client=windows"), "{error}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+}
+
+/// With nothing to change, `edit` asks the host to open the ticket's file, and
+/// reads it back once the editor closes.
+#[test]
+fn edit_with_nothing_to_change_opens_the_editor_through_the_host() {
+    let dir = Utf8TempDir::new().unwrap();
+    let tickets = dir.path().join("docs/ticket");
+    write_ticket(&tickets, "02wt0kx", "Wrapping is wrong", Status::Todo);
+    let path = tickets.join("02wt0kx-slug.md");
+
+    let messages = exchange_with(&init(dir.path(), &["edit", "T-02wt0kx"]), &[
+        HostToPlugin::Edited(EditedResponse {
+            id: None,
+            saved: true,
+        }),
+    ]);
+
+    assert!(
+        messages.contains(&PluginToHost::EditFiles(EditFilesRequest {
+            id: None,
+            paths: vec![path.clone()],
+        })),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|message| matches!(
+            message,
+            PluginToHost::Print(print) if print.text == format!("{path}: unchanged\n")
+        )),
+        "{messages:?}"
+    );
+    assert!(
+        matches!(messages.last(), Some(PluginToHost::Exit(exit)) if exit.code == 0),
+        "{messages:?}"
+    );
+}
+
+/// A host that can't open an editor says why, and the flags are named as the
+/// way to make the same change without one.
+#[test]
+fn edit_without_an_editor_names_the_flags() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(
+        &dir.path().join("docs/ticket"),
+        "02wt0kx",
+        "Wrapping is wrong",
+        Status::Todo,
+    );
+
+    let messages = exchange_with(&init(dir.path(), &["edit", "T-02wt0kx"]), &[
+        HostToPlugin::Error(ErrorResponse {
+            id: None,
+            request: Some("edit_files".to_owned()),
+            message: "there is no terminal to open an editor on".to_owned(),
+        }),
+    ]);
+
+    assert_eq!(
+        messages.last(),
+        Some(&PluginToHost::Exit(ExitMessage {
+            code: 1,
+            reason: Some(
+                "Couldn't open an editor: there is no terminal to open an editor on. Pass what to \
+                 change instead: --title, --body, --status, or --label."
+                    .to_owned()
+            ),
+            expected: false,
+        }))
+    );
+}
+
+#[test]
+fn status_moves_a_ticket_to_any_column() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_ticket(dir.path(), "02wt0kx", "Moving", Status::Todo);
+    let path = dir.path().join("02wt0kx-slug.md");
+
+    let moved = run_command(&dir, Command::Status {
+        id,
+        status: Status::InProgress,
+        before: None,
+        after: None,
+    })
+    .unwrap();
+    assert_eq!(moved.text, format!("{path}: Todo -> In Progress\n"));
+
+    let again = run_command(&dir, Command::Status {
+        id,
+        status: Status::InProgress,
+        before: None,
+        after: None,
+    })
+    .unwrap();
+    assert_eq!(again.text, format!("{path}: already In Progress\n"));
+}
+
+/// A drag on the site's board is this one command: the column and the place in
+/// it change together.
+#[test]
+fn status_places_the_ticket_next_to_its_neighbour() {
+    let dir = Utf8TempDir::new().unwrap();
+    let root = dir.path();
+    let moving = write_ticket(root, "02wt0k1", "Moving", Status::Todo);
+    let started = write_ticket(root, "02wt0k2", "Started", Status::InProgress);
+    write_ticket(root, "02wt0k3", "Also started", Status::InProgress);
+
+    let moved = run_in(root, Command::Status {
+        id: moving,
+        status: Status::InProgress,
+        before: None,
+        after: Some(started),
+    })
+    .unwrap();
+    assert_eq!(
+        moved.text,
+        format!(
+            "{}: Todo -> In Progress, below T-02wt0k2\n",
+            root.join("02wt0k1-slug.md")
+        )
+    );
+
+    let board = run_in(root, Command::Board).unwrap();
+    assert!(
+        board.text.contains(
+            "In Progress (3)\nT-02wt0k2 Started\nT-02wt0k1 Moving\nT-02wt0k3 Also started\n"
+        ),
+        "{}",
+        board.text
+    );
+}
+
+/// The neighbour is checked before the ticket moves, so a drop next to a card
+/// that has since left the column changes nothing.
+#[test]
+fn status_refuses_a_neighbour_outside_the_column() {
+    let dir = Utf8TempDir::new().unwrap();
+    let root = dir.path();
+    let moving = write_ticket(root, "02wt0k1", "Moving", Status::Todo);
+    let done = write_ticket(root, "02wt0k2", "Finished", Status::Done);
+
+    let error = run_in(root, Command::Status {
+        id: moving,
+        status: Status::InProgress,
+        before: Some(done),
+        after: None,
+    })
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        "T-02wt0k2 is Done, not In Progress; a ticket is placed next to one in the column it \
+         moves to."
+    );
+    let source = std::fs::read_to_string(root.join("02wt0k1-slug.md")).unwrap();
+    assert!(source.contains("- **Status**: Todo"), "{source}");
+}
+
+#[test]
+fn status_takes_the_id_and_the_column() {
+    match parse(&["status", "T-02wt0kx", "in progress"])
+        .unwrap()
+        .command
+    {
+        Command::Status {
+            id,
+            status,
+            before,
+            after,
+        } => {
+            assert_eq!(id, "T-02wt0kx".parse().unwrap());
+            assert_eq!(status, Status::InProgress);
+            assert_eq!((before, after), (None, None));
+        }
+        other => panic!("expected status, got {other:?}"),
+    }
+
+    assert!(parse(&["status", "T-02wt0kx"]).is_err());
+    assert!(parse(&["status", "T-02wt0kx", "done", "--after", "T-02wt0k2"]).is_ok());
+    assert!(
+        parse(&[
+            "status",
+            "T-02wt0kx",
+            "done",
+            "--before",
+            "T-02wt0k1",
+            "--after",
+            "T-02wt0k2"
+        ])
+        .is_err()
+    );
+}
+
+/// The board reads each column in board order, then the tickets nobody ranked;
+/// Done runs newest first and stops at the configured limit.
+#[test]
+fn board_prints_each_column_in_board_order() {
+    let dir = Utf8TempDir::new().unwrap();
+    let root = dir.path();
+    write_ticket(root, "02wt0k1", "First filed", Status::Todo);
+    write_ticket(root, "02wt0k2", "Second filed", Status::Todo);
+    write_ticket(root, "02wt0k3", "Third filed", Status::Todo);
+    write_ticket(root, "02wt0k4", "Older done", Status::Done);
+    write_ticket(root, "02wt0k5", "Newer done", Status::Done);
+    std::fs::write(
+        root.join(board::BOARD_FILE),
+        r#"{"todo": ["T-02wt0k3"], "in_progress": [], "done": []}"#,
+    )
+    .unwrap();
+    let options = Options {
+        board: options::BoardOptions { done_limit: 1 },
+        ..Options::default()
+    };
+
+    let output = run_with_options(root, Command::Board, &options).unwrap();
+
+    assert_eq!(
+        output.text,
+        "Todo (3)\nT-02wt0k3 Third filed\nT-02wt0k1 First filed\nT-02wt0k2 Second filed\n\nIn \
+         Progress (0)\n\nDone (2, showing 1)\nT-02wt0k5 Newer done\n"
+    );
+}
+
+#[test]
+fn rank_places_a_ticket_and_the_board_follows() {
+    let dir = Utf8TempDir::new().unwrap();
+    let root = dir.path();
+    let first = write_ticket(root, "02wt0k1", "First filed", Status::Todo);
+    let second = write_ticket(root, "02wt0k2", "Second filed", Status::Todo);
+
+    let ranked = run_in(root, Command::Rank {
+        id: second,
+        before: Some(first),
+        after: None,
+    })
+    .unwrap();
+    assert_eq!(ranked.text, "T-02wt0k2 now sits above T-02wt0k1 in Todo\n");
+
+    let board = run_in(root, Command::Board).unwrap();
+    assert!(
+        board
+            .text
+            .starts_with("Todo (2)\nT-02wt0k2 Second filed\nT-02wt0k1 First"),
+        "{}",
+        board.text
+    );
+}
+
+#[test]
+fn rank_takes_exactly_one_place() {
+    assert!(parse(&["rank", "T-02wt0k1"]).is_err());
+    assert!(
+        parse(&[
+            "rank",
+            "T-02wt0k1",
+            "--before",
+            "T-02wt0k2",
+            "--after",
+            "T-02wt0k3"
+        ])
+        .is_err()
+    );
+    assert!(parse(&["rank", "T-02wt0k1", "--after", "T-02wt0k2"]).is_ok());
+}
+
+/// The order within one column says nothing about another.
+#[test]
+fn rank_refuses_tickets_in_different_columns() {
+    let dir = Utf8TempDir::new().unwrap();
+    let root = dir.path();
+    let open = write_ticket(root, "02wt0k1", "Open", Status::Todo);
+    let done = write_ticket(root, "02wt0k2", "Done", Status::Done);
+
+    let error = run_in(root, Command::Rank {
+        id: open,
+        before: None,
+        after: Some(done),
+    })
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        "T-02wt0k1 is Todo and T-02wt0k2 is Done; a ticket is ranked within its own column."
+    );
+}
+
+/// `init` creates the directory and nothing in it: the board needs no order
+/// file until something is ranked.
+#[test]
+fn init_creates_the_ticket_directory() {
+    let dir = Utf8TempDir::new().unwrap();
+    let tickets = dir.path().join("docs/ticket");
+
+    let created = run_in(&tickets, Command::Init).unwrap();
+    assert_eq!(created.text, format!("Created {tickets}\n"));
+    assert!(tickets.is_dir());
+    assert_eq!(std::fs::read_dir(&tickets).unwrap().count(), 0);
+
+    let again = run_in(&tickets, Command::Init).unwrap();
+    assert_eq!(again.text, format!("{tickets} already exists.\n"));
+}
+
+/// The repository is named on every call; there is no default to land issues
+/// from the wrong place.
+#[test]
+fn import_requires_a_repository() {
+    let error = parse(&["import", "123"]).unwrap_err();
+    assert!(error.to_string().contains("--repo"), "{error}");
+
+    match parse(&["import", "123", "--repo", "dcdpr/jp"])
+        .unwrap()
+        .command
+    {
+        Command::Import { numbers, repo, .. } => {
+            assert_eq!(numbers, [123]);
+            assert_eq!(repo, "dcdpr/jp");
+        }
+        other => panic!("expected import, got {other:?}"),
+    }
+}
+
+/// The definitions directory is taken against the workspace root, like `--dir`.
+#[test]
+fn tools_init_writes_into_a_directory_under_the_root() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let output = run_in(dir.path(), Command::Tools {
+        command: ToolsCommand::Init {
+            path: Utf8PathBuf::from("config/tools"),
+        },
+    })
+    .unwrap();
+
+    // Joined the way the directory and the file name are, so the path reads the
+    // same as in the output on Windows too.
+    let written = dir.path().join("config/tools").join("create.toml");
+    assert!(written.exists());
+    assert!(
+        output.text.contains(&format!("Wrote {written}\n")),
+        "{}",
+        output.text
+    );
 }
 
 #[test]
@@ -558,11 +1393,9 @@ fn commands_run_against_the_resolved_directory() {
     let dir = Utf8TempDir::new().unwrap();
 
     let created = run_command(&dir, Command::Add {
-        kind: Some(Kind::Bug),
         title: Some("Tool call header misaligned".to_owned()),
         author: Some("John Doe".to_owned()),
         body: Some("The header renders one column left of the body.".to_owned()),
-        implements: None,
         labels: vec![],
     })
     .unwrap();
@@ -588,78 +1421,30 @@ fn commands_run_against_the_resolved_directory() {
 
     let listed = run_command(&dir, Command::List {
         status: None,
-        kind: None,
         labels: vec![],
-        json: false,
+        query: None,
     })
     .unwrap();
     assert_eq!(
         listed.text,
-        format!("{id} Todo         Bug      Tool call header misaligned\n")
+        format!("{id} Todo         Tool call header misaligned\n")
     );
 
     let closed = run_command(&dir, Command::Close { id: Some(id) }).unwrap();
     assert!(closed.text.contains("Todo -> Done"), "{}", closed.text);
 
-    let json = run_command(&dir, Command::List {
+    let json = run_json(&dir, Command::List {
         status: Some(Status::Done),
-        kind: None,
         labels: vec![],
-        json: true,
+        query: None,
     })
     .unwrap();
+    assert!(json.json);
     let rows: Vec<serde_json::Value> = serde_json::from_str(&json.text).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["id"], id.to_string());
     assert_eq!(rows[0]["status"], "Done");
     assert_eq!(rows[0]["comments"], 1);
-}
-
-/// A branch cut before the id change carries tickets the new parser skips
-/// silently, so migration has to find them by filename and fix what names them.
-#[test]
-fn migrate_converts_legacy_tickets_and_the_board() {
-    let dir = Utf8TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("0005-old-ticket.md"),
-        "# T0005: Old ticket\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- \
-         **Date**: 2026-08-05\n\nBody.\n",
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join(".board.json"),
-        "{\"todo\":[\"T0005\"],\"in_progress\":[],\"done\":[]}\n",
-    )
-    .unwrap();
-
-    let output = run_command(&dir, Command::Migrate).unwrap();
-
-    let id = store::list(dir.path()).unwrap()[0].id;
-    assert!(!dir.path().join("0005-old-ticket.md").exists());
-    assert!(
-        dir.path()
-            .join(format!("{}old-ticket.md", id.file_prefix()))
-            .exists()
-    );
-
-    // The legacy heading carried the id too; it lives only in the filename now.
-    let converted = dir
-        .path()
-        .join(format!("{}old-ticket.md", id.file_prefix()));
-    let source = std::fs::read_to_string(&converted).unwrap();
-    assert!(source.starts_with("# Old ticket\n"), "{source}");
-
-    let board = std::fs::read_to_string(dir.path().join(".board.json")).unwrap();
-    assert_eq!(
-        board,
-        format!("{{\"todo\":[\"{id}\"],\"in_progress\":[],\"done\":[]}}\n")
-    );
-
-    assert!(
-        output.text.starts_with(&format!("T0005 -> {id} at ")),
-        "{}",
-        output.text
-    );
 }
 
 /// The whole point of `refresh`: the branch's own references follow the new id,
@@ -674,8 +1459,7 @@ fn refresh_rewrites_the_branch_and_leaves_the_base_alone() {
     // On `main`: the ticket that wins the id, and a file naming it.
     std::fs::write(
         dir.join("02wt0kx-winner.md"),
-        "# Winner\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- **Date**: \
-         2026-08-14\n\nBody.\n",
+        "# Winner\n\n- **Status**: Todo\n- **Authors**: john\n- **Date**: 2026-08-14\n\nBody.\n",
     )
     .unwrap();
     std::fs::write(root.join("NOTES.md"), "See T-02wt0kx for the winner.\n").unwrap();
@@ -687,21 +1471,17 @@ fn refresh_rewrites_the_branch_and_leaves_the_base_alone() {
     let losing = dir.join("02wt0kx-loser.md");
     std::fs::write(
         &losing,
-        "# Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- **Date**: \
-         2026-08-14\n\nOther body.\n",
+        "# Loser\n\n- **Status**: Todo\n- **Authors**: jane\n- **Date**: 2026-08-14\n\nOther \
+         body.\n",
     )
     .unwrap();
     std::fs::write(root.join("BRANCH.md"), "Fixes T-02wt0kx on this branch.\n").unwrap();
     commit(root, "Add the losing ticket", Some("2026-08-14T12:00:00Z"));
 
-    let output = execute(
-        &dir,
-        Command::Refresh {
-            path: losing.clone(),
-            base: "main".to_owned(),
-        },
-        &serde_json::json!({}),
-    )
+    let output = run_in(&dir, Command::Refresh {
+        path: losing.clone(),
+        base: "main".to_owned(),
+    })
     .unwrap();
 
     // The loser moved.
@@ -757,7 +1537,7 @@ fn refresh_leaves_a_reply_alone() {
     let losing = dir.join("02wt0kx-loser.md");
     std::fs::write(
         &losing,
-        "# Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- **Date**: \
+        "# Loser\n\n- **Status**: Todo\n- **Authors**: jane\n- **Date**: \
          2026-08-14\n\nBody.\n\n## Comments\n\n-----\n\n- **From**: john\n- **Date**: \
          2026-08-14T10:00:00Z\n\nFirst.\n\n-----\n\n- **From**: jp\n- **Date**: \
          2026-08-14T11:00:00Z\n- **Re**: #1\n\nSecond.\n",
@@ -766,14 +1546,10 @@ fn refresh_leaves_a_reply_alone() {
     let before = std::fs::read_to_string(&losing).unwrap();
     commit(root, "Add the losing ticket", None);
 
-    let output = execute(
-        &dir,
-        Command::Refresh {
-            path: losing,
-            base: "main".to_owned(),
-        },
-        &serde_json::json!({}),
-    )
+    let output = run_in(&dir, Command::Refresh {
+        path: losing,
+        base: "main".to_owned(),
+    })
     .unwrap();
 
     let entry = store::list(&dir).unwrap().pop().unwrap();
@@ -794,20 +1570,16 @@ fn refresh_reports_prose_naming_the_old_id_in_the_renamed_ticket() {
     let losing = dir.join("02wt0kx-loser.md");
     std::fs::write(
         &losing,
-        "# Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- **Date**: \
-         2026-08-14\n\nProbably a duplicate of T-02wt0kx.\n",
+        "# Loser\n\n- **Status**: Todo\n- **Authors**: jane\n- **Date**: 2026-08-14\n\nProbably a \
+         duplicate of T-02wt0kx.\n",
     )
     .unwrap();
     commit(root, "Add the losing ticket", None);
 
-    let output = execute(
-        &dir,
-        Command::Refresh {
-            path: losing,
-            base: "main".to_owned(),
-        },
-        &serde_json::json!({}),
-    )
+    let output = run_in(&dir, Command::Refresh {
+        path: losing,
+        base: "main".to_owned(),
+    })
     .unwrap();
 
     let entry = store::list(&dir).unwrap().pop().unwrap();
@@ -822,8 +1594,8 @@ fn refresh_reports_prose_naming_the_old_id_in_the_renamed_ticket() {
     );
 }
 
-/// `just ticket-refresh` documents a workspace-relative path, and git runs in
-/// the ticket directory, so the path has to be resolved before either sees it.
+/// A ticket is named by its workspace-relative path, and git runs in the ticket
+/// directory, so the path has to be resolved before either sees it.
 #[test]
 fn refresh_accepts_a_repository_relative_path() {
     let repo = git_repo();
@@ -832,21 +1604,17 @@ fn refresh_accepts_a_repository_relative_path() {
 
     std::fs::write(
         dir.join("02wt0kx-filed-earlier.md"),
-        "# Filed earlier\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- **Date**: \
+        "# Filed earlier\n\n- **Status**: Todo\n- **Authors**: john\n- **Date**: \
          2026-08-14\n\nBody.\n",
     )
     .unwrap();
     // 2026-08-14T00:00:00Z is 345,600 seconds past the epoch: bucket 69,120.
     commit(root, "File it", Some("2026-08-14T00:00:00Z"));
 
-    execute(
-        &dir,
-        Command::Refresh {
-            path: Utf8PathBuf::from("docs/ticket/02wt0kx-filed-earlier.md"),
-            base: "main".to_owned(),
-        },
-        &serde_json::json!({}),
-    )
+    run_in(&dir, Command::Refresh {
+        path: Utf8PathBuf::from("docs/ticket/02wt0kx-filed-earlier.md"),
+        base: "main".to_owned(),
+    })
     .unwrap();
 
     // The add-date drove the bucket, which only happens when git resolved the
@@ -871,8 +1639,7 @@ fn refresh_reports_a_file_that_named_the_id_on_base() {
     let losing = dir.join("02wt0kx-loser.md");
     std::fs::write(
         &losing,
-        "# Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- **Date**: \
-         2026-08-14\n\nBody.\n",
+        "# Loser\n\n- **Status**: Todo\n- **Authors**: jane\n- **Date**: 2026-08-14\n\nBody.\n",
     )
     .unwrap();
     // The branch touches the file for an unrelated reason.
@@ -883,14 +1650,10 @@ fn refresh_reports_a_file_that_named_the_id_on_base() {
     .unwrap();
     commit(root, "Add the losing ticket", None);
 
-    let output = execute(
-        &dir,
-        Command::Refresh {
-            path: losing,
-            base: "main".to_owned(),
-        },
-        &serde_json::json!({}),
-    )
+    let output = run_in(&dir, Command::Refresh {
+        path: losing,
+        base: "main".to_owned(),
+    })
     .unwrap();
 
     assert_eq!(
@@ -916,49 +1679,21 @@ fn refresh_keeps_the_ticket_in_the_bucket_it_was_created_in() {
     let path = dir.join("02wt0kx-filed-earlier.md");
     std::fs::write(
         &path,
-        "# Filed earlier\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- **Date**: \
+        "# Filed earlier\n\n- **Status**: Todo\n- **Authors**: john\n- **Date**: \
          2026-08-14\n\nBody.\n",
     )
     .unwrap();
     // 2026-08-14T00:00:00Z is 345,600 seconds past the epoch: bucket 69,120.
     commit(root, "File it", Some("2026-08-14T00:00:00Z"));
 
-    execute(
-        &dir,
-        Command::Refresh {
-            path,
-            base: "main".to_owned(),
-        },
-        &serde_json::json!({}),
-    )
+    run_in(&dir, Command::Refresh {
+        path,
+        base: "main".to_owned(),
+    })
     .unwrap();
 
     let fresh = store::list(&dir).unwrap()[0].id;
     assert_eq!(fresh.bucket(), 69_120);
-}
-
-/// The scan walks whatever is in the ticket directory, so a name whose fourth
-/// byte falls mid-character must not take the command down.
-#[test]
-fn migrate_skips_a_non_ascii_filename_without_panicking() {
-    let dir = Utf8TempDir::new().unwrap();
-    std::fs::write(dir.path().join("a\u{e9}\u{e9}.md"), "not a ticket\n").unwrap();
-
-    let output = run_command(&dir, Command::Migrate).unwrap();
-
-    assert_eq!(output.text, "No tickets to migrate.\n");
-}
-
-/// `12345-foo.md` is not a pre-RFD-102 ticket: the id is five digits, so the
-/// fifth byte is not the separator.
-#[test]
-fn migrate_ignores_a_filename_that_only_starts_with_digits() {
-    let dir = Utf8TempDir::new().unwrap();
-    std::fs::write(dir.path().join("12345-foo.md"), "not a ticket\n").unwrap();
-
-    let output = run_command(&dir, Command::Migrate).unwrap();
-
-    assert_eq!(output.text, "No tickets to migrate.\n");
 }
 
 /// An unreadable candidate must not be mistaken for one that holds no
@@ -989,79 +1724,26 @@ fn rewriting_a_missing_or_binary_file_is_skipped() {
     assert!(!rewrite(&binary, "a", "b").unwrap());
 }
 
-/// A legacy reply named the ticket it lives on.
-/// The cross-file rewrite would turn that into `T-<new>#1` and leave the
-/// migrated ticket naming itself, so the conversion has to reach the `Re` field
-/// first.
-#[test]
-fn migrate_converts_a_legacy_reply_to_the_positional_form() {
-    let dir = Utf8TempDir::new().unwrap();
-    std::fs::write(
-        dir.path().join("0005-old-ticket.md"),
-        "# T0005: Old ticket\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- \
-         **Date**: 2026-08-05\n\nBody.\n\n## Comments\n\n-----\n\n- **From**: john\n- **Date**: \
-         2026-08-05T10:00:00Z\n\nFirst.\n\n-----\n\n- **From**: jp\n- **Date**: \
-         2026-08-05T11:00:00Z\n- **Re**: T0005#1\n\nSecond.\n",
-    )
-    .unwrap();
-
-    run_command(&dir, Command::Migrate).unwrap();
-
-    let entry = store::list(dir.path()).unwrap().pop().unwrap();
-    let ticket = entry.ticket.unwrap();
-    assert_eq!(ticket.title, "Old ticket");
-    assert_eq!(ticket.comments[1].re.as_deref(), Some("#1"));
-
-    // The whole point: nothing inside the file names the ticket any more.
-    let source = std::fs::read_to_string(&entry.path).unwrap();
-    assert!(!source.contains(&entry.id.to_string()), "{source}");
-    assert!(!source.contains("T0005"), "{source}");
-}
-
-/// `just ticket-promote` reads `.id` out of this, so the field has to survive
-/// the document losing its own.
+/// The ticket document has no id of its own, so the output has to carry it.
 #[test]
 fn show_json_carries_the_id() {
     let dir = Utf8TempDir::new().unwrap();
     run_command(&dir, Command::Add {
-        kind: Some(Kind::Bug),
         title: Some("Tool call header misaligned".to_owned()),
         author: Some("john".to_owned()),
         body: Some("The header renders one column left.".to_owned()),
-        implements: None,
         labels: vec![],
     })
     .unwrap();
     let id = store::list(dir.path()).unwrap()[0].id;
 
-    let out = run_command(&dir, Command::Show {
-        id: Some(id),
-        json: true,
-    })
-    .unwrap();
+    let out = run_json(&dir, Command::Show { id: Some(id) }).unwrap();
 
+    assert!(out.json);
     let detail: serde_json::Value = serde_json::from_str(&out.text).unwrap();
     assert_eq!(detail["id"], id.to_string());
     assert_eq!(detail["title"], "Tool call header misaligned");
     assert_eq!(detail["description"], "The header renders one column left.");
-}
-
-#[test]
-fn migrate_of_a_converted_directory_does_nothing() {
-    let dir = Utf8TempDir::new().unwrap();
-    run_command(&dir, Command::Add {
-        kind: Some(Kind::Chore),
-        title: Some("Already current".to_owned()),
-        author: Some("john".to_owned()),
-        body: None,
-        implements: None,
-        labels: vec![],
-    })
-    .unwrap();
-
-    let output = run_command(&dir, Command::Migrate).unwrap();
-
-    assert_eq!(output.text, "No tickets to migrate.\n");
 }
 
 #[test]
@@ -1120,11 +1802,7 @@ fn the_manifest_states_the_protocol_the_handshake_needs() {
 #[test]
 fn a_run_reports_ready_then_output_then_exit() {
     let dir = Utf8TempDir::new().unwrap();
-    let messages = exchange(&init(dir.path(), &[
-        "add",
-        "bug",
-        "Tool call header misaligned",
-    ]));
+    let messages = exchange(&init(dir.path(), &["add", "Tool call header misaligned"]));
 
     match messages.as_slice() {
         [
@@ -1156,6 +1834,79 @@ fn a_run_reports_ready_then_output_then_exit() {
     }
 }
 
+/// An `init` carrying a tool call that files a ticket.
+fn tool_call_init(root: &Utf8Path, options: serde_json::Value) -> HostToPlugin {
+    let mut message = init_message(jp_plugin::PROTOCOL_VERSION, root, &[]);
+    let serde_json::Value::Object(options) = options else {
+        panic!("options are an object");
+    };
+    message.options = options;
+    message.tool = Some(ToolCall {
+        action: ToolAction::Run,
+        name: "create".to_owned(),
+        arguments: Map::from_iter([("title".to_owned(), json!("Tool call header misaligned"))]),
+        answers: Map::new(),
+        options: Map::new(),
+        access: None,
+        conversation: "jp-c17000000000".to_owned(),
+    });
+
+    HostToPlugin::Init(Box::new(message))
+}
+
+/// A tool call is answered with one outcome and an exit, and nothing printed.
+/// The host closed stdin after `init`, so the plugin must not wait for more.
+#[test]
+fn a_tool_call_is_answered_with_its_outcome_then_exit() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let messages = exchange(&tool_call_init(dir.path(), json!({ "assistant": "jp" })));
+
+    match messages.as_slice() {
+        [
+            PluginToHost::Ready(ready),
+            PluginToHost::ToolOutcome(answer),
+            PluginToHost::Exit(exit),
+        ] => {
+            assert_eq!(ready.protocol, REQUIRED_PROTOCOL);
+            assert_eq!(answer.outcome["type"], "success");
+            let content = answer.outcome["content"].as_str().unwrap_or_default();
+            assert!(content.starts_with("Created T-"), "{content}");
+            assert_eq!(exit.code, 0);
+        }
+        other => panic!("unexpected exchange: {other:?}"),
+    }
+
+    // Filed through a tool, so attributed to the configured assistant rather
+    // than the user `init.config` names.
+    let entries = store::list(&dir.path().join("docs/ticket")).unwrap();
+    let [entry] = entries.as_slice() else {
+        panic!("expected one ticket, got {entries:?}");
+    };
+    assert_eq!(entry.ticket.as_ref().unwrap().metadata.authors, "jp");
+}
+
+/// The assistant can't fix the configuration, so options the plugin can't read
+/// fail the plugin run rather than coming back as an outcome to retry.
+#[test]
+fn a_tool_call_with_unreadable_options_fails_the_run() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let messages = exchange(&tool_call_init(dir.path(), json!({ "assistant": "" })));
+
+    match messages.as_slice() {
+        [PluginToHost::Ready(_), PluginToHost::Exit(exit)] => {
+            assert_eq!(exit.code, 1);
+            assert_eq!(
+                exit.reason.as_deref(),
+                Some("`plugins.command.ticket.options.assistant` must be a name on one line.")
+            );
+        }
+        other => panic!("unexpected exchange: {other:?}"),
+    }
+    assert!(!dir.path().join("docs/ticket").exists());
+}
+
 /// A plugin newer than its host cannot ask for anything interactive, so it says
 /// so and stops, without claiming ready, rather than hanging on a reply the
 /// host cannot produce.
@@ -1170,7 +1921,7 @@ fn an_older_host_is_refused_up_front() {
             assert!(
                 exit.reason
                     .as_ref()
-                    .is_some_and(|reason| reason.contains("needs `jp` protocol 2")),
+                    .is_some_and(|reason| reason.contains("needs `jp` protocol 12")),
                 "{:?}",
                 exit.reason
             );
@@ -1202,7 +1953,6 @@ fn a_bad_argument_exits_non_zero_with_a_reason() {
 #[test]
 fn labels_survive_the_round_trip_and_show_in_the_listing() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     let id = add_labelled(&dir, "Window title truncates", &[
         "package=jp_config",
@@ -1211,24 +1961,20 @@ fn labels_survive_the_round_trip_and_show_in_the_listing() {
 
     let listed = run_command(&dir, Command::List {
         status: None,
-        kind: None,
         labels: vec![],
-        json: false,
+        query: None,
     })
     .unwrap();
 
     assert_eq!(
         listed.text,
-        format!(
-            "{id} Todo         Bug      Window title truncates [client=macos, package=jp_config]\n"
-        )
+        format!("{id} Todo         Window title truncates [client=macos, package=jp_config]\n")
     );
 }
 
 #[test]
 fn listing_narrows_to_tickets_carrying_every_label() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     let both = add_labelled(&dir, "Both", &["client=macos", "package=jp_cli"]);
     add_labelled(&dir, "One", &["package=jp_cli"]);
@@ -1236,15 +1982,14 @@ fn listing_narrows_to_tickets_carrying_every_label() {
 
     let listed = run_command(&dir, Command::List {
         status: None,
-        kind: None,
         labels: vec!["package=jp_cli".to_owned(), "client=macos".to_owned()],
-        json: false,
+        query: None,
     })
     .unwrap();
 
     assert_eq!(
         listed.text,
-        format!("{both} Todo         Bug      Both [client=macos, package=jp_cli]\n")
+        format!("{both} Todo         Both [client=macos, package=jp_cli]\n")
     );
 }
 
@@ -1253,16 +1998,14 @@ fn listing_narrows_to_tickets_carrying_every_label() {
 #[test]
 fn listing_narrows_on_a_bare_key() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     add_labelled(&dir, "Client work", &["client=cli"]);
     add_labelled(&dir, "Crate work", &["package=jp_cli"]);
 
     let listed = run_command(&dir, Command::List {
         status: None,
-        kind: None,
         labels: vec!["client".to_owned()],
-        json: false,
+        query: None,
     })
     .unwrap();
 
@@ -1270,49 +2013,293 @@ fn listing_narrows_on_a_bare_key() {
     assert!(listed.text.contains("Client work"), "{}", listed.text);
 }
 
-/// The whole set is written, so labelling is idempotent and a label left off
-/// the call is a label removed.
+/// A query matches the title or the description, whatever its case, and a blank
+/// one keeps every ticket.
 #[test]
-fn labelling_replaces_the_whole_set() {
+fn listing_narrows_on_a_query() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
-    let id = add_labelled(&dir, "Replace me", &["client=macos", "package=jp_cli"]);
-
-    let out = run_command(&dir, Command::Label {
-        id: Some(id),
-        labels: vec!["package=jp_cli".to_owned()],
-    })
-    .unwrap();
-    assert!(out.text.ends_with(": package=jp_cli\n"), "{}", out.text);
-
-    let cleared = run_command(&dir, Command::Label {
-        id: Some(id),
+    let titled = add_labelled(&dir, "Wrap is off by one", &[]);
+    let described = add_labelled(&dir, "Header misaligned", &[]);
+    add_labelled(&dir, "Unrelated", &[]);
+    run_command(&dir, Command::Edit {
+        id: Some(described),
+        title: None,
+        body: Some("The WRAP width ignores the gutter.".to_owned()),
+        status: None,
         labels: vec![],
     })
     .unwrap();
-    assert!(
-        cleared.text.ends_with(": labels cleared\n"),
-        "{}",
-        cleared.text
+    let listing = |query: &str| {
+        run_command(&dir, Command::List {
+            status: None,
+            labels: vec![],
+            query: Some(query.to_owned()),
+        })
+        .unwrap()
+        .text
+    };
+
+    assert_eq!(
+        listing("wrap"),
+        format!(
+            "{titled} Todo         Wrap is off by one\n{described} Todo         Header \
+             misaligned\n"
+        )
     );
+    assert_eq!(listing("  ").lines().count(), 3);
+}
+
+/// `add` keeps what the ticket carries, and says when a label was there
+/// already, so running it twice changes nothing.
+#[test]
+fn label_add_keeps_what_the_ticket_carries() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = add_labelled(&dir, "Add to me", &["client=macos"]);
+    let path = store::locate_ticket(dir.path(), id).unwrap();
+    let add = || {
+        run_command(
+            &dir,
+            label_on(&[id], LabelVerb::Add {
+                labels: owned(&["package=jp_cli", "client=macos"]),
+            }),
+        )
+        .unwrap()
+        .text
+    };
+
+    assert_eq!(
+        add(),
+        format!("{path}: added package=jp_cli; already carries client=macos\n")
+    );
+    assert_eq!(
+        add(),
+        format!("{path}: already carries package=jp_cli, client=macos\n")
+    );
+    assert_eq!(labels_of(&dir, id), ["client=macos", "package=jp_cli"]);
+}
+
+/// `set` replaces what the keys it names hold, and leaves the other keys alone.
+#[test]
+fn label_set_replaces_what_a_key_holds() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = add_labelled(&dir, "Set me", &["client=macos", "package=jp_cli"]);
+    let path = store::locate_ticket(dir.path(), id).unwrap();
+
+    let out = run_command(
+        &dir,
+        label_on(&[id], LabelVerb::Set {
+            labels: owned(&["package=jp_config"]),
+        }),
+    )
+    .unwrap();
+
+    assert_eq!(
+        out.text,
+        format!("{path}: removed package=jp_cli; added package=jp_config\n")
+    );
+    assert_eq!(labels_of(&dir, id), ["client=macos", "package=jp_config"]);
+}
+
+/// `rm` takes one label, or every label under a bare key, and names what the
+/// ticket didn't carry rather than failing on it.
+#[test]
+fn label_rm_reports_what_it_took_and_what_was_not_there() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = add_labelled(&dir, "Trim me", &[
+        "client=cli",
+        "client=macos",
+        "package=jp_cli",
+    ]);
+    let path = store::locate_ticket(dir.path(), id).unwrap();
+
+    let out = run_command(
+        &dir,
+        label_on(&[id], LabelVerb::Rm {
+            labels: owned(&["client", "package=jp_config"]),
+        }),
+    )
+    .unwrap();
+
+    assert_eq!(
+        out.text,
+        format!("{path}: removed client=cli, client=macos; doesn't carry package=jp_config\n")
+    );
+    assert_eq!(labels_of(&dir, id), ["package=jp_cli"]);
+}
+
+/// A bare `rm` takes every label, and drops the field rather than leaving an
+/// empty one.
+#[test]
+fn label_rm_without_labels_removes_every_label() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = add_labelled(&dir, "Clear me", &["client=macos", "package=jp_cli"]);
+
+    run_command(&dir, label_on(&[id], LabelVerb::Rm { labels: vec![] })).unwrap();
 
     let path = store::locate_ticket(dir.path(), id).unwrap();
     let source = std::fs::read_to_string(path).unwrap();
     assert!(!source.contains("- **Label**"), "{source}");
 }
 
+/// A label to remove has to be one: a malformed one matches nothing, which
+/// would read as removed.
+#[test]
+fn label_rm_refuses_what_is_not_a_label() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = add_labelled(&dir, "Keep me", &["client=cli"]);
+
+    let error = run_command(
+        &dir,
+        label_on(&[id], LabelVerb::Rm {
+            labels: owned(&["1client"]),
+        }),
+    )
+    .unwrap_err();
+
+    assert!(error.starts_with("label key '1client'"), "{error}");
+    assert_eq!(labels_of(&dir, id), ["client=cli"]);
+}
+
+/// One ticket's labels print one per line; several tickets' lines start with
+/// their ids.
+#[test]
+fn label_ls_lists_one_label_per_line() {
+    let dir = Utf8TempDir::new().unwrap();
+    let first = add_labelled(&dir, "First", &["client=cli", "package=jp_cli"]);
+    let second = add_labelled(&dir, "Second", &["client=macos"]);
+
+    let one = run_command(&dir, label_on(&[first], LabelVerb::Ls)).unwrap();
+    let both = run_command(&dir, Command::Label {
+        ids: vec![first, second],
+        verb: None,
+    })
+    .unwrap();
+
+    assert_eq!(one.text, "client=cli\npackage=jp_cli\n");
+    assert_eq!(
+        both.text,
+        format!("{first}: client=cli\n{first}: package=jp_cli\n{second}: client=macos\n")
+    );
+}
+
+/// Several tickets change in one command, each from the labels it carries.
+#[test]
+fn label_changes_several_tickets_at_once() {
+    let dir = Utf8TempDir::new().unwrap();
+    let first = add_labelled(&dir, "First", &["client=cli"]);
+    let second = add_labelled(&dir, "Second", &["package=jp_cli"]);
+
+    let out = run_command(
+        &dir,
+        label_on(&[first, second], LabelVerb::Add {
+            labels: owned(&["client=macos"]),
+        }),
+    )
+    .unwrap();
+
+    assert_eq!(out.text.lines().count(), 2, "{}", out.text);
+    assert_eq!(labels_of(&dir, first), ["client=cli", "client=macos"]);
+    assert_eq!(labels_of(&dir, second), ["client=macos", "package=jp_cli"]);
+}
+
+/// One ticket the board refuses stops the whole command, and the refusal names
+/// the ticket.
+#[test]
+fn label_changes_no_ticket_when_one_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    let typed = typed();
+    let file = |title: &str, labels: &[&str]| {
+        run_with_options(
+            dir.path(),
+            Command::Add {
+                title: Some(title.to_owned()),
+                author: Some("john".to_owned()),
+                body: None,
+                labels: owned(labels),
+            },
+            &typed,
+        )
+        .unwrap();
+        store::list(dir.path())
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.ticket.as_ref().is_ok_and(|t| t.title == title))
+            .unwrap()
+            .id
+    };
+    let bug = file("A bug", &["type=bug"]);
+    let feature = file("A feature", &["type=feature"]);
+
+    // Every ticket carries exactly one `type`: removing `type=bug` leaves the
+    // bug with none, while the feature has no `type=bug` to lose.
+    let error = run_with_options(
+        dir.path(),
+        label_on(&[feature, bug], LabelVerb::Rm {
+            labels: owned(&["type=bug"]),
+        }),
+        &typed,
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        format!("{bug}: `type` label missing: add one of type=bug, type=feature.")
+    );
+    assert_eq!(labels_of(&dir, bug), ["type=bug"]);
+}
+
+/// Adding can't make room under a key the board holds to one label, so the
+/// refusal points at `set`, which can.
+#[test]
+fn adding_to_a_full_key_points_at_set() {
+    let dir = Utf8TempDir::new().unwrap();
+    run_with_options(
+        dir.path(),
+        Command::Add {
+            title: Some("A bug".to_owned()),
+            author: Some("john".to_owned()),
+            body: None,
+            labels: owned(&["type=bug"]),
+        },
+        &typed(),
+    )
+    .unwrap();
+    let id = store::list(dir.path()).unwrap()[0].id;
+    let run = |verb| run_with_options(dir.path(), label_on(&[id], verb), &typed());
+
+    let error = run(LabelVerb::Add {
+        labels: owned(&["type=feature"]),
+    })
+    .unwrap_err();
+    assert_eq!(
+        error,
+        "`type` takes exactly one label, and 2 are given: type=bug, type=feature.\nReplace what a \
+         key holds with `jp ticket label set`."
+    );
+
+    run(LabelVerb::Set {
+        labels: owned(&["type=feature"]),
+    })
+    .unwrap();
+    assert_eq!(labels_of(&dir, id), ["type=feature"]);
+}
+
+/// The labels a ticket's file carries, as tokens.
+fn labels_of(dir: &Utf8TempDir, id: TicketId) -> Vec<String> {
+    let path = store::locate_ticket(dir.path(), id).unwrap();
+
+    ticket::parse::labels(&std::fs::read_to_string(path).unwrap()).to_tokens()
+}
+
 /// A typo names the vocabulary rather than landing a label nothing groups by.
 #[test]
 fn an_unknown_label_is_refused_with_the_known_set() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     let error = run_command(&dir, Command::Add {
-        kind: Some(Kind::Bug),
         title: Some("Typo".to_owned()),
         author: Some("john".to_owned()),
         body: None,
-        implements: None,
         labels: vec!["client=mcaos".to_owned()],
     })
     .unwrap_err();
@@ -1331,7 +2318,6 @@ fn an_unknown_label_is_refused_with_the_known_set() {
 #[test]
 fn the_vocabulary_listing_names_each_label_and_what_it_covers() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     let out = run_command(&dir, Command::Labels).unwrap();
 
@@ -1349,7 +2335,6 @@ fn the_vocabulary_listing_names_each_label_and_what_it_covers() {
 #[test]
 fn a_retired_label_already_on_a_ticket_can_be_kept() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
 
     // Written by hand: `legacy-ui` can no longer be applied through the CLI,
     // which is exactly the situation an old ticket is in.
@@ -1363,29 +2348,29 @@ fn a_retired_label_already_on_a_ticket_can_be_kept() {
     )
     .unwrap();
 
-    let out = run_command(&dir, Command::Label {
-        id: Some(id),
-        labels: vec!["package=jp_legacy".to_owned(), "client=cli".to_owned()],
-    })
+    let out = run_command(
+        &dir,
+        label_on(&[id], LabelVerb::Add {
+            labels: owned(&["client=cli"]),
+        }),
+    )
     .unwrap();
 
-    assert!(
-        out.text.ends_with(": client=cli, package=jp_legacy\n"),
-        "{}",
-        out.text
-    );
+    assert!(out.text.ends_with(": added client=cli\n"), "{}", out.text);
+    assert_eq!(labels_of(&dir, id), ["client=cli", "package=jp_legacy"]);
 }
 
 #[test]
 fn a_retired_label_cannot_be_added_fresh() {
     let dir = Utf8TempDir::new().unwrap();
-    write_vocabulary(&dir);
     let id = add_labelled(&dir, "Fresh", &[]);
 
-    let error = run_command(&dir, Command::Label {
-        id: Some(id),
-        labels: vec!["package=jp_legacy".to_owned()],
-    })
+    let error = run_command(
+        &dir,
+        label_on(&[id], LabelVerb::Add {
+            labels: owned(&["package=jp_legacy"]),
+        }),
+    )
     .unwrap_err();
 
     assert_eq!(
@@ -1399,38 +2384,384 @@ fn a_retired_label_cannot_be_added_fresh() {
 fn a_board_without_a_vocabulary_says_where_to_define_one() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let out = run_command(&dir, Command::Labels).unwrap();
+    let out = run_in(dir.path(), Command::Labels).unwrap();
+
+    assert_eq!(
+        out.text,
+        "This board defines no labels, so a ticket takes any `key` or `key=value` label. List \
+         them in `plugins.command.ticket.options.labels` to hold tickets to a fixed set.\n"
+    );
+}
+
+/// The file the vocabulary lived in before it moved into the options is no
+/// longer read, so a board that kept it is told why its labels are gone.
+#[test]
+fn a_leftover_labels_file_is_pointed_out() {
+    let dir = Utf8TempDir::new().unwrap();
+    std::fs::write(dir.path().join(".labels.json"), "{}").unwrap();
+
+    let out = run_in(dir.path(), Command::Labels).unwrap();
 
     assert_eq!(
         out.text,
         format!(
-            "This board defines no labels. Add them to {}.\n",
+            "This board defines no labels, so a ticket takes any `key` or `key=value` label. List \
+             them in `plugins.command.ticket.options.labels` to hold tickets to a fixed set.\n{} \
+             is no longer read: move its keys there.\n",
             dir.path().join(".labels.json")
         )
     );
 }
 
-/// An unreadable ticket is reported to the log, not mixed into stdout where it
-/// would corrupt `--json`.
+/// A vocabulary that doesn't parse fails the commands that label or file a
+/// ticket, named by where it is configured, and no others.
+/// Filing reads it even with no labels named, since a board can require some.
+#[test]
+fn a_broken_vocabulary_fails_what_labels_or_files() {
+    let dir = Utf8TempDir::new().unwrap();
+    let Value::Object(options) = json!({ "labels": { "client": "The client." } }) else {
+        unreachable!("options are an object");
+    };
+    let options = Options::read(&options).unwrap();
+    let broken = "`plugins.command.ticket.options.labels`: The label vocabulary is not a map";
+
+    let error = run_with_options(dir.path(), Command::Labels, &options).unwrap_err();
+    assert!(error.starts_with(broken), "{error}");
+
+    let error = run_with_options(
+        dir.path(),
+        Command::Add {
+            title: Some("Unlabelled".to_owned()),
+            author: Some("john".to_owned()),
+            body: None,
+            labels: vec![],
+        },
+        &options,
+    )
+    .unwrap_err();
+    assert!(error.starts_with(broken), "{error}");
+
+    run_with_options(
+        dir.path(),
+        Command::List {
+            status: None,
+            labels: vec![],
+            query: None,
+        },
+        &options,
+    )
+    .unwrap();
+}
+
+/// A board where every ticket carries exactly one `type`.
+fn typed() -> Options {
+    let Value::Object(options) = json!({ "labels": {
+        "type": { "description": "The type", "values": ["bug", "feature"], "min": 1, "max": 1 },
+        "client": { "description": "The client.", "values": ["cli"] }
+    } }) else {
+        unreachable!("options are an object");
+    };
+
+    Options::read(&options).unwrap()
+}
+
+/// A ticket filed without a label the board requires is refused, naming the key
+/// and the values to choose from, and nothing is written.
+#[test]
+fn adding_a_ticket_without_a_required_label_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    let add = |labels: &[&str]| {
+        run_with_options(
+            dir.path(),
+            Command::Add {
+                title: Some("Header misaligned".to_owned()),
+                author: Some("john".to_owned()),
+                body: None,
+                labels: labels.iter().map(|label| (*label).to_owned()).collect(),
+            },
+            &typed(),
+        )
+    };
+
+    assert_eq!(
+        add(&["client=cli"]).unwrap_err(),
+        "`type` label missing: add one of type=bug, type=feature."
+    );
+    assert!(store::list(dir.path()).unwrap().is_empty());
+
+    add(&["client=cli", "type=bug"]).unwrap();
+    assert_eq!(store::list(dir.path()).unwrap().len(), 1);
+}
+
+/// Composing a ticket the board would refuse would throw away what the user
+/// typed, so the labels are checked before the composer opens.
+#[test]
+fn the_labels_are_checked_before_the_composer_opens() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let error = compose_missing(
+        dir.path(),
+        &typed(),
+        Command::Add {
+            title: None,
+            author: None,
+            body: None,
+            labels: vec![],
+        },
+        &mut &b""[..],
+        &mut Vec::new(),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        "`type` label missing: add one of type=bug, type=feature."
+    );
+}
+
+/// Removing the required key is refused, and the ticket keeps the labels it
+/// had.
+#[test]
+fn removing_a_required_label_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    run_with_options(
+        dir.path(),
+        Command::Add {
+            title: Some("Header misaligned".to_owned()),
+            author: Some("john".to_owned()),
+            body: None,
+            labels: vec!["type=bug".to_owned()],
+        },
+        &typed(),
+    )
+    .unwrap();
+    let id = store::list(dir.path()).unwrap()[0].id;
+
+    let error = run_with_options(
+        dir.path(),
+        label_on(&[id], LabelVerb::Rm {
+            labels: owned(&["type"]),
+        }),
+        &typed(),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        "`type` label missing: add one of type=bug, type=feature."
+    );
+    let ticket = store::list(dir.path()).unwrap().remove(0).ticket.unwrap();
+    assert_eq!(ticket.metadata.labels.to_tokens(), ["type=bug"]);
+}
+
+/// An issue imported for the first time needs the labels the board requires,
+/// and is refused before anything is fetched from GitHub.
+#[test]
+fn importing_a_new_issue_without_required_labels_fetches_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let error = import_all(dir.path(), &typed(), &[123], "dcdpr/jp", &[]).unwrap_err();
+
+    assert_eq!(
+        error,
+        "`type` label missing: add one of type=bug, type=feature."
+    );
+}
+
+/// A board whose `rfd` key takes any value, held to one ticket per value, and
+/// whose `focus` sits on one ticket.
+fn unique_board() -> Options {
+    let Value::Object(options) = json!({ "labels": {
+        "rfd": { "description": "The RFD it tracks.", "values": [], "unique": "key-value" },
+        "focus": { "description": "Being worked on now.", "unique": "key" }
+    } }) else {
+        unreachable!("options are an object");
+    };
+
+    Options::read(&options).unwrap()
+}
+
+/// File a ticket on [`unique_board`].
+fn add_unique(dir: &Utf8TempDir, title: &str, labels: &[&str]) -> Result<Output, String> {
+    run_with_options(
+        dir.path(),
+        Command::Add {
+            title: Some(title.to_owned()),
+            author: Some("john".to_owned()),
+            body: None,
+            labels: labels.iter().map(|label| (*label).to_owned()).collect(),
+        },
+        &unique_board(),
+    )
+}
+
+/// A label the board lets one ticket carry is refused on a second one, naming
+/// the ticket that holds it; a key taking any value takes a fresh one.
+#[test]
+fn adding_a_label_another_ticket_holds_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    add_unique(&dir, "Tracks 116", &["rfd=116"]).unwrap();
+    let holder = store::list(dir.path()).unwrap()[0].id;
+
+    assert_eq!(
+        add_unique(&dir, "Also 116", &["rfd=116"]).unwrap_err(),
+        format!(
+            "`rfd=116` is already on {holder}, and the board lets one ticket carry each `rfd` \
+             value."
+        )
+    );
+
+    add_unique(&dir, "Tracks 117", &["rfd=117"]).unwrap();
+    assert_eq!(store::list(dir.path()).unwrap().len(), 2);
+}
+
+/// A label another ticket holds is refused before the composer opens, so it
+/// costs the user nothing they typed.
+#[test]
+fn a_taken_label_is_refused_before_the_composer_opens() {
+    let dir = Utf8TempDir::new().unwrap();
+    add_unique(&dir, "Tracks 116", &["rfd=116"]).unwrap();
+    let holder = store::list(dir.path()).unwrap()[0].id;
+    let mut sent = Vec::new();
+
+    let error = compose_missing(
+        dir.path(),
+        &unique_board(),
+        Command::Add {
+            title: None,
+            author: None,
+            body: None,
+            labels: vec!["rfd=116".to_owned()],
+        },
+        &mut &b""[..],
+        &mut sent,
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        format!(
+            "`rfd=116` is already on {holder}, and the board lets one ticket carry each `rfd` \
+             value."
+        )
+    );
+    assert!(sent.is_empty(), "the composer was asked for");
+}
+
+/// Adding what another ticket holds is refused too, and a ticket keeps a unique
+/// label it already carries.
+#[test]
+fn relabelling_onto_a_label_another_ticket_holds_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    add_unique(&dir, "Focused", &["focus"]).unwrap();
+    add_unique(&dir, "Waiting", &[]).unwrap();
+    let [focused, waiting] = store::list(dir.path())
+        .unwrap()
+        .iter()
+        .map(|entry| entry.id)
+        .collect::<Vec<_>>()[..]
+    else {
+        panic!("expected two tickets");
+    };
+    let add = |id, labels: &[&str]| {
+        run_with_options(
+            dir.path(),
+            label_on(&[id], LabelVerb::Add {
+                labels: owned(labels),
+            }),
+            &unique_board(),
+        )
+    };
+
+    assert_eq!(
+        add(waiting, &["focus"]).unwrap_err(),
+        format!("`focus` is already on {focused}, and the board lets one ticket carry it.")
+    );
+    add(focused, &["rfd=116"]).unwrap();
+}
+
+/// Two tickets labelled together can't both take a label the board lets one
+/// ticket carry, though neither carries it yet.
+#[test]
+fn labelling_two_tickets_with_one_unique_label_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    add_unique(&dir, "First", &[]).unwrap();
+    add_unique(&dir, "Second", &[]).unwrap();
+    let [first, second] = store::list(dir.path())
+        .unwrap()
+        .iter()
+        .map(|entry| entry.id)
+        .collect::<Vec<_>>()[..]
+    else {
+        panic!("expected two tickets");
+    };
+
+    let error = run_with_options(
+        dir.path(),
+        label_on(&[first, second], LabelVerb::Add {
+            labels: owned(&["rfd=116"]),
+        }),
+        &unique_board(),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        format!(
+            "{first}: `rfd=116` would also go on {second}, and the board lets one ticket carry \
+             each `rfd` value."
+        )
+    );
+    assert!(labels_of(&dir, first).is_empty());
+}
+
+/// `jp ticket labels` shows a key taking any value, and which keys one ticket
+/// holds on its own.
+#[test]
+fn the_label_listing_names_open_and_unique_keys() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let out = run_with_options(dir.path(), Command::Labels, &unique_board()).unwrap();
+
+    assert_eq!(
+        out.text,
+        "focus  Being worked on now. (on one ticket only)\n\nrfd  The RFD it tracks. (each value \
+         on one ticket only)\n  rfd=<any value>\n\n"
+    );
+}
+
+/// `jp ticket labels` says how many of a bounded key a ticket carries.
+#[test]
+fn the_label_listing_names_each_bound() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let out = run_with_options(dir.path(), Command::Labels, &typed()).unwrap();
+
+    assert_eq!(
+        out.text,
+        "client  The client.\n  client=cli\n\ntype  The type (exactly one label per ticket)\n  \
+         type=bug\n  type=feature\n\n"
+    );
+}
+
+/// An unreadable ticket is a warning, not mixed into stdout where it would
+/// corrupt `jp -F json`.
 #[test]
 fn unreadable_tickets_are_warned_about_separately() {
     let dir = Utf8TempDir::new().unwrap();
     run_command(&dir, Command::Add {
-        kind: Some(Kind::Chore),
         title: Some("Readable".to_owned()),
         author: Some("john".to_owned()),
         body: None,
-        implements: None,
         labels: vec![],
     })
     .unwrap();
     std::fs::write(dir.path().join("zzzzzzz-mangled.md"), "no heading here\n").unwrap();
 
-    let listed = run_command(&dir, Command::List {
+    let listed = run_json(&dir, Command::List {
         status: None,
-        kind: None,
         labels: vec![],
-        json: true,
+        query: None,
     })
     .unwrap();
 
@@ -1438,4 +2769,59 @@ fn unreadable_tickets_are_warned_about_separately() {
     assert_eq!(rows.len(), 1);
     assert_eq!(listed.warnings.len(), 1);
     assert!(listed.warnings[0].contains("zzzzzzz-mangled.md"));
+}
+
+/// `jp -F json` reaches the plugin as the output format, and the listing is one
+/// JSON value the host prints as a record of its own.
+#[test]
+fn a_json_output_format_prints_the_listing_as_json() {
+    let root = Utf8TempDir::new().unwrap();
+    let mut message = init_message(jp_plugin::PROTOCOL_VERSION, root.path(), &["list"]);
+    message.output_format = OutputFormat::Json;
+
+    let messages = exchange(&HostToPlugin::Init(Box::new(message)));
+
+    let prints: Vec<&PrintMessage> = messages
+        .iter()
+        .filter_map(|message| match message {
+            PluginToHost::Print(print) => Some(print),
+            _ => None,
+        })
+        .collect();
+    let [print] = prints[..] else {
+        panic!("expected one print: {messages:?}");
+    };
+    assert_eq!(print.format, "json");
+    assert_eq!(print.text, "[]\n");
+}
+
+/// A warning names something to check now, so it is printed on stderr rather
+/// than logged, where only `-v` would show it.
+#[test]
+fn warnings_are_printed_on_stderr() {
+    let root = Utf8TempDir::new().unwrap();
+    let dir = root.path().join("docs/ticket");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("zzzzzzz-mangled.md"), "no heading here\n").unwrap();
+
+    let messages = exchange(&init(root.path(), &["list"]));
+
+    let stderr: Vec<&str> = messages
+        .iter()
+        .filter_map(|message| match message {
+            PluginToHost::Print(print) if print.channel == "chrome" => Some(print.text.as_str()),
+            _ => None,
+        })
+        .collect();
+    let [warning] = stderr[..] else {
+        panic!("expected one warning: {messages:?}");
+    };
+    assert!(warning.starts_with("Warning: "), "{warning}");
+    assert!(warning.contains("zzzzzzz-mangled.md"), "{warning}");
+    assert!(
+        !messages
+            .iter()
+            .any(|message| matches!(message, PluginToHost::Log(_))),
+        "{messages:?}"
+    );
 }

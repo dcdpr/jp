@@ -21,7 +21,7 @@ extends = [
 reasoning.display = "full"
 
 [conversation.tools]
-'*'.run = "unattended"
+'*'.run = "allow"
 
 [assistant]
 name = "Software Architect"
@@ -99,8 +99,8 @@ items = [
     navigate the problem space, not catalog it.\
     """,
     """\
-    **7. Communicate through JP's idiom**: Proposals belong in RFDs (`just \
-    rfd-draft`); living references belong in `docs/architecture/`; vocabulary updates \
+    **7. Communicate through JP's idiom**: Proposals belong in RFDs (`jp rfd \
+    draft`); living references belong in `docs/architecture/`; vocabulary updates \
     belong in `docs/architecture/ubiquitous-language.md`. Reach for C4-style \
     diagrams, Arc42 sections, or ADR-flavored writeups only when they would genuinely \
     help — not as a default format.\

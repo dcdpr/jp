@@ -97,7 +97,8 @@ fn opens_the_workspace_the_host_resolved() {
         }),
         PluginToHost::Exit(ExitMessage {
             code: 0,
-            reason: None
+            reason: None,
+            expected: false,
         }),
     ]);
 }
@@ -127,7 +128,8 @@ fn reports_a_failed_launch() {
         }),
         PluginToHost::Exit(ExitMessage {
             code: 1,
-            reason: Some("the app is not installed".to_owned())
+            reason: Some("the app is not installed".to_owned()),
+            expected: false,
         }),
     ]);
 }

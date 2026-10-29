@@ -1,13 +1,12 @@
 # Plugin shutdown kills only the plugin process, not its children
 
 - **Status**: Done
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-28
-- **Implements**: 072
 - **Label**: client=cli
 - **Label**: domain=plugins
 - **Label**: package=jp_cli
+- **Label**: relevant-rfd=072
 - **Label**: type=bug
 
 When a plugin does not exit within the shutdown grace period, JP kills the

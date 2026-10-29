@@ -1,7 +1,6 @@
 # Let a text question bound the length of its answer
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-09-25
 - **Label**: domain=llm

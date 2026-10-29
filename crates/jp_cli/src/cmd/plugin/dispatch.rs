@@ -28,7 +28,7 @@ use jp_config::{
     util::{build, list_configs_in_load_path},
 };
 use jp_conversation::{ConversationId, ConversationStream, EventId, event::ChatRequest};
-use jp_editor::{EditOutcome, EditorBackend};
+use jp_editor::{EditOutcome, EditRequest, EditorBackend};
 use jp_inquire::{
     ReplyEditMode, ReplyOutcome,
     prompt::{PromptBackend, TerminalPromptBackend},
@@ -39,10 +39,11 @@ use jp_plugin::{
     message::{
         ComposeMode, ComposeOption, ComposeRequest, ComposeResponse, ConfigEntry, ConfigResponse,
         ConfigsResponse, ConversationSummary, ConversationsResponse, CreatedResponse,
-        DescribeResponse, DoneResponse, DraftResponse, ErrorResponse, EventsResponse, HostToPlugin,
-        InitMessage, InterruptAction as WireAction, InterruptRequest, LockState, LogMessage,
-        OutputFormat as PluginOutputFormat, PathsInfo, PluginToHost, QueryCompleteResponse,
-        QueryRequest, SetTitleRequest, WorkspaceInfo, WriteDraftRequest,
+        DescribeResponse, DoneResponse, DraftResponse, EditFilesRequest, EditedResponse,
+        ErrorResponse, EventsResponse, HostToPlugin, InitMessage, InterruptAction as WireAction,
+        InterruptRequest, LockState, LogMessage, OutputFormat as PluginOutputFormat, PathsInfo,
+        PluginToHost, QueryCompleteResponse, QueryRequest, SetTitleRequest, WorkspaceInfo,
+        WriteDraftRequest,
     },
     registry::{Registry, RegistryPlugin},
 };
@@ -192,6 +193,45 @@ impl Composer {
 
                 options.get(chosen.index).map(|o| o.value.clone())
             }
+        }
+    }
+
+    /// Open the files a plugin names in the user's editor, and answer once it
+    /// exits.
+    ///
+    /// Refused without a terminal, since an editor nobody closes blocks the
+    /// plugin forever, and without a configured editor.
+    /// Paths have to be absolute: the plugin and the editor need not share a
+    /// working directory.
+    fn edit_files(&self, request: &EditFilesRequest) -> HostToPlugin {
+        let failed = |message: String| action_failed(request.id.clone(), "edit_files", message);
+
+        if !self.interactive {
+            return failed("there is no terminal to open an editor on".to_owned());
+        }
+        let Some(editor) = &self.editor else {
+            return failed(
+                "no editor is configured: set `editor.cmd`, or one of the `JP_EDITOR`, `VISUAL`, \
+                 or `EDITOR` variables"
+                    .to_owned(),
+            );
+        };
+        if request.paths.is_empty() {
+            return failed("no files to open".to_owned());
+        }
+        if let Some(path) = request.paths.iter().find(|path| path.is_relative()) {
+            return failed(format!("`{path}` is not an absolute path"));
+        }
+
+        match editor.edit_file(EditRequest {
+            paths: &request.paths,
+            cwd: None,
+        }) {
+            Ok(outcome) => HostToPlugin::Edited(EditedResponse {
+                id: request.id.clone(),
+                saved: outcome == EditOutcome::Saved,
+            }),
+            Err(error) => failed(format!("failed to run the editor: {}", error_chain(&error))),
         }
     }
 
@@ -765,16 +805,17 @@ async fn message_loop(
 
         trace!(?msg, "Received plugin message.");
 
-        // Both of these block for as long as a person or a provider takes, so
-        // they run before the lock is taken: the shutdown thread needs that same
+        // These block for as long as a person or a provider takes, so they
+        // run before the lock is taken: the shutdown thread needs that same
         // lock to deliver `Shutdown` if the user interrupts partway.
         match msg {
             PluginToHost::Compose(request) => {
-                let response = composer.compose(&request);
-                let mut writer = stdin.lock().expect("stdin lock poisoned");
-                write_message(&mut *writer, &HostToPlugin::Composed(response)).map_err(|e| {
-                    cmd::Error::from(format!("failed to answer a compose request: {e}"))
-                })?;
+                let response = HostToPlugin::Composed(composer.compose(&request));
+                answer(stdin, &response, "a compose request")?;
+            }
+
+            PluginToHost::EditFiles(request) => {
+                answer(stdin, &composer.edit_files(&request), "an edit request")?;
             }
 
             PluginToHost::Query(request) => {
@@ -869,6 +910,17 @@ async fn message_loop(
         1u8,
         "plugin exited unexpectedly without sending exit message",
     )))
+}
+
+/// Write one answer to the plugin; `what` names the request it answers.
+fn answer(
+    stdin: &Mutex<ChildStdin>,
+    response: &HostToPlugin,
+    what: &str,
+) -> Result<(), cmd::Error> {
+    let mut writer = stdin.lock().expect("stdin lock poisoned");
+    write_message(&mut *writer, response)
+        .map_err(|e| cmd::Error::from(format!("failed to answer {what}: {e}")))
 }
 
 /// Run a turn on the plugin's behalf.
@@ -1834,6 +1886,7 @@ fn handle_request(
 
         // Answered by the caller, before the lock this runs under is taken.
         PluginToHost::Compose(_)
+        | PluginToHost::EditFiles(_)
         | PluginToHost::Query(_)
         | PluginToHost::Interrupt(_)
         | PluginToHost::Print(_) => {
@@ -1841,14 +1894,20 @@ fn handle_request(
         }
 
         PluginToHost::Exit(exit) => {
-            debug!(code = exit.code, "Plugin exited.");
-            if exit.code != 0 {
-                return match exit.reason {
-                    Some(reason) => Err(cmd::Error::from((exit.code, reason))),
-                    None => Err(cmd::Error::from(exit.code)),
-                };
+            debug!(code = exit.code, expected = exit.expected, "Plugin exited.");
+            if exit.code == 0 {
+                return Ok(Flow::Stop);
             }
-            return Ok(Flow::Stop);
+
+            let error = match exit.reason {
+                Some(reason) => cmd::Error::from((exit.code, reason)),
+                None => cmd::Error::from(exit.code),
+            };
+            return Err(if exit.expected {
+                error.expected()
+            } else {
+                error
+            });
         }
     }
 

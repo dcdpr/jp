@@ -1,6 +1,6 @@
 [conversation.tools.rust_crate_readme]
 enable = false
-run = "unattended"
+run = "allow"
 
 source = "mcp.bookworm.crate_readme"
 summary = "Get a crate's README as markdown."

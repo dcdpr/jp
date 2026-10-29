@@ -1,0 +1,47 @@
+[conversation.tools.rfd_draft]
+source = "plugin.command.rfd.draft"
+summary = "Create an RFD draft from its category's template."
+description = """
+Writes the draft into the drafts directory under the first free draft id (`D01`
+to `D99`), named after its title, with the author and today's date filled in.
+The draft carries the template's sections for you to write.
+
+With `ticket`, the draft is seeded from that ticket: its title, unless `title`
+is given too, and its description as the draft's summary. The ticket then
+records the draft it became and is closed. Running it again for the same
+ticket reports the draft rather than writing a second one.
+"""
+
+examples = """
+A new design draft:
+```json
+{"category": "design", "title": "Tool Output Limits"}
+```
+
+A draft seeded from a ticket:
+```json
+{"category": "design", "ticket": "T-02wt0kx"}
+```
+"""
+
+run = "ask"
+
+[conversation.tools.rfd_draft.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.rfd_draft.parameters.category]
+type = "string"
+required = true
+summary = "The kind of document, which picks the template."
+
+[conversation.tools.rfd_draft.parameters.title]
+type = "string"
+required = false
+summary = "The title, which also names the file. Required unless `ticket` is given."
+
+[conversation.tools.rfd_draft.parameters.ticket]
+type = "string"
+required = false
+summary = "A ticket to seed the draft from, such as `T-02wt0kx`."

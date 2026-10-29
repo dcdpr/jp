@@ -1464,7 +1464,7 @@ review-file *ARGS:
 # or quit.
 [group('rfd')]
 [positional-arguments]
-rfd-review NNN *ARGS: _install-jp
+rfd-review NNN *ARGS: _install-jp _install-rfd
     #!/usr/bin/env sh
     set -eu
 
@@ -1475,9 +1475,9 @@ rfd-review NNN *ARGS: _install-jp
     RFDs are aspirational, but not necessarily final, so any inconsistencies \
     against those should be noted, but not blockers."
 
-    out=$(just _rfd-resolve "{{NNN}}") || exit 1
-    rfd_id="${out%% *}"
-    file="${out#* }"
+    info=$(jp -F json rfd show {{quote(NNN)}}) || exit 1
+    rfd_id=$(echo "$info" | jq -r '.num')
+    file=$(echo "$info" | jq -r '.file')
 
     title="rfd-review:${rfd_id}"
 
@@ -1556,7 +1556,7 @@ rfd-review NNN *ARGS: _install-jp
 # Accepts a permanent number (41, 041) or a draft ID (D01).
 [group('rfd')]
 [positional-arguments]
-rfd-triage NNN *ARGS: _install-jp
+rfd-triage NNN *ARGS: _install-jp _install-rfd
     #!/usr/bin/env sh
     set -eu
 
@@ -1568,9 +1568,9 @@ rfd-triage NNN *ARGS: _install-jp
     accepted or amended items describe the concrete change you would make to \
     the RFD. Do NOT edit the RFD yet; give your opinion first."
 
-    out=$(just _rfd-resolve "{{NNN}}") || exit 1
-    rfd_id="${out%% *}"
-    file="${out#* }"
+    info=$(jp -F json rfd show {{quote(NNN)}}) || exit 1
+    rfd_id=$(echo "$info" | jq -r '.num')
+    file=$(echo "$info" | jq -r '.file')
 
     # The triage step needs the sibling review conversation to exist.
     review_id=$(jp -F json conversation ls 2>/dev/null \
@@ -1656,7 +1656,7 @@ rfd-triage NNN *ARGS: _install-jp
 # `rfd/<id>/implement` and attaches them.
 [group('rfd')]
 [positional-arguments]
-rfd-implement NNN *ARGS: _install-jp
+rfd-implement NNN *ARGS: _install-jp _install-rfd
     #!/usr/bin/env sh
     set -eu
 
@@ -1671,14 +1671,12 @@ rfd-implement NNN *ARGS: _install-jp
     problem instead of resolving it yourself. End the turn with the final \
     report exactly as your instructions describe."
 
-    out=$(just _rfd-resolve "{{NNN}}") || exit 1
-    rfd_id="${out%% *}"
-    file="${out#* }"
+    info=$(jp -F json rfd show {{quote(NNN)}}) || exit 1
+    rfd_id=$(echo "$info" | jq -r '.num')
+    file=$(echo "$info" | jq -r '.file')
 
     # Status gate: only Accepted or Implemented RFDs are valid targets.
-    # Drafts pass `_rfd-resolve` and get a meaningful "is 'Draft'" error
-    # here instead of "file not found".
-    status=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
+    status=$(echo "$info" | jq -r '.status // empty')
     case "$status" in
         Accepted|Implemented) ;;
         *)
@@ -1729,668 +1727,33 @@ rfd-implement NNN *ARGS: _install-jp
             $args
     fi
 
-# Create a new RFD draft. CATEGORY is 'design', 'decision', 'guide', or 'process'.
-# Drafts are created as docs/rfd/drafts/DNN-slug.md; a permanent number is assigned
-# and the file is moved up to docs/rfd/ at Discussion.
-[group('rfd')]
-rfd-draft CATEGORY +TITLE:
-    #!/usr/bin/env sh
-    set -eu
-
-    category="{{CATEGORY}}"
-
-    # Validate the category and resolve the template.
-    case "$category" in
-        design)   template="design"  ;;
-        decision) template="decision" ;;
-        guide)    template="guide"   ;;
-        process)  template="process" ;;
-        *) echo "Unknown category '$category'. Use 'design', 'decision', 'guide', or 'process'." >&2; exit 1 ;;
-    esac
-
-    # Find the first available draft number (D01–D99).
-    draft_id=$(just _rfd-next-draft-slot) || exit 1
-
-    author=$(just _git-author)
-
-    # Capitalize the category for the metadata header.
-    cap_category=$(echo "$category" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
-
-    # Build the filename slug from the title.
-    slug=$(echo "{{TITLE}}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9_-')
-    file="docs/rfd/drafts/${draft_id}-${slug}.md"
-    mkdir -p "$(dirname "$file")"
-
-    # Copy the template and fill in metadata.
-    sed \
-        -e "s/RFD NNN: TITLE/RFD ${draft_id}: {{TITLE}}/" \
-        -e "s/^- \*\*Category\*\*: .*/- **Category**: ${cap_category}/" \
-        -e "s/AUTHOR/${author}/" \
-        -e "s/DATE/$(date +%Y-%m-%d)/" \
-        "docs/rfd/000-${template}-template.md" > "$file"
-
-    echo "Created $file"
-
-# Supersede RFD NNN with RFD MMM, updating both documents.
-[group('rfd')]
-rfd-supersede NNN MMM:
-    #!/usr/bin/env sh
-    set -eu
-
-    old_n=$(echo "{{NNN}}" | sed 's/^0*//')
-    old_num=$(printf "%03d" "${old_n:-0}")
-    new_n=$(echo "{{MMM}}" | sed 's/^0*//')
-    new_num=$(printf "%03d" "${new_n:-0}")
-    old_file=$(ls docs/rfd/${old_num}-*.md 2>/dev/null | head -1)
-    new_file=$(ls docs/rfd/${new_num}-*.md 2>/dev/null | head -1)
-    if [ -z "$old_file" ]; then
-        echo "No RFD found with number ${old_num}." >&2; exit 1
-    fi
-    if [ -z "$new_file" ]; then
-        echo "No RFD found with number ${new_num}." >&2; exit 1
-    fi
-
-    # Validate the old RFD can be superseded.
-    current=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$old_file" | head -1)
-    case "$current" in
-        Accepted|Implemented) ;;
-        *)
-            echo "Cannot supersede from '${current}'." >&2
-            echo "Only Accepted or Implemented RFDs can be superseded." >&2
-            exit 1 ;;
-    esac
-
-    # Resolve basenames for relative markdown links.
-    new_basename=$(basename "$new_file")
-    old_basename=$(basename "$old_file")
-
-    # Update old RFD: status -> Superseded, add/update "Superseded by" link.
-    awk -v new="RFD ${new_num}" -v new_file="${new_basename}" '
-        /^- \*\*Status\*\*:/ { print "- **Status**: Superseded"; next }
-        /^- \*\*Superseded by\*\*:/ { next }
-        /^- \*\*Date\*\*:/ { print; print "- **Superseded by**: [" new "](" new_file ")"; next }
-        { print }
-    ' "$old_file" > "${old_file}.tmp"
-    mv "${old_file}.tmp" "$old_file"
-
-    # Update new RFD: add/update "Supersedes" link.
-    awk -v old="RFD ${old_num}" -v old_file="${old_basename}" '
-        /^- \*\*Supersedes\*\*:/ { next }
-        /^- \*\*Date\*\*:/ { print; print "- **Supersedes**: [" old "](" old_file ")"; next }
-        { print }
-    ' "$new_file" > "${new_file}.tmp"
-    mv "${new_file}.tmp" "$new_file"
-
-    # The superseded RFD is no longer work to prioritise; the replacement
-    # carries it. Whether MMM belongs on the board is a call for whoever
-    # reorders it, so only the old id is dropped.
-    just _rfd-priority-remove "$old_num"
-
-    echo "${old_file}: Superseded by RFD ${new_num}"
-    echo "${new_file}: Supersedes RFD ${old_num}"
-
-    # Remind the user to close the old tracking issue if one exists.
-    old_tracking=$(sed -n 's/^- \*\*Tracking Issue\*\*: \[#\([0-9]*\)\].*/\1/p' "$old_file" | head -1)
-    if [ -n "$old_tracking" ]; then
-        echo "Remember to close the superseded tracking issue: https://github.com/dcdpr/jp/issues/${old_tracking}"
-    fi
-
-# Record that RFD MMM extends RFD NNN, updating both documents.
-#
-# Both NNN and MMM may be permanent numbers (e.g. 042) or draft IDs (e.g. D05).
-# Bidirectional metadata is maintained per the draft policy: a published RFD
-# never receives a `Extended by: RFD D«nn»` back-link from a draft (would
-# violate the no-link-from-published-to-draft rule).
-[group('rfd')]
-rfd-extend NNN MMM:
-    #!/usr/bin/env sh
-    set -eu
-
-    # Validate that the extended RFD (NNN, the older) is not Abandoned or
-    # Superseded — extending a withdrawn or replaced design is almost certainly
-    # a mistake.
-    nnn_file=$(ls docs/rfd/{{NNN}}-*.md docs/rfd/drafts/{{NNN}}-*.md 2>/dev/null | head -1)
-    if [ -z "$nnn_file" ]; then
-        # `_rfd-link` will produce a clearer error; let it handle the
-        # not-found case.
-        :
-    else
-        nnn_status=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$nnn_file" | head -1)
-        case "$nnn_status" in
-            Draft|Discussion|Accepted|Implemented) ;;
-            *)
-                echo "Cannot extend RFD {{NNN}} (status: '${nnn_status}')." >&2
-                echo "Abandoned and Superseded RFDs cannot be extended." >&2
-                exit 1 ;;
-        esac
-    fi
-
-    # Delegate to the shared bidirectional-link helper.
-    # rfd-extend NNN MMM means "MMM extends NNN":
-    #   MMM (source) gets `Extends: NNN`.
-    #   NNN (target) gets `Extended by: MMM` (per the draft-aware matrix).
-    just _rfd-link "{{MMM}}" "{{NNN}}" "Extends" "Extended by"
-
-# Record that RFD NNN requires RFD MMM, updating both documents.
-#
-# Both NNN and MMM may be permanent numbers (e.g. 042) or draft IDs (e.g. D05).
-# Bidirectional metadata is maintained per the draft policy: a published RFD
-# never receives a `Required by: RFD D«nn»` back-link from a draft.
-#
-# `Requires` participates in the promotion gate enforced by `rfd-promote`:
-# Discussion → Accepted requires every dependency to be Accepted, Implemented
-# or Superseded; Accepted → Implemented requires every dependency to be
-# Implemented or Superseded.
-[group('rfd')]
-rfd-require NNN MMM:
-    #!/usr/bin/env sh
-    set -eu
-
-    # Delegate to the shared bidirectional-link helper.
-    # rfd-require NNN MMM means "NNN requires MMM":
-    #   NNN (source) gets `Requires: MMM`.
-    #   MMM (target) gets `Required by: NNN` (per the draft-aware matrix).
-    just _rfd-link "{{NNN}}" "{{MMM}}" "Requires" "Required by"
-
-# Internal: write a bidirectional relationship between two RFDs.
-#
-# SOURCE gets `FORWARD: TARGET` in its metadata.
-# TARGET gets `INVERSE: SOURCE` — except when SOURCE is a draft and TARGET is a
-# non-draft (rule 2 of the draft-aware matrix: published RFDs never link to
-# drafts).
-#
-# Refused: SOURCE non-draft + TARGET draft (would create a draft link from a
-# published RFD).
-#
-# Cycles in the FORWARD field are detected by walking TARGET's transitive
-# FORWARD chain and refusing if SOURCE appears anywhere in it.
-[no-exit-message]
-[private]
-_rfd-link SOURCE TARGET FORWARD INVERSE:
-    #!/usr/bin/env sh
-    set -eu
-
-    # --- Helpers ---
-
-    # Resolve an RFD id ("D05" or "42" or "042") to its file path.
-    resolve_file() {
-        if echo "$1" | grep -qE '^D[0-9]+$'; then
-            ls "docs/rfd/drafts/$1-"*.md 2>/dev/null | head -1
-        else
-            n=$(echo "$1" | sed 's/^0*//')
-            num=$(printf "%03d" "${n:-0}")
-            ls "docs/rfd/${num}-"*.md 2>/dev/null | head -1
-        fi
-    }
-
-    # Canonicalize an id to display form ("D05" stays "D05"; "42"/"042" become "042").
-    display_id() {
-        if echo "$1" | grep -qE '^D[0-9]+$'; then
-            echo "$1"
-        else
-            n=$(echo "$1" | sed 's/^0*//')
-            printf "%03d\n" "${n:-0}"
-        fi
-    }
-
-    is_draft() {
-        echo "$1" | grep -qE '^D[0-9]+$'
-    }
-
-    # Compute relative path from $1 (a file) to $2 (a file).
-    relative_link() {
-        from_dir=$(dirname "$1")
-        to_dir=$(dirname "$2")
-        to_base=$(basename "$2")
-        if [ "$from_dir" = "$to_dir" ]; then
-            echo "$to_base"
-        elif [ "$from_dir" = "docs/rfd/drafts" ] && [ "$to_dir" = "docs/rfd" ]; then
-            echo "../$to_base"
-        elif [ "$from_dir" = "docs/rfd" ] && [ "$to_dir" = "docs/rfd/drafts" ]; then
-            echo "drafts/$to_base"
-        else
-            echo "$to_base"
-        fi
-    }
-
-    # Add a `- **FIELD**: LINK` entry to FILE for an entry referring to ID.
-    # Skips if the entry is already present (idempotent).
-    # Returns 0 if added, 1 if skipped.
-    #
-    # All operations are scoped to the metadata header (lines before the first
-    # `## ` heading). RFDs may include metadata-shaped examples inside code
-    # blocks (RFD 001 in particular), and we must not read or write against
-    # those.
-    add_link() {
-        f="$1"; field="$2"; link="$3"; id="$4"
-
-        first_heading=$(grep -n '^## ' "$f" | head -1 | cut -d: -f1)
-        header_end="${first_heading:-9999}"
-
-        existing=$(head -n "$header_end" "$f" | sed -n "s/^- \\*\\*${field}\\*\\*: //p" | head -1)
-        if echo "$existing" | grep -qE "RFD ${id}([^0-9]|\$)"; then
-            return 1
-        fi
-
-        if [ -n "$existing" ]; then
-            # Append to the existing header line, scoped to the header range.
-            sed "1,${header_end}s|^- \\*\\*${field}\\*\\*: .*|&, ${link}|" "$f" > "$f.tmp"
-            mv "$f.tmp" "$f"
-        else
-            # Insert after the metadata block's last line, which is not the
-            # same as its last `- **` line: a value long enough to wrap
-            # continues on indented lines, and splicing between them would
-            # strand the remainder as prose. The block runs from its first
-            # entry to the blank line that closes it, and `Summary` keeps the
-            # bottom of it.
-            last_meta=$(head -n "$header_end" "$f" | awk '
-                !start && /^- \*\*/ { start = NR; next }
-                start && /^- \*\*Summary\*\*:/ { print NR - 1; found = 1; exit }
-                start && /^[[:space:]]*$/ { print NR - 1; found = 1; exit }
-                END { if (!found && start) print NR }
-            ')
-            awk -v ln="$last_meta" -v entry="- **${field}**: ${link}" '
-                NR == ln { print; print entry; next }
-                { print }
-            ' "$f" > "$f.tmp"
-            mv "$f.tmp" "$f"
-        fi
-        return 0
-    }
-
-    # --- Resolve source and target ---
-
-    src_id=$(display_id "{{SOURCE}}")
-    tgt_id=$(display_id "{{TARGET}}")
-    src_file=$(resolve_file "{{SOURCE}}")
-    tgt_file=$(resolve_file "{{TARGET}}")
-
-    if [ -z "$src_file" ]; then
-        echo "RFD not found: {{SOURCE}}" >&2; exit 1
-    fi
-    if [ -z "$tgt_file" ]; then
-        echo "RFD not found: {{TARGET}}" >&2; exit 1
-    fi
-
-    # --- Refuse non-draft source → draft target (rule 2 of the matrix) ---
-
-    if ! is_draft "$src_id" && is_draft "$tgt_id"; then
-        echo "Refused: published RFD ${src_id} cannot link to draft RFD ${tgt_id}." >&2
-        echo "Promote ${tgt_id} first, or move the relationship to a draft." >&2
-        exit 1
-    fi
-
-    # --- Refuse duplicate across `Extends` and `Requires` ---
-    #
-    # Extension implies dependency, so the same target must not appear under
-    # both fields. Decide the "other" field to inspect from FORWARD.
-    case "{{FORWARD}}" in
-        Requires) other_forward="Extends" ;;
-        Extends)  other_forward="Requires" ;;
-        *)        other_forward="" ;;
-    esac
-
-    if [ -n "$other_forward" ]; then
-        other_line=$(sed -n "s/^- \\*\\*${other_forward}\\*\\*: //p" "$src_file" | head -1)
-        if echo "$other_line" | grep -qE "RFD ${tgt_id}([^0-9]|\$)"; then
-            echo "Refused: RFD ${src_id} already lists RFD ${tgt_id} under '${other_forward}'." >&2
-            echo "Extension implies dependency; don't list the same target under both. Drop one entry first." >&2
-            exit 1
-        fi
-    fi
-
-    # --- Cycle detection: walk TARGET's transitive `Requires`+`Extends` chain ---
-    #
-    # The two relationships are unified for gating and cycle purposes
-    # (extension is a kind of dependency), so the cycle walk traverses both
-    # fields as a single edge set.
-
-    visited=""
-    frontier="$tgt_id"
-    while [ -n "$frontier" ]; do
-        next_frontier=""
-        for cur in $frontier; do
-            case " $visited " in *" $cur "*) continue ;; esac
-            visited="$visited $cur"
-
-            if [ "$cur" = "$src_id" ]; then
-                echo "Refused: cycle detected. Adding RFD ${src_id} → RFD ${tgt_id} on '{{FORWARD}}' would close a loop in the Requires/Extends graph." >&2
-                exit 1
-            fi
-
-            cur_file=$(resolve_file "$cur")
-            [ -z "$cur_file" ] && continue
-
-            for cyc_field in Requires Extends; do
-                line=$(sed -n "s/^- \\*\\*${cyc_field}\\*\\*: //p" "$cur_file" | head -1)
-                ids=$(echo "$line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}')
-                for id in $ids; do
-                    next_frontier="$next_frontier $id"
-                done
-            done
-        done
-        frontier="$next_frontier"
-    done
-
-    # --- Compute display links and write metadata ---
-
-    fwd_link="[RFD ${tgt_id}]($(relative_link "$src_file" "$tgt_file"))"
-    inv_link="[RFD ${src_id}]($(relative_link "$tgt_file" "$src_file"))"
-
-    # Write FORWARD on source.
-    if add_link "$src_file" "{{FORWARD}}" "$fwd_link" "$tgt_id"; then
-        echo "${src_file}: {{FORWARD}}: RFD ${tgt_id}"
-    else
-        echo "${src_file}: already lists RFD ${tgt_id} under {{FORWARD}}"
-    fi
-
-    # Write INVERSE on target unless rule 3 of the matrix (draft → non-draft).
-    if is_draft "$src_id" && ! is_draft "$tgt_id"; then
-        echo "${tgt_file}: skipped {{INVERSE}}: RFD ${src_id} (suppressed: draft → non-draft)"
-    else
-        if add_link "$tgt_file" "{{INVERSE}}" "$inv_link" "$src_id"; then
-            echo "${tgt_file}: {{INVERSE}}: RFD ${src_id}"
-        else
-            echo "${tgt_file}: already lists RFD ${src_id} under {{INVERSE}}"
-        fi
-    fi
-
 # Advance an RFD's status: Draft -> Discussion -> Accepted -> Implemented.
 #
-# For drafts (DNN-prefixed files), assigns the next available permanent number
-# and renames the file. When promoting to Accepted, offers to file the RFD's
-# tracking ticket (prompting on TTY, defaulting to yes in non-interactive runs);
-# see `rfd-track`.
-#
-# Renaming a draft rewrites references to its old id across every RFD and every
-# ticket under `docs/ticket/`. Ticket link targets move from
-# `../rfd/drafts/DNN-slug.md` to `../rfd/NNN-slug.md`, following the promoted
-# file out of `drafts/`.
+# `jp rfd promote` does the promotion: a draft gets the next permanent number
+# and every reference to its draft id is rewritten, each later step is gated on
+# the RFDs it requires or extends, and an RFD reaching Accepted is offered its
+# tracking ticket. One step of JP's own workflow remains here: publishing a
+# draft archives the review and triage conversations titled after its draft id.
 #
 # Accepts: a permanent number (41, 041) or a draft ID (D01).
 [group('rfd')]
-rfd-promote NNN: _install-jp _install-comfort _install-ticket
+rfd-promote NNN: _install-jp _install-rfd
     #!/usr/bin/env sh
     set -eu
 
-    out=$(just _rfd-resolve "{{NNN}}") || exit 1
-    rfd_id="${out%% *}"
-    file="${out#* }"
+    # The status before the promotion says which step it takes.
+    before=$(jp -F json rfd show {{quote(NNN)}})
+    rfd_id=$(echo "$before" | jq -r '.num')
+    status=$(echo "$before" | jq -r '.status // empty')
 
-    current=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
-    case "$current" in
-        Draft)       next="Discussion" ;;
-        Discussion)  next="Accepted" ;;
-        Accepted)    next="Implemented" ;;
-        *)
-            echo "Cannot promote from '${current}'." >&2
-            echo "Promotable statuses: Draft, Discussion, Accepted." >&2
-            exit 1 ;;
-    esac
+    jp rfd promote "$rfd_id"
 
-    # --- Pre-flight (Draft -> Discussion): refuse if Requires or Extends
-    # contain draft references. The promoted RFD becomes a published file;
-    # published files cannot reference drafts (the loader's DNN check would
-    # fail the next docs build).
-    if [ "$current" = "Draft" ]; then
-        for field in Requires Extends; do
-            line=$(sed -n "s/^- \\*\\*${field}\\*\\*: //p" "$file" | head -1)
-            if echo "$line" | grep -qE 'RFD D[0-9]+'; then
-                echo "Cannot promote: '${field}' on $(basename "$file") contains draft references." >&2
-                echo "  ${line}" >&2
-                echo "Promote those drafts first, or remove the entries." >&2
-                exit 1
-            fi
-        done
-
-        # The docs build also rejects `DNN` tokens anywhere in a published
-        # RFD's body, so refuse while the document references other drafts.
-        # Exempt: this draft's own id (the cross-reference pass below
-        # rewrites it to the permanent number) and the `Required by` /
-        # `Extended by` metadata lines (draft back-links are stripped
-        # automatically further down).
-        stray=$(grep -v -e '^- \*\*Required by\*\*: ' -e '^- \*\*Extended by\*\*: ' "$file" \
-            | grep -oE '(^|[^A-Za-z0-9_])D[0-9][0-9]([^A-Za-z0-9_]|$)' \
-            | grep -oE 'D[0-9][0-9]' | sort -u | grep -v "^${rfd_id}\$" || true)
-        if [ -n "$stray" ]; then
-            echo "Cannot promote: $(basename "$file") references other drafts in its body:" >&2
-            echo "$stray" | sed 's/^/  RFD /' >&2
-            echo "Published RFDs must not reference drafts (the docs build rejects DNN tokens)." >&2
-            echo "Promote those drafts first, or reword the references." >&2
-            exit 1
-        fi
-    fi
-
-    # --- Promotion gate (Discussion -> Accepted, Accepted -> Implemented):
-    # check that all `Requires` dependencies are at a sufficient status.
-    # Discussion -> Accepted requires deps to be Accepted, Implemented, or
-    # Superseded; Accepted -> Implemented requires deps to be Implemented or
-    # Superseded.
-    case "$current" in
-        Discussion) gate_states="Accepted Implemented Superseded" ;;
-        Accepted)   gate_states="Implemented Superseded" ;;
-        *)          gate_states="" ;;
-    esac
-
-    if [ -n "$gate_states" ]; then
-        # Gather deps from `Requires` and `Extends` (unified gate: extension
-        # is a kind of dependency, both participate).
-        deps=""
-        for field in Requires Extends; do
-            line=$(sed -n "s/^- \\*\\*${field}\\*\\*: //p" "$file" | head -1)
-            field_deps=$(echo "$line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}')
-            deps="$deps $field_deps"
-        done
-        deps=$(echo "$deps" | tr ' ' '\n' | awk 'NF' | sort -u)
-
-        if [ -n "$deps" ]; then
-            unmet=""
-            for dep in $deps; do
-                if echo "$dep" | grep -qE '^D[0-9]+$'; then
-                    dep_file=$(ls "docs/rfd/drafts/${dep}-"*.md 2>/dev/null | head -1)
-                else
-                    dep_file=$(ls "docs/rfd/${dep}-"*.md 2>/dev/null | head -1)
-                fi
-                if [ -z "$dep_file" ]; then
-                    unmet="${unmet}\n  RFD ${dep} (not found)"
-                    continue
-                fi
-                dep_status=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$dep_file" | head -1)
-                case " $gate_states " in
-                    *" $dep_status "*) ;;
-                    *) unmet="${unmet}\n  RFD ${dep} (${dep_status})" ;;
-                esac
-            done
-            if [ -n "$unmet" ]; then
-                echo "Cannot promote to ${next}: dependencies not satisfied:" >&2
-                printf "${unmet}\n" >&2
-                echo "Required: status is one of: ${gate_states}" >&2
-                exit 1
-            fi
-        fi
-    fi
-
-    # Resolved path of the promoted file, after any rename. Used by the
-    # closing `comfort` pass.
-    final_file="$file"
-
-    # --- Draft -> Discussion: assign permanent number, rename file ---
-    if [ "$current" = "Draft" ]; then
-        basename_f=$(basename "$file")
-        old_draft_id=$(echo "$basename_f" | sed 's/^\(D[0-9]*\)-.*/\1/')
-        slug=$(echo "$basename_f" | sed 's/^[A-Z]*[0-9]*-//; s/\.md$//')
-
-        # Assign next available permanent number.
-        num=$(just _rfd-next-number) || exit 1
-        new_basename="${num}-${slug}.md"
-        new_file="docs/rfd/${new_basename}"
-        final_file="$new_file"
-
-        # Rewrite heading and status. Also strip one `../` level from markdown
-        # link targets: the file moves from `docs/rfd/drafts/` up to
-        # `docs/rfd/`, so any backlink to a non-draft RFD would otherwise
-        # resolve one directory too high. Both inline links (`[...](../foo.md)`)
-        # and reference definitions (`[label]: ../foo.md`) are handled.
-        sed \
-            -e "s/^# RFD [A-Z]*[0-9]*:/# RFD ${num}:/" \
-            -e "s/^- \*\*Status\*\*: Draft/- **Status**: Discussion/" \
-            -e 's|](\.\./|](|g' \
-            -e 's|^\(\[[^]]*\]:[ ]*\)\.\./|\1|' \
-            "$file" > "$new_file"
-        rm "$file"
-
-        # Carry the board position across renumbering.
-        just _rfd-priority-rewrite "$old_draft_id" "$num"
-
-        # Update cross-references in every RFD, including the promoted file
-        # itself: its prose can self-reference by draft id ("once D24
-        # lands"), and the initial rewrite above only covers the heading,
-        # status, and link prefixes. Replace `RFD DNN` with `RFD NNN` in
-        # prose, `DNN-slug.md` with the correct relative path to
-        # `NNN-slug.md` in link targets, and standalone short mentions like
-        # `DNN` (e.g. "D27 also widens the scope") with the bare number
-        # `NNN`. Drafts under `drafts/` need a `../` prefix because the
-        # promoted file moved up a directory.
-        #
-        # The short-form pass runs last so the long-form and basename
-        # rewrites get first crack at their specific shapes (the
-        # basename rule adds the `../` prefix, which the short-form
-        # rule cannot). It runs twice, because sed's `g` flag consumes
-        # the leading boundary character of each match — back-to-back
-        # mentions like "D27 D27" need a second pass for the second
-        # one to be recognised.
-        # Link targets match on the stem with `.md` optional, because the docs
-        # site resolves extensionless links and `docs/ticket/index.md` writes
-        # them that way.
-        stem_f="${basename_f%.md}"
-        new_stem="${new_basename%.md}"
-        updated=0
-        for other in docs/rfd/*.md docs/rfd/drafts/*.md docs/ticket/*.md; do
-            [ -f "$other" ] || continue
-            if ! grep -qE \
-                    -e "RFD ${old_draft_id}" \
-                    -e "${stem_f}" \
-                    -e "(^|[^A-Za-z0-9_])${old_draft_id}([^A-Za-z0-9_]|\$)" \
-                    "$other"; then
-                continue
-            fi
-            # Tickets sit in a sibling directory and address RFDs through
-            # `../rfd/`, so their link targets need that prefix rather than the
-            # bare basename an RFD-to-RFD link uses.
-            case "$(dirname "$other")" in
-                docs/rfd/drafts) link_replacement="../${new_basename}" ;;
-                docs/ticket)     link_replacement="../rfd/${new_basename}" ;;
-                *)               link_replacement="${new_basename}" ;;
-            esac
-            # The `drafts/` segment disappears when the file is promoted, so a
-            # link carrying it is rewritten whole; substituting only the
-            # basename would leave `../rfd/drafts/NNN-slug.md`, which points at
-            # nothing. A repo-root-relative path keeps its `docs/` prefix
-            # instead of picking up the `../` a ticket link needs, so it is
-            # matched first and more specifically.
-            link_stem="${link_replacement%.md}"
-            sed -E \
-                -e "s|RFD ${old_draft_id}|RFD ${num}|g" \
-                -e "s|docs/rfd/drafts/${stem_f}(\.md)?|docs/rfd/${new_stem}\1|g" \
-                -e "s|(\.\./)?rfd/drafts/${stem_f}(\.md)?|${link_stem}\2|g" \
-                -e "s|${stem_f}(\.md)?|${link_stem}\1|g" \
-                -e "s#(^|[^A-Za-z0-9_])${old_draft_id}([^A-Za-z0-9_]|\$)#\1${num}\2#g" \
-                -e "s#(^|[^A-Za-z0-9_])${old_draft_id}([^A-Za-z0-9_]|\$)#\1${num}\2#g" \
-                "$other" > "${other}.tmp"
-            mv "${other}.tmp" "$other"
-            echo "  updated ${old_draft_id} -> ${num} references in ${other}"
-            updated=$((updated + 1))
-        done
-
-        # Strip draft entries from `Required by` and `Extended by` on the
-        # promoted file. These are bookkeeping artefacts of the bidirectional
-        # draft-draft policy; the file is now published and cannot carry
-        # draft back-links.
-        promoted_head=$(grep -n '^## ' "$new_file" | head -1 | cut -d: -f1)
-        promoted_head="${promoted_head:-9999}"
-        for field in "Required by" "Extended by"; do
-            awk -v field="$field" -v header_end="$promoted_head" '
-                BEGIN { search = "^- \\*\\*" field "\\*\\*: " }
-                NR <= header_end && $0 ~ search {
-                    sub(search, "", $0)
-                    n = split($0, entries, /, /)
-                    new = ""
-                    for (i = 1; i <= n; i++) {
-                        if (entries[i] !~ /RFD D[0-9]+/) {
-                            new = (new == "") ? entries[i] : new ", " entries[i]
-                        }
-                    }
-                    if (new != "") print "- **" field "**: " new
-                    next
-                }
-                { print }
-            ' "$new_file" > "${new_file}.tmp"
-            mv "${new_file}.tmp" "$new_file"
-        done
-
-        # Backfill: for each entry in `Requires` and `Extends`, ensure the
-        # target lists the promoted RFD under the inverse field. Targets that
-        # were drafts at link-time may not have the back-link (rule 3 of the
-        # draft-aware matrix); add it now.
-        for pair in "Requires:Required by" "Extends:Extended by"; do
-            forward=$(echo "$pair" | cut -d: -f1)
-            inverse=$(echo "$pair" | cut -d: -f2)
-
-            line=$(sed -n "s/^- \\*\\*${forward}\\*\\*: //p" "$new_file" | head -1)
-            [ -z "$line" ] && continue
-
-            for dep in $(echo "$line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}'); do
-                if echo "$dep" | grep -qE '^D[0-9]+$'; then
-                    dep_file=$(ls "docs/rfd/drafts/${dep}-"*.md 2>/dev/null | head -1)
-                else
-                    dep_file=$(ls "docs/rfd/${dep}-"*.md 2>/dev/null | head -1)
-                fi
-                [ -z "$dep_file" ] && continue
-
-                # Scoped to the metadata header, like `add_link` in `_rfd-link`.
-                # RFDs that document these fields carry metadata-shaped examples
-                # in fenced blocks — 001 and 041 both do, and they are the most
-                # likely extension targets. Reading unscoped finds the example and
-                # concludes a header line exists; writing unscoped appends to the
-                # example instead of the header.
-                dep_head=$(grep -n '^## ' "$dep_file" | head -1 | cut -d: -f1)
-                dep_head="${dep_head:-9999}"
-
-                existing=$(head -n "$dep_head" "$dep_file" \
-                    | sed -n "s/^- \\*\\*${inverse}\\*\\*: //p" | head -1)
-                if echo "$existing" | grep -qE "RFD ${num}([^0-9]|\$)"; then
-                    continue
-                fi
-
-                dep_dir=$(dirname "$dep_file")
-                if [ "$dep_dir" = "docs/rfd/drafts" ]; then
-                    rel="../${new_basename}"
-                else
-                    rel="${new_basename}"
-                fi
-                link="[RFD ${num}](${rel})"
-
-                if [ -n "$existing" ]; then
-                    sed "1,${dep_head}s|^- \\*\\*${inverse}\\*\\*: .*|&, ${link}|" \
-                        "$dep_file" > "${dep_file}.tmp"
-                    mv "${dep_file}.tmp" "$dep_file"
-                else
-                    last_meta=$(head -n "$dep_head" "$dep_file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
-                    awk -v ln="$last_meta" -v entry="- **${inverse}**: ${link}" '
-                        NR == ln { print; print entry; next }
-                        { print }
-                    ' "$dep_file" > "${dep_file}.tmp"
-                    mv "${dep_file}.tmp" "$dep_file"
-                fi
-                echo "  backfilled ${inverse}: RFD ${num} into ${dep_file}"
-            done
-        done
-
-        # The review and triage conversations are titled after the draft id,
-        # which no longer names anything. Archive them; a later cycle starts
-        # fresh under the permanent number.
+    # The review and triage conversations are titled after the draft id, which
+    # no longer names anything. Archive them; a later cycle starts fresh under
+    # the permanent number.
+    if [ "$status" = Draft ]; then
         for kind in review triage; do
-            conv_title="rfd-${kind}:${old_draft_id}"
+            conv_title="rfd-${kind}:${rfd_id}"
             conv_id=$(jp -F json conversation ls 2>/dev/null \
                 | jq -r --arg t "$conv_title" 'first(.[] | select(.title == $t) | .id) // empty' \
                 2>/dev/null || true)
@@ -2398,695 +1761,7 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
             echo "  archiving conversation ${conv_title} (${conv_id})"
             jp conversation archive "$conv_id" || true
         done
-
-        echo "${new_file}: Draft -> Discussion (assigned ${num})"
-        if [ "$updated" -gt 0 ]; then
-            echo "Updated ${updated} cross-reference(s) in RFDs and tickets."
-        fi
-
-    # --- Discussion -> Accepted: offer to file the tracking ticket ---
-    elif [ "$current" = "Discussion" ]; then
-        sed "s/^- \*\*Status\*\*: Discussion/- **Status**: Accepted/" "$file" > "${file}.tmp"
-        mv "${file}.tmp" "$file"
-        echo "${file}: Discussion -> Accepted"
-
-        # Acceptance records an agreed direction, not a commitment to start
-        # building, so the ticket is offered rather than created. Whoever
-        # accepts reviews it before it lands. Non-interactive runs default to
-        # creating it.
-        create_tickets=true
-        if [ -r /dev/tty ] && [ -w /dev/tty ]; then
-            printf "File the tracking ticket for %s? [Y/n] " "$(basename "$file")" > /dev/tty
-            if IFS= read -r answer < /dev/tty; then
-                case "$answer" in
-                    n|N|no|No|NO) create_tickets=false ;;
-                esac
-            fi
-        fi
-
-        if [ "$create_tickets" = true ]; then
-            # The status is already written, so a ticket that cannot be filed
-            # must not take the promotion down with it. `rfd-track` is
-            # idempotent, so the suggested retry is safe.
-            if ticket=$(just rfd-track "$rfd_id"); then
-                echo "Review ${ticket} before committing it; 'just ticket-list' shows the board."
-            else
-                echo "Could not file the tracking ticket; run 'just rfd-track ${rfd_id}' to retry." >&2
-            fi
-        else
-            echo "Skipped the tracking ticket. File it later with 'just rfd-track ${rfd_id}'." >&2
-        fi
-
-    # --- Accepted -> Implemented ---
-    else
-        sed "s/^- \*\*Status\*\*: Accepted/- **Status**: Implemented/" "$file" > "${file}.tmp"
-        mv "${file}.tmp" "$file"
-
-        # Strip `Requires` on promotion to Implemented. By the promotion gate,
-        # every `Requires` target is already Implemented or Superseded, so the
-        # dependency is satisfied for good and the link serves no further
-        # purpose (see RFD 001). Drop the `Requires` line from this file, and
-        # drop the matching `Required by: RFD <this>` back-link from each
-        # former target.
-        this_n=$(basename "$file" | sed 's/^\([0-9]*\)-.*/\1/; s/^0*//')
-        this_n=${this_n:-0}
-        requires_line=$(sed -n 's/^- \*\*Requires\*\*: //p' "$file" | head -1)
-
-        sed '/^- \*\*Requires\*\*: /d' "$file" > "${file}.tmp"
-        mv "${file}.tmp" "$file"
-
-        if [ -n "$requires_line" ]; then
-            for dep in $(echo "$requires_line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}'); do
-                if echo "$dep" | grep -qE '^D[0-9]+$'; then
-                    dep_file=$(ls "docs/rfd/drafts/${dep}-"*.md 2>/dev/null | head -1)
-                else
-                    dep_file=$(ls "docs/rfd/${dep}-"*.md 2>/dev/null | head -1)
-                fi
-                [ -z "$dep_file" ] && continue
-
-                awk -v num="$this_n" '
-                    BEGIN { search = "^- \\*\\*Required by\\*\\*: " }
-                    $0 ~ search {
-                        sub(search, "", $0)
-                        n = split($0, entries, /, /)
-                        new = ""
-                        for (i = 1; i <= n; i++) {
-                            if (entries[i] !~ ("RFD 0*" num "([^0-9]|$)")) {
-                                new = (new == "") ? entries[i] : new ", " entries[i]
-                            }
-                        }
-                        if (new != "") print "- **Required by**: " new
-                        next
-                    }
-                    { print }
-                ' "$dep_file" > "${dep_file}.tmp"
-                mv "${dep_file}.tmp" "$dep_file"
-                echo "  stripped Required by: RFD ${this_n} from ${dep_file}"
-            done
-        fi
-
-        # Mirror of the strip above, in the other direction. Any RFD still in
-        # flight that lists this one under `Requires` now points at an
-        # Implemented dependency, which the docs build rejects (see
-        # `checkRequiresOnImplemented`). Drop this file's `Required by` line and
-        # the matching `Requires: RFD <this>` entry from each dependent.
-        required_by_line=$(sed -n 's/^- \*\*Required by\*\*: //p' "$file" | head -1)
-
-        sed '/^- \*\*Required by\*\*: /d' "$file" > "${file}.tmp"
-        mv "${file}.tmp" "$file"
-
-        if [ -n "$required_by_line" ]; then
-            for dependent in $(echo "$required_by_line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}'); do
-                if echo "$dependent" | grep -qE '^D[0-9]+$'; then
-                    dep_file=$(ls "docs/rfd/drafts/${dependent}-"*.md 2>/dev/null | head -1)
-                else
-                    dep_file=$(ls "docs/rfd/${dependent}-"*.md 2>/dev/null | head -1)
-                fi
-                [ -z "$dep_file" ] && continue
-
-                awk -v num="$this_n" '
-                    BEGIN { search = "^- \\*\\*Requires\\*\\*: " }
-                    $0 ~ search {
-                        sub(search, "", $0)
-                        n = split($0, entries, /, /)
-                        new = ""
-                        for (i = 1; i <= n; i++) {
-                            if (entries[i] !~ ("RFD 0*" num "([^0-9]|$)")) {
-                                new = (new == "") ? entries[i] : new ", " entries[i]
-                            }
-                        }
-                        if (new != "") print "- **Requires**: " new
-                        next
-                    }
-                    { print }
-                ' "$dep_file" > "${dep_file}.tmp"
-                mv "${dep_file}.tmp" "$dep_file"
-                echo "  stripped Requires: RFD ${this_n} from ${dep_file}"
-            done
-        fi
-
-        # The board ranks open work; this RFD is done. Drop it so `rfd-list`
-        # and the web board stop counting it as planned.
-        just _rfd-priority-remove "$rfd_id"
-
-        echo "${file}: Accepted -> Implemented"
     fi
-
-    # Reflow the promoted file: wrap prose with semantic line breaks and
-    # consolidate reference-style link definitions at the bottom, matching the
-    # markdown formatting CI enforces (`fmt-markdown-ci`).
-    comfort --language markdown --format-markdown --reference-links "$final_file"
-
-# File or refresh an RFD's tracking ticket, printing its id on stdout.
-#
-# The tracking ticket stands for the RFD's implementation as a whole: one ticket
-# carrying `Implements: NNN` and the label `type=tracking`, holding the
-# Implementation Plan as its description. A phase that needs its own card is
-# filed separately and carries `Implements: NNN` without the label.
-#
-# Idempotent: an existing tracking ticket is reused, never duplicated. Reading
-# the plan needs a provider, so a run without one files the ticket with a
-# `<!-- rfd-plan: pending -->` marker in place of the plan, and the next run
-# fills it in.
-#
-# Only Accepted and Implemented RFDs carry a tracking ticket; anything earlier
-# is refused.
-[group('rfd')]
-rfd-track NNN: _install-jp _install-ticket
-    #!/usr/bin/env sh
-    set -eu
-
-    out=$(just _rfd-resolve "{{NNN}}") || exit 1
-    rfd_id="${out%% *}"
-    file="${out#* }"
-
-    just _rfd-trackable "$file" || exit 1
-
-    id=$(just _rfd-tracking "$rfd_id")
-
-    if [ -z "$id" ]; then
-        title=$(sed -n 's/^# RFD [0-9A-Z]*: //p' "$file" | head -1)
-        if [ -z "$title" ]; then
-            echo "No heading found in ${file}; cannot title the ticket." >&2
-            exit 1
-        fi
-        # Read into a variable rather than inline: a command substitution in an
-        # argument list keeps its exit status to itself, so an interrupted plan
-        # read would file a ticket with an empty description.
-        plan=$(just _rfd-plan "$rfd_id" "$file")
-        jp ticket add feature "$title" \
-            --implements "$rfd_id" \
-            --label type=tracking \
-            --body "$plan" >&2
-        id=$(just _rfd-tracking "$rfd_id")
-        if [ -z "$id" ]; then
-            echo "Filed a tracking ticket for RFD ${rfd_id} but cannot find it back." >&2
-            exit 1
-        fi
-    else
-        # Only a ticket still carrying the marker is rewritten: the description
-        # is editable by hand, and a later run must not overwrite that.
-        detail=$(jp ticket show "$id" --json)
-        body=$(printf '%s' "$detail" | jq -r '.description')
-        case "$body" in
-            *'<!-- rfd-plan: pending -->'*)
-                plan=$(just _rfd-plan "$rfd_id" "$file")
-                case "$plan" in
-                    *'<!-- rfd-plan: pending -->'*) ;;
-                    *) jp ticket edit "$id" --body "$plan" >&2 ;;
-                esac
-                ;;
-        esac
-    fi
-
-    echo "$id"
-
-# Mark an RFD as in development.
-#
-# Files the RFD's tracking ticket if it has none, then moves that ticket to In
-# Progress — which is what the priority board reports as "in development". This
-# is what the board's checkbox runs, so the first mark on an RFD takes as long
-# as reading its plan (see `rfd-track`).
-[group('rfd')]
-rfd-start NNN:
-    #!/usr/bin/env sh
-    set -eu
-
-    id=$(just rfd-track "{{NNN}}") || exit 1
-    jp ticket edit "$id" --status "In Progress"
-
-# Mark an RFD as no longer in development.
-#
-# Moves the RFD's tracking ticket back to Todo. Phase tickets are left where
-# they are, and an RFD without a tracking ticket is already not in development,
-# so nothing is filed.
-[group('rfd')]
-rfd-stop NNN: _install-jp _install-ticket
-    #!/usr/bin/env sh
-    set -eu
-
-    # Allowed at any status, unlike marking: a mark left behind by an RFD moving
-    # back to Discussion must still be clearable, and stopping files nothing.
-    id=$(just _rfd-tracking "{{NNN}}") || exit 1
-    if [ -z "$id" ]; then
-        echo "RFD {{NNN}} has no tracking ticket; nothing to stop."
-        exit 0
-    fi
-    jp ticket edit "$id" --status Todo
-
-# Internal: refuse an RFD that is not far enough along to be built.
-#
-# Implementation begins at Accepted (see RFD 001), so a tracking ticket does
-# too. Drafts and Discussion RFDs pass `_rfd-resolve`, and get a meaningful
-# "is 'Draft'" error here rather than a filed ticket.
-[private]
-_rfd-trackable FILE:
-    #!/usr/bin/env sh
-    set -eu
-
-    file="{{FILE}}"
-    status=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
-    case "$status" in
-        Accepted|Implemented) ;;
-        *)
-            echo "Cannot track: $(basename "$file") is '${status}'." >&2
-            echo "Only Accepted or Implemented RFDs carry a tracking ticket." >&2
-            exit 1 ;;
-    esac
-
-# Internal: print an RFD's tracking ticket id, or nothing when it has none.
-#
-# The tracking ticket is the one carrying both `Implements: NNN` and the label
-# `type=tracking`. Phase tickets name the same RFD without the label, so they
-# are never returned here.
-[private]
-_rfd-tracking NNN:
-    #!/usr/bin/env sh
-    set -eu
-
-    out=$(just _rfd-resolve "{{NNN}}") || exit 1
-    rfd_id="${out%% *}"
-
-    # Read into a variable first: in a pipeline, `jq` succeeding on empty input
-    # hides a failure from `jp` and reports the RFD as having no tracking
-    # ticket, which is how a second one gets filed.
-    tickets=$(jp ticket list --json --label type=tracking)
-
-    # The flag has already filtered by label; the selector repeats it so the
-    # whole rule reads in one place.
-    printf '%s' "$tickets" \
-        | jq -r --arg rfd "$rfd_id" '
-            first(
-                .[]
-                | select((.labels.type // []) | index("tracking"))
-                | select(((.implements // "") | sub("^RFD +"; "")) == $rfd)
-                | .id
-            ) // empty'
-
-# Internal: render the description for an RFD's tracking ticket.
-#
-# Prints a link to the RFD followed by its Implementation Plan as a list. The
-# plan is read out of the document by `jp query` rather than templated, because
-# the phases differ per RFD; structured output keeps the result parseable.
-#
-# When the query fails, or the RFD has no Implementation Plan, the marker
-# `<!-- rfd-plan: pending -->` stands in for the plan. `rfd-track` retries while
-# that marker is present.
-[private]
-_rfd-plan NNN FILE:
-    #!/usr/bin/env sh
-    set -eu
-
-    rfd_id="{{NNN}}"
-    file="{{FILE}}"
-
-    # Tickets live one directory over from the RFDs, so their links to an RFD
-    # are `../rfd/<file>`.
-    link="../${file#docs/}"
-    printf 'Tracking ticket for [RFD %s](%s).\n' "$rfd_id" "$link"
-
-    SCHEMA='{"type":"object","properties":{"phases":{"type":"array","description":"One entry per phase of the Implementation Plan, in order","items":{"type":"object","properties":{"title":{"type":"string","description":"Imperative title, at most 60 characters"},"summary":{"type":"string","description":"What the phase delivers, one to three sentences of markdown"}},"required":["title","summary"]}}},"required":["phases"]}'
-    PROMPT="Read the attached RFD and list the phases of its Implementation Plan, in order. Give each a short imperative title and a summary of what it delivers. Return an empty array if the RFD has no Implementation Plan."
-
-    result=$(
-        jp query --new --local --tmp=5m --format=json --no-reasoning --no-tools \
-            --schema "$SCHEMA" \
-            --attachment "$file" \
-            "$PROMPT" \
-        | jq -s '.[-1]' 2>/dev/null
-    ) || true
-
-    count=$(echo "$result" | jq '.phases | length' 2>/dev/null || echo 0)
-    count=${count:-0}
-
-    if [ "$count" -eq 0 ]; then
-        printf '\n<!-- rfd-plan: pending -->\n'
-        exit 0
-    fi
-
-    printf '\n## Implementation plan\n\n'
-    echo "$result" | jq -r '.phases[] | "- **" + .title + "**: " + .summary'
-
-# Renumber an RFD to a new id, updating every cross-reference.
-#
-# NNN is the RFD to renumber: a permanent number (95, 095), a draft ID (D24),
-# or a file name (`DNN-slug.md` or `NNN-slug.md`, with or without a directory
-# prefix and with `.md` optional). A file name is how to pick between two
-# documents that share an id after a branch merge, which a bare id refuses to
-# resolve.
-# MMM is the target id and must live in the same id-space as NNN
-# (drafts renumber to another draft slot, published RFDs to another permanent
-# number; moving between spaces is `rfd-promote`'s job). When MMM is omitted,
-# the next available id in that space is used. The scan only sees local
-# files, so a number taken on another branch must be avoided by passing MMM
-# explicitly.
-#
-# Rewrites the file name, the document heading, `RFD <old>` mentions and
-# `<old>-slug.md` link targets across all RFDs (including the renumbered file
-# itself) and all tickets under `docs/ticket/`, bare `DNN` tokens for
-# draft-space renumbers, and the id in `priority.json`. The file stays in its
-# directory, so existing link prefixes (`../`, `./`) remain correct and only
-# the basename is substituted.
-# References outside `docs/rfd/` and `docs/ticket/` (code comments, other docs)
-# are reported but not rewritten.
-#
-# When another file keeps NNN's old id, `RFD <old>` mentions and bare `<old>`
-# tokens in other documents could belong to either one, so they are left alone
-# and listed at the end, as is the board entry; `<old>-slug` link targets carry
-# the slug and are still rewritten.
-#
-# Renumbering a published RFD changes its site URL.
-[group('rfd')]
-rfd-renumber NNN MMM="":
-    #!/usr/bin/env sh
-    set -eu
-
-    arg="{{NNN}}"
-    if echo "$arg" | grep -qiE '^(D[0-9]+|[0-9]+)$'; then
-        out=$(just _rfd-resolve "$arg") || exit 1
-        old_id="${out%% *}"
-        file="${out#* }"
-    else
-        # A file name names one document even when two share an id, so it is
-        # the caller's way of saying which of them moves. Bare names are looked
-        # up in both id spaces; a path is taken as given.
-        name=$(basename "$arg")
-        case "$name" in *.md) ;; *) name="${name}.md" ;; esac
-        file=""
-        for candidate in "$arg" "docs/rfd/${name}" "docs/rfd/drafts/${name}"; do
-            if [ -f "$candidate" ]; then file="$candidate"; break; fi
-        done
-        if [ -z "$file" ]; then
-            echo "No RFD file matching '${arg}'." >&2; exit 1
-        fi
-        old_id=$(basename "$file" | sed -nE 's/^(D[0-9]{2}|[0-9]{3})-.*\.md$/\1/p')
-        if [ -z "$old_id" ]; then
-            echo "'${file}' does not start with an RFD id (DNN or NNN)." >&2; exit 1
-        fi
-    fi
-
-    if [ "$old_id" = "000" ]; then
-        echo "Refusing to renumber a template." >&2; exit 1
-    fi
-
-    dir=$(dirname "$file")
-    old_basename=$(basename "$file")
-    slug=$(echo "$old_basename" | sed 's/^[A-Z]*[0-9]*-//; s/\.md$//')
-
-    case "$old_id" in
-        D*) is_draft=true ;;
-        *)  is_draft=false ;;
-    esac
-
-    # Files that keep the old id once this one moves. Their existence makes
-    # every id-keyed reference in the repository unattributable.
-    siblings=$(ls "${dir}/${old_id}-"*.md 2>/dev/null | grep -v "/${old_basename}$" || true)
-
-    # --- Determine and validate the target id ---
-    target="{{MMM}}"
-    if [ -n "$target" ]; then
-        if [ "$is_draft" = true ]; then
-            if ! echo "$target" | grep -qiE '^D[0-9]{1,2}$'; then
-                echo "Target for a draft must be a draft slot (D01-D99), got '${target}'." >&2
-                exit 1
-            fi
-            n=$(echo "$target" | sed 's/^[Dd]0*//')
-            new_id=$(printf "D%02d" "${n:-0}")
-        else
-            if ! echo "$target" | grep -qE '^[0-9]+$'; then
-                echo "Target for a published RFD must be a number, got '${target}'." >&2
-                exit 1
-            fi
-            n=$(echo "$target" | sed 's/^0*//')
-            new_id=$(printf "%03d" "${n:-0}")
-        fi
-        if [ "${n:-0}" -eq 0 ]; then
-            echo "Target id must be greater than zero." >&2; exit 1
-        fi
-    else
-        if [ "$is_draft" = true ]; then
-            new_id=$(just _rfd-next-draft-slot) || exit 1
-        else
-            new_id=$(just _rfd-next-number) || exit 1
-        fi
-    fi
-
-    if [ "$new_id" = "$old_id" ]; then
-        echo "RFD ${old_id} already has that id; nothing to do." >&2; exit 1
-    fi
-
-    if [ "$is_draft" = true ]; then
-        taken=$(ls "docs/rfd/drafts/${new_id}-"*.md 2>/dev/null | head -1)
-    else
-        taken=$(ls "docs/rfd/${new_id}-"*.md 2>/dev/null | head -1)
-    fi
-    if [ -n "$taken" ]; then
-        echo "Target id ${new_id} is taken by $(basename "$taken")." >&2; exit 1
-    fi
-
-    # --- Rename the file and rewrite its heading ---
-    new_basename="${new_id}-${slug}.md"
-    new_file="${dir}/${new_basename}"
-    sed "s/^# RFD [A-Z]*[0-9]*:/# RFD ${new_id}:/" "$file" > "$new_file"
-    rm "$file"
-
-    # --- Carry the board position across renumbering ---
-    # A board entry holds an id, so with the id shared there is no telling
-    # which document ranked; leave it for the operator.
-    if [ -z "$siblings" ]; then
-        just _rfd-priority-rewrite "$old_id" "$new_id"
-    fi
-
-    # --- Cross-references in every RFD, including the renumbered file ---
-    # Bare-token rewriting is draft-space only: `D24` is a distinctive
-    # token, a bare `095` is not. The bare-token rule runs twice because
-    # sed's `g` flag consumes the leading boundary character of a match,
-    # hiding the second of two back-to-back mentions.
-    # Link targets match on the stem with `.md` optional, because the docs site
-    # resolves extensionless links and `docs/ticket/index.md` writes them that
-    # way. The file keeps its directory, so the surrounding path is untouched.
-    old_stem="${old_basename%.md}"
-    new_stem="${new_basename%.md}"
-    updated=0
-    for other in docs/rfd/*.md docs/rfd/drafts/*.md docs/ticket/*.md; do
-        [ -f "$other" ] || continue
-        # The stem carries the slug, so a link target names one document even
-        # when the id is shared. Id-keyed rules only run when nothing else
-        # answers to the old id, or inside the renumbered document itself.
-        set -- -e "s|${old_stem}(\.md)?|${new_stem}\1|g"
-        if [ -z "$siblings" ] || [ "$(basename "$other")" = "$new_basename" ]; then
-            set -- "$@" -e "s#RFD ${old_id}([^0-9]|\$)#RFD ${new_id}\1#g"
-            if [ "$is_draft" = true ]; then
-                set -- "$@" \
-                    -e "s#(^|[^A-Za-z0-9_])${old_id}([^A-Za-z0-9_]|\$)#\1${new_id}\2#g" \
-                    -e "s#(^|[^A-Za-z0-9_])${old_id}([^A-Za-z0-9_]|\$)#\1${new_id}\2#g"
-            fi
-        fi
-        sed -E "$@" "$other" > "${other}.tmp"
-        if cmp -s "$other" "${other}.tmp"; then
-            rm "${other}.tmp"
-            continue
-        fi
-        mv "${other}.tmp" "$other"
-        echo "  updated ${old_id} -> ${new_id} references in ${other}"
-        updated=$((updated + 1))
-    done
-
-    echo "${old_basename} -> ${new_file} (${old_id} -> ${new_id})"
-    if [ "$updated" -gt 0 ]; then
-        echo "Updated ${updated} file(s) with cross-references."
-    fi
-
-    # --- Report references the rewrite does not touch ---
-    if [ -n "$siblings" ]; then
-        echo "" >&2
-        echo "Warning: ${old_id} is still held by:" >&2
-        printf '%s\n' "$siblings" | sed 's/^/  /' >&2
-        echo "Mentions of \"RFD ${old_id}\" outside ${new_basename}, and a board" >&2
-        echo "entry for ${old_id}, were left alone: they name either document." >&2
-        echo "Check them by hand." >&2
-    fi
-
-    leftovers=$(rg -l -e "RFD ${old_id}\b" -e "${old_basename}" \
-        --glob '!docs/rfd/**' --glob '!docs/ticket/**' . 2>/dev/null || true)
-    if [ -n "$leftovers" ]; then
-        echo "" >&2
-        echo "Warning: references outside docs/rfd/ and docs/ticket/ still mention ${old_id}:" >&2
-        echo "$leftovers" | sed 's/^/  /' >&2
-    fi
-
-# Retitle an RFD, renaming its file to match.
-#
-# NNN is the RFD to retitle: a permanent number (95, 095) or a draft ID (D24).
-# TITLE is the new title, taken as the rest of the command line.
-#
-# Rewrites the document heading and moves the file to the slug the new title
-# produces. The id is kept, so `RFD <id>` mentions stay correct; `<id>-slug.md`
-# link targets under `docs/` are rewritten, and matches outside `docs/` are
-# reported but not rewritten.
-#
-# Retitling a published RFD changes its site URL.
-[group('rfd')]
-rfd-rename NNN +TITLE:
-    #!/usr/bin/env sh
-    set -eu
-
-    out=$(just _rfd-resolve "{{NNN}}") || exit 1
-    rfd_id="${out%% *}"
-    file="${out#* }"
-
-    if [ "$rfd_id" = "000" ]; then
-        echo "Refusing to rename a template." >&2; exit 1
-    fi
-
-    title="{{TITLE}}"
-    dir=$(dirname "$file")
-    old_basename=$(basename "$file")
-
-    slug=$(echo "$title" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9_-')
-    if [ -z "$slug" ]; then
-        echo "Title '${title}' produces an empty filename slug." >&2; exit 1
-    fi
-
-    new_basename="${rfd_id}-${slug}.md"
-    new_file="${dir}/${new_basename}"
-
-    # --- Rewrite the heading, then move the file ---
-    # The title travels through the environment and is printed rather than
-    # substituted, so a `&` or a `/` in it stays literal. Writing the heading
-    # before the move means an interrupted rename leaves a readable RFD with a
-    # stale filename, and running the same command again finishes it.
-    if ! title="$title" awk -v id="$rfd_id" '
-        !seen && /^# RFD /{ printf "# RFD %s: %s\n", id, ENVIRON["title"]; seen = 1; next }
-        { print }
-        END { if (!seen) exit 1 }
-    ' "$file" > "${file}.tmp"; then
-        rm -f "${file}.tmp"
-        echo "No '# RFD ${rfd_id}: ...' heading in ${file}." >&2; exit 1
-    fi
-    mv "${file}.tmp" "$file"
-
-    if [ "$new_file" != "$file" ]; then
-        if [ -e "$new_file" ]; then
-            echo "${new_file} already exists." >&2; exit 1
-        fi
-        mv "$file" "$new_file"
-    fi
-
-    # --- Link targets, which carry the basename ---
-    # Scoped to `docs/`, where the links live. The escaped dots keep `.md` from
-    # matching any character.
-    old_pattern=$(echo "$old_basename" | sed 's/\./\\./g')
-    updated=0
-    for other in $(rg -l --fixed-strings "$old_basename" docs 2>/dev/null || true); do
-        [ -f "$other" ] || continue
-        sed "s|${old_pattern}|${new_basename}|g" "$other" > "${other}.tmp"
-        if cmp -s "$other" "${other}.tmp"; then
-            rm "${other}.tmp"
-            continue
-        fi
-        mv "${other}.tmp" "$other"
-        echo "  updated link targets in ${other}"
-        updated=$((updated + 1))
-    done
-
-    echo "${old_basename} -> ${new_file}"
-    if [ "$updated" -gt 0 ]; then
-        echo "Updated ${updated} file(s) with link targets."
-    fi
-
-    # --- Report references the rewrite does not touch ---
-    leftovers=$(rg -l --fixed-strings "$old_basename" --glob '!docs/**' . 2>/dev/null || true)
-    if [ -n "$leftovers" ]; then
-        echo "" >&2
-        echo "Warning: references outside docs/ still name ${old_basename}:" >&2
-        echo "$leftovers" | sed 's/^/  /' >&2
-    fi
-
-# Internal: print the commit author as `Name <email>`.
-#
-# Falls back to the bare name, then to $USER, so a checkout without git identity
-# still produces something to attribute a document to.
-[private]
-_git-author:
-    #!/usr/bin/env sh
-    set -eu
-
-    name=$(git config user.name 2>/dev/null || true)
-    email=$(git config user.email 2>/dev/null || true)
-
-    if [ -n "$name" ] && [ -n "$email" ]; then
-        echo "${name} <${email}>"
-    elif [ -n "$name" ]; then
-        echo "$name"
-    else
-        echo "${USER:-unknown}"
-    fi
-
-# Internal: print the first available draft slot id (D01–D99).
-#
-# Exits 1 when all 99 slots are in use. Callers should propagate the exit
-# status with `|| exit 1`.
-[no-exit-message]
-[private]
-_rfd-next-draft-slot:
-    #!/usr/bin/env sh
-    set -eu
-
-    next=1
-    while [ "$next" -le 99 ]; do
-        draft_id=$(printf "D%02d" "$next")
-        if ! ls docs/rfd/drafts/${draft_id}-*.md >/dev/null 2>&1; then
-            break
-        fi
-        next=$((next + 1))
-    done
-    if [ "$next" -gt 99 ]; then
-        echo "No draft slots available (D01–D99 all in use)." >&2; exit 1
-    fi
-    printf "D%02d\n" "$next"
-
-# Internal: print the next available permanent RFD number, zero-padded.
-#
-# Walks the sorted existing numbers under `docs/rfd/` and takes the first gap
-# (max + 1 when there are none). Only local files are visible: a number taken
-# on another branch is not detected.
-[private]
-_rfd-next-number:
-    #!/usr/bin/env sh
-    set -eu
-
-    existing=$(ls docs/rfd/[0-9][0-9][0-9]-*.md 2>/dev/null \
-        | sed 's|.*/||; s|-.*||' \
-        | sort -n)
-    next_num=1
-    for num_iter in $existing; do
-        n=$(echo "$num_iter" | sed 's/^0*//')
-        n=${n:-0}
-        [ "$n" -lt "$next_num" ] && continue
-        [ "$n" -gt "$next_num" ] && break
-        next_num=$((next_num + 1))
-    done
-    printf "%03d\n" "$next_num"
-
-# Internal: rewrite an RFD id in the priority board.
-#
-# `priority.json` stores RFD ids; substitute OLD for NEW wherever the id
-# appears (the `planned` milestone groups, `backlog`, and the legacy flat
-# `order`). A missing board file is a no-op.
-[private]
-_rfd-priority-rewrite OLD NEW:
-    #!/usr/bin/env sh
-    set -eu
-
-    priority_file="docs/rfd/.priority.json"
-    [ -f "$priority_file" ] || exit 0
-    jq --arg old "{{OLD}}" --arg new "{{NEW}}" '
-        def sub_id: map(if . == $old then $new else . end);
-        (if .planned then .planned |= map(.ids |= sub_id) else . end)
-        | (if .order then .order |= sub_id else . end)
-        | .backlog = ((.backlog // []) | sub_id)
-    ' "$priority_file" > "${priority_file}.tmp" && mv "${priority_file}.tmp" "$priority_file"
 
 # Internal: drop RFD ids from the priority board.
 #
@@ -3114,8 +1789,8 @@ _rfd-priority-remove +IDS:
 #
 # The board ranks work that is still open, so an Implemented, Superseded, or
 # Abandoned RFD has no place on it and the docs build rejects one that lingers.
-# `rfd-promote`, `rfd-abandon`, and `rfd-supersede` prune the id as they change
-# the status; this recipe is the repair path for a status edited by hand.
+# `jp rfd promote`, `abandon`, and `supersede` prune the id as they change the
+# status; this recipe is the repair path for a status edited by hand.
 [group('rfd')]
 rfd-board-prune:
     #!/usr/bin/env sh
@@ -3157,87 +1832,11 @@ rfd-board-prune:
     just _rfd-priority-remove $stale
     echo "Pruned from the priority board:${stale}"
 
-# Mark an RFD as abandoned with the given reason.
+# File a ticket. TYPE becomes its `type` label: 'bug', 'feature', 'task', and the
+# rest `jp ticket labels` lists.
 #
-# Accepts: a permanent number (41, 041) or a draft ID (D01). A draft the author
-# has decided not to pursue can be abandoned when the rationale is worth keeping
-# as a record, or simply deleted when it isn't (see RFD 001).
-[group('rfd')]
-rfd-abandon NNN +REASON:
-    #!/usr/bin/env sh
-    set -eu
-
-    out=$(just _rfd-resolve "{{NNN}}") || exit 1
-    rfd_id="${out%% *}"
-    file="${out#* }"
-
-    current=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
-    case "$current" in
-        Implemented|Superseded|Abandoned)
-            echo "Cannot abandon from '${current}'." >&2; exit 1 ;;
-    esac
-
-    sed "s/^- \*\*Status\*\*: ${current}/- **Status**: Abandoned/" "$file" > "${file}.tmp"
-    mv "${file}.tmp" "$file"
-
-    # Append the reason as a note after the metadata block.
-    awk -v reason="{{REASON}}" '
-        /^## / && !done { print "> **Abandoned**: " reason; print ""; done=1 }
-        { print }
-    ' "$file" > "${file}.tmp"
-    mv "${file}.tmp" "$file"
-
-    # An abandoned RFD is no longer work to prioritise.
-    just _rfd-priority-remove "$rfd_id"
-
-    # Remind the user to close the tracking issue if one exists.
-    tracking=$(sed -n 's/^- \*\*Tracking Issue\*\*: \[#\([0-9]*\)\].*/\1/p' "$file" | head -1)
-    echo "${file}: Abandoned (${current} -> Abandoned)"
-    if [ -n "$tracking" ]; then
-        echo "Remember to close the tracking issue: https://github.com/dcdpr/jp/issues/${tracking}"
-    fi
-
-    # Warn about RFDs that depend on this one (`Required by` field). The
-    # abandonment doesn't auto-cascade or auto-fix; the dependents need
-    # manual review. The check uses this RFD's own `Required by` field as
-    # the source of truth (assumes `rfd-require` was used to maintain it).
-    required_by_line=$(sed -n 's/^- \*\*Required by\*\*: //p' "$file" | head -1)
-    if [ -n "$required_by_line" ]; then
-        echo "" >&2
-        echo "Warning: the following RFDs depend on this one (Required by):" >&2
-        for r in $(echo "$required_by_line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}'); do
-            echo "  RFD ${r}" >&2
-        done
-        echo "Their dependency on RFD ${rfd_id} is now broken — review and update." >&2
-    fi
-
-# Search across all RFD documents.
-[group('rfd')]
-rfd-grep +ARGS:
-    @rg {{ARGS}} docs/rfd/
-
-# List RFDs in priority order, optionally filtered by category.
-#
-# Shares the priority board's data (priority.json + summaries + relationship
-# graph) via `docs/.vitepress/loaders/rfd-shared.mjs`, so this list and the web
-# board at `/rfd/priority` stay in sync.
-#
-# Usage:
-#   just rfd-list                 # planned RFDs, in priority order (default)
-#   just rfd-list --backlog       # the unranked backlog instead
-#   just rfd-list --all           # planned + backlog + terminal/implemented
-#   just rfd-list --full          # add summaries and dependencies
-#   just rfd-list design          # filter to the "design" category
-#   just rfd-list --json          # every entry, tagged, for `jq` etc.
-[group('rfd')]
-rfd-list *ARGS:
-    node docs/.vitepress/rfd-list.mjs {{ARGS}}
-
-# File a ticket. KIND is 'bug', 'feature', or 'chore'.
-#
-# Tickets are markdown files under `docs/ticket/`, numbered from a counter that
-# never reuses an id. Write a ticket when the work is clear enough to start, and
-# an RFD when it needs a design first.
+# Tickets are markdown files under `docs/ticket/`. Write a ticket when the work is
+# clear enough to start, and an RFD when it needs a design first.
 #
 # The author comes from your JP or git identity. Omit the title to compose the
 # ticket inline — first line the title, blank line, then the description, with
@@ -3245,9 +1844,9 @@ rfd-list *ARGS:
 #
 #   just ticket-add bug "Tool call header misaligned"
 #   just ticket-add bug
-#   pbpaste | just ticket-add chore "Bump the deny list"
+#   pbpaste | just ticket-add task "Bump the deny list"
 [group('ticket')]
-ticket-add KIND *TITLE: _install-ticket
+ticket-add TYPE *TITLE: _install-ticket
     #!/usr/bin/env sh
     set -eu
 
@@ -3258,7 +1857,7 @@ ticket-add KIND *TITLE: _install-ticket
         body=$(cat)
     fi
 
-    set -- add {{quote(KIND)}}
+    set -- add --label {{quote("type=" + TYPE)}}
     if [ -n "{{TITLE}}" ]; then
         set -- "$@" {{quote(TITLE)}}
     fi
@@ -3315,167 +1914,15 @@ ticket-comment NNN *BODY: _install-ticket
 
     jp ticket "$@"
 
-# Mark a ticket as Done. NNN is T-02wt0kx or 02wt0kx.
-[group('ticket')]
-ticket-close NNN: _install-ticket
-    @jp ticket close {{quote(NNN)}}
-
-# List tickets, ordered by id.
-#
-# `jp -F json` switches the whole invocation to the machine-readable form; the
-# command has no format flag of its own.
-#
-#   just ticket-list                        # every ticket
-#   just ticket-list --status "In Progress" # one column of the board
-#   just ticket-list --kind bug
-#   just ticket-list --label package=jp_cli # one area of the system
-#   just ticket-list --label package        # any value of one key
-#   jp -F json ticket list                  # for `jq`
-[group('ticket')]
-[positional-arguments]
-ticket-list *ARGS: _install-ticket
-    #!/usr/bin/env sh
-    set -eu
-
-    jp ticket list "$@"
-
-# Replace the labels on a ticket. NNN is T-02wt0kx or 02wt0kx.
-#
-# The whole set is written: name every label the ticket should end up with, or
-# none to clear them. `just ticket-labels` lists what the board defines.
-#
-#   just ticket-label T-02wt0kx --label client=cli --label package=jp_cli
-#   just ticket-label T-02wt0kx --label package=jp_cli --label package=jp_config
-#   just ticket-label T-02wt0kx
-[group('ticket')]
-[positional-arguments]
-ticket-label NNN *ARGS: _install-ticket
-    #!/usr/bin/env sh
-    set -eu
-
-    shift # remove NNN from positional params
-    jp ticket label {{quote(NNN)}} "$@"
-
-# List the labels the board defines, with what each one covers.
-[group('ticket')]
-ticket-labels: _install-ticket
-    @jp ticket labels
-
-# Mirror the board's active labels into the ticket tool declarations.
-#
-# The vocabulary lives in `docs/ticket/.labels.json`, next to the tickets, and
-# is what every write is checked against. This copies the active names into
-# `.jp/mcp/tools/ticket/labels.toml` so the assistant is offered them in its
-# tool schema rather than guessing.
-#
-# Run it after editing the vocabulary. Nothing fails if you forget: a label
-# missing from the mirror still writes, and one left in it after being retired
-# is refused with a message naming the real set.
-#
-# RFD D64 replaces the mirror with a reference the config loader resolves, at
-# which point this recipe and the file it writes both go.
-[group('ticket')]
-ticket-labels-sync:
-    #!/usr/bin/env sh
-    set -eu
-
-    source="docs/ticket/.labels.json"
-    target=".jp/mcp/tools/ticket/labels.toml"
-
-    if [ ! -f "$source" ]; then
-        echo "No label vocabulary at ${source}." >&2
-        exit 1
-    fi
-
-    # `ticket_create` is offered only what it may add; the other two also get
-    # retired values, because replacing a ticket's whole set means naming a
-    # retired value to keep it, and finding the tickets that still carry one
-    # means filtering on it.
-    tokens() {
-        jq -r --argjson retired "$1" --argjson bare "$2" '
-            to_entries
-            | map(
-                .key as $key
-                | (if (.value.values // [] | length) == 0 and (.value.retired // [] | length) == 0
-                   then [$key]
-                   else ((.value.values // []) + (if $retired then (.value.retired // []) else [] end))
-                        | map("\($key)=\(.)")
-                        | (if $bare then [$key] + . else . end)
-                   end)
-              )
-            | flatten | sort | .[] | "  \"\(.)\","
-        ' "$source"
-    }
-
-    addable=$(tokens false false)
-    keepable=$(tokens true false)
-    # A filter also takes a bare key, matching any value under it, which is the
-    # only way to ask what carries a label at all.
-    selectable=$(tokens true true)
-
-    {
-        echo '# Generated by `just ticket-labels-sync` from `docs/ticket/.labels.json`.'
-        echo '#'
-        echo '# The vocabulary lives with the tickets, because `jp ticket` and the docs build'
-        echo '# both read it and neither loads this config. This file mirrors the active'
-        echo '# labels into the tool schemas so the assistant is offered them rather than'
-        echo '# guessing.'
-        echo '#'
-        echo '# The mirror is a hint, not a contract. Nothing fails when it goes stale: the'
-        echo '# tools validate against `.labels.json`, so a label missing here still writes,'
-        echo '# and one left here after being deleted is refused with a message naming the'
-        echo '# real set. Re-run the recipe to bring it back in step.'
-        echo '#'
-        echo '# The three lists differ. `ticket_create` is offered only the values it may'
-        echo '# add. `ticket_label` also gets retired ones, because replacing a whole set'
-        echo '# means naming a retired value to keep it. `ticket_list` gets those plus a'
-        echo '# bare key per facet, which is how a filter asks for any value under it.'
-        echo '#'
-        echo '# RFD D64 replaces this file with a reference the loader resolves directly.'
-
-        echo
-        echo '[conversation.tools.ticket_create.parameters.labels.items]'
-        echo 'enum = ['
-        echo "$addable"
-        echo ']'
-
-        echo
-        echo '# Includes retired values: see the note above.'
-        echo '[conversation.tools.ticket_label.parameters.labels.items]'
-        echo 'enum = ['
-        echo "$keepable"
-        echo ']'
-
-        echo
-        echo '# Includes retired values and bare keys: see the note above.'
-        echo '[conversation.tools.ticket_list.parameters.labels.items]'
-        echo 'enum = ['
-        echo "$selectable"
-        echo ']'
-    } > "$target"
-
-    echo "Wrote ${target}"
-
-# Read one ticket, with its comments numbered for replies.
-#
-# Run it as `jp -F json ticket show NNN` for the machine-readable form.
-[group('ticket')]
-[positional-arguments]
-ticket-show NNN *ARGS: _install-ticket
-    #!/usr/bin/env sh
-    set -eu
-
-    shift # remove NNN from positional params
-    jp ticket show {{quote(NNN)}} "$@"
-
-# Import a GitHub issue as a ticket, or refresh one already imported.
+# Import a GitHub issue from dcdpr/jp as a ticket, or refresh one already
+# imported.
 #
 # One way only: the title, description, and comments come from GitHub, and the
 # metadata block stays local, so triage survives the next import. Replies belong
 # on GitHub and arrive when you import again.
 #
 #   just ticket-import 123
-#   just ticket-import 123 --kind feature
+#   just ticket-import 123 --label type=feature
 [group('ticket')]
 [positional-arguments]
 ticket-import NNN *ARGS: _install-ticket
@@ -3483,111 +1930,17 @@ ticket-import NNN *ARGS: _install-ticket
     set -eu
 
     shift # remove NNN from positional params
-    jp ticket import {{quote(NNN)}} "$@"
-
-# Promote a ticket to an RFD draft. CATEGORY is 'design' (default), 'decision',
-# 'guide', or 'process'.
-#
-# A ticket whose discussion turned into a design question becomes an RFD: the
-# draft is seeded from the ticket's title and description, and the ticket closes
-# as Done with `Promoted to` naming the draft. The work item is finished; the
-# work moved.
-#
-# Idempotent: a ticket that already names an existing draft reports it and stops,
-# so a run that failed partway can simply be repeated.
-[group('ticket')]
-ticket-promote NNN CATEGORY="design": _install-ticket
-    #!/usr/bin/env sh
-    set -eu
-
-    detail=$(jp --format json ticket show {{quote(NNN)}})
-    id=$(echo "$detail" | jq -r '.id')
-    title=$(echo "$detail" | jq -r '.title')
-    description=$(echo "$detail" | jq -r '.description')
-    promoted=$(echo "$detail" | jq -r '.metadata.promoted_to // empty')
-
-    if [ -n "$promoted" ]; then
-        existing=$(ls docs/rfd/drafts/${promoted}-*.md docs/rfd/${promoted}-*.md 2>/dev/null | head -1)
-        if [ -n "$existing" ]; then
-            echo "${id} is already promoted to ${promoted} (${existing})." >&2
-            exit 0
-        fi
-        echo "${id} names ${promoted}, but no such RFD exists; seeding a new draft." >&2
-    fi
-
-    # A run interrupted between the draft and the `promote` below leaves the
-    # ticket unmarked, so a retry would seed a second draft. The seeded Summary
-    # names the ticket, which is the marker to find it by.
-    seeded=$(grep -rl "^Promoted from ticket ${id}\.$" docs/rfd --include='*.md' 2>/dev/null | head -1 || true)
-    if [ -n "$seeded" ]; then
-        draft=$(basename "$seeded" | sed 's/^\([D0-9][0-9]*\)-.*/\1/')
-        echo "${id} already seeded ${seeded}; linking it." >&2
-        jp ticket promote "$id" --to "$draft"
-        exit 0
-    fi
-
-    out=$(just rfd-draft {{quote(CATEGORY)}} "$title")
-    echo "$out"
-    file=${out#Created }
-    draft=$(basename "$file" | sed 's/^\(D[0-9]*\)-.*/\1/')
-
-    # Seed the Summary with the ticket's description, replacing the template's
-    # placeholder prose. The remaining sections are left for the author.
-    awk -v desc="$description" -v id="$id" '
-        /^## Summary$/ {
-            print; print ""
-            if (desc != "") { print desc; print "" }
-            print "Promoted from ticket " id "."
-            print ""
-            skip = 1
-            next
-        }
-        skip && /^## / { skip = 0 }
-        skip { next }
-        { print }
-    ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
-
-    jp ticket promote "$id" --to "$draft"
-
-# Give a ticket a fresh id, after CI reports two files claiming one.
-#
-# PATH names the losing ticket file — an id would name both. Run this on the
-# branch that has not merged yet: its commits are still rewritable and every
-# reference to the id on it is unambiguously its own.
-#
-# References are rewritten in what the branch changed against BASE (`main` by
-# default). Occurrences elsewhere are reported, not touched: the same token on
-# BASE belongs to the ticket that kept the id.
-#
-#   just ticket-refresh docs/ticket/02wt0kx-some-bug.md
-#   just ticket-refresh docs/ticket/02wt0kx-some-bug.md develop
-[group('ticket')]
-ticket-refresh PATH BASE="main": _install-ticket
-    @jp ticket refresh {{quote(PATH)}} --base {{quote(BASE)}}
-
-# Convert tickets left in the pre-RFD-102 `NNNN-slug.md` format.
-#
-# Run it on a branch cut before the id change, after rebasing onto main. Each
-# ticket lands in the time bucket of the commit that added it, so it keeps its
-# order against tickets already on main.
-#
-# The docs build rejects the old filename shape, so a branch that merges without
-# running this fails rather than dropping the ticket silently.
-#
-# Transitional: delete this recipe once no such branch is left.
-[group('ticket')]
-ticket-migrate: _install-ticket
-    @jp ticket migrate
-
-# Search across all tickets.
-[group('ticket')]
-ticket-grep +ARGS:
-    @rg {{ARGS}} docs/ticket/
+    jp ticket import {{quote(NNN)}} --repo dcdpr/jp "$@"
 
 # Locally develop the documentation, with hot-reloading.
+#
+# Runs through `jp vite serve`, which keeps the site's settings in step with the
+# configuration and is the only dev server the RFD and ticket pages accept
+# edits from. It checks `jp ticket` and `jp rfd` were built from the same site
+# files as `jp vite`, so all three are installed first.
 [group('docs')]
-develop-docs *FLAGS="--host --allowedHosts --open": _install-ticket
-    just _docs "dev" {{FLAGS}}
+develop-docs *FLAGS="--host --allowedHosts --open": _docs-install _install-jp _install-site-plugins
+    jp vite serve -- {{FLAGS}}
 
 # Open the RFD priority board for drag-and-drop reordering.
 #
@@ -3596,21 +1949,22 @@ develop-docs *FLAGS="--host --allowedHosts --open": _install-ticket
 # file to publish the new order. The board is read-only in the production build
 # — the write endpoint only exists on the dev server.
 [group('rfd')]
-rfd-manage:
-    just _docs "dev" "--host" "--allowedHosts" "--open" "/rfd/priority"
+rfd-manage: _docs-install _install-jp _install-site-plugins
+    jp vite serve -- --host --allowedHosts --open /rfd/priority
 
 # Test the documentation site's own tooling.
 #
-# The site is assembled by the `.mjs` modules under `docs/.vitepress/`, which
-# Cargo knows nothing about. `node --test` needs no dependency beyond the Node
-# the site build already requires.
+# The site's loaders are `.mjs` modules that `jp vite sync` writes from
+# `crates/plugins/command/vite/site/`, which Cargo knows nothing about.
+# `node --test` needs no dependency beyond the Node the site build already
+# requires.
 #
 # The pattern is quoted so node globs it rather than the shell: a positional
 # argument to `--test` is a glob, `sh` has no `**`, and an unmatched pattern
 # would otherwise arrive as a literal path node tries to execute.
 [group('docs')]
 test-docs *FLAGS:
-    node --test {{FLAGS}} 'docs/.vitepress/**/*.test.mjs'
+    node --test {{FLAGS}} 'crates/plugins/command/vite/js-tests/**/*.test.mjs'
 
 # Build the statically built documentation.
 [group('docs')]
@@ -4012,6 +2366,19 @@ test-ci SCOPE="workspace": (_install "cargo-nextest@" + nextest_version) _instal
     # No target selection, matching `just test`; see the reasoning there.
     cargo nextest run --locked --cargo-profile=nextest --status-level=slow --failure-output=immediate-final --workspace --no-fail-fast {{ if SCOPE == "jp-only" { non_jp_excludes } else { "" } }}
 
+# Check on CI that the site's own files are the ones `jp vite sync` writes from
+# this checkout and its configuration.
+#
+# Runs `jp-vite`'s tests. `jp_site_is_synced` fails on a site file changed in
+# `crates/plugins/command/vite/site/`, or a label vocabulary changed in
+# `.jp/config.toml`, without `jp vite sync` run; the others check the site files
+# the binary carries, which the Rust workflow doesn't test when only those
+# files change. It builds `jp-vite` rather than `jp`, so the check doesn't pay
+# for the whole workspace.
+[group('ci')]
+site-ci:
+    cargo test --locked -p jp-vite
+
 # Generate documentation on CI.
 [group('ci')]
 docs-ci: _install_ci_matchers
@@ -4107,6 +2474,44 @@ _install-ticket *args:
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path crates/plugins/command/ticket --debug {{args}}
+
+# Build and install the `jp-rfd` command plugin that backs `jp rfd`.
+#
+# The plugin is not in the published registry, so `jp` picks it up from `$PATH`
+# (`plugins.command.rfd.run` in `.jp/config.toml` approves it).
+_install-rfd *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -z "${JP_INSTALL:-}" ] && command -v jp-rfd >/dev/null 2>&1; then
+        echo "Skipping jp-rfd rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
+        exit 0
+    fi
+    cargo install {{quiet_flag}} --locked --path crates/plugins/command/rfd --debug {{args}}
+
+# Build and install the `jp-vite` command plugin that backs `jp vite`.
+#
+# The plugin is not in the published registry, so `jp` picks it up from `$PATH`
+# (`plugins.command.vite.run` in `.jp/config.toml` approves it).
+_install-vite *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -z "${JP_INSTALL:-}" ] && command -v jp-vite >/dev/null 2>&1; then
+        echo "Skipping jp-vite rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
+        exit 0
+    fi
+    cargo install {{quiet_flag}} --locked --path crates/plugins/command/vite --debug {{args}}
+
+# Install the three plugins the site needs, from this checkout.
+#
+# `jp vite serve` refuses to trust the RFD and ticket pages unless `jp ticket`
+# and `jp rfd` were built from the same site files as `jp vite`, so the three
+# are rebuilt together.
+_install-site-plugins:
+    #!/usr/bin/env sh
+    set -eu
+    JP_INSTALL=1 just _install-ticket
+    JP_INSTALL=1 just _install-rfd
+    JP_INSTALL=1 just _install-vite
 
 # Build the `jp-serve-web` command plugin into JP's plugin directory.
 #
@@ -4306,63 +2711,6 @@ _bear-note TAG:
         q|Q)    echo "QUIT" ;;
         *)      echo "Unknown choice '$ans'; aborting." >&2; exit 1 ;;
     esac
-
-# Internal: resolve an RFD argument (DNN draft ID or NNN/NN permanent number)
-# to its canonical id and file path.
-#
-# On success, prints `<rfd_id> <file>` to stdout on a single line:
-#   - rfd_id is `DNN` for drafts, zero-padded `NNN` for permanent numbers.
-#   - file is the relative path under `docs/rfd/` or `docs/rfd/drafts/`.
-#
-# On failure (invalid argument, file not found), writes a message to stderr
-# and exits 1. Callers should propagate the exit status with `|| exit 1`.
-[no-exit-message]
-[private]
-_rfd-resolve NNN:
-    #!/usr/bin/env sh
-    set -eu
-
-    # Two files sharing an id is a repository fault, not a choice to make on
-    # the caller's behalf. Picking one and proceeding is how a rename ends up
-    # rewriting the other document's heading to the new id, so refuse instead.
-    reject_ambiguous() {
-        echo "Ambiguous: ${2} files share ID ${1}:" >&2
-        printf '%s\n' "$3" | sed 's/^/  /' >&2
-        echo "Renumber or remove one before continuing; a rewrite keyed on" >&2
-        echo "${1} would corrupt the others. \`just rfd-renumber\` takes a file" >&2
-        echo "name in place of an id, to say which of them moves." >&2
-        exit 1
-    }
-
-    arg="{{NNN}}"
-    if echo "$arg" | grep -qiE '^D[0-9]+$'; then
-        rfd_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
-        found=$(ls docs/rfd/drafts/${rfd_id}-*.md 2>/dev/null || true)
-        count=$(printf '%s' "$found" | grep -c . || true)
-        if [ "$count" -eq 0 ]; then
-            echo "No draft RFD found with ID ${rfd_id}." >&2; exit 1
-        fi
-        if [ "$count" -gt 1 ]; then
-            reject_ambiguous "$rfd_id" "$count" "$found"
-        fi
-        file="$found"
-    elif echo "$arg" | grep -qE '^[0-9]+$'; then
-        n=$(echo "$arg" | sed 's/^0*//')
-        rfd_id=$(printf "%03d" "${n:-0}")
-        found=$(ls docs/rfd/${rfd_id}-*.md 2>/dev/null || true)
-        count=$(printf '%s' "$found" | grep -c . || true)
-        if [ "$count" -eq 0 ]; then
-            echo "No RFD found with number ${rfd_id}." >&2; exit 1
-        fi
-        if [ "$count" -gt 1 ]; then
-            reject_ambiguous "$rfd_id" "$count" "$found"
-        fi
-        file="$found"
-    else
-        echo "Invalid argument '${arg}'. Use a number (41) or draft ID (D01)." >&2; exit 1
-    fi
-
-    echo "${rfd_id} ${file}"
 
 # Internal: shape a recipe's `*ARGS` and a default prompt MSG into a single
 # `args` string that the recipe forwards to `jp query`.

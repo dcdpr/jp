@@ -1,6 +1,6 @@
 [conversation.tools.swift_test_ui]
 enable = false
-run = "unattended"
+run = "allow"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "Run named UI tests against the macOS app. Each one drives the app through the screen, so a run takes over the display and cannot be used while the machine is busy. Names are required and there is no way to ask for the whole bundle: run the two or three you are working on, and leave the full suite to CI (`just test-app-ui`). The run stops at the first failure and closes the app it left behind; set `CI=1` to let it finish and report everything. Builds the library and regenerates the Xcode project first, so no setup step is needed. A failure reports what the tests recorded and copies their screenshots into `tmp/uitests/`."

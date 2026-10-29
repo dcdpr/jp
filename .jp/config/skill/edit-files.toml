@@ -22,7 +22,7 @@ single-file mutations.
 """
 
 [conversation.tools]
-fs_create_file = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-fs_delete_file = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-fs_move_file = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-fs_modify_file = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+fs_create_file = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+fs_delete_file = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+fs_move_file = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+fs_modify_file = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }

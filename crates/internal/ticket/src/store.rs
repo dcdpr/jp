@@ -15,13 +15,13 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
-use jp_label::vocabulary;
+use jp_label::Clash;
 
 use crate::{
-    Comment, LABEL_KEY, LABELS_FILE, Labels, NewTicket, ParseError, Status, Ticket, TicketId,
-    Vocabulary,
+    Comment, LABEL_KEY, Labels, NewTicket, ParseError, Status, Ticket, TicketId, Vocabulary,
+    check::{self, Directory, Report, TicketFile},
     id::{MAX_BUCKET, TAIL_SPACE},
-    import::{Import, escaped},
+    import::{Import, escaped, github_marker},
     parse, render,
 };
 
@@ -69,10 +69,36 @@ pub enum Error {
     /// Allocation refuses rather than wrapping, which would reuse old time
     /// prefixes, or widening, which would break the fixed-width form.
     Exhausted,
-    /// The board's label vocabulary can't be read.
-    Labels(vocabulary::Error),
     /// A write named labels the board won't accept.
     Rejected(jp_label::Rejected),
+    /// A write named labels the board lets one ticket carry, and another ticket
+    /// already does.
+    Taken(Vec<(Clash, TicketId)>),
+    /// A write named labels the board lets one ticket carry, and gives them to
+    /// another ticket it writes too.
+    Shared(Vec<(Clash, TicketId)>),
+    /// A write to several tickets the board refused, with each ticket refused
+    /// and why.
+    Refused(Vec<(TicketId, Error)>),
+    /// A ticket file that is there but isn't a well-formed ticket.
+    Malformed { id: TicketId, error: ParseError },
+    /// The board's order file can't be read as one.
+    Board { path: Utf8PathBuf, reason: String },
+    /// A ticket was ranked against itself.
+    SameTicket(TicketId),
+    /// Two tickets ranked against each other sit in different columns.
+    OtherColumn {
+        id: TicketId,
+        status: Status,
+        other: TicketId,
+        other_status: Status,
+    },
+    /// A ticket was to be placed next to one outside the column it moves to.
+    NotInColumn {
+        other: TicketId,
+        other_status: Status,
+        status: Status,
+    },
     /// The filesystem said no.
     Io(io::Error),
 }
@@ -105,18 +131,74 @@ impl fmt::Display for Error {
             Self::Exhausted => f.write_str(
                 "The ticket id format has no time buckets left; it needs a wider time component.",
             ),
-            Self::Labels(error) => error.fmt(f),
             Self::Rejected(error) => error.fmt(f),
+            Self::Taken(taken) => {
+                let sentences: Vec<String> = taken
+                    .iter()
+                    .map(|(clash, id)| {
+                        format!("`{clash}` is already on {id}, and {}.", held_to_one(clash))
+                    })
+                    .collect();
+                f.write_str(&sentences.join(" "))
+            }
+            Self::Shared(shared) => {
+                let sentences: Vec<String> = shared
+                    .iter()
+                    .map(|(clash, id)| {
+                        format!(
+                            "`{clash}` would also go on {id}, and {}.",
+                            held_to_one(clash)
+                        )
+                    })
+                    .collect();
+                f.write_str(&sentences.join(" "))
+            }
+            Self::Refused(refused) => {
+                let lines: Vec<String> = refused
+                    .iter()
+                    .map(|(id, error)| format!("{id}: {error}"))
+                    .collect();
+                f.write_str(&lines.join("\n"))
+            }
+            Self::Malformed { id, error } => write!(f, "{id} is not a well-formed ticket: {error}"),
+            Self::Board { path, reason } => write!(f, "{path} is not a board order: {reason}."),
+            Self::SameTicket(id) => write!(f, "{id} can't be ranked against itself."),
+            Self::OtherColumn {
+                id,
+                status,
+                other,
+                other_status,
+            } => write!(
+                f,
+                "{id} is {status} and {other} is {other_status}; a ticket is ranked within its \
+                 own column."
+            ),
+            Self::NotInColumn {
+                other,
+                other_status,
+                status,
+            } => write!(
+                f,
+                "{other} is {other_status}, not {status}; a ticket is placed next to one in the \
+                 column it moves to."
+            ),
             Self::Io(error) => error.fmt(f),
         }
+    }
+}
+
+/// Why the board refuses `clash` on a second ticket.
+pub(crate) fn held_to_one(clash: &Clash) -> String {
+    match clash.value {
+        Some(_) => format!("the board lets one ticket carry each `{}` value", clash.key),
+        None => "the board lets one ticket carry it".to_owned(),
     }
 }
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Parse(error) => Some(error),
-            Self::Labels(error) => Some(error),
+            Self::Parse(error) | Self::Malformed { error, .. } => Some(error),
             Self::Rejected(error) => Some(error),
             Self::Io(error) => Some(error),
             _ => None,
@@ -127,12 +209,6 @@ impl std::error::Error for Error {
 impl From<ParseError> for Error {
     fn from(error: ParseError) -> Self {
         Self::Parse(error)
-    }
-}
-
-impl From<vocabulary::Error> for Error {
-    fn from(error: vocabulary::Error) -> Self {
-        Self::Labels(error)
     }
 }
 
@@ -168,10 +244,18 @@ const CLAIM_ATTEMPTS: usize = 16;
 
 /// Create a ticket at `Todo`, returning its id and path.
 ///
+/// `new.labels` are resolved already; `vocabulary` holds them to the keys it
+/// lets one ticket carry, which only the board can check.
+///
 /// Creating the file exclusively is what claims the id: two processes drawing
 /// in the same bucket can land on one tail, and the loser finds out here rather
 /// than overwriting the winner's ticket.
-pub fn create(dir: &Utf8Path, new: &NewTicket<'_>) -> Result<(TicketId, Utf8PathBuf)> {
+pub fn create(
+    dir: &Utf8Path,
+    vocabulary: &Vocabulary,
+    new: &NewTicket<'_>,
+) -> Result<(TicketId, Utf8PathBuf)> {
+    check_unique(dir, vocabulary, new.labels, None)?;
     let slug = slug(new.title);
 
     for _ in 0..CLAIM_ATTEMPTS {
@@ -273,6 +357,25 @@ pub fn edit(
     Ok(Edited { from, to })
 }
 
+/// Move a ticket's file to the name its title produces, after the file was
+/// edited by hand.
+///
+/// The id half of the name is kept, so references to the ticket still resolve.
+/// `from` and `to` are the same when the title still produces the old name.
+pub fn rename_to_title(dir: &Utf8Path, id: TicketId) -> Result<Edited> {
+    let from = locate(dir, id)?;
+    let ticket = parse::document(&fs::read_to_string(&from)?)?;
+
+    let to = dir.join(format!("{}{}.md", id.file_prefix(), slug(&ticket.title)));
+    // As in `edit`: the target carries this id's prefix, and `locate` refused
+    // above if a second file claimed it.
+    if to != from {
+        fs::rename(&from, &to)?;
+    }
+
+    Ok(Edited { from, to })
+}
+
 /// Set one metadata field on a ticket.
 ///
 /// The field is created if the ticket doesn't carry it yet.
@@ -286,49 +389,229 @@ pub fn set_field(dir: &Utf8Path, id: TicketId, key: &str, value: &str) -> Result
     Ok(path)
 }
 
-/// Read the board's label vocabulary.
+/// A ticket's labels before and after [`relabel`] wrote them.
+#[derive(Debug)]
+pub struct Relabeled {
+    pub id: TicketId,
+    pub path: Utf8PathBuf,
+    /// What the ticket carried, as its label lines said.
+    pub before: Labels,
+    /// What it carries now, in the board's spelling.
+    pub after: Labels,
+}
+
+/// Change the labels of every ticket `ids` names, all of them or none.
 ///
-/// A board with no `.labels.json` defines no labels, which is a board that
-/// hasn't started using them rather than an error — reading a ticket must not
-/// depend on the file being there.
-/// A file that is present but unreadable *is* an error: silently treating it as
-/// empty would reject every label a caller asks for and blame the caller.
-pub fn vocabulary(dir: &Utf8Path) -> Result<Vocabulary> {
-    match fs::read_to_string(dir.join(LABELS_FILE)) {
-        Ok(source) => Ok(Vocabulary::parse(&source)?),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vocabulary::default()),
-        Err(error) => Err(error.into()),
+/// `change` maps the labels a ticket carries to the whole set it should end up
+/// with, as tokens.
+/// Each set is checked as [`Vocabulary::resolve_against`] checks one, so a
+/// retired value the ticket already carries can be kept, and held to the keys
+/// the board lets one ticket carry: against the rest of the board, and against
+/// the other tickets `ids` names.
+///
+/// Every ticket is checked before any is written, so a refusal changes nothing.
+/// With one ticket, the error is the board's own refusal; with several, it is
+/// [`Error::Refused`], naming each ticket refused.
+/// A ticket whose labels don't change isn't rewritten.
+///
+/// The writes go one file at a time: a failure partway through, such as a full
+/// disk, leaves the tickets before it written.
+pub fn relabel(
+    dir: &Utf8Path,
+    vocabulary: &Vocabulary,
+    ids: &[TicketId],
+    change: impl Fn(&Labels) -> Vec<String>,
+) -> Result<Vec<Relabeled>> {
+    let mut named: Vec<TicketId> = vec![];
+    for id in ids {
+        if !named.contains(id) {
+            named.push(*id);
+        }
+    }
+
+    let mut planned = vec![];
+    let mut refused = vec![];
+    for id in named.iter().copied() {
+        let path = locate(dir, id)?;
+        let source = fs::read_to_string(&path)?;
+        let before = parse::labels(&source);
+        let after = match vocabulary.resolve_against(&change(&before), &before) {
+            Ok(after) => after,
+            Err(rejected) => {
+                refused.push((id, Error::Rejected(rejected)));
+                continue;
+            }
+        };
+
+        // Rendered here rather than at the write, so a ticket that can't take
+        // its new labels refuses the batch before any ticket is written.
+        let updated = if after == before {
+            None
+        } else if let Some(updated) =
+            render::set_repeated_metadata(&source, LABEL_KEY, &after.to_tokens())
+        {
+            Some(updated)
+        } else {
+            refused.push((id, Error::Malformed {
+                id,
+                error: ParseError::MissingMetadata,
+            }));
+            continue;
+        };
+
+        planned.push((
+            Relabeled {
+                id,
+                path,
+                before,
+                after,
+            },
+            updated,
+        ));
+    }
+
+    let writing: Vec<(TicketId, &Labels)> = planned
+        .iter()
+        .map(|(ticket, _)| (ticket.id, &ticket.after))
+        .collect();
+    refused.extend(unique_refusals(dir, vocabulary, &writing)?);
+
+    if !refused.is_empty() {
+        // Reported in the order the tickets were named, whichever check
+        // refused each.
+        refused.sort_by_key(|(id, _)| named.iter().position(|named| named == id));
+
+        return Err(if named.len() == 1 {
+            refused.swap_remove(0).1
+        } else {
+            Error::Refused(refused)
+        });
+    }
+
+    let mut done = vec![];
+    for (ticket, updated) in planned {
+        if let Some(updated) = updated {
+            fs::write(&ticket.path, updated)?;
+        }
+        done.push(ticket);
+    }
+
+    Ok(done)
+}
+
+/// What the keys the board lets one ticket carry refuse among `writing`, the
+/// tickets a write gives labels to: a label another ticket in `dir` already
+/// carries, and one two of them would both carry.
+///
+/// Nothing is read when none of them carries a unique key.
+fn unique_refusals(
+    dir: &Utf8Path,
+    vocabulary: &Vocabulary,
+    writing: &[(TicketId, &Labels)],
+) -> Result<Vec<(TicketId, Error)>> {
+    if !writing
+        .iter()
+        .any(|(_, labels)| carries_unique(vocabulary, labels))
+    {
+        return Ok(vec![]);
+    }
+
+    let others = board_labels(dir, |id| writing.iter().any(|(written, _)| *written == id))?;
+
+    let mut refused = vec![];
+    for (index, (id, labels)) in writing.iter().enumerate() {
+        let taken = clashes_with(
+            vocabulary,
+            labels,
+            others.iter().map(|(other, theirs)| (*other, theirs)),
+        );
+        if !taken.is_empty() {
+            refused.push((*id, Error::Taken(taken)));
+        }
+
+        // Each pair once, against the tickets named after this one.
+        let shared = clashes_with(vocabulary, labels, writing[index + 1..].iter().copied());
+        if !shared.is_empty() {
+            refused.push((*id, Error::Shared(shared)));
+        }
+    }
+
+    Ok(refused)
+}
+
+/// Refuse `labels` when another ticket in `dir` already carries one the
+/// vocabulary lets one ticket carry.
+///
+/// `except` is the ticket being written, which can't clash with itself.
+/// The other tickets' labels are read as written, whether or not the rest of
+/// each file parses, so a ticket edited by hand still holds what it carries.
+/// Nothing is read when `labels` carries no unique key.
+///
+/// # Errors
+///
+/// Returns [`Error::Taken`], naming each label and the ticket holding it.
+pub fn check_unique(
+    dir: &Utf8Path,
+    vocabulary: &Vocabulary,
+    labels: &Labels,
+    except: Option<TicketId>,
+) -> Result<()> {
+    if !carries_unique(vocabulary, labels) {
+        return Ok(());
+    }
+
+    let others = board_labels(dir, |id| Some(id) == except)?;
+    let taken = clashes_with(
+        vocabulary,
+        labels,
+        others.iter().map(|(other, theirs)| (*other, theirs)),
+    );
+
+    if taken.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::Taken(taken))
     }
 }
 
-/// Replace a ticket's labels, returning its path and what it now carries.
-///
-/// The whole set is written, so this is the only write labels need: an empty
-/// list drops the field.
-/// Replacing rather than merging keeps a retried call from landing twice.
-///
-/// `requested` is checked against the ticket's current labels, not just against
-/// the vocabulary, so a retired label the ticket already carries can be listed
-/// again and kept.
-/// The check happens here rather than in the caller because the current labels
-/// come from the same read this write is about to replace.
-pub fn set_labels(
+/// Whether `labels` carries a key the vocabulary lets one ticket carry.
+fn carries_unique(vocabulary: &Vocabulary, labels: &Labels) -> bool {
+    vocabulary.facets().any(|(key, facet)| {
+        facet.unique().is_some() && labels.keys().any(|label| label.eq_ignore_ascii_case(key))
+    })
+}
+
+/// Every ticket in `dir` but the ones `skip` picks, with the labels its label
+/// lines carry, read as written whether or not the rest of the file parses.
+fn board_labels(
     dir: &Utf8Path,
-    id: TicketId,
+    skip: impl Fn(TicketId) -> bool,
+) -> Result<Vec<(TicketId, Labels)>> {
+    let mut tickets = vec![];
+    for (id, path) in files(dir)? {
+        if !skip(id) {
+            tickets.push((id, parse::labels(&fs::read_to_string(&path)?)));
+        }
+    }
+
+    Ok(tickets)
+}
+
+/// The labels of `labels` that each of `others` carries too, among the keys the
+/// vocabulary lets one ticket carry, paired with the ticket carrying it.
+fn clashes_with<'a>(
     vocabulary: &Vocabulary,
-    requested: &[String],
-) -> Result<(Utf8PathBuf, Labels)> {
-    let path = locate(dir, id)?;
-    let source = fs::read_to_string(&path)?;
-
-    let current = parse::labels(&source);
-    let applied = vocabulary.resolve_against(requested, &current)?;
-
-    let updated = render::set_repeated_metadata(&source, LABEL_KEY, &applied.to_tokens())
-        .ok_or(ParseError::MissingMetadata)?;
-    fs::write(&path, updated)?;
-
-    Ok((path, applied))
+    labels: &Labels,
+    others: impl Iterator<Item = (TicketId, &'a Labels)>,
+) -> Vec<(Clash, TicketId)> {
+    others
+        .flat_map(|(other, theirs)| {
+            vocabulary
+                .clashes(labels, theirs)
+                .into_iter()
+                .map(move |clash| (clash, other))
+        })
+        .collect()
 }
 
 /// Delete a ticket, returning the path that held it.
@@ -389,6 +672,19 @@ pub struct Imported {
     pub comments: usize,
 }
 
+/// The ticket an earlier import of upstream issue `number` created, found by
+/// its `GitHub` field.
+pub fn imported(dir: &Utf8Path, number: u64) -> Result<Option<Entry>> {
+    let marker = github_marker(number);
+
+    Ok(list(dir)?.into_iter().find(|entry| {
+        entry
+            .ticket
+            .as_ref()
+            .is_ok_and(|ticket| ticket.metadata.github.as_deref() == Some(marker.as_str()))
+    }))
+}
+
 /// Replace a ticket's content from an upstream issue, creating it if this is
 /// the first import.
 ///
@@ -396,29 +692,24 @@ pub struct Imported {
 /// number stay independent.
 /// Re-importing is safe and idempotent: the metadata block survives, so triage
 /// done here is never undone from there.
-pub fn import(dir: &Utf8Path, upstream: &Import<'_>) -> Result<Imported> {
+/// `vocabulary` holds a new ticket's labels to the keys it lets one ticket
+/// carry, as [`create`] does.
+pub fn import(dir: &Utf8Path, vocabulary: &Vocabulary, upstream: &Import<'_>) -> Result<Imported> {
     let marker = upstream.marker();
     let (title, description, comments) = escaped(upstream);
 
-    let existing = list(dir)?.into_iter().find(|entry| {
-        entry
-            .ticket
-            .as_ref()
-            .is_ok_and(|ticket| ticket.metadata.github.as_deref() == Some(marker.as_str()))
-    });
+    let existing = imported(dir, upstream.number)?;
 
     let (id, path, created) = if let Some(entry) = existing {
         (entry.id, entry.path, false)
     } else {
-        // No labels: the repository owns the metadata block, so an imported
-        // issue is labelled here by whoever triages it, not from upstream.
-        let (id, path) = create(dir, &NewTicket {
-            kind: upstream.kind,
+        // The repository owns the metadata block, so the labels are the
+        // importer's, not upstream's.
+        let (id, path) = create(dir, vocabulary, &NewTicket {
             title: &title,
             authors: upstream.authors,
             date: upstream.date,
-            implements: None,
-            labels: &Labels::default(),
+            labels: upstream.labels,
             description: "",
         })?;
 
@@ -447,14 +738,23 @@ pub fn import(dir: &Utf8Path, upstream: &Import<'_>) -> Result<Imported> {
 
 /// Mark a ticket as `Done`, returning its path and the status it held before.
 pub fn close(dir: &Utf8Path, id: TicketId) -> Result<(Utf8PathBuf, Status)> {
+    set_status(dir, id, Status::Done)
+}
+
+/// Move a ticket to the column `status` names, returning its path and the
+/// status it held before.
+///
+/// Its place within the new column is the board's: a ticket the board file
+/// doesn't rank there sorts below those it does.
+pub fn set_status(dir: &Utf8Path, id: TicketId, status: Status) -> Result<(Utf8PathBuf, Status)> {
     let path = locate(dir, id)?;
     let source = fs::read_to_string(&path)?;
     let previous = parse::document(&source)?.metadata.status;
 
-    if previous != Status::Done {
+    if previous != status {
         // The status line is required, and `parse::document` above rejected any
         // ticket that lacks one.
-        let updated = render::set_metadata(&source, "Status", &Status::Done.to_string())
+        let updated = render::set_metadata(&source, "Status", &status.to_string())
             .ok_or(ParseError::MissingField("Status"))?;
         fs::write(&path, updated)?;
     }
@@ -486,6 +786,56 @@ pub fn list(dir: &Utf8Path) -> Result<Vec<Entry>> {
         .collect()
 }
 
+/// Read every ticket in `dir` and hold it to `vocabulary`, as [`check::report`]
+/// does.
+///
+/// A directory that doesn't exist yet holds no tickets, and so no problems.
+pub fn check(dir: &Utf8Path, vocabulary: &Vocabulary) -> Result<Report> {
+    let mut tickets = vec![];
+    for (id, path) in files(dir)? {
+        let source = fs::read_to_string(&path)?;
+        tickets.push(TicketFile { id, path, source });
+    }
+
+    let directory = Directory {
+        legacy: legacy_files(dir)?,
+        tickets,
+    };
+
+    Ok(check::report(&directory, vocabulary))
+}
+
+/// Every file in `dir` named in the four-digit `NNNN-slug.md` form, sorted.
+///
+/// [`files`] skips them, since their names hold no id, so they need a pass of
+/// their own to be seen at all.
+fn legacy_files(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(vec![]),
+        Err(error) => return Err(error.into()),
+    };
+
+    let mut legacy = vec![];
+    for entry in entries {
+        let Ok(path) = Utf8PathBuf::try_from(entry?.path()) else {
+            continue;
+        };
+        let numbered = path
+            .file_stem()
+            .and_then(|stem| stem.split_once('-'))
+            .is_some_and(|(number, slug)| {
+                number.len() == 4 && number.bytes().all(|b| b.is_ascii_digit()) && !slug.is_empty()
+            });
+        if path.extension() == Some("md") && numbered {
+            legacy.push(path);
+        }
+    }
+    legacy.sort();
+
+    Ok(legacy)
+}
+
 /// Resolve a ticket id to its file.
 pub fn locate_ticket(dir: &Utf8Path, id: TicketId) -> Result<Utf8PathBuf> {
     locate(dir, id)
@@ -512,7 +862,7 @@ fn locate(dir: &Utf8Path, id: TicketId) -> Result<Utf8PathBuf> {
     claiming.pop().ok_or(Error::NoSuchTicket(id))
 }
 
-/// Every `NNNN-slug.md` in `dir`, paired with its id and ordered by it.
+/// Every ticket file in `dir`, paired with its id and ordered by it.
 fn files(dir: &Utf8Path) -> Result<Vec<(TicketId, Utf8PathBuf)>> {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
@@ -544,13 +894,8 @@ fn files(dir: &Utf8Path) -> Result<Vec<(TicketId, Utf8PathBuf)>> {
     Ok(files)
 }
 
-/// The reference token and slug of `path`, when it is a ticket file directly
-/// inside `dir`.
-///
-/// The token is the id as other documents write it: `T-02wt0kx` now, `T0005`
-/// for a ticket left in the pre-RFD-102 format, which is exactly what a
-/// migration reassigns.
-fn ticket_filename<'a>(dir: &Utf8Path, path: &'a Utf8Path) -> Option<(String, &'a str)> {
+/// The id and slug of `path`, when it is a ticket file directly inside `dir`.
+fn ticket_filename<'a>(dir: &Utf8Path, path: &'a Utf8Path) -> Option<(TicketId, &'a str)> {
     if !same_directory(dir, path.parent()?) || path.extension() != Some("md") {
         return None;
     }
@@ -560,11 +905,7 @@ fn ticket_filename<'a>(dir: &Utf8Path, path: &'a Utf8Path) -> Option<(String, &'
         return None;
     }
 
-    if id.len() == 4 && id.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Some((format!("T{id}"), slug));
-    }
-
-    id.parse::<TicketId>().ok().map(|id| (id.to_string(), slug))
+    id.parse::<TicketId>().ok().map(|id| (id, slug))
 }
 
 /// Whether two paths name the same directory.
@@ -656,12 +997,8 @@ pub fn bucket_at(unix_seconds: u64) -> Result<u32> {
 /// What a reassignment changed.
 #[derive(Debug)]
 pub struct Reassigned {
-    /// The reference token the ticket is leaving behind, as other documents
-    /// write it.
-    ///
-    /// A string rather than a [`TicketId`], so a ticket from an older format
-    /// can report `T0005`.
-    pub old: String,
+    /// The id the ticket is leaving behind.
+    pub old: TicketId,
     pub new: TicketId,
     pub path: Utf8PathBuf,
 }

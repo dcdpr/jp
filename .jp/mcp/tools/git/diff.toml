@@ -1,6 +1,6 @@
 [conversation.tools.git_diff]
 enable = "explicit"
-run = "unattended"
+run = "allow"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"

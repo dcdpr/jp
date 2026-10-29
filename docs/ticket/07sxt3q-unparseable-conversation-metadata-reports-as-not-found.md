@@ -1,7 +1,6 @@
 # Unparseable conversation metadata reports as Not found
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-24
 - **Label**: domain=conversation

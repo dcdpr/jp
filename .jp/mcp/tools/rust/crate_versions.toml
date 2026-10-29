@@ -1,6 +1,6 @@
 [conversation.tools.rust_crate_versions]
 enable = false
-run = "unattended"
+run = "allow"
 
 source = "mcp.bookworm.crate_versions"
 summary = "List recent versions of a crate."

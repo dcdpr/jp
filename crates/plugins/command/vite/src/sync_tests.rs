@@ -1,0 +1,209 @@
+use camino_tempfile::Utf8TempDir;
+
+use super::*;
+
+fn owned(path: &str, contents: &str) -> Owned {
+    Owned {
+        path: Utf8PathBuf::from(path),
+        contents: contents.as_bytes().to_vec(),
+    }
+}
+
+fn write(root: &Utf8TempDir, path: &str, contents: &str) {
+    let path = root.path().join(path);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, contents).unwrap();
+}
+
+fn paths(changes: &[Change]) -> Vec<String> {
+    changes
+        .iter()
+        .map(|change| match change {
+            Change::Write(owned) => format!("write {}", owned.path),
+            Change::Create(page) => format!("create {}", page.path),
+            Change::Remove(path) => format!("remove {path}"),
+        })
+        .collect()
+}
+
+const OWNED: &str = "docs/.vitepress/jp-vite";
+
+#[test]
+fn a_fresh_project_gets_every_file() {
+    let root = Utf8TempDir::new().unwrap();
+
+    let changes = plan(
+        root.path(),
+        vec![
+            owned("docs/rfd/index.md", "Index"),
+            owned("docs/.vitepress/jp-vite/config.mjs", "Config"),
+        ],
+        Utf8Path::new(OWNED),
+    )
+    .unwrap();
+
+    assert_eq!(paths(&changes), [
+        "write docs/.vitepress/jp-vite/config.mjs",
+        "write docs/rfd/index.md",
+    ]);
+}
+
+#[test]
+fn a_file_already_written_is_left_alone() {
+    let root = Utf8TempDir::new().unwrap();
+    write(&root, "docs/.vitepress/jp-vite/config.mjs", "Config");
+    write(&root, "docs/rfd/index.md", "Old index");
+
+    let changes = plan(
+        root.path(),
+        vec![
+            owned("docs/rfd/index.md", "Index"),
+            owned("docs/.vitepress/jp-vite/config.mjs", "Config"),
+        ],
+        Utf8Path::new(OWNED),
+    )
+    .unwrap();
+
+    assert_eq!(paths(&changes), ["write docs/rfd/index.md"]);
+}
+
+/// A checkout that turned line endings into CRLF holds what the binary writes,
+/// so `sync` leaves it alone and `sync --check` passes; a file that differs in
+/// text is still written.
+#[test]
+fn a_file_differing_only_in_line_endings_is_left_alone() {
+    let root = Utf8TempDir::new().unwrap();
+    write(
+        &root,
+        "docs/.vitepress/jp-vite/config.mjs",
+        "one\r\ntwo\r\n",
+    );
+    write(&root, "docs/.vitepress/jp-vite/style.css", "old\r\n");
+
+    let changes = plan(
+        root.path(),
+        vec![
+            owned("docs/.vitepress/jp-vite/config.mjs", "one\ntwo\n"),
+            owned("docs/.vitepress/jp-vite/style.css", "new\n"),
+        ],
+        Utf8Path::new(OWNED),
+    )
+    .unwrap();
+
+    assert_eq!(paths(&changes), ["write docs/.vitepress/jp-vite/style.css"]);
+}
+
+#[test]
+fn only_a_carriage_return_ending_a_line_is_ignored() {
+    assert!(same_text(b"a\r\nb\r\n", b"a\nb\n"));
+    assert!(same_text(b"a\nb", b"a\r\nb"));
+    assert!(!same_text(b"a\rb\n", b"ab\n"));
+    assert!(!same_text(b"a\r\n", b"a\n\n"));
+}
+
+/// A page is created where there is none, and left as it is where there is one,
+/// whatever it holds.
+#[test]
+fn only_missing_pages_are_created() {
+    let root = Utf8TempDir::new().unwrap();
+    write(&root, "docs/rfd/index.md", "Our own index");
+
+    let changes = missing(root.path(), vec![
+        owned("docs/rfd/index.md", "Index"),
+        owned("docs/rfd/priority.md", "Priorities"),
+    ]);
+
+    assert_eq!(paths(&changes), ["create docs/rfd/priority.md"]);
+
+    assert_eq!(
+        apply(root.path(), &changes, Utf8Path::new(OWNED)).unwrap(),
+        Vec::<Utf8PathBuf>::new()
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join("docs/rfd/priority.md")).unwrap(),
+        "Priorities"
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join("docs/rfd/index.md")).unwrap(),
+        "Our own index"
+    );
+}
+
+/// A page that appears between planning and applying, while `sync` waits for a
+/// confirmation, is the project's: it is left as written, and reported.
+#[test]
+fn a_page_created_after_planning_is_left_alone() {
+    let root = Utf8TempDir::new().unwrap();
+    let changes = missing(root.path(), vec![
+        owned("docs/ticket/index.md", "Index"),
+        owned("docs/ticket/board.md", "Board"),
+    ]);
+    write(&root, "docs/ticket/index.md", "Our own index");
+
+    let kept = apply(root.path(), &changes, Utf8Path::new(OWNED)).unwrap();
+
+    assert_eq!(kept, [Utf8PathBuf::from("docs/ticket/index.md")]);
+    let read = |path: &str| fs::read_to_string(root.path().join(path)).unwrap();
+    assert_eq!(read("docs/ticket/index.md"), "Our own index");
+    assert_eq!(read("docs/ticket/board.md"), "Board");
+}
+
+/// The owned directory is the binary's whole: a file a newer release dropped
+/// goes, and what an editor leaves behind stays.
+#[test]
+fn a_file_the_binary_no_longer_has_is_removed() {
+    let root = Utf8TempDir::new().unwrap();
+    write(&root, "docs/.vitepress/jp-vite/config.mjs", "Config");
+    write(&root, "docs/.vitepress/jp-vite/loaders/old.mjs", "Old");
+    write(&root, "docs/.vitepress/jp-vite/.DS_Store", "Junk");
+    write(&root, "docs/.vitepress/config.mts", "The project's own");
+
+    let changes = plan(
+        root.path(),
+        vec![owned("docs/.vitepress/jp-vite/config.mjs", "Config")],
+        Utf8Path::new(OWNED),
+    )
+    .unwrap();
+
+    assert_eq!(paths(&changes), [
+        "remove docs/.vitepress/jp-vite/loaders/old.mjs"
+    ]);
+}
+
+#[test]
+fn applying_the_plan_writes_and_removes() {
+    let root = Utf8TempDir::new().unwrap();
+    write(&root, "docs/.vitepress/jp-vite/loaders/old.mjs", "Old");
+    write(&root, "docs/rfd/index.md", "Old index");
+
+    let changes = plan(
+        root.path(),
+        vec![
+            owned("docs/rfd/index.md", "Index"),
+            owned("docs/rfd/drafts/index.md", "Drafts"),
+            owned("docs/.vitepress/jp-vite/config.mjs", "Config"),
+        ],
+        Utf8Path::new(OWNED),
+    )
+    .unwrap();
+    apply(root.path(), &changes, Utf8Path::new(OWNED)).unwrap();
+
+    let read = |path: &str| fs::read_to_string(root.path().join(path)).unwrap();
+    assert_eq!(read("docs/rfd/index.md"), "Index");
+    assert_eq!(read("docs/rfd/drafts/index.md"), "Drafts");
+    assert_eq!(read("docs/.vitepress/jp-vite/config.mjs"), "Config");
+    assert!(!root.path().join("docs/.vitepress/jp-vite/loaders").exists());
+    assert!(root.path().join("docs/.vitepress/jp-vite").is_dir());
+
+    let again = plan(
+        root.path(),
+        vec![
+            owned("docs/rfd/index.md", "Index"),
+            owned("docs/rfd/drafts/index.md", "Drafts"),
+            owned("docs/.vitepress/jp-vite/config.mjs", "Config"),
+        ],
+        Utf8Path::new(OWNED),
+    )
+    .unwrap();
+    assert_eq!(again, []);
+}

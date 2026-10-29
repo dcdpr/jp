@@ -1,7 +1,6 @@
 # Archive and unarchive delete an existing directory at the target name
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-27
 - **Label**: domain=storage

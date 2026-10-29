@@ -97,6 +97,36 @@ fn a_later_layer_merges_nested_options_recursively() {
     );
 }
 
+/// An empty list is a value, not the absence of one: a plugin can give `[]` a
+/// meaning of its own, so it reaches the plugin from one layer, and replaces a
+/// list an earlier layer set.
+#[test]
+fn an_empty_list_in_the_options_is_kept() {
+    let single = layer("", indoc! {"
+        [options.labels.rfd]
+        values = []
+    "});
+    assert_eq!(
+        serde_json::to_value(&single.options).unwrap(),
+        json!({ "labels": { "rfd": { "values": [] } } })
+    );
+
+    let layered = layer(
+        indoc! {r#"
+            [options.labels.rfd]
+            values = ["042"]
+        "#},
+        indoc! {"
+            [options.labels.rfd]
+            values = []
+        "},
+    );
+    assert_eq!(
+        serde_json::to_value(&layered.options).unwrap(),
+        json!({ "labels": { "rfd": { "values": [] } } })
+    );
+}
+
 #[test]
 fn a_replace_strategy_drops_the_options_of_earlier_layers() {
     let config = layer(

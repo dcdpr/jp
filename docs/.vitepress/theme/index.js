@@ -1,23 +1,17 @@
 import DefaultTheme from 'vitepress/theme'
-import PageActions from './PageActions.vue'
-import RfdBreadcrumb from './RfdBreadcrumb.vue'
-import RfdLinkColors from './RfdLinkColors.vue'
-import RfdReferences from './RfdReferences.vue'
-import RfdStatusBadge from './RfdStatusBadge.vue'
 import { h } from 'vue'
+
+import { docBefore, enhanceApp } from '../jp-vite/theme/index.mjs'
+import PageActions from './PageActions.vue'
 import './custom.css'
 
 export default {
     extends: DefaultTheme,
+    // Registers the components the RFD and ticket pages render their lists with.
+    enhanceApp,
     Layout() {
         return h(DefaultTheme.Layout, null, {
-            'doc-before': () => [
-                h(PageActions),
-                h(RfdBreadcrumb),
-                h(RfdReferences),
-                h(RfdStatusBadge),
-                h(RfdLinkColors),
-            ],
+            'doc-before': () => [h(PageActions), ...docBefore()],
         })
     },
 }
