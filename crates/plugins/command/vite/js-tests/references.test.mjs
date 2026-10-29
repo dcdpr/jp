@@ -71,6 +71,14 @@ test('every name in prose is found once, in order', () => {
     )
 })
 
+test('a bare ticket id names a ticket only when the ticket exists', () => {
+    const known = new Map([['T-0aaaaaa', 'ticket/0aaaaaa-a.md']])
+    const text = 'Fixed in 0aaaaaa and T0aaaaaa, not 0bbbbbb, release, or commit 8a0593f.'
+
+    assert.deepEqual(mentionedLabels(text, known), ['T-0aaaaaa'])
+    assert.deepEqual(mentionedLabels(text), [])
+})
+
 test('names of existing documents become links, others stay text', () => {
     const line = inline(token('text', 'See RFD 042 and T-0aaaaaa, not RFD 999 or RFD D12x.'))
 
@@ -93,12 +101,34 @@ test('text already in a link, and headings, are left alone', () => {
     assert.equal(shown(heading.children), 'Follow-up to RFD 042')
 })
 
-test('a code span holding only a name is linked whole', () => {
-    const line = inline(token('code_inline', 'T-0aaaaaa'), token('text', ' and '), token('code_inline', 'see T-0aaaaaa'))
+test('a bare ticket id is linked when the ticket exists', () => {
+    const line = inline(token('text', 'See 0aaaaaa, T0aaaaaa, and 0bbbbbb; the release.'))
 
     linkMentions([line], Token, hrefFor)
 
-    assert.equal(shown(line.children), '<a href="./0aaaaaa-a.md">`T-0aaaaaa`</a> and `see T-0aaaaaa`')
+    assert.equal(
+        shown(line.children),
+        'See <a href="./0aaaaaa-a.md">0aaaaaa</a>, <a href="./0aaaaaa-a.md">T0aaaaaa</a>, ' +
+            'and 0bbbbbb; the release.',
+    )
+})
+
+test('a code span holding only a name is linked whole', () => {
+    const line = inline(
+        token('code_inline', 'T-0aaaaaa'),
+        token('text', ' and '),
+        token('code_inline', '0aaaaaa'),
+        token('text', ' but '),
+        token('code_inline', 'see T-0aaaaaa'),
+    )
+
+    linkMentions([line], Token, hrefFor)
+
+    assert.equal(
+        shown(line.children),
+        '<a href="./0aaaaaa-a.md">`T-0aaaaaa`</a> and <a href="./0aaaaaa-a.md">`0aaaaaa`</a> ' +
+            'but `see T-0aaaaaa`',
+    )
 })
 
 test('a link is relative to the page, and none is made to the page itself', () => {

@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+import { knownDocuments } from '../references.mjs'
 import { readSettings, workflowDir, workflowPath } from '../settings.mjs'
 import { field } from './metadata.mjs'
 import { referencedLabels } from './rfd-shared.mjs'
@@ -29,7 +30,10 @@ export const COLUMNS = [
 const DEFAULT_DONE_LIMIT = 8
 
 // Parse one ticket file.
-export function parseTicket(content, filename) {
+//
+// `known` holds the documents a bare ticket id in the text may name; see
+// `referencedLabels`.
+export function parseTicket(content, filename, known = new Map()) {
     const id = filename.match(/^([0-9a-z]{7})-/)?.[1] ?? '0000000'
     const title = content.match(/^# (.+)/m)?.[1]?.trim() ?? filename
 
@@ -45,7 +49,7 @@ export function parseTicket(content, filename) {
         github: field(content, 'GitHub'),
         comments: countComments(content),
         // Cross-kind links, resolved in the browser against both sets.
-        links: referencedLabels(content).filter(label => label !== `T-${id}`),
+        links: referencedLabels(content, known).filter(label => label !== `T-${id}`),
         slug: filename.replace(/\.md$/, ''),
     }
 }
@@ -364,8 +368,9 @@ export function loadTickets(settings = readSettings()) {
     const duplicate = findDuplicateIds(files)
     if (duplicate) throw new Error(duplicate)
 
+    const known = knownDocuments(settings)
     const tickets = files.map(f => ({
-        ...parseTicket(readFileSync(resolve(dir, f), 'utf-8'), f),
+        ...parseTicket(readFileSync(resolve(dir, f), 'utf-8'), f, known),
         path: `${route}/${f.replace(/\.md$/, '')}`,
     }))
 

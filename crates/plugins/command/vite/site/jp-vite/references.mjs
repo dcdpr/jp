@@ -6,27 +6,47 @@ import { SRC_DIR } from './settings.mjs'
 // Documents named in prose, and the links the site makes of them.
 //
 // A ticket or RFD often names another by its id instead of linking to it:
-// `RFD 042`, `RFD D12`, or `T-005zd00`. The References box above a document
-// lists every document it names, and the document's text links each name where
-// it appears, so both read the same names the same way.
+// `RFD 042`, `RFD D12`, `T-005zd00`, or the ticket id alone, `005zd00`. The
+// References box above a document lists every document it names, and the
+// document's text links each name where it appears, so both read the same
+// names the same way.
 
-// A named document: an RFD as `RFD 042` or `RFD D12`, a ticket as `T-005zd00`.
-// The space in `RFD 042` may be a line break, where a formatter wrapped it.
-const MENTION = /\bRFD\s+(\d{3}|D\d{2})\b|\bT-[0-9a-z]{7}\b/g
+// A named document: an RFD as `RFD 042` or `RFD D12`, a ticket as `T-005zd00`,
+// `T005zd00`, or `005zd00`. The space in `RFD 042` may be a line break, where a
+// formatter wrapped it.
+//
+// Groups: the RFD id; the ticket prefix, if any; the ticket id.
+const MENTION = /\bRFD\s+(\d{3}|D\d{2})\b|\b(T-|T)?([0-9a-z]{7})\b/g
 
-// A code span holding nothing but a name, which is linked whole.
-const WHOLE = /^(?:RFD\s+(\d{3}|D\d{2})|T-[0-9a-z]{7})$/
+// A code span holding nothing but a name, which is linked whole. Same groups.
+const WHOLE = /^(?:RFD\s+(\d{3}|D\d{2})|(T-|T)?([0-9a-z]{7}))$/
 
 // The label a name stands for, as `documents.mjs` keys on it: `042`, `D12`,
 // `T-005zd00`.
 function labelOf(match) {
-    return match[1] ?? match[0]
+    return match[1] ?? `T-${match[3]}`
+}
+
+// Whether a name says what it is: `RFD 042` and `T-005zd00` do. `005zd00` and
+// `T005zd00` read like any seven-letter word or a commit hash, so they name a
+// ticket only when that ticket exists.
+function isExplicit(match) {
+    return match[1] !== undefined || match[2] === 'T-'
 }
 
 // The labels of the documents `text` names, each once, in the order they first
 // appear.
-export function mentionedLabels(text) {
-    return [...new Set([...text.matchAll(MENTION)].map(labelOf))]
+//
+// A bare ticket id counts only when `known`, a map keyed by label such as
+// `knownDocuments` gives, holds it; an explicit name always does.
+export function mentionedLabels(text, known = new Map()) {
+    const labels = new Set()
+    for (const match of text.matchAll(MENTION)) {
+        const label = labelOf(match)
+        if (isExplicit(match) || known.has(label)) labels.add(label)
+    }
+
+    return [...labels]
 }
 
 // Every RFD and ticket the site has, as the label a name stands for mapped to
@@ -79,7 +99,7 @@ export function relativeHref(page, target) {
 // `hrefFor` gives the link for a label, or `null` to leave the name as text.
 // Text already inside a link stays as it is, and so do headings, which a link
 // would turn into a link to somewhere else. A code span holding nothing but a
-// name, such as `T-005zd00`, is linked whole.
+// name, such as `T-005zd00` or `005zd00`, is linked whole.
 export function linkMentions(tokens, Token, hrefFor) {
     tokens.forEach((token, index) => {
         if (token.type !== 'inline' || !token.children) return

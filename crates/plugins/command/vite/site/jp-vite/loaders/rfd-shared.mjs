@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { mentionedLabels } from '../references.mjs'
+import { knownDocuments, mentionedLabels } from '../references.mjs'
 import { readSettings, workflowDir, workflowPath } from '../settings.mjs'
 import { anyLabelQuery } from '../theme/label-filter.mjs'
 import { field, wrappedField } from './metadata.mjs'
@@ -70,9 +70,10 @@ export function parseReferences(content, ownNum) {
 //
 // RFDs are matched through their linked filename, whose slug must carry a
 // letter so a date like `2026-08-05` isn't read as a link, and by name in
-// prose, as `RFD 042`. Tickets are matched through the canonical `T-` token.
-// The names are the ones the page's text links; see `../references.mjs`.
-export function referencedLabels(content) {
+// prose, as `RFD 042`. Tickets are matched as `T-005zd00`, or as `005zd00`
+// when `known` holds that ticket. The names are the ones the page's text
+// links; see `../references.mjs`.
+export function referencedLabels(content, known = new Map()) {
     const labels = new Set()
 
     const rfds = /\b(\d{3}|D\d{2})-[a-z0-9-]*[a-z][a-z0-9-]*(?:\.md)?/g
@@ -80,7 +81,7 @@ export function referencedLabels(content) {
     while ((match = rfds.exec(content)) !== null) {
         labels.add(match[1])
     }
-    for (const label of mentionedLabels(content)) labels.add(label)
+    for (const label of mentionedLabels(content, known)) labels.add(label)
 
     return [...labels]
 }
@@ -93,6 +94,7 @@ export function referencedLabels(content) {
 // can't reference drafts, so a draft's `referencedBy` lists drafts; a
 // published RFD's stays published-only.
 export function buildEntries(dir, files, basePath) {
+    const known = knownDocuments(readSettings())
     const rfds = files.map(f => {
         const content = readFileSync(resolve(dir, f), 'utf-8')
         const meta = parseMeta(content, f)
@@ -101,7 +103,7 @@ export function buildEntries(dir, files, basePath) {
             path: `${basePath}/${meta.slug}`,
             references: parseReferences(content, meta.num),
             // Cross-kind links, resolved in the browser against both sets.
-            links: referencedLabels(content).filter(label => label !== meta.num),
+            links: referencedLabels(content, known).filter(label => label !== meta.num),
         }
     })
 
