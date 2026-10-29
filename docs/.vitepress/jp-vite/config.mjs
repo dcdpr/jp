@@ -3,6 +3,7 @@ import { posix } from 'node:path'
 import { joinMultilineInlineCode } from './join-inline-code.mjs'
 import { devServer } from './middleware.mjs'
 import { rfdRedirectServer, writeRfdRedirects } from './redirects.mjs'
+import { knownDocuments, linkMentions, relativeHref } from './references.mjs'
 import { readSettings } from './settings.mjs'
 
 // What the RFD and ticket pages need from the VitePress configuration.
@@ -42,6 +43,7 @@ export function withJpVite(config = {}) {
             config: chain((md) => {
                 escapeInlineCodeInterpolation(md)
                 rewriteRepositoryLinks(md, settings)
+                linkDocumentMentions(md)
             }, markdown.config),
         },
         // RFDs and tickets aren't in the sidebar, so VitePress's prev/next links
@@ -126,6 +128,24 @@ function escapeInlineCodeInterpolation(md) {
             .replace(/\}\}/g, '&#125;&#125;')
         return `<code>${escaped}</code>`
     }
+}
+
+// Link the RFDs and tickets an RFD or ticket page names in its text, such as
+// `RFD 042` or `T-005zd00`, to their pages. A name of a document that doesn't
+// exist stays text. See `./references.mjs`.
+//
+// Runs at parse time, so VitePress's link render rule treats the links like
+// ones written by hand. The documents are read on every page, so one created
+// while the dev server runs is linked from the next page rendered.
+function linkDocumentMentions(md) {
+    md.core.ruler.push('link_document_mentions', (state) => {
+        const page = state.env?.relativePath
+        const settings = readSettings()
+        if (!page || !isDocumentPage(page, settings)) return
+
+        const known = knownDocuments(settings)
+        linkMentions(state.tokens, state.Token, label => relativeHref(page, known.get(label)))
+    })
 }
 
 // Rewrite relative links that climb out of the site to the file in the

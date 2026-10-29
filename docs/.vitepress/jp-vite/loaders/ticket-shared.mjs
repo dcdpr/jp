@@ -45,7 +45,7 @@ export function parseTicket(content, filename) {
         github: field(content, 'GitHub'),
         comments: countComments(content),
         // Cross-kind links, resolved in the browser against both sets.
-        links: referencedLabels(content).filter(label => label !== `T${id}`),
+        links: referencedLabels(content).filter(label => label !== `T-${id}`),
         slug: filename.replace(/\.md$/, ''),
     }
 }

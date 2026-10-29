@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+import { mentionedLabels } from '../references.mjs'
 import { readSettings, workflowDir, workflowPath } from '../settings.mjs'
 import { anyLabelQuery } from '../theme/label-filter.mjs'
 import { field, wrappedField } from './metadata.mjs'
@@ -67,9 +68,10 @@ export function parseReferences(content, ownNum) {
 // Every document a body links to, as the labels `documents.mjs` keys on:
 // `042` and `D12` for RFDs, `T-005zd00` for tickets.
 //
-// RFDs are matched through their linked filename; the slug must carry a letter,
-// so a date like `2026-08-05` isn't read as a link. Tickets are matched through
-// the canonical `T-` token, which is distinctive enough to appear in prose.
+// RFDs are matched through their linked filename, whose slug must carry a
+// letter so a date like `2026-08-05` isn't read as a link, and by name in
+// prose, as `RFD 042`. Tickets are matched through the canonical `T-` token.
+// The names are the ones the page's text links; see `../references.mjs`.
 export function referencedLabels(content) {
     const labels = new Set()
 
@@ -78,11 +80,7 @@ export function referencedLabels(content) {
     while ((match = rfds.exec(content)) !== null) {
         labels.add(match[1])
     }
-
-    const tickets = /\bT-([0-9a-z]{7})\b/g
-    while ((match = tickets.exec(content)) !== null) {
-        labels.add(`T-${match[1]}`)
-    }
+    for (const label of mentionedLabels(content)) labels.add(label)
 
     return [...labels]
 }
