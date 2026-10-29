@@ -1,7 +1,7 @@
 //! Ticket identifiers.
 //!
 //! An id is seven Crockford base-32 characters: five encoding a five-second
-//! bucket since the epoch, two carrying randomness.
+//! bucket since the ticket directory's epoch, two carrying randomness.
 //! The canonical form prefixes them with `T-`, as in `T-02wt0kx`.
 //!
 //! Every position is fixed width and the alphabet's ASCII order matches its
@@ -36,8 +36,8 @@ pub const TAIL_SPACE: u16 = 1024;
 
 /// Buckets the time component can express: `32^5`.
 ///
-/// At five seconds each this runs out in December 2031, at which point
-/// allocation refuses rather than wrapping or widening.
+/// At five seconds each this runs out about 5.3 years after the epoch, at which
+/// point allocation refuses rather than wrapping or widening.
 pub const MAX_BUCKET: u32 = 33_554_432;
 
 /// A ticket id.

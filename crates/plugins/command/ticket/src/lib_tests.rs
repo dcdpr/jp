@@ -1,9 +1,12 @@
+use std::fs;
+
 use camino_tempfile::Utf8TempDir;
 use clap::CommandFactory;
 use jp_plugin::message::{
     EditFilesRequest, EditedResponse, ErrorResponse, OutputFormat, ToolAction, WorkspaceInfo,
 };
 use serde_json::{Map, json};
+use ticket::epoch::EPOCH_FILE;
 
 use super::*;
 
@@ -147,6 +150,7 @@ fn git_repo() -> Utf8TempDir {
     git(root, &["config", "commit.gpgsign", "false"]);
 
     std::fs::create_dir_all(root.join("docs/ticket")).unwrap();
+    std::fs::write(root.join("docs/ticket").join(EPOCH_FILE), "2026-08-10\n").unwrap();
     std::fs::write(root.join("README.md"), "# Fixture\n").unwrap();
     commit(root, "Initial commit", None);
 
@@ -711,9 +715,15 @@ fn write_with_labels(dir: &Utf8Path, body: &str, labels: &[(&str, &str)]) {
     fs::write(dir.join(format!("{body}-slug.md")), document).unwrap();
 }
 
+/// Give `dir` the epoch file a board with tickets in it has.
+fn write_epoch(dir: &Utf8Path) {
+    fs::write(dir.join(EPOCH_FILE), "2026-08-10\n").unwrap();
+}
+
 #[test]
 fn check_reports_a_board_meeting_every_rule_and_exits_zero() {
     let dir = Utf8TempDir::new().unwrap();
+    write_epoch(dir.path());
     write_with_labels(dir.path(), "0aaaaaa", &[("type", "bug"), ("rfd", "116")]);
     write_with_labels(dir.path(), "0bbbbbb", &[("type", "task"), ("rfd", "117")]);
 
@@ -727,6 +737,7 @@ fn check_reports_a_board_meeting_every_rule_and_exits_zero() {
 #[test]
 fn check_lists_every_problem_and_exits_one() {
     let dir = Utf8TempDir::new().unwrap();
+    write_epoch(dir.path());
     write_with_labels(dir.path(), "0aaaaaa", &[("type", "bug"), ("rfd", "116")]);
     write_with_labels(dir.path(), "0bbbbbb", &[]);
     write_with_labels(dir.path(), "0cccccc", &[("type", "task"), ("rfd", "116")]);
@@ -753,6 +764,7 @@ fn check_prints_its_report_and_then_exits_one() {
     let root = Utf8TempDir::new().unwrap();
     let dir = root.path().join(store::DEFAULT_DIR);
     fs::create_dir_all(&dir).unwrap();
+    write_epoch(&dir);
     write_with_labels(&dir, "0bbbbbb", &[]);
 
     let messages = exchange(&init_with_options(root.path(), &["check"], checked_board()));
@@ -779,6 +791,7 @@ fn check_prints_its_report_and_then_exits_one() {
 #[test]
 fn check_under_json_prints_one_record_per_problem() {
     let dir = Utf8TempDir::new().unwrap();
+    write_epoch(dir.path());
     write_with_labels(dir.path(), "0bbbbbb", &[]);
     fs::write(dir.path().join("0001-old.md"), "# Old\n").unwrap();
 
@@ -1330,8 +1343,8 @@ fn rank_refuses_tickets_in_different_columns() {
     );
 }
 
-/// `init` creates the directory and nothing in it: the board needs no order
-/// file until something is ranked.
+/// `init` creates the directory and its epoch file, and nothing else: the board
+/// needs no order file until something is ranked.
 #[test]
 fn init_creates_the_ticket_directory() {
     let dir = Utf8TempDir::new().unwrap();
@@ -1339,8 +1352,11 @@ fn init_creates_the_ticket_directory() {
 
     let created = run_in(&tickets, Command::Init).unwrap();
     assert_eq!(created.text, format!("Created {tickets}\n"));
-    assert!(tickets.is_dir());
-    assert_eq!(std::fs::read_dir(&tickets).unwrap().count(), 0);
+    let names: Vec<String> = fs::read_dir(&tickets)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, [EPOCH_FILE]);
 
     let again = run_in(&tickets, Command::Init).unwrap();
     assert_eq!(again.text, format!("{tickets} already exists.\n"));
@@ -1696,6 +1712,35 @@ fn refresh_keeps_the_ticket_in_the_bucket_it_was_created_in() {
     assert_eq!(fresh.bucket(), 69_120);
 }
 
+/// A ticket git added before the board's epoch, as one carried over with its
+/// history from another repository is, sorts first rather than failing the
+/// repair.
+#[test]
+fn refresh_puts_a_ticket_older_than_the_epoch_in_the_first_bucket() {
+    let repo = git_repo();
+    let root = repo.path();
+    let dir = root.join("docs/ticket");
+
+    let path = dir.join("02wt0kx-carried-over.md");
+    std::fs::write(
+        &path,
+        "# Carried over\n\n- **Status**: Todo\n- **Authors**: john\n- **Date**: \
+         2026-08-01\n\nBody.\n",
+    )
+    .unwrap();
+    // Nine days before the fixture's 2026-08-10 epoch.
+    commit(root, "File it", Some("2026-08-01T00:00:00Z"));
+
+    run_in(&dir, Command::Refresh {
+        path,
+        base: "main".to_owned(),
+    })
+    .unwrap();
+
+    let fresh = store::list(&dir).unwrap()[0].id;
+    assert_eq!(fresh.bucket(), 0);
+}
+
 /// An unreadable candidate must not be mistaken for one that holds no
 /// reference, or `refresh` reports success on an incomplete repair.
 #[test]
@@ -1818,6 +1863,7 @@ fn a_run_reports_ready_then_output_then_exit() {
             let names: Vec<String> = std::fs::read_dir(&ticket_dir)
                 .unwrap()
                 .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                .filter(|name| name != EPOCH_FILE)
                 .collect();
             assert_eq!(names.len(), 1, "{names:?}");
 

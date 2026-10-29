@@ -48,6 +48,15 @@ pub enum Problem {
     /// no command reads it.
     LegacyName(Utf8PathBuf),
 
+    /// No epoch file beside existing tickets, so no new id can be allocated.
+    MissingEpoch(Utf8PathBuf),
+
+    /// An epoch file that doesn't hold an epoch.
+    MalformedEpoch {
+        path: Utf8PathBuf,
+        error: ParseError,
+    },
+
     /// Files claiming one id, so a reference to it can't tell them apart.
     Duplicate {
         id: TicketId,
@@ -84,6 +93,12 @@ impl fmt::Display for Problem {
                 "{path} is named in the four-digit `NNNN-slug.md` form, which no command reads. \
                  Rename it to the `<id>-slug.md` form."
             ),
+            Self::MissingEpoch(path) => write!(
+                f,
+                "{path} is missing, so no new ticket can be filed. Restore it from version \
+                 control."
+            ),
+            Self::MalformedEpoch { path, error } => write!(f, "{path}: {error}"),
             Self::Duplicate { id, paths } => write!(
                 f,
                 "{id} is claimed by more than one file: {}. Give all but one a fresh id with `jp \
