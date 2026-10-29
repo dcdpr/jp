@@ -613,7 +613,7 @@ fn handle_command(
                 print(stdout, &output.text)?;
             }
             // No reason: the text already says what the code reports.
-            send_exit(stdout, output.code, None)
+            send_result(stdout, output.code)
         }
         Err(message) => send_exit(stdout, 1, Some(&message)),
     }
@@ -2325,12 +2325,27 @@ fn print_to(stdout: &mut impl Write, text: &str, channel: &str) -> Result<(), St
     )
 }
 
+/// End the session with a failure, or with success when `code` is 0.
 fn send_exit(stdout: &mut impl Write, code: u8, reason: Option<&str>) -> Result<(), String> {
     send(
         stdout,
         &PluginToHost::Exit(ExitMessage {
             code,
             reason: reason.map(String::from),
+            expected: false,
+        }),
+    )
+}
+
+/// End the session with the code a command chose to report its result by, which
+/// `jp` doesn't treat as a failure.
+fn send_result(stdout: &mut impl Write, code: u8) -> Result<(), String> {
+    send(
+        stdout,
+        &PluginToHost::Exit(ExitMessage {
+            code,
+            reason: None,
+            expected: code != 0,
         }),
     )
 }

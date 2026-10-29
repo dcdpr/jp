@@ -1160,6 +1160,16 @@ pub struct ExitMessage {
     /// Omit for successful exits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+
+    /// Whether a non-zero code reports a result rather than a failure, as a
+    /// check that found problems does.
+    ///
+    /// `jp` still exits with the code; it skips what it does only for a run
+    /// that broke, such as keeping the trace log and naming where it went.
+    /// Ignored with a code of 0, and by a `jp` that predates it, which treats
+    /// the exit as a failure.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub expected: bool,
 }
 
 /// Wrap a field that is present on the wire, including `null`, in `Some`.

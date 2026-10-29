@@ -39,6 +39,7 @@ pub fn ready(required: u32, host: u32) -> Result<ReadyMessage, ExitMessage> {
                 "this plugin needs `jp` protocol {required}, and this `jp` speaks {host}. \
                  Reinstall the two together."
             )),
+            expected: false,
         });
     }
 

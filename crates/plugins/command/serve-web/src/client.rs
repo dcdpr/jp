@@ -406,7 +406,11 @@ impl PluginClient {
 
     /// Send an exit message to the host.
     pub fn send_exit(&self, code: u8) {
-        drop(self.send(&PluginToHost::Exit(ExitMessage { code, reason: None })));
+        drop(self.send(&PluginToHost::Exit(ExitMessage {
+            code,
+            reason: None,
+            expected: false,
+        })));
     }
 
     fn next_id(&self) -> String {

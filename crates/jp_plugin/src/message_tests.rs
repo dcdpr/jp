@@ -273,10 +273,11 @@ fn plugin_exit_roundtrip() {
     let msg = PluginToHost::Exit(ExitMessage {
         code: 0,
         reason: None,
+        expected: false,
     });
     let json = serde_json::to_string(&msg).unwrap();
-    // reason: None should not appear in JSON
-    assert!(!json.contains("reason"));
+    // Neither a missing reason nor a failure is written out.
+    assert_eq!(json, r#"{"type":"exit","code":0}"#);
     let parsed: PluginToHost = from_str(&json).unwrap();
     assert_eq!(msg, parsed);
 }
@@ -286,6 +287,7 @@ fn plugin_exit_with_reason() {
     let msg = PluginToHost::Exit(ExitMessage {
         code: 1,
         reason: Some("something went wrong".to_owned()),
+        expected: false,
     });
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains("reason"));
@@ -301,9 +303,25 @@ fn plugin_exit_without_reason_deserializes() {
     if let PluginToHost::Exit(exit) = msg {
         assert_eq!(exit.code, 0);
         assert!(exit.reason.is_none());
+        assert!(!exit.expected);
     } else {
         panic!("expected Exit");
     }
+}
+
+/// A code reporting a result says so on the wire, and only then.
+#[test]
+fn plugin_exit_reporting_a_result() {
+    let msg = PluginToHost::Exit(ExitMessage {
+        code: 1,
+        reason: None,
+        expected: true,
+    });
+
+    let json = serde_json::to_string(&msg).unwrap();
+
+    assert_eq!(json, r#"{"type":"exit","code":1,"expected":true}"#);
+    assert_eq!(from_str::<PluginToHost>(&json).unwrap(), msg);
 }
 
 #[test]

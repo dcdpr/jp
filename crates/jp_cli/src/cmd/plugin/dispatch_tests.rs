@@ -889,6 +889,7 @@ async fn a_ready_carries_on_and_a_clean_exit_stops() {
             PluginToHost::Exit(ExitMessage {
                 code: 0,
                 reason: None,
+                expected: false,
             }),
             &mut sink,
             &mut ws,
@@ -913,6 +914,7 @@ async fn a_failing_exit_carries_its_code_and_reason() {
         PluginToHost::Exit(ExitMessage {
             code: 3,
             reason: Some("no such ticket".to_owned()),
+            expected: false,
         }),
         &mut sink,
         &mut ws,
@@ -925,6 +927,34 @@ async fn a_failing_exit_carries_its_code_and_reason() {
 
     assert_eq!(error.code.get(), 3);
     assert_eq!(error.message.as_deref(), Some("no such ticket"));
+    assert!(!error.expected);
+}
+
+/// A non-zero exit the plugin marks as a result keeps its code, but doesn't
+/// count as a failed run, so `jp` keeps no trace log for it.
+#[tokio::test]
+async fn an_exit_reporting_a_result_is_an_expected_error() {
+    let mut ws = bare_workspace();
+    let mut sink: Vec<u8> = Vec::new();
+
+    let error = handle_request(
+        PluginToHost::Exit(ExitMessage {
+            code: 1,
+            reason: None,
+            expected: true,
+        }),
+        &mut sink,
+        &mut ws,
+        &json!({}),
+        None,
+        None,
+        &AppConfig::new_test(),
+    )
+    .expect_err("a non-zero exit is still an error");
+
+    assert_eq!(error.code.get(), 1);
+    assert_eq!(error.message, None);
+    assert!(error.expected);
 }
 
 /// A plugin that ignores `Shutdown` is killed rather than waited on forever,

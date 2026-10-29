@@ -1894,14 +1894,20 @@ fn handle_request(
         }
 
         PluginToHost::Exit(exit) => {
-            debug!(code = exit.code, "Plugin exited.");
-            if exit.code != 0 {
-                return match exit.reason {
-                    Some(reason) => Err(cmd::Error::from((exit.code, reason))),
-                    None => Err(cmd::Error::from(exit.code)),
-                };
+            debug!(code = exit.code, expected = exit.expected, "Plugin exited.");
+            if exit.code == 0 {
+                return Ok(Flow::Stop);
             }
-            return Ok(Flow::Stop);
+
+            let error = match exit.reason {
+                Some(reason) => cmd::Error::from((exit.code, reason)),
+                None => cmd::Error::from(exit.code),
+            };
+            return Err(if exit.expected {
+                error.expected()
+            } else {
+                error
+            });
         }
     }
 

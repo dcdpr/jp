@@ -747,6 +747,7 @@ fn check_lists_every_problem_and_exits_one() {
 
 /// The report reaches the host as output, and the exit carries no reason, so
 /// `jp` prints the report once rather than again as an error.
+/// The exit is marked as a result, so `jp` doesn't treat it as a failed run.
 #[test]
 fn check_prints_its_report_and_then_exits_one() {
     let root = Utf8TempDir::new().unwrap();
@@ -770,6 +771,7 @@ fn check_prints_its_report_and_then_exits_one() {
         PluginToHost::Exit(ExitMessage {
             code: 1,
             reason: None,
+            expected: true,
         }),
     ]);
 }
@@ -1109,6 +1111,7 @@ fn edit_without_an_editor_names_the_flags() {
                  change instead: --title, --body, --status, or --label."
                     .to_owned()
             ),
+            expected: false,
         }))
     );
 }
