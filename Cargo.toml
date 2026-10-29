@@ -63,6 +63,7 @@ camino-tempfile = { version = "1", default-features = false }
 cargo_metadata = { version = "0.23", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4", default-features = false }
+clap_lex = { version = "0.7", default-features = false }
 clean-path = { version = "0.2", default-features = false }
 comfy-table = { version = "7", default-features = false }
 comrak = { version = "0.52", default-features = false }

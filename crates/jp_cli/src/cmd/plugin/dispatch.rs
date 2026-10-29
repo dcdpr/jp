@@ -2940,8 +2940,6 @@ fn unknown_subcommand_error(
 /// prefix, usage line, help hint), so an unknown plugin command reads like an
 /// unknown built-in one.
 fn usage_error(message: String) -> cmd::Error {
-    use clap::CommandFactory as _;
-
     let err = crate::Cli::command().error(clap::error::ErrorKind::InvalidSubcommand, message);
     drop(err.print());
     cmd::Error::from(2u8)

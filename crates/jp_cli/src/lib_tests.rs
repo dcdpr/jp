@@ -1,8 +1,8 @@
-use std::{env, fs, sync::Arc};
+use std::{env, fmt::Write as _, fs, sync::Arc};
 
 use camino::Utf8PathBuf;
 use camino_tempfile::tempdir;
-use clap::CommandFactory;
+use clap::{Arg, Command, builder::ValueParser};
 use jp_config::{
     AppConfig, PartialAppConfig,
     model::id::{PartialModelIdConfig, ProviderId},
@@ -288,6 +288,177 @@ fn tracing_guard_persist_keeps_temp_file_on_disk() {
 #[test]
 fn test_cli() {
     Cli::command().debug_assert();
+}
+
+/// The whole command-line surface, as clap resolves it.
+///
+/// Pins every flag's spelling, arity, value type, relations, and help text, so
+/// a change to how the commands are declared can only change what a user sees
+/// on purpose.
+#[test]
+fn command_line_surface() {
+    let mut cli = Cli::command().term_width(100).max_term_width(100);
+    cli.build();
+
+    let mut out = String::new();
+    describe_command(&mut out, &cli, "jp", &[]);
+    insta::assert_snapshot!(out);
+}
+
+/// Append `cmd`, its arguments, and then its subcommands to `out`.
+///
+/// `inherited` names the global arguments an ancestor already described, which
+/// clap copies into every subcommand.
+fn describe_command(out: &mut String, cmd: &Command, path: &str, inherited: &[String]) {
+    let text = |s: Option<&clap::builder::StyledStr>| s.map(ToString::to_string);
+    let hidden: Vec<_> = cmd
+        .get_all_aliases()
+        .filter(|a| !cmd.get_visible_aliases().any(|v| v == *a))
+        .collect();
+
+    writeln!(out, "## {path}").unwrap();
+    writeln!(out, "about: {:?}", text(cmd.get_about())).unwrap();
+    writeln!(out, "long_about: {:?}", text(cmd.get_long_about())).unwrap();
+    writeln!(out, "after_help: {:?}", text(cmd.get_after_help())).unwrap();
+    writeln!(
+        out,
+        "after_long_help: {:?}",
+        text(cmd.get_after_long_help())
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "visible_aliases: {:?}",
+        cmd.get_visible_aliases().collect::<Vec<_>>()
+    )
+    .unwrap();
+    writeln!(out, "hidden_aliases: {hidden:?}").unwrap();
+    writeln!(out, "hidden: {}", cmd.is_hide_set()).unwrap();
+    writeln!(
+        out,
+        "external_subcommands: {:?}",
+        cmd.is_allow_external_subcommands_set().then(|| cmd
+            .get_external_subcommand_value_parser()
+            .map(ValueParser::type_id))
+    )
+    .unwrap();
+
+    // The version and author come from the package, so only their presence is
+    // pinned: a release must not change the snapshot.
+    let settings = [
+        ("version", cmd.get_version().is_some()),
+        ("long_version", cmd.get_long_version().is_some()),
+        ("author", cmd.get_author().is_some()),
+        ("subcommand_required", cmd.is_subcommand_required_set()),
+        (
+            "arg_required_else_help",
+            cmd.is_arg_required_else_help_set(),
+        ),
+        (
+            "disable_help_subcommand",
+            cmd.is_disable_help_subcommand_set(),
+        ),
+        ("propagate_version", cmd.is_propagate_version_set()),
+        (
+            "subcommand_negates_reqs",
+            cmd.is_subcommand_negates_reqs_set(),
+        ),
+        (
+            "args_conflicts_with_subcommands",
+            cmd.is_args_conflicts_with_subcommands_set(),
+        ),
+        ("flatten_help", cmd.is_flatten_help_set()),
+    ];
+    let set: Vec<_> = settings
+        .iter()
+        .filter(|(_, on)| *on)
+        .map(|(name, _)| *name)
+        .collect();
+    writeln!(out, "set: {set:?}").unwrap();
+    writeln!(out, "usage: {}", cmd.clone().render_usage()).unwrap();
+    for group in cmd.get_groups() {
+        let args: Vec<_> = group.get_args().map(ToString::to_string).collect();
+        writeln!(
+            out,
+            "group {}: {args:?} required={} multiple={}",
+            group.get_id(),
+            group.is_required_set(),
+            group.clone().is_multiple()
+        )
+        .unwrap();
+    }
+    writeln!(out).unwrap();
+
+    let mut globals = inherited.to_vec();
+    for arg in cmd.get_arguments() {
+        let id = arg.get_id().to_string();
+        if arg.is_global_set() {
+            if inherited.contains(&id) {
+                continue;
+            }
+            globals.push(id);
+        }
+
+        describe_arg(out, cmd, arg);
+    }
+
+    for sub in cmd.get_subcommands() {
+        describe_command(out, sub, &format!("{path} {}", sub.get_name()), &globals);
+    }
+}
+
+/// Append one argument of `cmd` to `out`.
+fn describe_arg(out: &mut String, cmd: &Command, arg: &Arg) {
+    let text = |s: Option<&clap::builder::StyledStr>| s.map(ToString::to_string);
+    let aliases = arg.get_all_aliases().unwrap_or_default();
+    let visible = arg.get_visible_aliases().unwrap_or_default();
+    let hidden: Vec<_> = aliases.iter().filter(|a| !visible.contains(a)).collect();
+    let possible: Vec<_> = arg
+        .get_possible_values()
+        .iter()
+        .map(|v| v.get_name().to_owned())
+        .collect();
+    let conflicts: Vec<_> = cmd
+        .get_arg_conflicts_with(arg)
+        .iter()
+        .map(|a| a.get_id().to_string())
+        .collect();
+    let flags = [
+        ("required", arg.is_required_set()),
+        ("global", arg.is_global_set()),
+        ("hide", arg.is_hide_set()),
+        ("last", arg.is_last_set()),
+        ("require_equals", arg.is_require_equals_set()),
+        ("trailing_var_arg", arg.is_trailing_var_arg_set()),
+        ("allow_hyphen_values", arg.is_allow_hyphen_values_set()),
+        ("exclusive", arg.is_exclusive_set()),
+    ];
+    let set: Vec<_> = flags
+        .iter()
+        .filter(|(_, on)| *on)
+        .map(|(name, _)| *name)
+        .collect();
+
+    writeln!(out, "### {}", arg.get_id()).unwrap();
+    writeln!(out, "short: {:?}", arg.get_short()).unwrap();
+    writeln!(out, "long: {:?}", arg.get_long()).unwrap();
+    writeln!(out, "visible_aliases: {visible:?}").unwrap();
+    writeln!(out, "hidden_aliases: {hidden:?}").unwrap();
+    writeln!(out, "short_aliases: {:?}", arg.get_all_short_aliases()).unwrap();
+    writeln!(out, "index: {:?}", arg.get_index()).unwrap();
+    writeln!(out, "action: {:?}", arg.get_action()).unwrap();
+    writeln!(out, "num_args: {:?}", arg.get_num_args()).unwrap();
+    writeln!(out, "value_type: {:?}", arg.get_value_parser().type_id()).unwrap();
+    writeln!(out, "possible_values: {possible:?}").unwrap();
+    writeln!(out, "value_names: {:?}", arg.get_value_names()).unwrap();
+    writeln!(out, "value_delimiter: {:?}", arg.get_value_delimiter()).unwrap();
+    writeln!(out, "default_values: {:?}", arg.get_default_values()).unwrap();
+    writeln!(out, "help_heading: {:?}", arg.get_help_heading()).unwrap();
+    writeln!(out, "conflicts: {conflicts:?}").unwrap();
+    writeln!(out, "set: {set:?}").unwrap();
+    writeln!(out, "help: {:?}", text(arg.get_help())).unwrap();
+    writeln!(out, "long_help: {:?}", text(arg.get_long_help())).unwrap();
+    writeln!(out).unwrap();
 }
 
 #[test]
@@ -625,7 +796,7 @@ fn query_model_override_persists_config_delta_through_run_inner() {
     conv.update_metadata(|_| {});
     drop(conv);
 
-    let cli = Cli::parse_from([
+    let cli = Cli::try_parse_from([
         "jp",
         "--workspace",
         root.as_str(),
@@ -648,7 +819,8 @@ fn query_model_override_persists_config_delta_through_run_inner() {
         "providers.llm.openai.api_key_env=JP_TEST_DUMMY_OPENAI_API_KEY",
         "--cfg",
         "providers.llm.openai.base_url=http://127.0.0.1:9",
-    ]);
+    ])
+    .unwrap();
 
     let result = run_inner(cli, OutputFormat::TextPretty);
     assert!(
@@ -738,7 +910,7 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
         .record_session_activation(&session, conversation_id, chrono::Utc::now())
         .unwrap();
 
-    let cli = Cli::parse_from([
+    let cli = Cli::try_parse_from([
         "jp",
         "--workspace",
         root.as_str(),
@@ -754,7 +926,8 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
         "providers.llm.openai.api_key_env=JP_TEST_DUMMY_OPENAI_API_KEY",
         "--cfg",
         "providers.llm.openai.base_url=http://127.0.0.1:9",
-    ]);
+    ])
+    .unwrap();
 
     let result = run_inner(cli, OutputFormat::TextPretty);
     assert!(
@@ -790,6 +963,28 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
     env::set_current_dir(previous_cwd).unwrap();
 }
 
+// A prompt ended with Ctrl-C reports the shell's interrupt status, which a
+// config error's message would lose.
+#[test]
+fn a_command_error_from_cli_flags_keeps_its_exit_status() {
+    let error = cli_config_error(Box::new(cmd::Error::from(130_u8)));
+
+    let Error::Command(error) = error else {
+        panic!("expected the command error to pass through, got {error:?}");
+    };
+    assert_eq!(error.code.get(), 130);
+}
+
+#[test]
+fn any_other_error_from_cli_flags_is_a_config_error() {
+    let error = cli_config_error("`try` is not a configured tool".into());
+
+    assert_matches::assert_matches!(
+        error,
+        Error::CliConfig(message) if message == "`try` is not a configured tool"
+    );
+}
+
 /// Verify that `resolve_config` consumes `default_id` so it doesn't leak into
 /// the runtime `AppConfig`.
 #[test]
@@ -807,8 +1002,8 @@ fn resolve_config_consumes_default_id() {
     base.conversation.default_id = Some(DefaultConversationId::LastActivated);
 
     let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
-    let (config, _handles, _start_new, _config_reset) = resolve_config(
-        &cli.command,
+    let Resolved { config, .. } = resolve_config(
+        cli.command,
         || Ok(base),
         &cli.globals.config,
         &mut workspace,
@@ -865,8 +1060,8 @@ fn resolve_config_applies_the_compact_model_flag() {
         "gpt",
     ])
     .unwrap();
-    let (config, _handles, _start_new, _config_reset) = resolve_config(
-        &cli.command,
+    let Resolved { config, .. } = resolve_config(
+        cli.command,
         || Ok(base),
         &cli.globals.config,
         &mut workspace,
@@ -907,7 +1102,7 @@ fn resolve_config_rejects_a_cleared_model_without_changing_the_conversation() {
     .unwrap();
 
     let error = resolve_config(
-        &cli.command,
+        cli.command,
         || Ok(base.to_partial()),
         &cli.globals.config,
         &mut workspace,
@@ -994,11 +1189,11 @@ fn resolve_config_reset_skips_broken_conversation_config() {
     }
 
     let id = conversation_id.to_string();
-    let cli = Cli::try_parse_from(["jp", "query", "--id", &id, "hello"]).unwrap();
+    let parse = || Cli::try_parse_from(["jp", "query", "--id", &id, "hello"]).unwrap();
 
     // Without a reset point, the conversation layer is resolved and fails.
     let result = resolve_config(
-        &cli.command,
+        parse().command,
         || Ok(base_config.to_partial()),
         &[],
         &mut workspace,
@@ -1010,8 +1205,12 @@ fn resolve_config_reset_skips_broken_conversation_config() {
 
     // With `--cfg=NONE` (+ the required fields), the conversation layer is
     // skipped and resolution succeeds — the escape hatch works.
-    let (config, _handles, _start_new, config_reset) = resolve_config(
-        &cli.command,
+    let Resolved {
+        config,
+        config_reset,
+        ..
+    } = resolve_config(
+        parse().command,
         || Ok(base_config.to_partial()),
         &[
             KeyValueOrPath::Keyword(CfgKeyword::None),
@@ -1055,8 +1254,8 @@ fn resolve_config_reset_workspace_layer_contains_resolved_model_ids() {
     base.assistant.model.id = PartialModelIdOrAliasConfig::Alias("fast".to_owned());
 
     let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
-    let (_config, _handles, _start_new, config_reset) = resolve_config(
-        &cli.command,
+    let Resolved { config_reset, .. } = resolve_config(
+        cli.command,
         || Ok(base),
         &[KeyValueOrPath::Keyword(CfgKeyword::Workspace)],
         &mut workspace,
@@ -1102,8 +1301,8 @@ fn resolve_config_reset_post_layer_contains_resolved_model_ids() {
     workspace.load_conversation_index();
 
     let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
-    let (_config, _handles, _start_new, config_reset) = resolve_config(
-        &cli.command,
+    let Resolved { config_reset, .. } = resolve_config(
+        cli.command,
         || unreachable!("NONE skips implicit loading"),
         &[
             KeyValueOrPath::Keyword(CfgKeyword::None),

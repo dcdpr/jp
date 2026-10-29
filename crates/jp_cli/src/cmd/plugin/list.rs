@@ -5,6 +5,7 @@ use std::{
     io::{self, Write as _},
 };
 
+use clap::{ArgMatches, Command};
 use jp_plugin::registry::{PluginKind, Registry};
 use jp_printer::Printer;
 
@@ -15,11 +16,21 @@ use super::{
     registry::{self, Fetched},
     routing::official_entries,
 };
-use crate::cmd;
+use crate::{cli::CommandArgs, cmd};
 
 /// List installed plugins, and the ones the registry offers.
-#[derive(Debug, clap::Args)]
+#[derive(Debug)]
 pub(crate) struct List;
+
+impl CommandArgs for List {
+    fn augment(cmd: Command) -> Command {
+        cmd
+    }
+
+    fn from_matches(_: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self)
+    }
+}
 
 impl List {
     /// List the plugins.

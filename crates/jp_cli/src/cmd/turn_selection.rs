@@ -23,9 +23,19 @@
 use std::{fmt, str::FromStr as _, time::Duration};
 
 use chrono::{DateTime, NaiveDate, Utc};
+use clap::{
+    Arg, ArgMatches, Command,
+    builder::{RangedU64ValueParser, TypedValueParser},
+    value_parser,
+};
 use jp_config::conversation::compaction::RuleBound;
 use jp_conversation::{
     ConversationStream, RangeBound, compaction::resolve_range, stream::TurnOrigin,
+};
+
+use crate::cli::{
+    CommandArgs,
+    flag::{Flag, FlagValues, OptionalValue, flag_arg},
 };
 
 /// A `--from`/`--to` bound before stream resolution.
@@ -457,80 +467,196 @@ pub(crate) fn keep_last_bound(bound: &RuleBound, events: &ConversationStream) ->
 /// One of `--from`/`--to`, `--turn`, or `--first`/`--last` names the base
 /// selection (the whole conversation when none is given); `--keep-first` and
 /// `--keep-last` then protect turns at either end from it.
-#[derive(Debug, Clone, Default, clap::Args)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct TurnSelection {
-    /// Select the first N turns.
-    /// Without a value, selects the first turn.
-    ///
-    /// Composes with `--last`: the pair selects the leading and trailing
-    /// windows and skips the turns in between.
-    #[arg(long, short = 'f', num_args = 0..=1, default_missing_value = "1", conflicts_with_all = ["turn", "from", "to"])]
+    /// `--first N`: the first N turns.
     first: Option<usize>,
 
-    /// Select the last N turns.
-    /// Without a value, selects the last turn.
-    ///
-    /// Composes with `--first`: the pair selects the leading and trailing
-    /// windows and skips the turns in between.
-    #[arg(long, short = 'l', num_args = 0..=1, default_missing_value = "1", conflicts_with_all = ["turn", "from", "to"])]
+    /// `--last N`: the last N turns.
     last: Option<usize>,
 
-    /// Select turns by number: a single turn (`3`), an inclusive range
-    /// (`1..5`), or an open range like `10..` (turn 10 onward), `..10` (the
-    /// first 10), or `..` (all).
-    /// Numbers are 1-based and stable across new turns; `-N` instead counts
-    /// from the end, so `-1` is the last turn and `-3..-2` the two turns before
-    /// it.
-    #[arg(long, alias = "turns", value_parser = parse_turn, allow_negative_numbers = true, conflicts_with_all = ["first", "last", "from", "to"])]
+    /// `--turn`: turns by number.
     turn: Option<TurnSpec>,
 
-    /// Start of the range, inclusive.
-    ///
-    /// Accepts a 1-based turn number (`3`), a from-end offset (`-1` is the last
-    /// turn), a relative duration (`5h`), a date (`2026-01-01`), an RFC 3339
-    /// timestamp, or `last-compaction` (the turn after the most recent
-    /// compaction).
-    ///
-    /// A time-based value starts the selection at the first turn to *begin*
-    /// after the given instant, so the turn that was already running at that
-    /// instant is excluded.
-    /// A bound never splits a turn.
-    // `allow_negative_numbers` keeps the from-end form usable as a
-    // space-separated value (`--from -3`), which clap would otherwise read as an
-    // unknown short flag.
-    #[arg(long, value_parser = parse_bound, allow_negative_numbers = true)]
+    /// `--from`: the start of the range, inclusive.
     from: Option<CliRangeBound>,
 
-    /// End of the range, inclusive.
-    ///
-    /// Accepts the same forms as `--from`, except `last-compaction`, which only
-    /// makes sense as a start bound.
-    ///
-    /// A time-based value ends the selection at (and includes) the turn that
-    /// was running at the given instant — the mirror of `--from`, which
-    /// excludes it.
-    /// A bound never splits a turn.
-    #[arg(long, value_parser = parse_to_bound, allow_negative_numbers = true)]
+    /// `--to`: the end of the range, inclusive.
     to: Option<CliRangeBound>,
 
-    /// Protect the first N turns from the selection.
-    ///
-    /// Accepts a turn count (`2`), an absolute 1-based turn (`@3`), a from-end
-    /// offset (`-3`), a duration (`5h`), or `last-compaction` (protect every
-    /// turn through the most recent compaction).
-    /// Composes with every other selector: the selection starts no earlier than
-    /// the first unprotected turn.
-    #[arg(long, allow_negative_numbers = true)]
+    /// `--keep-first`: turns at the start protected from the selection.
     keep_first: Option<RuleBound>,
 
-    /// Protect the last N turns from the selection.
-    ///
-    /// Accepts the same forms as `--keep-first`, except `last-compaction`,
-    /// which only makes sense at the start.
-    /// Composes with every other selector: the selection ends no later than the
-    /// last unprotected turn.
-    #[arg(long, value_parser = parse_keep_last, allow_negative_numbers = true)]
+    /// `--keep-last`: turns at the end protected from the selection.
     keep_last: Option<RuleBound>,
+}
+
+impl CommandArgs for TurnSelection {
+    fn augment(cmd: Command) -> Command {
+        // `allow_negative_numbers` keeps the from-end forms usable as a
+        // space-separated value (`--from -3`), which clap would otherwise read
+        // as an unknown short flag.
+        cmd.arg(flag_arg::<First>())
+            .arg(flag_arg::<Last>())
+            .arg(
+                Arg::new("turn")
+                    .long("turn")
+                    .alias("turns")
+                    .value_name("TURN")
+                    .value_parser(parse_turn)
+                    .allow_negative_numbers(true)
+                    .conflicts_with_all(["first", "last", "from", "to"])
+                    .help(
+                        "Select turns by number: a single turn (`3`), an inclusive range \
+                         (`1..5`), or an open range like `10..` (turn 10 onward), `..10` (the \
+                         first 10), or `..` (all). Numbers are 1-based and stable across new \
+                         turns; `-N` instead counts from the end, so `-1` is the last turn and \
+                         `-3..-2` the two turns before it",
+                    ),
+            )
+            .arg(
+                Arg::new("from")
+                    .long("from")
+                    .value_name("FROM")
+                    .value_parser(parse_bound)
+                    .allow_negative_numbers(true)
+                    .help("Start of the range, inclusive")
+                    .long_help(
+                        "Start of the range, inclusive.\n\nAccepts a 1-based turn number (`3`), a \
+                         from-end offset (`-1` is the last turn), a relative duration (`5h`), a \
+                         date (`2026-01-01`), an RFC 3339 timestamp, or `last-compaction` (the \
+                         turn after the most recent compaction).\n\nA time-based value starts the \
+                         selection at the first turn to *begin* after the given instant, so the \
+                         turn that was already running at that instant is excluded. A bound never \
+                         splits a turn.",
+                    ),
+            )
+            .arg(
+                Arg::new("to")
+                    .long("to")
+                    .value_name("TO")
+                    .value_parser(parse_to_bound)
+                    .allow_negative_numbers(true)
+                    .help("End of the range, inclusive")
+                    .long_help(
+                        "End of the range, inclusive.\n\nAccepts the same forms as `--from`, \
+                         except `last-compaction`, which only makes sense as a start bound.\n\nA \
+                         time-based value ends the selection at (and includes) the turn that was \
+                         running at the given instant — the mirror of `--from`, which excludes \
+                         it. A bound never splits a turn.",
+                    ),
+            )
+            .arg(
+                Arg::new("keep_first")
+                    .long("keep-first")
+                    .value_name("KEEP_FIRST")
+                    .value_parser(value_parser!(RuleBound))
+                    .allow_negative_numbers(true)
+                    .help("Protect the first N turns from the selection")
+                    .long_help(
+                        "Protect the first N turns from the selection.\n\nAccepts a turn count \
+                         (`2`), an absolute 1-based turn (`@3`), a from-end offset (`-3`), a \
+                         duration (`5h`), or `last-compaction` (protect every turn through the \
+                         most recent compaction). Composes with every other selector: the \
+                         selection starts no earlier than the first unprotected turn.",
+                    ),
+            )
+            .arg(
+                Arg::new("keep_last")
+                    .long("keep-last")
+                    .value_name("KEEP_LAST")
+                    .value_parser(parse_keep_last)
+                    .allow_negative_numbers(true)
+                    .help("Protect the last N turns from the selection")
+                    .long_help(
+                        "Protect the last N turns from the selection.\n\nAccepts the same forms \
+                         as `--keep-first`, except `last-compaction`, which only makes sense at \
+                         the start. Composes with every other selector: the selection ends no \
+                         later than the last unprotected turn.",
+                    ),
+            )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            first: Flag::<First>::strict(matches)?,
+            last: Flag::<Last>::strict(matches)?,
+            turn: matches.get_one("turn").cloned(),
+            from: matches.get_one("from").cloned(),
+            to: matches.get_one("to").cloned(),
+            keep_first: matches.get_one("keep_first").cloned(),
+            keep_last: matches.get_one("keep_last").cloned(),
+        })
+    }
+}
+
+/// `-f` / `--first[=N]`: the first N turns, or the first turn.
+enum First {}
+
+impl OptionalValue for First {
+    const ID: &'static str = "first";
+
+    type Context = ();
+    type Output = Option<usize>;
+    type Value = usize;
+
+    fn declare(arg: Arg) -> Arg {
+        arg.short('f')
+            .long("first")
+            .value_name("FIRST")
+            .conflicts_with_all(["turn", "from", "to"])
+            .help("Select the first N turns. Without a value, selects the first turn")
+            .long_help(
+                "Select the first N turns. Without a value, selects the first turn.\n\nComposes \
+                 with `--last`: the pair selects the leading and trailing windows and skips the \
+                 turns in between.",
+            )
+    }
+
+    fn parser() -> impl TypedValueParser<Value = usize> {
+        turn_count()
+    }
+
+    fn collect(values: FlagValues<usize>) -> Result<Option<usize>, clap::Error> {
+        Ok(values.last().map(|count| count.unwrap_or(1)))
+    }
+}
+
+/// `-l` / `--last[=N]`: the last N turns, or the last turn.
+enum Last {}
+
+impl OptionalValue for Last {
+    const ID: &'static str = "last";
+
+    type Context = ();
+    type Output = Option<usize>;
+    type Value = usize;
+
+    fn declare(arg: Arg) -> Arg {
+        arg.short('l')
+            .long("last")
+            .value_name("LAST")
+            .conflicts_with_all(["turn", "from", "to"])
+            .help("Select the last N turns. Without a value, selects the last turn")
+            .long_help(
+                "Select the last N turns. Without a value, selects the last turn.\n\nComposes \
+                 with `--first`: the pair selects the leading and trailing windows and skips the \
+                 turns in between.",
+            )
+    }
+
+    fn parser() -> impl TypedValueParser<Value = usize> {
+        turn_count()
+    }
+
+    fn collect(values: FlagValues<usize>) -> Result<Option<usize>, clap::Error> {
+        Ok(values.last().map(|count| count.unwrap_or(1)))
+    }
+}
+
+/// The parser for a number of turns.
+fn turn_count() -> impl TypedValueParser<Value = usize> {
+    RangedU64ValueParser::<usize>::new()
 }
 
 impl TurnSelection {

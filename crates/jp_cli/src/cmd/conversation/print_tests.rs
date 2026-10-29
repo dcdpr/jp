@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use camino_tempfile::{Utf8TempDir, tempdir};
 use chrono::{DateTime, TimeZone as _, Utc};
-use clap::Parser as _;
 use indexmap::IndexMap;
 use jp_config::{
     AppConfig, PartialAppConfig,
@@ -24,6 +23,7 @@ use tokio::runtime::Runtime;
 use super::*;
 use crate::{
     Globals,
+    cli::parse_args,
     cmd::{conversation_id::PositionalIds, target::ConversationTarget},
     ctx::Ctx,
 };
@@ -1166,15 +1166,7 @@ fn turn_prints_specific_turn() {
 /// Goes through clap so the tests cover the flag surface (value syntax
 /// included), not just the parsed representation.
 fn parse_print(args: &[&str], id: ConversationId) -> Print {
-    #[derive(clap::Parser)]
-    struct TestCli {
-        #[command(flatten)]
-        print: Print,
-    }
-
-    let mut argv = vec!["print"];
-    argv.extend_from_slice(args);
-    let mut print = TestCli::try_parse_from(argv).unwrap().print;
+    let mut print = parse_args::<Print>(args).unwrap();
     print.target = PositionalIds::from_targets(vec![ConversationTarget::Id(id)]);
     print
 }

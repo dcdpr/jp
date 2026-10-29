@@ -206,6 +206,36 @@ fn test_map_model_gemini_3_8_flash() {
     assert_eq!(details.structured_output, Some(true));
 }
 
+#[test]
+fn test_map_model_gemini_4_argon() {
+    let model = types::Model {
+        base_model_id: "gemini-4-argon".to_owned(),
+        display_name: "Gemini 4 Argon".to_owned(),
+        input_token_limit: 1_048_576,
+        output_token_limit: 65_536,
+        thinking: true,
+        ..Default::default()
+    };
+
+    let details = map_model(model);
+
+    assert_eq!(details.id, (PROVIDER, "gemini-4-argon").try_into().unwrap());
+    assert_eq!(details.display_name, Some("Gemini 4 Argon".to_owned()));
+    assert_eq!(details.context_window, Some(1_048_576));
+    assert_eq!(details.max_output_tokens, Some(65_536));
+    assert_eq!(
+        details.reasoning,
+        Some(ReasoningDetails::leveled(false, true, true, true, false, false).always_on())
+    );
+    assert_eq!(
+        details.knowledge_cutoff,
+        Some(NaiveDate::from_ymd_opt(2026, 3, 1).unwrap())
+    );
+    assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+    assert_eq!(details.structured_output, Some(true));
+    assert_eq!(details.prefill, None);
+}
+
 /// A model whose ladder is unknown still honours the caller's effort.
 /// Dropping it would make `-r high` silently do nothing on any thinking model
 /// newer than this binary, which is most of Gemini's current catalog.
@@ -386,6 +416,127 @@ fn test_apply_thinking_support_keeps_table_when_thinking() {
 
     assert_eq!(apply_thinking_support(table, true), table);
     assert_eq!(apply_thinking_support(None, true), None);
+}
+
+/// The role and text of every part in `contents`, in order.
+///
+/// Non-text parts are reported as `None`.
+fn content_texts(contents: &[types::Content]) -> Vec<(Option<types::Role>, Vec<Option<String>>)> {
+    contents
+        .iter()
+        .map(|content| {
+            let texts = content
+                .parts
+                .iter()
+                .map(|part| match &part.data {
+                    types::ContentData::Text(text) => Some(text.clone()),
+                    _ => None,
+                })
+                .collect();
+
+            (content.role, texts)
+        })
+        .collect()
+}
+
+/// A conversation ending in partial assistant output, as a retry or an
+/// interrupt commits it.
+fn partial_response_query() -> ChatQuery {
+    let mut events = ConversationStream::new_test();
+    events.start_turn(ChatRequest::from("Tell me about X"));
+    events
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::reasoning("Thinking about X"))
+        .add_chat_response(ChatResponse::message("X is a topic that was first"))
+        .build()
+        .unwrap();
+
+    ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    }
+}
+
+/// Gemini rejects a request ending with a model turn ("Requests ending with a
+/// model turn are not supported."), which is the shape a retry produces after
+/// committing partial output.
+/// A model with unknown prefill support gets the synthetic continue message, so
+/// the request ends with a user turn.
+#[test]
+fn test_continue_appended_when_request_ends_with_model_turn() {
+    let model = ModelDetails::empty((PROVIDER, "gemini-future-99").try_into().unwrap());
+    assert_eq!(model.prefill, None, "fixture must have unknown prefill");
+
+    let (request, _) = create_request(&model, partial_response_query()).unwrap();
+
+    assert_eq!(content_texts(&request.contents), vec![
+        (Some(types::Role::User), vec![Some(
+            "Tell me about X".to_owned()
+        )]),
+        (Some(types::Role::Model), vec![
+            Some("Thinking about X".to_owned()),
+            Some("X is a topic that was first".to_owned()),
+        ]),
+        (Some(types::Role::User), vec![Some(
+            "Continue your response exactly from where you left off. Do not repeat content you \
+             already produced."
+                .to_owned()
+        )]),
+    ]);
+}
+
+/// A model known to accept prefill continues from its own trailing turn, so no
+/// message is added.
+#[test]
+fn test_trailing_model_turn_kept_when_prefill_supported() {
+    let mut model = ModelDetails::empty((PROVIDER, "gemini-future-99").try_into().unwrap());
+    model.prefill = Some(true);
+
+    let (request, _) = create_request(&model, partial_response_query()).unwrap();
+
+    assert_eq!(content_texts(&request.contents), vec![
+        (Some(types::Role::User), vec![Some(
+            "Tell me about X".to_owned()
+        )]),
+        (Some(types::Role::Model), vec![
+            Some("Thinking about X".to_owned()),
+            Some("X is a topic that was first".to_owned()),
+        ]),
+    ]);
+}
+
+/// A request already ending with a user turn is sent unchanged.
+#[test]
+fn test_no_continue_when_request_ends_with_user_turn() {
+    let model = ModelDetails::empty((PROVIDER, "gemini-future-99").try_into().unwrap());
+
+    let mut events = ConversationStream::new_test();
+    events.start_turn(ChatRequest::from("Tell me about X"));
+    let query = ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+
+    let (request, _) = create_request(&model, query).unwrap();
+
+    assert_eq!(content_texts(&request.contents), vec![(
+        Some(types::Role::User),
+        vec![Some("Tell me about X".to_owned())]
+    )]);
 }
 
 /// Records a live request for a Gemini model absent from the built-in table,
