@@ -207,20 +207,23 @@ fn check(
     original: &str,
     options: &Options,
 ) -> Result<Result<(), String>, String> {
-    let ticket = match parse::document(edited) {
-        Ok(ticket) => ticket,
-        Err(problem) => return Ok(Err(problem.to_string())),
-    };
+    if let Err(problem) = parse::document(edited) {
+        return Ok(Err(problem.to_string()));
+    }
+
+    // The label lines as written: a parsed ticket leaves out a line that isn't
+    // a label, which would then go unchecked.
+    let tokens = parse::label_tokens(edited);
 
     // Labels left as they were don't read the vocabulary, so a board whose
     // vocabulary is broken can still have its descriptions edited.
-    let current = parse::labels(original);
-    if ticket.metadata.labels == current {
+    if tokens == parse::label_tokens(original) {
         return Ok(Ok(()));
     }
 
     let vocabulary = options.vocabulary()?;
-    let labels = match vocabulary.resolve_against(&ticket.metadata.labels.to_tokens(), &current) {
+    let current = parse::labels(original);
+    let labels = match vocabulary.resolve_against(&tokens, &current) {
         Ok(labels) => labels,
         Err(refusal) => return Ok(Err(refusal.to_string())),
     };

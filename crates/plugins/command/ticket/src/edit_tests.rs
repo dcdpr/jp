@@ -226,6 +226,32 @@ fn a_label_the_board_refuses_goes_back_to_the_editor() {
     assert_eq!(fs::read_to_string(&path).unwrap(), original);
 }
 
+/// A label line that isn't a label at all, such as one missing its `=`, is
+/// refused even when the labels that do read are unchanged.
+#[test]
+fn a_label_line_that_is_not_a_label_goes_back_to_the_editor() {
+    let dir = Utf8TempDir::new().unwrap();
+    let (path, original) = write_ticket(&dir);
+    let edited = original.replace(
+        "- **Status**: Todo\n",
+        "- **Status**: Todo\n- **Label**: client cli\n",
+    );
+    assert_ne!(edited, original, "the fixture has no status line to follow");
+    let mut editing = Scripted::editing([(Some(edited), true)]).answering([false]);
+
+    let error = in_editor(dir.path(), id(), &options(), &mut editing).unwrap_err();
+
+    assert_eq!(editing.asked, [format!(
+        "{ID} can't be saved: `client cli` is not a `key=value` label. Labels you can add: \
+         client=cli, client=macos."
+    )]);
+    assert!(
+        error.starts_with(&format!("{ID} is unchanged: ")),
+        "{error}"
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+}
+
 /// A label the board lets one ticket carry, added by hand while another ticket
 /// holds it, goes back to the editor naming that ticket.
 #[test]
