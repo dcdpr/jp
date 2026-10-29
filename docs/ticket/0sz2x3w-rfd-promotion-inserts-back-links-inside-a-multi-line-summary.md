@@ -1,6 +1,6 @@
 # RFD promotion inserts back-links inside a multi-line Summary field
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-09-28
 - **Label**: domain=tooling

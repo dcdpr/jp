@@ -1,10 +1,28 @@
 # RFD D05: Internal Dev Plugin for RFD Workflows
 
-- **Status**: Draft
+- **Status**: Abandoned
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-20
 - **Requires**: [RFD 050]
+
+> [!IMPORTANT]
+> This RFD is **Abandoned**.
+>
+> Its plugin was split by concern into later RFDs, and its remaining workflow
+> needs a redesign on the current plugin protocol.
+>
+> The one internal `jp dev` plugin became a family of plugins.
+> [RFD 116] gives the RFD lifecycle commands this draft handed to `just
+> rfd-promote` to `jp rfd`, and [RFD 121] and [RFD 122] give releases to `jp
+> release`.
+> The AI-assisted steps between lifecycle transitions (explore, converge, draft,
+> review, refine, implement) are not carried forward.
+> A future RFD on the new RFD-writing workflow takes them up, on top of `jp
+> rfd`, with the host's `query` request in place of this draft's `jp query`
+> subprocesses.
+>
+> The original text below is preserved for historical context.
 
 ## Summary
 
@@ -835,4 +853,7 @@ Depends on: Phase 6.
 [RFD 003]: ../003-jp-assisted-rfds.md
 [RFD 050]: ../050-scripting-ergonomics-for-conversation-management.md
 [RFD 072]: ../072-command-plugin-system.md
+[RFD 116]: ../116-shareable-rfd-ticket-and-site-tooling.md
+[RFD 121]: ../121-changelog-fragments-and-validation.md
+[RFD 122]: ../122-release-pipeline.md
 [RFD D18]: D18-plugin-event-subscriptions-and-query-delegation.md
