@@ -1594,8 +1594,8 @@ fn refresh_reports_prose_naming_the_old_id_in_the_renamed_ticket() {
     );
 }
 
-/// `just ticket-refresh` documents a workspace-relative path, and git runs in
-/// the ticket directory, so the path has to be resolved before either sees it.
+/// A ticket is named by its workspace-relative path, and git runs in the ticket
+/// directory, so the path has to be resolved before either sees it.
 #[test]
 fn refresh_accepts_a_repository_relative_path() {
     let repo = git_repo();

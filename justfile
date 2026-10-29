@@ -1464,7 +1464,7 @@ review-file *ARGS:
 # or quit.
 [group('rfd')]
 [positional-arguments]
-rfd-review NNN *ARGS: _install-jp
+rfd-review NNN *ARGS: _install-jp _install-rfd
     #!/usr/bin/env sh
     set -eu
 
@@ -1475,9 +1475,9 @@ rfd-review NNN *ARGS: _install-jp
     RFDs are aspirational, but not necessarily final, so any inconsistencies \
     against those should be noted, but not blockers."
 
-    out=$(just _rfd-resolve "{{NNN}}") || exit 1
-    rfd_id="${out%% *}"
-    file="${out#* }"
+    info=$(jp -F json rfd show {{quote(NNN)}}) || exit 1
+    rfd_id=$(echo "$info" | jq -r '.num')
+    file=$(echo "$info" | jq -r '.file')
 
     title="rfd-review:${rfd_id}"
 
@@ -1556,7 +1556,7 @@ rfd-review NNN *ARGS: _install-jp
 # Accepts a permanent number (41, 041) or a draft ID (D01).
 [group('rfd')]
 [positional-arguments]
-rfd-triage NNN *ARGS: _install-jp
+rfd-triage NNN *ARGS: _install-jp _install-rfd
     #!/usr/bin/env sh
     set -eu
 
@@ -1568,9 +1568,9 @@ rfd-triage NNN *ARGS: _install-jp
     accepted or amended items describe the concrete change you would make to \
     the RFD. Do NOT edit the RFD yet; give your opinion first."
 
-    out=$(just _rfd-resolve "{{NNN}}") || exit 1
-    rfd_id="${out%% *}"
-    file="${out#* }"
+    info=$(jp -F json rfd show {{quote(NNN)}}) || exit 1
+    rfd_id=$(echo "$info" | jq -r '.num')
+    file=$(echo "$info" | jq -r '.file')
 
     # The triage step needs the sibling review conversation to exist.
     review_id=$(jp -F json conversation ls 2>/dev/null \
@@ -1656,7 +1656,7 @@ rfd-triage NNN *ARGS: _install-jp
 # `rfd/<id>/implement` and attaches them.
 [group('rfd')]
 [positional-arguments]
-rfd-implement NNN *ARGS: _install-jp
+rfd-implement NNN *ARGS: _install-jp _install-rfd
     #!/usr/bin/env sh
     set -eu
 
@@ -1671,14 +1671,12 @@ rfd-implement NNN *ARGS: _install-jp
     problem instead of resolving it yourself. End the turn with the final \
     report exactly as your instructions describe."
 
-    out=$(just _rfd-resolve "{{NNN}}") || exit 1
-    rfd_id="${out%% *}"
-    file="${out#* }"
+    info=$(jp -F json rfd show {{quote(NNN)}}) || exit 1
+    rfd_id=$(echo "$info" | jq -r '.num')
+    file=$(echo "$info" | jq -r '.file')
 
     # Status gate: only Accepted or Implemented RFDs are valid targets.
-    # Drafts pass `_rfd-resolve` and get a meaningful "is 'Draft'" error
-    # here instead of "file not found".
-    status=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
+    status=$(echo "$info" | jq -r '.status // empty')
     case "$status" in
         Accepted|Implemented) ;;
         *)
@@ -1840,7 +1838,7 @@ rfd-grep +ARGS:
     @rg {{ARGS}} docs/rfd/
 
 # File a ticket. TYPE becomes its `type` label: 'bug', 'feature', 'task', and the
-# rest `just ticket-labels` lists.
+# rest `jp ticket labels` lists.
 #
 # Tickets are markdown files under `docs/ticket/`. Write a ticket when the work is
 # clear enough to start, and an RFD when it needs a design first.
@@ -1921,65 +1919,6 @@ ticket-comment NNN *BODY: _install-ticket
 
     jp ticket "$@"
 
-# Mark a ticket as Done. NNN is T-02wt0kx or 02wt0kx.
-[group('ticket')]
-ticket-close NNN: _install-ticket
-    @jp ticket close {{quote(NNN)}}
-
-# List tickets, ordered by id.
-#
-# `jp -F json` switches the whole invocation to the machine-readable form; the
-# command has no format flag of its own.
-#
-#   just ticket-list                        # every ticket
-#   just ticket-list --status "In Progress" # one column of the board
-#   just ticket-list --label type=bug       # one type of work
-#   just ticket-list --label package=jp_cli # one area of the system
-#   just ticket-list --label package        # any value of one key
-#   jp -F json ticket list                  # for `jq`
-[group('ticket')]
-[positional-arguments]
-ticket-list *ARGS: _install-ticket
-    #!/usr/bin/env sh
-    set -eu
-
-    jp ticket list "$@"
-
-# Add, set, or remove labels on a ticket. NNN is T-02wt0kx or 02wt0kx.
-#
-# `add` keeps what the ticket carries, `set` replaces what each named key
-# holds, and `rm` takes labels off, a bare key every label under it. `just
-# ticket-labels` lists what the board defines.
-#
-#   just ticket-label add T-02wt0kx client=cli package=jp_cli
-#   just ticket-label set T-02wt0kx type=bug
-#   just ticket-label rm T-02wt0kx package
-[group('ticket')]
-[positional-arguments]
-ticket-label VERB NNN *LABELS: _install-ticket
-    #!/usr/bin/env sh
-    set -eu
-
-    shift 2 # remove VERB and NNN from positional params
-    jp ticket label {{quote(VERB)}} --id {{quote(NNN)}} "$@"
-
-# List the labels the board defines, with what each one covers.
-[group('ticket')]
-ticket-labels: _install-ticket
-    @jp ticket labels
-
-# Read one ticket, with its comments numbered for replies.
-#
-# Run it as `jp -F json ticket show NNN` for the machine-readable form.
-[group('ticket')]
-[positional-arguments]
-ticket-show NNN *ARGS: _install-ticket
-    #!/usr/bin/env sh
-    set -eu
-
-    shift # remove NNN from positional params
-    jp ticket show {{quote(NNN)}} "$@"
-
 # Import a GitHub issue from dcdpr/jp as a ticket, or refresh one already
 # imported.
 #
@@ -1997,22 +1936,6 @@ ticket-import NNN *ARGS: _install-ticket
 
     shift # remove NNN from positional params
     jp ticket import {{quote(NNN)}} --repo dcdpr/jp "$@"
-
-# Give a ticket a fresh id, after CI reports two files claiming one.
-#
-# PATH names the losing ticket file — an id would name both. Run this on the
-# branch that has not merged yet: its commits are still rewritable and every
-# reference to the id on it is unambiguously its own.
-#
-# References are rewritten in what the branch changed against BASE (`main` by
-# default). Occurrences elsewhere are reported, not touched: the same token on
-# BASE belongs to the ticket that kept the id.
-#
-#   just ticket-refresh docs/ticket/02wt0kx-some-bug.md
-#   just ticket-refresh docs/ticket/02wt0kx-some-bug.md develop
-[group('ticket')]
-ticket-refresh PATH BASE="main": _install-ticket
-    @jp ticket refresh {{quote(PATH)}} --base {{quote(BASE)}}
 
 # Search across all tickets.
 [group('ticket')]
@@ -2798,63 +2721,6 @@ _bear-note TAG:
         q|Q)    echo "QUIT" ;;
         *)      echo "Unknown choice '$ans'; aborting." >&2; exit 1 ;;
     esac
-
-# Internal: resolve an RFD argument (DNN draft ID or NNN/NN permanent number)
-# to its canonical id and file path.
-#
-# On success, prints `<rfd_id> <file>` to stdout on a single line:
-#   - rfd_id is `DNN` for drafts, zero-padded `NNN` for permanent numbers.
-#   - file is the relative path under `docs/rfd/` or `docs/rfd/drafts/`.
-#
-# On failure (invalid argument, file not found), writes a message to stderr
-# and exits 1. Callers should propagate the exit status with `|| exit 1`.
-[no-exit-message]
-[private]
-_rfd-resolve NNN:
-    #!/usr/bin/env sh
-    set -eu
-
-    # Two files sharing an id is a repository fault, not a choice to make on
-    # the caller's behalf. Picking one and proceeding is how a rename ends up
-    # rewriting the other document's heading to the new id, so refuse instead.
-    reject_ambiguous() {
-        echo "Ambiguous: ${2} files share ID ${1}:" >&2
-        printf '%s\n' "$3" | sed 's/^/  /' >&2
-        echo "Renumber or remove one before continuing; a rewrite keyed on" >&2
-        echo "${1} would corrupt the others. \`jp rfd renumber\` takes a file" >&2
-        echo "name in place of an id, to say which of them moves." >&2
-        exit 1
-    }
-
-    arg="{{NNN}}"
-    if echo "$arg" | grep -qiE '^D[0-9]+$'; then
-        rfd_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
-        found=$(ls docs/rfd/drafts/${rfd_id}-*.md 2>/dev/null || true)
-        count=$(printf '%s' "$found" | grep -c . || true)
-        if [ "$count" -eq 0 ]; then
-            echo "No draft RFD found with ID ${rfd_id}." >&2; exit 1
-        fi
-        if [ "$count" -gt 1 ]; then
-            reject_ambiguous "$rfd_id" "$count" "$found"
-        fi
-        file="$found"
-    elif echo "$arg" | grep -qE '^[0-9]+$'; then
-        n=$(echo "$arg" | sed 's/^0*//')
-        rfd_id=$(printf "%03d" "${n:-0}")
-        found=$(ls docs/rfd/${rfd_id}-*.md 2>/dev/null || true)
-        count=$(printf '%s' "$found" | grep -c . || true)
-        if [ "$count" -eq 0 ]; then
-            echo "No RFD found with number ${rfd_id}." >&2; exit 1
-        fi
-        if [ "$count" -gt 1 ]; then
-            reject_ambiguous "$rfd_id" "$count" "$found"
-        fi
-        file="$found"
-    else
-        echo "Invalid argument '${arg}'. Use a number (41) or draft ID (D01)." >&2; exit 1
-    fi
-
-    echo "${rfd_id} ${file}"
 
 # Internal: shape a recipe's `*ARGS` and a default prompt MSG into a single
 # `args` string that the recipe forwards to `jp query`.

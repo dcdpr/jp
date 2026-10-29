@@ -1182,9 +1182,9 @@ fn git(dir: &Utf8Path, args: &[&str]) -> Option<String> {
 
 /// Resolve a user-supplied ticket path to one that exists.
 ///
-/// A relative path is taken against the repository root first — the spelling
-/// `just ticket-refresh` documents — then against the ticket directory, so
-/// naming a file from inside `docs/ticket/` works too.
+/// A relative path is taken against the repository root first, as in
+/// `docs/ticket/02wt0kx-slug.md`, then against the ticket directory, so naming
+/// a file from inside `docs/ticket/` works too.
 /// Everything downstream gets an absolute path: git runs in the ticket
 /// directory, where a workspace-relative path would resolve against the wrong
 /// place and silently match no commit.
