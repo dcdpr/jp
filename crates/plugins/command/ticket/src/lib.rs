@@ -23,10 +23,7 @@ mod label;
 mod options;
 mod tool;
 
-use std::{
-    fs,
-    io::{self, BufRead, Write},
-};
+use std::io::{self, BufRead, Write};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{Local, SecondsFormat, Utc};
@@ -318,7 +315,7 @@ enum Command {
     /// With `jp -F json`, the problems are printed as JSON.
     Check,
 
-    /// Create the ticket directory.
+    /// Create the ticket directory and the epoch file its ids count time from.
     Init,
 
     /// Write the tool definitions that offer the tickets to the assistant.
@@ -1229,7 +1226,10 @@ fn names_on_base(dir: &Utf8Path, base: &str, file: &Utf8Path, token: &str) -> bo
 ///
 /// Falls back to the current bucket for a file git has never seen, which is
 /// what an uncommitted ticket looks like.
+/// A file added before the directory's epoch, such as one carried over with its
+/// history from another repository, lands in the first bucket.
 fn created_bucket(dir: &Utf8Path, path: &Utf8Path) -> Result<u32, String> {
+    let epoch = store::load_epoch(dir).map_err(|error| error.to_string())?;
     let added = git(dir, &[
         "log",
         "--diff-filter=A",
@@ -1240,10 +1240,15 @@ fn created_bucket(dir: &Utf8Path, path: &Utf8Path) -> Result<u32, String> {
     ])
     .and_then(|text| text.trim().parse::<u64>().ok());
 
-    match added {
-        Some(seconds) => store::bucket_at(seconds).map_err(|error| error.to_string()),
-        None => store::current_bucket().map_err(|error| error.to_string()),
-    }
+    let bucket = match added {
+        Some(seconds) => match store::bucket_at(epoch, seconds) {
+            Err(store::Error::ClockBeforeEpoch(_)) => Ok(0),
+            bucket => bucket,
+        },
+        None => store::current_bucket(epoch),
+    };
+
+    bucket.map_err(|error| error.to_string())
 }
 
 /// Every file the branch changed against `base`, as absolute paths.
@@ -1594,17 +1599,19 @@ fn rank(
     Ok(format!("{id} now sits {} {other} in {status}\n", relation(place)).into())
 }
 
-/// Create the ticket directory.
+/// Create the ticket directory and its epoch file.
 ///
-/// One that exists already is left as it is.
+/// A directory that exists already keeps its files, and gets an epoch file only
+/// if it holds no tickets yet.
 /// The board's order file is not created: a board ranks nothing until a ticket
 /// is ranked, and needs no file for that.
 fn init_dir(dir: &Utf8Path) -> Result<Output, String> {
-    if dir.is_dir() {
+    let existed = dir.is_dir();
+    store::establish_epoch(dir).map_err(|error| error.to_string())?;
+
+    if existed {
         return Ok(format!("{dir} already exists.\n").into());
     }
-
-    fs::create_dir_all(dir).map_err(|error| format!("failed to create {dir}: {error}"))?;
 
     Ok(format!("Created {dir}\n").into())
 }
@@ -1941,6 +1948,10 @@ impl<'a> From<&'a Problem> for Finding<'a> {
     fn from(problem: &'a Problem) -> Self {
         let (kind, ids, paths) = match problem {
             Problem::LegacyName(path) => ("legacy_name", vec![], vec![path.as_path()]),
+            Problem::MissingEpoch(path) => ("missing_epoch", vec![], vec![path.as_path()]),
+            Problem::MalformedEpoch { path, .. } => {
+                ("malformed_epoch", vec![], vec![path.as_path()])
+            }
             Problem::Duplicate { id, paths } => (
                 "duplicate",
                 vec![*id],

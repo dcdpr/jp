@@ -5,6 +5,9 @@
 //! checkouts that cannot see each other still hand out different ids.
 //! Nothing coordinates allocation; see
 //! `docs/rfd/102-collision-resistant-ticket-identifiers.md`.
+//!
+//! The time component counts from the directory's own [`Epoch`], which the
+//! first allocation in an empty directory writes.
 
 use std::{
     collections::hash_map::RandomState,
@@ -18,8 +21,9 @@ use camino::{Utf8Path, Utf8PathBuf};
 use jp_label::Clash;
 
 use crate::{
-    Comment, LABEL_KEY, Labels, NewTicket, ParseError, Status, Ticket, TicketId, Vocabulary,
-    check::{self, Directory, Report, TicketFile},
+    Comment, Epoch, LABEL_KEY, Labels, NewTicket, ParseError, Status, Ticket, TicketId, Vocabulary,
+    check::{self, Directory, Problem, Report, TicketFile},
+    epoch::EPOCH_FILE,
     id::{MAX_BUCKET, TAIL_SPACE},
     import::{Import, escaped, github_marker},
     parse, render,
@@ -32,10 +36,6 @@ pub const DEFAULT_DIR: &str = "docs/ticket";
 ///
 /// Slugs are ASCII, so this is both a byte count and a character count.
 pub const MAX_SLUG_SIZE: usize = 60;
-
-/// Start of the id time range: `2026-08-10T00:00:00Z`, the day the ticket
-/// system went live.
-const EPOCH_SECS: u64 = 1_786_320_000;
 
 /// Seconds one id bucket spans.
 const BUCKET_SECS: u64 = 5;
@@ -63,7 +63,15 @@ pub enum Error {
     /// Every id drawn was already claimed on disk.
     Contended,
     /// The clock reads before the epoch ids are measured from.
-    ClockBeforeEpoch,
+    ClockBeforeEpoch(Epoch),
+    /// The directory holds tickets but no epoch file, so a new id can't be
+    /// placed in time against theirs.
+    MissingEpoch(Utf8PathBuf),
+    /// The epoch file is there but doesn't hold an epoch.
+    MalformedEpoch {
+        path: Utf8PathBuf,
+        error: ParseError,
+    },
     /// The time component has no bucket left to express.
     ///
     /// Allocation refuses rather than wrapping, which would reuse old time
@@ -125,9 +133,18 @@ impl fmt::Display for Error {
             Self::Contended => f.write_str(
                 "Every id drawn was already taken; another process is creating tickets.",
             ),
-            Self::ClockBeforeEpoch => {
-                f.write_str("The system clock reads before 2026-08-10, when ticket ids start.")
+            Self::ClockBeforeEpoch(epoch) => {
+                write!(
+                    f,
+                    "The system clock reads before {epoch}, when ticket ids start."
+                )
             }
+            Self::MissingEpoch(path) => write!(
+                f,
+                "{path} is missing, so a new ticket id can't be ordered against the existing \
+                 ones. Restore it from version control."
+            ),
+            Self::MalformedEpoch { path, error } => write!(f, "{path}: {error}"),
             Self::Exhausted => f.write_str(
                 "The ticket id format has no time buckets left; it needs a wider time component.",
             ),
@@ -198,7 +215,9 @@ pub(crate) fn held_to_one(clash: &Clash) -> String {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Parse(error) | Self::Malformed { error, .. } => Some(error),
+            Self::Parse(error)
+            | Self::Malformed { error, .. }
+            | Self::MalformedEpoch { error, .. } => Some(error),
             Self::Rejected(error) => Some(error),
             Self::Io(error) => Some(error),
             _ => None,
@@ -257,9 +276,10 @@ pub fn create(
 ) -> Result<(TicketId, Utf8PathBuf)> {
     check_unique(dir, vocabulary, new.labels, None)?;
     let slug = slug(new.title);
+    let epoch = establish_epoch(dir)?;
 
     for _ in 0..CLAIM_ATTEMPTS {
-        let id = allocate_id(dir)?;
+        let id = allocate_id(dir, epoch)?;
         let path = dir.join(format!("{}{slug}.md", id.file_prefix()));
 
         match fs::OpenOptions::new()
@@ -787,7 +807,8 @@ pub fn list(dir: &Utf8Path) -> Result<Vec<Entry>> {
 }
 
 /// Read every ticket in `dir` and hold it to `vocabulary`, as [`check::report`]
-/// does.
+/// does, and report an epoch file that is missing while tickets exist, or that
+/// doesn't hold an epoch.
 ///
 /// A directory that doesn't exist yet holds no tickets, and so no problems.
 pub fn check(dir: &Utf8Path, vocabulary: &Vocabulary) -> Result<Report> {
@@ -802,7 +823,21 @@ pub fn check(dir: &Utf8Path, vocabulary: &Vocabulary) -> Result<Report> {
         tickets,
     };
 
-    Ok(check::report(&directory, vocabulary))
+    let mut report = check::report(&directory, vocabulary);
+
+    // The epoch is a directory-wide problem, which a report lists first.
+    let epoch_problem = match read_epoch(dir) {
+        Ok(Some(_)) => None,
+        Ok(None) if directory.tickets.is_empty() => None,
+        Ok(None) => Some(Problem::MissingEpoch(dir.join(EPOCH_FILE))),
+        Err(Error::MalformedEpoch { path, error }) => Some(Problem::MalformedEpoch { path, error }),
+        Err(error) => return Err(error),
+    };
+    if let Some(problem) = epoch_problem {
+        report.problems.insert(0, problem);
+    }
+
+    Ok(report)
 }
 
 /// Every file in `dir` named in the four-digit `NNNN-slug.md` form, sorted.
@@ -947,8 +982,71 @@ fn duplicate(files: &[(TicketId, Utf8PathBuf)]) -> Option<Error> {
 /// An id sitting in a *future* bucket is ignored rather than continued from:
 /// one merged ticket from a machine with a fast clock would otherwise drag
 /// every later local timestamp forward with it.
-fn allocate_id(dir: &Utf8Path) -> Result<TicketId> {
-    allocate_in(dir, current_bucket()?)
+fn allocate_id(dir: &Utf8Path, epoch: Epoch) -> Result<TicketId> {
+    allocate_in(dir, current_bucket(epoch)?)
+}
+
+/// The epoch `dir`'s ids count time from, written as the start of today when
+/// the directory holds no tickets yet.
+///
+/// Creates `dir` if it doesn't exist.
+/// A directory holding tickets but no epoch file is an error rather than a
+/// fresh start: a new epoch would sort every new id against the existing ones
+/// by an unrelated clock.
+///
+/// # Errors
+///
+/// Returns an error when the epoch file is missing beside existing tickets or
+/// doesn't hold an epoch, or when the filesystem refuses.
+pub fn establish_epoch(dir: &Utf8Path) -> Result<Epoch> {
+    match read_epoch(dir)? {
+        Some(epoch) => return Ok(epoch),
+        None if !files(dir)?.is_empty() => return Err(Error::MissingEpoch(dir.join(EPOCH_FILE))),
+        None => {}
+    }
+
+    let epoch = Epoch::day_of(now_seconds()?).ok_or(Error::Exhausted)?;
+
+    fs::create_dir_all(dir)?;
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dir.join(EPOCH_FILE))
+    {
+        Ok(mut file) => {
+            file.write_all(epoch.render().as_bytes())?;
+
+            Ok(epoch)
+        }
+        // Another process filing its first ticket wrote one first; theirs
+        // stands.
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => load_epoch(dir),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// The epoch `dir`'s ids count time from, as its epoch file records it.
+///
+/// # Errors
+///
+/// Returns an error when there is no epoch file, or it doesn't hold an epoch.
+pub fn load_epoch(dir: &Utf8Path) -> Result<Epoch> {
+    read_epoch(dir)?.ok_or_else(|| Error::MissingEpoch(dir.join(EPOCH_FILE)))
+}
+
+/// The epoch `dir`'s epoch file holds, or `None` when there is no such file.
+fn read_epoch(dir: &Utf8Path) -> Result<Option<Epoch>> {
+    let path = dir.join(EPOCH_FILE);
+    let source = match fs::read_to_string(&path) {
+        Ok(source) => source,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+
+    source
+        .parse()
+        .map(Some)
+        .map_err(|error| Error::MalformedEpoch { path, error })
 }
 
 /// Hand out an id in `bucket`, or the first bucket after it with room.
@@ -980,12 +1078,12 @@ fn allocate_in(dir: &Utf8Path, mut bucket: u32) -> Result<TicketId> {
 ///
 /// # Errors
 ///
-/// Returns an error when the timestamp predates the epoch ids are measured
-/// from, or falls past the last bucket the format can express.
-pub fn bucket_at(unix_seconds: u64) -> Result<u32> {
+/// Returns an error when the timestamp predates `epoch`, or falls past the last
+/// bucket the format can express.
+pub fn bucket_at(epoch: Epoch, unix_seconds: u64) -> Result<u32> {
     let bucket = unix_seconds
-        .checked_sub(EPOCH_SECS)
-        .ok_or(Error::ClockBeforeEpoch)?
+        .checked_sub(epoch.unix_seconds())
+        .ok_or(Error::ClockBeforeEpoch(epoch))?
         / BUCKET_SECS;
 
     u32::try_from(bucket)
@@ -1036,15 +1134,22 @@ pub fn reassign(dir: &Utf8Path, path: &Utf8Path, bucket: u32) -> Result<Reassign
 ///
 /// # Errors
 ///
-/// Returns an error when the clock reads before the epoch, or past the last
+/// Returns an error when the clock reads before `epoch`, or past the last
 /// bucket the format can express.
-pub fn current_bucket() -> Result<u32> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| Error::ClockBeforeEpoch)?
-        .as_secs();
+pub fn current_bucket(epoch: Epoch) -> Result<u32> {
+    let now = now_seconds().map_err(|_| Error::ClockBeforeEpoch(epoch))?;
 
-    bucket_at(now)
+    bucket_at(epoch, now)
+}
+
+/// Seconds since the unix epoch, by the system clock.
+///
+/// A clock set before 1970 reads as an error rather than as zero.
+fn now_seconds() -> Result<u64> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .map_err(|error| Error::Io(io::Error::other(error)))
 }
 
 /// A random tail.
