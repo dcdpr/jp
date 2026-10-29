@@ -115,7 +115,10 @@ fn only_missing_pages_are_created() {
 
     assert_eq!(paths(&changes), ["create docs/rfd/priority.md"]);
 
-    apply(root.path(), &changes, Utf8Path::new(OWNED)).unwrap();
+    assert_eq!(
+        apply(root.path(), &changes, Utf8Path::new(OWNED)).unwrap(),
+        Vec::<Utf8PathBuf>::new()
+    );
     assert_eq!(
         fs::read_to_string(root.path().join("docs/rfd/priority.md")).unwrap(),
         "Priorities"
@@ -124,6 +127,25 @@ fn only_missing_pages_are_created() {
         fs::read_to_string(root.path().join("docs/rfd/index.md")).unwrap(),
         "Our own index"
     );
+}
+
+/// A page that appears between planning and applying, while `sync` waits for a
+/// confirmation, is the project's: it is left as written, and reported.
+#[test]
+fn a_page_created_after_planning_is_left_alone() {
+    let root = Utf8TempDir::new().unwrap();
+    let changes = missing(root.path(), vec![
+        owned("docs/ticket/index.md", "Index"),
+        owned("docs/ticket/board.md", "Board"),
+    ]);
+    write(&root, "docs/ticket/index.md", "Our own index");
+
+    let kept = apply(root.path(), &changes, Utf8Path::new(OWNED)).unwrap();
+
+    assert_eq!(kept, [Utf8PathBuf::from("docs/ticket/index.md")]);
+    let read = |path: &str| fs::read_to_string(root.path().join(path)).unwrap();
+    assert_eq!(read("docs/ticket/index.md"), "Our own index");
+    assert_eq!(read("docs/ticket/board.md"), "Board");
 }
 
 /// The owned directory is the binary's whole: a file a newer release dropped

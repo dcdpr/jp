@@ -6,7 +6,11 @@
 //! writes what they found.
 //! Whether the project may be written at all is [`crate::git`]'s to say.
 
-use std::{collections::BTreeSet, fs, io};
+use std::{
+    collections::BTreeSet,
+    fs,
+    io::{self, Write as _},
+};
 
 use camino::{Utf8Path, Utf8PathBuf};
 
@@ -103,19 +107,37 @@ pub(crate) fn missing(root: &Utf8Path, pages: Vec<Owned>) -> Vec<Change> {
 /// Make the changes, creating directories as needed.
 ///
 /// A directory a removal empties is removed with it, up to `owned_dir`.
+/// A page to create that exists by now, made while the changes waited to be
+/// confirmed, is the project's and is left as it is; those are returned, as
+/// paths relative to the root.
 pub(crate) fn apply(
     root: &Utf8Path,
     changes: &[Change],
     owned_dir: &Utf8Path,
-) -> Result<(), String> {
+) -> Result<Vec<Utf8PathBuf>, String> {
+    let mut kept = vec![];
+
     for change in changes {
         let path = root.join(change.path());
         match change {
-            Change::Write(owned) | Change::Create(owned) => {
-                if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent).map_err(|error| format!("{parent}: {error}"))?;
-                }
+            Change::Write(owned) => {
+                create_parent(&path)?;
                 fs::write(&path, &owned.contents).map_err(|error| format!("{path}: {error}"))?;
+            }
+            Change::Create(page) => {
+                create_parent(&path)?;
+                let created = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .and_then(|mut file| file.write_all(&page.contents));
+                match created {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                        kept.push(page.path.clone());
+                    }
+                    Err(error) => return Err(format!("{path}: {error}")),
+                }
             }
             Change::Remove(_) => {
                 fs::remove_file(&path).map_err(|error| format!("{path}: {error}"))?;
@@ -124,7 +146,14 @@ pub(crate) fn apply(
         }
     }
 
-    Ok(())
+    Ok(kept)
+}
+
+fn create_parent(path: &Utf8Path) -> Result<(), String> {
+    match path.parent() {
+        Some(parent) => fs::create_dir_all(parent).map_err(|error| format!("{parent}: {error}")),
+        None => Ok(()),
+    }
 }
 
 /// Every file below `dir`, relative to `root`, dotfiles and the contents of

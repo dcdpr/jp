@@ -414,13 +414,20 @@ fn sync_site<R: BufRead, W: Write>(
         }
     }
 
-    sync::apply(root, &changes, &owned_dir)?;
+    let kept = sync::apply(root, &changes, &owned_dir)?;
+    let synced = changes.len() - kept.len();
 
-    Ok(format!(
-        "Synced {} {}. `git diff` shows what changed.\n",
-        changes.len(),
-        if changes.len() == 1 { "file" } else { "files" }
-    ))
+    let mut text = format!(
+        "Synced {synced} {}. `git diff` shows what changed.\n",
+        if synced == 1 { "file" } else { "files" }
+    );
+    for path in kept {
+        text.push_str(&format!(
+            "Left {path}, which was created in the meantime.\n"
+        ));
+    }
+
+    Ok(text)
 }
 
 /// What syncing changes in the project at `root`: the owned files it rewrites
