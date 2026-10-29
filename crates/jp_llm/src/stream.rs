@@ -237,6 +237,76 @@ pub fn with_tool_call_keepalive(stream: EventStream, interval: Duration) -> Even
     .boxed()
 }
 
+/// Inject a synthetic [`Event::KeepAlive`] every `interval` while a response is
+/// open but silent, for at most `allowance` of continuous silence.
+///
+/// A response opens with its first item and closes with [`Event::Finished`].
+/// Some providers generate parts of a response without sending anything: Google
+/// delivers a function call as one complete part once the model has finished
+/// writing its arguments, so a large call reads as a long silence in the middle
+/// of an otherwise healthy response.
+/// The keep-alives keep a downstream [`with_idle_timeout`] from treating that
+/// silence as a dead connection.
+///
+/// The allowance bounds how long a dead connection can be masked: once the
+/// response has been silent for `allowance`, keep-alives stop and the idle
+/// timeout fires one idle window later.
+/// Silence is measured against the wall clock, for the same reason as in
+/// [`with_idle_timeout`]: time the machine spends asleep counts.
+///
+/// Before the first item and after the response finishes, this is a transparent
+/// pass-through.
+/// Apply it per-provider, only where the provider is known to have such gaps.
+#[must_use]
+pub fn with_response_keepalive(
+    stream: EventStream,
+    interval: Duration,
+    allowance: Duration,
+) -> EventStream {
+    with_response_keepalive_at(stream, interval, allowance, SystemTime::now)
+}
+
+/// [`with_response_keepalive`] with an injectable wall clock, for tests.
+fn with_response_keepalive_at(
+    stream: EventStream,
+    interval: Duration,
+    allowance: Duration,
+    now: impl Fn() -> SystemTime + Send + 'static,
+) -> EventStream {
+    stream! {
+        let mut stream = stream;
+        let mut open = false;
+        let mut last_item = now();
+        loop {
+            // Outside an open response, pass through and let the downstream
+            // idle timeout own liveness.
+            let next = if open {
+                timeout(interval, stream.next()).await
+            } else {
+                Ok(stream.next().await)
+            };
+
+            match next {
+                Ok(Some(item)) => {
+                    open = !matches!(item, Ok(Event::Finished(_)));
+                    last_item = now();
+                    yield item;
+                }
+                Ok(None) => break,
+                Err(_elapsed) => {
+                    let silent_for = now()
+                        .duration_since(last_item)
+                        .unwrap_or(Duration::ZERO);
+                    if silent_for < allowance {
+                        yield Ok(Event::KeepAlive);
+                    }
+                }
+            }
+        }
+    }
+    .boxed()
+}
+
 /// Track tool-call open/close boundaries for [`with_tool_call_keepalive`].
 ///
 /// A `ToolCallPart::Start` opens the call at its index; the matching `Flush`

@@ -25,7 +25,7 @@ use jp_tool::ToolDefinition;
 use serde_json::{Map, Value};
 use tracing::{debug, trace, warn};
 
-use super::{EventStream, Provider, trace_to_tmpfile};
+use super::{CONTINUE_MESSAGE, EventStream, Provider, trace_to_tmpfile};
 use crate::{
     StreamErrorKind,
     error::{
@@ -38,9 +38,24 @@ use crate::{
         catalog::{Catalog, Entry},
     },
     query::ChatQuery,
+    stream::with_response_keepalive,
 };
 
 static PROVIDER: ProviderId = ProviderId::Google;
+
+/// How often to inject a synthetic keep-alive while a response is silent.
+///
+/// Stays below the enforced minimum `stream_idle_timeout_secs` (10s) so the
+/// heartbeat always lands before the idle window elapses.
+const RESPONSE_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
+
+/// How long a response may stay silent before keep-alives stop.
+///
+/// Gemini sends a function call as one part once its arguments are complete, so
+/// a model writing a large call is silent for as long as the writing takes.
+/// This bounds that wait; a connection that died mid-response is detected this
+/// long plus one idle window after its last part.
+const RESPONSE_KEEPALIVE_ALLOWANCE: Duration = Duration::from_mins(5);
 
 const THOUGHT_SIGNATURE_KEY: &str = "google_thought_signature";
 const THOUGHT_SIGNATURE_DUMMY_VALUE: &str = "skip_thought_signature_validator";
@@ -88,7 +103,11 @@ impl Provider for Google {
             "Request payload."
         );
 
-        Ok(call(client, request, slug, 0, structured))
+        Ok(with_response_keepalive(
+            call(client, request, slug, 0, structured),
+            RESPONSE_KEEPALIVE_INTERVAL,
+            RESPONSE_KEEPALIVE_ALLOWANCE,
+        ))
     }
 }
 
@@ -431,6 +450,27 @@ fn create_request(
     }
     contents.extend(convert_events(events));
 
+    // A retry or interrupt that committed partial output leaves the request
+    // ending with a model turn, which Gemini rejects with "Requests ending with
+    // a model turn are not supported." Unless the model is known to continue
+    // from it, end with a user turn asking it to pick up where it stopped.
+    if contents
+        .last()
+        .is_some_and(|c| c.role == Some(types::Role::Model))
+        && !model.supports_prefill()
+    {
+        debug!("Appending synthetic continue message (model does not support prefill).");
+        contents.push(types::Content {
+            parts: vec![types::ContentPart {
+                data: types::ContentData::Text(CONTINUE_MESSAGE.to_owned()),
+                thought: false,
+                metadata: None,
+                thought_signature: None,
+            }],
+            role: Some(types::Role::User),
+        });
+    }
+
     // Set structured output config on GenerationConfig when a schema is present.
     // We use `_responseJsonSchema` (the JSON Schema field) rather than
     // `responseSchema` (the OpenAPI Schema field) so that standard JSON
@@ -540,6 +580,25 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
     let id = |name: &str| ModelIdConfig::try_from((PROVIDER, name)).unwrap();
 
     Catalog::new(vec![
+        // The model page does not publish a knowledge cutoff.
+        Entry {
+            aliases: &[],
+            value: ModelDetails {
+                id: id("gemini-4-argon"),
+                display_name: None,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: Some(
+                    ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
+                ),
+                knowledge_cutoff: None,
+                deprecated: Some(ModelDeprecation::Active),
+                structured_output: Some(true),
+                prefill: None,
+                subscription: None,
+                features: vec![],
+            },
+        },
         Entry {
             aliases: &[
                 "gemini-3.1-pro-preview",
