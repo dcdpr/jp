@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.660850260771025,
-  "iosp_score": 0.8165233801635563,
+  "quality_score": 0.6616942618760341,
+  "iosp_score": 0.816907302783009,
   "violations": 875,
-  "total": 6721,
+  "total": 6735,
   "complexity_warnings": 0,
   "magic_number_warnings": 0,
   "nesting_depth_warnings": 0,
@@ -11,7 +11,7 @@
   "unsafe_warnings": 0,
   "error_handling_warnings": 0,
   "duplicate_groups": 29,
-  "dead_code_warnings": 258,
+  "dead_code_warnings": 257,
   "dead_type_warnings": 28,
   "fragment_groups": 58,
   "boilerplate_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 0,
   "structural_coupling_warnings": 0,
-  "total_findings": 1296,
+  "total_findings": 1295,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -2368,27 +2368,27 @@
     {
       "name": "inject_mounts",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2437
+      "line": 2446
     },
     {
       "name": "create_mount_effects",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2503
+      "line": 2513
     },
     {
       "name": "PendingStreamTrim::apply",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2682
+      "line": 2709
     },
     {
       "name": "mount_access_seed",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2841
+      "line": 2876
     },
     {
       "name": "read_piped_stdin",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2936
+      "line": 2971
     },
     {
       "name": "Login::run_with_auth",
@@ -2778,7 +2778,7 @@
     {
       "name": "QueryText::read",
       "file": "crates/jp_cli/src/cmd/query/args.rs",
-      "line": 532
+      "line": 535
     },
     {
       "name": "build_execution_plan",
@@ -3168,17 +3168,17 @@
     {
       "name": "compile_fs",
       "file": "crates/jp_cli/src/access/compile.rs",
-      "line": 74
+      "line": 76
     },
     {
       "name": "compile_tool_policy",
       "file": "crates/jp_cli/src/access/compile.rs",
-      "line": 147
+      "line": 150
     },
     {
       "name": "compile_policy",
       "file": "crates/jp_cli/src/access/compile.rs",
-      "line": 174
+      "line": 177
     },
     {
       "name": "Commands::run",
@@ -3333,12 +3333,12 @@
     {
       "name": "Flag<F>::read",
       "file": "crates/jp_cli/src/cli/flag.rs",
-      "line": 308
+      "line": 319
     },
     {
       "name": "Flag<F>::decide",
       "file": "crates/jp_cli/src/cli/flag.rs",
-      "line": 353
+      "line": 367
     },
     {
       "name": "Spelling::of",
@@ -3896,24 +3896,24 @@
       "line": 90
     },
     {
-      "name": "Context::resolve",
+      "name": "FsRule::workspace_exclusion",
       "file": "crates/jp_tool/src/access.rs",
-      "line": 636
+      "line": 408
     },
     {
       "name": "normalize_lexical",
       "file": "crates/jp_tool/src/access.rs",
-      "line": 693
+      "line": 600
     },
     {
       "name": "canonicalize_workspace_target",
       "file": "crates/jp_tool/src/access.rs",
-      "line": 719
+      "line": 633
     },
     {
       "name": "AnswerType::deserialize",
       "file": "crates/jp_tool/src/lib.rs",
-      "line": 406
+      "line": 407
     },
     {
       "name": "validate_node",

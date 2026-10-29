@@ -2,12 +2,11 @@ use std::fs;
 
 use camino::Utf8Path;
 use jp_process::{ProcessRunner, SystemProcessRunner};
-use jp_tool::{AccessPolicy, Capability, Outcome, Question};
+use jp_tool::{AccessPolicy, Capability, EntryKind, Outcome, Question, ResolvedPath};
 use serde_json::{Map, Value};
 
 use super::utils::{
-    EntryKind, ResolvedPath, authorize, authorize_entry, count_dirty_paths_impl,
-    is_file_dirty_impl, resolve_workspace_entry,
+    authorize, authorize_entry, count_dirty_paths_impl, is_file_dirty_impl, resolve_workspace_entry,
 };
 use crate::{
     Error,

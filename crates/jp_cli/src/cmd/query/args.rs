@@ -331,18 +331,21 @@ impl Query<Parsed> {
                 Arg::new("mount")
                     .long("mount")
                     .action(ArgAction::Append)
-                    .value_name("[TOOL:]NAME=PATH[:MODE]")
+                    .value_name("[TOOL:][NAME=]PATH[:MODE]")
                     .help(
                         "Mount an external path into the workspace as a symlink and grant the \
                          assistant access to it",
                     )
                     .long_help(
                         "Mount an external path into the workspace as a symlink and grant the \
-                         assistant access to it.\n\nForm: `[TOOL:]NAME=PATH[:MODE]`. `NAME` is the \
-                         workspace-relative location for the symlink, `PATH` is the external \
-                         target, and `MODE` is `ro` (default) or `rw`. `rw` requires a `TOOL:` \
-                         prefix; without a `TOOL:` prefix the grant applies to all enabled local \
-                         and command plugin tools. Repeat the flag to mount several paths.",
+                         assistant access to it.\n\nForm: `[TOOL:][NAME=]PATH[:MODE]`. `NAME` is \
+                         the workspace-relative location for the symlink, `PATH` is the external \
+                         target, and `MODE` is `ro` (default) or `rw`. Without `NAME=`, `PATH` \
+                         must exist and the symlink is named after its last segment; a leading \
+                         `TOOL:` is then a tool only if the rest of the path exists and the whole \
+                         value does not. `rw` requires a `TOOL:` prefix; without a `TOOL:` prefix \
+                         the grant applies to all enabled local and command plugin tools. Repeat \
+                         the flag to mount several paths.",
                     ),
             )
     }
