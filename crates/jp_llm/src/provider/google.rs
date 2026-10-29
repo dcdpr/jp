@@ -580,7 +580,6 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
     let id = |name: &str| ModelIdConfig::try_from((PROVIDER, name)).unwrap();
 
     Catalog::new(vec![
-        // The model page does not publish a knowledge cutoff.
         Entry {
             aliases: &[],
             value: ModelDetails {
@@ -591,7 +590,7 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
                 reasoning: Some(
                     ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
                 ),
-                knowledge_cutoff: None,
+                knowledge_cutoff: Some(date(2026, 3, 1)),
                 deprecated: Some(ModelDeprecation::Active),
                 structured_output: Some(true),
                 prefill: None,

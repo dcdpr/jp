@@ -227,7 +227,10 @@ fn test_map_model_gemini_4_argon() {
         details.reasoning,
         Some(ReasoningDetails::leveled(false, true, true, true, false, false).always_on())
     );
-    assert_eq!(details.knowledge_cutoff, None);
+    assert_eq!(
+        details.knowledge_cutoff,
+        Some(NaiveDate::from_ymd_opt(2026, 3, 1).unwrap())
+    );
     assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
     assert_eq!(details.structured_output, Some(true));
     assert_eq!(details.prefill, None);
