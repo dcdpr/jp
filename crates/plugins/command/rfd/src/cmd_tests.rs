@@ -2,11 +2,15 @@ use std::fs;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
+use ticket::epoch::EPOCH_FILE;
 
 use super::*;
 
 /// A workspace with JP's layout: RFDs in `docs/rfd`, drafts in its `drafts/`,
 /// and tickets in `docs/ticket`.
+///
+/// The ticket directory carries an epoch, as one holding tickets does, so a
+/// ticket a test writes by hand doesn't stop the next one being filed.
 pub(super) struct Workspace {
     _dir: Utf8TempDir,
     pub paths: Paths,
@@ -22,6 +26,7 @@ impl Workspace {
         );
         fs::create_dir_all(paths.drafts()).unwrap();
         fs::create_dir_all(&paths.tickets).unwrap();
+        fs::write(paths.tickets.join(EPOCH_FILE), "2026-08-10\n").unwrap();
 
         Self { _dir: dir, paths }
     }

@@ -8,6 +8,7 @@ use jp_plugin::message::{
     QueryCompleteResponse, QueryRequest, ToolAction, WorkspaceInfo,
 };
 use serde_json::{Map, json};
+use ticket::epoch::EPOCH_FILE;
 
 use super::*;
 
@@ -30,12 +31,16 @@ pub(crate) fn jp_root() -> Utf8PathBuf {
 
 /// A workspace holding one RFD, `042`, planned first and in development, and
 /// one draft in the backlog.
+///
+/// The ticket directory carries an epoch, as one holding tickets does, so a
+/// ticket a test writes by hand doesn't stop the next one being filed.
 fn workspace() -> Utf8TempDir {
     let root = Utf8TempDir::new().unwrap();
     let rfds = root.path().join("docs/rfd");
     let tickets = root.path().join("docs/ticket");
     fs::create_dir_all(rfds.join("drafts")).unwrap();
     fs::create_dir_all(&tickets).unwrap();
+    fs::write(tickets.join(EPOCH_FILE), "2026-08-10\n").unwrap();
 
     fs::write(
         rfds.join("042-ordered-things.md"),
