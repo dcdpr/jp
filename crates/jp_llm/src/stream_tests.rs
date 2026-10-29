@@ -398,6 +398,8 @@ async fn no_response_keepalive_before_the_first_item() {
 
 #[tokio::test(start_paused = true)]
 async fn no_response_keepalive_after_the_response_finishes() {
+    // An item after `Finished` does not reopen the response: the silence that
+    // follows the trailing flush stays owned by the downstream idle timeout.
     let inner = stream::iter(vec![
         Ok(Event::message(0, "a")),
         Ok(Event::Finished(FinishReason::Completed)),
@@ -406,6 +408,7 @@ async fn no_response_keepalive_after_the_response_finishes() {
         tokio::time::sleep(Duration::from_secs(12)).await;
         Ok(Event::flush(0))
     }))
+    .chain(stream::pending())
     .boxed();
     let wrapped = with_response_keepalive_at(
         inner,
@@ -418,7 +421,7 @@ async fn no_response_keepalive_after_the_response_finishes() {
         (0, "part"),
         (0, "finished"),
         (12, "flush"),
-        (12, "end"),
+        (72, "silent"),
     ]);
 }
 

@@ -276,6 +276,7 @@ fn with_response_keepalive_at(
     stream! {
         let mut stream = stream;
         let mut open = false;
+        let mut finished = false;
         let mut last_item = now();
         loop {
             // Outside an open response, pass through and let the downstream
@@ -288,7 +289,9 @@ fn with_response_keepalive_at(
 
             match next {
                 Ok(Some(item)) => {
-                    open = !matches!(item, Ok(Event::Finished(_)));
+                    // A response stays closed once finished, whatever trails it.
+                    finished |= matches!(item, Ok(Event::Finished(_)));
+                    open = !finished;
                     last_item = now();
                     yield item;
                 }
