@@ -1,34 +1,34 @@
 {
   "version": 2,
-  "quality_score": 0.7157008282742712,
-  "iosp_score": 0.9165696893742726,
-  "violations": 932,
-  "total": 15291,
-  "complexity_warnings": 175,
-  "magic_number_warnings": 240,
-  "nesting_depth_warnings": 28,
-  "function_length_warnings": 459,
+  "quality_score": 0.7207917743561473,
+  "iosp_score": 0.9181342632955536,
+  "violations": 939,
+  "total": 15764,
+  "complexity_warnings": 178,
+  "magic_number_warnings": 241,
+  "nesting_depth_warnings": 30,
+  "function_length_warnings": 468,
   "unsafe_warnings": 74,
-  "error_handling_warnings": 200,
+  "error_handling_warnings": 201,
   "duplicate_groups": 0,
   "dead_code_warnings": 0,
   "dead_type_warnings": 0,
   "fragment_groups": 0,
   "boilerplate_warnings": 300,
   "srp_struct_warnings": 48,
-  "srp_module_warnings": 233,
+  "srp_module_warnings": 240,
   "wildcard_import_warnings": 0,
   "sdp_violations": 0,
   "coupling_warnings": 0,
   "coupling_cycles": 0,
   "tq_no_assertion_warnings": 0,
   "tq_no_sut_warnings": 3,
-  "tq_untested_warnings": 94,
+  "tq_untested_warnings": 90,
   "tq_uncovered_warnings": 0,
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 51,
-  "structural_coupling_warnings": 8,
-  "total_findings": 2965,
+  "structural_coupling_warnings": 10,
+  "total_findings": 2997,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -633,7 +633,7 @@
     {
       "name": "read_message",
       "file": "crates/plugins/command/rfd/src/lib.rs",
-      "line": 920
+      "line": 921
     },
     {
       "name": "load",
@@ -678,7 +678,7 @@
     {
       "name": "read_message",
       "file": "crates/plugins/command/vite/src/lib.rs",
-      "line": 549
+      "line": 550
     },
     {
       "name": "rfd_options",
@@ -773,67 +773,77 @@
     {
       "name": "handle_command",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 538
+      "line": 555
     },
     {
       "name": "compose_missing",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 658
+      "line": 676
     },
     {
       "name": "with_show_alias",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1023
+      "line": 1041
     },
     {
       "name": "show_board",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1501
+      "line": 1521
     },
     {
       "name": "board_row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1551
+      "line": 1571
     },
     {
       "name": "import_all",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1598
+      "line": 1618
     },
     {
       "name": "label",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1776
+      "line": 1796
     },
     {
       "name": "label_refusal",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1827
+      "line": 1847
     },
     {
       "name": "list_labels",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1851
+      "line": 1871
+    },
+    {
+      "name": "check",
+      "file": "crates/plugins/command/ticket/src/lib.rs",
+      "line": 1965
     },
     {
       "name": "describe_vocabulary",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1908
+      "line": 2035
     },
     {
       "name": "show",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2020
+      "line": 2147
+    },
+    {
+      "name": "list",
+      "file": "crates/plugins/command/ticket/src/lib.rs",
+      "line": 2213
     },
     {
       "name": "row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2141
+      "line": 2269
     },
     {
       "name": "read_message",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2210
+      "line": 2353
     },
     {
       "name": "answer",
@@ -883,12 +893,12 @@
     {
       "name": "PartialRequestConfig::assign",
       "file": "crates/jp_config/src/assistant/request.rs",
-      "line": 157
+      "line": 162
     },
     {
       "name": "MaxResponseBytes::from",
       "file": "crates/jp_config/src/assistant/request.rs",
-      "line": 332
+      "line": 337
     },
     {
       "name": "PartialInstructionsConfig::assign",
@@ -1586,14 +1596,19 @@
       "line": 111
     },
     {
+      "name": "report",
+      "file": "crates/internal/ticket/src/check.rs",
+      "line": 114
+    },
+    {
       "name": "relabel",
       "file": "crates/internal/ticket/src/store.rs",
-      "line": 418
+      "line": 419
     },
     {
       "name": "slug",
       "file": "crates/internal/ticket/src/store.rs",
-      "line": 1014
+      "line": 1065
     },
     {
       "name": "escape",
@@ -1608,12 +1623,12 @@
     {
       "name": "unescaped",
       "file": "crates/internal/ticket/src/parse.rs",
-      "line": 95
+      "line": 103
     },
     {
       "name": "metadata",
       "file": "crates/internal/ticket/src/parse.rs",
-      "line": 273
+      "line": 281
     },
     {
       "name": "FileContent::add",
@@ -2566,64 +2581,64 @@
       "line": 172
     },
     {
-      "name": "CompactFlag::from_arg_matches",
+      "name": "Compact::collect",
       "file": "crates/jp_cli/src/cmd/compact_flag.rs",
-      "line": 134
+      "line": 145
     },
     {
       "name": "CompactSpec::to_partial_rule",
       "file": "crates/jp_cli/src/cmd/compact_flag.rs",
-      "line": 197
+      "line": 206
     },
     {
       "name": "Fmt::run",
       "file": "crates/jp_cli/src/cmd/config/fmt.rs",
-      "line": 23
+      "line": 58
     },
     {
       "name": "Fmt::fmt_target",
       "file": "crates/jp_cli/src/cmd/config/fmt.rs",
-      "line": 74
+      "line": 109
     },
     {
       "name": "Show::run",
       "file": "crates/jp_cli/src/cmd/config/show.rs",
-      "line": 20
+      "line": 44
     },
     {
       "name": "config_skeleton",
       "file": "crates/jp_cli/src/cmd/config/show.rs",
-      "line": 40
+      "line": 64
     },
     {
       "name": "Set::run",
       "file": "crates/jp_cli/src/cmd/config/set.rs",
-      "line": 27
+      "line": 55
     },
     {
       "name": "Set::set_in_conversations",
       "file": "crates/jp_cli/src/cmd/config/set.rs",
-      "line": 43
+      "line": 71
     },
     {
       "name": "Set::set_in_file",
       "file": "crates/jp_cli/src/cmd/config/set.rs",
-      "line": 76
+      "line": 104
     },
     {
       "name": "Ls::run",
       "file": "crates/jp_cli/src/cmd/workspace/ls.rs",
-      "line": 22
+      "line": 34
     },
     {
       "name": "render",
       "file": "crates/jp_cli/src/cmd/workspace/show.rs",
-      "line": 283
+      "line": 304
     },
     {
       "name": "conversation_stats",
       "file": "crates/jp_cli/src/cmd/workspace/show.rs",
-      "line": 381
+      "line": 402
     },
     {
       "name": "resolve",
@@ -2636,129 +2651,129 @@
       "line": 505
     },
     {
-      "name": "Query::run_locked",
+      "name": "Query<S>::conversation_load_request",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 457
+      "line": 224
     },
     {
-      "name": "Query::conversation_load_request",
+      "name": "Query::run_locked",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 886
+      "line": 310
     },
     {
       "name": "Query::build_conversation",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 903
+      "line": 747
     },
     {
       "name": "Query::create_new_conversation",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 1001
+      "line": 845
     },
     {
       "name": "Query::run_turn",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 1174
+      "line": 1016
     },
     {
       "name": "Query::acquire_lock",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 1388
+      "line": 1211
     },
     {
       "name": "persist_config_reset",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2020
+      "line": 1843
     },
     {
       "name": "turn_config_delta",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2049
+      "line": 1872
     },
     {
       "name": "Query::apply_cli_config",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2070
+      "line": 1893
     },
     {
       "name": "build_sections",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2170
+      "line": 1995
     },
     {
       "name": "build_thread",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2198
+      "line": 2023
     },
     {
       "name": "apply_mounts",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2594
+      "line": 2419
     },
     {
       "name": "inject_mounts",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2612
+      "line": 2446
     },
     {
       "name": "create_mount_effects",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2678
+      "line": 2513
     },
     {
       "name": "PendingStreamTrim::apply",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2857
+      "line": 2709
     },
     {
       "name": "mount_access_seed",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 3016
+      "line": 2876
     },
     {
       "name": "read_piped_stdin",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 3121
+      "line": 2971
     },
     {
       "name": "Login::run_with_auth",
       "file": "crates/jp_cli/src/cmd/provider.rs",
-      "line": 273
+      "line": 451
     },
     {
       "name": "Login::acquire",
       "file": "crates/jp_cli/src/cmd/provider.rs",
-      "line": 496
+      "line": 674
     },
     {
       "name": "Login::device_login",
       "file": "crates/jp_cli/src/cmd/provider.rs",
-      "line": 560
+      "line": 738
     },
     {
       "name": "await_callback",
       "file": "crates/jp_cli/src/cmd/provider.rs",
-      "line": 639
+      "line": 817
     },
     {
       "name": "percent_decode",
       "file": "crates/jp_cli/src/cmd/provider.rs",
-      "line": 698
+      "line": 876
     },
     {
       "name": "List::run_with_auth",
       "file": "crates/jp_cli/src/cmd/provider.rs",
-      "line": 749
+      "line": 927
     },
     {
       "name": "read_setup_token",
       "file": "crates/jp_cli/src/cmd/provider.rs",
-      "line": 1054
+      "line": 1232
     },
     {
       "name": "humanize",
       "file": "crates/jp_cli/src/cmd/provider.rs",
-      "line": 1149
+      "line": 1327
     },
     {
       "name": "Composer::ask",
@@ -2813,37 +2828,37 @@
     {
       "name": "handle_write_draft",
       "file": "crates/jp_cli/src/cmd/plugin/dispatch.rs",
-      "line": 2149
+      "line": 2155
     },
     {
       "name": "handle_list_configs",
       "file": "crates/jp_cli/src/cmd/plugin/dispatch.rs",
-      "line": 2247
+      "line": 2253
     },
     {
       "name": "describe",
       "file": "crates/jp_cli/src/cmd/plugin/dispatch.rs",
-      "line": 2530
+      "line": 2536
     },
     {
       "name": "manifest_differences",
       "file": "crates/jp_cli/src/cmd/plugin/dispatch.rs",
-      "line": 2566
+      "line": 2572
     },
     {
       "name": "describe_plugin",
       "file": "crates/jp_cli/src/cmd/plugin/dispatch.rs",
-      "line": 2591
+      "line": 2597
     },
     {
       "name": "run_external",
       "file": "crates/jp_cli/src/cmd/plugin/dispatch.rs",
-      "line": 2950
+      "line": 2954
     },
     {
       "name": "render",
       "file": "crates/jp_cli/src/cmd/plugin/list.rs",
-      "line": 113
+      "line": 124
     },
     {
       "name": "discover_in",
@@ -2858,7 +2873,7 @@
     {
       "name": "Update::run",
       "file": "crates/jp_cli/src/cmd/plugin/update.rs",
-      "line": 26
+      "line": 37
     },
     {
       "name": "TurnPlugins::admit",
@@ -2883,17 +2898,17 @@
     {
       "name": "Install::run",
       "file": "crates/jp_cli/src/cmd/plugin/install.rs",
-      "line": 31
+      "line": 49
     },
     {
       "name": "visit",
       "file": "crates/jp_cli/src/cmd/plugin/install.rs",
-      "line": 120
+      "line": 138
     },
     {
       "name": "confirm_third_party",
       "file": "crates/jp_cli/src/cmd/plugin/install.rs",
-      "line": 155
+      "line": 173
     },
     {
       "name": "print_root_section",
@@ -2913,7 +2928,7 @@
     {
       "name": "TimeThreshold::from_str",
       "file": "crates/jp_cli/src/cmd/time.rs",
-      "line": 43
+      "line": 45
     },
     {
       "name": "Resolver<'a>::automatic",
@@ -2928,47 +2943,47 @@
     {
       "name": "parse_bound",
       "file": "crates/jp_cli/src/cmd/turn_selection.rs",
-      "line": 53
+      "line": 63
     },
     {
       "name": "parse_to_bound",
       "file": "crates/jp_cli/src/cmd/turn_selection.rs",
-      "line": 111
+      "line": 121
     },
     {
       "name": "TurnSet::new",
       "file": "crates/jp_cli/src/cmd/turn_selection.rs",
-      "line": 289
+      "line": 299
     },
     {
       "name": "TurnSelection::windows",
       "file": "crates/jp_cli/src/cmd/turn_selection.rs",
-      "line": 687
+      "line": 813
     },
     {
       "name": "Init::run",
       "file": "crates/jp_cli/src/cmd/init.rs",
-      "line": 35
+      "line": 53
     },
     {
       "name": "Init::maybe_ask_and_persist_user_name",
       "file": "crates/jp_cli/src/cmd/init.rs",
-      "line": 128
+      "line": 146
     },
     {
       "name": "Init::ask_run_mode",
       "file": "crates/jp_cli/src/cmd/init.rs",
-      "line": 192
+      "line": 210
     },
     {
       "name": "Init::ask_model",
       "file": "crates/jp_cli/src/cmd/init.rs",
-      "line": 278
+      "line": 296
     },
     {
       "name": "Init::detect_models",
       "file": "crates/jp_cli/src/cmd/init.rs",
-      "line": 311
+      "line": 329
     },
     {
       "name": "acquire_lock",
@@ -3104,6 +3119,11 @@
       "name": "commit_tool_responses",
       "file": "crates/jp_cli/src/cmd/query/turn_loop.rs",
       "line": 1326
+    },
+    {
+      "name": "QueryText::read",
+      "file": "crates/jp_cli/src/cmd/query/args.rs",
+      "line": 535
     },
     {
       "name": "build_execution_plan",
@@ -3263,137 +3283,137 @@
     {
       "name": "Grep::run",
       "file": "crates/jp_cli/src/cmd/conversation/grep.rs",
-      "line": 204
+      "line": 361
     },
     {
       "name": "Grep::collect_hits_for_id",
       "file": "crates/jp_cli/src/cmd/conversation/grep.rs",
-      "line": 388
+      "line": 545
     },
     {
       "name": "Grep::render",
       "file": "crates/jp_cli/src/cmd/conversation/grep.rs",
-      "line": 503
+      "line": 660
     },
     {
       "name": "Grep::render_hits",
       "file": "crates/jp_cli/src/cmd/conversation/grep.rs",
-      "line": 529
+      "line": 686
     },
     {
       "name": "expand_scopes",
       "file": "crates/jp_cli/src/cmd/conversation/grep.rs",
-      "line": 772
+      "line": 929
     },
     {
       "name": "collect_scope_hits",
       "file": "crates/jp_cli/src/cmd/conversation/grep.rs",
-      "line": 894
+      "line": 1051
     },
     {
       "name": "context_ranges",
       "file": "crates/jp_cli/src/cmd/conversation/grep.rs",
-      "line": 951
+      "line": 1108
     },
     {
       "name": "Row::windowed",
       "file": "crates/jp_cli/src/cmd/conversation/grep.rs",
-      "line": 1054
+      "line": 1211
     },
     {
       "name": "window_row",
       "file": "crates/jp_cli/src/cmd/conversation/grep.rs",
-      "line": 1117
+      "line": 1274
     },
     {
       "name": "highlight",
       "file": "crates/jp_cli/src/cmd/conversation/grep.rs",
-      "line": 1194
+      "line": 1351
     },
     {
       "name": "render_group_heading",
       "file": "crates/jp_cli/src/cmd/conversation/grep.rs",
-      "line": 1262
+      "line": 1419
     },
     {
       "name": "Edit::run",
       "file": "crates/jp_cli/src/cmd/conversation/edit.rs",
-      "line": 97
+      "line": 283
     },
     {
       "name": "Edit::run_open_editor",
       "file": "crates/jp_cli/src/cmd/conversation/edit.rs",
-      "line": 129
+      "line": 315
     },
     {
       "name": "Edit::run_property_edit",
       "file": "crates/jp_cli/src/cmd/conversation/edit.rs",
-      "line": 258
+      "line": 444
     },
     {
       "name": "Compact::effective_rules",
       "file": "crates/jp_cli/src/cmd/conversation/compact.rs",
-      "line": 203
+      "line": 344
     },
     {
       "name": "plan_rule_ranges",
       "file": "crates/jp_cli/src/cmd/conversation/compact.rs",
-      "line": 428
+      "line": 569
     },
     {
       "name": "plan_compactions",
       "file": "crates/jp_cli/src/cmd/conversation/compact.rs",
-      "line": 592
+      "line": 733
     },
     {
       "name": "timeline_lines",
       "file": "crates/jp_cli/src/cmd/conversation/compact.rs",
-      "line": 784
+      "line": 925
     },
     {
       "name": "Compact::preflight",
       "file": "crates/jp_cli/src/cmd/conversation/compact.rs",
-      "line": 932
+      "line": 1073
     },
     {
       "name": "Compact::compact_one",
       "file": "crates/jp_cli/src/cmd/conversation/compact.rs",
-      "line": 963
+      "line": 1104
     },
     {
       "name": "Compact::preview_compaction",
       "file": "crates/jp_cli/src/cmd/conversation/compact.rs",
-      "line": 1085
+      "line": 1226
     },
     {
       "name": "Rm::conversation_load_request",
       "file": "crates/jp_cli/src/cmd/conversation/rm.rs",
-      "line": 71
+      "line": 87
     },
     {
       "name": "remove",
       "file": "crates/jp_cli/src/cmd/conversation/rm.rs",
-      "line": 109
+      "line": 125
     },
     {
       "name": "Ls::run",
       "file": "crates/jp_cli/src/cmd/conversation/ls.rs",
-      "line": 147
+      "line": 201
     },
     {
       "name": "Ls::build_conversation_row",
       "file": "crates/jp_cli/src/cmd/conversation/ls.rs",
-      "line": 277
+      "line": 331
     },
     {
       "name": "Ls::build_body",
       "file": "crates/jp_cli/src/cmd/conversation/ls.rs",
-      "line": 360
+      "line": 414
     },
     {
       "name": "build_header_row",
       "file": "crates/jp_cli/src/cmd/conversation/ls.rs",
-      "line": 388
+      "line": 442
     },
     {
       "name": "generate_summary",
@@ -3413,72 +3433,72 @@
     {
       "name": "Fork::fork_each",
       "file": "crates/jp_cli/src/cmd/conversation/fork.rs",
-      "line": 87
+      "line": 128
     },
     {
       "name": "Path::run",
       "file": "crates/jp_cli/src/cmd/conversation/path.rs",
-      "line": 34
+      "line": 66
     },
     {
       "name": "resolve_paths",
       "file": "crates/jp_cli/src/cmd/conversation/path.rs",
-      "line": 57
+      "line": 89
     },
     {
       "name": "Title::title_one",
       "file": "crates/jp_cli/src/cmd/conversation/title.rs",
-      "line": 80
+      "line": 120
     },
     {
       "name": "Unarchive::run",
       "file": "crates/jp_cli/src/cmd/conversation/unarchive.rs",
-      "line": 31
+      "line": 44
     },
     {
       "name": "Unarchive::resolve_ids",
       "file": "crates/jp_cli/src/cmd/conversation/unarchive.rs",
-      "line": 52
+      "line": 65
     },
     {
       "name": "Label::conversation_load_request",
       "file": "crates/jp_cli/src/cmd/conversation/label.rs",
-      "line": 98
+      "line": 174
     },
     {
       "name": "Label::run",
       "file": "crates/jp_cli/src/cmd/conversation/label.rs",
-      "line": 111
+      "line": 187
     },
     {
       "name": "Print::print_conversation",
       "file": "crates/jp_cli/src/cmd/conversation/print.rs",
-      "line": 137
+      "line": 177
     },
     {
       "name": "Archive::conversation_load_request",
       "file": "crates/jp_cli/src/cmd/conversation/archive.rs",
-      "line": 70
+      "line": 94
     },
     {
       "name": "Archive::run",
       "file": "crates/jp_cli/src/cmd/conversation/archive.rs",
-      "line": 79
+      "line": 103
     },
     {
       "name": "Use::run",
       "file": "crates/jp_cli/src/cmd/conversation/use_.rs",
-      "line": 69
+      "line": 89
     },
     {
       "name": "Use::conversation_load_request",
       "file": "crates/jp_cli/src/cmd/conversation/use_.rs",
-      "line": 180
+      "line": 200
     },
     {
       "name": "Use::run_filtered",
       "file": "crates/jp_cli/src/cmd/conversation/use_.rs",
-      "line": 192
+      "line": 212
     },
     {
       "name": "ApprovalStore::load",
@@ -3488,67 +3508,67 @@
     {
       "name": "compile_fs",
       "file": "crates/jp_cli/src/access/compile.rs",
-      "line": 74
+      "line": 76
     },
     {
       "name": "compile_tool_policy",
       "file": "crates/jp_cli/src/access/compile.rs",
-      "line": 147
+      "line": 150
     },
     {
       "name": "compile_policy",
       "file": "crates/jp_cli/src/access/compile.rs",
-      "line": 174
+      "line": 177
     },
     {
       "name": "Commands::run",
       "file": "crates/jp_cli/src/cmd.rs",
-      "line": 69
+      "line": 183
     },
     {
-      "name": "Commands::name",
+      "name": "Commands<S>::name",
       "file": "crates/jp_cli/src/cmd.rs",
-      "line": 152
+      "line": 294
     },
     {
       "name": "Error::from",
       "file": "crates/jp_cli/src/cmd.rs",
-      "line": 443
+      "line": 562
     },
     {
       "name": "run",
       "file": "crates/jp_cli/src/lib.rs",
-      "line": 410
+      "line": 236
     },
     {
       "name": "run_inner",
       "file": "crates/jp_cli/src/lib.rs",
-      "line": 588
+      "line": 414
     },
     {
       "name": "drain_background_tasks",
       "file": "crates/jp_cli/src/lib.rs",
-      "line": 853
+      "line": 685
     },
     {
       "name": "parse_error",
       "file": "crates/jp_cli/src/lib.rs",
-      "line": 916
+      "line": 748
     },
     {
       "name": "resolve_config",
       "file": "crates/jp_cli/src/lib.rs",
-      "line": 992
+      "line": 841
     },
     {
       "name": "effective_cfg_overrides",
       "file": "crates/jp_cli/src/lib.rs",
-      "line": 1117
+      "line": 994
     },
     {
       "name": "load_workspace",
       "file": "crates/jp_cli/src/lib.rs",
-      "line": 1252
+      "line": 1129
     },
     {
       "name": "TurnRenderer::new",
@@ -3646,6 +3666,21 @@
       "line": 448
     },
     {
+      "name": "Flag<F>::read",
+      "file": "crates/jp_cli/src/cli/flag.rs",
+      "line": 319
+    },
+    {
+      "name": "Flag<F>::decide",
+      "file": "crates/jp_cli/src/cli/flag.rs",
+      "line": 367
+    },
+    {
+      "name": "Spelling::of",
+      "file": "crates/jp_cli/src/cli/spelling.rs",
+      "line": 28
+    },
+    {
       "name": "parse_schema_dsl",
       "file": "crates/jp_cli/src/schema.rs",
       "line": 77
@@ -3693,17 +3728,17 @@
     {
       "name": "AttachmentUrlOrPath::parse",
       "file": "crates/jp_cli/src/parser.rs",
-      "line": 56
+      "line": 49
     },
     {
       "name": "AttachmentUrlOrPath::from_str",
       "file": "crates/jp_cli/src/parser.rs",
-      "line": 119
+      "line": 112
     },
     {
       "name": "jp_id_shorthand_to_url",
       "file": "crates/jp_cli/src/parser.rs",
-      "line": 143
+      "line": 136
     },
     {
       "name": "QueryDocument<'_>::fmt",
@@ -4186,24 +4221,24 @@
       "line": 90
     },
     {
-      "name": "Context::resolve",
+      "name": "FsRule::workspace_exclusion",
       "file": "crates/jp_tool/src/access.rs",
-      "line": 636
+      "line": 408
     },
     {
       "name": "normalize_lexical",
       "file": "crates/jp_tool/src/access.rs",
-      "line": 693
+      "line": 600
     },
     {
       "name": "canonicalize_workspace_target",
       "file": "crates/jp_tool/src/access.rs",
-      "line": 719
+      "line": 633
     },
     {
       "name": "AnswerType::deserialize",
       "file": "crates/jp_tool/src/lib.rs",
-      "line": 406
+      "line": 407
     },
     {
       "name": "validate_node",
@@ -4318,27 +4353,27 @@
     {
       "name": "get_provider",
       "file": "crates/jp_llm/src/provider.rs",
-      "line": 89
+      "line": 101
     },
     {
       "name": "output_schema_is_open",
       "file": "crates/jp_llm/src/provider.rs",
-      "line": 180
+      "line": 192
     },
     {
       "name": "map_candidate",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 764
+      "line": 822
     },
     {
       "name": "process_schema",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 947
+      "line": 1005
     },
     {
       "name": "StreamError::from",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 1257
+      "line": 1315
     },
     {
       "name": "prepare_soft_force_retry_request",
@@ -4453,7 +4488,7 @@
     {
       "name": "PreparedRequest::new",
       "file": "crates/jp_llm/src/provider/anthropic/acp/transcript.rs",
-      "line": 44
+      "line": 47
     },
     {
       "name": "environment",
@@ -4493,57 +4528,57 @@
     {
       "name": "Anthropic::mcp_tool_metadata",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 422
+      "line": 413
     },
     {
       "name": "Anthropic::chat_completion_stream",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 516
+      "line": 507
     },
     {
       "name": "force_tool_retry",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 1087
+      "line": 1078
     },
     {
       "name": "soft_force_retry",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 1169
+      "line": 1160
     },
     {
       "name": "resolve_cache_control",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 1712
+      "line": 1703
     },
     {
       "name": "create_request",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 1744
+      "line": 1735
     },
     {
       "name": "map_event",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 2646
+      "line": 2637
     },
     {
       "name": "transform_schema",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 2704
+      "line": 2695
     },
     {
       "name": "map_content_start",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 3121
+      "line": 3112
     },
     {
       "name": "map_content_delta",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 3162
+      "line": 3153
     },
     {
       "name": "StreamError::from",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 3207
+      "line": 3198
     },
     {
       "name": "walk_chain",
