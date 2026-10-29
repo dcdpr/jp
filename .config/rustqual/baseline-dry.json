@@ -3333,12 +3333,12 @@
     {
       "name": "Flag<F>::read",
       "file": "crates/jp_cli/src/cli/flag.rs",
-      "line": 308
+      "line": 319
     },
     {
       "name": "Flag<F>::decide",
       "file": "crates/jp_cli/src/cli/flag.rs",
-      "line": 353
+      "line": 367
     },
     {
       "name": "Spelling::of",
@@ -4028,32 +4028,32 @@
     {
       "name": "get_provider",
       "file": "crates/jp_llm/src/provider.rs",
-      "line": 89
+      "line": 101
     },
     {
       "name": "output_schema_is_open",
       "file": "crates/jp_llm/src/provider.rs",
-      "line": 180
+      "line": 192
     },
     {
       "name": "number_ids",
       "file": "crates/jp_llm/src/provider.rs",
-      "line": 305
+      "line": 317
     },
     {
       "name": "map_candidate",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 764
+      "line": 822
     },
     {
       "name": "process_schema",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 947
+      "line": 1005
     },
     {
       "name": "StreamError::from",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 1257
+      "line": 1315
     },
     {
       "name": "prepare_soft_force_retry_request",
@@ -4168,7 +4168,7 @@
     {
       "name": "PreparedRequest::new",
       "file": "crates/jp_llm/src/provider/anthropic/acp/transcript.rs",
-      "line": 44
+      "line": 47
     },
     {
       "name": "environment",
@@ -4208,57 +4208,57 @@
     {
       "name": "Anthropic::mcp_tool_metadata",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 422
+      "line": 413
     },
     {
       "name": "Anthropic::chat_completion_stream",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 516
+      "line": 507
     },
     {
       "name": "force_tool_retry",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 1087
+      "line": 1078
     },
     {
       "name": "soft_force_retry",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 1169
+      "line": 1160
     },
     {
       "name": "resolve_cache_control",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 1712
+      "line": 1703
     },
     {
       "name": "create_request",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 1744
+      "line": 1735
     },
     {
       "name": "map_event",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 2646
+      "line": 2637
     },
     {
       "name": "transform_schema",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 2704
+      "line": 2695
     },
     {
       "name": "map_content_start",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 3121
+      "line": 3112
     },
     {
       "name": "map_content_delta",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 3162
+      "line": 3153
     },
     {
       "name": "StreamError::from",
       "file": "crates/jp_llm/src/provider/anthropic.rs",
-      "line": 3207
+      "line": 3198
     },
     {
       "name": "walk_chain",
