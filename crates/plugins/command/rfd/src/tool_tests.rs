@@ -144,7 +144,9 @@ fn list_takes_the_sections_and_category_the_command_does() {
 #[test]
 fn list_says_when_it_could_not_read_the_board() {
     let root = workspace();
-    let board = root.path().join("docs/rfd/.priority.json");
+    // Joined the way the RFD directory and the file name are, so the path
+    // reads the same as in the message on Windows too.
+    let board = root.path().join("docs/rfd").join(".priority.json");
     fs::write(&board, "<<<<<<< HEAD\n{}\n").unwrap();
 
     let out = content(run_tool(&root, "list", json!({})));

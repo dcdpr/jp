@@ -1377,7 +1377,9 @@ fn tools_init_writes_into_a_directory_under_the_root() {
     })
     .unwrap();
 
-    let written = dir.path().join("config/tools/create.toml");
+    // Joined the way the directory and the file name are, so the path reads the
+    // same as in the output on Windows too.
+    let written = dir.path().join("config/tools").join("create.toml");
     assert!(written.exists());
     assert!(
         output.text.contains(&format!("Wrote {written}\n")),

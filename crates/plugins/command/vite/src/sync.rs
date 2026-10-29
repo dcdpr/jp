@@ -10,7 +10,7 @@ use std::{collections::BTreeSet, fs, io};
 
 use camino::{Utf8Path, Utf8PathBuf};
 
-use crate::site::Owned;
+use crate::site::{self, Owned};
 
 /// One change syncing makes, to a path relative to the workspace root.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,9 +137,9 @@ fn files_below(root: &Utf8Path, dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>, Stri
                 .file_type()
                 .map_err(|error| format!("{absolute}/{name}: {error}"))?;
             if kind.is_dir() {
-                pending.push(dir.join(&name));
+                pending.push(site::join(&dir, &name));
             } else {
-                found.push(dir.join(&name));
+                found.push(site::join(&dir, &name));
             }
         }
     }

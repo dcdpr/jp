@@ -13,6 +13,8 @@ use std::{fs, io::Write as _};
 
 use camino::Utf8Path;
 
+use crate::settings::below;
+
 /// A file `init` writes, below the source directory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Template {
@@ -116,7 +118,7 @@ pub(crate) fn write(
             .and_then(|mut file| file.write_all(render(template, fill).as_bytes()))
             .map_err(|error| format!("{path}: {error}"))?;
 
-        written.push(path.strip_prefix(root).unwrap_or(&path).to_string());
+        written.push(below(root, &path).unwrap_or_else(|| path.to_string()));
     }
 
     Ok(written)

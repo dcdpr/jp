@@ -42,19 +42,28 @@ pub(crate) struct Owned {
     pub contents: Vec<u8>,
 }
 
+/// `rest` below the project path `base`, joined with `/`.
+///
+/// Paths relative to the workspace root are written with `/` on every platform,
+/// as git and the configuration write them, so a listing reads the same
+/// everywhere; a file operation takes them joined to the root.
+pub(crate) fn join(base: impl AsRef<str>, rest: &str) -> Utf8PathBuf {
+    Utf8PathBuf::from(format!("{}/{rest}", base.as_ref()))
+}
+
 /// The directory holding the files written as they are, relative to the
 /// workspace root.
 pub(crate) fn owned_dir(settings: &Settings) -> Utf8PathBuf {
     if settings.site == "." {
         Utf8PathBuf::from(OWNED_DIR)
     } else {
-        Utf8PathBuf::from(&settings.site).join(OWNED_DIR)
+        join(&settings.site, OWNED_DIR)
     }
 }
 
 /// Where the snapshot goes, relative to the workspace root.
 pub(crate) fn settings_path(settings: &Settings) -> Utf8PathBuf {
-    owned_dir(settings).join(SETTINGS_FILE)
+    join(owned_dir(settings), SETTINGS_FILE)
 }
 
 /// Every file `jp vite` owns in a project with these settings, ordered by path:
@@ -66,7 +75,7 @@ pub(crate) fn owned(settings: &Settings) -> Vec<Owned> {
         .filter_map(|(path, contents)| {
             let rest = path.strip_prefix("jp-vite/")?;
             Some(Owned {
-                path: dir.join(rest),
+                path: join(&dir, rest),
                 contents: contents.to_vec(),
             })
         })
@@ -96,7 +105,7 @@ pub(crate) fn pages(settings: &Settings) -> Vec<Owned> {
             };
 
             Some(Owned {
-                path: Utf8PathBuf::from(dir).join(rest),
+                path: join(dir, rest),
                 contents: contents.to_vec(),
             })
         })
