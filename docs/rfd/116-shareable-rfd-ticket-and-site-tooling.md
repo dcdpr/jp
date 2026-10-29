@@ -698,8 +698,8 @@ the same cases without a manifest to keep, so v1 does not add one.
 ## Non-Goals
 
 - **Porting validation.** See [Validation](#validation).
-- **The remaining recipes.** `rfd-grep`, `rfd-board-prune`, `ticket-grep`, and
-  the rest stay in JP's justfile until a later change moves them.
+- **The remaining recipes.** `rfd-board-prune` and the rest stay in JP's
+  justfile until a later change moves them.
 - **A standalone mode.** See [Alternatives](#alternatives).
 - **Editing milestones from the terminal.** See [RFDs](#rfds).
 - **Migrating tickets.** No project has tickets left to migrate.

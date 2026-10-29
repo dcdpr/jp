@@ -1832,11 +1832,6 @@ rfd-board-prune:
     just _rfd-priority-remove $stale
     echo "Pruned from the priority board:${stale}"
 
-# Search across all RFD documents.
-[group('rfd')]
-rfd-grep +ARGS:
-    @rg {{ARGS}} docs/rfd/
-
 # File a ticket. TYPE becomes its `type` label: 'bug', 'feature', 'task', and the
 # rest `jp ticket labels` lists.
 #
@@ -1936,11 +1931,6 @@ ticket-import NNN *ARGS: _install-ticket
 
     shift # remove NNN from positional params
     jp ticket import {{quote(NNN)}} --repo dcdpr/jp "$@"
-
-# Search across all tickets.
-[group('ticket')]
-ticket-grep +ARGS:
-    @rg {{ARGS}} docs/ticket/
 
 # Locally develop the documentation, with hot-reloading.
 #

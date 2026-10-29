@@ -461,7 +461,7 @@ issue rather than one board file, and tombstones rather than deletes.
   [Labels](#labels).
 - **Label hierarchies, colours, or per-label board columns.** A label is a name
   and a description.
-- **A search DSL.** `just ticket-grep` over markdown files.
+- **A search DSL.** `jp ticket list --query`, or `rg` over the markdown files.
 - **Write-back to GitHub.**
 - **Notifications.** The board is the notification.
 - **Stable comment ids.** Positions are good enough until they are not.
