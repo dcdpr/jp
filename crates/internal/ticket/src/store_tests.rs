@@ -928,6 +928,52 @@ fn create_writes_one_line_per_label() {
     assert_eq!(parse::document(&source).unwrap().metadata.labels, resolved);
 }
 
+#[test]
+fn check_reads_every_ticket_and_names_files_in_the_four_digit_form() {
+    let dir = Utf8TempDir::new().unwrap();
+    let vocabulary = test_vocabulary();
+
+    let labelled = vocabulary.resolve(&owned(&["client=cli"])).unwrap();
+    create(dir.path(), &vocabulary, &draft("Labelled", &labelled)).unwrap();
+    let (unknown, unknown_path) = create(
+        dir.path(),
+        &Vocabulary::default(),
+        &draft("Unknown", &[("area", ["cli"])].into_iter().collect()),
+    )
+    .unwrap();
+    fs::write(dir.path().join("0001-old.md"), "# Old\n").unwrap();
+    // The site's own pages share the directory, and aren't tickets.
+    fs::write(dir.path().join("index.md"), "# Index\n").unwrap();
+
+    let report = check(dir.path(), &vocabulary).unwrap();
+
+    assert_eq!(report.tickets, 2);
+    let [legacy, labels] = report.problems.as_slice() else {
+        panic!("expected two problems: {:?}", report.problems);
+    };
+    assert_eq!(
+        legacy,
+        &check::Problem::LegacyName(dir.path().join("0001-old.md"))
+    );
+    let check::Problem::Labels { id, path, .. } = labels else {
+        panic!("expected a label problem: {labels:?}");
+    };
+    assert_eq!((*id, path), (unknown, &unknown_path));
+    assert_eq!(
+        labels.to_string(),
+        format!("{unknown}: `area` is not a known label key.")
+    );
+}
+
+#[test]
+fn check_of_a_directory_that_does_not_exist_finds_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let report = check(&dir.path().join("missing"), &test_vocabulary()).unwrap();
+
+    assert_eq!((report.tickets, report.problems), (0, vec![]));
+}
+
 /// A long label set can't produce a long line, which is what keeps the block
 /// stable under a markdown formatter that wraps at a fixed width.
 #[test]

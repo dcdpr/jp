@@ -41,6 +41,7 @@ use serde_json::Value;
 use ticket::{
     Comment, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId, Unique, Vocabulary,
     board::{self, Place},
+    check::Problem,
     import::Import,
     store,
 };
@@ -305,6 +306,18 @@ enum Command {
         query: Option<String>,
     },
 
+    /// Check every ticket against the board's rules, and exit 1 if any breaks
+    /// one.
+    ///
+    /// A write is checked when it is made, so this is what catches a ticket
+    /// edited by hand, or filed before a rule was added: one that doesn't
+    /// parse, carries a label the board doesn't define, breaks a key's `min` or
+    /// `max`, or shares a label the board lets one ticket carry.
+    /// Also names files `jp ticket` can't read as tickets.
+    ///
+    /// With `jp -F json`, the problems are printed as JSON.
+    Check,
+
     /// Create the ticket directory.
     Init,
 
@@ -424,6 +437,10 @@ struct Output {
     json: bool,
 
     warnings: Vec<String>,
+
+    /// The exit code, for a command that reports a result by it: `check` exits
+    /// 1 when it finds a problem, after printing what it found.
+    code: u8,
 }
 
 impl From<String> for Output {
@@ -595,7 +612,8 @@ fn handle_command(
             } else if !output.text.is_empty() {
                 print(stdout, &output.text)?;
             }
-            send_exit(stdout, 0, None)
+            // No reason: the text already says what the code reports.
+            send_exit(stdout, output.code, None)
         }
         Err(message) => send_exit(stdout, 1, Some(&message)),
     }
@@ -1404,6 +1422,8 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             ctx.format.is_json(),
         ),
 
+        Command::Check => check(dir, ctx.options, ctx.format.is_json()),
+
         Command::Init => init_dir(dir),
 
         Command::Tools { command } => tools(ctx, command),
@@ -1893,6 +1913,113 @@ fn resolve_labels(options: &Options, requested: &[String]) -> Result<Labels, Str
         .map_err(|error| error.to_string())
 }
 
+/// `jp -F json ticket check` output.
+#[derive(Serialize)]
+struct CheckReport<'a> {
+    /// How many ticket files were read.
+    tickets: usize,
+    problems: Vec<Finding<'a>>,
+}
+
+/// One problem in `jp -F json ticket check` output.
+#[derive(Serialize)]
+struct Finding<'a> {
+    /// `legacy_name`, `duplicate`, `malformed`, `labels`, or `shared`.
+    kind: &'static str,
+
+    /// The tickets the problem is on.
+    ids: Vec<TicketId>,
+
+    /// The files the problem is in; empty for a label several tickets share.
+    paths: Vec<&'a Utf8Path>,
+
+    /// The problem in words, as the text output prints it.
+    message: String,
+}
+
+impl<'a> From<&'a Problem> for Finding<'a> {
+    fn from(problem: &'a Problem) -> Self {
+        let (kind, ids, paths) = match problem {
+            Problem::LegacyName(path) => ("legacy_name", vec![], vec![path.as_path()]),
+            Problem::Duplicate { id, paths } => (
+                "duplicate",
+                vec![*id],
+                paths.iter().map(Utf8PathBuf::as_path).collect(),
+            ),
+            Problem::Malformed { id, path, .. } => ("malformed", vec![*id], vec![path.as_path()]),
+            Problem::Labels { id, path, .. } => ("labels", vec![*id], vec![path.as_path()]),
+            Problem::Shared { ids, .. } => ("shared", ids.clone(), vec![]),
+        };
+
+        Self {
+            kind,
+            ids,
+            paths,
+            message: problem.to_string(),
+        }
+    }
+}
+
+/// Check every ticket in `dir` against the board's rules, exiting 1 when one
+/// breaks any.
+fn check(dir: &Utf8Path, options: &Options, json: bool) -> Result<Output, String> {
+    let report = store::check(dir, &options.vocabulary()?).map_err(|error| error.to_string())?;
+    let code = u8::from(!report.problems.is_empty());
+
+    if json {
+        let text = serde_json::to_string(&CheckReport {
+            tickets: report.tickets,
+            problems: report.problems.iter().map(Finding::from).collect(),
+        })
+        .map_err(|error| format!("failed to serialize the check: {error}"))?;
+
+        return Ok(Output {
+            text,
+            json: true,
+            code,
+            ..Output::default()
+        });
+    }
+
+    let checked = counted(report.tickets, "ticket", "tickets");
+    if report.problems.is_empty() {
+        return Ok(format!("Checked {checked}: no problems.\n").into());
+    }
+
+    let mut text = report
+        .problems
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    text.push_str(&format!(
+        "\n\nChecked {checked}: {}.\n",
+        counted(report.problems.len(), "problem", "problems")
+    ));
+    let labels = report
+        .problems
+        .iter()
+        .any(|problem| matches!(problem, Problem::Labels { .. } | Problem::Shared { .. }));
+    if labels {
+        text.push_str(
+            "Change a ticket's labels with `jp ticket label add`, `set`, or `rm`; `--id` takes \
+             several tickets, comma-separated. `jp ticket labels` lists the labels the board \
+             defines.\n",
+        );
+    }
+
+    Ok(Output {
+        text,
+        code,
+        ..Output::default()
+    })
+}
+
+/// `count` with the noun that fits it: `1 ticket`, `2 tickets`.
+fn counted(count: usize, one: &str, many: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { many })
+}
+
 /// List the labels the board defines, with what each one covers.
 fn vocabulary_listing(dir: &Utf8Path, options: &Options) -> Result<Output, String> {
     let vocabulary = options.vocabulary()?;
@@ -2134,6 +2261,7 @@ fn list(dir: &Utf8Path, filter: &Filter<'_>, json: bool) -> Result<Output, Strin
         text,
         json,
         warnings,
+        ..Output::default()
     })
 }
 

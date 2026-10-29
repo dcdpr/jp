@@ -74,17 +74,25 @@ pub fn title(source: &str) -> Option<String> {
 /// the file.
 #[must_use]
 pub fn labels(source: &str) -> Labels {
+    Labels::from_tokens_lossy(label_tokens(source)).0
+}
+
+/// The value of every label line in a document's metadata block, as written.
+///
+/// Keeps a value that isn't a well-formed label, so a caller can report it.
+/// Tolerant of a malformed header, as [`labels`] is.
+#[must_use]
+pub fn label_tokens(source: &str) -> Vec<String> {
     let doc = Doc::new(source);
     let Some(header) = doc.metadata_range() else {
-        return Labels::default();
+        return vec![];
     };
 
-    let tokens = header
+    header
         .filter_map(|i| meta_line(doc.lines[i]))
         .filter(|(key, _)| key.eq_ignore_ascii_case(LABEL_KEY))
-        .map(|(_, value)| unescaped(value));
-
-    Labels::from_tokens_lossy(tokens).0
+        .map(|(_, value)| unescaped(value))
+        .collect()
 }
 
 /// Undo the escaping a markdown formatter applies inside a metadata value.

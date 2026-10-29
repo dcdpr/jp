@@ -613,6 +613,14 @@ A new way of writing and reviewing RFDs is in development and brings its own
 checker.
 Porting validation to Rust waits until that has settled, and gets its own RFD.
 
+The ticket rules are the exception, because they already live in Rust: every
+label write is held to the vocabulary, its bounds, and `unique`.
+`jp ticket check` holds every ticket to them with the same code, so a project
+catches a ticket edited by hand, or filed before a rule existed, without
+building its site.
+The ticket loaders keep their JavaScript copy, which `vitepress build` runs
+without `jp`.
+
 ### Installation
 
 ```sh

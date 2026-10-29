@@ -19,6 +19,7 @@ use jp_label::Clash;
 
 use crate::{
     Comment, LABEL_KEY, Labels, NewTicket, ParseError, Status, Ticket, TicketId, Vocabulary,
+    check::{self, Directory, Report, TicketFile},
     id::{MAX_BUCKET, TAIL_SPACE},
     import::{Import, escaped, github_marker},
     parse, render,
@@ -187,7 +188,7 @@ impl fmt::Display for Error {
 }
 
 /// Why the board refuses `clash` on a second ticket.
-fn held_to_one(clash: &Clash) -> String {
+pub(crate) fn held_to_one(clash: &Clash) -> String {
     match clash.value {
         Some(_) => format!("the board lets one ticket carry each `{}` value", clash.key),
         None => "the board lets one ticket carry it".to_owned(),
@@ -783,6 +784,56 @@ pub fn list(dir: &Utf8Path) -> Result<Vec<Entry>> {
             })
         })
         .collect()
+}
+
+/// Read every ticket in `dir` and hold it to `vocabulary`, as [`check::report`]
+/// does.
+///
+/// A directory that doesn't exist yet holds no tickets, and so no problems.
+pub fn check(dir: &Utf8Path, vocabulary: &Vocabulary) -> Result<Report> {
+    let mut tickets = vec![];
+    for (id, path) in files(dir)? {
+        let source = fs::read_to_string(&path)?;
+        tickets.push(TicketFile { id, path, source });
+    }
+
+    let directory = Directory {
+        legacy: legacy_files(dir)?,
+        tickets,
+    };
+
+    Ok(check::report(&directory, vocabulary))
+}
+
+/// Every file in `dir` named in the four-digit `NNNN-slug.md` form, sorted.
+///
+/// [`files`] skips them, since their names hold no id, so they need a pass of
+/// their own to be seen at all.
+fn legacy_files(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(vec![]),
+        Err(error) => return Err(error.into()),
+    };
+
+    let mut legacy = vec![];
+    for entry in entries {
+        let Ok(path) = Utf8PathBuf::try_from(entry?.path()) else {
+            continue;
+        };
+        let numbered = path
+            .file_stem()
+            .and_then(|stem| stem.split_once('-'))
+            .is_some_and(|(number, slug)| {
+                number.len() == 4 && number.bytes().all(|b| b.is_ascii_digit()) && !slug.is_empty()
+            });
+        if path.extension() == Some("md") && numbered {
+            legacy.push(path);
+        }
+    }
+    legacy.sort();
+
+    Ok(legacy)
 }
 
 /// Resolve a ticket id to its file.

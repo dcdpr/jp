@@ -193,8 +193,8 @@ Left out, a ticket carries any number of them, or none.
 JP's board makes `type` say what kind of work every ticket is; `max = 1` alone
 makes one optional, but never repeated.
 Every label write is held to them, and the refusal names the values to choose
-from; the docs build reports a ticket that breaks them, such as one edited by
-hand.
+from; `jp ticket check` and the docs build report a ticket that breaks them,
+such as one edited by hand.
 A key that leaves `values` out is bare: present or absent, so it takes neither.
 
 `unique` holds a key to one ticket across the board.
@@ -202,8 +202,8 @@ A key that leaves `values` out is bare: present or absent, so it takes neither.
 `unique = "key-value"` lets one ticket carry each of its values, so `rfd=116`
 and `rfd=117` sit on two tickets but `rfd=116` on only one.
 Every label write checks it against the other tickets, and the refusal names the
-ticket already carrying the label; the docs build reports two tickets carrying
-one, such as after a hand edit or a merge.
+ticket already carrying the label; `jp ticket check` and the docs build report
+two tickets carrying one, such as after a hand edit or a merge.
 `unique = "key"` on a key every ticket needs is refused, since no two tickets
 could meet it.
 
@@ -226,8 +226,15 @@ Deleting the entry outright is the other option, and it turns every ticket
 carrying that value into a docs-build failure until they are fixed.
 
 Reading is liberal throughout: a ticket lists the labels it carries as written,
-and the docs build reports one the vocabulary doesn't declare rather than hiding
-it.
+and one the vocabulary doesn't declare is reported by `jp ticket check` and the
+docs build rather than hidden.
+
+`jp ticket check` reads every ticket and reports each rule a write would refuse:
+a ticket that doesn't parse, a label the vocabulary doesn't declare, a key held
+outside its `min` and `max`, a `unique` label on more than one ticket, two files
+claiming one id, and a file named in the four-digit form ids had before RFD 102,
+which no command reads.
+It exits 1 when it finds one, so it can run in CI.
 
 Filtering takes a pair or a bare key: `--label package=jp_cli` matches that
 value, `--label package` matches any value under the key.

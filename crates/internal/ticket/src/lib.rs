@@ -51,6 +51,7 @@ use std::{fmt, str::FromStr};
 use serde::Serialize;
 
 pub mod board;
+pub mod check;
 pub mod id;
 pub mod import;
 pub mod parse;

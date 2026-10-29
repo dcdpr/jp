@@ -673,6 +673,150 @@ fn the_version_names_the_site_revision() {
     assert!(revision.chars().all(|c| c.is_ascii_hexdigit()), "{VERSION}");
 }
 
+/// A board whose every ticket carries exactly one `type`, and each of whose
+/// `rfd` values one ticket may carry.
+fn checked_board() -> Value {
+    json!({
+        "labels": {
+            "type": {
+                "description": "The kind of work.",
+                "values": ["bug", "task"],
+                "min": 1,
+                "max": 1
+            },
+            "rfd": { "description": "The RFD.", "values": [], "unique": "key-value" }
+        }
+    })
+}
+
+fn options_from(options: Value) -> Options {
+    let Value::Object(options) = options else {
+        unreachable!("options are an object");
+    };
+
+    Options::read(&options).unwrap()
+}
+
+/// Write a ticket under a fixed id carrying `labels`, as a hand edit would:
+/// nothing checks them on the way in.
+fn write_with_labels(dir: &Utf8Path, body: &str, labels: &[(&str, &str)]) {
+    let labels: Labels = labels.iter().map(|(key, value)| (*key, [*value])).collect();
+    let document = ticket::render::ticket(&NewTicket {
+        title: "A ticket",
+        authors: "john",
+        date: "2026-08-05",
+        labels: &labels,
+        description: "",
+    });
+    fs::write(dir.join(format!("{body}-slug.md")), document).unwrap();
+}
+
+#[test]
+fn check_reports_a_board_meeting_every_rule_and_exits_zero() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_with_labels(dir.path(), "0aaaaaa", &[("type", "bug"), ("rfd", "116")]);
+    write_with_labels(dir.path(), "0bbbbbb", &[("type", "task"), ("rfd", "117")]);
+
+    let output =
+        run_with_options(dir.path(), Command::Check, &options_from(checked_board())).unwrap();
+
+    assert_eq!(output.text, "Checked 2 tickets: no problems.\n");
+    assert_eq!(output.code, 0);
+}
+
+#[test]
+fn check_lists_every_problem_and_exits_one() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_with_labels(dir.path(), "0aaaaaa", &[("type", "bug"), ("rfd", "116")]);
+    write_with_labels(dir.path(), "0bbbbbb", &[]);
+    write_with_labels(dir.path(), "0cccccc", &[("type", "task"), ("rfd", "116")]);
+
+    let output =
+        run_with_options(dir.path(), Command::Check, &options_from(checked_board())).unwrap();
+
+    assert_eq!(
+        output.text,
+        "T-0bbbbbb: `type` label missing: add one of type=bug, type=task.\n`rfd=116` is on \
+         T-0aaaaaa, T-0cccccc, and the board lets one ticket carry each `rfd` value.\n\nChecked 3 \
+         tickets: 2 problems.\nChange a ticket's labels with `jp ticket label add`, `set`, or \
+         `rm`; `--id` takes several tickets, comma-separated. `jp ticket labels` lists the labels \
+         the board defines.\n"
+    );
+    assert_eq!(output.code, 1);
+}
+
+/// The report reaches the host as output, and the exit carries no reason, so
+/// `jp` prints the report once rather than again as an error.
+#[test]
+fn check_prints_its_report_and_then_exits_one() {
+    let root = Utf8TempDir::new().unwrap();
+    let dir = root.path().join(store::DEFAULT_DIR);
+    fs::create_dir_all(&dir).unwrap();
+    write_with_labels(&dir, "0bbbbbb", &[]);
+
+    let messages = exchange(&init_with_options(root.path(), &["check"], checked_board()));
+
+    assert_eq!(messages[1..], [
+        PluginToHost::Print(PrintMessage {
+            text: "T-0bbbbbb: `type` label missing: add one of type=bug, type=task.\n\nChecked 1 \
+                   ticket: 1 problem.\nChange a ticket's labels with `jp ticket label add`, \
+                   `set`, or `rm`; `--id` takes several tickets, comma-separated. `jp ticket \
+                   labels` lists the labels the board defines.\n"
+                .to_owned(),
+            channel: "content".to_owned(),
+            format: "plain".into(),
+            language: None,
+        }),
+        PluginToHost::Exit(ExitMessage {
+            code: 1,
+            reason: None,
+        }),
+    ]);
+}
+
+#[test]
+fn check_under_json_prints_one_record_per_problem() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_with_labels(dir.path(), "0bbbbbb", &[]);
+    fs::write(dir.path().join("0001-old.md"), "# Old\n").unwrap();
+
+    let output = run_with(
+        dir.path(),
+        Command::Check,
+        &options_from(checked_board()),
+        OutputFormat::Json,
+    )
+    .unwrap();
+
+    assert!(output.json);
+    assert_eq!(output.code, 1);
+    let legacy = dir.path().join("0001-old.md");
+    let ticket = dir.path().join("0bbbbbb-slug.md");
+    assert_eq!(
+        serde_json::from_str::<Value>(&output.text).unwrap(),
+        json!({
+            "tickets": 1,
+            "problems": [
+                {
+                    "kind": "legacy_name",
+                    "ids": [],
+                    "paths": [legacy],
+                    "message": format!(
+                        "{legacy} is named in the four-digit `NNNN-slug.md` form, which no \
+                         command reads. Rename it to the `<id>-slug.md` form."
+                    ),
+                },
+                {
+                    "kind": "labels",
+                    "ids": ["T-0bbbbbb"],
+                    "paths": [ticket],
+                    "message": "T-0bbbbbb: `type` label missing: add one of type=bug, type=task.",
+                },
+            ],
+        })
+    );
+}
+
 /// `--help` reaches us as an error, but it is output, not a failure.
 #[test]
 fn help_is_not_a_failure() {
