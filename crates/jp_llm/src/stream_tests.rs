@@ -9,7 +9,10 @@ use std::{
 use futures::{StreamExt as _, future, stream};
 use serde_json::Map;
 
-use super::{with_idle_timeout, with_idle_timeout_at, with_output_limit, with_tool_call_keepalive};
+use super::{
+    EventStream, with_idle_timeout, with_idle_timeout_at, with_output_limit,
+    with_response_keepalive_at, with_tool_call_keepalive,
+};
 use crate::{
     StreamError, StreamErrorKind,
     event::{Event, EventPart, FinishReason},
@@ -262,6 +265,164 @@ async fn tool_call_keepalive_emitted_during_open_tool_call() {
         Some(Ok(Event::Flush { .. }))
     ));
     assert!(wrapped.next().await.is_none(), "inner stream exhausted");
+}
+
+/// A wall clock that follows tokio's paused time, so `start_paused` tests
+/// control both the monotonic timers and the silence measurement.
+fn paused_wall_clock() -> impl Fn() -> SystemTime + Send + 'static {
+    let start = tokio::time::Instant::now();
+    move || SystemTime::UNIX_EPOCH + start.elapsed()
+}
+
+/// Every item of `stream` with the second it arrived at, until the stream ends
+/// (`"end"`) or a minute passes without an item (`"silent"`).
+///
+/// Each read is bounded, so a keep-alive that never comes fails the assertion
+/// rather than hanging the test.
+async fn timeline(mut stream: EventStream) -> Vec<(u64, &'static str)> {
+    let start = tokio::time::Instant::now();
+    let mut items = vec![];
+    loop {
+        let next = tokio::time::timeout(Duration::from_mins(1), stream.next()).await;
+        let label = match next {
+            Err(_elapsed) => "silent",
+            Ok(None) => "end",
+            Ok(Some(Ok(Event::Part { .. }))) => "part",
+            Ok(Some(Ok(Event::KeepAlive))) => "keepalive",
+            Ok(Some(Ok(Event::Finished(_)))) => "finished",
+            Ok(Some(Ok(Event::Flush { .. }))) => "flush",
+            Ok(Some(Ok(_))) => "other",
+            Ok(Some(Err(_))) => "error",
+        };
+
+        items.push((start.elapsed().as_secs(), label));
+        if matches!(label, "silent" | "end") {
+            return items;
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn response_keepalive_covers_silence_within_the_allowance() {
+    // A 12s gap mid-response, as Google leaves while the model writes a
+    // function call.
+    let inner = stream::once(future::ready(Ok(Event::message(0, "a"))))
+        .chain(stream::once(async {
+            tokio::time::sleep(Duration::from_secs(12)).await;
+            Ok(Event::message(0, "b"))
+        }))
+        .boxed();
+    let wrapped = with_response_keepalive_at(
+        inner,
+        Duration::from_secs(5),
+        Duration::from_mins(1),
+        paused_wall_clock(),
+    );
+
+    assert_eq!(timeline(wrapped).await, vec![
+        (0, "part"),
+        (5, "keepalive"),
+        (10, "keepalive"),
+        (12, "part"),
+        (12, "end"),
+    ]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn response_keepalive_stops_once_silence_reaches_the_allowance() {
+    // A connection that dies mid-response: once 12s of silence have passed,
+    // keep-alives stop so a downstream idle timeout can fire.
+    let inner = stream::once(future::ready(Ok(Event::message(0, "a"))))
+        .chain(stream::pending())
+        .boxed();
+    let wrapped = with_response_keepalive_at(
+        inner,
+        Duration::from_secs(5),
+        Duration::from_secs(12),
+        paused_wall_clock(),
+    );
+
+    assert_eq!(timeline(wrapped).await, vec![
+        (0, "part"),
+        (5, "keepalive"),
+        (10, "keepalive"),
+        (70, "silent"),
+    ]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn response_keepalive_allowance_restarts_on_each_item() {
+    // The allowance bounds continuous silence, not the whole response: the
+    // part at 8s restarts it.
+    let inner = stream::once(future::ready(Ok(Event::message(0, "a"))))
+        .chain(stream::once(async {
+            tokio::time::sleep(Duration::from_secs(8)).await;
+            Ok(Event::message(0, "b"))
+        }))
+        .chain(stream::pending())
+        .boxed();
+    let wrapped = with_response_keepalive_at(
+        inner,
+        Duration::from_secs(5),
+        Duration::from_secs(12),
+        paused_wall_clock(),
+    );
+
+    assert_eq!(timeline(wrapped).await, vec![
+        (0, "part"),
+        (5, "keepalive"),
+        (8, "part"),
+        (13, "keepalive"),
+        (18, "keepalive"),
+        (78, "silent"),
+    ]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn no_response_keepalive_before_the_first_item() {
+    // Time to first token stays owned by the downstream idle timeout.
+    let inner = stream::once(async {
+        tokio::time::sleep(Duration::from_secs(12)).await;
+        Ok(Event::message(0, "a"))
+    })
+    .boxed();
+    let wrapped = with_response_keepalive_at(
+        inner,
+        Duration::from_secs(5),
+        Duration::from_mins(1),
+        paused_wall_clock(),
+    );
+
+    assert_eq!(timeline(wrapped).await, vec![(12, "part"), (12, "end")]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn no_response_keepalive_after_the_response_finishes() {
+    // An item after `Finished` does not reopen the response: the silence that
+    // follows the trailing flush stays owned by the downstream idle timeout.
+    let inner = stream::iter(vec![
+        Ok(Event::message(0, "a")),
+        Ok(Event::Finished(FinishReason::Completed)),
+    ])
+    .chain(stream::once(async {
+        tokio::time::sleep(Duration::from_secs(12)).await;
+        Ok(Event::flush(0))
+    }))
+    .chain(stream::pending())
+    .boxed();
+    let wrapped = with_response_keepalive_at(
+        inner,
+        Duration::from_secs(5),
+        Duration::from_mins(1),
+        paused_wall_clock(),
+    );
+
+    assert_eq!(timeline(wrapped).await, vec![
+        (0, "part"),
+        (0, "finished"),
+        (12, "flush"),
+        (72, "silent"),
+    ]);
 }
 
 #[tokio::test(start_paused = true)]

@@ -73,9 +73,14 @@ pub struct RequestConfig {
     /// Set to `0` to disable the idle timeout; any other value must be at least
     /// `10`, since smaller windows abort healthy streams.
     ///
-    /// The timer resets every time the provider sends data, so it only fires
-    /// when a connection goes silent for the full duration without delivering
-    /// any tokens or events.
+    /// The timer resets every time the provider sends data, so it fires when a
+    /// connection goes silent for the full duration.
+    /// Before the first token of a response, that silence is measured exactly.
+    /// After it, some providers send nothing while the model writes a tool
+    /// call, and that time counts as activity: for as long as the call is open
+    /// on most providers, and for up to five minutes of silence on Google.
+    /// A connection that dies at that point is detected only once that
+    /// allowance has passed.
     /// A timed-out stream is treated as a transient error and retried according
     /// to `max_retries` and the backoff settings.
     ///
