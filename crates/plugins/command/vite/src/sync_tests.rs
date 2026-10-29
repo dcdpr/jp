@@ -67,6 +67,40 @@ fn a_file_already_written_is_left_alone() {
     assert_eq!(paths(&changes), ["write docs/rfd/index.md"]);
 }
 
+/// A checkout that turned line endings into CRLF holds what the binary writes,
+/// so `sync` leaves it alone and `sync --check` passes; a file that differs in
+/// text is still written.
+#[test]
+fn a_file_differing_only_in_line_endings_is_left_alone() {
+    let root = Utf8TempDir::new().unwrap();
+    write(
+        &root,
+        "docs/.vitepress/jp-vite/config.mjs",
+        "one\r\ntwo\r\n",
+    );
+    write(&root, "docs/.vitepress/jp-vite/style.css", "old\r\n");
+
+    let changes = plan(
+        root.path(),
+        vec![
+            owned("docs/.vitepress/jp-vite/config.mjs", "one\ntwo\n"),
+            owned("docs/.vitepress/jp-vite/style.css", "new\n"),
+        ],
+        Utf8Path::new(OWNED),
+    )
+    .unwrap();
+
+    assert_eq!(paths(&changes), ["write docs/.vitepress/jp-vite/style.css"]);
+}
+
+#[test]
+fn only_a_carriage_return_ending_a_line_is_ignored() {
+    assert!(same_text(b"a\r\nb\r\n", b"a\nb\n"));
+    assert!(same_text(b"a\nb", b"a\r\nb"));
+    assert!(!same_text(b"a\rb\n", b"ab\n"));
+    assert!(!same_text(b"a\r\n", b"a\n\n"));
+}
+
 /// A page is created where there is none, and left as it is where there is one,
 /// whatever it holds.
 #[test]

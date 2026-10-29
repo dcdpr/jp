@@ -382,7 +382,7 @@ fn write_snapshot(
 
     let unchanged = match previous {
         Some(previous) => previous == settings,
-        None => fs::read_to_string(&path).is_ok_and(|current| current == rendered),
+        None => fs::read(&path).is_ok_and(|current| sync::same_text(&current, rendered.as_bytes())),
     };
     if unchanged {
         return Ok(None);

@@ -51,7 +51,7 @@ pub(crate) fn plan(
     for file in owned {
         let path = root.join(&file.path);
         match fs::read(&path) {
-            Ok(contents) if contents == file.contents => {}
+            Ok(contents) if same_text(&contents, &file.contents) => {}
             Ok(_) => changes.push(Change::Write(file)),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 changes.push(Change::Write(file));
@@ -69,6 +69,24 @@ pub(crate) fn plan(
     changes.sort_by(|a, b| a.path().cmp(b.path()));
 
     Ok(changes)
+}
+
+/// Whether a file holds the same text as `other`, however its lines end.
+///
+/// Git can check text files out with CRLF line endings (`core.autocrlf`, on by
+/// default in Git for Windows) and commits them back with LF, so a file that
+/// differs from what `jp vite` writes only there is, to git, the same file.
+/// A `\r` that doesn't end a line still counts.
+pub(crate) fn same_text(file: &[u8], other: &[u8]) -> bool {
+    fn lf(bytes: &[u8]) -> impl Iterator<Item = u8> + '_ {
+        bytes
+            .iter()
+            .enumerate()
+            .filter(|&(index, &byte)| byte != b'\r' || bytes.get(index + 1) != Some(&b'\n'))
+            .map(|(_, &byte)| byte)
+    }
+
+    lf(file).eq(lf(other))
 }
 
 /// The pages among `pages` that the project at `root` doesn't have.

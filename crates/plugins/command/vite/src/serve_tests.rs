@@ -196,6 +196,22 @@ fn the_snapshot_is_written_only_when_it_changes() {
     );
 }
 
+/// A snapshot checked out with CRLF line endings holds the same settings, so
+/// starting the site doesn't rewrite it.
+#[test]
+fn a_snapshot_differing_only_in_line_endings_is_not_rewritten() {
+    let root = Utf8TempDir::new().unwrap();
+    fs::create_dir_all(root.path().join("docs/rfd")).unwrap();
+    let settings = settings(&root);
+    let path = root.path().join(SNAPSHOT);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let crlf = settings.render().replace('\n', "\r\n");
+    fs::write(&path, &crlf).unwrap();
+
+    assert_eq!(write_snapshot(root.path(), &settings, None).unwrap(), None);
+    assert_eq!(fs::read_to_string(&path).unwrap(), crlf);
+}
+
 /// A configuration that changes while the site runs reaches it; one that
 /// doesn't is no reason to write.
 #[test]
