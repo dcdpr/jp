@@ -104,6 +104,57 @@ fn normalizes_a_prefix_for_lookup() {
 }
 
 #[test]
+fn reads_the_id_a_ticket_file_name_opens_with() {
+    let expected = TicketId::new(BUCKET, 637);
+
+    assert_eq!(TicketId::of_file("02wt0kx-turn-summaries.md"), expected);
+    assert_eq!(TicketId::of_file("02wt0kx-x.md"), expected);
+
+    for name in [
+        "02wt0kx.md",
+        "02wt0kx-.md",
+        "02wt0kx-slug.txt",
+        "02wt0k-slug.md",
+        "index.md",
+    ] {
+        assert_eq!(TicketId::of_file(name), None, "{name}");
+    }
+}
+
+#[test]
+fn parses_an_id_or_the_path_of_a_ticket_file() {
+    let expected = TicketId::new(BUCKET, 637).unwrap();
+
+    for input in [
+        "T-02wt0kx",
+        "02wt0kx",
+        "02wt0kx-turn-summaries.md",
+        "docs/ticket/02wt0kx-turn-summaries.md",
+        "/abs/docs/ticket/02wt0kx-turn-summaries.md",
+    ] {
+        assert_eq!(TicketId::parse_id_or_path(input), Ok(expected), "{input}");
+    }
+}
+
+/// Only a file name ending in `.md` is read as a path, so a mistyped word with
+/// a dash isn't taken for the id its first seven characters fold onto.
+#[test]
+fn refuses_a_path_that_names_no_ticket_file() {
+    for input in [
+        "docs/ticket/turn-summaries.md",
+        "docs/ticket/02wt0kx",
+        "comment-foo",
+        "docs/ticket/",
+    ] {
+        assert_eq!(
+            TicketId::parse_id_or_path(input),
+            Err(ParseError::Id(input.to_owned())),
+            "{input}"
+        );
+    }
+}
+
+#[test]
 fn serializes_as_the_canonical_form() {
     let id = TicketId::new(BUCKET, 637).unwrap();
 

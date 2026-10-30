@@ -18,6 +18,7 @@
 
 use std::{fmt, str::FromStr};
 
+use camino::Utf8Path;
 use serde::{Serialize, Serializer};
 
 use crate::ParseError;
@@ -115,6 +116,34 @@ impl TicketId {
         }
 
         body.chars().map(fold).collect()
+    }
+
+    /// The id a ticket file name opens with: `02wt0kx-slug.md` is `T-02wt0kx`.
+    ///
+    /// Returns `None` for a name without a slug or the `.md` extension.
+    #[must_use]
+    pub fn of_file(name: &str) -> Option<Self> {
+        let (id, slug) = name.strip_suffix(".md")?.split_once('-')?;
+        if slug.is_empty() {
+            return None;
+        }
+
+        id.parse().ok()
+    }
+
+    /// Read an id in any accepted spelling, or the path of a ticket file, such
+    /// as `docs/ticket/02wt0kx-slug.md`.
+    ///
+    /// A path is read for its file name alone; the file need not exist.
+    pub fn parse_id_or_path(text: &str) -> Result<Self, ParseError> {
+        if let Ok(id) = text.parse() {
+            return Ok(id);
+        }
+
+        Utf8Path::new(text.trim())
+            .file_name()
+            .and_then(Self::of_file)
+            .ok_or_else(|| ParseError::Id(text.to_owned()))
     }
 }
 

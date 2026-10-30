@@ -484,7 +484,7 @@ fn promote(place: &Place<'_>, args: &Arguments<'_>) -> Reply {
         place.require_tickets(&[Capability::Read, Capability::Update])?;
     }
 
-    let mut output = cmd::promote::promote(&place.paths, id)?;
+    let mut output = cmd::promote::promote(&place.paths, id, None)?;
     if status.as_deref() == Some("Discussion") && place.paths.tickets.is_dir() {
         output.text.push_str(&format!(
             "Skipped the tracking ticket, which a tool call doesn't offer. When the work starts, \

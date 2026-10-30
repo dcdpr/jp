@@ -343,6 +343,34 @@ fn a_bare_id_is_a_show() {
     }
 }
 
+/// A path is what tab completion and a file listing hand over, so every ticket
+/// argument takes one as readily as an id, and a bare path reads as `show`.
+#[test]
+fn ticket_arguments_take_a_file_path() {
+    let path = "docs/ticket/02wt0kx-turn-summaries.md";
+    let expected: TicketId = "T-02wt0kx".parse().unwrap();
+
+    match parse(&["close", path]).unwrap().command {
+        Command::Close { id } => assert_eq!(id, Some(expected)),
+        other => panic!("expected close, got {other:?}"),
+    }
+    match parse(&[path]).unwrap().command {
+        Command::Show { id } => assert_eq!(id, Some(expected)),
+        other => panic!("expected show, got {other:?}"),
+    }
+    match parse(&["rank", "T-02wt0k1", "--before", path])
+        .unwrap()
+        .command
+    {
+        Command::Rank { before, .. } => assert_eq!(before, Some(expected)),
+        other => panic!("expected rank, got {other:?}"),
+    }
+    match parse(&["label", "--id", path, "ls"]).unwrap().command {
+        Command::Label { ids, .. } => assert_eq!(ids, [expected]),
+        other => panic!("expected label, got {other:?}"),
+    }
+}
+
 /// An exact subcommand always wins over id parsing.
 ///
 /// `comment` and `promote` are seven characters that fold onto the id alphabet,
