@@ -12,7 +12,9 @@ expression: v
                         message: "2 + 2 is 4.",
                     },
                 ),
-                metadata: {},
+                metadata: {
+                    "google_thought_signature": String("EvQCCvECARFNMg+UrmPQwJVYJQx2/dLU3GUSvbwl2QfaJyKcbrImSB9908scd2NFz3ATvlGff2PakB00gWc377zKU6M4AzwqULMlnxyB/jbbjR4pTACO19j3ZTaXuuoV9KTDJH6Wt7YHiO8UjtV0jur5SF48ZIAPi7aDA5jB2ZZ1C8HvCH2ZRen2zExy1kMdz/FirzEabHfu6wnX5HURpka2o7TckfZ5s+DDFq5CpksCtiJKkZtSQExCwkRLaWUCjR78dPWNJojQjntffNh51OaJ8uFMpIR5+BIfArpFI9eoMIjpjrrEgmnZe2aMwTlm1LJEe1g8DpmIn5sTM15zIczRv51dzQMyHnZFzNJyugDiZ72jCHUB30aF22w/3DfsA7aptHj2WsyBfixvdN30lw9UDtiT9o7k/kzw04p2ewP0GcuoVp0Jsdq8cWPiIUZx664QFiCwyWT523LZTUjofW10FmnybZK9P83gN7KKPGrHeKVz/aP9"),
+                },
             },
         ),
         Finished(
