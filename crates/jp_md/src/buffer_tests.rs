@@ -1998,6 +1998,20 @@ fn test_last_inline_ground_state() {
     assert_eq!(last_inline_ground_state("a <tag>", 7), 7);
     // A literal `<` (whitespace after) is left as content.
     assert_eq!(last_inline_ground_state("a < b", 5), 5);
+    // Open math span holds from the opening `$`; closing `$` with a known
+    // non-digit trailing byte restores ground state, even with `*` or `_`
+    // inside the math span.
+    assert_eq!(last_inline_ground_state("turn $a_1 * b", 13), 5);
+    assert_eq!(last_inline_ground_state("turn $a_1 * b$ ", 15), 15);
+    // Display math `$$..$$` holds while open and restores ground state on close.
+    assert_eq!(last_inline_ground_state("block $$x^2", 11), 6);
+    assert_eq!(last_inline_ground_state("block $$x^2$$", 13), 13);
+    // `$ ` (space after) and `$5 and $10` (space before / digit after) are
+    // literal text, not unclosed math.
+    assert_eq!(last_inline_ground_state("cost $ 5 ok", 11), 11);
+    assert_eq!(last_inline_ground_state("cost $5 and $10", 15), 12);
+    // Escaped `\$` is literal.
+    assert_eq!(last_inline_ground_state(r"cost \$50 ok", 12), 12);
 }
 
 #[test]

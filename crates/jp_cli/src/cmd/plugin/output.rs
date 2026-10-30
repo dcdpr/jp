@@ -66,11 +66,13 @@ pub(crate) fn render(print: &PrintMessage, format: OutputFormat, style: &Markdow
         return render_json_mode(print, format);
     }
 
-    let formatter = Formatter::with_width(style.wrap_width).theme(if format.is_pretty() {
-        style.theme.as_deref()
-    } else {
-        None
-    });
+    let formatter = Formatter::with_width(style.wrap_width)
+        .theme(if format.is_pretty() {
+            style.theme.as_deref()
+        } else {
+            None
+        })
+        .style_sheet(crate::format::markdown_style_sheet(style));
 
     Emit::Text(match print.format.as_str() {
         "plain" => print.text.clone(),

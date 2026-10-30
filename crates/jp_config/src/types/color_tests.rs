@@ -29,6 +29,40 @@ fn parse_hex_rgb_from_str() {
 }
 
 #[test]
+fn parse_named_ansi_from_str() {
+    assert_eq!("black".parse::<Color>().unwrap(), Color::Ansi256(0));
+    assert_eq!("red".parse::<Color>().unwrap(), Color::Ansi256(1));
+    assert_eq!("green".parse::<Color>().unwrap(), Color::Ansi256(2));
+    assert_eq!("yellow".parse::<Color>().unwrap(), Color::Ansi256(3));
+    assert_eq!("YELLOW".parse::<Color>().unwrap(), Color::Ansi256(3));
+    assert_eq!("blue".parse::<Color>().unwrap(), Color::Ansi256(4));
+    assert_eq!("magenta".parse::<Color>().unwrap(), Color::Ansi256(5));
+    assert_eq!("cyan".parse::<Color>().unwrap(), Color::Ansi256(6));
+    assert_eq!("white".parse::<Color>().unwrap(), Color::Ansi256(7));
+    assert_eq!("bright_black".parse::<Color>().unwrap(), Color::Ansi256(8));
+    assert_eq!("bright-black".parse::<Color>().unwrap(), Color::Ansi256(8));
+    assert_eq!("gray".parse::<Color>().unwrap(), Color::Ansi256(8));
+    assert_eq!("grey".parse::<Color>().unwrap(), Color::Ansi256(8));
+    assert_eq!("bright_red".parse::<Color>().unwrap(), Color::Ansi256(9));
+    assert_eq!("bright_green".parse::<Color>().unwrap(), Color::Ansi256(10));
+    assert_eq!(
+        "bright_yellow".parse::<Color>().unwrap(),
+        Color::Ansi256(11)
+    );
+    assert_eq!(
+        "bright-yellow".parse::<Color>().unwrap(),
+        Color::Ansi256(11)
+    );
+    assert_eq!("bright_blue".parse::<Color>().unwrap(), Color::Ansi256(12));
+    assert_eq!(
+        "bright_magenta".parse::<Color>().unwrap(),
+        Color::Ansi256(13)
+    );
+    assert_eq!("bright_cyan".parse::<Color>().unwrap(), Color::Ansi256(14));
+    assert_eq!("bright_white".parse::<Color>().unwrap(), Color::Ansi256(15));
+}
+
+#[test]
 fn parse_invalid() {
     assert!("256".parse::<Color>().is_err());
     assert!("-1".parse::<Color>().is_err());

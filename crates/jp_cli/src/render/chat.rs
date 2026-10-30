@@ -1137,6 +1137,7 @@ fn formatter_from_config(
                 .background
                 .map(crate::format::color_to_bg_param),
         )
+        .style_sheet(crate::format::markdown_style_sheet(&config.markdown))
 }
 
 #[cfg(test)]
