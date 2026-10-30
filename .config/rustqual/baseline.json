@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.7215016760342342,
-  "iosp_score": 0.9183762169680111,
+  "quality_score": 0.7215428487488884,
+  "iosp_score": 0.9183904050060838,
   "violations": 939,
-  "total": 15813,
+  "total": 15815,
   "complexity_warnings": 179,
   "magic_number_warnings": 241,
   "nesting_depth_warnings": 30,
@@ -4363,17 +4363,17 @@
     {
       "name": "map_candidate",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 861
+      "line": 872
     },
     {
       "name": "process_schema",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 1054
+      "line": 1065
     },
     {
       "name": "StreamError::from",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 1369
+      "line": 1380
     },
     {
       "name": "prepare_soft_force_retry_request",
