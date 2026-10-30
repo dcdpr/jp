@@ -3116,7 +3116,7 @@ fn turn_structured_data_refuses_a_turn_that_did_not_start() {
 #[test]
 fn turn_structured_data_refuses_a_turn_that_did_not_start_after_sanitizing() {
     let mut stream = stream_with_structured(serde_json::json!({"turn": 1}));
-    stream.push_event(ConversationEvent::now(TurnStart));
+    stream.push_event(ConversationEvent::now(TurnStart::default()));
     let before = last_request_id(&stream);
 
     stream.sanitize();

@@ -223,7 +223,7 @@ mod tests {
         let timestamp = Utc.with_ymd_and_hms(2026, 9, 9, 12, 0, 0).unwrap();
         let mut events = ConversationStream::new_test().with_created_at(timestamp);
         events.extend([
-            ConversationEvent::new(TurnStart, timestamp),
+            ConversationEvent::new(TurnStart::default(), timestamp),
             ConversationEvent::new(ChatRequest::from("hello"), timestamp),
         ]);
         let query = ChatQuery::from(

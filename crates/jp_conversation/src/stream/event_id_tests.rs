@@ -34,7 +34,7 @@ fn event(kind: impl Into<ConversationEvent>) -> ConversationEvent {
 fn fixture() -> ConversationStream {
     let mut stream = ConversationStream::new_test();
     stream.extend_entries([
-        entry("turn001", event(TurnStart)),
+        entry("turn001", event(TurnStart::default())),
         entry("chat001", event(ChatRequest::from("question"))),
         entry("reply01", event(ChatResponse::message("answer"))),
     ]);
@@ -724,10 +724,10 @@ fn synthetic_summary_entries_have_distinct_ids() {
 fn partially_summarized() -> ConversationStream {
     let mut stream = ConversationStream::new_test();
     stream.extend_entries([
-        entry("turn001", event(TurnStart)),
+        entry("turn001", event(TurnStart::default())),
         entry("chat001", event(ChatRequest::from("old question"))),
         entry("reply01", event(ChatResponse::message("old answer"))),
-        entry("turn002", event(TurnStart)),
+        entry("turn002", event(TurnStart::default())),
         entry("chat002", event(ChatRequest::from("new question"))),
         entry("reply02", event(ChatResponse::message("new answer"))),
     ]);
@@ -835,7 +835,7 @@ fn a_stream_that_was_never_projected_covers_its_entries() {
 fn stripped_tool_call() -> ConversationStream {
     let mut stream = ConversationStream::new_test();
     stream.extend_entries([
-        entry("turn001", event(TurnStart)),
+        entry("turn001", event(TurnStart::default())),
         entry("chat001", event(ChatRequest::from("question"))),
         entry(
             "tool001",

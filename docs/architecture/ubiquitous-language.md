@@ -440,6 +440,8 @@ wider range, an authored one cannot.
 **Not the same as** the mechanical compaction policies (reasoning stripping,
 tool-call stripping), which filter events within their range rather than
 replacing the range.
+Also not a [Turn Summary], which describes a single turn in one line and never
+stands in for it.
 
 ### Thread
 
@@ -520,4 +522,5 @@ See [RFD-031].
 [RFD-031]: ../rfd/031-durable-conversation-storage-with-workspace-projection.md
 [RFD-064]: ../rfd/064-non-destructive-conversation-compaction.md
 [RFD-087]: ../rfd/087-session-scoped-active-workspace.md
+[Turn Summary]: ./ubiquitous-language/conversation.md#turn-summary
 [`shlex::split`]: https://docs.rs/shlex

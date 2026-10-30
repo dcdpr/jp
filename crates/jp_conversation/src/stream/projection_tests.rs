@@ -25,7 +25,7 @@ fn two_turn_stream() -> ConversationStream {
     let mut stream = ConversationStream::new_test();
 
     // Turn 0
-    stream.push(ConversationEvent::new(TurnStart, ts(0)));
+    stream.push(ConversationEvent::new(TurnStart::default(), ts(0)));
     stream.push(ConversationEvent::new(
         ChatRequest::from("set up the project"),
         ts(0),
@@ -55,7 +55,7 @@ fn two_turn_stream() -> ConversationStream {
     ));
 
     // Turn 1
-    stream.push(ConversationEvent::new(TurnStart, ts(1)));
+    stream.push(ConversationEvent::new(TurnStart::default(), ts(1)));
     stream.push(ConversationEvent::new(
         ChatRequest::from("add error handling"),
         ts(1),
@@ -95,7 +95,7 @@ fn two_turn_stream() -> ConversationStream {
 fn message_turns(count: usize) -> ConversationStream {
     let mut stream = ConversationStream::new_test();
     for t in 0..count {
-        stream.push(ConversationEvent::new(TurnStart, ts(0)));
+        stream.push(ConversationEvent::new(TurnStart::default(), ts(0)));
         stream.push(ConversationEvent::new(
             ChatRequest::from(format!("q{t}")),
             ts(0),
@@ -387,7 +387,7 @@ fn strip_tool_response_only() {
 #[test]
 fn strip_tool_response_preserves_error_status() {
     let mut stream = ConversationStream::new_test();
-    stream.push(ConversationEvent::new(TurnStart, ts(0)));
+    stream.push(ConversationEvent::new(TurnStart::default(), ts(0)));
     stream.push(ConversationEvent::new(
         ChatRequest::from("do something"),
         ts(0),
@@ -446,7 +446,7 @@ const ONE_KB: u64 = 1024;
 fn mixed_size_tool_calls() -> ConversationStream {
     let mut stream = ConversationStream::new_test();
 
-    stream.push(ConversationEvent::new(TurnStart, ts(0)));
+    stream.push(ConversationEvent::new(TurnStart::default(), ts(0)));
     stream.push(ConversationEvent::new(
         ChatRequest::from("read them"),
         ts(0),
@@ -587,7 +587,7 @@ fn over_threshold_on_omit_uses_the_pair_total() {
     // whole. This is what makes `Omit` a pair-level decision rather than a
     // per-half one.
     let mut stream = ConversationStream::new_test();
-    stream.push(ConversationEvent::new(TurnStart, ts(0)));
+    stream.push(ConversationEvent::new(TurnStart::default(), ts(0)));
     stream.push(ConversationEvent::new(ChatRequest::from("go"), ts(0)));
 
     stream.push(ConversationEvent::new(
@@ -647,7 +647,7 @@ fn over_threshold_on_omit_uses_the_pair_total() {
 #[test]
 fn over_threshold_strips_only_large_reasoning_blocks() {
     let mut stream = ConversationStream::new_test();
-    stream.push(ConversationEvent::new(TurnStart, ts(0)));
+    stream.push(ConversationEvent::new(TurnStart::default(), ts(0)));
     stream.push(ConversationEvent::new(ChatRequest::from("think"), ts(0)));
     stream.push(ConversationEvent::new(
         ChatResponse::reasoning("z".repeat(4096)),
@@ -730,7 +730,7 @@ fn threshold_is_measured_against_the_raw_stream() {
 /// Both requests carry the same short arguments.
 fn reused_call_id_stream() -> ConversationStream {
     let mut stream = ConversationStream::new_test();
-    stream.push(ConversationEvent::new(TurnStart, ts(0)));
+    stream.push(ConversationEvent::new(TurnStart::default(), ts(0)));
     stream.push(ConversationEvent::new(ChatRequest::from("go"), ts(0)));
 
     for body in ["x".repeat(4096), "ok".to_owned()] {
@@ -930,7 +930,7 @@ fn affected_items_reports_each_stripped_half_separately() {
 #[test]
 fn affected_items_reports_reasoning_blocks() {
     let mut stream = ConversationStream::new_test();
-    stream.push(ConversationEvent::new(TurnStart, ts(0)));
+    stream.push(ConversationEvent::new(TurnStart::default(), ts(0)));
     stream.push(ConversationEvent::new(ChatRequest::from("think"), ts(0)));
     stream.push(ConversationEvent::new(
         ChatResponse::reasoning("z".repeat(4096)),
@@ -1211,7 +1211,7 @@ fn distinct_adjacent_summaries_with_identical_text_stay_separate() {
     // a turn.
     let mut stream = ConversationStream::new_test();
     for t in 0..2 {
-        stream.push(ConversationEvent::new(TurnStart, ts(0)));
+        stream.push(ConversationEvent::new(TurnStart::default(), ts(0)));
         stream.push(ConversationEvent::new(
             ChatRequest::from(format!("q{t}")),
             ts(0),
@@ -1261,7 +1261,7 @@ fn contained_summary_reinjects_outer_summary_tail() {
     // Four single-message turns.
     let mut stream = ConversationStream::new_test();
     for t in 0..4 {
-        stream.push(ConversationEvent::new(TurnStart, ts(0)));
+        stream.push(ConversationEvent::new(TurnStart::default(), ts(0)));
         stream.push(ConversationEvent::new(
             ChatRequest::from(format!("q{t}")),
             ts(0),
@@ -1753,7 +1753,7 @@ fn build_arbitrary_stream(turns: &[TurnSpec]) -> ConversationStream {
     // `TurnStart` position, not time), so a constant is fine.
     let at = ts(0);
     for (t, spec) in turns.iter().enumerate() {
-        stream.push(ConversationEvent::new(TurnStart, at));
+        stream.push(ConversationEvent::new(TurnStart::default(), at));
         stream.push(ConversationEvent::new(ChatRequest::from("q"), at));
         if spec.reasoning {
             stream.push(ConversationEvent::new(ChatResponse::reasoning("r"), at));
@@ -1923,7 +1923,7 @@ fn build_tagged_stream(turns: &[TurnSpec]) -> ConversationStream {
     let mut stream = ConversationStream::new_test();
     let at = ts(0);
     for (t, spec) in turns.iter().enumerate() {
-        stream.push(ConversationEvent::new(TurnStart, at));
+        stream.push(ConversationEvent::new(TurnStart::default(), at));
         stream.push(ConversationEvent::new(
             ChatRequest::from(format!("q{t}")),
             at,
@@ -2092,11 +2092,11 @@ proptest! {
 fn turn_indices_basic() {
     let mut stream = ConversationStream::new_test();
     stream.extend([
-        ConversationEvent::new(TurnStart, ts(0)),
+        ConversationEvent::new(TurnStart::default(), ts(0)),
         ConversationEvent::new(ChatRequest::from("q1"), ts(0)),
-        ConversationEvent::new(TurnStart, ts(1)),
+        ConversationEvent::new(TurnStart::default(), ts(1)),
         ConversationEvent::new(ChatRequest::from("q2"), ts(1)),
-        ConversationEvent::new(TurnStart, ts(2)),
+        ConversationEvent::new(TurnStart::default(), ts(2)),
         ConversationEvent::new(ChatRequest::from("q3"), ts(2)),
     ]);
 
@@ -2109,7 +2109,7 @@ fn turn_indices_with_implicit_leading_turn() {
     let mut stream = ConversationStream::new_test();
     stream.extend([
         ConversationEvent::new(ChatRequest::from("orphan"), ts(0)),
-        ConversationEvent::new(TurnStart, ts(1)),
+        ConversationEvent::new(TurnStart::default(), ts(1)),
         ConversationEvent::new(ChatRequest::from("q1"), ts(1)),
     ]);
 
@@ -2126,7 +2126,7 @@ fn compaction_targets_correct_turn_with_implicit_leading_turn() {
     let mut stream = ConversationStream::new_test();
     stream.push(ConversationEvent::new(ChatRequest::from("q0"), ts(0)));
     stream.push(ConversationEvent::new(ChatResponse::reasoning("r0"), ts(0)));
-    stream.push(ConversationEvent::new(TurnStart, ts(1)));
+    stream.push(ConversationEvent::new(TurnStart::default(), ts(1)));
     stream.push(ConversationEvent::new(ChatRequest::from("q1"), ts(1)));
     stream.push(ConversationEvent::new(ChatResponse::reasoning("r1"), ts(1)));
 

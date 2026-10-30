@@ -455,13 +455,13 @@ fn structured_fence_is_closed_at_end_of_replay() {
 #[test]
 fn structured_response_followed_by_message_closes_fence_first() {
     let (mut ctx, id, out, _err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Extract"), ts(0, 0, 1)),
         ConversationEvent::new(
             ChatResponse::structured(json!({"name": "Alice"})),
             ts(0, 0, 2),
         ),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Thanks"), ts(0, 1, 1)),
         ConversationEvent::new(ChatResponse::message("You're welcome.\n\n"), ts(0, 1, 2)),
     ]);
@@ -503,7 +503,7 @@ fn structured_response_followed_by_message_closes_fence_first() {
 #[test]
 fn prints_consecutive_structured_events_as_separate_fences() {
     let (mut ctx, id, out, _err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Extract"), ts(0, 0, 1)),
         ConversationEvent::new(
             ChatResponse::structured(json!({"name": "Alice"})),
@@ -546,7 +546,7 @@ fn prints_consecutive_structured_events_as_separate_fences() {
 #[test]
 fn structured_to_message_in_same_turn_closes_fence_first() {
     let (mut ctx, id, out, _err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Extract"), ts(0, 0, 1)),
         ConversationEvent::new(
             ChatResponse::structured(json!({"name": "Alice"})),
@@ -585,10 +585,10 @@ fn structured_to_message_in_same_turn_closes_fence_first() {
 #[test]
 fn turn_separators_between_turns() {
     let (mut ctx, id, out, _err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("First question"), ts(0, 0, 1)),
         ConversationEvent::new(ChatResponse::message("First answer.\n\n"), ts(0, 0, 2)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Second question"), ts(0, 1, 1)),
         ConversationEvent::new(ChatResponse::message("Second answer.\n\n"), ts(0, 1, 2)),
     ]);
@@ -613,10 +613,10 @@ fn turn_separators_between_turns() {
 #[test]
 fn turn_header_shows_turn_number_and_relative_time() {
     let (mut ctx, id, out, _err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("First question"), ts(0, 0, 1)),
         ConversationEvent::new(ChatResponse::message("First answer.\n\n"), ts(0, 0, 2)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Second question"), ts(0, 1, 1)),
         ConversationEvent::new(ChatResponse::message("Second answer.\n\n"), ts(0, 1, 2)),
     ]);
@@ -752,13 +752,13 @@ fn empty_conversation_produces_no_content() {
 #[test]
 fn full_conversation_round_trip() {
     let (mut ctx, id, out, err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("What is Rust?"), ts(0, 0, 1)),
         ConversationEvent::new(
             ChatResponse::message("Rust is a systems programming language focused on safety.\n\n"),
             ts(0, 0, 3),
         ),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Show me an example"), ts(0, 1, 1)),
         ConversationEvent::new(
             ToolCallRequest {
@@ -813,10 +813,10 @@ fn full_conversation_round_trip() {
 #[test]
 fn last_prints_only_last_turn() {
     let (mut ctx, id, out, _err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("First question"), ts(0, 0, 1)),
         ConversationEvent::new(ChatResponse::message("First answer.\n\n"), ts(0, 0, 2)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Second question"), ts(0, 1, 1)),
         ConversationEvent::new(ChatResponse::message("Second answer.\n\n"), ts(0, 1, 2)),
     ]);
@@ -851,13 +851,13 @@ fn last_prints_only_last_turn() {
 #[test]
 fn last_two_with_three_turns() {
     let (mut ctx, id, out, _err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Turn one"), ts(0, 0, 1)),
         ConversationEvent::new(ChatResponse::message("Answer one.\n\n"), ts(0, 0, 2)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Turn two"), ts(0, 1, 1)),
         ConversationEvent::new(ChatResponse::message("Answer two.\n\n"), ts(0, 1, 2)),
-        ConversationEvent::new(TurnStart, ts(0, 2, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 2, 0)),
         ConversationEvent::new(ChatRequest::from("Turn three"), ts(0, 2, 1)),
         ConversationEvent::new(ChatResponse::message("Answer three.\n\n"), ts(0, 2, 2)),
     ]);
@@ -886,7 +886,7 @@ fn last_two_with_three_turns() {
 #[test]
 fn last_exceeding_turn_count_prints_all() {
     let (mut ctx, id, out, _err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Only question"), ts(0, 0, 1)),
         ConversationEvent::new(ChatResponse::message("Only answer.\n\n"), ts(0, 0, 2)),
     ]);
@@ -913,7 +913,7 @@ fn last_exceeding_turn_count_prints_all() {
 #[test]
 fn blank_line_between_tool_calls_and_message() {
     let (mut ctx, id, out, err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Check this"), ts(0, 0, 1)),
         ConversationEvent::new(
             ToolCallRequest {
@@ -965,7 +965,7 @@ fn blank_line_between_tool_calls_and_message() {
 #[test]
 fn blank_line_between_message_and_tool_calls() {
     let (mut ctx, id, out, err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Help me"), ts(0, 0, 1)),
         ConversationEvent::new(
             ChatResponse::message("Let me check something.\n\n"),
@@ -1024,7 +1024,7 @@ fn blank_line_between_message_and_tool_calls() {
 #[test]
 fn no_extra_blank_line_between_consecutive_tool_calls() {
     let (mut ctx, id, _out, err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Do two things"), ts(0, 0, 1)),
         ConversationEvent::new(
             ToolCallRequest {
@@ -1090,7 +1090,7 @@ fn no_extra_blank_line_between_consecutive_tool_calls() {
 #[test]
 fn last_zero_prints_nothing() {
     let (mut ctx, id, out, _err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Hello"), ts(0, 0, 1)),
         ConversationEvent::new(ChatResponse::message("World.\n\n"), ts(0, 0, 2)),
     ]);
@@ -1118,13 +1118,13 @@ fn last_zero_prints_nothing() {
 #[test]
 fn turn_prints_specific_turn() {
     let (mut ctx, id, out, _err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("First question"), ts(0, 0, 1)),
         ConversationEvent::new(ChatResponse::message("First answer.\n\n"), ts(0, 0, 2)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Second question"), ts(0, 1, 1)),
         ConversationEvent::new(ChatResponse::message("Second answer.\n\n"), ts(0, 1, 2)),
-        ConversationEvent::new(TurnStart, ts(0, 2, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 2, 0)),
         ConversationEvent::new(ChatRequest::from("Third question"), ts(0, 2, 1)),
         ConversationEvent::new(ChatResponse::message("Third answer.\n\n"), ts(0, 2, 2)),
     ]);
@@ -1174,13 +1174,13 @@ fn parse_print(args: &[&str], id: ConversationId) -> Print {
 /// Three turns, one question and answer each, numbered in their text.
 fn three_turns() -> Vec<ConversationEvent> {
     vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("First question"), ts(0, 0, 1)),
         ConversationEvent::new(ChatResponse::message("First answer.\n\n"), ts(0, 0, 2)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Second question"), ts(0, 1, 1)),
         ConversationEvent::new(ChatResponse::message("Second answer.\n\n"), ts(0, 1, 2)),
-        ConversationEvent::new(TurnStart, ts(0, 2, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 2, 0)),
         ConversationEvent::new(ChatRequest::from("Third question"), ts(0, 2, 1)),
         ConversationEvent::new(ChatResponse::message("Third answer.\n\n"), ts(0, 2, 2)),
     ]
@@ -1289,7 +1289,7 @@ fn turn_from_end_past_the_conversation_errors() {
 #[test]
 fn turn_out_of_range_errors() {
     let (mut ctx, id, _out, _err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Only turn"), ts(0, 0, 1)),
     ]);
 
@@ -1308,7 +1308,7 @@ fn turn_out_of_range_errors() {
 #[test]
 fn turn_zero_errors() {
     let (mut ctx, id, _out, _err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Only turn"), ts(0, 0, 1)),
     ]);
 
@@ -1330,7 +1330,7 @@ fn style_brief_hides_reasoning_and_tool_details() {
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
 
     let (mut ctx, id, out, err, _tmp) = setup_ctx_with_config(config, vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Explain Rust"), ts(0, 0, 1)),
         ConversationEvent::new(
             ChatResponse::reasoning("Let me think deeply about this...\n\n"),
@@ -1407,7 +1407,7 @@ fn style_chat_hides_reasoning_and_tool_calls() {
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
 
     let (mut ctx, id, out, err, _tmp) = setup_ctx_with_config(config, vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Explain Rust"), ts(0, 0, 1)),
         ConversationEvent::new(
             ChatResponse::reasoning("Let me think deeply about this...\n\n"),
@@ -1486,7 +1486,7 @@ fn style_user_shows_only_user_messages() {
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
 
     let (mut ctx, id, out, err, _tmp) = setup_ctx_with_config(config, vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Explain Rust"), ts(0, 0, 1)),
         ConversationEvent::new(
             ChatResponse::reasoning("Let me think deeply about this...\n\n"),
@@ -1631,7 +1631,7 @@ fn role_header_renders_assistant_label_with_model_suffix() {
 /// `openai/gpt-4o`.
 fn two_turns_with_model_switch() -> (Ctx, ConversationId, SharedBuffer, SharedBuffer, Utf8TempDir) {
     let (ctx, id, out, err, tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("first"), ts(0, 0, 1)),
         ConversationEvent::new(ChatResponse::message("one"), ts(0, 0, 2)),
     ]);
@@ -1644,7 +1644,7 @@ fn two_turns_with_model_switch() -> (Ctx, ConversationId, SharedBuffer, SharedBu
     lock.as_mut().update_events(|e| {
         e.add_config_delta(delta);
         e.extend(vec![
-            ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+            ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
             ConversationEvent::new(ChatRequest::from("second"), ts(0, 1, 1)),
             ConversationEvent::new(ChatResponse::message("two"), ts(0, 1, 2)),
         ]);
@@ -1834,7 +1834,7 @@ fn style_chat_separates_messages_across_hidden_reasoning() {
     // paragraph — they should be separated by a blank line so the
     // transcript reads naturally.
     let (mut ctx, id, out, _err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Explain"), ts(0, 0, 1)),
         ConversationEvent::new(
             ChatResponse::message("Let me research the codebase first."),
@@ -1877,7 +1877,7 @@ fn style_chat_separates_messages_across_hidden_reasoning() {
 fn style_chat_separates_messages_across_hidden_tool_call() {
     // Same concern as above, but with a tool call as the hidden boundary.
     let (mut ctx, id, out, _err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Check it"), ts(0, 0, 1)),
         ConversationEvent::new(
             ChatResponse::message("Checking the file first."),
@@ -1935,7 +1935,7 @@ fn style_full_shows_reasoning_and_untruncated_results() {
     config.style.reasoning.display = ReasoningDisplayConfig::Hidden;
 
     let (mut ctx, id, out, err, _tmp) = setup_ctx_with_config(config, vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Check the file"), ts(0, 0, 1)),
         ConversationEvent::new(
             ChatResponse::reasoning("Let me reason about this carefully.\n\n"),
@@ -2009,7 +2009,7 @@ fn style_full_shows_reasoning_and_untruncated_results() {
 #[test]
 fn replay_shades_tool_chrome_after_reasoning() {
     let (mut ctx, id, _out, err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("read it"), ts(0, 0, 1)),
         ConversationEvent::new(
             ChatResponse::reasoning("Let me check the file.\n\n"),
@@ -2058,7 +2058,7 @@ fn replay_does_not_shade_tool_chrome_when_extension_disabled() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.extend_across_tool_calls = false;
     let (mut ctx, id, _out, err, _tmp) = setup_ctx_with_config(config, vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("read it"), ts(0, 0, 1)),
         ConversationEvent::new(
             ChatResponse::reasoning("Let me check the file.\n\n"),
@@ -2108,7 +2108,7 @@ fn replay_suppresses_tool_chrome_when_show_disabled() {
     let mut config = AppConfig::new_test();
     config.style.tool_call.show = false;
     let (mut ctx, id, _out, err, _tmp) = setup_ctx_with_config(config, vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("read it"), ts(0, 0, 1)),
         ConversationEvent::new(
             ChatResponse::reasoning("Let me check the file.\n\n"),
@@ -2168,7 +2168,7 @@ fn replay_keeps_the_gap_after_a_result_when_reasoning_renders_nothing() {
     config.conversation.tools.defaults.style.results_file_link = LinkStyle::Off;
 
     let (mut ctx, id, _out, err, _tmp) = setup_ctx_with_config(config, vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("read it"), ts(0, 0, 1)),
         ConversationEvent::new(
             ChatResponse::reasoning("Let me check the file.\n\n"),
@@ -2227,10 +2227,10 @@ fn replay_keeps_the_gap_after_a_result_when_reasoning_renders_nothing() {
 #[test]
 fn replay_does_not_leak_reasoning_region_across_turns() {
     let (mut ctx, id, _out, err, _tmp) = setup_ctx(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("think about it"), ts(0, 0, 1)),
         ConversationEvent::new(ChatResponse::reasoning("Deep thought.\n\n"), ts(0, 0, 2)),
-        ConversationEvent::new(TurnStart, ts(0, 0, 3)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 3)),
         ConversationEvent::new(ChatRequest::from("now act"), ts(0, 0, 4)),
         ConversationEvent::new(
             ToolCallRequest {
@@ -2279,7 +2279,7 @@ fn replay_does_not_shade_a_tool_that_does_not_join_reasoning() {
     let mut config = AppConfig::new_test();
     config.conversation.tools.defaults.style.joins_reasoning = false;
     let (mut ctx, id, _out, err, _tmp) = setup_ctx_with_config(config, vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("edit it"), ts(0, 0, 1)),
         ConversationEvent::new(
             ChatResponse::reasoning("Let me edit the file.\n\n"),
@@ -2336,7 +2336,7 @@ fn a_tool_that_does_not_join_reasoning_leaves_the_region_shaded_around_it() {
     let mut config = AppConfig::new_test();
     config.conversation.tools.defaults.style.joins_reasoning = false;
     let (mut ctx, id, out, err, _tmp) = setup_ctx_with_config(config, vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("edit it"), ts(0, 0, 1)),
         ConversationEvent::new(ChatResponse::reasoning("Before the edit.\n\n"), ts(0, 0, 2)),
         ConversationEvent::new(
@@ -2393,7 +2393,7 @@ fn joins_reasoning_is_decided_per_tool_within_one_region() {
     );
 
     let (mut ctx, id, _out, err, _tmp) = setup_ctx_with_config(config, vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("do both"), ts(0, 0, 1)),
         ConversationEvent::new(ChatResponse::reasoning("Two calls.\n\n"), ts(0, 0, 2)),
         ConversationEvent::new(

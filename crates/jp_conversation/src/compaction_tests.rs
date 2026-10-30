@@ -212,7 +212,7 @@ fn stream_with_turns(n: usize) -> ConversationStream {
     for i in 0..n {
         stream.extend(vec![
             crate::ConversationEvent::new(
-                crate::event::TurnStart,
+                crate::event::TurnStart::default(),
                 Utc.with_ymd_and_hms(2025, 1, 1, i as u32, 0, 0).unwrap(),
             ),
             crate::ConversationEvent::new(

@@ -82,7 +82,7 @@ fn turns(count: u32) -> Vec<ConversationEvent> {
         .flat_map(|turn| {
             [
                 ConversationEvent::new(
-                    TurnStart,
+                    TurnStart::default(),
                     Utc.with_ymd_and_hms(2020, 1, 1, 0, turn * 2, 0).unwrap(),
                 ),
                 ConversationEvent::new(
@@ -401,7 +401,7 @@ fn test_conversation_fork() {
                 lock.as_mut().update_events(|e| {
                     e.extend(vec![
                         ConversationEvent::new(
-                            TurnStart,
+                            TurnStart::default(),
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
                         ),
                         ConversationEvent::new(
@@ -413,7 +413,7 @@ fn test_conversation_fork() {
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
                         ),
                         ConversationEvent::new(
-                            TurnStart,
+                            TurnStart::default(),
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 3, 0).unwrap(),
                         ),
                         ConversationEvent::new(
@@ -425,7 +425,7 @@ fn test_conversation_fork() {
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 5, 0).unwrap(),
                         ),
                         ConversationEvent::new(
-                            TurnStart,
+                            TurnStart::default(),
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 6, 0).unwrap(),
                         ),
                         ConversationEvent::new(
@@ -478,7 +478,7 @@ fn test_conversation_fork() {
                 lock.as_mut().update_events(|e| {
                     e.extend(vec![
                         ConversationEvent::new(
-                            TurnStart,
+                            TurnStart::default(),
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
                         ),
                         ConversationEvent::new(
@@ -490,7 +490,7 @@ fn test_conversation_fork() {
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
                         ),
                         ConversationEvent::new(
-                            TurnStart,
+                            TurnStart::default(),
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 3, 0).unwrap(),
                         ),
                         ConversationEvent::new(
@@ -502,7 +502,7 @@ fn test_conversation_fork() {
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 5, 0).unwrap(),
                         ),
                         ConversationEvent::new(
-                            TurnStart,
+                            TurnStart::default(),
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 6, 0).unwrap(),
                         ),
                         ConversationEvent::new(
@@ -554,7 +554,7 @@ fn test_conversation_fork() {
                 lock.as_mut().update_events(|e| {
                     e.extend(vec![
                         ConversationEvent::new(
-                            TurnStart,
+                            TurnStart::default(),
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
                         ),
                         ConversationEvent::new(
@@ -639,7 +639,7 @@ fn test_conversation_fork() {
                 lock.as_mut().update_events(|e| {
                     e.extend(vec![
                         ConversationEvent::new(
-                            TurnStart,
+                            TurnStart::default(),
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
                         ),
                         ConversationEvent::new(
@@ -651,7 +651,7 @@ fn test_conversation_fork() {
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
                         ),
                         ConversationEvent::new(
-                            TurnStart,
+                            TurnStart::default(),
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 3, 0).unwrap(),
                         ),
                         ConversationEvent::new(
@@ -663,7 +663,7 @@ fn test_conversation_fork() {
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 5, 0).unwrap(),
                         ),
                         ConversationEvent::new(
-                            TurnStart,
+                            TurnStart::default(),
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 6, 0).unwrap(),
                         ),
                         ConversationEvent::new(
@@ -715,7 +715,7 @@ fn test_conversation_fork() {
                 lock.as_mut().update_events(|e| {
                     e.extend(vec![
                         ConversationEvent::new(
-                            TurnStart,
+                            TurnStart::default(),
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
                         ),
                         ConversationEvent::new(
@@ -723,7 +723,7 @@ fn test_conversation_fork() {
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
                         ),
                         ConversationEvent::new(
-                            TurnStart,
+                            TurnStart::default(),
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
                         ),
                         ConversationEvent::new(
@@ -731,7 +731,7 @@ fn test_conversation_fork() {
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 3, 0).unwrap(),
                         ),
                         ConversationEvent::new(
-                            TurnStart,
+                            TurnStart::default(),
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 4, 0).unwrap(),
                         ),
                         ConversationEvent::new(
@@ -739,7 +739,7 @@ fn test_conversation_fork() {
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 5, 0).unwrap(),
                         ),
                         ConversationEvent::new(
-                            TurnStart,
+                            TurnStart::default(),
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 6, 0).unwrap(),
                         ),
                         ConversationEvent::new(
@@ -784,7 +784,7 @@ fn test_conversation_fork() {
                 lock.as_mut().update_events(|e| {
                     e.extend(vec![
                         ConversationEvent::new(
-                            TurnStart,
+                            TurnStart::default(),
                             Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
                         ),
                         ConversationEvent::new(

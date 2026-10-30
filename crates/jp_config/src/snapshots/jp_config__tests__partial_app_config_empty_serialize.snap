@@ -54,6 +54,13 @@ PartialAppConfig {
             },
             from_heading: None,
         },
+        turn_summary: PartialTurnSummaryConfig {
+            generate: PartialTurnSummaryGenerateConfig {
+                auto: None,
+                batch_size: None,
+                model: None,
+            },
+        },
         tools: PartialToolsConfig {
             defaults: PartialToolsDefaultsConfig {
                 enable: None,
