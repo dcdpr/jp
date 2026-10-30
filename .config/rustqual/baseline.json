@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.7215428487488884,
-  "iosp_score": 0.9183904050060838,
-  "violations": 939,
-  "total": 15815,
+  "quality_score": 0.7216835797306753,
+  "iosp_score": 0.9183815229660501,
+  "violations": 940,
+  "total": 15831,
   "complexity_warnings": 179,
   "magic_number_warnings": 241,
   "nesting_depth_warnings": 30,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 51,
   "structural_coupling_warnings": 10,
-  "total_findings": 2999,
+  "total_findings": 3000,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -476,19 +476,24 @@
       "line": 155
     },
     {
+      "name": "promote",
+      "file": "crates/plugins/command/rfd/src/cmd/promote.rs",
+      "line": 55
+    },
+    {
       "name": "to_discussion",
       "file": "crates/plugins/command/rfd/src/cmd/promote.rs",
-      "line": 70
+      "line": 82
     },
     {
       "name": "to_implemented",
       "file": "crates/plugins/command/rfd/src/cmd/promote.rs",
-      "line": 323
+      "line": 362
     },
     {
       "name": "reflow",
       "file": "crates/plugins/command/rfd/src/cmd/promote.rs",
-      "line": 443
+      "line": 482
     },
     {
       "name": "track",
@@ -573,7 +578,7 @@
     {
       "name": "taken",
       "file": "crates/plugins/command/rfd/src/id.rs",
-      "line": 246
+      "line": 264
     },
     {
       "name": "init",
@@ -618,22 +623,22 @@
     {
       "name": "handle_command",
       "file": "crates/plugins/command/rfd/src/lib.rs",
-      "line": 501
+      "line": 523
     },
     {
       "name": "execute",
       "file": "crates/plugins/command/rfd/src/lib.rs",
-      "line": 608
+      "line": 630
     },
     {
       "name": "promote",
       "file": "crates/plugins/command/rfd/src/lib.rs",
-      "line": 764
+      "line": 786
     },
     {
       "name": "read_message",
       "file": "crates/plugins/command/rfd/src/lib.rs",
-      "line": 921
+      "line": 944
     },
     {
       "name": "load",
@@ -773,77 +778,77 @@
     {
       "name": "handle_command",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 552
+      "line": 577
     },
     {
       "name": "compose_missing",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 673
+      "line": 698
     },
     {
       "name": "with_show_alias",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1038
+      "line": 1064
     },
     {
       "name": "show_board",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1526
+      "line": 1552
     },
     {
       "name": "board_row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1576
+      "line": 1602
     },
     {
       "name": "import_all",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1625
+      "line": 1651
     },
     {
       "name": "label",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1803
+      "line": 1829
     },
     {
       "name": "label_refusal",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1854
+      "line": 1880
     },
     {
       "name": "list_labels",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1878
+      "line": 1904
     },
     {
       "name": "check",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1976
+      "line": 2002
     },
     {
       "name": "describe_vocabulary",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2046
+      "line": 2072
     },
     {
       "name": "show",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2158
+      "line": 2184
     },
     {
       "name": "list",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2224
+      "line": 2250
     },
     {
       "name": "row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2280
+      "line": 2306
     },
     {
       "name": "read_message",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2364
+      "line": 2390
     },
     {
       "name": "answer",
