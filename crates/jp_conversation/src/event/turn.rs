@@ -19,4 +19,13 @@ use serde::{Deserialize, Serialize};
 /// [`ChatRequest`]: super::ChatRequest
 /// [`ConversationEvent`]: super::ConversationEvent
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct TurnStart;
+pub struct TurnStart {
+    /// A single-line summary of what the turn asked and accomplished, used to
+    /// identify the turn when navigating or editing the conversation.
+    ///
+    /// `None` while the turn has no summary.
+    /// Changing it leaves the conversation's provider requests untouched:
+    /// `TurnStart` events are not provider-visible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}

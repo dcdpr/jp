@@ -7,6 +7,7 @@
 //! [`TurnStart`]: crate::event::TurnStart
 
 use super::ConversationEventWithConfigRef;
+use crate::EventId;
 
 /// A group of events belonging to a single turn in the conversation.
 ///
@@ -33,6 +34,34 @@ impl<'a> Turn<'a> {
     /// Iterate over the events in this turn.
     pub fn iter(&self) -> std::slice::Iter<'_, ConversationEventWithConfigRef<'a>> {
         self.events.iter()
+    }
+
+    /// The [`EventId`] of this turn's [`TurnStart`] entry, which identifies the
+    /// turn.
+    ///
+    /// `None` for the implicit leading turn, whose events precede the first
+    /// `TurnStart`.
+    ///
+    /// [`TurnStart`]: crate::event::TurnStart
+    #[must_use]
+    pub fn id(&self) -> Option<&'a EventId> {
+        self.events
+            .first()
+            .filter(|event| event.is_turn_start())
+            .map(|event| event.event_id)
+    }
+
+    /// The summary stored on this turn's [`TurnStart`], if one has been stored.
+    ///
+    /// Always `None` for the implicit leading turn.
+    ///
+    /// [`TurnStart`]: crate::event::TurnStart
+    #[must_use]
+    pub fn summary(&self) -> Option<&'a str> {
+        self.events
+            .first()
+            .and_then(|event| event.event.as_turn_start())
+            .and_then(|turn_start| turn_start.summary.as_deref())
     }
 }
 

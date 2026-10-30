@@ -30,7 +30,7 @@ fn every_variant_is_listed(kind: &EventKind) {
 /// One value of every variant.
 fn every_kind() -> Vec<EventKind> {
     vec![
-        TurnStart.into(),
+        TurnStart::default().into(),
         ChatRequest::from("hi").into(),
         ChatResponse::message("hello").into(),
         ToolCallRequest::new("call-1".to_owned(), "read_file".to_owned(), Map::new()).into(),

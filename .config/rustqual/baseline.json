@@ -1,22 +1,22 @@
 {
   "version": 2,
-  "quality_score": 0.7229863990305296,
-  "iosp_score": 0.9186774651415213,
-  "violations": 974,
-  "total": 16405,
-  "complexity_warnings": 187,
+  "quality_score": 0.7243116867100486,
+  "iosp_score": 0.919068461474936,
+  "violations": 980,
+  "total": 16560,
+  "complexity_warnings": 188,
   "magic_number_warnings": 252,
   "nesting_depth_warnings": 30,
-  "function_length_warnings": 482,
+  "function_length_warnings": 483,
   "unsafe_warnings": 74,
-  "error_handling_warnings": 202,
+  "error_handling_warnings": 203,
   "duplicate_groups": 0,
   "dead_code_warnings": 0,
   "dead_type_warnings": 0,
   "fragment_groups": 0,
-  "boilerplate_warnings": 306,
-  "srp_struct_warnings": 49,
-  "srp_module_warnings": 254,
+  "boilerplate_warnings": 309,
+  "srp_struct_warnings": 50,
+  "srp_module_warnings": 257,
   "wildcard_import_warnings": 0,
   "sdp_violations": 0,
   "coupling_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 51,
   "structural_coupling_warnings": 10,
-  "total_findings": 3095,
+  "total_findings": 3111,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -68,12 +68,12 @@
     {
       "name": "ConversationStream::sanitize_orphaned_tool_calls",
       "file": "crates/jp_conversation/src/stream.rs",
-      "line": 1194
+      "line": 1197
     },
     {
       "name": "ConversationStream::from_legacy_events",
       "file": "crates/jp_conversation/src/stream.rs",
-      "line": 1603
+      "line": 1632
     },
     {
       "name": "strip_schema",
@@ -98,7 +98,7 @@
     {
       "name": "IterTurns<'a>::new",
       "file": "crates/jp_conversation/src/stream/turn_iter.rs",
-      "line": 66
+      "line": 95
     },
     {
       "name": "ConversationStream::extend",
@@ -823,12 +823,12 @@
     {
       "name": "Options::read",
       "file": "crates/plugins/command/vite/src/options.rs",
-      "line": 95
+      "line": 105
     },
     {
       "name": "categories",
       "file": "crates/plugins/command/vite/src/options.rs",
-      "line": 320
+      "line": 344
     },
     {
       "name": "prefix",
@@ -1198,12 +1198,12 @@
     {
       "name": "PartialConversationConfig::assign",
       "file": "crates/jp_config/src/conversation.rs",
-      "line": 120
+      "line": 129
     },
     {
       "name": "PartialInquiryConfig::assign",
       "file": "crates/jp_config/src/conversation.rs",
-      "line": 241
+      "line": 259
     },
     {
       "name": "collect_config_segments",
@@ -1516,6 +1516,11 @@
       "line": 40
     },
     {
+      "name": "PartialTurnSummaryConfig::assign",
+      "file": "crates/jp_config/src/conversation/turn_summary.rs",
+      "line": 43
+    },
+    {
       "name": "PartialToolsConfig::assign",
       "file": "crates/jp_config/src/conversation/tool.rs",
       "line": 58
@@ -1544,6 +1549,11 @@
       "name": "PartialFanOutConfig::assign",
       "file": "crates/jp_config/src/conversation/tool.rs",
       "line": 2218
+    },
+    {
+      "name": "PartialTurnSummaryGenerateConfig::assign",
+      "file": "crates/jp_config/src/conversation/turn_summary/generate.rs",
+      "line": 54
     },
     {
       "name": "PartialTitleConfig::assign",
@@ -2838,77 +2848,77 @@
     {
       "name": "Query::build_conversation",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 747
+      "line": 761
     },
     {
       "name": "Query::create_new_conversation",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 845
+      "line": 859
     },
     {
       "name": "Query::run_turn",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 1016
+      "line": 1030
     },
     {
       "name": "Query::acquire_lock",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 1211
+      "line": 1225
     },
     {
       "name": "persist_config_reset",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 1843
+      "line": 1857
     },
     {
       "name": "turn_config_delta",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 1872
+      "line": 1886
     },
     {
       "name": "Query::apply_cli_config",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 1893
+      "line": 1907
     },
     {
       "name": "build_sections",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 1995
+      "line": 2009
     },
     {
       "name": "build_thread",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2023
+      "line": 2037
     },
     {
       "name": "apply_mounts",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2419
+      "line": 2433
     },
     {
       "name": "inject_mounts",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2446
+      "line": 2460
     },
     {
       "name": "create_mount_effects",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2513
+      "line": 2527
     },
     {
       "name": "PendingStreamTrim::apply",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2709
+      "line": 2723
     },
     {
       "name": "mount_access_seed",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2876
+      "line": 2890
     },
     {
       "name": "read_piped_stdin",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2971
+      "line": 2985
     },
     {
       "name": "Login::run_with_auth",
@@ -3513,17 +3523,17 @@
     {
       "name": "Edit::run",
       "file": "crates/jp_cli/src/cmd/conversation/edit.rs",
-      "line": 283
+      "line": 287
     },
     {
       "name": "Edit::run_open_editor",
       "file": "crates/jp_cli/src/cmd/conversation/edit.rs",
-      "line": 315
+      "line": 319
     },
     {
       "name": "Edit::run_property_edit",
       "file": "crates/jp_cli/src/cmd/conversation/edit.rs",
-      "line": 444
+      "line": 448
     },
     {
       "name": "Compact::effective_rules",
@@ -4842,6 +4852,21 @@
     },
     {
       "name": "generate",
+      "file": "crates/jp_llm/src/turn_summary.rs",
+      "line": 218
+    },
+    {
+      "name": "transcribe",
+      "file": "crates/jp_llm/src/turn_summary.rs",
+      "line": 373
+    },
+    {
+      "name": "render_event",
+      "file": "crates/jp_llm/src/turn_summary.rs",
+      "line": 406
+    },
+    {
+      "name": "generate",
       "file": "crates/jp_llm/src/title.rs",
       "line": 131
     },
@@ -4884,6 +4909,11 @@
       "name": "TaskHandler::sync",
       "file": "crates/jp_task/src/handler.rs",
       "line": 61
+    },
+    {
+      "name": "TurnSummaryTask::new",
+      "file": "crates/jp_task/src/task/turn_summary.rs",
+      "line": 75
     },
     {
       "name": "PullsHandler::fetch_review_comments",
