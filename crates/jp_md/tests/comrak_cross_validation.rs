@@ -26,6 +26,7 @@ fn comrak_options() -> comrak::Options<'static> {
             superscript: true,
             underline: true,
             subscript: true,
+            math_dollars: true,
             ..Default::default()
         },
         render: comrak::options::Render {

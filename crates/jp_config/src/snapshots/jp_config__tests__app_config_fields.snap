@@ -43,6 +43,8 @@ expression: "AppConfig::fields()"
     "style.markdown.table_max_column_width",
     "style.markdown.theme",
     "style.markdown.wrap_width",
+    "style.markdown.elements.math.bg",
+    "style.markdown.elements.math.fg",
     "style.lock_wait.delay_secs",
     "style.lock_wait.interval_ms",
     "style.lock_wait.show",

@@ -1509,6 +1509,10 @@ style: StyleConfig
     show?: bool
     timeout_secs?: int
   markdown: MarkdownConfig
+    elements: ElementsConfig
+      math: ElementStyleConfig
+        bg: int | string | null
+        fg: int | string | null
     hr_style?: "markdown" | "line"
     table_continuation_edge?: bool
     table_max_column_width?: int

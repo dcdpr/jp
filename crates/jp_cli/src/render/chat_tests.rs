@@ -1564,6 +1564,16 @@ fn test_streaming_byte_identity_corpus() {
                    keep wrapping along.",
         },
         StreamingFixture {
+            name: "math_span",
+            wrap_width: 40,
+            reasoning: false,
+            latency: Latency::Streams,
+            rest: "\n\n",
+            body: "Here is a fair amount of leading prose to cross the threshold and then a \
+                   $a_1 * b_2 + c_3$ formula followed by a good deal more trailing prose so the \
+                   lines keep wrapping.",
+        },
+        StreamingFixture {
             name: "strong",
             wrap_width: 40,
             reasoning: false,

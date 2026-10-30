@@ -139,7 +139,11 @@ impl PartialConfigDelta for PartialStyleConfig {
                 &path(prefix, "inline_code"),
                 unsets,
             ),
-            markdown: self.markdown.delta(next.markdown),
+            markdown: self.markdown.delta_with_unsets(
+                next.markdown,
+                &path(prefix, "markdown"),
+                unsets,
+            ),
             mcp_startup: self.mcp_startup.delta(next.mcp_startup),
             reasoning: self.reasoning.delta_with_unsets(
                 next.reasoning,
