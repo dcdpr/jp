@@ -804,18 +804,29 @@ impl CandidateState {
 
     /// Events carrying a thought signature that arrived on a part with no text.
     ///
-    /// The signature joins the open reasoning, or the open message when that
-    /// message will be committed.
-    /// Otherwise it becomes an empty reasoning item of its own, since reasoning
-    /// is committed whatever its content.
-    fn signature_events(&mut self, signature: String, is_structured: bool) -> Vec<Event> {
+    /// Google requires a signature to go back inside the part it arrived on.
+    /// Streaming splits one part into chunks, so the signature joins the open
+    /// content only when the empty part is the same kind: a thought part joins
+    /// the open reasoning, and a non-thought part joins the open message when
+    /// that message will be committed.
+    /// Otherwise the part becomes an empty reasoning item of its own, since
+    /// reasoning is committed whatever its content; the next request sends it
+    /// back as a non-thought part.
+    fn signature_events(
+        &mut self,
+        signature: String,
+        thought: bool,
+        is_structured: bool,
+    ) -> Vec<Event> {
         let index = self.current_virtual_index;
         let joined = match self.last_mode {
-            Some(ContentMode::Reasoning) => Some(Event::reasoning(index, "")),
-            Some(ContentMode::Message) if self.has_visible_text && is_structured => {
+            Some(ContentMode::Reasoning) if thought => Some(Event::reasoning(index, "")),
+            Some(ContentMode::Message) if !thought && self.has_visible_text && is_structured => {
                 Some(Event::structured(index, ""))
             }
-            Some(ContentMode::Message) if self.has_visible_text => Some(Event::message(index, "")),
+            Some(ContentMode::Message) if !thought && self.has_visible_text => {
+                Some(Event::message(index, ""))
+            }
             _ => None,
         };
         if let Some(event) = joined {
@@ -890,7 +901,7 @@ fn map_candidate(
         // carry the response's thought signature, which the next request needs.
         if matches!(&data, types::ContentData::Text(text) if text.is_empty()) {
             if let Some(signature) = thought_signature {
-                events.extend(state.signature_events(signature, is_structured));
+                events.extend(state.signature_events(signature, thought, is_structured));
             }
             continue;
         }

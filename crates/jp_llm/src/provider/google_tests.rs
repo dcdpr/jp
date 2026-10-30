@@ -675,6 +675,77 @@ mod trailing_thought_signature {
         assert_eq!(last.thought_signature.as_deref(), Some("SIG"));
     }
 
+    /// A non-thought signed part directly after reasoning keeps its own part:
+    /// moving the signature onto the thought part would cross the boundary
+    /// Google drew between them.
+    #[test]
+    fn signature_after_reasoning_keeps_its_non_thought_part() {
+        let committed = commit(vec![
+            chunk(
+                &json!([{ "thought": true, "text": "Refining the plan." }]),
+                None,
+            ),
+            chunk(
+                &json!([{ "text": "", "thoughtSignature": "SIG" }]),
+                Some("STOP"),
+            ),
+        ]);
+
+        let mut events = ConversationStream::new_test();
+        events.start_turn(ChatRequest::from("plan it"));
+        events.extend(committed);
+        events.start_turn(ChatRequest::from("continue"));
+
+        let contents = convert_events(events);
+        let model = &contents[1];
+        assert_eq!(model.role, Some(types::Role::Model));
+        assert_eq!(model.parts.len(), 2);
+
+        let reasoning = &model.parts[0];
+        assert!(reasoning.thought);
+        assert!(
+            matches!(&reasoning.data, types::ContentData::Text(text) if text == "Refining the plan.")
+        );
+        assert_eq!(reasoning.thought_signature, None);
+
+        let signed = &model.parts[1];
+        assert!(!signed.thought);
+        assert!(matches!(&signed.data, types::ContentData::Text(text) if text.is_empty()));
+        assert_eq!(signed.thought_signature.as_deref(), Some("SIG"));
+    }
+
+    /// An empty thought part ends the reasoning it streams in, so its signature
+    /// joins that reasoning, the way it would arrive unstreamed.
+    #[test]
+    fn thought_signature_after_reasoning_joins_the_reasoning() {
+        let committed = commit(vec![
+            chunk(
+                &json!([{ "thought": true, "text": "Refining the plan." }]),
+                None,
+            ),
+            chunk(
+                &json!([{ "thought": true, "text": "", "thoughtSignature": "SIG" }]),
+                Some("STOP"),
+            ),
+        ]);
+
+        let mut events = ConversationStream::new_test();
+        events.start_turn(ChatRequest::from("plan it"));
+        events.extend(committed);
+        events.start_turn(ChatRequest::from("continue"));
+
+        let contents = convert_events(events);
+        let model = &contents[1];
+        assert_eq!(model.parts.len(), 1);
+
+        let reasoning = &model.parts[0];
+        assert!(reasoning.thought);
+        assert!(
+            matches!(&reasoning.data, types::ContentData::Text(text) if text == "Refining the plan.")
+        );
+        assert_eq!(reasoning.thought_signature.as_deref(), Some("SIG"));
+    }
+
     /// A signature arriving while an answer is still open belongs to that
     /// answer; it does not become an event of its own.
     #[test]
