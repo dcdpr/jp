@@ -118,7 +118,9 @@ enum Command {
 
     /// Show one RFD's metadata and where it stands on the priority board.
     Show {
-        /// The RFD: a number (`42`, `042`) or a draft id (`D05`).
+        /// The RFD: a number (`42`, `042`), a draft id (`D05`), or the path of
+        /// its file.
+        #[arg(value_parser = RfdId::parse_id_or_path)]
         id: RfdId,
 
         /// Add the document's sections after its metadata.
@@ -143,18 +145,24 @@ enum Command {
 
         /// Seed the draft from this ticket's title and description, then record
         /// on the ticket that it moved there and close it.
-        #[arg(long, value_name = "TICKET")]
+        #[arg(long, value_name = "TICKET", value_parser = TicketId::parse_id_or_path)]
         from_ticket: Option<TicketId>,
     },
 
     /// Advance an RFD one status: Draft, Discussion, Accepted, Implemented.
     ///
-    /// A draft gets the next permanent number, and every reference to its draft
-    /// id is rewritten.
+    /// A draft gets the next permanent number, or the one given, and every
+    /// reference to its draft id is rewritten.
     /// An RFD reaching Accepted is offered its tracking ticket.
     Promote {
-        /// The RFD: a number (`42`, `042`) or a draft id (`D05`).
+        /// The RFD: a number (`42`, `042`), a draft id (`D05`), or the path of
+        /// its file.
+        #[arg(value_parser = RfdId::parse_id_or_path)]
         id: RfdId,
+
+        /// The permanent number to publish a draft under, such as `100`, when
+        /// the next free one is taken on another branch.
+        number: Option<RfdId>,
     },
 
     /// File or refresh an RFD's tracking ticket, printing its id.
@@ -165,54 +173,65 @@ enum Command {
     /// reads it again.
     /// Only an Accepted or Implemented RFD carries a tracking ticket.
     Track {
-        /// The RFD: a number (`42`, `042`).
+        /// The RFD: a number (`42`, `042`), or the path of its file.
+        #[arg(value_parser = RfdId::parse_id_or_path)]
         id: RfdId,
     },
 
     /// Mark an RFD as in development, filing its tracking ticket if it has none
     /// and moving the ticket to In Progress.
     Start {
-        /// The RFD: a number (`42`, `042`).
+        /// The RFD: a number (`42`, `042`), or the path of its file.
+        #[arg(value_parser = RfdId::parse_id_or_path)]
         id: RfdId,
     },
 
     /// Mark an RFD as no longer in development, moving its tracking ticket back
     /// to Todo.
     Stop {
-        /// The RFD: a number (`42`, `042`).
+        /// The RFD: a number (`42`, `042`), or the path of its file.
+        #[arg(value_parser = RfdId::parse_id_or_path)]
         id: RfdId,
     },
 
     /// Record that one RFD builds on another's design.
     Extend {
         /// The RFD that extends the other.
+        #[arg(value_parser = RfdId::parse_id_or_path)]
         id: RfdId,
 
         /// The RFD it builds on.
+        #[arg(value_parser = RfdId::parse_id_or_path)]
         target: RfdId,
     },
 
     /// Record that one RFD can't be accepted or implemented before another.
     Require {
         /// The RFD that depends on the other.
+        #[arg(value_parser = RfdId::parse_id_or_path)]
         id: RfdId,
 
         /// The RFD it depends on.
+        #[arg(value_parser = RfdId::parse_id_or_path)]
         target: RfdId,
     },
 
     /// Record that one RFD replaces another.
     Supersede {
         /// The RFD being replaced, Accepted or Implemented.
+        #[arg(value_parser = RfdId::parse_id_or_path)]
         id: RfdId,
 
         /// The RFD that replaces it.
+        #[arg(value_parser = RfdId::parse_id_or_path)]
         by: RfdId,
     },
 
     /// Set an RFD aside, keeping the document and the reason.
     Abandon {
-        /// The RFD: a number (`42`, `042`) or a draft id (`D05`).
+        /// The RFD: a number (`42`, `042`), a draft id (`D05`), or the path of
+        /// its file.
+        #[arg(value_parser = RfdId::parse_id_or_path)]
         id: RfdId,
 
         /// Why it was set aside.
@@ -237,7 +256,9 @@ enum Command {
 
     /// Give an RFD a new title, moving its file to match.
     Rename {
-        /// The RFD: a number (`42`, `042`) or a draft id (`D05`).
+        /// The RFD: a number (`42`, `042`), a draft id (`D05`), or the path of
+        /// its file.
+        #[arg(value_parser = RfdId::parse_id_or_path)]
         id: RfdId,
 
         /// The new title, which also names the file.
@@ -249,14 +270,15 @@ enum Command {
     #[command(group(ArgGroup::new("place").required(true)))]
     Rank {
         /// The RFD to move.
+        #[arg(value_parser = RfdId::parse_id_or_path)]
         id: RfdId,
 
         /// Place it directly above this RFD, in its milestone group.
-        #[arg(long, group = "place", value_name = "OTHER")]
+        #[arg(long, group = "place", value_name = "OTHER", value_parser = RfdId::parse_id_or_path)]
         before: Option<RfdId>,
 
         /// Place it directly below this RFD, in its milestone group.
-        #[arg(long, group = "place", value_name = "OTHER")]
+        #[arg(long, group = "place", value_name = "OTHER", value_parser = RfdId::parse_id_or_path)]
         after: Option<RfdId>,
 
         /// Move it to the backlog.
@@ -645,7 +667,7 @@ fn execute<R: BufRead, W: Write>(
             from_ticket,
         } => draft(ctx, &category, &title.join(" "), from_ticket),
 
-        Command::Promote { id } => promote(ctx, id, session),
+        Command::Promote { id, number } => promote(ctx, id, number, session),
 
         Command::Track { id } => {
             let vocabulary = ticket_vocabulary(ctx.config)?;
@@ -764,11 +786,12 @@ const FILE_TRACKING_TICKET: &str = "file";
 fn promote<R: BufRead, W: Write>(
     ctx: &Context<'_>,
     id: RfdId,
+    number: Option<RfdId>,
     session: &mut Session<'_, R, W>,
 ) -> Result<Output, String> {
     let file = ctx.paths.resolve(id)?;
     let before = Document::parse(&paths::read(&file)?).header().status();
-    let promoted = cmd::promote::promote(&ctx.paths, id)?;
+    let promoted = cmd::promote::promote(&ctx.paths, id, number)?;
 
     // A project without tickets doesn't track its RFDs.
     if before.as_deref() != Some("Discussion") || !ctx.paths.tickets.is_dir() {

@@ -80,6 +80,42 @@ fn a_file_name_names_an_id_only_in_its_canonical_form() {
 }
 
 #[test]
+fn an_id_or_the_path_of_an_rfd_file_names_an_id() {
+    for text in [
+        "42",
+        "RFD 042",
+        "042-slug.md",
+        "docs/rfd/042-slug.md",
+        "/abs/042-slug.md",
+    ] {
+        assert_eq!(
+            RfdId::parse_id_or_path(text),
+            Ok(RfdId::Published(42)),
+            "{text}"
+        );
+    }
+    for text in ["D5", "D05-sketch.md", "docs/rfd/drafts/D05-sketch.md"] {
+        assert_eq!(RfdId::parse_id_or_path(text), Ok(RfdId::Draft(5)), "{text}");
+    }
+}
+
+#[test]
+fn a_path_whose_file_name_carries_no_id_is_refused() {
+    for text in [
+        "docs/rfd/index.md",
+        "docs/rfd/42-slug.md",
+        "docs/rfd/000-design-template.md",
+        "docs/rfd/042-slug",
+    ] {
+        assert_eq!(
+            RfdId::parse_id_or_path(text),
+            Err(InvalidId(text.to_owned())),
+            "{text}"
+        );
+    }
+}
+
+#[test]
 fn resolve_finds_published_rfds_and_drafts_in_their_directories() {
     let dir = Utf8TempDir::new().unwrap();
     fs::create_dir_all(dir.path().join("drafts")).unwrap();
