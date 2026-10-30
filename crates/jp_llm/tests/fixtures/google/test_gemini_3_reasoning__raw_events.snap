@@ -22,6 +22,15 @@ expression: v
             ),
             metadata: {},
         },
+        Part {
+            index: 1,
+            part: Message(
+                "",
+            ),
+            metadata: {
+                "google_thought_signature": String("Eo8JCowJARFNMg/033qBsEf6zRq58AdahW4ZjQqZRlJwInVsHsNJafnLyv9nX7fH7pTZuncy+kQifWIK+ffGD5qkVlEmtKpu+KNWevdh1crrcBmeh5yanr9uPKUDq5D8sBDF78dXGFSYsnRVDX3UBHyppjE1O3BI+dZvrXjvJK3+81Wt5rM47ODhrQw945TuYOHD6vfrZa9dRnXYwl95dOQaK34fI4gUUGPAlacKI0LG5w3MV5RgWw3SM58Dg864U+z3edczjT57sAaKc3DLS670bNZd87GNfwLg7cHTCAvJm6ePV4QPxAvaeMYonSQg+NwEGs349fSpA89QD5z5atWEmX8PI7NQvHbGlIDL4o2CTBHBxiqE2FuK2s01sYVwCRGwc2aCwEUmNRYHW0lz/Q+mDcjDkSzG9P2v+wBaQE+WcpOX/wzO4zEvWeF2a0QV69A9TlNYda0lO/RH27oeFmnzfdnEpdREiKE/ub3W8E++mdNU/fJVOnDfuJ8o+HclpsGUggTcOoiC9+yiWSJfg8N8SLyNWTKUUN3Uv3fqdlanMyRkdeqrhIU47aLB4YAKHaTAViGZiIS4cyzwkX7/ggLZDBOGS7NhQRfNnWv3W9kPeP1VM/ZXAw/tSvW6eAF+EtWo8/FJLemg1J0mei6Rc59UUIfbA9XHnPvqclI99ADeFg8fhcRho1Ebyeh1F3BuKiTlKNBir2fSt03HCEMbgOyFJfBve9Bp4ZmH9DOqL4tBKlq/6qhyUXiM8YORmt+UQxkI6ouCMyatZIkQhUab5LKydbztWe0Phb1RxXYfEOtMYhGGb5QzoCCox1I96XnngjLrwfNSqCY+2CAFGx6YRvhgTLhCbkL7Dm0gW4ohr2zXnUqCAE+9GGrE1NcNpRwBZ2N3oX43hu9acw6h0i0J6N2a55aPBpOYeK5/PExUq8CWdpFBOEjAqXoRmAFFCAIYEb16+6dVzmei+qyHlFcQ1LoZIGt372Y/R45lcjwhhAxbYnUzL0FutF5JiYAWH/lDrb7Q++w/147UsfXYaXRbQukdRdKZOZVus1EBL9ttGqGTdO1uiDJyeQ0oNmqPNxdY2L6BEMOGJDdbjXHOtirnj0jp140ga7uxAVfKGekgcUeAWFnwle8HB3FfwNw6LaV1h2k77iZr66or8Q7MK9mIEBzxl5YI29Aeh4u0yh5JF3lZidbAfm5ByoRTAU+vnN/FqcmrWfuXx3xf8x0ddlbPNMqJSSjAEQI0JCPnnMG6fLA0GbQJDmqEA2tbvU6I+u7Ly67MAcM1M9MdLsnDoILmkjtJvkyk74jaC6WMdcourIdYXlV4s3KmQzr89GuUHHQ9KsmMsAtnblqkII94C7ledyYhExxhqF/d1MF9d0fXfriX7c6qK35AWHPHh9fJVNY9SL4VkdToYOBlLXPg+rcj8KGPR85gvylK7PPY5h9aPqj1OlFnls/VfYkvHg5npC4bUNu+yYBucMYDXz76z2VVKq54p6AG5pGecS3tiR9aLX+bhBQokf0qVEGX9ze6ELlRKHjdDeHdLqB48Rb2VHfn0fC0"),
+            },
+        },
         Flush {
             index: 1,
             metadata: {},

@@ -572,6 +572,150 @@ async fn test_unknown_model_inferred_thinking_level()
     run_test(PROVIDER, function_name!(), Some(request)).await
 }
 
+/// Gemini can end a response with a part holding no text and only a thought
+/// signature.
+/// The signature is part of the model's turn and has to reach the next request.
+mod trailing_thought_signature {
+    use gemini_client_rs::types;
+    use indexmap::IndexMap;
+    use jp_conversation::{ConversationEvent, ConversationStream, event::ChatRequest};
+    use serde_json::{Value, json};
+
+    use crate::{
+        event::Event,
+        event_builder::EventBuilder,
+        provider::google::{THOUGHT_SIGNATURE_KEY, convert_events, map_response},
+    };
+
+    fn chunk(parts: &Value, finish_reason: Option<&str>) -> types::GenerateContentResponse {
+        serde_json::from_value(json!({
+            "candidates": [{
+                "content": { "parts": parts, "role": "model" },
+                "finishReason": finish_reason,
+                "index": 0,
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 10,
+                "totalTokenCount": 20,
+                "promptTokensDetails": [],
+                "cacheTokensDetails": [],
+                "candidatesTokensDetails": [],
+                "toolUsePromptTokensDetails": [],
+            },
+        }))
+        .expect("valid response chunk")
+    }
+
+    /// Map the chunks the way a live stream does, and commit the events the way
+    /// the turn coordinator does.
+    fn commit(chunks: Vec<types::GenerateContentResponse>) -> Vec<ConversationEvent> {
+        let mut state = IndexMap::new();
+        let mut builder = EventBuilder::new();
+        let mut committed = vec![];
+
+        for chunk in chunks {
+            for event in map_response(chunk, &mut state, false).expect("mappable chunk") {
+                match event {
+                    Event::Part {
+                        index,
+                        part,
+                        metadata,
+                    } => builder.handle_part(index, part, metadata),
+                    Event::Flush { index, metadata } => {
+                        committed.extend(builder.handle_flush(index, metadata));
+                    }
+                    Event::Finished(_) => committed.extend(builder.drain()),
+                    _ => {}
+                }
+            }
+        }
+
+        committed
+    }
+
+    fn signatures(events: &[ConversationEvent]) -> Vec<&str> {
+        events
+            .iter()
+            .filter_map(|e| e.metadata.get(THOUGHT_SIGNATURE_KEY))
+            .filter_map(Value::as_str)
+            .collect()
+    }
+
+    /// The shape Gemini sent when it stopped without answering: reasoning, a
+    /// message holding only a newline, then the signature on an empty part.
+    #[test]
+    fn signature_after_a_blank_message_is_kept_and_resent() {
+        let committed = commit(vec![
+            chunk(
+                &json!([{ "thought": true, "text": "Refining the plan." }]),
+                None,
+            ),
+            chunk(&json!([{ "text": "\n" }]), None),
+            chunk(
+                &json!([{ "text": "", "thoughtSignature": "SIG" }]),
+                Some("STOP"),
+            ),
+        ]);
+
+        assert_eq!(signatures(&committed), ["SIG"]);
+
+        let mut events = ConversationStream::new_test();
+        events.start_turn(ChatRequest::from("plan it"));
+        events.extend(committed);
+        events.start_turn(ChatRequest::from("continue"));
+
+        let contents = convert_events(events);
+        let model = &contents[1];
+        assert_eq!(model.role, Some(types::Role::Model));
+
+        // Resent as Google sent it: a non-thought part with no text.
+        let last = model.parts.last().expect("model parts");
+        assert!(!last.thought);
+        assert!(matches!(&last.data, types::ContentData::Text(text) if text.is_empty()));
+        assert_eq!(last.thought_signature.as_deref(), Some("SIG"));
+    }
+
+    /// A signature arriving while an answer is still open belongs to that
+    /// answer; it does not become an event of its own.
+    #[test]
+    fn signature_after_an_answer_attaches_to_the_answer() {
+        let committed = commit(vec![
+            chunk(
+                &json!([{ "thought": true, "text": "Refining the plan." }]),
+                None,
+            ),
+            chunk(&json!([{ "text": "Here is the plan." }]), None),
+            chunk(
+                &json!([{ "text": "", "thoughtSignature": "SIG" }]),
+                Some("STOP"),
+            ),
+        ]);
+
+        assert_eq!(committed.len(), 2);
+        let answer = committed[1]
+            .as_chat_response()
+            .and_then(|r| r.as_message())
+            .expect("answer message");
+        assert_eq!(answer, "Here is the plan.");
+        assert_eq!(
+            committed[1].metadata.get(THOUGHT_SIGNATURE_KEY),
+            Some(&json!("SIG"))
+        );
+    }
+
+    /// Empty parts without a signature carry nothing and stay skipped.
+    #[test]
+    fn empty_part_without_signature_commits_nothing() {
+        let committed = commit(vec![
+            chunk(&json!([{ "text": "Here is the plan." }]), None),
+            chunk(&json!([{ "text": "" }]), Some("STOP")),
+        ]);
+
+        assert_eq!(committed.len(), 1);
+        assert!(signatures(&committed).is_empty());
+    }
+}
+
 mod thought_signature_recovery {
     use gemini_client_rs::types;
 

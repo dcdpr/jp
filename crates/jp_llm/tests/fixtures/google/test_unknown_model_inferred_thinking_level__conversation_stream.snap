@@ -264,7 +264,10 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "2 + 2 is 4."
+      "message": "2 + 2 is 4.",
+      "metadata": {
+        "google_thought_signature": "RXZRQ0N2RUNBUkZOTWcrVXJtUFF3SlZZSlF4Mi9kTFUzR1VTdmJ3bDJRZmFKeUtjYnJJbVNCOTkwOHNjZDJORnozQVR2bEdmZjJQYWtCMDBnV2MzNzd6S1U2TTRBendxVUxNbG54eUIvamJialI0cFRBQ08xOWozWlRhWHV1b1Y5S1RESkg2V3Q3WUhpTzhVanRWMGp1cjVTRjQ4WklBUGk3YURBNWpCMlpaMUM4SHZDSDJaUmVuMnpFeHkxa01kei9GaXJ6RWFiSGZ1NnduWDVIVVJwa2EybzdUY2tmWjVzK0RERnE1Q3Brc0N0aUpLa1p0U1FFeEN3a1JMYVdVQ2pSNzhkUFdOSm9qUWpudGZmTmg1MU9hSjh1Rk1wSVI1K0JJZkFycEZJOWVvTUlqcGpyckVnbW5aZTJhTXdUbG0xTEpFZTFnOERwbUluNXNUTTE1ekljelJ2NTFkelFNeUhuWkZ6Tkp5dWdEaVo3MmpDSFVCMzBhRjIydy8zRGZzQTdhcHRIajJXc3lCZml4dmROMzBsdzlVRHRpVDlvN2sva3p3MDRwMmV3UDBHY3VvVnAwSnNkcThjV1BpSVVaeDY2NFFGaUN3eVdUNTIzTFpUVWpvZlcxMEZtbnliWks5UDgzZ043S0tQR3JIZUtWei9hUDk="
+      }
     }
   ]
 }
