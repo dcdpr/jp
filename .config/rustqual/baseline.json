@@ -1,10 +1,10 @@
 {
   "version": 2,
-  "quality_score": 0.7213669590895615,
-  "iosp_score": 0.9183123096998695,
+  "quality_score": 0.7215428487488884,
+  "iosp_score": 0.9183904050060838,
   "violations": 939,
-  "total": 15801,
-  "complexity_warnings": 178,
+  "total": 15815,
+  "complexity_warnings": 179,
   "magic_number_warnings": 241,
   "nesting_depth_warnings": 30,
   "function_length_warnings": 468,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 51,
   "structural_coupling_warnings": 10,
-  "total_findings": 2998,
+  "total_findings": 2999,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -4363,17 +4363,17 @@
     {
       "name": "map_candidate",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 822
+      "line": 872
     },
     {
       "name": "process_schema",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 1005
+      "line": 1065
     },
     {
       "name": "StreamError::from",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 1315
+      "line": 1380
     },
     {
       "name": "prepare_soft_force_retry_request",

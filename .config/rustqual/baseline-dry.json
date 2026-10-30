@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.6631940916092905,
-  "iosp_score": 0.8177606177606178,
+  "quality_score": 0.6635161537481119,
+  "iosp_score": 0.8177957923180853,
   "violations": 944,
-  "total": 7211,
+  "total": 7213,
   "complexity_warnings": 0,
   "magic_number_warnings": 0,
   "nesting_depth_warnings": 0,
@@ -11,7 +11,7 @@
   "unsafe_warnings": 0,
   "error_handling_warnings": 0,
   "duplicate_groups": 52,
-  "dead_code_warnings": 245,
+  "dead_code_warnings": 243,
   "dead_type_warnings": 28,
   "fragment_groups": 76,
   "boilerplate_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 0,
   "structural_coupling_warnings": 0,
-  "total_findings": 1392,
+  "total_findings": 1390,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -4388,17 +4388,17 @@
     {
       "name": "map_candidate",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 822
+      "line": 872
     },
     {
       "name": "process_schema",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 1005
+      "line": 1065
     },
     {
       "name": "StreamError::from",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 1315
+      "line": 1380
     },
     {
       "name": "prepare_soft_force_retry_request",
