@@ -6,6 +6,7 @@ use super::*;
 use crate::{
     assignment::{KvAssignmentError, KvAssignmentErrorKind},
     assistant::instructions::PartialInstructionsConfig,
+    model::id::{ModelIdOrAliasConfig, PartialModelIdOrAliasConfig},
 };
 
 #[test]
@@ -1293,6 +1294,98 @@ fn resolve_model_aliases_resolves_assistant_model() {
         }
         PartialModelIdOrAliasConfig::Alias(a) => panic!("expected Id, got Alias({a})"),
     }
+}
+
+/// Compaction rules are stored in a conversation's config like every other
+/// field, so a summary model named by alias has to resolve before they are.
+#[test]
+fn resolve_model_aliases_resolves_compaction_summary_models() {
+    let aliases = IndexMap::from([(
+        "fast".to_owned(),
+        "ollama/llama3.2:3b"
+            .parse::<ModelIdOrAliasConfig>()
+            .unwrap(),
+    )]);
+
+    let mut partial = PartialAppConfig::empty();
+    partial
+        .assign(
+            KvAssignment::try_from_cli(
+                "conversation.compaction.rules:",
+                r#"[{"summary": {"model": {"id": "fast"}}}, {"reasoning": "strip"}]"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+    partial.resolve_model_aliases(&aliases);
+
+    let ids: Vec<_> = partial
+        .conversation
+        .compaction
+        .rules
+        .iter()
+        .map(|rule| {
+            rule.summary
+                .as_ref()
+                .and_then(|summary| summary.model.as_ref())
+                .map(|model| model.id.clone())
+        })
+        .collect();
+
+    assert_eq!(ids, [
+        Some(PartialModelIdOrAliasConfig::from("ollama/llama3.2:3b")),
+        None
+    ]);
+}
+
+/// `style.reasoning.summary_model` names a model like the other model fields,
+/// so an alias in it resolves before a partial is stored in a conversation.
+#[test]
+fn resolve_model_aliases_resolves_the_reasoning_summary_model() {
+    let aliases = IndexMap::from([(
+        "fast".to_owned(),
+        "ollama/llama3.2:3b"
+            .parse::<ModelIdOrAliasConfig>()
+            .unwrap(),
+    )]);
+
+    let mut partial = PartialAppConfig::empty();
+    partial
+        .assign(KvAssignment::try_from_cli("style.reasoning.summary_model.id", "fast").unwrap())
+        .unwrap();
+
+    partial.resolve_model_aliases(&aliases);
+
+    assert_eq!(
+        partial.style.reasoning.summary_model.map(|model| model.id),
+        Some(PartialModelIdOrAliasConfig::from("ollama/llama3.2:3b"))
+    );
+}
+
+/// The same alias resolves when the config is built, so none reaches the
+/// resolved config.
+#[test]
+fn build_resolves_the_reasoning_summary_model_alias() {
+    let mut partial = PartialAppConfig::new_test();
+    partial.providers.llm.aliases.insert(
+        "fast".to_owned(),
+        PartialModelIdOrAliasConfig::from("ollama/llama3.2:3b"),
+    );
+    partial
+        .assign(KvAssignment::try_from_cli("style.reasoning.summary_model.id", "fast").unwrap())
+        .unwrap();
+
+    let config = util::build(partial).unwrap();
+
+    assert_eq!(
+        config.style.reasoning.summary_model.map(|model| model.id),
+        Some(
+            "ollama/llama3.2:3b"
+                .parse::<ModelIdOrAliasConfig>()
+                .unwrap()
+        )
+    );
 }
 
 #[test]

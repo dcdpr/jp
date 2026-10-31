@@ -675,6 +675,12 @@ impl AppConfig {
             }
         }
 
+        if let Some(ref mut model) = self.style.reasoning.summary_model {
+            model.id.resolve_in_place(aliases).map_err(|e| {
+                Error::Custom(format!("style.reasoning.summary_model.id: {e}").into())
+            })?;
+        }
+
         Ok(())
     }
 }
@@ -803,6 +809,18 @@ impl PartialAppConfig {
             .model
             .id
             .resolve_in_place(aliases);
+
+        for rule in self.conversation.compaction.rules.iter_mut() {
+            if let Some(summary) = rule.summary.as_mut()
+                && let Some(model) = summary.model.as_mut()
+            {
+                model.id.resolve_in_place(aliases);
+            }
+        }
+
+        if let Some(ref mut model) = self.style.reasoning.summary_model {
+            model.id.resolve_in_place(aliases);
+        }
 
         if let Some(ref mut model) = self.conversation.title.generate.model {
             model.id.resolve_in_place(aliases);
