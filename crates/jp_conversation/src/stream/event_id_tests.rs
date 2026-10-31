@@ -536,10 +536,10 @@ fn trimming_a_turn_keeps_the_id_of_an_overlay_it_preserves() {
     stream.add_compaction(Compaction::new(0, 0));
     let overlay_id = ids(&stream)[3].clone();
 
-    let request = stream.trim_chat_request();
+    let request = stream.trim_last_turn();
 
     assert_eq!(request.map(|r| r.content), Some("question".to_owned()));
-    assert_eq!(ids(&stream), ["turn001".to_owned(), overlay_id]);
+    assert_eq!(ids(&stream), [overlay_id]);
 }
 
 #[test]

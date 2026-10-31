@@ -271,42 +271,47 @@ impl ConversationStream {
             .collect())
     }
 
-    /// Removes all events from the end of the stream, until a [`ChatRequest`]
-    /// is found, returning that request.
+    /// Removes the last turn from the stream, returning the [`ChatRequest`]
+    /// that opened it.
     ///
-    /// [`ConfigDelta`] and [`Compaction`] overlays encountered while trimming
-    /// are preserved (re-appended) rather than discarded — they apply to the
-    /// conversation as a whole, not to the turn being replayed.
+    /// The last turn is the one holding the stream's last `ChatRequest`, and it
+    /// runs from its [`TurnStart`] to the end of the stream.
+    /// Every turn entry in it is removed, including a request that answered an
+    /// interrupt partway through the turn.
+    /// [`ConfigDelta`] and [`Compaction`] overlays in it are kept: they apply
+    /// to the conversation as a whole, not to the turn they sit in.
+    ///
+    /// Returns `None`, leaving the stream unchanged, when it holds no
+    /// `ChatRequest`.
+    ///
+    /// [`TurnStart`]: crate::event::TurnStart
     #[must_use]
-    pub fn trim_chat_request(&mut self) -> Option<ChatRequest> {
-        let mut preserved = Vec::new();
-        let mut request = None;
+    pub fn trim_last_turn(&mut self) -> Option<ChatRequest> {
+        let last_request = self
+            .events
+            .iter()
+            .rposition(|e| e.as_event().is_some_and(ConversationEvent::is_chat_request))?;
 
-        while let Some(internal) = self.events.pop() {
-            match internal.scope() {
-                EventScope::Global => preserved.push(internal),
-                EventScope::Turn => {
-                    if let Some(req) = internal
-                        .into_event()
-                        .and_then(ConversationEvent::into_chat_request)
-                    {
-                        request = Some(req);
-                        break;
-                    }
-                    // A non-chat-request conversation event (response,
-                    // reasoning, tool call) — part of the replayed turn; drop.
-                }
-            }
-        }
+        // Events before the first `TurnStart` form an implicit leading turn,
+        // which starts at the beginning of the stream.
+        let start = self.events[..=last_request]
+            .iter()
+            .rposition(|e| e.as_event().is_some_and(ConversationEvent::is_turn_start))
+            .unwrap_or(0);
 
-        // Re-append preserved overlays in their original order, whether or not
-        // a request was found, so they survive the trim.
-        //
-        // Appended directly rather than through `adopt`: these are the entries
-        // just popped, so `event_ids` still holds their IDs and `adopt` would
-        // read that as a collision and reassign them.
-        preserved.reverse();
-        self.events.append(&mut preserved);
+        let request = self.events[start..]
+            .iter()
+            .find_map(|e| e.as_event().and_then(ConversationEvent::as_chat_request))
+            .cloned();
+
+        // Removed in place, so the overlays keep their IDs, and the IDs of the
+        // removed entries stay retired.
+        let mut index = 0;
+        self.events.retain(|e| {
+            let keep = index < start || e.scope() == EventScope::Global;
+            index += 1;
+            keep
+        });
 
         request
     }

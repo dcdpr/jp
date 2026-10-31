@@ -3290,11 +3290,11 @@ fn summarize_turns(stream: &mut ConversationStream, summaries: &[&str]) {
     }
 }
 
-/// `--replay` replays a turn's last request.
-/// When that is a reply to an interrupt, the turn keeps its opening request but
-/// loses the reply and the answer after it, which its summary describes.
+/// `--replay` replays the whole last turn, including a reply sent while it was
+/// interrupted, so the turn goes with its summary and the turn before keeps its
+/// own.
 #[test]
-fn pending_trim_replay_clears_the_summary_of_a_turn_it_shortens() {
+fn pending_trim_replay_removes_a_turn_holding_an_interrupt_reply() {
     let mut stream = ConversationStream::new_test();
     stream.start_turn("Set up the project");
     stream
@@ -3321,16 +3321,15 @@ fn pending_trim_replay_clears_the_summary_of_a_turn_it_shortens() {
     }
     .apply(&mut stream);
 
-    assert_eq!(turn_summaries(&stream), [
-        Some("Set up the project".to_owned()),
-        None
-    ]);
+    assert_eq!(turn_summaries(&stream), [Some(
+        "Set up the project".to_owned()
+    )]);
 }
 
-/// A replay that empties its turn removes the turn, summary and all, and leaves
-/// the summary of the turn before it alone.
+/// Bare `--no-edit` popping a turn's only request empties the turn, which goes
+/// with its summary, and leaves the summary of the turn before it alone.
 #[test]
-fn pending_trim_replay_of_a_whole_turn_keeps_the_summary_before_it() {
+fn pending_trim_pop_request_of_a_turns_only_request_keeps_the_summary_before_it() {
     let mut stream = ConversationStream::new_test();
     stream.start_turn("Set up the project");
     stream
@@ -3339,16 +3338,11 @@ fn pending_trim_replay_of_a_whole_turn_keeps_the_summary_before_it() {
         .build()
         .unwrap();
     stream.start_turn("Add retries to the stream handler");
-    stream
-        .current_turn_mut()
-        .add_chat_response(ChatResponse::message("Added."))
-        .build()
-        .unwrap();
     summarize_turns(&mut stream, &["Set up the project", "Add stream retries"]);
 
     PendingStreamTrim {
-        replay_turn: true,
-        pop_request: false,
+        replay_turn: false,
+        pop_request: true,
     }
     .apply(&mut stream);
 

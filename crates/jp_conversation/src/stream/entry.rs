@@ -244,7 +244,7 @@ impl<'de> Deserialize<'de> for EventPayload {
 /// conversation as a whole.
 ///
 /// This is the single source of truth for which events survive turn-level
-/// pruning (`pop`, `trim_chat_request`, `pop_if`, `retain`).
+/// pruning (`pop`, `trim_last_turn`, `pop_if`, `retain`).
 /// Adding a new `EventPayload` variant forces a classification here:
 /// [`InternalEvent::scope`] is an exhaustive match, so no pruning caller can
 /// silently mistreat it.
