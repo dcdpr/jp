@@ -59,6 +59,7 @@ impl AssignKeyValue for PartialInstructionsConfig {
             "" => *self = kv.try_object_or_from_str()?,
             "title" => self.title = kv.try_some_string()?,
             "description" => self.description = kv.try_some_string()?,
+            "position" => self.position = kv.try_some_number_or_from_str()?,
             _ if kv.p("items") => kv.try_some_vec_of_strings(&mut self.items)?,
             _ if kv.p("examples") => kv.try_vec_of_nested(&mut self.examples)?,
             _ => return missing_key(&kv),

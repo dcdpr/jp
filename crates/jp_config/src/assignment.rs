@@ -965,12 +965,17 @@ impl KvAssignment {
     }
 
     /// Try to parse the value as a 32-bit floating point number.
+    ///
+    /// Any JSON number is accepted, so `1` sets `1.0`, as it does in a config
+    /// file.
     pub(crate) fn try_f32(self) -> Result<f32, KvAssignmentError> {
         let Self { key, value, .. } = self;
 
         match value {
             #[expect(clippy::cast_possible_truncation)]
-            KvValue::Json(Value::Number(v)) if v.is_f64() => Ok(v.as_f64().expect("is f64") as f32),
+            KvValue::Json(Value::Number(v)) if v.as_f64().is_some() => {
+                Ok(v.as_f64().expect("is a number") as f32)
+            }
             KvValue::Json(_) => type_error(&key, &value, &["float", "string"]),
             KvValue::String(v) => Ok(v
                 .parse()

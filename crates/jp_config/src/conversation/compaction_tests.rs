@@ -263,6 +263,30 @@ fn rule_config_deserializes_integer_bounds() {
     assert_eq!(rule.keep_last, Some(RuleBound::Turns(3)));
 }
 
+/// A bound assigned with `--cfg` means what it means in a config file: a number
+/// is a turn count, and a negative number is refused rather than read as a
+/// from-end position, which only the string spelling names.
+#[test]
+fn assigning_a_rule_bound_matches_the_config_file() {
+    let mut rule = PartialCompactionRuleConfig::default();
+
+    rule.assign(KvAssignment::try_from_cli("keep_first:", "3").unwrap())
+        .unwrap();
+    assert_eq!(rule.keep_first, Some(RuleBound::Turns(3)));
+
+    rule.assign(KvAssignment::try_from_cli("keep_last", "-1").unwrap())
+        .unwrap();
+    assert_eq!(rule.keep_last, Some(RuleBound::FromEnd(0)));
+
+    rule.assign(KvAssignment::try_from_cli("keep_last", "5h").unwrap())
+        .unwrap();
+    assert!(matches!(rule.keep_last, Some(RuleBound::Duration(_))));
+
+    let negative = KvAssignment::try_from_cli("keep_first:", "-1").unwrap();
+    assert!(rule.assign(negative).is_err());
+    assert_eq!(rule.keep_first, Some(RuleBound::Turns(3)));
+}
+
 #[test]
 fn rule_partial_roundtrip_json() {
     let rule = PartialCompactionRuleConfig {

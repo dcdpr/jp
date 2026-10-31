@@ -13,6 +13,10 @@
 //! value outside that list has to be rejected.
 //! Without that check a schema could advertise four spellings while the parser
 //! quietly took anything, and every positive probe would still pass.
+//!
+//! [`number_probes`] does the same for numbers, for the other way a value
+//! reaches a field: a key-value assignment, which each field parses in its own
+//! `assign` arm rather than through `Deserialize`.
 
 use schematic::{
     Schema, SchemaType,
@@ -355,6 +359,113 @@ fn collect_enum(enum_type: &EnumType, path: &[Step], out: &mut Vec<Probe>) {
     }
 }
 
+/// Every number the schema says a field accepts, as a document that writes it.
+///
+/// A field accepts a number when its type is an integer or a float, or a union
+/// with one of those among its variants.
+/// A float field is probed with an integer too, since a config file may write
+/// `temperature = 1` and the deserializer reads it.
+///
+/// The walk follows structs, maps, array items, the value an optional wraps,
+/// and the expanded form a shorthand abbreviates: the shapes a key or an object
+/// reaches a field through.
+/// It does not enter any other struct variant of a union, which is a table form
+/// written in place of a scalar rather than a field of its own.
+///
+/// Documents carry no sibling keys, so each one sets its own field and nothing
+/// else.
+#[must_use]
+pub fn number_probes(schema: &Schema) -> Vec<Probe> {
+    let mut out = Vec::new();
+    collect_numbers(schema, &mut Vec::new(), &mut out, &mut Vec::new());
+    out
+}
+
+/// Walk a schema, recording a probe for every number a field accepts.
+fn collect_numbers(
+    schema: &Schema,
+    path: &mut Vec<Step>,
+    out: &mut Vec<Probe>,
+    enclosing: &mut Vec<String>,
+) {
+    if let Some(name) = &schema.name {
+        if enclosing.contains(name) {
+            return;
+        }
+        enclosing.push(name.clone());
+    }
+
+    let mut record = |value: Value| {
+        let probe = place(path, value.to_string(), value);
+        if !out.contains(&probe) {
+            out.push(probe);
+        }
+    };
+
+    match &schema.ty {
+        SchemaType::Integer(_) => record(json!(1)),
+        SchemaType::Float(_) => {
+            record(json!(1));
+            record(json!(0.5));
+        }
+        SchemaType::Struct(struct_type) => {
+            for (name, field) in &struct_type.fields {
+                if field.hidden {
+                    continue;
+                }
+
+                if !field.flatten {
+                    path.push(Step::Field {
+                        name: name.clone(),
+                        siblings: serde_json::Map::new(),
+                    });
+                }
+
+                collect_numbers(&field.schema, path, out, enclosing);
+
+                if !field.flatten {
+                    path.pop();
+                }
+            }
+        }
+        SchemaType::Object(object) => {
+            path.push(Step::MapEntry);
+            collect_numbers(&object.value_type, path, out, enclosing);
+            path.pop();
+        }
+        SchemaType::Array(array) => {
+            path.push(Step::Item);
+            collect_numbers(&array.items_type, path, out, enclosing);
+            path.pop();
+        }
+        SchemaType::Union(union) => {
+            let alternatives = union
+                .variants_types
+                .iter()
+                .filter(|variant| !variant.ty.is_null())
+                .count();
+
+            for (index, variant) in union.variants_types.iter().enumerate() {
+                // A list or map variant is the plain form of a collection that
+                // can also be written with its merge strategy, so its items are
+                // reached either way.
+                let table = matches!(variant.ty, SchemaType::Struct(_));
+
+                if table && alternatives > 1 && union.expanded_index != Some(index) {
+                    continue;
+                }
+
+                collect_numbers(variant, path, out, enclosing);
+            }
+        }
+        _ => {}
+    }
+
+    if schema.name.is_some() {
+        enclosing.pop();
+    }
+}
+
 /// The value used to check that a closed vocabulary really is closed.
 pub const SENTINEL: &str = "__jp_schema_probe_invalid__";
 
@@ -449,9 +560,15 @@ fn collect_rejections(
     }
 }
 
-/// Build the document that writes `value` at `path`.
+/// Build the document that writes the string `value` at `path`.
 fn probe(path: &[Step], value: &str) -> Probe {
-    let mut document = json!(value);
+    place(path, value.to_owned(), json!(value))
+}
+
+/// Build the document that writes `value` at `path`, labelled `label` in a
+/// failure message.
+fn place(path: &[Step], label: String, value: Value) -> Probe {
+    let mut document = value;
 
     for step in path.iter().rev() {
         document = match step {
@@ -467,7 +584,7 @@ fn probe(path: &[Step], value: &str) -> Probe {
 
     Probe {
         path: render_path(path),
-        value: value.to_owned(),
+        value: label,
         document,
     }
 }

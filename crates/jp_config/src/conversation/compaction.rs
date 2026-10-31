@@ -291,8 +291,11 @@ impl AssignKeyValue for PartialCompactionRuleConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
-            "keep_first" => self.keep_first = kv.try_some_from_str()?,
-            "keep_last" => self.keep_last = kv.try_some_from_str()?,
+            // Through `RuleBound`'s deserializer, so a number means what it
+            // means in a config file: `1` is a turn count and `-1` is refused,
+            // while the string `"-1"` is still the last turn.
+            "keep_first" => self.keep_first = kv.try_some_value()?,
+            "keep_last" => self.keep_last = kv.try_some_value()?,
             "reasoning" => self.reasoning = kv.try_some_from_str()?,
             "tool_calls" => self.tool_calls = kv.try_some_from_str()?,
             _ if kv.p("summary") => self.summary.assign(kv)?,

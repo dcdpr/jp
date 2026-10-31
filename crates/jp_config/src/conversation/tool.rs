@@ -2219,7 +2219,7 @@ impl AssignKeyValue for PartialFanOutConfig {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object_bool_or_from_str()?,
             "enabled" => self.enabled = kv.try_some_bool()?,
-            "concurrency" => self.concurrency = kv.try_some_from_str()?,
+            "concurrency" => self.concurrency = kv.try_some_number_or_from_str()?,
             "on_error" => self.on_error = kv.try_some_from_str()?,
             _ => return missing_key(&kv),
         }
