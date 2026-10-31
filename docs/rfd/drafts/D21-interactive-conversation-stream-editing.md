@@ -215,7 +215,7 @@ suffix:
 
 | Event type     | Suffix                    | Extension |
 | -------------- | ------------------------- | --------- |
-| `ChatRequest`  | `request`                 | `.md`     |
+| `ChatRequest`  | `request`, `reply`        | `.md`     |
 | `ChatResponse` | `message`, `reasoning`,   | `.md`     |
 |                | `structured`              |           |
 | `ToolCallReq`  | `tool-call-{tool_name}`   | `.md`     |
@@ -233,18 +233,26 @@ The `CONVERSATION` file determines final ordering.
 
 `TurnStart` events are not represented as files, and the turn headers in the
 plan file have no semantic effect.
-Turn boundaries are inferred during reconstruction: each `ChatRequest` starts a
+Turn boundaries are inferred during reconstruction: each `request` file starts a
 turn.
 
-A reconstructed turn reuses the original `TurnStart` of the turn its opening
-`ChatRequest` came from, so it keeps that turn's `event_id`:
+A `ChatRequest` is not always the first in its turn.
+Replying to an interrupt (`InterruptAction::Reply`) adds one to the running
+turn, after whatever the assistant had written by then.
+Such a request is written as a `reply` file (`type: reply`) and continues the
+turn it appears in.
+Changing a file's `type` from `reply` to `request` splits its turn in two, and
+the reverse joins two turns into one.
+
+A reconstructed turn opened by a `request` that opened a turn before the edit
+reuses that turn's `TurnStart`, so it keeps its `event_id`:
 
 - The turn summary survives only if the turn is unchanged: the same event files
   in the same order, each with its original hash.
   Config deltas and compactions belong to no turn and do not count.
   Otherwise the summary is cleared, and the next `jp query` regenerates it.
-- A turn opened by a new `ChatRequest` file gets a fresh `TurnStart` with no
-  summary.
+- A turn opened by a new `request` file, or by a `reply` changed to a `request`,
+  gets a fresh `TurnStart` with no summary.
 
 This is the contract [RFD 126] sets for any consumer that rewrites the stream.
 
@@ -310,8 +318,10 @@ Validation enforces structural invariants that providers require:
 1. **Tool result follows its tool call.** A `tool-result` must appear after the
    `tool-call` with the matching call ID.
 2. **Request/response alternation.** A `ChatRequest` (user role) must not be
-   immediately followed by another `ChatRequest` without an intervening
-   assistant response.
+   immediately followed by a `request` without an intervening assistant
+   response.
+   A `reply` may directly follow a `ChatRequest`: an interrupt can come before
+   the assistant has written anything.
 3. **Orphaned references.** A `tool-result` whose call ID doesn't match any
    `tool-call` in the plan is rejected.
    Similarly for inquiry responses.
@@ -319,6 +329,8 @@ Validation enforces structural invariants that providers require:
    plan gets a synthetic error response injected (consistent with
    `sanitize_orphaned_tool_calls`).
 5. **Non-empty stream.** The plan must contain at least one `ChatRequest`.
+6. **Reply placement.** A `reply` continues a turn, so it cannot come before the
+   plan's first `request`.
 
 Validation reuses and extends the existing `ConversationStream::sanitize()`
 logic.
@@ -506,7 +518,8 @@ arbitrary events).
 
 ### Phase 1: Event Serialization Format
 
-1. Define the markdown-with-frontmatter format for each `EventKind` variant.
+1. Define the markdown-with-frontmatter format for each `EventKind` variant,
+   including the `request` and `reply` types of a `ChatRequest`.
 2. Define the TOML format for `ConfigDelta` and `Compaction` events.
 3. Implement `serialize_to_edit_file()` and `deserialize_from_edit_file()` for
    each event type.
@@ -520,7 +533,8 @@ No behavioral changes.
 
 1. Implement the temporary directory builder: given a `ConversationStream`,
    produce the file tree (`CONVERSATION` + event files).
-2. Implement the file naming scheme (numeric prefix + descriptive suffix).
+2. Implement the file naming scheme (numeric prefix + descriptive suffix), with
+   each `ChatRequest` after the first in its turn written as a `reply`.
 3. Implement turn-grouped comments in the plan file, naming each turn's
    `TurnStart` `event_id` and its stored summary or mechanical fallback.
 4. Add unit tests for directory generation from sample streams.
@@ -541,6 +555,9 @@ Depends on Phase 1.
    Turn-marker tests cover an untouched turn (ID and summary kept), a turn with
    an edited event (ID kept, summary cleared), a reordered turn, and a turn
    opened by a new request (fresh `TurnStart`).
+   They also cover a turn holding an interrupt reply (kept as one turn) and a
+   `reply` changed to a `request` (the turn split, its second half with a fresh
+   `TurnStart`).
 
 Depends on Phase 2.
 
