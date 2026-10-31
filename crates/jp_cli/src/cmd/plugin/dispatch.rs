@@ -49,12 +49,12 @@ use jp_plugin::{
 };
 use jp_printer::{OutputFormat, Printer};
 use jp_storage::backend::{FsStorageBackend, Projection};
-use jp_task::task::TitleGeneratorTask;
+use jp_task::task::{TitleGeneratorTask, TurnSummaries, TurnSummaryTask};
 use jp_workspace::{ConversationLock, LockResult, Workspace, session::Session};
 use serde_json::{Map, Value};
 use tokio::{
     sync::mpsc::{self, error::TrySendError},
-    task::JoinSet,
+    task::{JoinHandle as TaskHandle, JoinSet},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
@@ -482,7 +482,7 @@ pub(crate) async fn run_plugin(
     // started it, and the plugin can exit while one is in flight, so they are
     // awaited below rather than left for the runtime to drop half-finished.
     let mut turns = JoinSet::new();
-    let (titles, mut arrived_titles) = Titles::new();
+    let (late, mut arrivals) = LateWrites::new();
 
     // Part of the result rather than returned early: a plugin that exits
     // before reading `init` fails this write, and what it started still has to
@@ -498,8 +498,8 @@ pub(crate) async fn run_plugin(
                 &composer,
                 &mut turns,
                 &RunningTurns::default(),
-                &titles,
-                &mut arrived_titles,
+                &late,
+                &mut arrivals,
             )
             .await
         }
@@ -778,8 +778,8 @@ async fn message_loop(
     composer: &Composer,
     turns: &mut JoinSet<()>,
     running: &RunningTurns,
-    titles: &Titles,
-    arrived_titles: &mut mpsc::UnboundedReceiver<ArrivedTitle>,
+    late: &LateWrites,
+    arrivals: &mut mpsc::UnboundedReceiver<Arrival>,
 ) -> Result<(), cmd::Error> {
     loop {
         let line = tokio::select! {
@@ -790,8 +790,8 @@ async fn message_loop(
 
             // Written from here because taking a conversation's lock takes the
             // workspace, and this loop is what holds it.
-            Some(arrived) = arrived_titles.recv() => {
-                titles.offer(&ctx.workspace, arrived);
+            Some(arrival) = arrivals.recv() => {
+                late.offer(&ctx.workspace, arrival);
                 continue;
             }
         };
@@ -820,8 +820,7 @@ async fn message_loop(
 
             PluginToHost::Query(request) => {
                 // `None` means the turn is running and will answer for itself.
-                if let Some(response) = run_query(ctx, request, stdin, turns, running, titles).await
-                {
+                if let Some(response) = run_query(ctx, request, stdin, turns, running, late).await {
                     let mut writer = stdin.lock().expect("stdin lock poisoned");
                     write_message(&mut *writer, &response)
                         .map_err(|e| cmd::Error::from(format!("failed to answer a query: {e}")))?;
@@ -931,13 +930,14 @@ fn answer(
 /// `None` means the turn is under way and will send its own reply, correlated
 /// by the request's id.
 /// Anything returned is a failure that happened before the turn started.
+#[expect(clippy::too_many_lines)]
 async fn run_query(
     ctx: &mut Ctx,
     request: QueryRequest,
     stdin: &Arc<Mutex<ChildStdin>>,
     turns: &mut JoinSet<()>,
     running: &RunningTurns,
-    titles: &Titles,
+    late: &LateWrites,
 ) -> Option<HostToPlugin> {
     let reply_id = request.id.clone();
     let failed = |message: String| Some(query_error(reply_id.clone(), message));
@@ -1042,6 +1042,8 @@ async fn run_query(
     let title = resolve_title(&config, &lock, &stream, &chat_request)
         .map(|task| -> TitleFuture { Box::pin(generate_title(task, lock.id())) });
 
+    let summaries = start_turn_summaries(&config, &lock, &stream, ctx.term.args.persist);
+
     // The last request before this query, to tell its turn from earlier ones.
     let before = lock.with_events(last_request_id);
 
@@ -1050,7 +1052,7 @@ async fn run_query(
     // is what keeps the message loop answering reads while it runs.
     let stdin = Arc::clone(stdin);
     let running = running.clone();
-    let titles = titles.clone();
+    let late = late.clone();
 
     turns.spawn(async move {
         let id = lock.id();
@@ -1083,13 +1085,15 @@ async fn run_query(
             }
         };
 
+        settle_summaries(summaries, &lock, &late).await;
+
         // Both before the answer goes out, because the answer is what a client
         // waits on before sending its next request. Reporting the turn as
         // finished while it still held the conversation would have that request
         // refused as already-locked, and an interrupt aimed at a turn that has
         // stopped reading would be queued only to be refused a moment later.
         running.finished(id);
-        titles.release(lock);
+        late.release(lock);
 
         {
             let mut writer = stdin.lock().expect("stdin lock poisoned");
@@ -1099,7 +1103,7 @@ async fn run_query(
         // Not awaited here: this task is joined before the host exits, and a
         // slow title model is no reason to hold that up.
         if let Some(title) = outstanding {
-            titles.follow(id, title);
+            late.follow_title(id, title);
         }
     });
 
@@ -1524,60 +1528,174 @@ fn write_title(lock: &ConversationLock, title: String) {
     }
 }
 
-/// A generated title that finished after its turn, on its way to the message
-/// loop.
+/// A summary request in flight, yielding `None` when it produced nothing
+/// usable.
+type SummaryRequest = TaskHandle<Option<TurnSummaries>>;
+
+/// Start summarizing the conversation's turns that have no summary, from the
+/// stream as it stands before the turn about to run, and beside that turn.
+///
+/// Returns `None` when the host does not persist conversations,
+/// `conversation.turn_summary.generate.auto` is off, every turn already has a
+/// summary, or the summary model cannot be set up.
+fn start_turn_summaries(
+    config: &AppConfig,
+    lock: &ConversationLock,
+    stream: &ConversationStream,
+    persist: bool,
+) -> Option<SummaryRequest> {
+    if !persist || !config.conversation.turn_summary.generate.auto {
+        return None;
+    }
+
+    let conversation = lock.id();
+    let task = match TurnSummaryTask::new(
+        conversation,
+        stream,
+        config,
+        // Nobody is watching a terminal for this turn, so tracing is the only
+        // place a notice from the summary model can go.
+        NoticeSink::new(|notice| warn!(%notice, "Turn summary notice.")),
+    ) {
+        Ok(task) => task?,
+        Err(error) => {
+            warn!(%error, %conversation, "Skipping turn summaries.");
+            return None;
+        }
+    };
+
+    // Spawned rather than raced against the turn, so a request that outlasts
+    // the turn keeps running after it.
+    Some(tokio::spawn(async move {
+        match task.generate().await {
+            Ok(summaries) => Some(summaries),
+            Err(error) => {
+                warn!(%error, %conversation, "Failed to summarize turns.");
+                None
+            }
+        }
+    }))
+}
+
+/// Store the summaries a turn started, through its lock if they are ready by
+/// the time it ends, or hand them to the message loop if they are not.
+///
+/// Never waited for, for the same reason a title is not: the turn's answer goes
+/// out only after it lets go of the conversation.
+/// Stored at the end rather than as they arrive, because the turn writes the
+/// same event stream while it runs.
+async fn settle_summaries(
+    summaries: Option<SummaryRequest>,
+    lock: &ConversationLock,
+    late: &LateWrites,
+) {
+    let Some(summaries) = summaries else {
+        return;
+    };
+
+    if !summaries.is_finished() {
+        late.follow_summaries(summaries);
+        return;
+    }
+
+    match summaries.await {
+        Ok(Some(summaries)) => summaries.store(lock),
+        Ok(None) => {}
+        Err(error) => warn!(%error, conversation = %lock.id(), "Turn summary request failed."),
+    }
+}
+
+/// Work a turn started beside it that finished after the turn let go of the
+/// conversation, on its way to the message loop.
+enum Arrival {
+    Title(ArrivedTitle),
+    Summaries(TurnSummaries),
+}
+
+/// A generated title that finished after its turn.
 struct ArrivedTitle {
     conversation: ConversationId,
     title: String,
 }
 
-/// Titles that finished after their turn had let go of the conversation.
+/// Writes that a turn's title and summary requests make after the turn has let
+/// go of the conversation.
 ///
-/// Writing one takes the conversation's lock, which only the message loop can
-/// take, and which may be held by then: by the next turn on the same
-/// conversation, or by another process.
+/// Writing takes the conversation's lock, which only the message loop can take,
+/// and which may be held by then: by the next turn on the same conversation, or
+/// by another process.
 /// A title that finds the lock held waits here, and whichever turn this host
 /// runs on that conversation next writes it before letting go.
+/// Summaries that find it held are dropped: their turns keep no summary, so the
+/// next query on the conversation asks for them again.
 ///
-/// Every write and every release goes through the same mutex, so a title cannot
-/// be set aside for a turn that has already released the lock.
+/// Every title write and every release goes through the same mutex, so a title
+/// cannot be set aside for a turn that has already released the lock.
 #[derive(Clone)]
-struct Titles {
+struct LateWrites {
     waiting: Arc<Mutex<HashMap<ConversationId, String>>>,
-    arrived: mpsc::UnboundedSender<ArrivedTitle>,
+    arrived: mpsc::UnboundedSender<Arrival>,
 }
 
-impl Titles {
+impl LateWrites {
     /// Create the store, and the receiver the message loop reads arrivals from.
-    fn new() -> (Self, mpsc::UnboundedReceiver<ArrivedTitle>) {
+    fn new() -> (Self, mpsc::UnboundedReceiver<Arrival>) {
         let (arrived, rx) = mpsc::unbounded_channel();
-        let titles = Self {
+        let late = Self {
             waiting: Arc::default(),
             arrived,
         };
 
-        (titles, rx)
+        (late, rx)
     }
 
     /// Wait for a title the turn finished without, and send it to the message
     /// loop.
     ///
     /// Detached: a host that exits first drops the title with it.
-    fn follow(&self, conversation: ConversationId, title: TitleFuture) {
+    fn follow_title(&self, conversation: ConversationId, title: TitleFuture) {
         let arrived = self.arrived.clone();
         tokio::spawn(async move {
             if let Some(title) = title.await {
-                drop(arrived.send(ArrivedTitle {
+                drop(arrived.send(Arrival::Title(ArrivedTitle {
                     conversation,
                     title,
-                }));
+                })));
             }
         });
     }
 
+    /// Wait for summaries the turn finished without, and send them to the
+    /// message loop.
+    ///
+    /// Detached: a host that exits first drops them, and the next query on the
+    /// conversation asks for its turns again.
+    fn follow_summaries(&self, summaries: SummaryRequest) {
+        let arrived = self.arrived.clone();
+        tokio::spawn(async move {
+            if let Ok(Some(summaries)) = summaries.await {
+                drop(arrived.send(Arrival::Summaries(summaries)));
+            }
+        });
+    }
+
+    /// Write what arrived after its turn, or hold a title until the lock is
+    /// free.
+    fn offer(&self, workspace: &Workspace, arrival: Arrival) {
+        match arrival {
+            Arrival::Title(title) => self.offer_title(workspace, title),
+            Arrival::Summaries(summaries) => {
+                let conversation = summaries.conversation_id;
+                if let Err(error) = summaries.store_in(workspace) {
+                    warn!(%error, %conversation, "Could not lock for the turn summaries.");
+                }
+            }
+        }
+    }
+
     /// Write a title that arrived after its turn, or hold it until the lock is
     /// free.
-    fn offer(&self, workspace: &Workspace, arrived: ArrivedTitle) {
+    fn offer_title(&self, workspace: &Workspace, arrived: ArrivedTitle) {
         let ArrivedTitle {
             conversation,
             title,

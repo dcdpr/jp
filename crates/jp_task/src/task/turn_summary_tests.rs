@@ -409,6 +409,54 @@ async fn a_failed_summary_request_stores_nothing() {
 }
 
 // ---------------------------------------------------------------------------
+// Generating and storing outside a task handler
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn generate_returns_the_summaries_for_its_conversation() {
+    let mut events = ConversationStream::new_test();
+    push_turn(&mut events, 1, "First question", "First answer");
+
+    let summaries = task(conversation_id(), &events, answering(TURN_1_SUMMARY))
+        .generate()
+        .await
+        .unwrap();
+
+    assert_eq!(summaries, TurnSummaries {
+        conversation_id: conversation_id(),
+        summaries: vec![generated(&events, "Ask the first question")],
+    });
+}
+
+/// A caller that already holds the lock, such as a turn about to let go of its
+/// conversation, stores through it and keeps holding it.
+#[tokio::test]
+async fn summaries_are_stored_through_a_lock_the_caller_holds() {
+    let mut workspace = Workspace::in_memory("root");
+    let id = conversation(&mut workspace, |events| {
+        push_turn(events, 1, "First question", "First answer");
+    });
+    let pending = task(id, &stored(&workspace, id), answering(TURN_1_SUMMARY))
+        .generate()
+        .await
+        .unwrap();
+
+    let held = lock(&workspace, id);
+    pending.store(&held);
+
+    let handle = workspace.acquire_conversation(&id).unwrap();
+    assert!(matches!(
+        workspace.lock_conversation(handle, None).unwrap(),
+        LockResult::AlreadyLocked(_)
+    ));
+
+    drop(held);
+    assert_eq!(summaries(&workspace, id), [Some(
+        "Ask the first question".to_owned()
+    )]);
+}
+
+// ---------------------------------------------------------------------------
 // Checking a summary against the turn it describes
 // ---------------------------------------------------------------------------
 

@@ -13,7 +13,7 @@ use jp_llm::{
     provider,
     turn_summary::{self, GeneratedTurnSummary, TurnFingerprint, TurnSummaryRequest},
 };
-use jp_workspace::{LockResult, Workspace};
+use jp_workspace::{ConversationLock, LockResult, Workspace};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace, warn};
 
@@ -130,6 +130,117 @@ impl TurnSummaryTask {
         trace!(summaries = self.summaries.len(), "Received turn summaries.");
         Ok(())
     }
+
+    /// Ask the summary model about the task's turns and return what it wrote.
+    ///
+    /// For a caller that runs the request itself rather than through a
+    /// [`TaskHandler`], and stores the result when it can lock the
+    /// conversation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the summary model cannot be reached or answers
+    /// with something other than summaries.
+    ///
+    /// [`TaskHandler`]: crate::TaskHandler
+    pub async fn generate(mut self) -> Result<TurnSummaries, Box<dyn Error + Send + Sync>> {
+        self.summarize().await?;
+
+        Ok(TurnSummaries {
+            conversation_id: self.conversation_id,
+            summaries: self.summaries,
+        })
+    }
+}
+
+/// Summaries the model wrote for a conversation's turns, not yet stored.
+///
+/// Storing keeps a summary only while its turn reads as it did when the model
+/// read it, and still has no summary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnSummaries {
+    /// The conversation the turns belong to.
+    pub conversation_id: ConversationId,
+
+    /// One summary per turn the model described.
+    pub summaries: Vec<GeneratedTurnSummary>,
+}
+
+impl TurnSummaries {
+    /// Store the summaries through a lock already held on their conversation.
+    ///
+    /// Summaries offered to a lock on any other conversation are dropped.
+    pub fn store(self, lock: &ConversationLock) {
+        let Self {
+            conversation_id,
+            summaries,
+        } = self;
+
+        if lock.id() != conversation_id {
+            warn!(
+                %conversation_id,
+                locked = %lock.id(),
+                "Turn summaries offered to another conversation's lock; dropping them."
+            );
+            return;
+        }
+
+        let summaries = lock.with_events(|events| still_current(events, summaries));
+        if summaries.is_empty() {
+            return;
+        }
+
+        let stored = lock.as_mut().update_events_and_flush(|events| {
+            let mut stored = 0;
+            for GeneratedTurnSummary {
+                turn_id, summary, ..
+            } in summaries
+            {
+                if events.set_turn_summary(&turn_id, summary) {
+                    stored += 1;
+                }
+            }
+
+            stored
+        });
+
+        match stored {
+            Ok(count) => debug!(%conversation_id, count, "Stored turn summaries."),
+            Err(error) => warn!(%error, %conversation_id, "Failed to persist turn summaries."),
+        }
+    }
+
+    /// Lock the summaries' conversation and store them through that lock.
+    ///
+    /// Taking the lock reloads the conversation, so the summaries are checked
+    /// against edits made since their turns were read.
+    /// Does nothing when the conversation is gone or locked elsewhere: its
+    /// turns keep no summary, and the next query asks for them again.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the conversation cannot be locked.
+    pub fn store_in(self, workspace: &Workspace) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let conversation_id = self.conversation_id;
+        if self.summaries.is_empty() {
+            return Ok(());
+        }
+
+        let Ok(handle) = workspace.acquire_conversation(&conversation_id) else {
+            debug!(%conversation_id, "Conversation is gone; dropping its turn summaries.");
+            return Ok(());
+        };
+
+        match workspace.lock_conversation(handle, None)? {
+            LockResult::Acquired(lock) => self.store(&lock),
+            LockResult::AlreadyLocked(_) => warn!(
+                %conversation_id,
+                "Could not lock conversation for turn summaries, skipping."
+            ),
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -170,55 +281,12 @@ impl Task for TurnSummaryTask {
             ..
         } = *self;
 
-        if summaries.is_empty() {
-            return Ok(());
+        // The query's lock has been released by the time task sync runs.
+        TurnSummaries {
+            conversation_id,
+            summaries,
         }
-
-        let Ok(handle) = ctx.acquire_conversation(&conversation_id) else {
-            debug!(%conversation_id, "Conversation is gone; dropping its turn summaries.");
-            return Ok(());
-        };
-
-        // Lock the conversation before writing. The query's lock has been
-        // released by the time task sync runs, and taking the lock reloads the
-        // conversation, so the check below sees edits made since the task
-        // started.
-        let lock = match ctx.lock_conversation(handle, None)? {
-            LockResult::Acquired(lock) => lock,
-            LockResult::AlreadyLocked(_) => {
-                warn!(
-                    %conversation_id,
-                    "Could not lock conversation for turn summaries, skipping."
-                );
-                return Ok(());
-            }
-        };
-
-        let summaries = lock.with_events(|events| still_current(events, summaries));
-        if summaries.is_empty() {
-            return Ok(());
-        }
-
-        let stored = lock.into_mut().update_events_and_flush(|events| {
-            let mut stored = 0;
-            for GeneratedTurnSummary {
-                turn_id, summary, ..
-            } in summaries
-            {
-                if events.set_turn_summary(&turn_id, summary) {
-                    stored += 1;
-                }
-            }
-
-            stored
-        });
-
-        match stored {
-            Ok(count) => debug!(%conversation_id, count, "Stored turn summaries."),
-            Err(error) => warn!(%error, %conversation_id, "Failed to persist turn summaries."),
-        }
-
-        Ok(())
+        .store_in(ctx)
     }
 }
 
