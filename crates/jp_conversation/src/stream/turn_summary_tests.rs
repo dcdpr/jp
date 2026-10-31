@@ -273,6 +273,26 @@ fn setting_a_summary_for_an_id_the_load_found_twice_changes_nothing() {
 }
 
 #[test]
+fn clearing_a_summary_removes_it_from_the_named_turn() {
+    let mut stream = fixture();
+
+    let updated = stream.clear_turn_summary(&EventId::fixed("turn001"));
+
+    assert!(updated);
+    assert_eq!(summaries(&stream), [None, None]);
+}
+
+#[test]
+fn clearing_a_summary_for_an_unknown_id_changes_nothing() {
+    let mut stream = fixture();
+
+    let updated = stream.clear_turn_summary(&EventId::fixed("missing"));
+
+    assert!(!updated);
+    assert_eq!(stream, fixture());
+}
+
+#[test]
 fn a_summary_stays_with_its_turn_when_earlier_turns_are_dropped() {
     let mut stream = fixture();
     assert!(stream.set_turn_summary(
