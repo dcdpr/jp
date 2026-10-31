@@ -70,6 +70,10 @@ export function withJpVite(config = {}) {
                 __JP_VITE_PROBLEM__: JSON.stringify(process.env.JP_VITE_PROBLEM || null),
             },
             server: {
+                // The site is served wherever the user reaches it from (a
+                // tailnet name, a LAN address), so any `Host` is accepted. A
+                // project that wants Vite's check sets `allowedHosts` itself.
+                allowedHosts: true,
                 ...server,
                 // The boards persist themselves through the dev server, and own
                 // their in-memory state. Their files aren't part of the module
