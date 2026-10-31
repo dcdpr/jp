@@ -6,6 +6,7 @@ use super::*;
 use crate::{
     assignment::{KvAssignmentError, KvAssignmentErrorKind},
     assistant::instructions::PartialInstructionsConfig,
+    model::id::{ModelIdOrAliasConfig, PartialModelIdOrAliasConfig},
 };
 
 #[test]
@@ -1133,6 +1134,79 @@ fn test_partial_app_config_assign() {
     );
 }
 
+/// A model `id` written as an object is one value, whichever JSON form carries
+/// it: the root object, a key's JSON value, or an object inside a listed item.
+/// A dotted key edits one half of the id instead.
+#[test]
+fn an_id_object_replaces_the_id_in_every_json_form() {
+    use crate::model::id::{PartialModelIdConfig, ProviderId};
+
+    // The provider alone: the id these forms leave behind.
+    let openai_only = PartialModelIdOrAliasConfig::Id(PartialModelIdConfig {
+        provider: Some(ProviderId::Openai),
+        name: None,
+    });
+
+    // A partial whose assistant and first compaction rule both name
+    // `anthropic/claude-haiku-4-5`.
+    let configured = || {
+        let mut p = PartialAppConfig::empty();
+        for (key, value) in [
+            ("assistant.model.id", "anthropic/claude-haiku-4-5"),
+            (
+                "conversation.compaction.rules:",
+                r#"[{"summary": {"model": {"id": "anthropic/claude-haiku-4-5"}}}]"#,
+            ),
+        ] {
+            p.assign(KvAssignment::try_from_cli(key, value).unwrap())
+                .unwrap();
+        }
+        p
+    };
+    let rule_id = |p: &PartialAppConfig| {
+        p.conversation.compaction.rules[0]
+            .summary
+            .as_ref()
+            .and_then(|summary| summary.model.as_ref())
+            .map(|model| model.id.clone())
+    };
+
+    let mut root = configured();
+    root.assign(KvAssignment::root_json(serde_json::json!({
+        "assistant": { "model": { "id": { "provider": "openai" } } }
+    })))
+    .unwrap();
+    assert_eq!(root.assistant.model.id, openai_only);
+
+    let mut key = configured();
+    key.assign(
+        KvAssignment::try_from_cli("assistant.model.id:", r#"{"provider": "openai"}"#).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(key.assistant.model.id, openai_only);
+
+    let mut listed = configured();
+    listed
+        .assign(
+            KvAssignment::try_from_cli(
+                "conversation.compaction.rules.0:",
+                r#"{"summary": {"model": {"id": {"provider": "openai"}}}}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(rule_id(&listed), Some(openai_only));
+
+    let mut dotted = configured();
+    dotted
+        .assign(KvAssignment::try_from_cli("assistant.model.id.provider", "openai").unwrap())
+        .unwrap();
+    assert_eq!(
+        dotted.assistant.model.id,
+        PartialModelIdOrAliasConfig::from("openai/claude-haiku-4-5")
+    );
+}
+
 #[test]
 fn config_load_paths_append_across_layers() {
     // Each layer adds its search directories to the accumulated list instead of
@@ -1293,6 +1367,98 @@ fn resolve_model_aliases_resolves_assistant_model() {
         }
         PartialModelIdOrAliasConfig::Alias(a) => panic!("expected Id, got Alias({a})"),
     }
+}
+
+/// Compaction rules are stored in a conversation's config like every other
+/// field, so a summary model named by alias has to resolve before they are.
+#[test]
+fn resolve_model_aliases_resolves_compaction_summary_models() {
+    let aliases = IndexMap::from([(
+        "fast".to_owned(),
+        "ollama/llama3.2:3b"
+            .parse::<ModelIdOrAliasConfig>()
+            .unwrap(),
+    )]);
+
+    let mut partial = PartialAppConfig::empty();
+    partial
+        .assign(
+            KvAssignment::try_from_cli(
+                "conversation.compaction.rules:",
+                r#"[{"summary": {"model": {"id": "fast"}}}, {"reasoning": "strip"}]"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+    partial.resolve_model_aliases(&aliases);
+
+    let ids: Vec<_> = partial
+        .conversation
+        .compaction
+        .rules
+        .iter()
+        .map(|rule| {
+            rule.summary
+                .as_ref()
+                .and_then(|summary| summary.model.as_ref())
+                .map(|model| model.id.clone())
+        })
+        .collect();
+
+    assert_eq!(ids, [
+        Some(PartialModelIdOrAliasConfig::from("ollama/llama3.2:3b")),
+        None
+    ]);
+}
+
+/// `style.reasoning.summary_model` names a model like the other model fields,
+/// so an alias in it resolves before a partial is stored in a conversation.
+#[test]
+fn resolve_model_aliases_resolves_the_reasoning_summary_model() {
+    let aliases = IndexMap::from([(
+        "fast".to_owned(),
+        "ollama/llama3.2:3b"
+            .parse::<ModelIdOrAliasConfig>()
+            .unwrap(),
+    )]);
+
+    let mut partial = PartialAppConfig::empty();
+    partial
+        .assign(KvAssignment::try_from_cli("style.reasoning.summary_model.id", "fast").unwrap())
+        .unwrap();
+
+    partial.resolve_model_aliases(&aliases);
+
+    assert_eq!(
+        partial.style.reasoning.summary_model.map(|model| model.id),
+        Some(PartialModelIdOrAliasConfig::from("ollama/llama3.2:3b"))
+    );
+}
+
+/// The same alias resolves when the config is built, so none reaches the
+/// resolved config.
+#[test]
+fn build_resolves_the_reasoning_summary_model_alias() {
+    let mut partial = PartialAppConfig::new_test();
+    partial.providers.llm.aliases.insert(
+        "fast".to_owned(),
+        PartialModelIdOrAliasConfig::from("ollama/llama3.2:3b"),
+    );
+    partial
+        .assign(KvAssignment::try_from_cli("style.reasoning.summary_model.id", "fast").unwrap())
+        .unwrap();
+
+    let config = util::build(partial).unwrap();
+
+    assert_eq!(
+        config.style.reasoning.summary_model.map(|model| model.id),
+        Some(
+            "ollama/llama3.2:3b"
+                .parse::<ModelIdOrAliasConfig>()
+                .unwrap()
+        )
+    );
 }
 
 #[test]
