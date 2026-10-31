@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.6634665859792891,
-  "iosp_score": 0.8177434908389586,
+  "quality_score": 0.6635361830392833,
+  "iosp_score": 0.8177786347859622,
   "violations": 945,
-  "total": 7217,
+  "total": 7219,
   "complexity_warnings": 0,
   "magic_number_warnings": 0,
   "nesting_depth_warnings": 0,
@@ -913,17 +913,17 @@
     {
       "name": "InstructionsConfig::to_section",
       "file": "crates/jp_config/src/assistant/instructions.rs",
-      "line": 114
+      "line": 115
     },
     {
       "name": "PartialExampleConfig::assign",
       "file": "crates/jp_config/src/assistant/instructions.rs",
-      "line": 180
+      "line": 181
     },
     {
       "name": "PartialContrastConfig::assign",
       "file": "crates/jp_config/src/assistant/instructions.rs",
-      "line": 231
+      "line": 232
     },
     {
       "name": "PartialSectionConfigOrString::assign",
@@ -1363,22 +1363,17 @@
     {
       "name": "KvAssignment::try_some_mergeable_vec",
       "file": "crates/jp_config/src/assignment.rs",
-      "line": 1163
+      "line": 1168
     },
     {
       "name": "KvAssignment::try_vec_of_nested",
       "file": "crates/jp_config/src/assignment.rs",
-      "line": 1231
-    },
-    {
-      "name": "flatten_recursive",
-      "file": "crates/jp_config/src/assignment.rs",
-      "line": 1338
+      "line": 1241
     },
     {
       "name": "missing_key",
       "file": "crates/jp_config/src/assignment.rs",
-      "line": 1600
+      "line": 1565
     },
     {
       "name": "PartialProviderConfig::assign",
@@ -1478,7 +1473,7 @@
     {
       "name": "PartialSummaryConfig::assign",
       "file": "crates/jp_config/src/conversation/compaction.rs",
-      "line": 377
+      "line": 383
     },
     {
       "name": "PartialAccessConfig::assign",
@@ -1513,12 +1508,17 @@
     {
       "name": "PartialAttachmentConfig::assign",
       "file": "crates/jp_config/src/conversation/attachment.rs",
-      "line": 31
+      "line": 32
+    },
+    {
+      "name": "object_form",
+      "file": "crates/jp_config/src/conversation/attachment.rs",
+      "line": 63
     },
     {
       "name": "PartialAttachmentObjectConfig::assign",
       "file": "crates/jp_config/src/conversation/attachment.rs",
-      "line": 127
+      "line": 188
     },
     {
       "name": "Workspace::resolvable_history",
