@@ -40,12 +40,12 @@ fn events_by_turn_agrees_with_iter_turns() {
     // the delta must not shift any turn number, since `iter_turns` never sees it.
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
     ]);
     stream.add_config_delta(PartialAppConfig::default());
     stream.extend(vec![
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
     ]);
 
@@ -62,7 +62,7 @@ fn events_by_turn_agrees_on_an_implicit_leading_turn() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
         ConversationEvent::new(ChatRequest::from("orphan"), ts(0, 0, 1)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 1, 1)),
     ]);
 
@@ -83,7 +83,7 @@ fn events_by_turn_is_empty_for_an_empty_stream() {
 fn single_turn() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Hello"), ts(0, 0, 1)),
         ConversationEvent::new(ChatResponse::message("Hi.\n\n"), ts(0, 0, 2)),
     ]);
@@ -97,11 +97,11 @@ fn single_turn() {
 fn turn_index() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
-        ConversationEvent::new(TurnStart, ts(0, 2, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 2, 0)),
         ConversationEvent::new(ChatRequest::from("Q3"), ts(0, 2, 1)),
     ]);
 
@@ -116,7 +116,7 @@ fn turn_index_with_implicit_leading_turn() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
         ConversationEvent::new(ChatRequest::from("orphan"), ts(0, 0, 0)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 1, 1)),
     ]);
 
@@ -129,13 +129,13 @@ fn turn_index_with_implicit_leading_turn() {
 fn multiple_turns() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
         ConversationEvent::new(ChatResponse::message("A1.\n\n"), ts(0, 0, 2)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
         ConversationEvent::new(ChatResponse::message("A2.\n\n"), ts(0, 1, 2)),
-        ConversationEvent::new(TurnStart, ts(0, 2, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 2, 0)),
         ConversationEvent::new(ChatRequest::from("Q3"), ts(0, 2, 1)),
     ]);
 
@@ -155,7 +155,7 @@ fn events_before_first_turn_start_form_implicit_turn() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
         ConversationEvent::new(ChatRequest::from("orphan"), ts(0, 0, 0)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 1, 1)),
     ]);
 
@@ -172,9 +172,9 @@ fn events_before_first_turn_start_form_implicit_turn() {
 fn double_ended_iteration() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("first"), ts(0, 0, 1)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("second"), ts(0, 1, 1)),
     ]);
 
@@ -190,11 +190,11 @@ fn double_ended_iteration() {
 fn exact_size() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
-        ConversationEvent::new(TurnStart, ts(0, 2, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 2, 0)),
         ConversationEvent::new(ChatRequest::from("Q3"), ts(0, 2, 1)),
     ]);
 
@@ -205,13 +205,13 @@ fn exact_size() {
 fn retain_last_turns_keeps_last_n() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
         ConversationEvent::new(ChatResponse::message("A1.\n\n"), ts(0, 0, 2)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
         ConversationEvent::new(ChatResponse::message("A2.\n\n"), ts(0, 1, 2)),
-        ConversationEvent::new(TurnStart, ts(0, 2, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 2, 0)),
         ConversationEvent::new(ChatRequest::from("Q3"), ts(0, 2, 1)),
     ]);
 
@@ -230,7 +230,7 @@ fn retain_last_turns_keeps_last_n() {
 fn retain_last_turns_noop_when_fewer_turns() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
     ]);
 
@@ -243,7 +243,7 @@ fn retain_last_turns_noop_when_fewer_turns() {
 fn retain_last_turns_zero_clears() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
     ]);
 
@@ -256,13 +256,13 @@ fn retain_last_turns_zero_clears() {
 fn retain_turns_keeps_a_leading_window() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
         ConversationEvent::new(ChatResponse::message("A1.\n\n"), ts(0, 0, 2)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
         ConversationEvent::new(ChatResponse::message("A2.\n\n"), ts(0, 1, 2)),
-        ConversationEvent::new(TurnStart, ts(0, 2, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 2, 0)),
         ConversationEvent::new(ChatRequest::from("Q3"), ts(0, 2, 1)),
     ]);
 
@@ -281,13 +281,13 @@ fn retain_turns_keeps_a_leading_window() {
 fn retain_turns_keeps_two_windows() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
-        ConversationEvent::new(TurnStart, ts(0, 2, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 2, 0)),
         ConversationEvent::new(ChatRequest::from("Q3"), ts(0, 2, 1)),
-        ConversationEvent::new(TurnStart, ts(0, 3, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 3, 0)),
         ConversationEvent::new(ChatRequest::from("Q4"), ts(0, 3, 1)),
     ]);
 
@@ -306,7 +306,7 @@ fn retain_turns_keeps_two_windows() {
 fn retain_turns_noop_when_every_turn_is_kept() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
     ]);
 
@@ -324,7 +324,7 @@ fn retain_turns_numbers_an_implicit_leading_turn_like_iter_turns() {
     let events = || {
         vec![
             ConversationEvent::new(ChatRequest::from("A"), ts(0, 0, 0)),
-            ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+            ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
             ConversationEvent::new(ChatRequest::from("B"), ts(0, 1, 1)),
         ]
     };
@@ -361,9 +361,9 @@ fn retain_turns_numbers_an_implicit_leading_turn_like_iter_turns() {
 fn retain_turns_keeping_nothing_clears() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(TurnStart::default(), ts(0, 1, 0)),
         ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
     ]);
 

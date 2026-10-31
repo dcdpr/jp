@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-03
-- **Extended by**: [RFD 098]
+- **Extended by**: [RFD 098], [RFD 126]
 - **Summary**: Assign stable, stream-unique identifiers to every conversation
   event for safe manual editing and future reference features.
 
@@ -702,3 +702,4 @@ That is out of scope here.
 [RFD 067]: 067-resource-deduplication-for-token-efficiency.md
 [RFD 072]: 072-command-plugin-system.md
 [RFD 098]: 098-request-response-event-linking.md
+[RFD 126]: 126-turn-summaries.md

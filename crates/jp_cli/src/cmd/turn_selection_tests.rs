@@ -14,7 +14,7 @@ fn stream(count: usize) -> ConversationStream {
             .with_ymd_and_hms(2020, 1, 1, 0, u32::try_from(turn).unwrap(), 0)
             .unwrap();
         events.push(ConversationEvent::new(
-            jp_conversation::event::TurnStart,
+            jp_conversation::event::TurnStart::default(),
             ts,
         ));
         events.push(ConversationEvent::new(

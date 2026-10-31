@@ -81,14 +81,14 @@ fn base_stream(provider: ProviderId) -> ConversationStream {
     tool_args.insert("path".into(), "notes.md".into());
 
     stream.extend([
-        ConversationEvent::new(TurnStart, ts),
+        ConversationEvent::new(TurnStart::default(), ts),
         ConversationEvent::new(ChatRequest::from("What is the capital of France?"), ts),
         ConversationEvent::new(
             ChatResponse::reasoning("The user wants a capital city."),
             ts,
         ),
         ConversationEvent::new(ChatResponse::message("Paris."), ts),
-        ConversationEvent::new(TurnStart, ts),
+        ConversationEvent::new(TurnStart::default(), ts),
         ConversationEvent::new(ChatRequest::from("Read my notes file."), ts),
         ConversationEvent::new(
             ToolCallRequest::new("call_1".to_owned(), "read_file".to_owned(), tool_args),
@@ -105,10 +105,10 @@ fn base_stream(provider: ProviderId) -> ConversationStream {
             ChatResponse::message("Your notes mention milk and the dentist."),
             ts,
         ),
-        ConversationEvent::new(TurnStart, ts),
+        ConversationEvent::new(TurnStart::default(), ts),
         ConversationEvent::new(ChatRequest::from("And the capital of Germany?"), ts),
         ConversationEvent::new(ChatResponse::message("Berlin."), ts),
-        ConversationEvent::new(TurnStart, ts),
+        ConversationEvent::new(TurnStart::default(), ts),
         ConversationEvent::new(ChatRequest::from("And of Italy?"), ts),
     ]);
 

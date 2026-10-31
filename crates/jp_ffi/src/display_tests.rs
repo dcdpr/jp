@@ -44,7 +44,7 @@ fn events(events: Vec<ConversationEvent>) -> ConversationStream {
 #[test]
 fn projects_a_chat_request_as_a_user_message() {
     let stream = stream(vec![
-        TurnStart.into(),
+        TurnStart::default().into(),
         ChatRequest {
             content: "What does this do?".to_owned(),
             schema: None,
@@ -66,7 +66,10 @@ fn projects_a_chat_request_as_a_user_message() {
 /// A request authored before a display name was configured has no author.
 #[test]
 fn projects_a_chat_request_without_an_author() {
-    let stream = stream(vec![TurnStart.into(), ChatRequest::from("hi").into()]);
+    let stream = stream(vec![
+        TurnStart::default().into(),
+        ChatRequest::from("hi").into(),
+    ]);
 
     assert_eq!(project_turns(&stream), vec![DisplayTurn {
         index: 0,
@@ -81,7 +84,7 @@ fn projects_a_chat_request_without_an_author() {
 #[test]
 fn projects_a_chat_response_as_an_assistant_message() {
     let stream = stream(vec![
-        TurnStart.into(),
+        TurnStart::default().into(),
         ChatRequest::from("hi").into(),
         ChatResponse::message("It reads conversations.").into(),
     ]);
@@ -108,7 +111,7 @@ fn projects_a_chat_response_as_an_assistant_message() {
 #[test]
 fn drops_every_event_with_no_prose_to_show() {
     let stream = stream(vec![
-        TurnStart.into(),
+        TurnStart::default().into(),
         ChatRequest::from("hi").into(),
         ChatResponse::reasoning("thinking").into(),
         ToolCallRequest::new(
@@ -143,10 +146,10 @@ fn drops_every_event_with_no_prose_to_show() {
 #[test]
 fn groups_events_into_the_turn_they_belong_to() {
     let stream = stream(vec![
-        TurnStart.into(),
+        TurnStart::default().into(),
         ChatRequest::from("first question").into(),
         ChatResponse::message("first answer").into(),
-        TurnStart.into(),
+        TurnStart::default().into(),
         ChatRequest::from("second question").into(),
         ChatResponse::message("second answer").into(),
     ]);
@@ -183,16 +186,16 @@ fn groups_events_into_the_turn_they_belong_to() {
 #[test]
 fn drops_a_turn_with_nothing_to_show_and_keeps_the_numbering() {
     let stream = stream(vec![
-        TurnStart.into(),
+        TurnStart::default().into(),
         ChatRequest::from("visible").into(),
-        TurnStart.into(),
+        TurnStart::default().into(),
         ToolCallRequest::new(
             "call-1".to_owned(),
             "read_file".to_owned(),
             serde_json::Map::new(),
         )
         .into(),
-        TurnStart.into(),
+        TurnStart::default().into(),
         ChatRequest::from("also visible").into(),
     ]);
 
@@ -210,7 +213,7 @@ fn drops_a_turn_with_nothing_to_show_and_keeps_the_numbering() {
 fn projects_events_before_the_first_turn_start_as_the_leading_turn() {
     let stream = stream(vec![
         ChatRequest::from("no marker ahead of me").into(),
-        TurnStart.into(),
+        TurnStart::default().into(),
         ChatRequest::from("after the marker").into(),
     ]);
 
@@ -255,7 +258,7 @@ fn keeps_sub_second_precision_in_a_timestamp() {
 #[test]
 fn joins_a_message_split_across_adjacent_items() {
     let stream = events(vec![
-        event(TurnStart),
+        event(TurnStart::default()),
         event(ChatRequest::from("show me")),
         event(ChatResponse::message("Here:\n\n```rust\nfn main() {")),
         ConversationEvent::new(
@@ -286,7 +289,7 @@ fn joins_a_message_split_across_adjacent_items() {
 #[test]
 fn keeps_messages_apart_when_a_tool_call_separates_them() {
     let stream = stream(vec![
-        TurnStart.into(),
+        TurnStart::default().into(),
         ChatRequest::from("hi").into(),
         ChatResponse::message("Looking.").into(),
         ToolCallRequest::new(
@@ -316,7 +319,7 @@ fn keeps_messages_apart_when_a_tool_call_separates_them() {
 #[test]
 fn keeps_messages_apart_when_reasoning_separates_them() {
     let stream = stream(vec![
-        TurnStart.into(),
+        TurnStart::default().into(),
         ChatRequest::from("hi").into(),
         ChatResponse::message("One.").into(),
         ChatResponse::reasoning("thinking").into(),
@@ -341,7 +344,7 @@ fn keeps_messages_apart_when_reasoning_separates_them() {
 #[test]
 fn serializes_turns_carrying_events_tagged_by_presentation() {
     let stream = stream(vec![
-        TurnStart.into(),
+        TurnStart::default().into(),
         ChatRequest::from("hi").into(),
         ChatResponse::message("hello").into(),
     ]);

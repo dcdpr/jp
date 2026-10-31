@@ -3,6 +3,7 @@ use camino_tempfile::{Utf8TempDir, tempdir};
 use chrono::Utc;
 use jp_conversation::{Conversation, ConversationId, event::ChatResponse};
 use jp_editor::MockEditorBackend;
+use jp_llm::turn_summary::{GeneratedTurnSummary, transcripts};
 #[cfg(unix)]
 use jp_plugin::registry::ApprovedPlugin;
 use jp_plugin::{
@@ -1596,7 +1597,7 @@ async fn a_title_that_arrives_first_is_written_by_the_turn() {
 #[test]
 fn a_late_title_waits_for_a_busy_conversation() {
     let (ws, id, _tmp) = workspace_with_conversation();
-    let (titles, _arrived) = Titles::new();
+    let (late, _arrivals) = LateWrites::new();
     let title_of = |ws: &Workspace| {
         let handle = ws.acquire_conversation(&id).unwrap();
         ws.metadata(&handle).unwrap().title.clone()
@@ -1607,13 +1608,16 @@ fn a_late_title_waits_for_a_busy_conversation() {
         panic!("the conversation starts unlocked");
     };
 
-    titles.offer(&ws, ArrivedTitle {
-        conversation: id,
-        title: "Rust or Python".to_owned(),
-    });
+    late.offer(
+        &ws,
+        Arrival::Title(ArrivedTitle {
+            conversation: id,
+            title: "Rust or Python".to_owned(),
+        }),
+    );
     assert_eq!(title_of(&ws), None, "the busy conversation is left alone");
 
-    titles.release(next_turn);
+    late.release(next_turn);
     assert_eq!(title_of(&ws).as_deref(), Some("Rust or Python"));
 }
 
@@ -1621,7 +1625,7 @@ fn a_late_title_waits_for_a_busy_conversation() {
 #[test]
 fn a_late_title_does_not_replace_a_chosen_one() {
     let (ws, id, _tmp) = workspace_with_conversation();
-    let (titles, _arrived) = Titles::new();
+    let (late, _arrivals) = LateWrites::new();
 
     handle_set_title(&ws, None, SetTitleRequest {
         id: None,
@@ -1629,16 +1633,148 @@ fn a_late_title_does_not_replace_a_chosen_one() {
         title: Some("Chosen".to_owned()),
     });
 
-    titles.offer(&ws, ArrivedTitle {
-        conversation: id,
-        title: "Generated".to_owned(),
-    });
+    late.offer(
+        &ws,
+        Arrival::Title(ArrivedTitle {
+            conversation: id,
+            title: "Generated".to_owned(),
+        }),
+    );
 
     let handle = ws.acquire_conversation(&id).unwrap();
     assert_eq!(
         ws.metadata(&handle).unwrap().title.as_deref(),
         Some("Chosen")
     );
+}
+
+/// A workspace whose one conversation holds a finished turn with no summary.
+fn workspace_with_a_turn() -> (Workspace, ConversationId, Utf8TempDir) {
+    let (ws, id, tmp) = workspace_with_conversation();
+    let handle = ws.acquire_conversation(&id).unwrap();
+    ws.test_lock(handle)
+        .as_mut()
+        .update_events(|stream| add_turn(stream, ChatResponse::message("An answer")));
+
+    (ws, id, tmp)
+}
+
+/// What the summary model returns for every turn of the conversation.
+fn summarized(ws: &Workspace, id: ConversationId) -> TurnSummaries {
+    let handle = ws.acquire_conversation(&id).unwrap();
+    let events = ws.events(&handle).unwrap().clone();
+    let turn_ids: Vec<EventId> = events
+        .iter_turns()
+        .filter_map(|turn| turn.id().cloned())
+        .collect();
+
+    TurnSummaries {
+        conversation_id: id,
+        summaries: transcripts(&events, &turn_ids)
+            .into_iter()
+            .map(|transcript| GeneratedTurnSummary {
+                turn_id: transcript.turn_id().clone(),
+                summary: "Answer a question".to_owned(),
+                fingerprint: transcript.fingerprint(),
+            })
+            .collect(),
+    }
+}
+
+/// Lock the conversation for a turn, as a delegated query does.
+fn lock_for_turn(ws: &Workspace, id: ConversationId) -> ConversationLock {
+    let handle = ws.acquire_conversation(&id).unwrap();
+    let LockResult::Acquired(lock) = ws.lock_conversation(handle, None).unwrap() else {
+        panic!("the conversation is free");
+    };
+
+    lock
+}
+
+/// Each turn's summary, read back from storage.
+fn stored_summaries(ws: &Workspace, id: ConversationId) -> Vec<Option<String>> {
+    lock_for_turn(ws, id).with_events(|events| {
+        events
+            .iter_turns()
+            .map(|turn| turn.summary().map(str::to_owned))
+            .collect()
+    })
+}
+
+/// Summaries that are ready by the time a turn ends are written through the
+/// lock the turn still holds, and nothing is handed on.
+#[tokio::test]
+async fn a_turn_stores_ready_summaries_through_its_lock() {
+    let (ws, id, _tmp) = workspace_with_a_turn();
+    let summaries = summarized(&ws, id);
+    let (late, mut arrivals) = LateWrites::new();
+    let turn = lock_for_turn(&ws, id);
+
+    let ready = tokio::spawn(async move { Some(summaries) });
+    while !ready.is_finished() {
+        tokio::task::yield_now().await;
+    }
+
+    settle_summaries(Some(ready), &turn, &late).await;
+    drop(turn);
+
+    assert_eq!(stored_summaries(&ws, id), [Some(
+        "Answer a question".to_owned()
+    )]);
+    assert!(arrivals.try_recv().is_err(), "nothing is handed on");
+}
+
+/// Summaries still being generated when a turn ends are handed on rather than
+/// waited for, and reach the message loop once they are ready.
+///
+/// Waiting would keep the conversation locked, and the client's next message
+/// would be refused as already-locked for as long as the summary model took.
+#[tokio::test]
+async fn a_turn_does_not_wait_for_its_summaries() {
+    let (ws, id, _tmp) = workspace_with_a_turn();
+    let summaries = summarized(&ws, id);
+    let (late, mut arrivals) = LateWrites::new();
+    let (finish, finished) = tokio::sync::oneshot::channel::<()>();
+    let turn = lock_for_turn(&ws, id);
+
+    let generating = tokio::spawn(async move {
+        finished.await.unwrap();
+        Some(summaries)
+    });
+
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        settle_summaries(Some(generating), &turn, &late),
+    )
+    .await
+    .expect("the turn must not wait on its summaries");
+    drop(turn);
+    assert_eq!(stored_summaries(&ws, id), [None]);
+
+    finish.send(()).unwrap();
+    let Some(Arrival::Summaries(arrived)) = arrivals.recv().await else {
+        panic!("the summaries reach the message loop");
+    };
+    assert_eq!(arrived, summarized(&ws, id));
+}
+
+/// Summaries that reach the message loop are stored while the conversation is
+/// free, and dropped while another turn holds it rather than held for that
+/// turn: its own summary request covers the same turns.
+#[test]
+fn late_summaries_are_stored_only_while_the_conversation_is_free() {
+    let (ws, id, _tmp) = workspace_with_a_turn();
+    let (late, _arrivals) = LateWrites::new();
+
+    let next_turn = lock_for_turn(&ws, id);
+    late.offer(&ws, Arrival::Summaries(summarized(&ws, id)));
+    late.release(next_turn);
+    assert_eq!(stored_summaries(&ws, id), [None]);
+
+    late.offer(&ws, Arrival::Summaries(summarized(&ws, id)));
+    assert_eq!(stored_summaries(&ws, id), [Some(
+        "Answer a question".to_owned()
+    )]);
 }
 
 /// The user-global root is `<config dir>/config/`, the directory `--cfg` itself

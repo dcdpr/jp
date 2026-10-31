@@ -558,7 +558,7 @@ impl ConversationStream {
     /// invisible to turn iteration ([`Self::iter`] skips them), so no attempt
     /// is made to associate trailing globals with the new turn.
     pub fn start_turn(&mut self, request: impl Into<ChatRequest>) {
-        self.push(ConversationEvent::now(TurnStart));
+        self.push(ConversationEvent::now(TurnStart::default()));
         self.push(ConversationEvent::now(request.into()));
     }
 
@@ -587,7 +587,7 @@ impl ConversationStream {
             .any(|e| matches!(&e.payload, EventPayload::Event(event) if event.is_turn_start()));
 
         if !has_turn {
-            self.push(ConversationEvent::now(TurnStart));
+            self.push(ConversationEvent::now(TurnStart::default()));
         }
 
         TurnMut::new(self)
@@ -1173,7 +1173,10 @@ impl ConversationStream {
 
             self.insert(
                 insert_pos,
-                EventPayload::Event(Box::new(ConversationEvent::new(TurnStart, timestamp))),
+                EventPayload::Event(Box::new(ConversationEvent::new(
+                    TurnStart::default(),
+                    timestamp,
+                ))),
             );
         }
     }
@@ -1319,6 +1322,59 @@ impl ConversationStream {
             }
         }
         result
+    }
+
+    /// Store `summary` on the [`TurnStart`] entry whose ID is `turn_id`,
+    /// replacing any summary it already holds.
+    ///
+    /// Returns `false`, leaving the stream unchanged, when `turn_id` does not
+    /// name a `TurnStart` in this stream: the turn has been removed, the ID
+    /// names another kind of entry, or this stream's load found the ID on more
+    /// than one entry (see [`Self::duplicated_event_ids`]).
+    ///
+    /// The text is stored verbatim; keeping it to a single line is up to the
+    /// caller.
+    pub fn set_turn_summary(&mut self, turn_id: &EventId, summary: String) -> bool {
+        let Some(turn_start) = self.turn_start_mut(turn_id) else {
+            return false;
+        };
+
+        turn_start.summary = Some(summary);
+        true
+    }
+
+    /// Remove the summary from the [`TurnStart`] entry whose ID is `turn_id`.
+    ///
+    /// For a turn whose content changed, so its summary no longer describes it.
+    /// Returns `false`, leaving the stream unchanged, in the same cases as
+    /// [`Self::set_turn_summary`].
+    pub fn clear_turn_summary(&mut self, turn_id: &EventId) -> bool {
+        let Some(turn_start) = self.turn_start_mut(turn_id) else {
+            return false;
+        };
+
+        turn_start.summary = None;
+        true
+    }
+
+    /// The [`TurnStart`] entry whose ID is `turn_id`.
+    ///
+    /// `None` when no entry has that ID, the entry is not a `TurnStart`, or
+    /// this stream's load found the ID on more than one entry.
+    fn turn_start_mut(&mut self, turn_id: &EventId) -> Option<&mut TurnStart> {
+        if self.duplicated_event_ids.contains(turn_id) {
+            return None;
+        }
+
+        let entry = self.events.iter_mut().find(|e| e.event_id == *turn_id)?;
+        let EventPayload::Event(event) = &mut entry.payload else {
+            return None;
+        };
+        let EventKind::TurnStart(turn_start) = &mut event.kind else {
+            return None;
+        };
+
+        Some(turn_start)
     }
 
     /// Retain only the last `n` turns, dropping earlier ones.
@@ -1744,3 +1800,7 @@ mod event_id_tests;
 #[cfg(test)]
 #[path = "stream/event_id_repair_tests.rs"]
 mod event_id_repair_tests;
+
+#[cfg(test)]
+#[path = "stream/turn_summary_tests.rs"]
+mod turn_summary_tests;

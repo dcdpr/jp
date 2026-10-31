@@ -1272,6 +1272,41 @@ conversation: ConversationConfig
                 results_file_link?: "full" | "osc8" | "off"
               |: null
             summary: string | null
+  turn_summary: TurnSummaryConfig
+    generate: TurnSummaryGenerateConfig
+      auto?: bool
+      batch_size?: int
+      model:
+        |: ModelConfig
+          id: ModelIdOrAliasConfig
+            |: ModelIdConfig
+              name: string
+              provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "vllm" | "xai"
+            |: string
+          parameters: ParametersConfig
+            max_tokens: int | null
+            other? (flattened):
+              *: unknown
+            reasoning:
+              |: ReasoningConfig
+                |: "off"
+                |: "auto"
+                |: CustomReasoningConfig
+                  effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string
+                  exclude?: bool
+              |: null
+            service_tier: "off" | "flex" | "standard" | "priority" | null
+            stop_words?: MergeableVec
+              |: [string]
+              |: MergedVec
+                dedup?: "inherit" | "true" | "false" | bool | null
+                discard_when_merged?: bool
+                strategy?: "append" | "prepend" | "replace" | null
+                value?: [string]
+            temperature: float | null
+            top_k: int | null
+            top_p: float | null
+        |: null
 editor: EditorConfig
   cmd:
     |: CommandConfigOrString

@@ -608,7 +608,7 @@ fn inject_summary(
     origin: TurnOrigin,
 ) {
     for event in [
-        ConversationEvent::new(TurnStart, timestamp),
+        ConversationEvent::new(TurnStart::default(), timestamp),
         ConversationEvent::new(ChatRequest::from(marker), timestamp),
         ConversationEvent::new(ChatResponse::message(summary), timestamp),
     ] {

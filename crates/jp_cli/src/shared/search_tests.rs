@@ -115,7 +115,7 @@ fn event_lines_chat_response_structured_string_is_verbatim() {
 
 #[test]
 fn event_lines_turn_start_is_empty() {
-    let kind = EventKind::TurnStart(jp_conversation::event::TurnStart);
+    let kind = EventKind::TurnStart(jp_conversation::event::TurnStart::default());
     assert!(collect_lines(&kind).is_empty());
 }
 
@@ -134,7 +134,9 @@ fn event_scope_mapping() {
         Some(ConcreteScope::Reasoning)
     );
     assert_eq!(
-        event_scope(&EventKind::TurnStart(jp_conversation::event::TurnStart)),
+        event_scope(&EventKind::TurnStart(
+            jp_conversation::event::TurnStart::default()
+        )),
         None
     );
 }
