@@ -296,8 +296,11 @@ impl AssignKeyValue for PartialCompactionRuleConfig {
             // while the string `"-1"` is still the last turn.
             "keep_first" => self.keep_first = kv.try_some_value()?,
             "keep_last" => self.keep_last = kv.try_some_value()?,
-            "reasoning" => self.reasoning = kv.try_some_from_str()?,
-            "tool_calls" => self.tool_calls = kv.try_some_from_str()?,
+            // A table goes through `PolicySpec`'s deserializer, as in a config
+            // file, and a string through its `FromStr`, which also reads the
+            // `strip,over=1MB` shorthand.
+            "reasoning" => self.reasoning = kv.try_some_object_or_from_str()?,
+            "tool_calls" => self.tool_calls = kv.try_some_object_or_from_str()?,
             _ if kv.p("summary") => self.summary.assign(kv)?,
             _ => return missing_key(&kv),
         }

@@ -1233,6 +1233,11 @@ impl KvAssignment {
 
     /// Try to parse the value as a JSON array of partial configs, and set or
     /// merge the elements.
+    ///
+    /// An object element is assigned one top-level key at a time, the way
+    /// [`Self::try_merge_object`] assigns a block, so each field receives its
+    /// value whole: a nested config gets its block as one object, and so does a
+    /// field that takes a table as its value.
     pub(crate) fn try_vec_of_nested<T>(mut self, vec: &mut Vec<T>) -> Result<(), KvAssignmentError>
     where
         T: PartialConfig + AssignKeyValue + FromStr<Err = BoxedError>,
@@ -1246,8 +1251,8 @@ impl KvAssignment {
                 // value from the assignment.
                 Some(item) if self.key.is_empty() => {
                     match self.value.clone() {
-                        KvValue::Json(v @ Value::Object(_)) => {
-                            for (k, v) in flatten_json_object(v, self.key.delim) {
+                        KvValue::Json(Value::Object(obj)) => {
+                            for (k, v) in obj {
                                 let mut kv = self.clone();
                                 kv.key.full_path = [self.key.full_path.as_str(), k.as_str()]
                                     .join(kv.key.delim.as_str());
@@ -1286,7 +1291,7 @@ impl KvAssignment {
             match kv.value.clone() {
                 KvValue::Json(Value::Object(obj)) => {
                     let mut item = T::default();
-                    for (k, v) in flatten_json_object(Value::Object(obj), kv.key.delim) {
+                    for (k, v) in obj {
                         let mut nested_kv = kv.clone();
                         nested_kv.key.full_path =
                             [kv.key.full_path.as_str(), k.as_str()].join(kv.key.delim.as_str());
@@ -1317,51 +1322,6 @@ impl KvAssignment {
         T: PartialConfig + AssignKeyValue + FromStr<Err = BoxedError>,
     {
         self.try_vec_of_nested(vec.get_or_insert_default())
-    }
-}
-
-/// Flatten a JSON object into a list of dot-delimited key-value pairs.
-///
-/// This *DOES NOT* flatten arrays, only objects.
-/// The reason for this is that if we want to assign a JSON array to an item, if
-/// we flattened the array, the assignment would try to fetch the individual
-/// elements from the array, which might not exist, and result in an
-/// out-of-bounds error.
-///
-/// Instead, we want the array to be assigned as-is, overriding any existing
-/// array.
-///
-/// Modifying individual elements of an array can still be done, by specifically
-/// targeting the array index, e.g. `foo.0` or `foo.0.bar`.
-fn flatten_json_object(value: Value, delim: KeyDelim) -> Vec<(String, Value)> {
-    let mut result = Vec::new();
-    flatten_recursive(value, String::new(), &mut result, delim);
-    result
-}
-
-/// Recursively flatten a JSON object into a list of dot-delimited key-value
-fn flatten_recursive(
-    value: Value,
-    path: String,
-    result: &mut Vec<(String, Value)>,
-    delim: KeyDelim,
-) {
-    match value {
-        Value::Object(v) => {
-            for (k, v) in v {
-                flatten_recursive(
-                    v,
-                    if path.is_empty() {
-                        k.clone()
-                    } else {
-                        format!("{path}{}{k}", delim.as_str())
-                    },
-                    result,
-                    delim,
-                );
-            }
-        }
-        _ => result.push((path, value)),
     }
 }
 

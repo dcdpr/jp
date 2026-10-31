@@ -1134,6 +1134,79 @@ fn test_partial_app_config_assign() {
     );
 }
 
+/// A model `id` written as an object is one value, whichever JSON form carries
+/// it: the root object, a key's JSON value, or an object inside a listed item.
+/// A dotted key edits one half of the id instead.
+#[test]
+fn an_id_object_replaces_the_id_in_every_json_form() {
+    use crate::model::id::{PartialModelIdConfig, ProviderId};
+
+    // The provider alone: the id these forms leave behind.
+    let openai_only = PartialModelIdOrAliasConfig::Id(PartialModelIdConfig {
+        provider: Some(ProviderId::Openai),
+        name: None,
+    });
+
+    // A partial whose assistant and first compaction rule both name
+    // `anthropic/claude-haiku-4-5`.
+    let configured = || {
+        let mut p = PartialAppConfig::empty();
+        for (key, value) in [
+            ("assistant.model.id", "anthropic/claude-haiku-4-5"),
+            (
+                "conversation.compaction.rules:",
+                r#"[{"summary": {"model": {"id": "anthropic/claude-haiku-4-5"}}}]"#,
+            ),
+        ] {
+            p.assign(KvAssignment::try_from_cli(key, value).unwrap())
+                .unwrap();
+        }
+        p
+    };
+    let rule_id = |p: &PartialAppConfig| {
+        p.conversation.compaction.rules[0]
+            .summary
+            .as_ref()
+            .and_then(|summary| summary.model.as_ref())
+            .map(|model| model.id.clone())
+    };
+
+    let mut root = configured();
+    root.assign(KvAssignment::root_json(serde_json::json!({
+        "assistant": { "model": { "id": { "provider": "openai" } } }
+    })))
+    .unwrap();
+    assert_eq!(root.assistant.model.id, openai_only);
+
+    let mut key = configured();
+    key.assign(
+        KvAssignment::try_from_cli("assistant.model.id:", r#"{"provider": "openai"}"#).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(key.assistant.model.id, openai_only);
+
+    let mut listed = configured();
+    listed
+        .assign(
+            KvAssignment::try_from_cli(
+                "conversation.compaction.rules.0:",
+                r#"{"summary": {"model": {"id": {"provider": "openai"}}}}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(rule_id(&listed), Some(openai_only));
+
+    let mut dotted = configured();
+    dotted
+        .assign(KvAssignment::try_from_cli("assistant.model.id.provider", "openai").unwrap())
+        .unwrap();
+    assert_eq!(
+        dotted.assistant.model.id,
+        PartialModelIdOrAliasConfig::from("openai/claude-haiku-4-5")
+    );
+}
+
 #[test]
 fn config_load_paths_append_across_layers() {
     // Each layer adds its search directories to the accumulated list instead of

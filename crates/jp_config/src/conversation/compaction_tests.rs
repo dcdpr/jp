@@ -1,5 +1,5 @@
 use super::*;
-use crate::types::byte_size::ByteSize;
+use crate::{PartialAppConfig, types::byte_size::ByteSize};
 
 // ---------------------------------------------------------------------------
 // Rule policies in TOML
@@ -285,6 +285,122 @@ fn assigning_a_rule_bound_matches_the_config_file() {
     let negative = KvAssignment::try_from_cli("keep_first:", "-1").unwrap();
     assert!(rule.assign(negative).is_err());
     assert_eq!(rule.keep_first, Some(RuleBound::Turns(3)));
+}
+
+/// A policy table assigned with `--cfg` means what it means in a config file,
+/// whichever order its keys are written in.
+#[test]
+fn assigning_a_policy_table_matches_the_config_file() {
+    let mut rule = PartialCompactionRuleConfig::default();
+
+    rule.assign(
+        KvAssignment::try_from_cli("reasoning:", r#"{"policy": "strip", "over": "16KB"}"#).unwrap(),
+    )
+    .unwrap();
+    rule.assign(
+        KvAssignment::try_from_cli(
+            "tool_calls:",
+            r#"{"over": "1MB", "policy": "strip-responses"}"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        rule.reasoning,
+        Some(PolicySpec::over(
+            ReasoningMode::Strip,
+            ByteSize::from_bytes(16 * 1024)
+        ))
+    );
+    assert_eq!(
+        rule.tool_calls,
+        Some(PolicySpec::over(
+            ToolCallsMode::StripResponses,
+            ByteSize::from_bytes(1024 * 1024)
+        ))
+    );
+}
+
+/// A misspelled option is refused, as it is in a config file, rather than
+/// dropped so the policy reaches every item instead of the large ones.
+#[test]
+fn assigning_a_policy_table_rejects_an_unknown_option() {
+    let mut rule = PartialCompactionRuleConfig::default();
+    let kv = KvAssignment::try_from_cli(
+        "tool_calls:",
+        r#"{"policy": "strip-responses", "oer": "1MB"}"#,
+    )
+    .unwrap();
+
+    let error = rule.assign(kv).unwrap_err().to_string();
+
+    assert!(error.contains("unknown policy option `oer`"), "{error}");
+    assert_eq!(rule.tool_calls, None);
+}
+
+/// A rule written as an object in a JSON list hands each nested value to its
+/// field whole: a policy table arrives as a table, and a summary block as a
+/// block.
+#[test]
+fn a_rule_in_a_json_list_keeps_its_nested_values_whole() {
+    let mut config = PartialAppConfig::empty();
+
+    config
+        .assign(KvAssignment::root_json(serde_json::json!({
+            "conversation": { "compaction": { "rules": [{
+                "tool_calls": { "over": "1MB", "policy": "strip-responses" },
+                "summary": { "context": "Keep the decisions." },
+            }]}}
+        })))
+        .unwrap();
+
+    assert_eq!(config.conversation.compaction.rules.to_vec(), [
+        PartialCompactionRuleConfig {
+            tool_calls: Some(PolicySpec::over(
+                ToolCallsMode::StripResponses,
+                ByteSize::from_bytes(1024 * 1024)
+            )),
+            summary: Some(PartialSummaryConfig {
+                context: Some("Keep the decisions.".to_owned()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    ]);
+}
+
+/// A table assigned to one listed rule replaces that policy and leaves the
+/// rule's other fields as they were.
+#[test]
+fn a_table_assigned_to_a_listed_rule_keeps_its_other_fields() {
+    let mut config = PartialCompactionConfig::default();
+    config
+        .assign(
+            KvAssignment::try_from_cli("rules:", r#"[{"reasoning": "strip", "keep_last": 3}]"#)
+                .unwrap(),
+        )
+        .unwrap();
+
+    config
+        .assign(
+            KvAssignment::try_from_cli(
+                "rules.0:",
+                r#"{"tool_calls": {"policy": "omit", "over": "1MB"}}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+    assert_eq!(config.rules.to_vec(), [PartialCompactionRuleConfig {
+        keep_last: Some(RuleBound::Turns(3)),
+        reasoning: Some(ReasoningMode::Strip.into()),
+        tool_calls: Some(PolicySpec::over(
+            ToolCallsMode::Omit,
+            ByteSize::from_bytes(1024 * 1024)
+        )),
+        ..Default::default()
+    }]);
 }
 
 #[test]
