@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "quality_score": 0.6639584914330302,
-  "iosp_score": 0.8179212839128773,
-  "violations": 953,
+  "quality_score": 0.6644219171517157,
+  "iosp_score": 0.8183034008406572,
+  "violations": 951,
   "total": 7278,
   "complexity_warnings": 0,
   "magic_number_warnings": 0,
@@ -11,7 +11,7 @@
   "unsafe_warnings": 0,
   "error_handling_warnings": 0,
   "duplicate_groups": 52,
-  "dead_code_warnings": 245,
+  "dead_code_warnings": 246,
   "dead_type_warnings": 28,
   "fragment_groups": 76,
   "boilerplate_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 0,
   "structural_coupling_warnings": 0,
-  "total_findings": 1401,
+  "total_findings": 1400,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -36,44 +36,39 @@
       "line": 247
     },
     {
-      "name": "ConversationStream::trim_chat_request",
-      "file": "crates/jp_conversation/src/stream.rs",
-      "line": 281
-    },
-    {
       "name": "ConversationStream::current_turn_mut",
       "file": "crates/jp_conversation/src/stream.rs",
-      "line": 583
+      "line": 588
     },
     {
       "name": "ConversationStream::pop_while",
       "file": "crates/jp_conversation/src/stream.rs",
-      "line": 827
+      "line": 832
     },
     {
       "name": "ConversationStream::remove_orphaned_inquiry_responses",
       "file": "crates/jp_conversation/src/stream.rs",
-      "line": 1018
+      "line": 1023
     },
     {
       "name": "ConversationStream::remove_orphaned_inquiry_requests",
       "file": "crates/jp_conversation/src/stream.rs",
-      "line": 1060
+      "line": 1065
     },
     {
       "name": "ConversationStream::normalize_turn_starts",
       "file": "crates/jp_conversation/src/stream.rs",
-      "line": 1107
+      "line": 1112
     },
     {
       "name": "ConversationStream::sanitize_orphaned_tool_calls",
       "file": "crates/jp_conversation/src/stream.rs",
-      "line": 1197
+      "line": 1202
     },
     {
       "name": "ConversationStream::from_legacy_events",
       "file": "crates/jp_conversation/src/stream.rs",
-      "line": 1659
+      "line": 1664
     },
     {
       "name": "strip_schema",
@@ -2741,19 +2736,14 @@
       "line": 2527
     },
     {
-      "name": "PendingStreamTrim::apply",
-      "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2723
-    },
-    {
       "name": "mount_access_seed",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2908
+      "line": 2906
     },
     {
       "name": "read_piped_stdin",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 3003
+      "line": 3001
     },
     {
       "name": "Login::run_with_auth",
@@ -3153,7 +3143,7 @@
     {
       "name": "QueryText::read",
       "file": "crates/jp_cli/src/cmd/query/args.rs",
-      "line": 535
+      "line": 537
     },
     {
       "name": "build_execution_plan",

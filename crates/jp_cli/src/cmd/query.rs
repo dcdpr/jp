@@ -662,8 +662,8 @@ impl Query {
         let schema = chat_request.schema.clone();
 
         // Read from the lock, not from `stream`: a `--replay` snapshot already
-        // has its last request trimmed, and a turn stopped before it starts
-        // leaves that request in place.
+        // has its last turn trimmed, and a turn stopped before it starts
+        // leaves that turn in place.
         let before = lock.with_events(last_request_id);
 
         let inputs = TurnInputs::collect(
@@ -770,8 +770,8 @@ impl Query {
     ) -> Result<BuiltConversation> {
         let mut pending_trim = PendingStreamTrim::default();
 
-        // If replaying, the events up-to-and-including the last `ChatRequest`
-        // are logically removed and the request is replayed. The removal is
+        // If replaying, the conversation's last turn is logically removed and
+        // the request that opened it is replayed. The removal is
         // computed on a clone (`view`) and only committed to the durable
         // stream at the turn-start commit point (see [`PendingStreamTrim`]):
         // an empty query, an interrupt, or an error before the turn starts
@@ -783,7 +783,7 @@ impl Query {
         let (view, mut chat_request) = if self.replay {
             pending_trim.replay_turn = true;
             let mut view = stream.clone();
-            let chat_request = view.trim_chat_request().unwrap_or_default();
+            let chat_request = view.trim_last_turn().unwrap_or_default();
             (Cow::Owned(view), chat_request)
         } else {
             (Cow::Borrowed(stream), ChatRequest::default())
@@ -2710,8 +2710,7 @@ struct BuiltConversation {
 /// [`TurnCoordinator::start_turn`]: turn::TurnCoordinator::start_turn
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct PendingStreamTrim {
-    /// Remove all trailing events up-to-and-including the last [`ChatRequest`]
-    /// event (`--replay`).
+    /// Remove the conversation's last turn (`--replay`).
     replay_turn: bool,
     /// Remove the trailing [`ChatRequest`] event (bare `--no-edit` replaying
     /// the last request).
@@ -2721,22 +2720,21 @@ pub(crate) struct PendingStreamTrim {
 impl PendingStreamTrim {
     /// Apply the deferred removals to the stream.
     pub(crate) fn apply(self, stream: &mut ConversationStream) {
-        let mut trimmed = false;
         if self.replay_turn {
-            trimmed |= stream.trim_chat_request().is_some();
-        }
-        if self.pop_request {
-            trimmed |= stream.pop_if(ConversationEvent::is_chat_request).is_some();
+            drop(stream.trim_last_turn());
         }
 
-        // A trim takes a request and everything after it. When that request
-        // was a reply to an interrupt, its turn stays, and its summary
-        // describes what was taken ([RFD 126]). Until the empty-turn check
-        // below, the trimmed turn is the stream's last; a turn the trim emptied
-        // is removed there, summary and all.
+        let popped =
+            self.pop_request && stream.pop_if(ConversationEvent::is_chat_request).is_some();
+
+        // Popping takes the last request. When that request was a reply to an
+        // interrupt, its turn stays, and the turn's summary describes what was
+        // taken ([RFD 126]). Until the empty-turn check below, that turn is the
+        // stream's last; a turn the pop emptied is removed there, summary and
+        // all.
         //
         // [RFD 126]: https://jp.computer/rfd/126
-        if trimmed
+        if popped
             && let Some(turn_id) = stream
                 .iter_events_by_turn()
                 .filter(|event| event.is_turn_start())
@@ -2746,12 +2744,12 @@ impl PendingStreamTrim {
             stream.clear_turn_summary(&turn_id);
         }
 
-        // Both trims strip a turn's request but leave the [`TurnStart`] that
-        // opened it. Remove the now-empty turn marker so the replacement
-        // request doesn't open a second turn right behind it — the later
-        // stream sanitization only collapses duplicate `TurnStart`s before
-        // the *first* request, so a stale middle marker would survive in
-        // multi-turn conversations.
+        // A trim can leave a [`TurnStart`] with nothing after it: popping a
+        // turn's only request leaves the marker that opened the turn. Remove it
+        // so the replacement request doesn't open a second turn right behind
+        // it — the later stream sanitization only collapses duplicate
+        // `TurnStart`s before the *first* request, so a stale middle marker
+        // would survive in multi-turn conversations.
         //
         // Gated on a trim having run so a default (no-op) `PendingStreamTrim`
         // never mutates the stream.
