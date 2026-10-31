@@ -1335,19 +1335,46 @@ impl ConversationStream {
     /// The text is stored verbatim; keeping it to a single line is up to the
     /// caller.
     pub fn set_turn_summary(&mut self, turn_id: &EventId, summary: String) -> bool {
-        if self.duplicated_event_ids.contains(turn_id) {
+        let Some(turn_start) = self.turn_start_mut(turn_id) else {
             return false;
+        };
+
+        turn_start.summary = Some(summary);
+        true
+    }
+
+    /// Remove the summary from the [`TurnStart`] entry whose ID is `turn_id`.
+    ///
+    /// For a turn whose content changed, so its summary no longer describes it.
+    /// Returns `false`, leaving the stream unchanged, in the same cases as
+    /// [`Self::set_turn_summary`].
+    pub fn clear_turn_summary(&mut self, turn_id: &EventId) -> bool {
+        let Some(turn_start) = self.turn_start_mut(turn_id) else {
+            return false;
+        };
+
+        turn_start.summary = None;
+        true
+    }
+
+    /// The [`TurnStart`] entry whose ID is `turn_id`.
+    ///
+    /// `None` when no entry has that ID, the entry is not a `TurnStart`, or
+    /// this stream's load found the ID on more than one entry.
+    fn turn_start_mut(&mut self, turn_id: &EventId) -> Option<&mut TurnStart> {
+        if self.duplicated_event_ids.contains(turn_id) {
+            return None;
         }
 
-        if let Some(entry) = self.events.iter_mut().find(|e| e.event_id == *turn_id)
-            && let EventPayload::Event(event) = &mut entry.payload
-            && let EventKind::TurnStart(turn_start) = &mut event.kind
-        {
-            turn_start.summary = Some(summary);
-            return true;
-        }
+        let entry = self.events.iter_mut().find(|e| e.event_id == *turn_id)?;
+        let EventPayload::Event(event) = &mut entry.payload else {
+            return None;
+        };
+        let EventKind::TurnStart(turn_start) = &mut event.kind else {
+            return None;
+        };
 
-        false
+        Some(turn_start)
     }
 
     /// Retain only the last `n` turns, dropping earlier ones.
