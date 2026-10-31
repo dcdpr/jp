@@ -765,17 +765,17 @@ fn pop_if_preserves_trailing_compaction() {
 }
 
 #[test]
-fn trim_chat_request_preserves_trailing_compaction() {
+fn trim_last_turn_preserves_trailing_compaction() {
     let mut stream = ConversationStream::new_test();
     stream.start_turn("hello");
     stream.add_compaction(Compaction::new(0, 0));
 
-    let request = stream.trim_chat_request();
+    let request = stream.trim_last_turn();
     assert_eq!(request.map(|r| r.content), Some("hello".to_owned()));
     assert_eq!(
         stream.compactions().count(),
         1,
-        "compaction overlay must survive trim_chat_request"
+        "compaction overlay must survive trim_last_turn"
     );
 }
 
@@ -847,11 +847,11 @@ fn pop_and_trim_preserve_trailing_config_delta() {
     assert_ne!(with_delta, base, "setup: the delta must change the config");
 
     let mut trimmed = stream.clone();
-    assert!(trimmed.trim_chat_request().is_some());
+    assert!(trimmed.trim_last_turn().is_some());
     assert_eq!(
         trimmed.config().unwrap(),
         with_delta,
-        "trim_chat_request must preserve the trailing config delta"
+        "trim_last_turn must preserve the trailing config delta"
     );
 
     assert!(stream.pop_if(ConversationEvent::is_chat_request).is_some());
@@ -3258,8 +3258,7 @@ fn entry_labels(stream: &ConversationStream) -> Vec<String> {
 fn replaying_a_turn_removes_its_unreadable_chat_response() {
     let mut stream = two_turns_with_future_commentary();
 
-    let request = stream.trim_chat_request().unwrap();
-    stream.trim_trailing_empty_turn();
+    let request = stream.trim_last_turn().unwrap();
     stream.start_turn(request);
 
     assert_eq!(entry_labels(&stream), [
@@ -3270,6 +3269,72 @@ fn replaying_a_turn_removes_its_unreadable_chat_response() {
         "turn",
         "request q1",
     ]);
+}
+
+/// A turn interrupted with a reply holds two requests.
+/// Trimming it removes both, and the reply's answer with them, and returns the
+/// request that opened the turn.
+#[test]
+fn trimming_the_last_turn_removes_it_whole_and_returns_its_opening_request() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("q0");
+    stream.push(ConversationEvent::now(ChatResponse::message("a0")));
+    stream.start_turn("q1");
+    stream.push(ConversationEvent::now(ChatResponse::message("partial a1")));
+    stream.push(ConversationEvent::now(ChatRequest::from(
+        "reply to the interrupt",
+    )));
+    stream.push(ConversationEvent::now(ChatResponse::message("a1")));
+
+    let request = stream.trim_last_turn();
+
+    assert_eq!(request.map(|r| r.content), Some("q1".to_owned()));
+    assert_eq!(entry_labels(&stream), ["turn", "request q0", "message a0"]);
+}
+
+/// The schema lives on the request that opened the turn; an interrupt reply
+/// carries none.
+#[test]
+fn trimming_the_last_turn_returns_the_schema_of_its_opening_request() {
+    let schema = Map::from_iter([("type".to_owned(), Value::from("object"))]);
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest {
+        content: "q0".into(),
+        schema: Some(schema.clone()),
+        author: None,
+    });
+    stream.push(ConversationEvent::now(ChatRequest::from(
+        "reply to the interrupt",
+    )));
+
+    let request = stream.trim_last_turn().unwrap();
+
+    assert_eq!(request.schema, Some(schema));
+}
+
+/// Events before the first turn marker form a turn of their own, which starts
+/// at the beginning of the stream.
+#[test]
+fn trimming_the_last_turn_of_a_stream_without_turn_markers_removes_its_events() {
+    let mut stream = ConversationStream::new_test();
+    stream.push(ConversationEvent::now(ChatRequest::from("q0")));
+    stream.push(ConversationEvent::now(ChatResponse::message("a0")));
+
+    let request = stream.trim_last_turn();
+
+    assert_eq!(request.map(|r| r.content), Some("q0".to_owned()));
+    assert!(entry_labels(&stream).is_empty());
+}
+
+#[test]
+fn trimming_a_stream_without_requests_changes_nothing() {
+    let mut stream = ConversationStream::new_test();
+    stream.push(TurnStart::default());
+    stream.add_compaction(Compaction::new(0, 0));
+    let before = stream.clone();
+
+    assert!(stream.trim_last_turn().is_none());
+    assert_eq!(stream, before);
 }
 
 #[test]

@@ -88,11 +88,13 @@ impl Query<Parsed> {
                     .long("replay")
                     .action(ArgAction::SetTrue)
                     .conflicts_with("new")
-                    .help("Replay the last message in the conversation")
+                    .help("Replay the last turn in the conversation")
                     .long_help(
-                        "Replay the last message in the conversation.\n\nIf a query is provided, \
-                         it will be appended to the end of the previous message. If no query is \
-                         provided, $EDITOR will open with the last message in the conversation.",
+                        "Replay the last turn in the conversation.\n\nThe turn is removed, \
+                         including any reply sent while it was interrupted, and the message \
+                         that started it is sent again. If a query is provided, it is placed \
+                         before that message. If no query is provided, $EDITOR will open with \
+                         that message.",
                     ),
             )
             .arg(flag_arg::<Target>())
