@@ -1,17 +1,18 @@
-//! Title configuration for conversations.
+//! Attachment configuration for conversations.
 
 use std::str::FromStr;
 
 use indexmap::IndexMap;
 use schematic::Config;
 use serde_json::Value;
-use url::Url;
+use url::{Position, Url};
 
 use crate::{
     BoxedError, Error,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt},
     partial::{ToPartial, partial_opt},
+    types::json_value::JsonValue,
 };
 
 /// Attachment configuration.
@@ -29,18 +30,75 @@ pub enum AttachmentConfig {
 
 impl AssignKeyValue for PartialAttachmentConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
-        #[expect(clippy::single_match_else)]
         match kv.key_string().as_str() {
             "" => *self = kv.try_object_or_from_str()?,
-            _ => {
-                let mut object = PartialAttachmentObjectConfig::default();
-                object.assign(kv)?;
-                *self = Self::Object(object);
-            }
+            _ => match self {
+                Self::Object(object) => object.assign(kv)?,
+                // A field assigned to a URL attachment edits that part of the
+                // URL: the URL becomes the table that rebuilds it, and the field
+                // is assigned there.
+                Self::Url(url) => {
+                    let mut object = object_form(url).ok_or_else(|| {
+                        format!(
+                            "`{url}` cannot be edited field by field, because it has no `//` \
+                             after its scheme; set the whole attachment instead"
+                        )
+                    })?;
+                    object.assign(kv)?;
+                    *self = Self::Object(object);
+                }
+            },
         }
 
         Ok(())
     }
+}
+
+/// The table that rebuilds `url`: its scheme as `type`, its query as `params`,
+/// and everything else after `//` as `path`.
+///
+/// `None` for a URL without `//` after its scheme, such as `gh:pull/544/diff`.
+/// A table always rebuilds `<type>://<path>`, which an attachment handler reads
+/// as a different URL.
+fn object_form(url: &Url) -> Option<PartialAttachmentObjectConfig> {
+    if !url.has_authority() {
+        return None;
+    }
+
+    // The fragment stays on the path, where the rebuilt URL keeps it.
+    let path = format!(
+        "{}{}",
+        &url[Position::BeforeUsername..Position::AfterPath],
+        &url[Position::AfterQuery..]
+    );
+
+    let mut values = IndexMap::<String, Vec<String>>::new();
+    for (key, value) in url.query_pairs() {
+        values
+            .entry(key.into_owned())
+            .or_default()
+            .push(value.into_owned());
+    }
+
+    // A parameter given more than once becomes a list, which is written back as
+    // the same repeated parameter.
+    let params: IndexMap<_, _> = values
+        .into_iter()
+        .map(|(key, mut values)| {
+            let value = if values.len() == 1 {
+                Value::String(values.remove(0))
+            } else {
+                Value::from(values)
+            };
+            (key, JsonValue(value))
+        })
+        .collect();
+
+    Some(PartialAttachmentObjectConfig {
+        kind: Some(url.scheme().to_owned()),
+        path: Some(path),
+        params: (!params.is_empty()).then_some(params),
+    })
 }
 
 impl PartialConfigDelta for PartialAttachmentConfig {
@@ -104,7 +162,10 @@ impl From<Url> for PartialAttachmentConfig {
     }
 }
 
-/// Custom reasoning configuration.
+/// An attachment written as a table.
+///
+/// Its URL is `<type>://<path>`, with each `params` entry added as a query
+/// parameter.
 #[derive(Debug, Clone, PartialEq, Config)]
 pub struct AttachmentObjectConfig {
     /// The type of the attachment.
@@ -120,16 +181,16 @@ pub struct AttachmentObjectConfig {
     pub path: String,
 
     /// The query parameters of the attachment.
-    pub params: IndexMap<String, Value>,
+    pub params: IndexMap<String, JsonValue>,
 }
 
 impl AssignKeyValue for PartialAttachmentObjectConfig {
-    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
-            "kind" => self.kind = kv.try_some_string()?,
+            "type" => self.kind = kv.try_some_string()?,
             "path" => self.path = kv.try_some_string()?,
-            "params" => kv.try_object()?,
+            _ if kv.p("params") => kv.assign_to_entry(self.params.get_or_insert_default())?,
             _ => return missing_key(&kv),
         }
 
@@ -171,7 +232,7 @@ impl AttachmentObjectConfig {
             .map_err(|e| Error::Custom(Box::new(e)))?;
 
         for (key, value) in &self.params {
-            match value {
+            match &value.0 {
                 Value::String(value) => {
                     url.query_pairs_mut().append_pair(key, value);
                 }
@@ -204,3 +265,7 @@ impl AttachmentObjectConfig {
         Ok(url)
     }
 }
+
+#[cfg(test)]
+#[path = "attachment_tests.rs"]
+mod tests;
