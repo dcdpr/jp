@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.7219430678063076,
-  "iosp_score": 0.9187591053217928,
-  "violations": 948,
-  "total": 16005,
+  "quality_score": 0.7222880114815048,
+  "iosp_score": 0.9189582797909707,
+  "violations": 946,
+  "total": 16009,
   "complexity_warnings": 181,
   "magic_number_warnings": 255,
   "nesting_depth_warnings": 30,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 51,
   "structural_coupling_warnings": 10,
-  "total_findings": 3034,
+  "total_findings": 3032,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -36,44 +36,39 @@
       "line": 247
     },
     {
-      "name": "ConversationStream::trim_chat_request",
-      "file": "crates/jp_conversation/src/stream.rs",
-      "line": 281
-    },
-    {
       "name": "ConversationStream::current_turn_mut",
       "file": "crates/jp_conversation/src/stream.rs",
-      "line": 583
+      "line": 588
     },
     {
       "name": "ConversationStream::pop_while",
       "file": "crates/jp_conversation/src/stream.rs",
-      "line": 827
+      "line": 832
     },
     {
       "name": "ConversationStream::remove_orphaned_inquiry_responses",
       "file": "crates/jp_conversation/src/stream.rs",
-      "line": 1018
+      "line": 1023
     },
     {
       "name": "ConversationStream::remove_orphaned_inquiry_requests",
       "file": "crates/jp_conversation/src/stream.rs",
-      "line": 1060
+      "line": 1065
     },
     {
       "name": "ConversationStream::normalize_turn_starts",
       "file": "crates/jp_conversation/src/stream.rs",
-      "line": 1107
+      "line": 1112
     },
     {
       "name": "ConversationStream::sanitize_orphaned_tool_calls",
       "file": "crates/jp_conversation/src/stream.rs",
-      "line": 1197
+      "line": 1202
     },
     {
       "name": "ConversationStream::from_legacy_events",
       "file": "crates/jp_conversation/src/stream.rs",
-      "line": 1659
+      "line": 1664
     },
     {
       "name": "strip_schema",
@@ -2741,19 +2736,14 @@
       "line": 2527
     },
     {
-      "name": "PendingStreamTrim::apply",
-      "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2723
-    },
-    {
       "name": "mount_access_seed",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 2908
+      "line": 2906
     },
     {
       "name": "read_piped_stdin",
       "file": "crates/jp_cli/src/cmd/query.rs",
-      "line": 3003
+      "line": 3001
     },
     {
       "name": "Login::run_with_auth",
@@ -3148,7 +3138,7 @@
     {
       "name": "QueryText::read",
       "file": "crates/jp_cli/src/cmd/query/args.rs",
-      "line": 535
+      "line": 537
     },
     {
       "name": "build_execution_plan",
