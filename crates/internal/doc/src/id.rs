@@ -27,6 +27,7 @@ use std::{
     str::FromStr,
 };
 
+use camino::Utf8Path;
 use serde::{Serialize, Serializer};
 
 /// Characters an id is written in, in ascending digit order.
@@ -154,6 +155,42 @@ impl<K: Kind> Id<K> {
         }
 
         body.chars().map(fold).collect()
+    }
+
+    /// The id a document's file name opens with: `02wt0kx-slug.md` is
+    /// `T-02wt0kx` for a ticket.
+    ///
+    /// Returns `None` for a name without a slug or the `.md` extension.
+    #[must_use]
+    pub fn of_file(name: &str) -> Option<Self> {
+        let (id, slug) = name.strip_suffix(".md")?.split_once('-')?;
+        if slug.is_empty() {
+            return None;
+        }
+
+        id.parse().ok()
+    }
+
+    /// Read an id in any accepted spelling, or the path of a document's file,
+    /// such as `docs/ticket/02wt0kx-slug.md`.
+    ///
+    /// A path is read for its file name alone; the file need not exist.
+    /// Only a name ending in `.md` is read as a path, so a mistyped word with a
+    /// dash isn't taken for the id its first seven characters fold onto.
+    ///
+    /// # Errors
+    ///
+    /// When `text` is neither an id nor the path of a file one names.
+    pub fn parse_id_or_path(text: &str) -> Result<Self, InvalidId> {
+        let refused = match text.parse() {
+            Ok(id) => return Ok(id),
+            Err(refused) => refused,
+        };
+
+        Utf8Path::new(text.trim())
+            .file_name()
+            .and_then(Self::of_file)
+            .ok_or(refused)
     }
 }
 

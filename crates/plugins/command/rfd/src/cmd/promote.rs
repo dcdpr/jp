@@ -1,8 +1,9 @@
 //! `jp rfd promote`: advance an RFD one status along its lifecycle.
 //!
-//! - Draft to Discussion assigns the next permanent number, moves the file out
-//!   of the drafts directory, and rewrites every reference to the draft's id in
-//!   the RFDs, the drafts, and the tickets.
+//! - Draft to Discussion assigns a permanent number, the next free one unless
+//!   the caller names another, moves the file out of the drafts directory, and
+//!   rewrites every reference to the draft's id in the RFDs, the drafts, and
+//!   the tickets.
 //! - Discussion to Accepted, and Accepted to Implemented, are gated on every
 //!   RFD this one requires or extends having got that far first.
 //! - Implemented drops the `Requires` links in both directions: a dependency
@@ -47,13 +48,24 @@ static DRAFT_TOKEN: LazyLock<Regex> =
 const LINKS: [(&str, &str); 2] = [("Requires", "Required by"), ("Extends", "Extended by")];
 
 /// Advance the RFD `id` one status.
-pub(crate) fn promote(paths: &Paths, id: RfdId) -> Result<Output, String> {
+///
+/// A draft is published under `number`, or the next free number when it is
+/// `None`.
+/// Naming a number for an RFD that isn't a draft is refused.
+pub(crate) fn promote(paths: &Paths, id: RfdId, number: Option<RfdId>) -> Result<Output, String> {
     let file = paths.resolve(id)?;
     let document = Document::parse(&paths::read(&file)?);
     let status = document.header().status().unwrap_or_default();
 
+    if number.is_some() && status != "Draft" {
+        return Err(format!(
+            "Only a draft is promoted under a new number; RFD {id} is at {status}. Use `jp rfd \
+             renumber` to move it."
+        ));
+    }
+
     let output = match status.as_str() {
-        "Draft" => to_discussion(paths, id, &file, document)?,
+        "Draft" => to_discussion(paths, id, number, &file, document)?,
         "Discussion" => to_accepted(paths, &file, document)?,
         "Accepted" => to_implemented(paths, id, &file, document)?,
         other => {
@@ -66,18 +78,22 @@ pub(crate) fn promote(paths: &Paths, id: RfdId) -> Result<Output, String> {
     Ok(output)
 }
 
-/// Publish a draft under the next permanent number.
+/// Publish a draft under `number`, or the next free permanent number.
 fn to_discussion(
     paths: &Paths,
     draft: RfdId,
+    number: Option<RfdId>,
     file: &Utf8Path,
     mut document: Document,
 ) -> Result<Output, String> {
     let name = file.file_name().unwrap_or_default();
     check_publishable(&document, draft, name)?;
 
+    let number = match number {
+        Some(number) => check_number(paths, draft, number)?,
+        None => id::next_number(&paths.rfds)?,
+    };
     let mut board = priority::read_for_update(&paths.rfds)?;
-    let number = id::next_number(&paths.rfds)?;
     let old_stem = stem(name);
     let slug = &old_stem[draft.file_prefix().len()..];
     let new_name = format!("{number}-{slug}.md");
@@ -120,6 +136,29 @@ fn to_discussion(
 
     reflow(&new_file)?;
     Ok(output)
+}
+
+/// Refuse to publish `draft` under `number` when it isn't a permanent number,
+/// or a published RFD already holds it.
+fn check_number(paths: &Paths, draft: RfdId, number: RfdId) -> Result<RfdId, String> {
+    if matches!(number, RfdId::Draft(_)) {
+        return Err(format!(
+            "Cannot publish {draft} as {number}: a published RFD takes a number (001-999)."
+        ));
+    }
+
+    let prefix = number.file_prefix();
+    if let Some(taken) = markdown_files(&paths.rfds)?
+        .iter()
+        .filter_map(|file| file.file_name())
+        .find(|name| name.starts_with(&prefix))
+    {
+        return Err(format!(
+            "Cannot publish {draft} as {number}: {taken} holds it."
+        ));
+    }
+
+    Ok(number)
 }
 
 /// Refuse a draft that would publish a reference to another draft: the docs

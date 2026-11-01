@@ -21,7 +21,8 @@ impl Kind for TicketKind {
 /// A ticket id.
 ///
 /// The canonical form is `T-02wt0kx`.
-/// Input additionally accepts `T02wt0kx`, the bare body, and any case.
+/// Input additionally accepts `T02wt0kx`, the bare body, and any case; and,
+/// through `parse_id_or_path`, the path of a ticket file.
 pub type TicketId = Id<TicketKind>;
 
 #[cfg(test)]

@@ -99,8 +99,10 @@ enum Command {
 
     /// Append a comment to a ticket.
     Comment {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
         /// Omit it to choose.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: Option<TicketId>,
 
         /// Who is commenting.
@@ -125,8 +127,15 @@ enum Command {
     /// Without it, you choose one.
     /// Without a verb, lists the labels.
     Label {
-        /// A ticket to act on: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
-        #[arg(long = "id", short = 'i', global = true, value_delimiter = ',')]
+        /// A ticket to act on: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path
+        /// of its file.
+        #[arg(
+            long = "id",
+            short = 'i',
+            global = true,
+            value_delimiter = ',',
+            value_parser = TicketId::parse_id_or_path
+        )]
         ids: Vec<TicketId>,
 
         #[command(subcommand)]
@@ -138,8 +147,10 @@ enum Command {
 
     /// Mark a ticket as Done.
     Close {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
         /// Omit it to choose.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: Option<TicketId>,
     },
 
@@ -150,24 +161,28 @@ enum Command {
     /// With one, it lands next to that ticket, which has to be in the column
     /// already; that is checked before anything changes.
     Status {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: TicketId,
 
         /// The column: `todo`, `in progress`, or `done`.
         status: Status,
 
         /// Place it directly above this ticket.
-        #[arg(long, conflicts_with = "after")]
+        #[arg(long, conflicts_with = "after", value_parser = TicketId::parse_id_or_path)]
         before: Option<TicketId>,
 
         /// Place it directly below this ticket.
-        #[arg(long)]
+        #[arg(long, value_parser = TicketId::parse_id_or_path)]
         after: Option<TicketId>,
     },
 
     /// Give a ticket a new title, moving its file to match.
     Rename {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: TicketId,
 
         /// New one-line summary.
@@ -180,8 +195,10 @@ enum Command {
     /// one `editor.cmd` names, or `JP_EDITOR`, `VISUAL`, or `EDITOR`.
     /// What the flags don't name is left alone.
     Edit {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
         /// Omit it to choose.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: Option<TicketId>,
 
         /// New one-line summary; the file moves to match, as with `rename`.
@@ -207,8 +224,10 @@ enum Command {
     /// Its id is not retired: a later creation in the same time bucket can draw
     /// it again.
     Delete {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
         /// Omit it to choose.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: Option<TicketId>,
     },
 
@@ -216,8 +235,10 @@ enum Command {
     ///
     /// With `jp -F json`, the ticket is printed as JSON.
     Show {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
         /// Omit it to choose.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: Option<TicketId>,
     },
 
@@ -229,22 +250,26 @@ enum Command {
     /// Move a ticket next to another in the same column of the board.
     #[command(group(ArgGroup::new("place").required(true)))]
     Rank {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: TicketId,
 
         /// Place it directly above this ticket.
-        #[arg(long, group = "place")]
+        #[arg(long, group = "place", value_parser = TicketId::parse_id_or_path)]
         before: Option<TicketId>,
 
         /// Place it directly below this ticket.
-        #[arg(long, group = "place")]
+        #[arg(long, group = "place", value_parser = TicketId::parse_id_or_path)]
         after: Option<TicketId>,
     },
 
     /// Record that a ticket became an RFD, and close it.
     Promote {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
         /// Omit it to choose.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: Option<TicketId>,
 
         /// The RFD the work moved to, e.g. `D07` or `045`.
@@ -1029,7 +1054,8 @@ fn compose(
     }
 }
 
-/// Read `jp ticket T-02wt0kx` as `jp ticket show T-02wt0kx`.
+/// Read `jp ticket T-02wt0kx` as `jp ticket show T-02wt0kx`, and the same for
+/// the path of a ticket file.
 ///
 /// A bare id is the most common thing to type.
 /// An exact subcommand name always wins: `comment` and `promote` are seven
@@ -1043,7 +1069,7 @@ fn with_show_alias(args: &[String]) -> Vec<String> {
     let is_subcommand = Args::command()
         .get_subcommands()
         .any(|sub| sub.get_name() == first || sub.get_all_aliases().any(|alias| alias == first));
-    if is_subcommand || first.parse::<TicketId>().is_err() {
+    if is_subcommand || TicketId::parse_id_or_path(first).is_err() {
         return args.to_vec();
     }
 
