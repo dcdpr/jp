@@ -21,7 +21,7 @@
 //! `Label` does.
 //! The site reads the block the same way, in `jp-vite`'s `metadata.mjs`.
 //!
-//! [`split`] reads one field line and [`line`] writes one.
+//! [`split`] reads one field line and [`line()`] writes one.
 //! [`Header`] reads a block and nothing past it, so a field line quoted further
 //! down, as a document describing the format does, is never read as the
 //! document's own.
