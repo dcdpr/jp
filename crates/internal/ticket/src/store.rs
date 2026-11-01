@@ -1,30 +1,24 @@
-//! Ticket files on disk: id allocation and the create, comment, close, and list
-//! operations.
+//! Ticket files on disk: the create, comment, close, and list operations.
 //!
 //! Ids carry a time bucket and a random tail rather than a counter, so two
 //! checkouts that cannot see each other still hand out different ids.
 //! Nothing coordinates allocation; see
 //! `docs/rfd/102-collision-resistant-ticket-identifiers.md`.
 //!
-//! The time component counts from the directory's own [`Epoch`], which the
-//! first allocation in an empty directory writes.
+//! Allocation is `doc::files`'s: the time component counts from the directory's
+//! own [`Epoch`], which the first ticket in an empty directory writes.
 
-use std::{
-    collections::hash_map::RandomState,
-    fmt, fs,
-    hash::BuildHasher,
-    io::{self, Write},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{fmt, fs, io};
 
 use camino::{Utf8Path, Utf8PathBuf};
+use doc::files;
 use jp_label::Clash;
 
 use crate::{
     Comment, Epoch, LABEL_KEY, Labels, NewTicket, ParseError, Status, Ticket, TicketId, Vocabulary,
     check::{self, Directory, Problem, Report, TicketFile},
-    epoch::EPOCH_FILE,
-    id::{MAX_BUCKET, TAIL_SPACE},
+    epoch::{EPOCH_FILE, EpochError},
+    id::TicketKind,
     import::{Import, escaped, github_marker},
     parse, render,
 };
@@ -32,13 +26,7 @@ use crate::{
 /// Directory holding the ticket files, relative to the workspace root.
 pub const DEFAULT_DIR: &str = "docs/ticket";
 
-/// Longest slug a ticket filename carries; a title beyond this is cut.
-///
-/// Slugs are ASCII, so this is both a byte count and a character count.
-pub const MAX_SLUG_SIZE: usize = 60;
-
-/// Seconds one id bucket spans.
-const BUCKET_SECS: u64 = 5;
+pub use doc::files::MAX_SLUG_SIZE;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -70,7 +58,7 @@ pub enum Error {
     /// The epoch file is there but doesn't hold an epoch.
     MalformedEpoch {
         path: Utf8PathBuf,
-        error: ParseError,
+        error: EpochError,
     },
     /// The time component has no bucket left to express.
     ///
@@ -215,9 +203,8 @@ pub(crate) fn held_to_one(clash: &Clash) -> String {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Parse(error)
-            | Self::Malformed { error, .. }
-            | Self::MalformedEpoch { error, .. } => Some(error),
+            Self::Parse(error) | Self::Malformed { error, .. } => Some(error),
+            Self::MalformedEpoch { error, .. } => Some(error),
             Self::Rejected(error) => Some(error),
             Self::Io(error) => Some(error),
             _ => None,
@@ -243,6 +230,21 @@ impl From<io::Error> for Error {
     }
 }
 
+impl From<files::Error<TicketKind>> for Error {
+    fn from(error: files::Error<TicketKind>) -> Self {
+        match error {
+            files::Error::NotFound(id) => Self::NoSuchTicket(id),
+            files::Error::Duplicate { id, paths } => Self::Duplicate { id, paths },
+            files::Error::Contended => Self::Contended,
+            files::Error::ClockBeforeEpoch(epoch) => Self::ClockBeforeEpoch(epoch),
+            files::Error::MissingEpoch(path) => Self::MissingEpoch(path),
+            files::Error::MalformedEpoch { path, error } => Self::MalformedEpoch { path, error },
+            files::Error::Exhausted => Self::Exhausted,
+            files::Error::Io(error) => Self::Io(error),
+        }
+    }
+}
+
 /// A ticket file and the result of reading it.
 ///
 /// Listing keeps unreadable files rather than failing on them: one hand-mangled
@@ -255,19 +257,13 @@ pub struct Entry {
     pub ticket: std::result::Result<Ticket, ParseError>,
 }
 
-/// How many ids to draw before giving up on a contended directory.
-///
-/// Each attempt sees the file the previous one lost to, so the tail advances
-/// every round rather than redrawing into the same clash.
-const CLAIM_ATTEMPTS: usize = 16;
-
 /// Create a ticket at `Todo`, returning its id and path.
 ///
 /// `new.labels` are resolved already; `vocabulary` holds them to the keys it
 /// lets one ticket carry, which only the board can check.
 ///
 /// Creating the file exclusively is what claims the id: two processes drawing
-/// in the same bucket can land on one tail, and the loser finds out here rather
+/// in the same bucket can land on one tail, and the loser draws again rather
 /// than overwriting the winner's ticket.
 pub fn create(
     dir: &Utf8Path,
@@ -275,31 +271,12 @@ pub fn create(
     new: &NewTicket<'_>,
 ) -> Result<(TicketId, Utf8PathBuf)> {
     check_unique(dir, vocabulary, new.labels, None)?;
-    let slug = slug(new.title);
-    let epoch = establish_epoch(dir)?;
 
-    for _ in 0..CLAIM_ATTEMPTS {
-        let id = allocate_id(dir, epoch)?;
-        let path = dir.join(format!("{}{slug}.md", id.file_prefix()));
-
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
-            Ok(mut file) => {
-                file.write_all(render::ticket(new).as_bytes())?;
-
-                return Ok((id, path));
-            }
-            // Another process claimed this id first. The next attempt sees its
-            // file and draws a higher tail.
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error.into()),
-        }
-    }
-
-    Err(Error::Contended)
+    Ok(files::create(
+        dir,
+        &files::slug(new.title),
+        &render::ticket(new),
+    )?)
 }
 
 /// Record that a ticket became an RFD, and close it.
@@ -363,7 +340,7 @@ pub fn edit(
     fs::write(&from, updated)?;
 
     let to = match title {
-        Some(title) => dir.join(format!("{}{}.md", id.file_prefix(), slug(title))),
+        Some(title) => dir.join(format!("{}{}.md", id.file_prefix(), files::slug(title))),
         None => from.clone(),
     };
 
@@ -386,7 +363,11 @@ pub fn rename_to_title(dir: &Utf8Path, id: TicketId) -> Result<Edited> {
     let from = locate(dir, id)?;
     let ticket = parse::document(&fs::read_to_string(&from)?)?;
 
-    let to = dir.join(format!("{}{}.md", id.file_prefix(), slug(&ticket.title)));
+    let to = dir.join(format!(
+        "{}{}.md",
+        id.file_prefix(),
+        files::slug(&ticket.title)
+    ));
     // As in `edit`: the target carries this id's prefix, and `locate` refused
     // above if a second file claimed it.
     if to != from {
@@ -608,7 +589,7 @@ fn board_labels(
     skip: impl Fn(TicketId) -> bool,
 ) -> Result<Vec<(TicketId, Labels)>> {
     let mut tickets = vec![];
-    for (id, path) in files(dir)? {
+    for (id, path) in files::list::<TicketKind>(dir)? {
         if !skip(id) {
             tickets.push((id, parse::labels(&fs::read_to_string(&path)?)));
         }
@@ -788,12 +769,12 @@ pub fn set_status(dir: &Utf8Path, id: TicketId, status: Status) -> Result<(Utf8P
 /// Two files claiming one id is an error: nothing downstream can tell which of
 /// them a reference means, so the board refuses to render rather than pick.
 pub fn list(dir: &Utf8Path) -> Result<Vec<Entry>> {
-    let files = files(dir)?;
-    if let Some(error) = duplicate(&files) {
-        return Err(error);
+    let found = files::list::<TicketKind>(dir)?;
+    if let Some(error) = files::duplicate(&found) {
+        return Err(error.into());
     }
 
-    files
+    found
         .into_iter()
         .map(|(id, path)| {
             let source = fs::read_to_string(&path)?;
@@ -813,7 +794,7 @@ pub fn list(dir: &Utf8Path) -> Result<Vec<Entry>> {
 /// A directory that doesn't exist yet holds no tickets, and so no problems.
 pub fn check(dir: &Utf8Path, vocabulary: &Vocabulary) -> Result<Report> {
     let mut tickets = vec![];
-    for (id, path) in files(dir)? {
+    for (id, path) in files::list::<TicketKind>(dir)? {
         let source = fs::read_to_string(&path)?;
         tickets.push(TicketFile { id, path, source });
     }
@@ -881,52 +862,7 @@ pub fn locate_ticket(dir: &Utf8Path, id: TicketId) -> Result<Utf8PathBuf> {
 /// Two files claiming the id is an error rather than a choice: a write by id
 /// would otherwise land on whichever one the directory happened to yield first.
 fn locate(dir: &Utf8Path, id: TicketId) -> Result<Utf8PathBuf> {
-    let mut claiming: Vec<Utf8PathBuf> = files(dir)?
-        .into_iter()
-        .filter(|(found, _)| *found == id)
-        .map(|(_, path)| path)
-        .collect();
-
-    if claiming.len() > 1 {
-        return Err(Error::Duplicate {
-            id,
-            paths: claiming,
-        });
-    }
-
-    claiming.pop().ok_or(Error::NoSuchTicket(id))
-}
-
-/// Every ticket file in `dir`, paired with its id and ordered by it.
-fn files(dir: &Utf8Path) -> Result<Vec<(TicketId, Utf8PathBuf)>> {
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(vec![]),
-        Err(error) => return Err(error.into()),
-    };
-
-    let mut files = vec![];
-    for entry in entries {
-        // A path that isn't UTF-8 can't be a ticket file: ids and slugs are
-        // ASCII.
-        let Ok(path) = Utf8PathBuf::try_from(entry?.path()) else {
-            continue;
-        };
-        if path.extension() != Some("md") {
-            continue;
-        }
-        let Some(id) = path
-            .file_stem()
-            .and_then(|stem| stem.split_once('-'))
-            .and_then(|(number, _)| number.parse::<TicketId>().ok())
-        else {
-            continue;
-        };
-        files.push((id, path));
-    }
-    files.sort_unstable();
-
-    Ok(files)
+    Ok(files::locate(dir, id)?)
 }
 
 /// The id and slug of `path`, when it is a ticket file directly inside `dir`.
@@ -959,33 +895,6 @@ fn same_directory(left: &Utf8Path, right: &Utf8Path) -> bool {
     }
 }
 
-/// The first id claimed by more than one file, if any.
-///
-/// `files` is ordered by id, so duplicates are adjacent.
-fn duplicate(files: &[(TicketId, Utf8PathBuf)]) -> Option<Error> {
-    files
-        .windows(2)
-        .find(|pair| pair[0].0 == pair[1].0)
-        .map(|pair| Error::Duplicate {
-            id: pair[0].0,
-            paths: vec![pair[0].1.clone(), pair[1].1.clone()],
-        })
-}
-
-/// Hand out an id for a ticket about to be written.
-///
-/// The time component comes from the clock; the tail is random, except when
-/// this bucket already holds an id.
-/// Then it continues from the highest one, so tickets created back to back stay
-/// in creation order rather than shuffling.
-///
-/// An id sitting in a *future* bucket is ignored rather than continued from:
-/// one merged ticket from a machine with a fast clock would otherwise drag
-/// every later local timestamp forward with it.
-fn allocate_id(dir: &Utf8Path, epoch: Epoch) -> Result<TicketId> {
-    allocate_in(dir, current_bucket(epoch)?)
-}
-
 /// The epoch `dir`'s ids count time from, written as the start of today when
 /// the directory holds no tickets yet.
 ///
@@ -999,30 +908,7 @@ fn allocate_id(dir: &Utf8Path, epoch: Epoch) -> Result<TicketId> {
 /// Returns an error when the epoch file is missing beside existing tickets or
 /// doesn't hold an epoch, or when the filesystem refuses.
 pub fn establish_epoch(dir: &Utf8Path) -> Result<Epoch> {
-    match read_epoch(dir)? {
-        Some(epoch) => return Ok(epoch),
-        None if !files(dir)?.is_empty() => return Err(Error::MissingEpoch(dir.join(EPOCH_FILE))),
-        None => {}
-    }
-
-    let epoch = Epoch::day_of(now_seconds()?).ok_or(Error::Exhausted)?;
-
-    fs::create_dir_all(dir)?;
-    match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(dir.join(EPOCH_FILE))
-    {
-        Ok(mut file) => {
-            file.write_all(epoch.render().as_bytes())?;
-
-            Ok(epoch)
-        }
-        // Another process filing its first ticket wrote one first; theirs
-        // stands.
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => load_epoch(dir),
-        Err(error) => Err(error.into()),
-    }
+    Ok(files::establish_epoch::<TicketKind>(dir)?)
 }
 
 /// The epoch `dir`'s ids count time from, as its epoch file records it.
@@ -1031,47 +917,12 @@ pub fn establish_epoch(dir: &Utf8Path) -> Result<Epoch> {
 ///
 /// Returns an error when there is no epoch file, or it doesn't hold an epoch.
 pub fn load_epoch(dir: &Utf8Path) -> Result<Epoch> {
-    read_epoch(dir)?.ok_or_else(|| Error::MissingEpoch(dir.join(EPOCH_FILE)))
+    Ok(files::load_epoch::<TicketKind>(dir)?)
 }
 
 /// The epoch `dir`'s epoch file holds, or `None` when there is no such file.
 fn read_epoch(dir: &Utf8Path) -> Result<Option<Epoch>> {
-    let path = dir.join(EPOCH_FILE);
-    let source = match fs::read_to_string(&path) {
-        Ok(source) => source,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error.into()),
-    };
-
-    source
-        .parse()
-        .map(Some)
-        .map_err(|error| Error::MalformedEpoch { path, error })
-}
-
-/// Hand out an id in `bucket`, or the first bucket after it with room.
-fn allocate_in(dir: &Utf8Path, mut bucket: u32) -> Result<TicketId> {
-    fs::create_dir_all(dir)?;
-
-    let existing: Vec<TicketId> = files(dir)?.into_iter().map(|(id, _)| id).collect();
-
-    loop {
-        let highest = existing.iter().rev().find(|id| id.bucket() == bucket);
-        let tail = match highest {
-            Some(id) => match id.tail() + 1 {
-                // The bucket is full, which takes 1,024 tickets in five
-                // seconds. Move to the next one rather than reusing a tail.
-                next if next >= TAIL_SPACE => {
-                    bucket += 1;
-                    continue;
-                }
-                next => next,
-            },
-            None => random_tail(),
-        };
-
-        return TicketId::new(bucket, tail).ok_or(Error::Exhausted);
-    }
+    Ok(files::read_epoch::<TicketKind>(dir)?)
 }
 
 /// The bucket a unix timestamp falls in.
@@ -1081,15 +932,7 @@ fn allocate_in(dir: &Utf8Path, mut bucket: u32) -> Result<TicketId> {
 /// Returns an error when the timestamp predates `epoch`, or falls past the last
 /// bucket the format can express.
 pub fn bucket_at(epoch: Epoch, unix_seconds: u64) -> Result<u32> {
-    let bucket = unix_seconds
-        .checked_sub(epoch.unix_seconds())
-        .ok_or(Error::ClockBeforeEpoch(epoch))?
-        / BUCKET_SECS;
-
-    u32::try_from(bucket)
-        .ok()
-        .filter(|bucket| *bucket < MAX_BUCKET)
-        .ok_or(Error::Exhausted)
+    Ok(files::bucket_at::<TicketKind>(epoch, unix_seconds)?)
 }
 
 /// What a reassignment changed.
@@ -1117,7 +960,7 @@ pub fn reassign(dir: &Utf8Path, path: &Utf8Path, bucket: u32) -> Result<Reassign
     let (old, slug) =
         ticket_filename(dir, path).ok_or_else(|| Error::NotATicketFile(path.to_path_buf()))?;
 
-    let new = allocate_in(dir, bucket)?;
+    let new = files::allocate_in(dir, bucket)?;
     let target = dir.join(format!("{}{slug}.md", new.file_prefix()));
     if target != path {
         fs::rename(path, &target)?;
@@ -1137,55 +980,7 @@ pub fn reassign(dir: &Utf8Path, path: &Utf8Path, bucket: u32) -> Result<Reassign
 /// Returns an error when the clock reads before `epoch`, or past the last
 /// bucket the format can express.
 pub fn current_bucket(epoch: Epoch) -> Result<u32> {
-    let now = now_seconds().map_err(|_| Error::ClockBeforeEpoch(epoch))?;
-
-    bucket_at(epoch, now)
-}
-
-/// Seconds since the unix epoch, by the system clock.
-///
-/// A clock set before 1970 reads as an error rather than as zero.
-fn now_seconds() -> Result<u64> {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs())
-        .map_err(|error| Error::Io(io::Error::other(error)))
-}
-
-/// A random tail.
-///
-/// `RandomState` is seeded by the OS once per thread and advances per call, so
-/// two processes starting in the same second draw independently.
-/// Independent is not distinct: ten bits leave a 1-in-1,024 chance they land on
-/// the same tail, which is the collision `store::list` and the docs build exist
-/// to catch.
-/// Ten bits do not warrant a dependency on a generator.
-fn random_tail() -> u16 {
-    let value = RandomState::new().hash_one(SystemTime::now()) % u64::from(TAIL_SPACE);
-
-    u16::try_from(value).unwrap_or_default()
-}
-
-/// Build the filename slug from a title.
-fn slug(title: &str) -> String {
-    let mut slug = String::new();
-    for char_ in title.chars() {
-        match char_ {
-            c if c.is_ascii_alphanumeric() => slug.push(c.to_ascii_lowercase()),
-            '_' => slug.push('_'),
-            _ if slug.ends_with('-') => {}
-            _ => slug.push('-'),
-        }
-    }
-
-    // Every pushed character is ASCII, so a byte index is a character index.
-    let slug = slug.trim_matches('-');
-    let cut = slug.len().min(MAX_SLUG_SIZE);
-
-    match slug[..cut].trim_end_matches('-') {
-        "" => "untitled".to_owned(),
-        trimmed => trimmed.to_owned(),
-    }
+    Ok(files::current_bucket::<TicketKind>(epoch)?)
 }
 
 #[cfg(test)]

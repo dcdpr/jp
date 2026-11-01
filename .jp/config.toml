@@ -136,10 +136,31 @@ run = "allow"
 [plugins.command.rfd.options.tracking]
 labels = ["type=tracking"]
 
-# `jp vite` keeps the site's RFD and ticket pages in step with the two plugins
-# above, installed with `just _install-vite`. The site reads its settings from
-# `docs/.vitepress/jp-vite/settings.json`, which `jp vite sync` writes from
-# this configuration.
+# `jp wiki` keeps what the project knows in `docs/wiki/`: how the system works,
+# the glossary, and research. It is served the same way, installed with
+# `just _install-wiki`. Its directory is left at its default.
+[plugins.command.wiki]
+run = "allow"
+
+# Pages the assistant writes through the `wiki_*` tools are attributed to `jp`.
+[plugins.command.wiki.options]
+assistant = "jp"
+
+# The labels a page can carry. `domain` matches the tickets' vocabulary, so a
+# note moved from a ticket keeps its labels. `jp wiki tools sync
+# .jp/mcp/tools/wiki` mirrors them into the `wiki_*` tool definitions.
+[plugins.command.wiki.options.labels.domain]
+description = "The subsystem a page covers, across whatever crates it spans."
+values = ["conversation", "llm", "mcp", "plugins", "storage", "tooling"]
+
+[plugins.command.wiki.options.labels.relevant-rfd]
+description = "An RFD this page relates to."
+values = []
+
+# `jp vite` keeps the site's RFD, ticket, and wiki pages in step with the three
+# plugins above, installed with `just _install-vite`. The site reads its
+# settings from `docs/.vitepress/jp-vite/settings.json`, which `jp vite sync`
+# writes from this configuration.
 [plugins.command.vite]
 run = "allow"
 

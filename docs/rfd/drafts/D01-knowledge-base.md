@@ -938,4 +938,4 @@ Runs alongside Phase 4.
 [#102]: https://github.com/dcdpr/jp/issues/102
 [RFD 016]: ../016-wasm-plugin-architecture.md
 [RFD 017]: ../017-wasm-attachment-handlers.md
-[Wasm Tools]: ../../architecture/wasm-tools.md
+[Wasm Tools]: ../../wiki/00dxyb9-wasm-tools-architecture.md

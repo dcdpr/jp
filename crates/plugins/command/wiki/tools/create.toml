@@ -1,0 +1,95 @@
+[conversation.tools.wiki_create]
+source = "plugin.command.wiki.create"
+summary = "Write down project knowledge as a new wiki page."
+description = """
+Create a wiki page: a markdown file in the repository holding what the project
+knows, attributed to you.
+
+A page is a `Reference` or a `Snapshot`. A Reference describes the system as it
+is, such as an architecture overview, a glossary, or a runbook: when the code
+and the page disagree, one of them is wrong. A Snapshot is dated evidence, such
+as research notes or a benchmark, and isn't expected to change as the code
+does. A page starts as a Reference unless `status` says otherwise. A Snapshot's
+links into source are turned into links to the commit holding that code, so
+they keep pointing at what the page saw.
+
+Pages form a tree: place a page under the one it belongs to with `parent`, and
+list the pages with `wiki_list` to find it. A page without a parent is a top
+page, which introduces an area and leads to the pages under it. A page created
+without a `body` is a hub: its title and summary, with the pages under it
+listed beneath them.
+
+Write a ticket for work to do and a design document for a decision to make; a
+wiki page is for what is known. Look for an existing page with `wiki_list`
+first, and change it with `wiki_edit` rather than writing a second one.
+"""
+
+examples = """
+A page under another, with a label:
+```json
+{"title": "Turn", "summary": "What a turn is.", "body": "A single \
+request-response cycle.", "parent": "W-0a1b2c3", "labels": ["domain=conversation"]}
+```
+
+A hub for an area, filled by the pages placed under it:
+```json
+{"title": "Glossary", "summary": "The words the project uses, each for one concept."}
+```
+
+Research notes, as a top page:
+```json
+{"title": "Prompt Caching Benchmarks", "status": "snapshot", "summary": "How \
+much each provider's prompt cache saved on JP's own conversations.", "body": \
+"## Method\\n\\nTen conversations were replayed against each provider."}
+```
+"""
+
+run = "ask"
+
+[conversation.tools.wiki_create.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.wiki_create.parameters.title]
+type = "string"
+required = true
+summary = "The page's title, which also names its file."
+
+[conversation.tools.wiki_create.parameters.summary]
+type = "string"
+required = true
+summary = "One sentence saying what the page holds, shown wherever the page is listed."
+
+[conversation.tools.wiki_create.parameters.body]
+type = "string"
+required = false
+summary = "The page's text, as markdown, below its metadata; leave it out for a hub."
+
+[conversation.tools.wiki_create.parameters.parent]
+type = "string"
+required = false
+summary = "The page this one sits under, `W-0a1b2c3`; without one, it is a top page."
+
+[conversation.tools.wiki_create.parameters.status]
+type = "string"
+required = false
+enum = ["reference", "snapshot"]
+summary = "`reference` or `snapshot`; defaults to `reference`."
+
+# Not marked required here: `jp wiki tools sync` marks it when the vocabulary
+# requires a label, and a value set here would compete with that one.
+[conversation.tools.wiki_create.parameters.labels]
+type = "array"
+summary = "What the page covers, as `key=value` labels."
+description = """
+Each label is a `key=value` pair, and a key may be named more than once.
+
+When the wiki defines labels, only those are accepted: a label outside them is
+refused, and the refusal names the ones you can use. A wiki that defines none
+takes any.
+"""
+
+# The accepted values are mirrored from the vocabulary by `jp wiki tools sync`.
+[conversation.tools.wiki_create.parameters.labels.items]
+type = "string"

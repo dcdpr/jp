@@ -29,11 +29,12 @@
 //! Each comment opens with its own separator, so writing one appends the
 //! separator, the metadata, and the body, leaving everything above untouched.
 //!
-//! [`id`] defines the identifier, [`epoch`] the day a directory's ids count
-//! time from, [`parse`] reads a document, [`render`] writes one, [`store`]
-//! holds the file operations (id allocation, create, comment, close, list,
+//! [`id`] defines the identifier, [`parse`] reads a document, [`render`] writes
+//! one, [`store`] holds the file operations (create, comment, close, list,
 //! import), [`board`] holds the order within each column of the board, and
 //! [`import`] carries the rules for content that comes from upstream.
+//! The id format, the [`epoch`] a directory's ids count time from, and id
+//! allocation are the `doc` crate's.
 //!
 //! Labels are `key=value` annotations from [`jp_label`], and are how a board
 //! classifies its tickets: what kind of work a ticket is, which part of the
@@ -52,14 +53,13 @@ use serde::Serialize;
 
 pub mod board;
 pub mod check;
-pub mod epoch;
 pub mod id;
 pub mod import;
 pub mod parse;
 pub mod render;
 pub mod store;
 
-pub use epoch::Epoch;
+pub use doc::epoch::{self, Epoch};
 pub use id::TicketId;
 pub use jp_label::{Labels, Selector, Unique, Vocabulary};
 
@@ -195,12 +195,6 @@ pub enum ParseError {
     MissingField(&'static str),
     /// A metadata field holds a value the format doesn't define.
     InvalidValue { field: &'static str, value: String },
-    /// A string that isn't a ticket id.
-    Id(String),
-    /// An epoch file with no date line.
-    EpochEmpty,
-    /// An epoch file whose date line isn't a `YYYY-MM-DD` date.
-    Epoch(String),
 }
 
 impl fmt::Display for ParseError {
@@ -214,9 +208,6 @@ impl fmt::Display for ParseError {
             Self::InvalidValue { field, value } => {
                 write!(f, "`{value}` is not a valid `{field}` value.")
             }
-            Self::Id(value) => write!(f, "`{value}` is not a ticket id (try T-02wt0kx)."),
-            Self::EpochEmpty => f.write_str("The epoch file holds no date (try 2026-08-10)."),
-            Self::Epoch(value) => write!(f, "`{value}` is not an epoch date (try 2026-08-10)."),
         }
     }
 }

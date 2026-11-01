@@ -2,6 +2,7 @@
 import { nextTick, ref } from 'vue'
 
 import { data } from '../loaders/tickets.data.js'
+import settings from '../settings.json'
 import DocIndex from './DocIndex.vue'
 import { isDev } from './board.mjs'
 import { problem } from './problem.mjs'
@@ -16,6 +17,7 @@ import { problem } from './problem.mjs'
 
 const STATUSES = ['Todo', 'In Progress', 'Done']
 const ENDPOINT = '/__ticket'
+const BOARD = `/${settings.ticket?.route ?? 'ticket'}/board`
 
 // `null` when closed, otherwise the ticket being edited or a blank one to add.
 const form = ref(null)
@@ -131,13 +133,14 @@ async function remove(ticket) {
 <template v-if="!problem">
 <!-- Above the table: on a long list, a form appended at the bottom is a scroll
      away from the row whose Edit button opened it. -->
-<div v-if="isDev" ref="panel" class="ticket-admin">
+<div ref="panel" class="ticket-admin">
     <div class="ticket-admin-row">
-        <button class="doc-filter" :disabled="busy" @click="openAdd()">+ New ticket</button>
+        <a class="doc-filter ticket-admin-link" :href="BOARD">Board</a>
+        <button v-if="isDev" class="doc-filter" :disabled="busy" @click="openAdd()">+ New ticket</button>
         <span v-if="notice" class="ticket-admin-error">{{ notice }}</span>
     </div>
 
-    <form v-if="form" class="ticket-admin-form" @submit.prevent="submit()">
+    <form v-if="isDev && form" class="ticket-admin-form" @submit.prevent="submit()">
         <div class="ticket-admin-row">
             <strong>{{ form.action === 'add' ? 'New ticket' : 'Edit ' + form.id }}</strong>
             <select v-if="form.action === 'edit'" v-model="form.status" class="doc-search">
@@ -175,6 +178,8 @@ async function remove(ticket) {
     :filters="[]"
     :show-summary="false"
     :show-authors="true"
+    label-kind="ticket"
+    label-noun="Tickets"
 >
     <!-- Icons, not labels: two words per row costs more width than a phone has
          to spare. `title` and `aria-label` carry the meaning. -->
@@ -221,6 +226,14 @@ async function remove(ticket) {
 .ticket-admin-body {
     font-family: var(--vp-font-family-mono);
     resize: vertical;
+}
+/* A link dressed as the button beside it. Two classes beat `.vp-doc a`. */
+.ticket-admin .ticket-admin-link {
+    color: var(--vp-c-text-2);
+    text-decoration: none;
+}
+.ticket-admin .ticket-admin-link:hover {
+    color: var(--vp-c-text-1);
 }
 .ticket-admin-error {
     font-size: 0.8rem;

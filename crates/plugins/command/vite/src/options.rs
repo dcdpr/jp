@@ -1,5 +1,5 @@
 //! The plugin's settings, read from `plugins.command.vite.options`, and what it
-//! reads of `jp rfd`'s and `jp ticket`'s.
+//! reads of `jp rfd`'s, `jp ticket`'s, and `jp wiki`'s.
 //!
 //! ```toml
 //! [plugins.command.vite.options]
@@ -7,23 +7,29 @@
 //! dir = "docs"
 //! # Where links to repository files point.
 //! repository = "https://github.com/dcdpr/jp"
+//!
+//! # Pages that moved: an old route, and the route or wiki page it went to.
+//! [plugins.command.vite.options.redirects]
+//! "architecture/ubiquitous-language" = "W-0a1b2c3"
 //! ```
 //!
-//! Every option is optional: `dir` defaults to `docs`, and `repository` to the
-//! web address of git's `origin` remote.
+//! Every option is optional: `dir` defaults to `docs`, `repository` to the web
+//! address of git's `origin` remote, and `redirects` to none.
 //! Keys this plugin doesn't read are ignored, so a configuration written for a
 //! newer `jp-vite` still loads.
 //!
 //! Each setting has one owner.
-//! The document directories, the RFD categories, the label keys a ticket names
-//! an RFD under, the ticket vocabulary, and how much of the Done column the
-//! board shows belong to `jp rfd` and `jp ticket`, and are read here from the
-//! whole configuration ([`rfd_options`], [`ticket_options`]), with the defaults
-//! those plugins use.
+//! The document directories, the RFD categories, the label keys a ticket or a
+//! wiki page names an RFD under, the ticket vocabulary, and how much of the
+//! Done column the board shows belong to `jp rfd`, `jp ticket`, and `jp wiki`,
+//! and are read here from the whole configuration ([`rfd_options`],
+//! [`ticket_options`], [`wiki_options`]), with the defaults those plugins use.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use camino::Utf8PathBuf;
+use doc::repository::is_web_address;
+pub(crate) use doc::repository::web_address;
 use jp_label::Vocabulary;
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -52,6 +58,9 @@ const DEFAULT_TICKET_DIR: &str = "docs/ticket";
 /// isn't set.
 const DEFAULT_DONE_LIMIT: usize = 8;
 
+/// Where `jp wiki` keeps the pages when its `dir` isn't set.
+const DEFAULT_WIKI_DIR: &str = "docs/wiki";
+
 /// The plugin's own settings.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default)]
@@ -61,6 +70,10 @@ pub(crate) struct Options {
 
     /// Where links to repository files point; `None` takes git's `origin`.
     pub repository: Option<String>,
+
+    /// Pages that moved: each old route, `/architecture/glossary`, and where it
+    /// went, a route or a wiki page id, `W-0a1b2c3`.
+    pub redirects: BTreeMap<String, String>,
 }
 
 impl Default for Options {
@@ -68,6 +81,7 @@ impl Default for Options {
         Self {
             dir: Utf8PathBuf::from(DEFAULT_SITE_DIR),
             repository: None,
+            redirects: BTreeMap::new(),
         }
     }
 }
@@ -99,7 +113,27 @@ impl Options {
             }
         };
 
-        Ok(Self { repository, ..read })
+        let mut redirects = BTreeMap::new();
+        for (from, to) in &read.redirects {
+            let refused = |why: String| {
+                format!("`plugins.command.vite.options.redirects` maps `{from}`: {why}")
+            };
+            let from = route(from).map_err(refused)?;
+            let to = wiki_page(to)
+                .map_or_else(|| route(to), Ok)
+                .map_err(refused)?;
+            if redirects.insert(from.clone(), to).is_some() {
+                return Err(format!(
+                    "`plugins.command.vite.options.redirects` maps `{from}` more than once."
+                ));
+            }
+        }
+
+        Ok(Self {
+            repository,
+            redirects,
+            ..read
+        })
     }
 
     /// The options in a configuration: the ones under
@@ -129,6 +163,45 @@ pub(crate) struct RfdOptions {
     pub relevant_key: String,
 }
 
+/// A route on the site as a redirect names it: below the site's root, with `/`
+/// in front, without `.html` or `.md`, and with a trailing `/` for a
+/// directory's index.
+///
+/// The error says what is wrong with `text`.
+fn route(text: &str) -> Result<String, String> {
+    let text = text.trim();
+    let bare = text.trim_start_matches('/');
+    let bare = bare
+        .strip_suffix(".html")
+        .or_else(|| bare.strip_suffix(".md"))
+        .unwrap_or(bare);
+
+    if bare.is_empty() {
+        return Err("a route names a page below the site's root.".to_owned());
+    }
+    if bare.contains(['?', '#', '\\']) || bare.chars().any(char::is_whitespace) {
+        return Err("a route holds no `?`, `#`, `\\`, or whitespace.".to_owned());
+    }
+    if bare.split('/').any(|part| part == ".." || part == ".") {
+        return Err("a route holds no `.` or `..` part.".to_owned());
+    }
+
+    Ok(format!("/{bare}"))
+}
+
+/// The wiki page `text` names, as `W-0a1b2c3`, when it is a page id: `W-`, or
+/// `W` alone, then the seven characters of the id, in any case.
+fn wiki_page(text: &str) -> Option<String> {
+    let text = text.trim().to_ascii_lowercase();
+    let body = text.strip_prefix("w-").or_else(|| text.strip_prefix('w'))?;
+    let id = body.len() == 7
+        && body
+            .bytes()
+            .all(|b| b.is_ascii_digit() || b.is_ascii_lowercase());
+
+    id.then(|| format!("W-{body}"))
+}
+
 /// What the site reads of `jp ticket`'s options.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TicketOptions {
@@ -140,6 +213,24 @@ pub(crate) struct TicketOptions {
 
     /// The labels a ticket can carry.
     pub labels: Vocabulary,
+}
+
+/// What the site reads of `jp wiki`'s options.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WikiOptions {
+    /// Where the pages live, as configured.
+    pub dir: Utf8PathBuf,
+
+    /// The label key a page names an RFD it relates to under.
+    pub relevant_key: String,
+}
+
+/// `jp wiki`'s options, as the configuration sets them.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct WikiSection {
+    dir: Option<Utf8PathBuf>,
+    relevant: KeySection,
 }
 
 /// `jp rfd`'s options, as the configuration sets them.
@@ -179,26 +270,9 @@ struct BoardSection {
 pub(crate) fn rfd_options(config: &Value) -> Result<RfdOptions, String> {
     let section: RfdSection = section(config, "rfd")?;
 
-    let categories = match section.categories {
-        None => DEFAULT_CATEGORIES.map(ToOwned::to_owned).to_vec(),
-        Some(categories) => {
-            let mut seen = BTreeSet::new();
-            let categories: Vec<String> = categories
-                .iter()
-                .map(|category| category.trim().to_lowercase())
-                .filter(|category| !category.is_empty() && seen.insert(category.clone()))
-                .collect();
-
-            if categories.is_empty() {
-                return Err("`plugins.command.rfd.options.categories` is empty.".to_owned());
-            }
-            categories
-        }
-    };
-
     Ok(RfdOptions {
         dir: directory(section.dir, DEFAULT_RFD_DIR, "rfd")?,
-        categories,
+        categories: categories(section.categories, &DEFAULT_CATEGORIES, "rfd")?,
         tracking_key: section
             .tracking
             .key
@@ -228,6 +302,49 @@ pub(crate) fn ticket_options(config: &Value) -> Result<TicketOptions, String> {
     })
 }
 
+/// What the site reads of `jp wiki`'s options, from the whole configuration the
+/// host passed.
+pub(crate) fn wiki_options(config: &Value) -> Result<WikiOptions, String> {
+    let section: WikiSection = section(config, "wiki")?;
+
+    Ok(WikiOptions {
+        dir: directory(section.dir, DEFAULT_WIKI_DIR, "wiki")?,
+        relevant_key: section
+            .relevant
+            .key
+            .unwrap_or_else(|| DEFAULT_RELEVANT_KEY.to_owned()),
+    })
+}
+
+/// A plugin's configured categories, lowercase and each once, or `default`.
+fn categories(
+    configured: Option<Vec<String>>,
+    default: &[&str],
+    name: &str,
+) -> Result<Vec<String>, String> {
+    let Some(configured) = configured else {
+        return Ok(default
+            .iter()
+            .map(|category| (*category).to_owned())
+            .collect());
+    };
+
+    let mut seen = BTreeSet::new();
+    let categories: Vec<String> = configured
+        .iter()
+        .map(|category| category.trim().to_lowercase())
+        .filter(|category| !category.is_empty() && seen.insert(category.clone()))
+        .collect();
+
+    if categories.is_empty() {
+        return Err(format!(
+            "`plugins.command.{name}.options.categories` is empty."
+        ));
+    }
+
+    Ok(categories)
+}
+
 /// The options of the plugin `name`, read into `T`.
 fn section<T: Default + for<'de> Deserialize<'de>>(
     config: &Value,
@@ -249,75 +366,6 @@ fn directory(dir: Option<Utf8PathBuf>, default: &str, name: &str) -> Result<Utf8
         }
         Some(dir) => Ok(dir),
     }
-}
-
-/// Whether `address` is somewhere a browser can follow a link to.
-fn is_web_address(address: &str) -> bool {
-    let rest = address
-        .strip_prefix("https://")
-        .or_else(|| address.strip_prefix("http://"));
-
-    rest.is_some_and(|rest| {
-        !rest.trim_matches('/').is_empty() && !rest.contains(char::is_whitespace)
-    })
-}
-
-/// The web address of a git remote, for links to the files in it: no
-/// credentials, and no `.git` suffix.
-///
-/// Reads `https://` and `http://` remotes, `ssh://` and `git://` ones, and the
-/// `git@host:owner/repo` form, the last three as `https://` addresses.
-/// `None` for a remote no address can be derived from, such as a path on disk.
-pub(crate) fn web_address(remote: &str) -> Option<String> {
-    let remote = remote.trim();
-
-    // A port on an `ssh://` or `git://` remote belongs to that protocol, and
-    // has to go; one on a web remote is part of the web address.
-    let (scheme, rest, web) = if let Some(rest) = remote.strip_prefix("https://") {
-        ("https", rest, true)
-    } else if let Some(rest) = remote.strip_prefix("http://") {
-        ("http", rest, true)
-    } else if let Some(rest) = remote
-        .strip_prefix("ssh://")
-        .or_else(|| remote.strip_prefix("git://"))
-    {
-        ("https", rest, false)
-    } else if remote.contains("://") {
-        // `file://` and anything else with no web side.
-        return None;
-    } else if let Some((host, path)) = remote.split_once(':') {
-        // `[user@]host:owner/repo`, which git reads as ssh when no slash comes
-        // before the colon. A single letter there is a Windows drive.
-        if host.contains('/') || host.len() < 2 || path.contains('\\') {
-            return None;
-        }
-        return address("https", host, path, false);
-    } else {
-        return None;
-    };
-
-    let (host, path) = rest.split_once('/')?;
-    address(scheme, host, path, web)
-}
-
-/// `scheme://host/path`, with the user taken off `host`, and `.git` and slashes
-/// off `path`.
-///
-/// `keep_port` keeps a port on `host`; without it, a port is dropped.
-fn address(scheme: &str, host: &str, path: &str, keep_port: bool) -> Option<String> {
-    let host = host.rsplit_once('@').map_or(host, |(_, host)| host);
-    let host = match host.rsplit_once(':') {
-        Some((name, port)) if !keep_port && port.chars().all(|c| c.is_ascii_digit()) => name,
-        _ => host,
-    };
-
-    let path = path.trim_matches('/');
-    let path = path.strip_suffix(".git").unwrap_or(path);
-    if host.is_empty() || path.is_empty() || host.contains('/') {
-        return None;
-    }
-
-    Some(format!("{scheme}://{host}/{path}"))
 }
 
 #[cfg(test)]

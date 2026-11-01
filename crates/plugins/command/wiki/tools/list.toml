@@ -1,0 +1,75 @@
+[conversation.tools.wiki_list]
+source = "plugin.command.wiki.list"
+summary = "List the wiki pages in reading order, with their status."
+description = """
+One line per page: its id, status, title, and labels, each child page indented
+under its parent. Pages come in reading order: each top page, then down its
+children, in the order the wiki ranks them. A top page introduces an area, such
+as the architecture or the glossary, and `under` lists what sits below it.
+
+The wiki holds what the project knows. A `Reference` page describes the system
+as it is and changes with it; a `Snapshot` page is dated research that doesn't.
+Use it to find what is already written down before writing it again, and to
+resolve a title you half-remember into an id for `wiki_show`.
+
+Archived pages are left out unless `status` is `archived`. Pages the call can't
+read are named at the end rather than skipped silently.
+"""
+
+examples = """
+Every active page:
+```json
+{}
+```
+
+The pages under one, with each page's summary:
+```json
+{"under": "W-0a1b2c3", "full": true}
+```
+
+Pages mentioning compaction in their title, summary, or text:
+```json
+{"query": "compaction"}
+```
+"""
+
+run = "allow"
+
+[conversation.tools.wiki_list.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.wiki_list.parameters.under]
+type = "string"
+required = false
+summary = "Only the pages below this one: `W-0a1b2c3`."
+
+[conversation.tools.wiki_list.parameters.status]
+type = "string"
+required = false
+enum = ["reference", "snapshot", "archived"]
+summary = "Only pages at this status; `archived` lists the retired pages."
+
+[conversation.tools.wiki_list.parameters.query]
+type = "string"
+required = false
+summary = "Only pages whose title, summary, or text contains this text, ignoring case."
+
+[conversation.tools.wiki_list.parameters.full]
+type = "boolean"
+required = false
+summary = "Add each page's one-sentence summary."
+
+[conversation.tools.wiki_list.parameters.labels]
+type = "array"
+required = false
+summary = "Only pages carrying every one of these labels."
+description = """
+Each entry is a `key=value` pair, or a bare `key` to match any value under it.
+Every entry has to match, so each one narrows the listing further.
+"""
+
+# The accepted values are mirrored from the vocabulary by `jp wiki tools sync`.
+[conversation.tools.wiki_list.parameters.labels.items]
+type = "string"

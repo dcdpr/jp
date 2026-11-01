@@ -15,6 +15,7 @@
 use std::collections::BTreeSet;
 
 use camino::Utf8Path;
+use doc::references;
 
 use super::{is_draft, parse};
 use crate::{
@@ -22,7 +23,7 @@ use crate::{
     document::{Document, NoMetadata},
     id::RfdId,
     paths::{self, Paths},
-    priority, references,
+    priority,
 };
 
 /// A dependency between two RFDs.

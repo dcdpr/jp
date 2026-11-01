@@ -5,33 +5,66 @@ import { SRC_DIR } from './settings.mjs'
 
 // Documents named in prose, and the links the site makes of them.
 //
-// A ticket or RFD often names another by its id instead of linking to it:
-// `RFD 042`, `RFD D12`, `T-005zd00`, or the ticket id alone, `005zd00`. The
-// References box above a document lists every document it names, and the
-// document's text links each name where it appears, so both read the same
-// names the same way.
+// A ticket, RFD, or wiki page often names another by its id instead of linking
+// to it: `RFD 042`, `RFD D12`, `T-005zd00`, the ticket id alone, `005zd00`, or
+// `W-0a1b2c3`. The References box above a document lists every document it
+// names, and the document's text links each name where it appears, so both read
+// the same names the same way.
+//
+// A name may point into its document with a `#section`, as `W-0a1b2c3#turn` or
+// `RFD 100#labels` does, which `jp wiki check` reads the same way.
 
-// A named document: an RFD as `RFD 042` or `RFD D12`, a ticket as `T-005zd00`,
-// `T005zd00`, or `005zd00`. The space in `RFD 042` may be a line break, where a
+// A heading anchor after a name, as `jp wiki check` reads one: word characters
+// and dashes.
+const SECTION = String.raw`(?:#([\p{Alphabetic}\p{Mark}\p{Decimal_Number}\p{Connector_Punctuation}\p{Join_Control}-]+))?`
+
+// The three kinds of name: an RFD as `RFD 042` or `RFD D12`, a wiki page as
+// `W-0a1b2c3`, and a ticket as `T-005zd00`, `T005zd00`, or `005zd00`, each
+// with an optional section. The space in `RFD 042` may be a line break, where a
 // formatter wrapped it.
 //
-// Groups: the RFD id; the ticket prefix, if any; the ticket id.
-const MENTION = /\bRFD\s+(\d{3}|D\d{2})\b|\b(T-|T)?([0-9a-z]{7})\b/g
+// Groups: the RFD id and section; the page id and section; the ticket prefix,
+// if any, id, and section.
+const NAMES = [
+    String.raw`RFD\s+(\d{3}|D\d{2})\b${SECTION}`,
+    String.raw`W-([0-9a-z]{7})\b${SECTION}`,
+    String.raw`(T-|T)?([0-9a-z]{7})\b${SECTION}`,
+]
+
+// A named document, anywhere in a text.
+const MENTION = new RegExp(NAMES.map(name => String.raw`\b${name}`).join('|'), 'gu')
 
 // A code span holding nothing but a name, which is linked whole. Same groups.
-const WHOLE = /^(?:RFD\s+(\d{3}|D\d{2})|(T-|T)?([0-9a-z]{7}))$/
+const WHOLE = new RegExp(`^(?:${NAMES.join('|')})$`, 'u')
 
 // The label a name stands for, as `documents.mjs` keys on it: `042`, `D12`,
-// `T-005zd00`.
+// `W-0a1b2c3`, `T-005zd00`.
 function labelOf(match) {
-    return match[1] ?? `T-${match[3]}`
+    if (match[1] !== undefined) return match[1]
+    if (match[3] !== undefined) return `W-${match[3]}`
+
+    return `T-${match[6]}`
 }
 
-// Whether a name says what it is: `RFD 042` and `T-005zd00` do. `005zd00` and
-// `T005zd00` read like any seven-letter word or a commit hash, so they name a
-// ticket only when that ticket exists.
+// The section a name points into, without its `#`, or `null`.
+function sectionOf(match) {
+    return match[2] ?? match[4] ?? match[7] ?? null
+}
+
+// Whether a name says what it is: `RFD 042`, `W-0a1b2c3`, and `T-005zd00` do.
+// `005zd00` and `T005zd00` read like any seven-letter word or a commit hash, so
+// they name a ticket only when that ticket exists.
 function isExplicit(match) {
-    return match[1] !== undefined || match[2] === 'T-'
+    return match[1] !== undefined || match[3] !== undefined || match[5] === 'T-'
+}
+
+// The link for a name, `hrefFor` giving its document's; `null` to leave it.
+function hrefOf(match, hrefFor) {
+    const href = hrefFor(labelOf(match))
+    const section = sectionOf(match)
+    if (!href || !section) return href
+
+    return `${href}#${section}`
 }
 
 // The labels of the documents `text` names, each once, in the order they first
@@ -49,9 +82,10 @@ export function mentionedLabels(text, known = new Map()) {
     return [...labels]
 }
 
-// Every RFD and ticket the site has, as the label a name stands for mapped to
-// its file below the source directory: `042` to `rfd/042-slug.md`, `T-005zd00`
-// to `ticket/005zd00-slug.md`.
+// Every RFD, ticket, and wiki page the site has, as the label a name stands for
+// mapped to its file below the source directory: `042` to `rfd/042-slug.md`,
+// `T-005zd00` to `ticket/005zd00-slug.md`, `W-0a1b2c3` to
+// `wiki/0a1b2c3-slug.md`.
 //
 // A workflow the project doesn't have, or whose directory doesn't exist yet,
 // has no documents.
@@ -77,6 +111,9 @@ export function knownDocuments(settings, srcDir = SRC_DIR) {
     if (settings.ticket) {
         add(settings.ticket.route, /^([0-9a-z]{7})-.+\.md$/, id => `T-${id}`)
     }
+    if (settings.wiki) {
+        add(settings.wiki.route, /^([0-9a-z]{7})-.+\.md$/, id => `W-${id}`)
+    }
     // The templates, which no name means.
     known.delete('000')
 
@@ -96,10 +133,11 @@ export function relativeHref(page, target) {
 // Turn each document named in the text of `tokens` into a link to it.
 //
 // `tokens` are markdown-it's block tokens and `Token` its token constructor.
-// `hrefFor` gives the link for a label, or `null` to leave the name as text.
-// Text already inside a link stays as it is, and so do headings, which a link
-// would turn into a link to somewhere else. A code span holding nothing but a
-// name, such as `T-005zd00` or `005zd00`, is linked whole.
+// `hrefFor` gives the link for a label, or `null` to leave the name as text; a
+// name's section is added to it. Text already inside a link stays as it is, and
+// so do headings, which a link would turn into a link to somewhere else. A code
+// span holding nothing but a name, such as `T-005zd00` or `005zd00`, is linked
+// whole.
 export function linkMentions(tokens, Token, hrefFor) {
     tokens.forEach((token, index) => {
         if (token.type !== 'inline' || !token.children) return
@@ -123,7 +161,7 @@ function linkChildren(children, Token, hrefFor) {
             continue
         } else if (depth === 0 && child.type === 'code_inline') {
             const match = child.content.trim().match(WHOLE)
-            const href = match ? hrefFor(labelOf(match)) : null
+            const href = match ? hrefOf(match, hrefFor) : null
             if (href) {
                 out.push(...link(href, [child], Token))
                 continue
@@ -141,7 +179,7 @@ function linkText(text, Token, hrefFor) {
     let from = 0
 
     for (const match of text.matchAll(MENTION)) {
-        const href = hrefFor(labelOf(match))
+        const href = hrefOf(match, hrefFor)
         if (!href) continue
 
         if (match.index > from) out.push(textToken(text.slice(from, match.index), Token))

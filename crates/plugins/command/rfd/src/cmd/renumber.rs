@@ -15,6 +15,7 @@
 use std::fs;
 
 use camino::{Utf8Path, Utf8PathBuf};
+use doc::references::{self, Rule, markdown_files};
 use ticket::render;
 
 use super::{Leftovers, listed, stem};
@@ -25,7 +26,6 @@ use crate::{
     links::Links,
     paths::{self, Paths},
     priority,
-    references::{self, Rule, markdown_files},
 };
 
 /// Move the RFD `given` names to `target`, or to the next free id in its id

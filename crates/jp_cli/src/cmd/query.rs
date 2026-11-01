@@ -34,8 +34,8 @@
 //!    goto 2 (new cycle, same turn).
 //! 4. If no tool calls: turn complete, persist and exit.
 //!
-//! See `docs/architecture/query-stream-pipeline.md` for the full design
-//! document.
+//! See `docs/wiki/00dxyb6-query-stream-pipeline-architecture.md` for the full
+//! design document.
 //!
 //! [`ChatRenderer`]: crate::render::ChatRenderer
 //! [`ConversationEvent`]: jp_conversation::event::ConversationEvent

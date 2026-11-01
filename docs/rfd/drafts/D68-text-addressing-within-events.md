@@ -415,9 +415,10 @@ Depends on Phase 3.
 
 ### Phase 5: documentation
 
-Add a character-offset section to `docs/architecture/indexing-conventions.md`,
-which currently covers turn positions only, recording that offsets are 0-based
-boundaries in code points and why that differs from `grep --json`.
+Add a character-offset section to
+`docs/wiki/00dxyba-indexing-and-counting-conventions.md`, which currently covers
+turn positions only, recording that offsets are 0-based boundaries in code
+points and why that differs from `grep --json`.
 Update the `jp_attachment_internal` README.
 Depends on Phase 4.
 
@@ -427,7 +428,8 @@ Depends on Phase 4.
 - [RFD D52], the first consumer of these addresses
 - [WADM], the Web Annotation Data Model, source of the selector vocabulary
 - [RFC 6901], JSON Pointer
-- `docs/architecture/indexing-conventions.md`, turn positions and counts
+- `docs/wiki/00dxyba-indexing-and-counting-conventions.md`, turn positions and
+  counts
 
 [RFC 6901]: https://www.rfc-editor.org/rfc/rfc6901
 [RFD 097]: ../097-stable-event-identifiers.md

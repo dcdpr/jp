@@ -404,6 +404,6 @@ Independent of Phase 4.
 - `jp_conversation::thread::Thread` — the thread type being extended with
   `into_parts()`.
 
-[Query Stream Pipeline]: ../architecture/query-stream-pipeline.md
+[Query Stream Pipeline]: ../wiki/00dxyb6-query-stream-pipeline-architecture.md
 [RFD 082]: 082-unified-inquiry-event-recording.md
 [inquiry-arch]: 028-structured-inquiry-system-for-tool-questions.md

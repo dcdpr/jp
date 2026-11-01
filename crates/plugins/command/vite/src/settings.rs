@@ -3,11 +3,12 @@
 //!
 //! The site's loaders also run without `jp`, in a static `vitepress build`, so
 //! they read this file rather than the configuration.
-//! It holds where the RFDs and tickets live and where the site serves them, the
-//! RFD categories, the label keys a ticket names an RFD under, the ticket
-//! vocabulary, how much of the Done column the board shows, where links to
-//! repository files point, and the revision of the site files it was written
-//! with.
+//! It holds where the RFDs, tickets, and wiki pages live and where the site
+//! serves them, the RFD categories, the label keys a ticket or a wiki page
+//! names an RFD under, the ticket vocabulary, how much of the Done column the
+//! board shows, where links to repository files point and the branch they are
+//! edited on, the pages that moved, and the revision of the site files it was
+//! written with.
 //!
 //! A workflow whose directory doesn't exist is `null`: the project doesn't have
 //! it, and the site neither loads it nor links to it.
@@ -22,7 +23,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::{
-    options::{Options, rfd_options, ticket_options, web_address},
+    git::Remote,
+    options::{Options, rfd_options, ticket_options, web_address, wiki_options},
     site,
 };
 
@@ -39,11 +41,38 @@ pub(crate) struct Settings {
     /// Where links to repository files point, if anywhere.
     pub repository: Option<String>,
 
+    /// The repository's default branch, which a page is edited on, when git
+    /// knows it.
+    pub branch: Option<String>,
+
     /// The RFDs, when the project has them.
     pub rfd: Option<RfdSettings>,
 
     /// The tickets, when the project has them.
     pub ticket: Option<TicketSettings>,
+
+    /// The wiki, when the project has one.
+    pub wiki: Option<WikiSettings>,
+
+    /// Pages that moved: each old route, and the route or wiki page id it went
+    /// to; left out when none did.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub redirects: BTreeMap<String, String>,
+}
+
+/// Where the wiki lives, and what the site shows of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WikiSettings {
+    /// The directory, relative to the workspace root, as `jp wiki` reads it.
+    pub dir: String,
+
+    /// Where the site serves it: the directory, relative to the source
+    /// directory.
+    pub route: String,
+
+    /// The label key a page names an RFD it relates to under.
+    pub relevant_key: String,
 }
 
 /// Where the RFDs live, and what the site shows of them.
@@ -150,12 +179,13 @@ impl Settings {
 /// The settings of the project at `root`, from the configuration the host
 /// passed.
 ///
-/// `origin` is git's `origin` remote, which `repository` falls back to.
+/// `remote` is what git knows of the `origin` remote: `repository` falls back
+/// to its address, and `branch` is its default branch.
 pub(crate) fn snapshot(
     root: &Utf8Path,
     options: &Options,
     config: &Value,
-    origin: Option<&str>,
+    remote: &Remote,
 ) -> Result<Settings, String> {
     let site_dir = source_dir(root, options)?;
     let site = below(root, &site_dir).unwrap_or_else(|| ".".to_owned());
@@ -193,15 +223,26 @@ pub(crate) fn snapshot(
         }
     });
 
+    let wiki_options = wiki_options(config)?;
+    let wiki =
+        workflow(root, &site_dir, &wiki_options.dir, "wiki")?.map(|(dir, route)| WikiSettings {
+            dir,
+            route,
+            relevant_key: wiki_options.relevant_key,
+        });
+
     Ok(Settings {
         revision: site::REVISION.to_owned(),
         site,
         repository: options
             .repository
             .clone()
-            .or_else(|| origin.and_then(web_address)),
+            .or_else(|| remote.origin.as_deref().and_then(web_address)),
+        branch: remote.branch.clone(),
         rfd,
         ticket,
+        wiki,
+        redirects: options.redirects.clone(),
     })
 }
 

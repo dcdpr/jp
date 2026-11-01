@@ -17,7 +17,7 @@ fn workspace() -> Utf8TempDir {
 fn options(dir: &str) -> Options {
     Options {
         dir: Utf8PathBuf::from(dir),
-        repository: None,
+        ..Options::default()
     }
 }
 
@@ -40,12 +40,13 @@ fn both_workflows_are_read_where_the_plugins_keep_them() {
         } } } }
     });
 
-    let settings = snapshot(root.path(), &options("docs"), &config, None).unwrap();
+    let settings = snapshot(root.path(), &options("docs"), &config, &Remote::default()).unwrap();
 
     assert_eq!(settings, Settings {
         revision: site::REVISION.to_owned(),
         site: "docs".to_owned(),
         repository: None,
+        branch: None,
         rfd: Some(RfdSettings {
             dir: "docs/rfd".to_owned(),
             route: "rfd".to_owned(),
@@ -83,7 +84,51 @@ fn both_workflows_are_read_where_the_plugins_keep_them() {
                 }),
             ]),
         }),
+        wiki: None,
+        redirects: BTreeMap::new(),
     });
+}
+
+/// The wiki is read where `jp wiki` keeps it, with the key its pages name an
+/// RFD under.
+#[test]
+fn the_wiki_is_read_where_jp_wiki_keeps_it() {
+    let root = Utf8TempDir::new().unwrap();
+    fs::create_dir_all(root.path().join("docs/knowledge")).unwrap();
+    let config = json!({
+        "plugins": { "command": { "wiki": { "options": {
+            "dir": "docs/knowledge",
+            "relevant": { "key": "rfd" }
+        } } } }
+    });
+
+    let settings = snapshot(root.path(), &options("docs"), &config, &Remote::default()).unwrap();
+
+    assert_eq!(
+        settings.wiki,
+        Some(WikiSettings {
+            dir: "docs/knowledge".to_owned(),
+            route: "knowledge".to_owned(),
+            relevant_key: "rfd".to_owned(),
+        })
+    );
+}
+
+#[test]
+fn the_redirects_are_the_configured_ones() {
+    let root = workspace();
+    let options = Options {
+        redirects: BTreeMap::from([("/old".to_owned(), "W-0a1b2c3".to_owned())]),
+        ..options("docs")
+    };
+
+    let settings = snapshot(root.path(), &options, &json!({}), &Remote::default()).unwrap();
+
+    assert_eq!(
+        settings.redirects,
+        BTreeMap::from([("/old".to_owned(), "W-0a1b2c3".to_owned())])
+    );
+    assert_eq!(settings.wiki, None);
 }
 
 /// "Each when that directory exists": a project without tickets has no ticket
@@ -93,7 +138,13 @@ fn a_workflow_without_its_directory_is_left_out() {
     let root = Utf8TempDir::new().unwrap();
     fs::create_dir_all(root.path().join("docs/ticket")).unwrap();
 
-    let settings = snapshot(root.path(), &options("docs"), &json!({}), None).unwrap();
+    let settings = snapshot(
+        root.path(),
+        &options("docs"),
+        &json!({}),
+        &Remote::default(),
+    )
+    .unwrap();
 
     assert_eq!(settings.rfd, None);
     assert_eq!(settings.ticket.unwrap().route, "ticket");
@@ -108,7 +159,7 @@ fn a_route_follows_the_directory_below_the_site() {
         "plugins": { "command": { "rfd": { "options": { "dir": "site/./design/../design/rfd" } } } }
     });
 
-    let rfd = snapshot(root.path(), &options("site"), &config, None)
+    let rfd = snapshot(root.path(), &options("site"), &config, &Remote::default())
         .unwrap()
         .rfd
         .unwrap();
@@ -121,7 +172,7 @@ fn a_route_follows_the_directory_below_the_site() {
 fn a_site_at_the_workspace_root_is_named_dot() {
     let root = workspace();
 
-    let settings = snapshot(root.path(), &options("."), &json!({}), None).unwrap();
+    let settings = snapshot(root.path(), &options("."), &json!({}), &Remote::default()).unwrap();
 
     assert_eq!(settings.site, ".");
     assert_eq!(settings.rfd.unwrap().route, "docs/rfd");
@@ -133,7 +184,13 @@ fn a_workflow_outside_the_site_is_refused() {
     let root = workspace();
     fs::create_dir_all(root.path().join("site")).unwrap();
 
-    let error = snapshot(root.path(), &options("site"), &json!({}), None).unwrap_err();
+    let error = snapshot(
+        root.path(),
+        &options("site"),
+        &json!({}),
+        &Remote::default(),
+    )
+    .unwrap_err();
 
     assert_eq!(
         error,
@@ -150,9 +207,18 @@ fn a_missing_workflow_outside_the_site_is_no_problem() {
     let root = Utf8TempDir::new().unwrap();
     fs::create_dir_all(root.path().join("site")).unwrap();
 
-    let settings = snapshot(root.path(), &options("site"), &json!({}), None).unwrap();
+    let settings = snapshot(
+        root.path(),
+        &options("site"),
+        &json!({}),
+        &Remote::default(),
+    )
+    .unwrap();
 
-    assert_eq!((settings.rfd, settings.ticket), (None, None));
+    assert_eq!(
+        (settings.rfd, settings.ticket, settings.wiki),
+        (None, None, None)
+    );
 }
 
 #[test]
@@ -160,7 +226,13 @@ fn a_site_outside_the_workspace_is_refused() {
     let root = workspace();
 
     assert_eq!(
-        snapshot(root.path(), &options("../elsewhere"), &json!({}), None).unwrap_err(),
+        snapshot(
+            root.path(),
+            &options("../elsewhere"),
+            &json!({}),
+            &Remote::default()
+        )
+        .unwrap_err(),
         "`plugins.command.vite.options.dir` (../elsewhere) is outside the workspace."
     );
 }
@@ -172,13 +244,17 @@ fn the_repository_is_the_configured_one_or_origins_web_address() {
         repository: Some("https://example.com/team/site".to_owned()),
         ..options("docs")
     };
+    let remote = |origin: &str| Remote {
+        origin: Some(origin.to_owned()),
+        branch: None,
+    };
 
     assert_eq!(
         snapshot(
             root.path(),
             &configured,
             &json!({}),
-            Some("git@github.com:dcdpr/jp.git")
+            &remote("git@github.com:dcdpr/jp.git")
         )
         .unwrap()
         .repository
@@ -190,7 +266,7 @@ fn the_repository_is_the_configured_one_or_origins_web_address() {
             root.path(),
             &options("docs"),
             &json!({}),
-            Some("git@github.com:dcdpr/jp.git")
+            &remote("git@github.com:dcdpr/jp.git")
         )
         .unwrap()
         .repository
@@ -202,12 +278,25 @@ fn the_repository_is_the_configured_one_or_origins_web_address() {
             root.path(),
             &options("docs"),
             &json!({}),
-            Some("/srv/git/jp")
+            &remote("/srv/git/jp")
         )
         .unwrap()
         .repository,
         None
     );
+}
+
+#[test]
+fn the_branch_is_origins_default_branch() {
+    let root = workspace();
+    let remote = Remote {
+        origin: None,
+        branch: Some("main".to_owned()),
+    };
+
+    let settings = snapshot(root.path(), &options("docs"), &json!({}), &remote).unwrap();
+
+    assert_eq!(settings.branch.as_deref(), Some("main"));
 }
 
 /// The snapshot is committed, so the same settings always write the same text.
@@ -217,6 +306,7 @@ fn the_snapshot_renders_in_a_fixed_shape() {
         revision: "0123456789abcdef".to_owned(),
         site: "docs".to_owned(),
         repository: Some("https://github.com/dcdpr/jp".to_owned()),
+        branch: Some("main".to_owned()),
         rfd: Some(RfdSettings {
             dir: "docs/rfd".to_owned(),
             route: "rfd".to_owned(),
@@ -258,6 +348,8 @@ fn the_snapshot_renders_in_a_fixed_shape() {
                 }),
             ]),
         }),
+        wiki: None,
+        redirects: BTreeMap::new(),
     };
 
     assert_eq!(
@@ -266,6 +358,7 @@ fn the_snapshot_renders_in_a_fixed_shape() {
   "revision": "0123456789abcdef",
   "site": "docs",
   "repository": "https://github.com/dcdpr/jp",
+  "branch": "main",
   "rfd": {
     "dir": "docs/rfd",
     "route": "rfd",
@@ -301,10 +394,58 @@ fn the_snapshot_renders_in_a_fixed_shape() {
         "max": 1
       }
     }
+  },
+  "wiki": null
+}
+"#
+    );
+}
+
+/// The wiki follows the other workflows, and the redirects come last, left out
+/// when no page moved.
+#[test]
+fn the_wiki_and_the_redirects_render_last() {
+    let settings = Settings {
+        revision: "0123456789abcdef".to_owned(),
+        site: "docs".to_owned(),
+        repository: None,
+        branch: None,
+        rfd: None,
+        ticket: None,
+        wiki: Some(WikiSettings {
+            dir: "docs/wiki".to_owned(),
+            route: "wiki".to_owned(),
+            relevant_key: "relevant-rfd".to_owned(),
+        }),
+        redirects: BTreeMap::from([("/architecture/glossary".to_owned(), "W-0a1b2c3".to_owned())]),
+    };
+
+    assert_eq!(
+        settings.render(),
+        r#"{
+  "revision": "0123456789abcdef",
+  "site": "docs",
+  "repository": null,
+  "branch": null,
+  "rfd": null,
+  "ticket": null,
+  "wiki": {
+    "dir": "docs/wiki",
+    "route": "wiki",
+    "relevantKey": "relevant-rfd"
+  },
+  "redirects": {
+    "/architecture/glossary": "W-0a1b2c3"
   }
 }
 "#
     );
+
+    let unmoved = Settings {
+        redirects: BTreeMap::new(),
+        ..settings
+    };
+    assert!(!unmoved.render().contains("redirects"));
 }
 
 #[test]

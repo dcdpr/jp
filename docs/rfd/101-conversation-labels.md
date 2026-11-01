@@ -825,5 +825,5 @@ Mergeable independently of Phase 1, but depends on it.
 [RFD 040]: 040-hidden-conversations-and-tool-context.md
 [RFD 077]: 077-plugin-configuration-and-trust-policy.md
 [RFD 103]: 103-multi-value-conversation-labels.md
-[cmd-cfg]: ../architecture/ubiquitous-language.md#commandconfig
+[cmd-cfg]: ../wiki/00dxybd-ubiquitous-language.md#commandconfig
 [tools]: ../../crates/jp_config/src/conversation/tool.rs

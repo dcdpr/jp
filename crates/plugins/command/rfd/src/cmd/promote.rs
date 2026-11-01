@@ -18,6 +18,7 @@ use comfort::{
     DEFAULT_MAX_WIDTH,
     format::{FormatOptions, format_markdown_with},
 };
+use doc::references::{self, Rule, markdown_files};
 use regex::Regex;
 
 use super::{is_draft, parse, stem};
@@ -27,7 +28,6 @@ use crate::{
     id::{self, ResolveError, RfdId},
     paths::{self, Paths},
     priority,
-    references::{self, Rule, markdown_files},
 };
 
 /// An inline link target one directory up: the `](../` of `](../001-x.md)`.

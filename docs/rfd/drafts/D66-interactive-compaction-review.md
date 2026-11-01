@@ -568,6 +568,6 @@ Mergeable separately from Phase 3.
 - [RFD 064], Non-Destructive Conversation Compaction
 - [RFD 071], Conversation Archiving
 
-[Indexing and Counting Conventions]: ../../architecture/indexing-conventions.md
+[Indexing and Counting Conventions]: ../../wiki/00dxyba-indexing-and-counting-conventions.md
 [RFD 064]: ../064-non-destructive-conversation-compaction.md
 [RFD 071]: ../071-conversation-archiving.md

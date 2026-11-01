@@ -135,7 +135,7 @@ fn ignored_files_are_untracked() {
 #[test]
 fn the_origin_remote_is_read_as_configured() {
     let top = repository();
-    assert_eq!(origin(top.path()), None);
+    assert_eq!(remote(top.path()), Remote::default());
 
     git(top.path(), &[
         "remote",
@@ -143,10 +143,24 @@ fn the_origin_remote_is_read_as_configured() {
         "origin",
         "git@github.com:dcdpr/jp.git",
     ]);
-    assert_eq!(
-        origin(top.path()).as_deref(),
-        Some("git@github.com:dcdpr/jp.git")
-    );
+    assert_eq!(remote(top.path()), Remote {
+        origin: Some("git@github.com:dcdpr/jp.git".to_owned()),
+        branch: None,
+    });
+
+    // `origin/HEAD` names the default branch, as a clone sets it.
+    git(top.path(), &["commit", "--allow-empty", "-qm", "first"]);
+    git(top.path(), &[
+        "update-ref",
+        "refs/remotes/origin/trunk",
+        "HEAD",
+    ]);
+    git(top.path(), &[
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/trunk",
+    ]);
+    assert_eq!(remote(top.path()).branch.as_deref(), Some("trunk"));
 }
 
 #[test]

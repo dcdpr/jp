@@ -3,9 +3,9 @@
 //! Before starting `vitepress dev`, serve brings the settings snapshot up to
 //! date and checks the site against what it reads ([`problems`]):
 //!
-//! - `jp ticket` and `jp rfd`, for each workflow the project has, report the
-//!   revision of the site files this binary carries, so the loaders read the
-//!   formats those plugins write.
+//! - `jp ticket`, `jp rfd`, and `jp wiki`, for each workflow the project has,
+//!   report the revision of the site files this binary carries, so the loaders
+//!   read the formats those plugins write.
 //! - Every owned file but the snapshot is the one this binary writes, so no
 //!   loader is left over from another release.
 //!
@@ -79,8 +79,8 @@ where
         ));
     }
 
-    let origin = git::origin(root);
-    let (mut settings, problem) = prepare(stdout, root, options, config, origin.as_deref())?;
+    let remote = git::remote(root);
+    let (mut settings, problem) = prepare(stdout, root, options, config, &remote)?;
 
     let mut child = start(root, &site_dir, vitepress, problem.as_deref())?;
 
@@ -138,13 +138,7 @@ where
 
             Event::Host(Ok(HostToPlugin::Config(response))) => {
                 reading = false;
-                let said = refresh(
-                    root,
-                    options,
-                    &response.data,
-                    origin.as_deref(),
-                    &mut settings,
-                );
+                let said = refresh(root, options, &response.data, &remote, &mut settings);
                 report(stdout, &mut complaint, said)?;
             }
 
@@ -174,9 +168,9 @@ fn prepare(
     root: &Utf8Path,
     options: &Options,
     config: &Value,
-    origin: Option<&str>,
+    remote: &git::Remote,
 ) -> Result<(Settings, Option<String>), String> {
-    let settings = snapshot(root, options, config, origin)?;
+    let settings = snapshot(root, options, config, remote)?;
     if let Some(note) = write_snapshot(root, &settings, None)? {
         print_to(stdout, &note, "chrome")?;
     }
@@ -188,6 +182,7 @@ fn prepare(
             .ticket
             .as_ref()
             .map(|_| ask_revision(root, "ticket")),
+        wiki: settings.wiki.as_ref().map(|_| ask_revision(root, "wiki")),
     };
 
     let problem = problems(&changes, &site::settings_path(&settings), &revisions);
@@ -195,8 +190,8 @@ fn prepare(
         print_to(
             stdout,
             &format!(
-                "{problem}\n\nThe site starts, but shows this in place of the RFD and ticket \
-                 pages, and refuses edits.\n"
+                "{problem}\n\nThe site starts, but shows this in place of the RFD, ticket, and \
+                 wiki pages, and refuses edits.\n"
             ),
             "chrome",
         )?;
@@ -211,10 +206,10 @@ fn refresh(
     root: &Utf8Path,
     options: &Options,
     config: &Value,
-    origin: Option<&str>,
+    remote: &git::Remote,
     settings: &mut Settings,
 ) -> Result<Option<String>, String> {
-    let Some(fresh) = reloaded(root, options, config, origin, settings)? else {
+    let Some(fresh) = reloaded(root, options, config, remote, settings)? else {
         return Ok(None);
     };
 
@@ -408,23 +403,24 @@ fn reloaded(
     root: &Utf8Path,
     options: &Options,
     config: &Value,
-    origin: Option<&str>,
+    remote: &git::Remote,
     current: &Settings,
 ) -> Result<Option<Settings>, String> {
     let fresh_options = Options {
         dir: options.dir.clone(),
         ..Options::from_config(config)?
     };
-    let fresh = snapshot(root, &fresh_options, config, origin)?;
+    let fresh = snapshot(root, &fresh_options, config, remote)?;
 
     Ok((fresh != *current).then_some(fresh))
 }
 
-/// What `jp rfd --version` and `jp ticket --version` answered, for the
-/// workflows the project has.
+/// What `jp rfd --version`, `jp ticket --version`, and `jp wiki --version`
+/// answered, for the workflows the project has.
 pub(crate) struct Revisions {
     pub rfd: Option<Result<String, String>>,
     pub ticket: Option<Result<String, String>>,
+    pub wiki: Option<Result<String, String>>,
 }
 
 /// Ask `jp <plugin> --version` what it prints.
@@ -476,6 +472,7 @@ pub(crate) fn problems(
     for (plugin, kind, reported) in [
         ("rfd", "RFDs", &revisions.rfd),
         ("ticket", "tickets", &revisions.ticket),
+        ("wiki", "wiki pages", &revisions.wiki),
     ] {
         if let Some(reported) = reported
             && let Some(problem) = revision_problem(plugin, kind, reported)
@@ -506,7 +503,8 @@ pub(crate) fn problems(
 
 /// Why the site may misread what `jp <plugin>` writes, given what it reported.
 fn revision_problem(plugin: &str, kind: &str, reported: &Result<String, String>) -> Option<String> {
-    let install = format!("cargo install --git {REPOSITORY} --rev <rev> jp-ticket jp-rfd jp-vite");
+    let install =
+        format!("cargo install --git {REPOSITORY} --rev <rev> jp-ticket jp-rfd jp-wiki jp-vite");
 
     let output = match reported {
         Ok(output) => output,
@@ -514,7 +512,7 @@ fn revision_problem(plugin: &str, kind: &str, reported: &Result<String, String>)
             return Some(format!(
                 "`jp {plugin}` didn't answer ({error}). The site shows {kind}, and reads them the \
                  way `jp {plugin}` writes them. Install it from the JP revision `jp-vite` came \
-                 from, in one command with the other two:\n  {install}"
+                 from, in one command with the others:\n  {install}"
             ));
         }
     };
@@ -523,13 +521,13 @@ fn revision_problem(plugin: &str, kind: &str, reported: &Result<String, String>)
         Some(revision) if revision == site::REVISION => None,
         Some(revision) => Some(format!(
             "`jp {plugin}` was built with site files {revision}, and `jp vite` with {}, so the \
-             site may misread the {kind} `jp {plugin}` writes. Install the three from one JP \
+             site may misread the {kind} `jp {plugin}` writes. Install them all from one JP \
              revision:\n  {install}",
             site::REVISION
         )),
         None => Some(format!(
             "`jp {plugin}` reports no site revision, so it predates `jp vite`, and the site may \
-             misread the {kind} it writes. Install the three from one JP revision:\n  {install}"
+             misread the {kind} it writes. Install them all from one JP revision:\n  {install}"
         )),
     }
 }

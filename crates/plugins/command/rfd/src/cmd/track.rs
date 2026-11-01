@@ -16,6 +16,7 @@
 //! project's to edit.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use doc::references;
 use jp_plugin::message::QueryRequest;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -28,7 +29,6 @@ use crate::{
     links::Links,
     options::TICKET_LABELS_KEY,
     paths::{self, Paths},
-    references,
 };
 
 /// The marker standing in for a plan that hasn't been read yet.

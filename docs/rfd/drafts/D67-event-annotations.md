@@ -359,7 +359,7 @@ Depends on Phase 2.
 
 Carry annotations through `fork`, dropping any that no longer resolve.
 Document `.jp/schemas/`, and add "Annotation" to
-`docs/architecture/ubiquitous-language.md`.
+`docs/wiki/00dxybd-ubiquitous-language.md`.
 Depends on Phase 3.
 
 ## References
