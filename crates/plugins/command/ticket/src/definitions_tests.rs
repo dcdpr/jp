@@ -1,9 +1,10 @@
-use std::env;
+use std::{env, fs};
 
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use serde_json::json;
 use ticket::Status;
+use tool_definitions::SYNCED_FILE;
 
 use super::*;
 use crate::tool::{DEFAULT_MAX_TITLE_LENGTH, SHORTER_TITLE, TOOLS};
@@ -59,6 +60,7 @@ fn read_definitions(dir: &Utf8Path) -> Vec<(String, toml::Value)> {
 /// The embedded definitions, parsed, by file name.
 fn templates() -> Vec<(String, toml::Value)> {
     DEFINITIONS
+        .files
         .iter()
         .map(|(name, source)| {
             let value = toml::from_str(source).unwrap_or_else(|error| panic!("{name}: {error}"));
@@ -67,8 +69,8 @@ fn templates() -> Vec<(String, toml::Value)> {
         .collect()
 }
 
-/// The tools a set of definitions routes to this plugin, as `(tool, key,
-/// definition)`, where `tool` is the name the plugin knows it by.
+/// The tools a set of definitions routes to this plugin, each as the name the
+/// plugin knows it by, its key, and its definition.
 ///
 /// A definition carrying no `source`, such as the synced file's, is skipped: it
 /// only adds to tools declared elsewhere.
@@ -159,48 +161,6 @@ fn assert_create_declares_the_question_and_the_limit(routed: &[(String, String, 
     }
 }
 
-#[test]
-fn init_writes_one_file_per_tool() {
-    let dir = Utf8TempDir::new().unwrap();
-    let target = dir.path().join("tools/ticket");
-
-    let output = init(&target).unwrap();
-
-    for (name, content) in DEFINITIONS {
-        assert_eq!(fs::read_to_string(target.join(name)).unwrap(), *content);
-        assert!(
-            output
-                .text
-                .contains(&format!("Wrote {}\n", target.join(name))),
-            "{}",
-            output.text
-        );
-    }
-}
-
-/// A project owns its definitions once they are written, so a second `init`
-/// must not undo its edits, and refuses before writing any file.
-#[test]
-fn init_refuses_to_overwrite_and_writes_nothing() {
-    let dir = Utf8TempDir::new().unwrap();
-    fs::write(dir.path().join("create.toml"), "# mine\n").unwrap();
-
-    let error = init(dir.path()).unwrap_err();
-
-    assert_eq!(
-        error,
-        format!(
-            "Refusing to overwrite {}. Move them aside first.",
-            dir.path().join("create.toml")
-        )
-    );
-    assert_eq!(
-        fs::read_to_string(dir.path().join("create.toml")).unwrap(),
-        "# mine\n"
-    );
-    assert!(!dir.path().join("show.toml").exists());
-}
-
 /// A definition declaring the `labels` parameter, served as `source`.
 fn labelled(source: &str) -> Value {
     declaring(source, "labels")
@@ -213,6 +173,8 @@ fn declaring(source: &str, parameter: &str) -> Value {
 
 /// Tools are found by their source, so a project that exposes `create` under a
 /// name of its own gets the labels under that name too.
+/// `create` and `edit` are offered what they may add, `edit` in its
+/// `add_labels`, and `list` what a filter takes.
 #[test]
 fn sync_offers_each_tool_its_labels_found_by_source() {
     let dir = Utf8TempDir::new().unwrap();
@@ -276,35 +238,13 @@ enum = [
 "#;
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
-        format!("{SYNCED_HEADER}\n{SYNCED_NOTES}{lists}")
+        format!("{}\n{SYNCED_NOTES}{lists}", DEFINITIONS.header())
     );
-}
-
-/// The file is rewritten whole, so a tool removed from the configuration drops
-/// out of it rather than lingering.
-#[test]
-fn sync_drops_a_tool_no_longer_configured() {
-    let dir = Utf8TempDir::new().unwrap();
-    let both = json!({ "conversation": { "tools": {
-        "ticket_create": labelled("plugin.command.ticket.create"),
-        "ticket_list": labelled("plugin.command.ticket.list")
-    }}});
-    let one = json!({ "conversation": { "tools": {
-        "ticket_list": labelled("plugin.command.ticket.list")
-    }}});
-
-    sync(dir.path(), &both, &vocabulary()).unwrap();
-    sync(dir.path(), &one, &vocabulary()).unwrap();
-
-    let synced = fs::read_to_string(dir.path().join(SYNCED_FILE)).unwrap();
-    assert!(synced.contains("ticket_list"), "{synced}");
-    assert!(!synced.contains("ticket_create"), "{synced}");
 }
 
 /// A tool whose definition leaves the parameter out is left out too, rather
 /// than given a parameter with no type, which would drop the tool from every
 /// conversation.
-/// The values an earlier sync wrote don't declare it.
 #[test]
 fn sync_leaves_out_a_tool_that_declares_no_labels() {
     let dir = Utf8TempDir::new().unwrap();
@@ -324,7 +264,7 @@ fn sync_leaves_out_a_tool_that_declares_no_labels() {
         output.text,
         format!(
             "Wrote {path}, with labels for ticket_create\nLeft out ticket_edit (no `add_labels` \
-             parameter), ticket_list (no `labels` parameter): the labels go into that parameter, \
+             parameter), ticket_list (no `labels` parameter): the values go into that parameter, \
              which their definitions don't declare.\n"
         )
     );
@@ -333,47 +273,8 @@ fn sync_leaves_out_a_tool_that_declares_no_labels() {
     assert!(!synced.contains("ticket_edit"), "{synced}");
 }
 
-/// JP's definitions declare the parameter in every tool `sync` writes labels
-/// into, so none of them is left out.
-#[test]
-fn jp_definitions_declare_the_labels_parameter() {
-    for (name, key, tool) in routed(&read_definitions(&jp_definitions())) {
-        if !matches!(name.as_str(), "create" | "edit" | "list") {
-            continue;
-        }
-
-        let parameter = parameter(&name);
-        assert!(
-            tool["parameters"][parameter].get("type").is_some(),
-            "{key} declares no `{parameter}` parameter"
-        );
-    }
-}
-
-/// A file in the synced file's place that `sync` didn't write is someone's, and
-/// stays as it is.
-#[test]
-fn sync_leaves_a_file_it_did_not_write_alone() {
-    let dir = Utf8TempDir::new().unwrap();
-    let path = dir.path().join(SYNCED_FILE);
-    fs::write(&path, "# mine\n").unwrap();
-
-    let error = sync(dir.path(), &json!({}), &vocabulary()).unwrap_err();
-
-    assert_eq!(
-        error,
-        format!(
-            "{path} was not written by `jp ticket tools sync`, so it is left alone. Move it aside \
-             first."
-        )
-    );
-    assert_eq!(fs::read_to_string(&path).unwrap(), "# mine\n");
-}
-
-/// A bounded key is described beside the lists that write a ticket's labels,
-/// and a key a ticket needs makes `create`'s labels required, so the assistant
-/// knows before its first call.
-/// A filter is held to neither.
+/// A key a ticket needs makes `create`'s labels required, and the bounds are
+/// told in terms of a ticket.
 #[test]
 fn sync_describes_the_bounds_to_the_tools_that_write_labels() {
     let dir = Utf8TempDir::new().unwrap();
@@ -420,45 +321,12 @@ enum = [
 "#;
     assert_eq!(
         fs::read_to_string(dir.path().join(SYNCED_FILE)).unwrap(),
-        format!("{SYNCED_HEADER}\n{SYNCED_NOTES}{lists}")
-    );
-}
-
-/// A key taking any value can't be listed, so a board with one gets no lists:
-/// its labels are described in words instead, along with the keys one ticket
-/// holds on its own.
-#[test]
-fn sync_describes_open_and_unique_keys_in_words() {
-    let dir = Utf8TempDir::new().unwrap();
-    let config = json!({ "conversation": { "tools": {
-        "ticket_create": labelled("plugin.command.ticket.create"),
-        "ticket_list": labelled("plugin.command.ticket.list")
-    }}});
-    let vocabulary = Vocabulary::parse(
-        r#"{
-            "rfd": {"values": [], "unique": "key-value"},
-            "type": {"values": ["bug"]}
-        }"#,
-    )
-    .unwrap();
-
-    sync(dir.path(), &config, &vocabulary).unwrap();
-
-    let lists = r#"
-[conversation.tools.ticket_create.parameters.labels.items]
-summary = "One `key=value` label: type=bug, or rfd=<value> with any value. Only one ticket carries each `rfd` value."
-
-[conversation.tools.ticket_list.parameters.labels.items]
-summary = "One `key=value` label, or a bare `key` for any value under it: rfd, type, type=bug, or rfd=<value> with any value."
-"#;
-    assert_eq!(
-        fs::read_to_string(dir.path().join(SYNCED_FILE)).unwrap(),
-        format!("{SYNCED_HEADER}\n{SYNCED_NOTES}{lists}")
+        format!("{}\n{SYNCED_NOTES}{lists}", DEFINITIONS.header())
     );
 }
 
 /// An empty `enum` accepts nothing, which some providers refuse outright, so a
-/// board without labels writes no lists at all.
+/// board without labels writes no lists at all, and says why.
 #[test]
 fn sync_with_an_empty_vocabulary_offers_no_lists() {
     let dir = Utf8TempDir::new().unwrap();
@@ -471,70 +339,26 @@ fn sync_with_an_empty_vocabulary_offers_no_lists() {
     assert_eq!(
         fs::read_to_string(dir.path().join(SYNCED_FILE)).unwrap(),
         format!(
-            "{SYNCED_HEADER}\n{SYNCED_NOTES}#\n# The board defines no labels, so the tools take \
-             any label.\n"
+            "{}\n{SYNCED_NOTES}#\n# The board defines no labels, so the tools take any label.\n",
+            DEFINITIONS.header()
         )
     );
 }
 
+/// JP's definitions declare the parameter in every tool `sync` writes labels
+/// into, so none of them is left out.
 #[test]
-fn sync_needs_an_existing_directory() {
-    let dir = Utf8TempDir::new().unwrap();
-    let missing = dir.path().join("nowhere");
-
-    assert_eq!(
-        sync(&missing, &json!({}), &vocabulary()).unwrap_err(),
-        format!("{missing} is not a directory.")
-    );
-}
-
-#[test]
-fn a_tool_named_by_the_plugin_alone_is_known_by_its_key() {
-    let config = json!({ "conversation": { "tools": {
-        "create": { "source": "plugin.command.ticket" },
-        "ticket_show": { "source": "plugin.command.ticket.show" },
-        "ticketing": { "source": "plugin.command.ticketing.create" }
-    }}});
-
-    assert_eq!(served_tools(&config), [
-        ("create".to_owned(), "create".to_owned()),
-        ("ticket_show".to_owned(), "show".to_owned()),
-    ]);
-}
-
-/// A tool key is the user's to choose, and a TOML table header has to quote one
-/// that isn't a bare key.
-#[test]
-fn keys_and_values_are_written_as_toml() {
-    assert_eq!(toml_key("ticket_create"), "ticket_create");
-    assert_eq!(toml_key("my-tool"), "my-tool");
-    assert_eq!(toml_key("my tool"), "\"my tool\"");
-    assert_eq!(toml_key("a.b"), "\"a.b\"");
-    assert_eq!(
-        toml_string("say \"hi\" \\ there"),
-        r#""say \"hi\" \\ there""#
-    );
-    assert_eq!(toml_string("tab\there"), r#""tab\u0009here""#);
-}
-
-/// The file `sync` writes has to load, or the whole workspace configuration
-/// fails with it.
-#[test]
-fn the_synced_file_parses() {
-    let tools = vec![
-        ("my tool".to_owned(), "create".to_owned()),
-        ("ticket_list".to_owned(), "list".to_owned()),
-    ];
-
-    let source = synced(&tools, &vocabulary());
-
-    let value: toml::Value = toml::from_str(&source).unwrap();
-    assert_eq!(
-        value["conversation"]["tools"]["my tool"]["parameters"]["labels"]["items"]["enum"]
-            .as_array()
-            .map(Vec::len),
-        Some(4)
-    );
+fn jp_definitions_declare_the_labels_parameter() {
+    let vocabulary = Vocabulary::default();
+    for (name, key, tool) in routed(&read_definitions(&jp_definitions())) {
+        for mirror in mirrors(&name, &vocabulary) {
+            assert!(
+                tool["parameters"][mirror.parameter].get("type").is_some(),
+                "{key} declares no `{}` parameter",
+                mirror.parameter
+            );
+        }
+    }
 }
 
 /// Each embedded definition is named for the tool it routes, and every tool the

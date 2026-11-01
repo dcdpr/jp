@@ -758,7 +758,7 @@ Can be merged independently.
 - [Query Stream Pipeline] — the turn loop and tool coordinator where `await` is
   dispatched.
 
-[Query Stream Pipeline]: ../architecture/query-stream-pipeline.md
+[Query Stream Pipeline]: ../wiki/00dxyb6-query-stream-pipeline-architecture.md
 [RFD 009]: 009-stateful-tool-protocol.md
 [RFD 011]: 011-system-notification-queue.md
 [RFD 028]: 028-structured-inquiry-system-for-tool-questions.md

@@ -536,5 +536,5 @@ This is follow-up work and can be scoped in a separate PR or RFD.
 - `crates/jp_cli/src/cmd/query/turn/coordinator.rs` — `TurnCoordinator`
 - `crates/jp_cli/src/render/tool.rs` — `ToolRenderer`
 
-[Query Stream Pipeline Architecture]: ../architecture/query-stream-pipeline.md
+[Query Stream Pipeline Architecture]: ../wiki/00dxyb6-query-stream-pipeline-architecture.md
 [RFD 012]: 012-typed-llm-streaming-events.md

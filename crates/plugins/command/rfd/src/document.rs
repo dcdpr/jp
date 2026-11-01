@@ -14,14 +14,19 @@
 //!   an indented line.
 //! ```
 //!
+//! The block is read and written the way `doc::metadata` reads and writes every
+//! document's; what this module adds is particular to RFDs: the `# RFD 042:`
+//! heading, the fields that cite other RFDs, and the retired `Tracking Issue`.
 //! [`Header`] reads that block and nothing past it, so a metadata line quoted
 //! further down, as RFD 001 does when it documents the format, is never read as
 //! the document's own.
 //! [`Document`] is the one place that writes it: every command that changes a
 //! status, a relationship, or the heading goes through it.
 
-use std::{ops::Range, sync::LazyLock};
+use std::sync::LazyLock;
 
+use doc::metadata;
+pub(crate) use doc::metadata::NoMetadata;
 use regex::Regex;
 
 /// `RFD 042` or `RFD D05`, the way a metadata field cites another RFD.
@@ -66,7 +71,7 @@ pub(crate) fn title(content: &str) -> Option<String> {
 #[must_use]
 pub(crate) fn body(content: &str) -> String {
     let lines: Vec<&str> = content.lines().collect();
-    let block = block(&lines);
+    let block = metadata::block(&lines);
     let start = if block.is_empty() {
         lines
             .iter()
@@ -79,61 +84,6 @@ pub(crate) fn body(content: &str) -> String {
     lines[start..].join("\n").trim().to_owned()
 }
 
-/// The metadata block of `lines`: the run of lines from the first `- **` line
-/// to the blank line that closes it.
-///
-/// A section heading (`## Summary`) before any metadata line means the document
-/// has no block, which is an empty range.
-fn block<S: AsRef<str>>(lines: &[S]) -> Range<usize> {
-    let mut start = None;
-    for (index, line) in lines.iter().enumerate() {
-        let line = line.as_ref();
-        if line.starts_with("## ") {
-            break;
-        }
-        if line.starts_with("- **") {
-            start = Some(index);
-            break;
-        }
-    }
-
-    let Some(start) = start else {
-        return 0..0;
-    };
-
-    let end = lines[start..]
-        .iter()
-        .position(|line| line.as_ref().trim().is_empty())
-        .map_or(lines.len(), |offset| start + offset);
-
-    start..end
-}
-
-/// The lines the field `key` spans in `lines`: its own line, and the lines a
-/// value long enough to wrap continues on, up to the next field.
-///
-/// `comfort` indents a continuation past the list marker; a line at the margin
-/// continues the value too, as markdown reads a list item.
-fn field_lines<S: AsRef<str>>(lines: &[S], key: &str) -> Option<Range<usize>> {
-    let block = block(lines);
-    let first = block
-        .clone()
-        .find(|&index| value_of(lines[index].as_ref(), key).is_some())?;
-    let end = (first + 1..block.end)
-        .find(|&index| lines[index].as_ref().starts_with("- **"))
-        .unwrap_or(block.end);
-
-    Some(first..end)
-}
-
-/// What follows `- **key**:` on `line`, or `None` when the line is not that
-/// field.
-fn value_of<'a>(line: &'a str, key: &str) -> Option<&'a str> {
-    line.strip_prefix("- **")?
-        .strip_prefix(key)?
-        .strip_prefix("**:")
-}
-
 /// The RFD an entry of a relationship field cites: `[RFD 001][tickets]` cites
 /// `001`.
 #[must_use]
@@ -144,15 +94,13 @@ pub(crate) fn cited(entry: &str) -> Option<String> {
 }
 
 /// A document's metadata block, read.
-pub(crate) struct Header<'a, S> {
-    lines: &'a [S],
-}
+pub(crate) struct Header<'a, S>(metadata::Header<'a, S>);
 
 impl<'a, S: AsRef<str>> Header<'a, S> {
     /// The metadata of the document `lines` holds.
     #[must_use]
     pub(crate) fn of(lines: &'a [S]) -> Self {
-        Self { lines }
+        Self(metadata::Header::of(lines))
     }
 
     /// The first line's value of the field `key`, trimmed.
@@ -160,29 +108,13 @@ impl<'a, S: AsRef<str>> Header<'a, S> {
     /// `None` when the block has no such field, or it is empty.
     #[must_use]
     pub(crate) fn field(&self, key: &str) -> Option<String> {
-        let range = field_lines(self.lines, key)?;
-        let value = value_of(self.lines[range.start].as_ref(), key)?.trim();
-
-        (!value.is_empty()).then(|| value.to_owned())
+        self.0.field(key)
     }
 
     /// The value of the field `key` with the lines it wraps onto, as one line.
-    ///
-    /// A value long enough to wrap continues on the lines below it, up to the
-    /// next field; those are joined back with single spaces.
     #[must_use]
     pub(crate) fn wrapped(&self, key: &str) -> Option<String> {
-        let range = field_lines(self.lines, key)?;
-        let first = value_of(self.lines[range.start].as_ref(), key)?;
-
-        let mut value = first.to_owned();
-        for line in &self.lines[range.start + 1..range.end] {
-            value.push(' ');
-            value.push_str(line.as_ref());
-        }
-
-        let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
-        (!value.is_empty()).then_some(value)
+        self.0.wrapped(key)
     }
 
     /// The RFDs the field `key` cites, in the order it names them.
@@ -230,7 +162,7 @@ impl<'a, S: AsRef<str>> Header<'a, S> {
             .and_then(|rest| rest.split_once(']'));
         let defined = label.and_then(|(label, _)| {
             let definition = format!("[{label}]:");
-            self.lines.iter().find_map(|line| {
+            self.0.lines().iter().find_map(|line| {
                 line.as_ref()
                     .strip_prefix(&definition)
                     .map(|target| target.trim().to_owned())
@@ -244,13 +176,9 @@ impl<'a, S: AsRef<str>> Header<'a, S> {
     /// lines included.
     #[must_use]
     pub(crate) fn is_field_line(&self, key: &str, index: usize) -> bool {
-        field_lines(self.lines, key).is_some_and(|range| range.contains(&index))
+        self.0.is_field_line(key, index)
     }
 }
-
-/// A document without a metadata block, asked to change one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct NoMetadata;
 
 /// A document being edited.
 ///
@@ -258,78 +186,40 @@ pub(crate) struct NoMetadata;
 /// as it was.
 /// A file read with `\r\n` line endings is written back with them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Document {
-    lines: Vec<String>,
-    crlf: bool,
-    trailing_newline: bool,
-}
+pub(crate) struct Document(metadata::Document);
 
 impl Document {
     #[must_use]
     pub(crate) fn parse(text: &str) -> Self {
-        Self {
-            lines: text.lines().map(ToOwned::to_owned).collect(),
-            crlf: text.contains("\r\n"),
-            trailing_newline: text.ends_with('\n'),
-        }
+        Self(metadata::Document::parse(text))
     }
 
     #[must_use]
     pub(crate) fn render(&self) -> String {
-        let mut text = self.lines.join(if self.crlf { "\r\n" } else { "\n" });
-        if self.trailing_newline {
-            text.push_str(if self.crlf { "\r\n" } else { "\n" });
-        }
-
-        text
+        self.0.render()
     }
 
     #[must_use]
     pub(crate) fn lines(&self) -> &[String] {
-        &self.lines
+        self.0.lines()
     }
 
     #[must_use]
     pub(crate) fn header(&self) -> Header<'_, String> {
-        Header::of(&self.lines)
-    }
-
-    /// Where a field the block doesn't carry yet goes: above `Summary`, which
-    /// RFD 001 keeps last, or at the end of the block when there is none.
-    fn insertion_point(&self) -> Result<usize, NoMetadata> {
-        let block = block(&self.lines);
-        if block.is_empty() {
-            return Err(NoMetadata);
-        }
-
-        Ok(field_lines(&self.lines, "Summary").map_or(block.end, |summary| summary.start))
+        Header::of(self.0.lines())
     }
 
     /// Set the field `key` to `value`, replacing it whole, wrapped lines
-    /// included, or adding it when the block doesn't carry it.
+    /// included, or adding it above `Summary`, which RFD 001 keeps last, when
+    /// the block doesn't carry it.
     pub(crate) fn set(&mut self, key: &str, value: &str) -> Result<(), NoMetadata> {
-        let line = format!("- **{key}**: {value}");
-
-        if let Some(range) = field_lines(&self.lines, key) {
-            self.lines.splice(range, [line]);
-            return Ok(());
-        }
-
-        let at = self.insertion_point()?;
-        self.lines.insert(at, line);
-
-        Ok(())
+        self.0.set(key, value)
     }
 
     /// Remove the field `key`, wrapped lines included.
     /// `false` when the block doesn't carry it.
     pub(crate) fn remove(&mut self, key: &str) -> bool {
-        let Some(range) = field_lines(&self.lines, key) else {
-            return false;
-        };
-
-        self.lines.drain(range);
-        true
+        self.0.remove(key)
     }
 
     /// Add `link`, which cites the RFD `id`, to the relationship field `key`.
@@ -343,16 +233,10 @@ impl Document {
         }
 
         // An empty field has nothing to append to, so it is replaced.
-        let has_value = self.header().wrapped(key).is_some();
-        match field_lines(&self.lines, key) {
-            Some(range) if has_value => {
-                let last = &mut self.lines[range.end - 1];
-                let kept = last.trim_end().len();
-                last.truncate(kept);
-                last.push_str(", ");
-                last.push_str(link);
-            }
-            _ => self.set(key, link)?,
+        if self.header().wrapped(key).is_some() {
+            self.0.append(key, &format!(", {link}"));
+        } else {
+            self.set(key, link)?;
         }
 
         Ok(true)
@@ -365,9 +249,7 @@ impl Document {
     /// The entries kept are written back on one line.
     /// `false` when no entry was dropped.
     pub(crate) fn uncite(&mut self, key: &str, drop: impl Fn(&str) -> bool) -> bool {
-        let (Some(range), Some(value)) =
-            (field_lines(&self.lines, key), self.header().wrapped(key))
-        else {
+        let Some(value) = self.header().wrapped(key) else {
             return false;
         };
 
@@ -383,18 +265,20 @@ impl Document {
         }
 
         if kept.is_empty() {
-            self.lines.drain(range);
+            self.0.remove(key)
         } else {
-            let line = format!("- **{key}**: {}", kept.join(", "));
-            self.lines.splice(range, [line]);
+            // The field is there, so `set` replaces it rather than needing a
+            // block to add it to.
+            self.0.set(key, &kept.join(", ")).is_ok()
         }
-
-        true
     }
 
     /// The index of the document's heading line, `# RFD 042: Title`.
     fn heading(&self) -> Option<usize> {
-        self.lines.iter().position(|line| line.starts_with(HEADING))
+        self.0
+            .lines()
+            .iter()
+            .position(|line| line.starts_with(HEADING))
     }
 
     /// Give the heading the id `id`, keeping its title.
@@ -403,11 +287,12 @@ impl Document {
         let Some(index) = self.heading() else {
             return false;
         };
-        let Some((_, title)) = self.lines[index][HEADING.len()..].split_once(':') else {
+        let Some((_, title)) = self.0.lines()[index][HEADING.len()..].split_once(':') else {
             return false;
         };
 
-        self.lines[index] = format!("{HEADING}{id}:{title}");
+        let line = format!("{HEADING}{id}:{title}");
+        self.0.lines_mut()[index] = line;
         true
     }
 
@@ -418,7 +303,7 @@ impl Document {
             return false;
         };
 
-        self.lines[index] = format!("{HEADING}{id}: {title}");
+        self.0.lines_mut()[index] = format!("{HEADING}{id}: {title}");
         true
     }
 
@@ -427,25 +312,7 @@ impl Document {
     ///
     /// A document without sections gets it at the end.
     pub(crate) fn insert_before_sections(&mut self, notice: &[String]) {
-        let after_metadata = block(&self.lines).end;
-        let section =
-            (after_metadata..self.lines.len()).find(|&index| self.lines[index].starts_with("## "));
-
-        if let Some(at) = section {
-            let inserted = notice.iter().cloned().chain([String::new()]);
-            self.lines.splice(at..at, inserted);
-            return;
-        }
-
-        if self
-            .lines
-            .last()
-            .is_some_and(|line| !line.trim().is_empty())
-        {
-            self.lines.push(String::new());
-        }
-        self.lines.extend(notice.iter().cloned());
-        self.trailing_newline = true;
+        self.0.insert_before_sections(notice);
     }
 }
 

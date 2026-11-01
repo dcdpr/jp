@@ -3,6 +3,7 @@
 .pnp.loader.mjs
 .vitepress/cache
 .vitepress/dist
+.vitepress/.temp
 .yarn/*
 
 # Fetched at build time by `just plugin-registry-fetch`.

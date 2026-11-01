@@ -1,17 +1,18 @@
 import DefaultTheme from 'vitepress/theme'
 import { h } from 'vue'
 
-import { docBefore, enhanceApp } from '../jp-vite/theme/index.mjs'
+import { docAfter, docBefore, enhanceApp } from '../jp-vite/theme/index.mjs'
 
-// The default theme, with what the RFD and ticket pages need: the components
-// they render their lists with (`<RfdIndex />` and the rest), and above a
-// document, the trail back to the index, the references, and the status badge.
+// The default theme, with what the RFD, ticket, and wiki pages need: the
+// components they render their lists with (`<RfdIndex />` and the rest), above
+// a document the trail back to the index, and below it the references.
 export default {
     extends: DefaultTheme,
     enhanceApp,
     Layout() {
         return h(DefaultTheme.Layout, null, {
             'doc-before': docBefore,
+            'doc-after': docAfter,
         })
     },
 }

@@ -61,6 +61,7 @@ const HREFS = new Map([
     ['042', '../rfd/042-forty-two.md'],
     ['D12', '../rfd/drafts/D12-twelve.md'],
     ['T-0aaaaaa', './0aaaaaa-a.md'],
+    ['W-0a1b2c3', '../wiki/0a1b2c3-glossary.md'],
 ])
 const hrefFor = label => HREFS.get(label) ?? null
 
@@ -131,6 +132,35 @@ test('a code span holding only a name is linked whole', () => {
     )
 })
 
+test('a wiki page is named as W- and its id, and always counts', () => {
+    assert.deepEqual(
+        mentionedLabels('See W-0a1b2c3, W-0a1b2c3#turn, and W0a1b2c3, which names nothing.'),
+        ['W-0a1b2c3'],
+    )
+})
+
+// A name can point into its document, as `jp wiki check` reads it.
+test('a name with a section links to that section', () => {
+    const line = inline(token('text', 'See W-0a1b2c3#pinned-conversation. Also RFD 042#labels and T-0aaaaaa#swot.'))
+
+    linkMentions([line], Token, hrefFor)
+
+    assert.equal(
+        shown(line.children),
+        'See <a href="../wiki/0a1b2c3-glossary.md#pinned-conversation">' +
+            'W-0a1b2c3#pinned-conversation</a>. Also <a href="../rfd/042-forty-two.md#labels">' +
+            'RFD 042#labels</a> and <a href="./0aaaaaa-a.md#swot">T-0aaaaaa#swot</a>.',
+    )
+})
+
+test('a code span holding a page and a section is linked whole', () => {
+    const line = inline(token('code_inline', 'W-0a1b2c3#turn'))
+
+    linkMentions([line], Token, hrefFor)
+
+    assert.equal(shown(line.children), '<a href="../wiki/0a1b2c3-glossary.md#turn">`W-0a1b2c3#turn`</a>')
+})
+
 test('a link is relative to the page, and none is made to the page itself', () => {
     assert.equal(relativeHref('ticket/0aaaaaa-a.md', 'rfd/042-x.md'), '../rfd/042-x.md')
     assert.equal(relativeHref('ticket/0aaaaaa-a.md', 'ticket/0bbbbbb-b.md'), './0bbbbbb-b.md')
@@ -142,6 +172,7 @@ test('the documents are the RFDs, drafts, and tickets on disk', () => {
     const site = mkdtempSync(join(tmpdir(), 'jp-vite-references-'))
     mkdirSync(join(site, 'rfd/drafts'), { recursive: true })
     mkdirSync(join(site, 'ticket'))
+    mkdirSync(join(site, 'wiki'))
     for (const file of [
         'rfd/000-design-template.md',
         'rfd/042-forty-two.md',
@@ -149,16 +180,22 @@ test('the documents are the RFDs, drafts, and tickets on disk', () => {
         'rfd/drafts/D12-twelve.md',
         'ticket/0aaaaaa-a.md',
         'ticket/board.md',
+        'wiki/0a1b2c3-glossary.md',
+        'wiki/index.md',
     ]) {
         writeFileSync(join(site, file), '# A document\n')
     }
 
-    const known = knownDocuments({ rfd: { route: 'rfd' }, ticket: { route: 'ticket' } }, site)
+    const known = knownDocuments(
+        { rfd: { route: 'rfd' }, ticket: { route: 'ticket' }, wiki: { route: 'wiki' } },
+        site,
+    )
 
     assert.deepEqual(Object.fromEntries(known), {
         '042': 'rfd/042-forty-two.md',
         'D12': 'rfd/drafts/D12-twelve.md',
         'T-0aaaaaa': 'ticket/0aaaaaa-a.md',
+        'W-0a1b2c3': 'wiki/0a1b2c3-glossary.md',
     })
     assert.equal(knownDocuments({ rfd: null, ticket: null }, site).size, 0)
 })

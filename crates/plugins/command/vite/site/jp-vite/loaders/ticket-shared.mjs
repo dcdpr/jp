@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 
 import { knownDocuments } from '../references.mjs'
 import { readSettings, workflowDir, workflowPath } from '../settings.mjs'
-import { field } from './metadata.mjs'
+import { readMetadata } from './metadata.mjs'
 import { referencedLabels } from './rfd-shared.mjs'
 
 // Reading the tickets in the ticket directory for the site.
@@ -35,18 +35,18 @@ const DEFAULT_DONE_LIMIT = 8
 // `referencedLabels`.
 export function parseTicket(content, filename, known = new Map()) {
     const id = filename.match(/^([0-9a-z]{7})-/)?.[1] ?? '0000000'
-    const title = content.match(/^# (.+)/m)?.[1]?.trim() ?? filename
+    const meta = readMetadata(content)
 
     return {
         id: `T-${id}`,
         num: id,
-        title,
-        status: field(content, 'Status'),
-        authors: field(content, 'Authors'),
-        date: field(content, 'Date'),
-        labels: readLabels(content),
-        promotedTo: field(content, 'Promoted to'),
-        github: field(content, 'GitHub'),
+        title: meta.title ?? filename,
+        status: meta.get('Status'),
+        authors: meta.get('Authors'),
+        date: meta.get('Date'),
+        labels: readLabels(meta),
+        promotedTo: meta.get('Promoted to'),
+        github: meta.get('GitHub'),
         comments: countComments(content),
         // Cross-kind links, resolved in the browser against both sets.
         links: referencedLabels(content, known).filter(label => label !== `T-${id}`),
@@ -54,32 +54,14 @@ export function parseTicket(content, filename, known = new Map()) {
     }
 }
 
-// Every `- **Label**: key=value` line in a ticket's metadata block, in order.
-//
-// The field repeats once per pair rather than joining them onto one line, so no
-// line grows with the number of labels and the block survives `comfort`'s width
-// wrapping. A formatter escapes what would otherwise be emphasis (`jp_config`
-// becomes `jp\_config`), so reading undoes that.
+// A ticket's labels, sorted: the `Label` field repeats once per `key=value`
+// pair, so no line grows with the number of labels.
 //
 // Read as written rather than checked against the vocabulary: a listing that
 // hid a label the file carries would disagree with the file.
 // `findUnknownLabels` below is what catches one the board doesn't define.
-//
-// Line endings are normalized first: the header match needs a literal blank
-// line, and `.` does not consume the `\r` of a CRLF file. Rust's `str::lines()`
-// reads such a file fine, so without this the CLI and the board disagree.
-export function readLabels(content) {
-    const block = content.replace(/\r\n/g, '\n')
-        .match(/^# .+\n\n((?:- \*\*[^*]+\*\*:.*\n)+)/m)?.[1]
-    if (!block) return []
-
-    return block
-        .split('\n')
-        .map(line => line.match(/^- \*\*Label\*\*:\s*(.*)$/i)?.[1])
-        .filter(value => value !== undefined)
-        .map(value => value.replace(/\\([!-/:-@[-`{-~])/g, '$1').trim())
-        .filter(Boolean)
-        .sort()
+function readLabels(meta) {
+    return meta.all('Label').sort()
 }
 
 // The labels the board defines, as a map of key to `{ values, open, retired,

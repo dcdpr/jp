@@ -384,8 +384,7 @@ Each command group is independently mergeable.
 
 ### Phase 3: The inventory, and the placements it forces
 
-- Record the application/frontend split as a living document under
-  `docs/architecture/`.
+- Record the application/frontend split as a living document under `docs/wiki/`.
 - Consolidate query-draft handling into the storage layer: one path resolution
   instead of the two in `cmd/query.rs` and `cmd/plugin/dispatch.rs`, reachable
   by `jp query` and an FFI consumer alike.

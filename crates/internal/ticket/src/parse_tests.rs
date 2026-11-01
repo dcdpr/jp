@@ -155,6 +155,45 @@ fn a_malformed_label_line_does_not_take_the_others_with_it() {
     ]);
 }
 
+/// `comfort` wraps a long value onto an indented line; the fields after it
+/// still belong to the block, and the value reads whole.
+#[test]
+fn a_wrapped_value_keeps_the_fields_after_it() {
+    let source = indoc! {"
+        # Wrapped
+
+        - **Status**: Todo
+        - **Authors**: Jane Doe <jane@example.com>, John Doe
+          <john@example.com>
+        - **Date**: 2026-08-05
+        - **Label**: client=cli
+
+        Description.
+    "};
+
+    let ticket = document(source).unwrap();
+
+    assert_eq!(
+        ticket.metadata.authors,
+        "Jane Doe <jane@example.com>, John Doe <john@example.com>"
+    );
+    assert_eq!(ticket.metadata.date, "2026-08-05");
+    assert_eq!(ticket.metadata.labels.to_tokens(), ["client=cli"]);
+    assert_eq!(ticket.description, "Description.");
+    assert_eq!(label_tokens(source), ["client=cli"]);
+}
+
+/// A key spelled in another case still names its field.
+#[test]
+fn keys_read_without_case() {
+    let source = "# Lower\n\n- **status**: Done\n- **AUTHORS**: jean\n- **date**: 2026-08-05\n";
+
+    let ticket = document(source).unwrap();
+
+    assert_eq!(ticket.metadata.status, Status::Done);
+    assert_eq!(ticket.metadata.authors, "jean");
+}
+
 #[test]
 fn reads_comments_in_order() {
     let ticket = document(WITH_COMMENTS).unwrap();
@@ -406,24 +445,6 @@ fn rejects_an_unknown_status() {
 fn locates_the_metadata_block() {
     assert_eq!(metadata_range(PLAIN), Some(2..5));
     assert_eq!(metadata_range("# No metadata\n"), None);
-}
-
-#[test]
-fn splits_metadata_lines() {
-    assert_eq!(
-        meta_line("- **Promoted to**: RFD 042"),
-        Some(("Promoted to", "RFD 042"))
-    );
-    assert_eq!(meta_line("- **Re**:"), Some(("Re", "")));
-    assert_eq!(meta_line("- not metadata"), None);
-    assert_eq!(meta_line("  - **Indented**: value"), None);
-}
-
-/// A value opening with `#` reaches the parser bare: it sits mid-line, where no
-/// markdown formatter has reason to escape it.
-#[test]
-fn reads_a_value_that_opens_with_a_hash() {
-    assert_eq!(meta_line("- **Re**: #1"), Some(("Re", "#1")));
 }
 
 #[test]

@@ -1,4 +1,5 @@
 use camino_tempfile::Utf8TempDir;
+use chrono::Utc;
 
 use super::*;
 
@@ -1196,18 +1197,6 @@ fn set_status_to_the_current_status_writes_nothing() {
     assert_eq!(fs::read_to_string(&path).unwrap(), before);
 }
 
-#[test]
-fn slugs_are_lowercase_and_hyphenated() {
-    assert_eq!(
-        slug("Tool call header misaligned"),
-        "tool-call-header-misaligned"
-    );
-    assert_eq!(slug("`jp query --new` panics!"), "jp-query-new-panics");
-    assert_eq!(slug("  Spaced  out  "), "spaced-out");
-    assert_eq!(slug("!!!"), "untitled");
-    assert_eq!(slug(&"long ".repeat(20)).len(), 59);
-}
-
 /// `2026-08-10T00:00:00Z`.
 const JP_EPOCH_SECS: u64 = 1_786_320_000;
 
@@ -1225,7 +1214,8 @@ fn the_first_ticket_writes_an_epoch_starting_today() {
         "{source}"
     );
     let epoch: Epoch = source.parse().unwrap();
-    assert_eq!(epoch, Epoch::day_of(now_seconds().unwrap()).unwrap());
+    let today = u64::try_from(Utc::now().timestamp()).unwrap();
+    assert_eq!(epoch, Epoch::day_of(today).unwrap());
     // One day holds 17,280 five-second buckets.
     assert!(id.bucket() < 17_280, "{id} sits in bucket {}", id.bucket());
 }
@@ -1267,7 +1257,7 @@ fn create_refuses_tickets_without_an_epoch() {
     assert!(matches!(error, Error::MissingEpoch(_)), "{error}");
     assert!(!dir.path().join(EPOCH_FILE).exists());
     assert_eq!(
-        files(dir.path())
+        files::list(dir.path())
             .unwrap()
             .into_iter()
             .map(|(id, _)| id)
@@ -1341,6 +1331,6 @@ fn check_reports_a_malformed_epoch() {
 
     assert_eq!(report.problems, [Problem::MalformedEpoch {
         path: dir.path().join(EPOCH_FILE),
-        error: ParseError::EpochEmpty,
+        error: EpochError::Empty,
     }]);
 }

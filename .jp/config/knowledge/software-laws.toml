@@ -134,7 +134,7 @@ code, documentation, commits, RFDs, CLI help, and error messages. Consistency of
 critical: it's how contributors (human and AI) reason about the system without \
 re-deriving what each concept means every time.
 
-The canonical glossary lives at `docs/architecture/ubiquitous-language.md`. Consult it before \
+The canonical glossary lives at `docs/wiki/00dxybd-ubiquitous-language.md`. Consult it before \
 introducing a term, and update it when the vocabulary shifts.
 
 - **Use the exact existing term.** When the code calls something a `Turn`, don't silently \
@@ -150,7 +150,7 @@ introducing a term, and update it when the vocabulary shifts.
 
 - **Introduce new terms explicitly.** When a new concept emerges, name it. Don't leave it \
   as \"that thing we do after a tool call.\" Add it to \
-  `docs/architecture/ubiquitous-language.md` and use it consistently from that point on.
+  `docs/wiki/00dxybd-ubiquitous-language.md` and use it consistently from that point on.
 
 - **User-facing and internal names can differ, but drift is a warning.** Names in the \
   public surface (CLI flags, config keys, error messages, help text) are part of the \
