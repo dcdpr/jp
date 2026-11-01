@@ -299,6 +299,30 @@ fn the_branch_is_origins_default_branch() {
     assert_eq!(settings.branch.as_deref(), Some("main"));
 }
 
+/// A configured branch wins over git's, so every checkout writes the same
+/// snapshot, and one without `origin/HEAD` still has a branch.
+#[test]
+fn a_configured_branch_wins_over_origins() {
+    let root = workspace();
+    let pinned = Options {
+        branch: Some("trunk".to_owned()),
+        ..options("docs")
+    };
+    let remote = Remote {
+        origin: None,
+        branch: Some("main".to_owned()),
+    };
+
+    let read = |remote: &Remote| {
+        snapshot(root.path(), &pinned, &json!({}), remote)
+            .unwrap()
+            .branch
+    };
+
+    assert_eq!(read(&remote).as_deref(), Some("trunk"));
+    assert_eq!(read(&Remote::default()).as_deref(), Some("trunk"));
+}
+
 /// The snapshot is committed, so the same settings always write the same text.
 #[test]
 fn the_snapshot_renders_in_a_fixed_shape() {

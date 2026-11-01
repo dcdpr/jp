@@ -165,9 +165,10 @@ values = []
 run = "allow"
 
 # Pinned rather than read from each contributor's `origin` remote, so everyone
-# writes the same settings.
+# writes the same settings, CI's clone included, which has no `origin/HEAD`.
 [plugins.command.vite.options]
 repository = "https://github.com/dcdpr/jp"
+branch = "main"
 
 [providers.llm.aliases]
 # Anthropic aliases

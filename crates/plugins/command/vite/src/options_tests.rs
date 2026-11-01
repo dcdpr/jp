@@ -22,6 +22,7 @@ fn every_option_has_a_default() {
         Ok(Options {
             dir: Utf8PathBuf::from("docs"),
             repository: None,
+            branch: None,
             redirects: BTreeMap::new(),
         })
     );
@@ -30,13 +31,32 @@ fn every_option_has_a_default() {
 #[test]
 fn configured_options_replace_the_defaults() {
     assert_eq!(
-        read(json!({ "dir": "site", "repository": "https://github.com/dcdpr/jp/" })),
+        read(json!({
+            "dir": "site",
+            "repository": "https://github.com/dcdpr/jp/",
+            "branch": " main ",
+        })),
         Ok(Options {
             dir: Utf8PathBuf::from("site"),
             repository: Some("https://github.com/dcdpr/jp".to_owned()),
+            branch: Some("main".to_owned()),
             redirects: BTreeMap::new(),
         })
     );
+}
+
+#[test]
+fn a_branch_is_one_name() {
+    for branch in ["", "  ", "my branch"] {
+        assert_eq!(
+            read(json!({ "branch": branch })),
+            Err(
+                "`plugins.command.vite.options.branch` must be a branch name, such as `main`."
+                    .to_owned()
+            ),
+            "{branch:?}"
+        );
+    }
 }
 
 /// A redirect names its routes the way the site serves them, so the same page

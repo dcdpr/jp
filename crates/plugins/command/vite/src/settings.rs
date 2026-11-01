@@ -180,7 +180,7 @@ impl Settings {
 /// passed.
 ///
 /// `remote` is what git knows of the `origin` remote: `repository` falls back
-/// to its address, and `branch` is its default branch.
+/// to its address, and `branch` to its default branch.
 pub(crate) fn snapshot(
     root: &Utf8Path,
     options: &Options,
@@ -238,7 +238,7 @@ pub(crate) fn snapshot(
             .repository
             .clone()
             .or_else(|| remote.origin.as_deref().and_then(web_address)),
-        branch: remote.branch.clone(),
+        branch: options.branch.clone().or_else(|| remote.branch.clone()),
         rfd,
         ticket,
         wiki,

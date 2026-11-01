@@ -548,7 +548,9 @@ fn jp_site_is_synced() {
     let root = jp_root();
     let config = jp_config(&root);
     let options = Options::from_config(&config).unwrap();
-    let settings = snapshot(&root, &options, &config, &git::remote(&root)).unwrap();
+    // Not the checkout's git remote: JP pins what it would give, and a CI clone
+    // has no `origin/HEAD` to read.
+    let settings = snapshot(&root, &options, &config, &git::Remote::default()).unwrap();
     let owned_dir = site::owned_dir(&settings);
     let changes = changes(&root, &settings).unwrap();
 

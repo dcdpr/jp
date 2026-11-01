@@ -7,6 +7,8 @@
 //! dir = "docs"
 //! # Where links to repository files point.
 //! repository = "https://github.com/dcdpr/jp"
+//! # The branch a page's "edit" link opens the forge's editor on.
+//! branch = "main"
 //!
 //! # Pages that moved: an old route, and the route or wiki page it went to.
 //! [plugins.command.vite.options.redirects]
@@ -14,7 +16,11 @@
 //! ```
 //!
 //! Every option is optional: `dir` defaults to `docs`, `repository` to the web
-//! address of git's `origin` remote, and `redirects` to none.
+//! address of git's `origin` remote, `branch` to the default branch git's
+//! `origin/HEAD` names, and `redirects` to none.
+//! The settings snapshot is committed, so a project whose checkouts disagree
+//! about `origin` sets `repository` and `branch` rather than reading them: a CI
+//! clone, for one, has no `origin/HEAD`.
 //! Keys this plugin doesn't read are ignored, so a configuration written for a
 //! newer `jp-vite` still loads.
 //!
@@ -71,6 +77,9 @@ pub(crate) struct Options {
     /// Where links to repository files point; `None` takes git's `origin`.
     pub repository: Option<String>,
 
+    /// The branch a page is edited on; `None` takes git's `origin/HEAD`.
+    pub branch: Option<String>,
+
     /// Pages that moved: each old route, `/architecture/glossary`, and where it
     /// went, a route or a wiki page id, `W-0a1b2c3`.
     pub redirects: BTreeMap<String, String>,
@@ -81,6 +90,7 @@ impl Default for Options {
         Self {
             dir: Utf8PathBuf::from(DEFAULT_SITE_DIR),
             repository: None,
+            branch: None,
             redirects: BTreeMap::new(),
         }
     }
@@ -113,6 +123,19 @@ impl Options {
             }
         };
 
+        let branch = match read.branch.as_deref().map(str::trim) {
+            None => None,
+            Some(branch) if !branch.is_empty() && !branch.contains(char::is_whitespace) => {
+                Some(branch.to_owned())
+            }
+            Some(_) => {
+                return Err(
+                    "`plugins.command.vite.options.branch` must be a branch name, such as `main`."
+                        .to_owned(),
+                );
+            }
+        };
+
         let mut redirects = BTreeMap::new();
         for (from, to) in &read.redirects {
             let refused = |why: String| {
@@ -131,6 +154,7 @@ impl Options {
 
         Ok(Self {
             repository,
+            branch,
             redirects,
             ..read
         })
