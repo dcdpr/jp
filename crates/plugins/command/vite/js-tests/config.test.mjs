@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { repositoryLinkFor } from '../site/jp-vite/config.mjs'
+import { repositoryLinkFor, withSearch } from '../site/jp-vite/config.mjs'
 
 // A site in `docs`, linking repository files on GitHub.
 const SETTINGS = { site: 'docs', repository: 'https://github.com/dcdpr/jp' }
@@ -29,4 +29,18 @@ test('lines are linked the way a forge reads them', () => {
     assert.equal(link('L12-24'), `${base}#L12-L24`)
     assert.equal(link('12-24'), `${base}#L12-L24`)
     assert.equal(link('by_rfd'), `${base}#by_rfd`)
+})
+
+test('a site without a search gets the local one', () => {
+    assert.deepEqual(
+        withSearch({ outline: { level: [2, 3] } }),
+        { outline: { level: [2, 3] }, search: { provider: 'local' } },
+    )
+})
+
+test('a search the project configures is kept', () => {
+    const algolia = { provider: 'algolia', options: { appId: 'a', apiKey: 'k', indexName: 'i' } }
+
+    assert.deepEqual(withSearch({ search: algolia }), { search: algolia })
+    assert.deepEqual(withSearch({ search: false }), { search: false })
 })
