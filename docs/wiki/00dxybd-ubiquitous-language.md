@@ -47,6 +47,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Match](#match)
     - [MCP Host](#mcp-host)
     - [Operation](#operation)
+    - [Parent Ticket](#parent-ticket)
     - [Pinned Conversation](#pinned-conversation)
     - [Provider](#provider)
     - [RFD](#rfd)
@@ -338,6 +339,19 @@ invocation, its position, and the number of operations in the call.
 its tool call id, and the conversation records one response for all of them.
 Nor the informal sense used by access policies, where an operation is whatever
 one tool execution does to a path.
+
+### Parent Ticket
+
+A ticket that groups the tickets filed under it, its children, and holds the
+context they share.
+The relation is recorded on the child alone, as its `Parent` field, so a
+parent's children are the tickets that name it.
+One level deep: a parent sits under nothing.
+`Metadata::parent` in the `ticket` crate holds the field, and
+`ticket::parent` the rules the relation keeps.
+
+**Not the same as** a [Tracking Ticket](#tracking-ticket), which stands for an
+RFD through a label rather than for other tickets through their `Parent`.
 
 ### Pinned Conversation
 

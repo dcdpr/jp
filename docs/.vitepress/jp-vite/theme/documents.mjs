@@ -49,7 +49,8 @@ export const ORIGINS = [
 /// Every document, newest kind-agnostic shape.
 ///
 /// `label` is what a breadcrumb or badge shows (`042`, `T-0007abc`,
-/// `W-0a1b2c3`); `status` feeds the link colouring.
+/// `W-0a1b2c3`); `status` feeds the link colouring; `parent` is the label of
+/// the document a ticket or wiki page sits under, or `null`.
 export const DOCUMENTS = [
     ...published.map(entry => document('rfd', entry.num, entry)),
     ...drafts.map(entry => document('rfd', entry.num, entry)),
@@ -64,6 +65,7 @@ function document(kind, label, entry) {
         title: entry.title,
         status: entry.status,
         path: entry.path,
+        parent: entry.parent ?? null,
         links: entry.links ?? [],
     }
 }
@@ -95,6 +97,11 @@ function normalize(path) {
 /// document it names actually exists.
 export function documentAt(path) {
     return BY_PATH.get(normalize(path)) ?? null
+}
+
+/// The document a label such as `T-0007abc` names, if any.
+export function documentNamed(label) {
+    return BY_LABEL.get(label) ?? null
 }
 
 /// The origin a path is, if it is one.
