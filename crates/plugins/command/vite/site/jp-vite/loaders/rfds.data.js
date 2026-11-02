@@ -19,10 +19,6 @@ import {
 
 // The published RFDs, for the RFD index and the cross-reference widgets.
 
-// RFD 001 is the process document, which describes the `DNN` numbering
-// convention and so may mention draft ids. See `findStrayDraftRefs`.
-const isProcessDocument = f => f.startsWith('001-')
-
 export default {
     // The settings name the RFD directory, so a change to them is a change to
     // what this reads.
@@ -49,7 +45,7 @@ export default {
         const errors = [
             checkSummaries(rfds.dir, files),
             findDuplicateIds(files),
-            findStrayDraftRefs(rfds.dir, files, new Set(files.filter(isProcessDocument))),
+            findStrayDraftRefs(rfds.dir, files),
             findUndefinedRefLinks(rfds.dir, files),
             checkRelationshipDuplicates(graph),
             checkStatusGate(graph),
