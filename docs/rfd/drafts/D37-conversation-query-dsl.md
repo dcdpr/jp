@@ -453,8 +453,8 @@ drift.
 
 - [RFD 050]: Scripting Ergonomics for Conversation Management — the broader
   scripting story this DSL plugs into.
-- [`docs/architecture/ubiquitous-language.md`][ubiquitous] — definitions of
+- [`docs/wiki/00dxybd-ubiquitous-language.md`][ubiquitous] — definitions of
   Conversation, Turn, Event, and related terms used throughout this RFD.
 
 [RFD 050]: ../050-scripting-ergonomics-for-conversation-management.md
-[ubiquitous]: ../../architecture/ubiquitous-language.md
+[ubiquitous]: ../../wiki/00dxybd-ubiquitous-language.md

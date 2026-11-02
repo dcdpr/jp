@@ -12,7 +12,8 @@ when:
       ],
       "stream": true,
       "chat_template_kwargs": {
-        "enable_thinking": true
+        "enable_thinking": true,
+        "thinking": true
       }
     }
 then:

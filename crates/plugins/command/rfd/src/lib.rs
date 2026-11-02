@@ -31,7 +31,6 @@ mod links;
 mod options;
 mod paths;
 mod priority;
-mod references;
 mod render;
 mod tool;
 

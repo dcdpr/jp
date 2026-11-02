@@ -2,6 +2,11 @@
 import { ref, computed, watch, onMounted, useSlots } from 'vue'
 import { inBrowser } from 'vitepress'
 
+import DocLabelFilter from './DocLabelFilter.vue'
+import DocLabels from './DocLabels.vue'
+import { matchesLabelFilter } from './label-filter.mjs'
+import { useLabelFilter } from './use-label-filter.mjs'
+
 // One index for every kind of document the site lists. RFDs and tickets differ
 // in what their id column is called and what they filter by; everything else —
 // the toolbar, the URL sync, the sortable table, the badges — is shared.
@@ -23,16 +28,33 @@ const props = defineProps({
     filterField: { type: String, default: 'category' },
     // Whether entries carry a one-line summary worth toggling.
     showSummary: { type: Boolean, default: true },
-    // Tickets list their author; RFDs don't, since theirs is nearly always the
-    // same person.
-    showAuthors: { type: Boolean, default: false },
+    // The kind of document listed, `ticket` or `wiki`, which says where a
+    // label opened in a new tab leads; and what the entries are called, for
+    // the line above a table narrowed to a label.
+    labelKind: { type: String, default: null },
+    labelNoun: { type: String, default: 'Entries' },
 })
+
+// Clicking a label in a row narrows the table to the documents carrying it, as
+// `?label=` in the address does; see `use-label-filter.mjs`.
+const { filter: labelFilter, toggle: toggleLabel, clear: clearLabels } = useLabelFilter()
 
 // A filled `actions` slot adds a trailing column, one cell per row, receiving
 // that row's entry. Nothing here knows what the buttons do — the ticket index
 // puts edit and delete there, the RFD index leaves it empty and gets no column.
 const slots = useSlots()
 const hasActions = computed(() => Boolean(slots.actions))
+
+// The table's layout is fixed, so a column narrower than its content lets the
+// content spill into the next one. The id column fits the longest id, and the
+// heading with its sort arrow; `2rem` is the cell's padding.
+const idWidth = computed(() => {
+    const longest = Math.max(
+        props.idLabel.length + 2,
+        ...props.entries.map(entry => String(entry[props.idField] ?? '').length),
+    )
+    return `calc(${longest + 1}ch + 2rem)`
+})
 
 function stored(key, fallback) {
     try { return sessionStorage.getItem(key) ?? fallback } catch { return fallback }
@@ -104,9 +126,6 @@ const columns = computed(() => {
             optional: true,
         })
     }
-    if (props.showAuthors) {
-        cols.push({ key: 'authors', label: 'Authors', optional: true })
-    }
     if (props.showStatus) cols.push({ key: 'status', label: 'Status' })
     return cols
 })
@@ -154,7 +173,8 @@ function toggleStatusFilter(status) {
 const filtered = computed(() => {
     let rows = filter.value === 'all'
         ? [...props.entries]
-        : props.entries.filter(r => r[props.filterField]?.toLowerCase() === filter.value)
+        : props.entries.filter(r => r[props.filterField]?.toLowerCase() === filter.value.toLowerCase())
+    rows = rows.filter(r => matchesLabelFilter(r.labels ?? [], labelFilter.value))
 
     const { statusFilter, textQuery } = parsedSearch.value
 
@@ -208,14 +228,16 @@ const filtered = computed(() => {
     >{{ showSummaries ? '⊟' : '⊞' }}</button>
 </div>
 
+<DocLabelFilter :filter="labelFilter" :noun="labelNoun" :clear="clearLabels" />
+
 <table class="doc-table">
 <colgroup>
-    <col style="width: 4rem">
+    <col :style="{ width: idWidth }">
     <col>
     <col v-if="showCategory" class="doc-col-optional" style="width: 7rem">
-    <col v-if="showAuthors" class="doc-col-optional" style="width: 10rem">
     <col v-if="showStatus" style="width: 8rem">
-    <col v-if="hasActions" style="width: 5.5rem">
+    <!-- Two 2rem icon buttons and the gap between them, plus the padding. -->
+    <col v-if="hasActions" style="width: 6.5rem">
 </colgroup>
 <thead><tr>
     <th v-for="col in columns" :key="col.key" :class="['doc-sortable', 'doc-col-' + col.key, { 'doc-col-optional': col.optional }]" @click="toggleSort(col.key)">
@@ -225,14 +247,19 @@ const filtered = computed(() => {
 </tr></thead>
 <tbody>
 <tr v-for="entry in filtered" :key="entry.slug">
-    <td>{{ entry[idField] }}</td>
+    <td class="doc-col-id">{{ entry[idField] }}</td>
     <td>
         <a :href="entry.path">{{ entry.title }}</a>
-        <span v-for="label in entry.labels ?? []" :key="label" class="doc-badge doc-badge--label">{{ label }}</span>
+        <DocLabels
+            v-if="entry.labels?.length"
+            :labels="entry.labels"
+            :kind="labelKind"
+            :filter="labelFilter"
+            :pick="toggleLabel"
+        />
         <div v-if="showSummaries && entry.summary" class="doc-summary">{{ entry.summary }}</div>
     </td>
     <td v-if="showCategory" class="doc-col-optional">{{ entry[filterField] }}</td>
-    <td v-if="showAuthors" class="doc-col-optional">{{ (entry.authors ?? '').replace(/\s*<[^>]*>/, '') }}</td>
     <td v-if="showStatus"><span
         :class="['doc-badge', statusClass(entry.status), { 'doc-badge--active': parsedSearch.statusFilter === entry.status?.toLowerCase() }]"
         @click="toggleStatusFilter(entry.status)"
@@ -350,6 +377,13 @@ const filtered = computed(() => {
     max-width: 100% !important;
     display: table !important;
 }
+.doc-col-id {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+.doc-col-actions {
+    white-space: nowrap;
+}
 .doc-summary {
     font-size: 0.8rem;
     color: var(--vp-c-text-2);
@@ -395,9 +429,6 @@ const filtered = computed(() => {
     }
     .doc-col-optional {
         display: none;
-    }
-    .doc-col-actions {
-        white-space: nowrap;
     }
     .doc-badge {
         font-size: 0.75rem;

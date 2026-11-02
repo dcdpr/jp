@@ -9,6 +9,7 @@
 use std::{fs, io};
 
 use camino::Utf8PathBuf;
+use doc::references::markdown_files;
 use ticket::{TicketId, store};
 
 use super::{alternatives, capitalized};
@@ -17,7 +18,6 @@ use crate::{
     document::Document,
     id::{self, RfdId},
     paths::{self, Paths},
-    references::markdown_files,
 };
 
 /// What a new draft is made of.

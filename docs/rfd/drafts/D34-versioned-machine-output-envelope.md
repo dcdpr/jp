@@ -778,7 +778,7 @@ change and a consumer should not have to infer the fix after release: document
 the envelope, the extension policy, and the meaning of version `0` in
 `docs/usage.md`; show old and new `jq` filters (`.data` for singletons,
 `.data[]` for arrays); add *format address*, *machine record*, and *format
-version* to `docs/architecture/ubiquitous-language.md`, defined as data-shape
+version* to `docs/wiki/00dxybd-ubiquitous-language.md`, defined as data-shape
 concepts rather than stdout concepts.
 
 Any typed payload type introduced here lives in its domain crate
@@ -846,4 +846,4 @@ exist.
 [RFD D32]: D32-jp-tracing-infrastructure.md
 [`cargo metadata` compatibility]: https://doc.rust-lang.org/cargo/commands/cargo-metadata.html#compatibility
 [notmuch structured output versioning]: https://notmuchmail.org/doc/latest/man1/notmuch-show.html
-[ubiquitous language]: ../../architecture/ubiquitous-language.md
+[ubiquitous language]: ../../wiki/00dxybd-ubiquitous-language.md

@@ -9,7 +9,9 @@ use std::fmt;
 use camino::Utf8PathBuf;
 use jp_label::{Clash, Rejected};
 
-use crate::{Labels, ParseError, TicketId, Vocabulary, parse, store::held_to_one};
+use crate::{
+    Labels, ParseError, TicketId, Vocabulary, epoch::EpochError, parse, store::held_to_one,
+};
 
 /// A ticket directory as read.
 #[derive(Debug, Default)]
@@ -54,7 +56,7 @@ pub enum Problem {
     /// An epoch file that doesn't hold an epoch.
     MalformedEpoch {
         path: Utf8PathBuf,
-        error: ParseError,
+        error: EpochError,
     },
 
     /// Files claiming one id, so a reference to it can't tell them apart.

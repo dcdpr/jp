@@ -3,8 +3,11 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { data } from '../loaders/tickets.data.js'
 import { createSortable, isDev, loadBoard, saveBoard } from './board.mjs'
-import { describeLabelFilter, matchesLabelFilter, parseLabelFilter } from './label-filter.mjs'
+import DocLabelFilter from './DocLabelFilter.vue'
+import DocLabels from './DocLabels.vue'
+import { matchesLabelFilter } from './label-filter.mjs'
 import { problem } from './problem.mjs'
+import { useLabelFilter } from './use-label-filter.mjs'
 
 // The ticket board, which a page renders with `<TicketBoard />`.
 //
@@ -13,7 +16,8 @@ import { problem } from './problem.mjs'
 //
 // `?label=` and `?any-label=` narrow the board to the tickets carrying those
 // labels (see `label-filter.mjs`), and a narrowed board shows the whole of
-// Done.
+// Done. Clicking a card's label narrows the board to it, and clicking it again
+// takes it back out; see `DocLabels.vue`.
 
 const ENDPOINT = '/__ticket-board'
 const LABELS = { todo: 'Todo', in_progress: 'In Progress', done: 'Done' }
@@ -33,7 +37,7 @@ let noticeTimer = null
 
 // The page's label filter. The server renders the whole board, so the filter
 // applies once the page has mounted in the browser.
-const filter = ref(null)
+const { filter, toggle, clear } = useLabelFilter()
 
 // The columns as the board shows them: the tickets the filter lets through,
 // or, with no filter, Done cut to its limit. `total` counts what passed.
@@ -113,7 +117,6 @@ async function onDrop(event) {
 }
 
 onMounted(async () => {
-    filter.value = parseLabelFilter(window.location.search)
     if (!isDev) return
 
     // The board file carries order only; statuses live in the ticket files. A
@@ -128,8 +131,9 @@ onMounted(async () => {
         group: GROUP,
         dataIdAttr: 'data-id',
         // The title is most of the card, so it has to be draggable. A click
-        // without movement still follows the link.
-        filter: 'input, label, button',
+        // without movement still follows the link. A label is for filtering,
+        // so it starts no drag.
+        filter: 'input, label, button, .doc-labels',
         onEnd: onDrop,
     })))
 })
@@ -142,10 +146,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-<p v-if="!problem && filter" class="ticket-board-filter">
-    {{ describeLabelFilter(filter) }}.
-    <a href="?">Show every ticket</a>
-</p>
+<DocLabelFilter v-if="!problem" :filter="filter" noun="Tickets" :clear="clear" />
 <div v-if="!problem" class="ticket-board">
     <section v-for="(column, index) in shown" :key="column.key" class="ticket-column">
         <h2 class="ticket-column-head">
@@ -164,15 +165,15 @@ onBeforeUnmount(() => {
                     <span class="ticket-id">{{ ticket.id }}</span>
                 </div>
                 <a :href="ticket.path" class="ticket-card-title">{{ ticket.title }}</a>
-                <div class="ticket-card-foot">
-                    <span
-                        v-for="label in ticket.labels ?? []"
-                        :key="label"
-                        class="ticket-badge doc-badge--label"
-                    >{{ label }}</span>
-                    <span v-if="ticket.comments" class="ticket-meta">
-                        {{ ticket.comments }} {{ ticket.comments === 1 ? 'comment' : 'comments' }}
-                    </span>
+                <DocLabels
+                    v-if="ticket.labels?.length"
+                    :labels="ticket.labels"
+                    kind="ticket"
+                    :filter="filter"
+                    :pick="toggle"
+                />
+                <div v-if="ticket.comments" class="ticket-meta">
+                    {{ ticket.comments }} {{ ticket.comments === 1 ? 'comment' : 'comments' }}
                 </div>
             </article>
         </div>
@@ -190,10 +191,6 @@ onBeforeUnmount(() => {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 1rem;
     margin-top: 2rem;
-}
-.ticket-board-filter {
-    font-size: 0.85rem;
-    color: var(--vp-c-text-2);
 }
 .ticket-column {
     min-width: 0;
@@ -244,14 +241,8 @@ onBeforeUnmount(() => {
     line-height: 1.35;
     font-weight: 500;
 }
-.ticket-card-foot {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.4rem;
-    margin-top: 0.35rem;
-}
 .ticket-meta {
+    margin-top: 0.25rem;
     font-size: 0.75rem;
     color: var(--vp-c-text-3);
 }
@@ -259,16 +250,6 @@ onBeforeUnmount(() => {
     font-size: 0.8rem;
     color: var(--vp-c-text-3);
     margin: 0.25rem 0 0 !important;
-}
-.ticket-badge {
-    display: inline-block;
-    padding: 0.1rem 0.45rem;
-    border-radius: 10px;
-    font-size: 0.7rem;
-    line-height: 1.5;
-    white-space: nowrap;
-    background: var(--vp-c-default-soft);
-    color: var(--vp-c-text-2);
 }
 @media (max-width: 767px) {
     .ticket-board {

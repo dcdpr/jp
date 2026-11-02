@@ -31,7 +31,7 @@ use jp_tool::{AccessPolicy, Action, Capability, Context, FsAccessError, Outcome,
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 use ticket::{
-    Comment, Labels, NewTicket, ParseError, Selector, Status, Ticket, TicketId, Vocabulary,
+    Comment, Labels, NewTicket, Selector, Status, Ticket, TicketId, Vocabulary,
     board::{self, Order},
     parse, render, store,
 };
@@ -984,7 +984,7 @@ fn left_out(ticket: &Ticket, parts: Parts) -> String {
 /// rather than coerced.
 fn id_arg(value: &Value) -> Result<TicketId, String> {
     match value {
-        Value::String(id) => id.parse().map_err(|error: ParseError| error.to_string()),
+        Value::String(id) => id.parse::<TicketId>().map_err(|error| error.to_string()),
         other => Err(format!("`{other}` is not a ticket id.")),
     }
 }

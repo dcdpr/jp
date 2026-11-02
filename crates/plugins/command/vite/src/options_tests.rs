@@ -22,6 +22,8 @@ fn every_option_has_a_default() {
         Ok(Options {
             dir: Utf8PathBuf::from("docs"),
             repository: None,
+            branch: None,
+            redirects: BTreeMap::new(),
         })
     );
 }
@@ -29,10 +31,102 @@ fn every_option_has_a_default() {
 #[test]
 fn configured_options_replace_the_defaults() {
     assert_eq!(
-        read(json!({ "dir": "site", "repository": "https://github.com/dcdpr/jp/" })),
+        read(json!({
+            "dir": "site",
+            "repository": "https://github.com/dcdpr/jp/",
+            "branch": " main ",
+        })),
         Ok(Options {
             dir: Utf8PathBuf::from("site"),
             repository: Some("https://github.com/dcdpr/jp".to_owned()),
+            branch: Some("main".to_owned()),
+            redirects: BTreeMap::new(),
+        })
+    );
+}
+
+#[test]
+fn a_branch_is_one_name() {
+    for branch in ["", "  ", "my branch"] {
+        assert_eq!(
+            read(json!({ "branch": branch })),
+            Err(
+                "`plugins.command.vite.options.branch` must be a branch name, such as `main`."
+                    .to_owned()
+            ),
+            "{branch:?}"
+        );
+    }
+}
+
+/// A redirect names its routes the way the site serves them, so the same page
+/// is one key however the configuration writes it.
+#[test]
+fn redirects_name_routes_and_wiki_pages() {
+    let options = read(json!({ "redirects": {
+        "architecture/glossary.md": "w0A1B2C3",
+        "/architecture/": "/wiki/",
+        "/old/page.html": "guide/new",
+    } }))
+    .unwrap();
+
+    assert_eq!(
+        options.redirects,
+        BTreeMap::from([
+            ("/architecture/".to_owned(), "/wiki/".to_owned()),
+            ("/architecture/glossary".to_owned(), "W-0a1b2c3".to_owned()),
+            ("/old/page".to_owned(), "/guide/new".to_owned()),
+        ])
+    );
+}
+
+#[test]
+fn a_redirect_that_names_no_route_is_refused() {
+    for (from, to, why) in [
+        ("/", "/wiki/", "a route names a page below the site's root."),
+        (
+            "old#part",
+            "/wiki/",
+            "a route holds no `?`, `#`, `\\`, or whitespace.",
+        ),
+        ("old", "../elsewhere", "a route holds no `.` or `..` part."),
+    ] {
+        assert_eq!(
+            read(json!({ "redirects": { from: to } })),
+            Err(format!(
+                "`plugins.command.vite.options.redirects` maps `{from}`: {why}"
+            )),
+        );
+    }
+}
+
+/// A target that isn't a page id reads as a route.
+#[test]
+fn a_target_that_is_no_page_id_is_a_route() {
+    assert_eq!(
+        read(json!({ "redirects": { "old": "W-short" } }))
+            .unwrap()
+            .redirects["/old"],
+        "/W-short"
+    );
+}
+
+/// Two spellings of one route are one key, which can only go one place.
+#[test]
+fn a_route_redirected_twice_is_refused() {
+    assert_eq!(
+        read(json!({ "redirects": { "old": "/a", "/old.html": "/b" } })),
+        Err("`plugins.command.vite.options.redirects` maps `/old` more than once.".to_owned())
+    );
+}
+
+#[test]
+fn the_wiki_options_default_to_what_jp_wiki_uses() {
+    assert_eq!(
+        wiki_options(&json!({})),
+        Ok(WikiOptions {
+            dir: Utf8PathBuf::from("docs/wiki"),
+            relevant_key: "relevant-rfd".to_owned(),
         })
     );
 }
@@ -203,6 +297,7 @@ fn the_dev_server_pins_directories_where_the_plugins_read_them() {
     for template in [
         "`plugins.command.rfd.options.dir=${settings.rfd.dir}`",
         "`plugins.command.ticket.options.dir=${settings.ticket.dir}`",
+        "`plugins.command.wiki.options.dir=${settings.wiki.dir}`",
     ] {
         assert!(
             middleware.contains(template),
@@ -214,6 +309,7 @@ fn the_dev_server_pins_directories_where_the_plugins_read_them() {
     for arg in [
         "plugins.command.rfd.options.dir=site/design",
         "plugins.command.ticket.options.dir=site/work",
+        "plugins.command.wiki.options.dir=site/knowledge",
     ] {
         let assignment: KvAssignment = arg.parse().unwrap();
         partial.assign(assignment).unwrap();
@@ -222,6 +318,7 @@ fn the_dev_server_pins_directories_where_the_plugins_read_them() {
 
     assert_eq!(rfd_options(&config).unwrap().dir, "site/design");
     assert_eq!(ticket_options(&config).unwrap().dir, "site/work");
+    assert_eq!(wiki_options(&config).unwrap().dir, "site/knowledge");
 }
 
 #[test]

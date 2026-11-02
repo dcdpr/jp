@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use camino::Utf8Path;
 
 use super::*;
-use crate::settings::{RfdSettings, TicketSettings};
+use crate::settings::{RfdSettings, TicketSettings, WikiSettings};
 
 /// Settings with a site in `docs` and the workflows `rfd` and `ticket` name.
 fn settings(rfd: Option<&str>, ticket: Option<&str>) -> Settings {
@@ -11,6 +11,9 @@ fn settings(rfd: Option<&str>, ticket: Option<&str>) -> Settings {
         revision: REVISION.to_owned(),
         site: "docs".to_owned(),
         repository: None,
+        branch: None,
+        wiki: None,
+        redirects: BTreeMap::new(),
         rfd: rfd.map(|route| RfdSettings {
             dir: format!("docs/{route}"),
             route: route.to_owned(),
@@ -45,7 +48,7 @@ fn contents<'a>(owned: &'a [Owned], path: &str) -> &'a str {
 fn every_site_file_has_a_place_in_a_project() {
     for (path, _) in FILES {
         assert!(
-            ["jp-vite/", "pages/rfd/", "pages/ticket/"]
+            ["jp-vite/", "pages/rfd/", "pages/ticket/", "pages/wiki/"]
                 .iter()
                 .any(|prefix| path.starts_with(prefix)),
             "{path} has nowhere to go"
@@ -112,6 +115,37 @@ fn each_workflow_gets_its_pages() {
     ]);
 }
 
+/// The wiki gets its front page and its list of every page in its own
+/// directory, where `jp wiki` reads neither as a page: a page's file is named
+/// for its id.
+#[test]
+fn the_wiki_gets_its_front_page_and_list() {
+    let settings = Settings {
+        wiki: Some(WikiSettings {
+            dir: "docs/knowledge".to_owned(),
+            route: "knowledge".to_owned(),
+            relevant_key: "relevant-rfd".to_owned(),
+        }),
+        ..settings(None, None)
+    };
+
+    let pages = pages(&settings);
+
+    assert_eq!(paths(&pages), [
+        "docs/knowledge/all.md",
+        "docs/knowledge/index.md"
+    ]);
+    for (path, tag) in [
+        ("docs/knowledge/all.md", "<WikiIndex />"),
+        ("docs/knowledge/index.md", "<WikiChildren />"),
+    ] {
+        assert!(
+            contents(&pages, path).contains(&format!("\n{tag}\n")),
+            "{path} renders no {tag}"
+        );
+    }
+}
+
 /// A page renders its list with a tag the theme registers, so it reads the same
 /// wherever the workflow's directory sits.
 #[test]
@@ -147,6 +181,8 @@ fn the_theme_registers_every_tag_the_pages_use() {
         "RfdBoard",
         "TicketIndex",
         "TicketBoard",
+        "WikiIndex",
+        "WikiChildren",
     ] {
         assert!(
             theme.contains(&format!("app.component('{tag}'")),

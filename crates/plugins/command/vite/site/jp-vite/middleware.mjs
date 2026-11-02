@@ -1,12 +1,15 @@
 import { spawn } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+import { readMetadata } from './loaders/metadata.mjs'
 import { rfdTickets } from './loaders/rfd-shared.mjs'
 import { assembleBoard, COLUMNS, loadTickets } from './loaders/ticket-shared.mjs'
 import { readSettings, SRC_DIR, workflowDir } from './settings.mjs'
+import { pageId, parsePage } from './wiki.mjs'
 
-// The dev server's endpoints for the boards and the ticket index.
+// The dev server's endpoints for the boards, the ticket index, and the wiki
+// index.
 //
 // Reads are answered on any dev server. Writes are accepted only under
 // `jp vite serve`, which names the workspace root in `JP_VITE_SERVE`, and only
@@ -54,6 +57,9 @@ function jp(args) {
     if (settings.rfd) pinned.push('--cfg', `plugins.command.rfd.options.dir=${settings.rfd.dir}`)
     if (settings.ticket) {
         pinned.push('--cfg', `plugins.command.ticket.options.dir=${settings.ticket.dir}`)
+    }
+    if (settings.wiki) {
+        pinned.push('--cfg', `plugins.command.wiki.options.dir=${settings.wiki.dir}`)
     }
 
     return new Promise((done) => {
@@ -389,6 +395,153 @@ export function ticketCommands(parsed) {
     }
 }
 
+// Page management on the wiki index and the wiki pages: add, edit a page or one
+// of its sections, archive.
+//
+// Every write shells out to `jp wiki`, which is the one implementation of the
+// page format; a page is archived rather than deleted, so links to it still
+// resolve. A read returns a page's own text, or one section's, embeds
+// unexpanded, which is what an edit replaces.
+const wikiWriter = {
+    name: 'wiki-writer',
+    configureServer(server) {
+        server.middlewares.use('/__wiki', endpoint(async (req, res, next) => {
+            if (req.method === 'GET') {
+                const params = new URL(req.url, 'http://localhost').searchParams
+                const id = pageId(params.get('id'))
+                if (!id) return reply(res, 400, { ok: false, output: 'missing id' })
+
+                const section = params.get('section')
+                if (section) {
+                    // Sections are found the way `jp wiki edit` finds them.
+                    const { ok, output } = await jp(
+                        ['-F', 'json', 'wiki', 'show', id, `--section=${section}`, '--raw'],
+                    )
+                    if (!ok) return reply(res, 500, { ok, output })
+
+                    try {
+                        return reply(res, 200, { ok: true, ...JSON.parse(output) })
+                    } catch {
+                        return reply(res, 500, { ok: false, output: 'unreadable section JSON' })
+                    }
+                }
+
+                const page = readPage(id)
+                if (!page) return reply(res, 404, { ok: false, output: `No wiki page ${id}.` })
+
+                return reply(res, 200, { ok: true, ...page })
+            }
+
+            if (req.method !== 'POST') return next()
+
+            const refusal = writeRefusal()
+            if (refusal) return reply(res, 403, { ok: false, output: refusal })
+
+            const parsed = await readJson(req, res, 256 * 1024)
+            if (parsed === undefined) return
+
+            const { commands, refusal: invalid } = wikiCommands(parsed)
+            if (invalid) return refuse(res, 400, invalid)
+
+            const outputs = []
+            for (const args of commands) {
+                const { ok, output } = await jp(args)
+                if (output) outputs.push(output)
+                if (!ok) return reply(res, 500, { ok, output: outputs.join('\n') })
+            }
+            reply(res, 200, { ok: true, output: outputs.join('\n') })
+        }))
+    },
+}
+
+// The page `id` names, as the edit form reads it: its metadata and its own
+// text below them; `null` when there is no such page.
+function readPage(id) {
+    const dir = workflowDir(readSettings(), 'wiki')
+    if (!dir) return null
+
+    let names
+    try {
+        names = readdirSync(dir)
+    } catch {
+        return null
+    }
+    const name = names.find(file => file.startsWith(`${id.slice(2)}-`) && file.endsWith('.md'))
+    if (!name) return null
+
+    const content = readFileSync(resolve(dir, name), 'utf-8')
+    return { ...parsePage(content, name), body: readMetadata(content).body }
+}
+
+// The `jp` commands a wiki-index request runs, in order, as `{ commands }`, or
+// why it is refused, as `{ refusal }`.
+//
+// Flags are built here rather than taken from the client, so a request can only
+// ask for what the CLI already offers. Each value is joined to its flag with
+// `=`, so text opening with `-`, such as a list, isn't read as another flag.
+// Labels are sent as the whole set, and `labelsBefore` as the set the form
+// opened with: an edit adds and removes the difference, so a label nobody
+// touched stays as written. An edit naming a `section` replaces only that
+// section with `body`, and an empty `parent` makes the page a top page.
+export function wikiCommands(parsed) {
+    const text = (value) => (typeof value === 'string' ? value : '')
+    const flag = (name, value) => (text(value) ? [`${name}=${text(value)}`] : [])
+    const list = (value) => (Array.isArray(value) ? value.map(text).filter(Boolean) : null)
+
+    switch (parsed.action) {
+        case 'add': {
+            if (!text(parsed.title)) return { refusal: 'add needs a title' }
+            const labels = (list(parsed.labels) ?? []).map(label => `--label=${label}`)
+            return {
+                commands: [['wiki', 'add', text(parsed.title),
+                    ...flag('--status', parsed.status),
+                    ...flag('--summary', parsed.summary),
+                    ...flag('--parent', parsed.parent),
+                    ...flag('--body', parsed.body),
+                    ...labels]],
+            }
+        }
+        case 'edit': {
+            const id = pageId(text(parsed.id))
+            if (!id) return { refusal: 'edit needs a page id' }
+
+            const labels = list(parsed.labels)
+            const before = list(parsed.labelsBefore) ?? []
+            const removed = labels ? before.filter(label => !labels.includes(label)) : []
+            const added = labels ? labels.filter(label => !before.includes(label)) : []
+            if (text(parsed.section) && typeof parsed.body !== 'string') {
+                return { refusal: 'a section edit needs a body' }
+            }
+            // A body may be empty when it replaces a section, which empties it.
+            const body = text(parsed.section) || text(parsed.body)
+                ? [`--body=${text(parsed.body)}`]
+                : []
+            const parent = typeof parsed.parent === 'string'
+                ? [`--parent=${text(parsed.parent) || 'none'}`]
+                : []
+            const edit = ['wiki', 'edit', id,
+                ...flag('--title', parsed.title),
+                ...flag('--summary', parsed.summary),
+                ...flag('--status', parsed.status),
+                ...parent,
+                ...body,
+                ...flag('--section', parsed.section),
+                ...removed.map(label => `--remove-label=${label}`),
+                ...added.map(label => `--add-label=${label}`)]
+            // With nothing to change, `jp wiki edit` opens an editor, which a
+            // dev-server request has no terminal for.
+            return { commands: edit.length > 3 ? [edit] : [] }
+        }
+        case 'archive': {
+            const id = pageId(text(parsed.id))
+            if (!id) return { refusal: 'archive needs a page id' }
+            return { commands: [['wiki', 'archive', id]] }
+        }
+        default:
+            return { refusal: 'expected action: add, edit, or archive' }
+    }
+}
+
 // What the tickets say about each RFD (`/rfd/priority`): which are in
 // development, and how many tickets name each.
 //
@@ -423,4 +576,5 @@ export const devServer = [
     rfdTicketsReader,
     ticketBoardWriter,
     ticketWriter,
+    wikiWriter,
 ]

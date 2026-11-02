@@ -193,6 +193,45 @@ fn replaces_a_metadata_field() {
     assert!(out.ends_with("Description.\n"));
 }
 
+/// A value wrapped onto a second line is replaced whole, so nothing of the old
+/// one is left behind to read as part of the new.
+#[test]
+fn replaces_a_wrapped_field_whole() {
+    let document = indoc! {"
+        # Tool call header misaligned
+
+        - **Status**: Todo
+        - **Authors**: Jane Doe <jane@example.com>, John Doe
+          <john@example.com>
+        - **Date**: 2026-08-05
+
+        Description.
+    "};
+
+    let out = set_metadata(document, "Authors", "jp").unwrap();
+
+    assert_eq!(out, indoc! {"
+            # Tool call header misaligned
+
+            - **Status**: Todo
+            - **Authors**: jp
+            - **Date**: 2026-08-05
+
+            Description.
+        "});
+}
+
+/// A metadata write leaves the rest of the file's lines, and their endings, as
+/// they were.
+#[test]
+fn keeps_the_line_endings_it_found() {
+    let document = "# T\r\n\r\n- **Status**: Todo\r\n\r\nBody.\r\n";
+
+    let out = set_metadata(document, "Status", "Done").unwrap();
+
+    assert_eq!(out, "# T\r\n\r\n- **Status**: Done\r\n\r\nBody.\r\n");
+}
+
 /// A quoted metadata line in a comment is content, not the ticket's own state.
 #[test]
 fn only_the_header_block_is_rewritten() {
