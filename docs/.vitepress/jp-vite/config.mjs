@@ -37,7 +37,9 @@ export function withJpVite(config = {}) {
 
     return {
         ...config,
-        themeConfig: withEditLink(withWikiSidebar(config.themeConfig ?? {}, settings), settings),
+        themeConfig: withSearch(
+            withEditLink(withWikiSidebar(config.themeConfig ?? {}, settings), settings),
+        ),
         markdown: {
             ...markdown,
             // The anchors `jp wiki check` computes, whatever VitePress's
@@ -168,6 +170,16 @@ function withEditLink(themeConfig, settings) {
         : { pattern: `${settings.repository}/blob/HEAD/${dir}:path`, text: 'View or edit this page on GitHub' }
 
     return { ...themeConfig, editLink }
+}
+
+// `themeConfig` with VitePress's built-in local search, so the RFDs, tickets,
+// and wiki pages can be searched together from every page.
+//
+// A search the project configures itself, including `false`, is kept.
+export function withSearch(themeConfig) {
+    if (themeConfig.search !== undefined) return themeConfig
+
+    return { ...themeConfig, search: { provider: 'local' } }
 }
 
 // Render the metadata block an RFD, ticket, or wiki page opens with as a
