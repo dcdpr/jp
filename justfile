@@ -2438,7 +2438,7 @@ affected-crates BASE="origin/main":
 site-ci:
     cargo test --locked -p jp-vite
 
-# Check the changelog fragments on CI, released ones included.
+# Check the changelog fragments and highlights on CI, released ones included.
 #
 # Builds the `changelog` crate alone: a fragment's types are fixed, so checking
 # reads no configuration and needs no `jp`.
