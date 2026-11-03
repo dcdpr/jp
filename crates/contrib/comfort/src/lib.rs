@@ -15,6 +15,8 @@
 //! The `cli` feature, on by default, adds what the `comfort` and
 //! `cargo-comfort` binaries need on top: argument parsing, the workspace walk,
 //! and `--check` diffs.
+//!
+//! [`format`]: crate::format
 
 #[cfg(feature = "cli")]
 pub mod cli;

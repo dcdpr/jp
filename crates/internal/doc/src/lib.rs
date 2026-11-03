@@ -17,6 +17,8 @@
 //!   that on for its kind.
 //!
 //! See `docs/rfd/127-in-repo-project-wiki.md`.
+//!
+//! [`format`]: crate::format
 
 pub mod epoch;
 pub mod files;
