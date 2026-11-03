@@ -1,8 +1,8 @@
 //! The `changelog` binary.
 //!
 //! `changelog check [DIR]` holds a fragments directory, `changelog.d` unless
-//! `DIR` names another, to its layout and every fragment in it to the format,
-//! and exits 1 when anything breaks a rule.
+//! `DIR` names another, to its layout and every fragment and highlight in it to
+//! its format, and exits 1 when anything breaks a rule.
 //! It reads no configuration, so CI can run it without `jp`.
 
 use std::process::ExitCode;
@@ -15,7 +15,7 @@ use crate::directory;
 #[derive(Debug, Parser)]
 #[command(
     name = "changelog",
-    about = "Check the changelog fragments a project records for its users.",
+    about = "Check the changelog fragments and highlights a project records for its users.",
     version
 )]
 struct Cli {
@@ -25,9 +25,10 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Check every file in a fragments directory, released fragments included.
+    /// Check every file in a fragments directory, released ones included.
     ///
-    /// Prints each problem, then how many fragments were checked.
+    /// Prints each problem, then how many fragments and highlights were
+    /// checked.
     /// Exits 1 when anything breaks a rule, and 2 when a file or directory
     /// can't be read.
     Check {

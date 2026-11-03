@@ -50,10 +50,11 @@ jobs:
 
           # Fragments the pull request adds at the top level of changelog.d/.
           # Editing or moving a fragment corrects or files notes that already
-          # exist, and a file in a release's directory is a released note, so
-          # neither counts. Through a file because the names are NUL-separated,
-          # which a shell variable cannot hold, and so a failing `git diff`
-          # stops the gate instead of reading as no fragments.
+          # exist, a file in a release's directory is a released note, and a
+          # highlight in highlights/ adds no entry to the list of changes, so
+          # none of them counts. Through a file because the names are
+          # NUL-separated, which a shell variable cannot hold, and so a failing
+          # `git diff` stops the gate instead of reading as no fragments.
           git diff --name-only --diff-filter=A --find-renames -z HEAD^1 HEAD -- changelog.d \
             > "$RUNNER_TEMP/added"
 

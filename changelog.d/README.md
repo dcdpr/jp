@@ -2,9 +2,11 @@
 
 Each pull request that changes something users notice adds a fragment to this
 directory: a short entry that tells them what changed.
-Release notes are built from fragments rather than commit messages, so write for
-someone using JP, not for someone reading its code.
-The format is specified in [RFD 121].
+A feature worth more than a line also gets a highlight, a few paragraphs of the
+release notes that tell its story.
+Release notes are built from these files rather than from commit messages, so
+write for someone using JP, not for someone reading its code.
+The formats are specified in [RFD 121].
 
 ## Writing a fragment
 
@@ -96,6 +98,42 @@ change_requests: [1207, 1211]
 A turn that stalls while idle is retried instead of failing.
 ```
 
+## Highlights
+
+Most changes need only a fragment, and a highlight is for the handful of
+features that deserve a story of their own.
+It is a Markdown file in `highlights/`, named like a fragment:
+
+```markdown
+---
+title: "Unified editor and inline reply widget"
+authors: ["@JeanMertz"]
+---
+Every prompt in JP now runs through a single editor service, and short replies
+can be written inline without leaving the conversation view.
+Longer edits still open your editor, so the two paths share one backend and one
+set of keybindings.
+```
+
+`title` heads the highlight's section of the release notes, and `authors` lists
+at least one person to credit for the feature.
+Quote a handle that starts with `@`, as the example does, since YAML reserves
+the character.
+
+A highlight has no `type` and no upgrade section, and adds no entry to the list
+of changes, so a pull request with a highlight still adds a fragment.
+A line that starts with `BREAKING CHANGE:` or `BREAKING-CHANGE:` is an error in
+a highlight.
+
+A highlight describes what is on `main`, since a release can be cut after any
+pull request.
+A feature that is still hidden gets its highlight in the pull request that makes
+it visible.
+One that is visible but incomplete gets a highlight describing what is there,
+which later pull requests extend.
+The release notes credit every pull request that wrote or changed the highlight,
+and `change_requests` replaces those credits, as in a fragment.
+
 ## Changes users don't see
 
 A pull request that changes nothing users see adds no fragment.
@@ -111,25 +149,28 @@ The label covers that too, for a break users never see.
 
 ## Released fragments
 
-Cutting a release moves its fragments into a directory named after its version,
-which may also hold `overview.md`, the release's introduction:
+Cutting a release moves its fragments and highlights into a directory named
+after its version, which may also hold `overview.md`, the release's
+introduction:
 
 ```text
 changelog.d/
   README.md
-  enable-explicit.md   # unreleased
+  enable-explicit.md          # unreleased
+  highlights/fan-out.md       # unreleased
   0.3.0/
     overview.md
     retry-idle-turns.md
+    highlights/plugin-tools.md
 ```
 
-Released fragments stay here; correct one like any other file.
+Released fragments and highlights stay here; correct one like any other file.
 
 ## Checking
 
-Every file here is checked against these rules, released fragments included.
-Anything else in this directory, such as another extension or a stray directory,
-is an error.
+Every file here is checked against these rules, released ones included.
+Anything else, such as another extension, a stray directory, or a README in
+`highlights/`, is an error.
 Run the check with:
 
 ```sh

@@ -32,12 +32,7 @@ use comrak::{
 };
 use serde::Deserialize;
 
-/// The tokens that open an upgrade section: the one Conventional Commits uses,
-/// and its synonym.
-const MARKERS: [&str; 2] = ["BREAKING CHANGE:", "BREAKING-CHANGE:"];
-
-/// The line that opens and closes a fragment's frontmatter.
-const DELIMITER: &str = "---";
+use crate::document::{self, FrontmatterError, Parsed};
 
 /// What a change means for the people using the software.
 ///
@@ -96,15 +91,9 @@ pub struct Upgrade {
 /// Lines count from 1 at the top of the file, frontmatter included.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FragmentError {
-    /// The first line isn't the `---` that opens the frontmatter.
-    MissingFrontmatter,
-
-    /// No `---` line closes the frontmatter.
-    UnclosedFrontmatter,
-
-    /// The frontmatter isn't YAML holding the fields a fragment's frontmatter
-    /// holds, and nothing else; the message is the YAML parser's.
-    Frontmatter(String),
+    /// The frontmatter is missing, unclosed, or doesn't hold a fragment's
+    /// fields and nothing else.
+    Frontmatter(FrontmatterError),
 
     /// Nothing but whitespace follows the frontmatter.
     EmptyBody,
@@ -132,11 +121,7 @@ pub enum FragmentError {
 impl fmt::Display for FragmentError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MissingFrontmatter => {
-                f.write_str("no frontmatter: a fragment's first line is `---`")
-            }
-            Self::UnclosedFrontmatter => f.write_str("no `---` line closes the frontmatter"),
-            Self::Frontmatter(message) => write!(f, "invalid frontmatter: {message}"),
+            Self::Frontmatter(error) => write!(f, "{error}"),
             Self::EmptyBody => {
                 f.write_str("no entry: say below the frontmatter what changed for users")
             }
@@ -175,6 +160,12 @@ impl fmt::Display for FragmentError {
 
 impl std::error::Error for FragmentError {}
 
+impl From<FrontmatterError> for FragmentError {
+    fn from(error: FrontmatterError) -> Self {
+        Self::Frontmatter(error)
+    }
+}
+
 /// The fields a fragment's frontmatter holds; any other is an error rather than
 /// ignored, so a misspelled field doesn't vanish.
 #[derive(Deserialize)]
@@ -193,20 +184,12 @@ struct Frontmatter {
 ///
 /// Returns the first rule `source` breaks, reading from the top.
 pub fn parse(source: &str) -> Result<Fragment, FragmentError> {
-    let source = source
-        .strip_prefix('\u{feff}')
-        .unwrap_or(source)
-        .replace("\r\n", "\n");
-
-    let split = split(&source)?;
-    let frontmatter: Frontmatter = serde_saphyr::from_str(split.frontmatter).map_err(|error| {
-        FragmentError::Frontmatter(
-            error
-                .without_snippet()
-                .render_with_formatter(&serde_saphyr::UserMessageFormatter),
-        )
-    })?;
-    let (entry, upgrade) = body(split.body, split.body_line)?;
+    let Parsed {
+        frontmatter,
+        body: text,
+        body_line,
+    } = document::parse::<Frontmatter>(source)?;
+    let (entry, upgrade) = body(&text, body_line)?;
 
     Ok(Fragment {
         type_: frontmatter.type_,
@@ -214,53 +197,6 @@ pub fn parse(source: &str) -> Result<Fragment, FragmentError> {
         entry,
         upgrade,
     })
-}
-
-/// A fragment's source, cut at the line closing its frontmatter.
-struct Split<'a> {
-    /// The frontmatter, its opening `---` line included, so the YAML parser
-    /// numbers lines as the file does.
-    frontmatter: &'a str,
-
-    /// Everything after the line closing the frontmatter.
-    body: &'a str,
-
-    /// The number of the body's first line in the file.
-    body_line: usize,
-}
-
-fn split(source: &str) -> Result<Split<'_>, FragmentError> {
-    let mut lines = source.split_inclusive('\n');
-    let opening = lines
-        .next()
-        .filter(|line| is_delimiter(line))
-        .ok_or(FragmentError::MissingFrontmatter)?;
-
-    let mut end = opening.len();
-    for line in lines {
-        if is_delimiter(line) {
-            let body_start = end + line.len();
-            return Ok(Split {
-                frontmatter: &source[..end],
-                body: &source[body_start..],
-                body_line: line_number(source, body_start),
-            });
-        }
-        end += line.len();
-    }
-
-    Err(FragmentError::UnclosedFrontmatter)
-}
-
-/// Whether `line` is the `---` that opens or closes the frontmatter, trailing
-/// whitespace aside.
-fn is_delimiter(line: &str) -> bool {
-    line.trim_end() == DELIMITER
-}
-
-/// The number of the line `text` has reached at byte `offset`, counting from 1.
-fn line_number(text: &str, offset: usize) -> usize {
-    text[..offset].matches('\n').count() + 1
 }
 
 /// The paragraph that opens a fragment's upgrade section.
@@ -384,12 +320,7 @@ fn marked_lines(lines: &[&str]) -> Vec<(usize, &'static str)> {
     lines
         .iter()
         .enumerate()
-        .filter_map(|(index, line)| {
-            MARKERS
-                .into_iter()
-                .find(|marker| line.starts_with(marker))
-                .map(|marker| (index, marker))
-        })
+        .filter_map(|(index, line)| document::marker(line).map(|marker| (index, marker)))
         .collect()
 }
 

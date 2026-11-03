@@ -112,11 +112,11 @@ fn an_unknown_frontmatter_field_is_an_error_rather_than_ignored() {
 fn a_fragment_opens_with_its_frontmatter() {
     assert_eq!(
         parse("type: fixed\n---\nEntry.\n"),
-        Err(FragmentError::MissingFrontmatter)
+        Err(FragmentError::Frontmatter(FrontmatterError::Missing))
     );
     assert_eq!(
         parse("\n---\ntype: fixed\n---\nEntry.\n"),
-        Err(FragmentError::MissingFrontmatter)
+        Err(FragmentError::Frontmatter(FrontmatterError::Missing))
     );
 }
 
@@ -124,7 +124,7 @@ fn a_fragment_opens_with_its_frontmatter() {
 fn a_frontmatter_needs_a_closing_line() {
     assert_eq!(
         parse("---\ntype: fixed\nEntry.\n"),
-        Err(FragmentError::UnclosedFrontmatter)
+        Err(FragmentError::Frontmatter(FrontmatterError::Unclosed))
     );
 }
 
