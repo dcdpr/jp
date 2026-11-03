@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-18
-- **Extended by**: [RFD 128]
+- **Extended by**: [RFD 129]
 - **Summary**: A per-tool `fan_out` setting lets one tool call carry several
   independent operations, which JP's MCP server runs separately and folds into
   one response.
@@ -116,10 +116,14 @@ When a tool opts in, the schema the server advertises is wrapped:
       "type": "array",
       "minItems": 1,
       "description": "The operations to perform. Each element is one complete set of this tool's arguments.",
-      "items": { "<the tool's own schema>": "..." }
+      "items": {
+        "<the tool's own schema>": "..."
+      }
     }
   },
-  "required": ["ops"],
+  "required": [
+    "ops"
+  ],
   "additionalProperties": false
 }
 ```
@@ -268,7 +272,7 @@ every remaining operation ends the call instead of leaving it waiting for work
 that will never start.
 
 > [!TIP]
-> [RFD 128] moves the concurrency limit and the ordering to the MCP Host, which
+> [RFD 129] moves the concurrency limit and the ordering to the MCP Host, which
 > applies them at release across every call to the tool, not only the operations
 > of one call.
 > The parent keeps only the `on_error = "stop"` check.
@@ -415,7 +419,7 @@ defaults block, so no tool inherits it: whether a tool's calls may be batched
 depends on what the tool does.
 
 > [!TIP]
-> [RFD 128] replaces `fan_out.concurrency` with a tool-level `concurrency`,
+> [RFD 129] replaces `fan_out.concurrency` with a tool-level `concurrency`,
 > which counts separate calls and operations against one limit and can be shared
 > across tools by key.
 > `fan_out` keeps `enabled` and `on_error`.
@@ -583,4 +587,4 @@ Route pause, resume, and cancel to the right invocation.
 [RFD 082]: 082-unified-inquiry-event-recording.md
 [RFD 109]: 109-in-process-jp-mcp-server.md
 [RFD 110]: 110-anthropic-subscription-queries-via-acp.md
-[RFD 128]: 128-tool-concurrency-limits.md
+[RFD 129]: 129-tool-concurrency-limits.md

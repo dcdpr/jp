@@ -3,10 +3,10 @@
 - **Status**: Todo
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-11-03
-- **Label**: tracking-rfd=128
+- **Label**: tracking-rfd=129
 - **Label**: type=tracking
 
-Tracking ticket for [RFD 128].
+Tracking ticket for [RFD 129].
 
 ## Implementation plan
 
@@ -28,4 +28,4 @@ Tracking ticket for [RFD 128].
   `.jp/mcp/tools/rfd/`.
   Depends on phase 1.
 
-[RFD 128]: ../rfd/128-tool-concurrency-limits.md
+[RFD 129]: ../rfd/129-tool-concurrency-limits.md
