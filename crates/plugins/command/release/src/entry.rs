@@ -1,10 +1,10 @@
 //! A fragment or highlight about to be written, and writing it.
 //!
-//! [`Entry::render`] lays the file out as it is written: the frontmatter, then
-//! the body laid out the way `comfort` lays out Markdown, so a file written
-//! here passes a formatting check unchanged.
-//! [`plan`] holds the file to the format `jp release check` holds it to and
-//! settles where it goes, and [`Planned::write`] writes it.
+//! [`Entry::render`] writes the file as it is given: the frontmatter, then the
+//! body.
+//! [`plan`] settles where it goes, lays it out as the workspace formats the
+//! fragments directory, and holds it to the format `jp release check` holds it
+//! to, as it is laid out; [`Planned::write`] writes it.
 //!
 //! A file is named by its slug: the one the caller gives, or one derived from
 //! the first words of the entry, or of a highlight's title, as they read
@@ -18,12 +18,11 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use changelog::{Type, fragment, highlight, reserved_for};
-use comfort::{
-    DEFAULT_MAX_WIDTH,
-    format::{FormatOptions, format_markdown_with},
-};
 use comrak::{Arena, Options, nodes::NodeValue, parse_document};
+use doc::format::Formatting;
 use serde_json::Value;
+
+use crate::PLUGIN;
 
 /// The directory, inside the fragments directory, that holds highlights.
 pub(crate) const HIGHLIGHTS: &str = "highlights";
@@ -40,6 +39,31 @@ pub(crate) struct Fragments<'a> {
 
     /// The fragments directory.
     pub dir: Utf8PathBuf,
+
+    /// How a file written in the fragments directory is laid out.
+    pub formatting: Formatting,
+}
+
+impl<'a> Fragments<'a> {
+    /// The fragments directory `dir` of the workspace at `root`, laying files
+    /// out as `config`, the whole configuration the host passed in `init`,
+    /// says: in the style of the workspace's `.comfort.toml` when
+    /// `format_on_write` is on, as they are given otherwise.
+    ///
+    /// The error names the setting or the file that is wrong.
+    pub(crate) fn new(
+        root: &'a Utf8Path,
+        dir: Utf8PathBuf,
+        config: &Value,
+    ) -> Result<Self, String> {
+        let formatting = Formatting::configure(root, config, &[(PLUGIN, &dir)])?;
+
+        Ok(Self {
+            root,
+            dir,
+            formatting,
+        })
+    }
 }
 
 impl Fragments<'_> {
@@ -79,9 +103,9 @@ pub(crate) struct Planned {
 }
 
 impl Entry {
-    /// The file as it is written.
+    /// The file as it is given, before the workspace lays it out.
     pub(crate) fn render(&self) -> String {
-        let document = match self {
+        match self {
             Self::Fragment { type_, body } => {
                 format!("---\ntype: {type_}\n---\n{}\n", body.trim())
             }
@@ -100,18 +124,11 @@ impl Entry {
                     body.trim()
                 )
             }
-        };
-
-        format_markdown_with(&document, &FormatOptions {
-            max_width: DEFAULT_MAX_WIDTH,
-            canonical: true,
-            reference_links: true,
-            prune_reference_links: true,
-        })
+        }
     }
 
-    /// Hold `text`, as [`Entry::render`] wrote it, to the entry's format, and
-    /// derive the slug the entry names its file by when given none.
+    /// Hold `text`, the entry's file as given or as laid out, to the entry's
+    /// format, and derive the slug the entry names its file by when given none.
     ///
     /// The error says what in the text breaks the format.
     fn check(&self, text: &str) -> Result<Option<String>, String> {
@@ -168,9 +185,13 @@ pub(crate) fn ready(
     Ok(())
 }
 
-/// Hold `entry` to its format and settle the file in `fragments` it is written
-/// to, named by `slug` or by one derived from the entry.
+/// Settle the file in `fragments` that `entry` is written to, named by `slug`
+/// or by one derived from the entry, and lay it out as the workspace formats
+/// the fragments directory.
 ///
+/// The entry is held to its format as given and again as laid out, since laying
+/// a paragraph out a sentence per line can start a line with an upgrade
+/// section's token.
 /// A derived slug a file already has gets `-2`, `-3`, and so on, while a `slug`
 /// the caller named is refused instead.
 /// The error says what to change.
@@ -182,8 +203,8 @@ pub(crate) fn plan(
     let highlight = matches!(entry, Entry::Highlight { .. });
     ready(fragments, highlight, slug)?;
 
-    let text = entry.render();
-    let derived = entry.check(&text)?;
+    let given = entry.render();
+    let derived = entry.check(&given)?;
     let dir = dir(fragments, highlight);
 
     let path = if let Some(slug) = slug {
@@ -198,6 +219,11 @@ pub(crate) fn plan(
         }
         unused(&dir, &slug)
     };
+
+    let text = fragments.formatting.apply(&path, &given).into_owned();
+    if text != given {
+        entry.check(&text)?;
+    }
 
     Ok(Planned {
         shown: fragments.show(&path),

@@ -183,8 +183,11 @@ branch = "main"
 [plugins.command.release]
 run = "allow"
 
+# Fragments and highlights are laid out in the style of `.comfort.toml` as they
+# are written, so they pass `fmt-markdown-ci` as they land.
 [plugins.command.release.options]
 fragments_dir = "changelog.d"
+format_on_write = true
 
 [providers.llm.aliases]
 # Anthropic aliases

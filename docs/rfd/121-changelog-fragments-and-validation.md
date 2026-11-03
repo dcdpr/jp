@@ -313,10 +313,14 @@ run = "allow"
 
 [plugins.command.release.options]
 fragments_dir = "changelog.d"
+format_on_write = true
 ```
 
 `fragments_dir` is optional and defaults to `changelog.d`, relative to the
 workspace root.
+`format_on_write` is optional and off by default; on, every file the plugin
+writes is laid out in the style of the workspace's `.comfort.toml`, as the
+documents of [RFD 116]'s plugins are.
 `run = "allow"` admits the plugin without asking ([RFD 077]), which a plugin
 rebuilt from the checkout needs.
 
@@ -330,8 +334,8 @@ rebuilt from the checkout needs.
 table as its hint, takes the body from the composer, and derives the slug from
 the body unless `--slug` names one, and refuses a reserved slug ([Changelog
 fragment](#changelog-fragment)).
-It writes through the validation `check` runs, so an entry it writes always
-passes.
+It writes through the validation `check` runs, applied to the file as it is laid
+out, so an entry it writes always passes.
 
 `add` is also served as a plugin tool, configured in JP the way `ticket_create`
 is:

@@ -1,7 +1,21 @@
 use camino_tempfile::Utf8TempDir;
 use indoc::indoc;
+use serde_json::json;
 
 use super::*;
+
+/// The style JP's `.comfort.toml` sets.
+const JP_STYLE: &str = indoc! {"
+    max_width = 80
+    format_markdown = true
+    reference_links = true
+    prune_reference_links = true
+"};
+
+/// Two sentences on one line, wider than JP's style allows.
+const TWO_SENTENCES: &str = "A turn that stalls while idle is retried instead of failing. The \
+                             retry waits for the provider's own backoff, and gives up after three \
+                             attempts, saying why.";
 
 /// A workspace whose fragments directory, `changelog.d`, exists.
 fn workspace() -> Utf8TempDir {
@@ -11,12 +25,20 @@ fn workspace() -> Utf8TempDir {
     root
 }
 
-/// `root`'s fragments directory.
+/// `root`'s fragments directory, writing files as they are given.
 fn fragments(root: &Utf8TempDir) -> Fragments<'_> {
-    Fragments {
-        root: root.path(),
-        dir: root.path().join("changelog.d"),
-    }
+    Fragments::new(root.path(), root.path().join("changelog.d"), &json!({})).unwrap()
+}
+
+/// `root`'s fragments directory, laying files out in JP's style as they are
+/// written.
+fn formatted(root: &Utf8TempDir) -> Fragments<'_> {
+    fs::write(root.path().join(".comfort.toml"), JP_STYLE).unwrap();
+    let config = json!({
+        "plugins": { "command": { "release": { "options": { "format_on_write": true } } } }
+    });
+
+    Fragments::new(root.path(), root.path().join("changelog.d"), &config).unwrap()
 }
 
 fn fixed(body: &str) -> Entry {
@@ -46,16 +68,29 @@ fn a_fragment_is_written_as_its_frontmatter_then_its_entry() {
     "});
 }
 
-/// Laid out the way `comfort` lays out Markdown, so the file passes a
-/// formatting check as it is written.
 #[test]
-fn an_entry_is_laid_out_one_sentence_per_line() {
-    let entry = fixed(
-        "A turn that stalls while idle is retried instead of failing. The retry waits for the \
-         provider's own backoff, and gives up after three attempts, saying why.",
-    );
+fn an_entry_is_written_as_given_unless_the_workspace_formats_on_write() {
+    let root = workspace();
 
-    assert_eq!(entry.render(), indoc! {"
+    let planned = plan(&fragments(&root), &fixed(TWO_SENTENCES), Some("retry")).unwrap();
+
+    assert_eq!(
+        planned.text,
+        "---\ntype: fixed\n---\nA turn that stalls while idle is retried instead of failing. The \
+         retry waits for the provider's own backoff, and gives up after three attempts, saying \
+         why.\n"
+    );
+}
+
+/// Laid out in the style of the workspace's `.comfort.toml`, so the file passes
+/// the workspace's formatting check as it is written.
+#[test]
+fn an_entry_is_laid_out_in_the_workspaces_style_when_it_formats_on_write() {
+    let root = workspace();
+
+    let planned = plan(&formatted(&root), &fixed(TWO_SENTENCES), Some("retry")).unwrap();
+
+    assert_eq!(planned.text, indoc! {"
         ---
         type: fixed
         ---
@@ -63,6 +98,69 @@ fn an_entry_is_laid_out_one_sentence_per_line() {
         The retry waits for the provider's own backoff, and gives up after three
         attempts, saying why.
     "});
+}
+
+/// `highlights/` sits inside the fragments directory, so a highlight is laid
+/// out as a fragment is.
+#[test]
+fn a_highlight_is_laid_out_as_a_fragment_is() {
+    let root = workspace();
+    let entry = highlight(
+        "Tool calls fan out",
+        "The assistant calls one tool on many inputs at once. Each result shows up under its own \
+         call.",
+    );
+
+    let planned = plan(&formatted(&root), &entry, None).unwrap();
+
+    assert_eq!(
+        planned.shown,
+        "changelog.d/highlights/tool-calls-fan-out.md"
+    );
+    assert_eq!(planned.text, indoc! {r#"
+        ---
+        title: "Tool calls fan out"
+        authors: ["@JeanMertz"]
+        ---
+        The assistant calls one tool on many inputs at once.
+        Each result shows up under its own call.
+    "#});
+}
+
+/// Laying a paragraph out a sentence per line can start a line with the upgrade
+/// section's token partway through it, so a file is held to the format as it is
+/// laid out.
+#[test]
+fn an_entry_is_checked_as_it_is_laid_out() {
+    let root = workspace();
+    let entry = fixed("Retries are fixed. BREAKING CHANGE: the old flag is gone.");
+
+    let error = plan(&formatted(&root), &entry, None).unwrap_err();
+
+    assert_eq!(
+        error,
+        "line 5 starts with `BREAKING CHANGE:` without starting a paragraph; an upgrade section \
+         opens a paragraph of its own, after a blank line, and to show the token instead, indent \
+         the line or put the token in inline code"
+    );
+    // Written as given, the token sits partway through a line, where it is
+    // text.
+    assert!(plan(&fragments(&root), &entry, None).is_ok());
+}
+
+#[test]
+fn a_format_on_write_that_is_not_true_or_false_is_refused() {
+    let root = workspace();
+    let config = json!({
+        "plugins": { "command": { "release": { "options": { "format_on_write": "yes" } } } }
+    });
+
+    let error = Fragments::new(root.path(), root.path().join("changelog.d"), &config).unwrap_err();
+
+    assert_eq!(
+        error,
+        "`plugins.command.release.options.format_on_write` must be `true` or `false`."
+    );
 }
 
 /// The title and the authors are written as quoted strings, so neither a colon
@@ -123,7 +221,7 @@ fn an_entry_with_links_is_named_after_its_words() {
     let root = workspace();
 
     let planned = plan(
-        &fragments(&root),
+        &formatted(&root),
         &fixed("See [the docs](https://example.com/docs) for setup."),
         None,
     )

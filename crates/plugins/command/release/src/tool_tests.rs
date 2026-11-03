@@ -102,6 +102,62 @@ fn add_writes_a_fragment() {
     );
 }
 
+/// The tool lays a fragment out as `jp release add` does: as the workspace's
+/// `format_on_write` says.
+#[test]
+fn add_lays_the_fragment_out_as_the_workspace_formats_it() {
+    let root = workspace();
+    fs::write(root.path().join(".comfort.toml"), "max_width = 80\n").unwrap();
+    let mut init = init(&root);
+    init.config = json!({
+        "plugins": { "command": { "release": { "options": { "format_on_write": true } } } }
+    });
+
+    let outcome = run(
+        &init,
+        &call(
+            ToolAction::Run,
+            "add",
+            json!({
+                "type": "fixed",
+                "slug": "retry",
+                "body": "Retries wait. They give up after three attempts."
+            }),
+        ),
+        &Options::default(),
+    );
+
+    assert_eq!(content(outcome), "Wrote changelog.d/retry.md");
+    assert_eq!(
+        fs::read_to_string(root.path().join("changelog.d/retry.md")).unwrap(),
+        "---\ntype: fixed\n---\nRetries wait.\nThey give up after three attempts.\n"
+    );
+}
+
+#[test]
+fn a_format_on_write_that_is_not_true_or_false_refuses_the_call() {
+    let root = workspace();
+    let mut init = init(&root);
+    init.config = json!({
+        "plugins": { "command": { "release": { "options": { "format_on_write": "yes" } } } }
+    });
+
+    let message = error_message(run(
+        &init,
+        &call(
+            ToolAction::Run,
+            "add",
+            json!({ "type": "fixed", "body": "Crashes are fixed." }),
+        ),
+        &Options::default(),
+    ));
+
+    assert_eq!(
+        message,
+        "`plugins.command.release.options.format_on_write` must be `true` or `false`."
+    );
+}
+
 #[test]
 fn add_names_the_file_by_the_slug_it_is_given() {
     let root = workspace();

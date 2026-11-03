@@ -12,6 +12,8 @@
 //! `entry` writes a fragment or highlight, `options` reads the settings from
 //! `plugins.command.release.options`, and `definitions` writes the tool's
 //! definition.
+//! With `format_on_write` on, every file written in the fragments directory is
+//! laid out in the style of the workspace's `.comfort.toml` (`doc::format`).
 //!
 //! See: `docs/rfd/121-changelog-fragments-and-validation.md`
 
@@ -40,6 +42,9 @@ use crate::{
     entry::{Entry, Fragments, HIGHLIGHTS, Planned},
     options::Options,
 };
+
+/// The name the plugin is configured under, `plugins.command.release`.
+pub(crate) const PLUGIN: &str = "release";
 
 /// The README `init` writes into the fragments directory, describing both
 /// formats.
@@ -256,11 +261,13 @@ fn handle_command(
         Err(message) => return send_exit(stdout, 1, Some(&message)),
     };
     let root = init.workspace.root.as_path();
+    let dir = resolve_dir(root, &options.fragments_dir);
+    let fragments = match Fragments::new(root, dir, &init.config) {
+        Ok(fragments) => fragments,
+        Err(message) => return send_exit(stdout, 1, Some(&message)),
+    };
     let ctx = Context {
-        fragments: Fragments {
-            root,
-            dir: resolve_dir(root, &options.fragments_dir),
-        },
+        fragments,
         config: &init.config,
     };
 
@@ -306,6 +313,8 @@ fn handle_command(
 /// Create the fragments directory and its `highlights/`, and write the README,
 /// each only when it isn't there.
 ///
+/// The README is laid out as the workspace formats the fragments directory.
+///
 /// `highlights/` starts empty, which git doesn't keep, so a checkout has none
 /// until a highlight is written; `add` creates it then.
 fn init_dir(ctx: &Context<'_>) -> Result<Output, String> {
@@ -322,11 +331,12 @@ fn init_dir(ctx: &Context<'_>) -> Result<Output, String> {
 
     let readme = fragments.dir.join(README_FILE);
     if !readme.exists() {
+        let contents = fragments.formatting.apply(&readme, README);
         OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&readme)
-            .and_then(|mut file| file.write_all(README.as_bytes()))
+            .and_then(|mut file| file.write_all(contents.as_bytes()))
             .map_err(|error| format!("failed to write {readme}: {error}"))?;
         text.push_str(&format!("Wrote {}\n", fragments.show(&readme)));
     }
