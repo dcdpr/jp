@@ -7,6 +7,7 @@
 //! [`TurnStart`]: crate::event::TurnStart
 
 use super::ConversationEventWithConfigRef;
+use crate::{EventId, event::format_turn_summary};
 
 /// A group of events belonging to a single turn in the conversation.
 ///
@@ -33,6 +34,53 @@ impl<'a> Turn<'a> {
     /// Iterate over the events in this turn.
     pub fn iter(&self) -> std::slice::Iter<'_, ConversationEventWithConfigRef<'a>> {
         self.events.iter()
+    }
+
+    /// The [`EventId`] of this turn's leading [`TurnStart`] entry.
+    ///
+    /// Returns `None` for an implicit leading turn whose events precede the
+    /// first `TurnStart`.
+    ///
+    /// [`TurnStart`]: crate::event::TurnStart
+    #[must_use]
+    pub fn id(&self) -> Option<&'a EventId> {
+        self.events
+            .first()
+            .filter(|event| event.is_turn_start())
+            .map(|event| event.event_id)
+    }
+
+    /// The summary stored on this turn's [`TurnStart`], if present.
+    ///
+    /// Always `None` for an implicit leading turn.
+    ///
+    /// [`TurnStart`]: crate::event::TurnStart
+    #[must_use]
+    pub fn summary(&self) -> Option<&'a str> {
+        self.events
+            .first()
+            .and_then(|event| event.event.as_turn_start())
+            .and_then(|turn_start| turn_start.summary.as_deref())
+    }
+
+    /// Fallback summary derived from the first non-empty line of the turn's
+    /// first [`ChatRequest`].
+    ///
+    /// Collapses whitespace to single spaces and truncates to
+    /// [`MAX_SUMMARY_CHARS`] characters.
+    /// Returns `None` if the turn has no non-empty `ChatRequest`.
+    ///
+    /// [`ChatRequest`]: crate::event::ChatRequest
+    /// [`MAX_SUMMARY_CHARS`]: crate::event::MAX_SUMMARY_CHARS
+    #[must_use]
+    pub fn fallback_summary(&self) -> Option<String> {
+        let request = self.iter().find_map(|event| event.as_chat_request())?;
+        let line = request
+            .content
+            .lines()
+            .find(|line| !line.trim().is_empty())?;
+
+        format_turn_summary(line)
     }
 }
 

@@ -122,7 +122,7 @@ fn grep(pattern: &str) -> Grep {
 
 /// A single-turn conversation: a `TurnStart` followed by `events`.
 fn turn(events: Vec<ConversationEvent>) -> Vec<ConversationEvent> {
-    let mut out = vec![ConversationEvent::new(TurnStart, ts())];
+    let mut out = vec![ConversationEvent::new(TurnStart::default(), ts())];
     out.extend(events);
     out
 }

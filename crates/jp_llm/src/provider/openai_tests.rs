@@ -1717,7 +1717,7 @@ mod create_request {
 
         let mut stream = ConversationStream::new(config.into()).with_created_at(created_at);
         stream.extend([
-            ConversationEvent::new(TurnStart, created_at),
+            ConversationEvent::new(TurnStart::default(), created_at),
             ConversationEvent::new(ChatRequest::from("A question"), created_at),
         ]);
 
@@ -1803,7 +1803,7 @@ mod create_request {
 
         let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
         stream.extend([
-            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(TurnStart::default(), ts),
             ConversationEvent::new(ChatRequest::from("A question"), ts),
         ]);
 
@@ -1864,7 +1864,7 @@ mod create_request {
 
         let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
         stream.extend([
-            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(TurnStart::default(), ts),
             ConversationEvent::new(ChatRequest::from("A question"), ts),
         ]);
 
@@ -1923,7 +1923,7 @@ mod create_request {
 
         let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
         stream.extend([
-            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(TurnStart::default(), ts),
             ConversationEvent::new(ChatRequest::from("A question"), ts),
         ]);
 
@@ -2006,13 +2006,13 @@ mod unknown_model {
 
         let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
         stream.extend([
-            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(TurnStart::default(), ts),
             ConversationEvent::new(ChatRequest::from("First question"), ts),
             ConversationEvent::new(ChatResponse::reasoning("Earlier reasoning."), ts)
                 .with_metadata_field(ITEM_ID_KEY, "rs_123")
                 .with_metadata_field(ENCRYPTED_CONTENT_KEY, "encrypted-blob"),
             ConversationEvent::new(ChatResponse::message("First answer."), ts),
-            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(TurnStart::default(), ts),
             ConversationEvent::new(ChatRequest::from("Second question"), ts),
         ]);
 
@@ -2058,13 +2058,13 @@ mod unknown_model {
 
         let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
         stream.extend([
-            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(TurnStart::default(), ts),
             ConversationEvent::new(ChatRequest::from("First question"), ts),
             ConversationEvent::new(ChatResponse::reasoning("Earlier reasoning."), ts)
                 .with_metadata_field(ITEM_ID_KEY, "rs_123")
                 .with_metadata_field(ENCRYPTED_CONTENT_KEY, "encrypted-blob"),
             ConversationEvent::new(ChatResponse::message("First answer."), ts),
-            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(TurnStart::default(), ts),
             ConversationEvent::new(ChatRequest::from("Second question"), ts),
         ]);
 
@@ -2109,7 +2109,7 @@ mod unknown_model {
 
         let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
         stream.extend([
-            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(TurnStart::default(), ts),
             ConversationEvent::new(ChatRequest::from("A question"), ts),
         ]);
 
@@ -2157,7 +2157,7 @@ mod unknown_model {
 
         let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
         stream.extend([
-            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(TurnStart::default(), ts),
             ConversationEvent::new(ChatRequest::from("A question"), ts),
         ]);
 
@@ -2201,7 +2201,7 @@ mod unknown_model {
 
         let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
         stream.extend([
-            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(TurnStart::default(), ts),
             ConversationEvent::new(ChatRequest::from("A question"), ts),
         ]);
 
