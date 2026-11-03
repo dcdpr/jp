@@ -101,6 +101,19 @@ fn every_author_names_someone() {
     assert_eq!(error, HighlightError::EmptyAuthor);
 }
 
+/// One author is written as a list of one, `["@JeanMertz"]`: the format takes
+/// no plain string.
+#[test]
+fn a_single_author_is_still_a_list() {
+    let error = parse("---\ntitle: Tool calls fan out\nauthors: \"@JeanMertz\"\n---\nProse.\n")
+        .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "invalid frontmatter: expected sequence start at line 3, column 10"
+    );
+}
+
 #[test]
 fn a_highlight_has_no_type() {
     // A fragment's field in a highlight's frontmatter, which strict parsing
