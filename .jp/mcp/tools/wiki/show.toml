@@ -43,6 +43,10 @@ The whole page, with what it embeds shown in place:
 
 run = "allow"
 
+# Reads are independent and have no side effects, so several run at once and a
+# missing page says nothing about the next.
+fan_out = true
+
 [conversation.tools.wiki_show.style]
 parameters = "function_call"
 inline_results = "full"
