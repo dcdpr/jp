@@ -24,7 +24,10 @@ use std::{fmt, num::NonZeroU64};
 
 use serde::Deserialize;
 
-use crate::document::{self, FrontmatterError, Parsed};
+use crate::{
+    document::{self, FrontmatterError, Parsed},
+    links::Links,
+};
 
 /// A highlight, as [`parse`] reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +43,9 @@ pub struct Highlight {
     pub change_requests: Option<Vec<NonZeroU64>>,
 
     /// The section's prose, as Markdown.
+    ///
+    /// Its links are inline, `[text](url)`, whichever form the file wrote them
+    /// in, so the prose stands alone beside other highlights.
     pub body: String,
 }
 
@@ -147,7 +153,8 @@ pub fn parse(source: &str) -> Result<Highlight, HighlightError> {
         return Err(HighlightError::EmptyAuthor);
     }
 
-    let prose = body.trim();
+    let prose = Links::read(&body).standalone(&body, 0..body.len());
+    let prose = prose.trim();
     if prose.is_empty() {
         return Err(HighlightError::EmptyBody);
     }

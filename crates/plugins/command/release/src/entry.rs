@@ -7,7 +7,8 @@
 //! settles where it goes, and [`Planned::write`] writes it.
 //!
 //! A file is named by its slug: the one the caller gives, or one derived from
-//! the entry's first words, or a highlight's title.
+//! the first words of the entry, or of a highlight's title, as they read
+//! without their markup and link URLs.
 
 use std::{
     fs::{self, OpenOptions},
@@ -21,6 +22,7 @@ use comfort::{
     DEFAULT_MAX_WIDTH,
     format::{FormatOptions, format_markdown_with},
 };
+use comrak::{Arena, Options, nodes::NodeValue, parse_document};
 use serde_json::Value;
 
 /// The directory, inside the fragments directory, that holds highlights.
@@ -115,10 +117,10 @@ impl Entry {
     fn check(&self, text: &str) -> Result<Option<String>, String> {
         match self {
             Self::Fragment { .. } => fragment::parse(text)
-                .map(|fragment| derive_slug(&fragment.entry))
+                .map(|fragment| derive_slug(&plain_text(&fragment.entry)))
                 .map_err(|error| error.to_string()),
             Self::Highlight { .. } => highlight::parse(text)
-                .map(|highlight| derive_slug(&highlight.title))
+                .map(|highlight| derive_slug(&plain_text(&highlight.title)))
                 .map_err(|error| error.to_string()),
         }
     }
@@ -249,6 +251,27 @@ fn check_slug(slug: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// What `markdown` says, without its markup: its text and inline code, with a
+/// space where a line or a block breaks, and no link's URL.
+fn plain_text(markdown: &str) -> String {
+    let arena = Arena::new();
+    let root = parse_document(&arena, markdown, &Options::default());
+
+    let mut text = String::new();
+    for node in root.descendants() {
+        let data = node.data();
+        match &data.value {
+            NodeValue::Text(literal) => text.push_str(literal),
+            NodeValue::Code(code) => text.push_str(&code.literal),
+            NodeValue::SoftBreak | NodeValue::LineBreak => text.push(' '),
+            value if value.block() => text.push(' '),
+            _ => {}
+        }
+    }
+
+    text
 }
 
 /// A slug for `text`: its first words, lowercased and joined by `-`, at most

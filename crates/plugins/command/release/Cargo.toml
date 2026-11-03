@@ -27,6 +27,7 @@ tool-definitions = { workspace = true }
 
 camino = { workspace = true, features = ["serde1"] }
 clap = { workspace = true, features = ["derive", "error-context", "help", "std", "usage"] }
+comrak = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
 

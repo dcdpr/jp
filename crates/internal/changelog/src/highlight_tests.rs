@@ -211,6 +211,35 @@ fn a_token_that_does_not_start_its_line_is_text() {
          BREAKING CHANGE: indented, are both text."});
 }
 
+/// Release notes place many highlights in one document, where two defining one
+/// label differently would collide, so the prose comes with its links inline.
+#[test]
+fn a_highlights_links_are_inline() {
+    let highlight = parse(indoc! {r#"
+        ---
+        title: Tool calls fan out
+        authors: ["@JeanMertz"]
+        ---
+        The assistant calls [one tool] on many inputs at once.
+
+        [one tool]: https://example.com/tools
+    "#})
+    .unwrap();
+
+    assert_eq!(
+        highlight.body,
+        "The assistant calls [one tool](https://example.com/tools) on many inputs at once."
+    );
+}
+
+#[test]
+fn a_highlight_of_definitions_alone_has_no_prose() {
+    assert_eq!(
+        parse("---\ntitle: Fan out\nauthors: [\"@JeanMertz\"]\n---\n[docs]: https://example.com\n"),
+        Err(HighlightError::EmptyBody)
+    );
+}
+
 #[test]
 fn a_misplaced_token_says_where_the_section_goes_instead() {
     assert_eq!(

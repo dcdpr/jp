@@ -20,19 +20,26 @@
 //! That keeps a plain search for the token in step with [`parse`]: a fragment
 //! the search finds has an upgrade section, or fails to parse.
 //!
+//! The entry and the upgrade section are each given with their links inline,
+//! `[text](url)`, so each stands alone wherever it is placed: a reference-style
+//! link reads its URL from a definition anywhere in the file, which a formatter
+//! puts at its end, below the upgrade section.
+//!
 //! Paragraphs and code blocks are read as GitHub renders Markdown.
 
 use std::{fmt, num::NonZeroU64, ops::Range, str::FromStr};
 
 use comrak::{
-    Arena, Options,
+    Arena,
     nodes::{NodeValue, Sourcepos},
-    options::Extension,
     parse_document,
 };
 use serde::Deserialize;
 
-use crate::document::{self, FrontmatterError, Parsed};
+use crate::{
+    document::{self, FrontmatterError, Parsed},
+    links::{Links, line_starts},
+};
 
 /// What a change means for the people using the software.
 ///
@@ -146,6 +153,9 @@ pub struct Fragment {
 
     /// The entry the release notes list, as Markdown: the body before its
     /// upgrade section, or all of it.
+    ///
+    /// Its links are inline, `[text](url)`, whichever form the file wrote them
+    /// in.
     pub entry: String,
 
     /// The fragment's section of the upgrade guide, for a change that requires
@@ -154,6 +164,8 @@ pub struct Fragment {
 }
 
 /// A fragment's section of a release's upgrade guide.
+///
+/// Its links are inline, `[text](url)`, whichever form the file wrote them in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Upgrade {
     /// What broke: the rest of the paragraph the token opens, on one line.
@@ -291,16 +303,25 @@ struct Opening {
 
 /// The entry and the upgrade section of a fragment's `body`, whose first line
 /// is line `first_line` of the file.
+///
+/// The rules are checked against the file as written, so a line an error names
+/// is the file's; each part then reads its links' URLs from the whole file.
 fn body(body: &str, first_line: usize) -> Result<(String, Option<Upgrade>), FragmentError> {
     if body.trim().is_empty() {
         return Err(FragmentError::EmptyBody);
     }
 
     let lines: Vec<&str> = body.lines().collect();
-    let Some(opening) = opening(body, &lines, first_line)? else {
-        return Ok((body.trim().to_owned(), None));
+    let opening = opening(body, &lines, first_line)?;
+    let links = Links::read(body);
+    let Some(opening) = opening else {
+        let entry = links.standalone(body, 0..body.len()).trim().to_owned();
+        if entry.is_empty() {
+            return Err(FragmentError::EmptyBody);
+        }
+        return Ok((entry, None));
     };
-    let (entry, upgrade) = upgrade(&lines, opening)?;
+    let (entry, upgrade) = upgrade(body, &links, opening)?;
 
     Ok((entry, Some(upgrade)))
 }
@@ -342,42 +363,49 @@ fn opening(
     Ok(opening)
 }
 
-/// The entry before `opening` in `lines`, and the upgrade section it opens.
-fn upgrade(lines: &[&str], opening: Opening) -> Result<(String, Upgrade), FragmentError> {
+/// The entry before `opening` in `body`, and the upgrade section it opens, with
+/// the links `links` found in `body` inline.
+fn upgrade(
+    body: &str,
+    links: &Links,
+    opening: Opening,
+) -> Result<(String, Upgrade), FragmentError> {
     let Opening {
         lines: paragraph,
         line,
         marker,
     } = opening;
 
-    let entry = joined(lines.get(..paragraph.start).unwrap_or_default());
+    let starts = line_starts(body);
+    let offset = |index: usize| starts.get(index).copied().unwrap_or(body.len());
+    let (title_start, rest_start) = (offset(paragraph.start), offset(paragraph.end));
+
+    let entry = links.standalone(body, 0..title_start).trim().to_owned();
     if entry.is_empty() {
         return Err(FragmentError::EmptyEntry { line, marker });
     }
 
-    let title = title(lines.get(paragraph.clone()).unwrap_or_default(), marker);
+    let title = title(&links.standalone(body, title_start..rest_start), marker);
     if title.is_empty() {
         return Err(FragmentError::EmptyUpgradeTitle { line, marker });
     }
 
-    let body = joined(lines.get(paragraph.end..).unwrap_or_default());
-    if body.is_empty() {
+    let rest = links
+        .standalone(body, rest_start..body.len())
+        .trim()
+        .to_owned();
+    if rest.is_empty() {
         return Err(FragmentError::EmptyUpgradeBody { line });
     }
 
-    Ok((entry, Upgrade { title, body }))
+    Ok((entry, Upgrade { title, body: rest }))
 }
 
-/// `lines` as one block of Markdown, without the blank lines around it.
-fn joined(lines: &[&str]) -> String {
-    lines.join("\n").trim().to_owned()
-}
-
-/// The title the paragraph on `lines` gives an upgrade section: the paragraph
-/// after its `marker`, its lines joined into one.
-fn title(lines: &[&str], marker: &str) -> String {
+/// The title `paragraph` gives an upgrade section: the paragraph after its
+/// `marker`, its lines joined into one.
+fn title(paragraph: &str, marker: &str) -> String {
     let mut parts = vec![];
-    for (index, line) in lines.iter().enumerate() {
+    for (index, line) in paragraph.lines().enumerate() {
         let line = if index == 0 {
             line.strip_prefix(marker).unwrap_or(line)
         } else {
@@ -415,7 +443,7 @@ struct Blocks {
 impl Blocks {
     fn read(body: &str) -> Self {
         let arena = Arena::new();
-        let root = parse_document(&arena, body, &options());
+        let root = parse_document(&arena, body, &document::markdown_options());
 
         let paragraphs = root
             .children()
@@ -453,18 +481,6 @@ impl Blocks {
 /// numbers.
 fn indices(sourcepos: &Sourcepos) -> Range<usize> {
     sourcepos.start.line.saturating_sub(1)..sourcepos.end.line
-}
-
-/// Parse options that read a body as GitHub renders it, tables included: a
-/// table can take a line that would otherwise start a paragraph.
-fn options() -> Options<'static> {
-    Options {
-        extension: Extension {
-            table: true,
-            ..Default::default()
-        },
-        ..Default::default()
-    }
 }
 
 #[cfg(test)]
