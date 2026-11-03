@@ -12,13 +12,14 @@
 
 use doc::metadata;
 
-use crate::{Comment, LABEL_KEY, NewTicket, Status, parse};
+use crate::{Comment, LABEL_KEY, NewTicket, PARENT_KEY, Status, parse};
 
 /// Render a new ticket, opened at `Todo`.
 ///
-/// The labels are written last, where [`set_repeated_metadata`] adds them to a
-/// ticket that has none, so a ticket labelled later looks like one that was
-/// filed with them.
+/// The labels and the parent are written last, where [`set_repeated_metadata`]
+/// and [`set_metadata`] add them to a ticket that has none, so a ticket
+/// labelled or filed under a parent later looks like one that was filed that
+/// way.
 #[must_use]
 pub fn ticket(new: &NewTicket<'_>) -> String {
     let mut out = format!("# {}\n\n", new.title);
@@ -27,6 +28,9 @@ pub fn ticket(new: &NewTicket<'_>) -> String {
     out.push_str(&format!("- **Date**: {}\n", new.date));
     for token in new.labels.to_tokens() {
         out.push_str(&format!("- **{LABEL_KEY}**: {token}\n"));
+    }
+    if let Some(parent) = new.parent {
+        out.push_str(&format!("- **{PARENT_KEY}**: {parent}\n"));
     }
 
     let description = new.description.trim();
@@ -134,6 +138,17 @@ pub fn set_metadata(document: &str, key: &str, value: &str) -> Option<String> {
     edited.set(key, value).ok()?;
 
     Some(edited.render())
+}
+
+/// Remove a field from the ticket's metadata block, returning the new document.
+///
+/// A document that doesn't carry the field comes back unchanged.
+#[must_use]
+pub fn remove_metadata(document: &str, key: &str) -> String {
+    let mut edited = metadata::Document::parse(document);
+    edited.remove(key);
+
+    edited.render()
 }
 
 /// Replace every occurrence of a repeated metadata field with `values`, one

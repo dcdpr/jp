@@ -16,6 +16,9 @@
 //! key = "relevant-rfd"
 //! ```
 //!
+//! `format_on_write = true` lays every RFD out in the style of the workspace's
+//! `.comfort.toml` as it is written; it is off by default.
+//!
 //! Every option is optional, and `tracking.labels` defaults to none.
 //! Keys this plugin doesn't read are ignored, so a configuration written for a
 //! newer `jp-rfd` still loads.
@@ -23,6 +26,7 @@
 //! The ticket directory belongs to `jp ticket`, and is read from its options
 //! ([`ticket_dir`]), as are the labels a ticket can carry
 //! ([`ticket_vocabulary`]).
+//! The wiki directory belongs to `jp wiki` ([`wiki_dir`]).
 
 use camino::Utf8PathBuf;
 use jp_label::validate_key;
@@ -217,6 +221,21 @@ pub(crate) fn ticket_dir(config: &Value) -> Result<Utf8PathBuf, String> {
         None | Some(Value::Null) => Ok(Utf8PathBuf::from(store::DEFAULT_DIR)),
         Some(Value::String(dir)) if !dir.trim().is_empty() => Ok(Utf8PathBuf::from(dir)),
         Some(_) => Err("`plugins.command.ticket.options.dir` is not a directory path.".to_owned()),
+    }
+}
+
+/// Where `jp wiki` keeps its pages when its `dir` isn't set.
+const DEFAULT_WIKI_DIR: &str = "docs/wiki";
+
+/// The wiki directory, as `jp wiki` is configured to use it: its
+/// `plugins.command.wiki.options.dir`, or `docs/wiki`.
+///
+/// `config` is the whole configuration the host passed in `init`.
+pub(crate) fn wiki_dir(config: &Value) -> Result<Utf8PathBuf, String> {
+    match config.pointer("/plugins/command/wiki/options/dir") {
+        None | Some(Value::Null) => Ok(Utf8PathBuf::from(DEFAULT_WIKI_DIR)),
+        Some(Value::String(dir)) if !dir.trim().is_empty() => Ok(Utf8PathBuf::from(dir)),
+        Some(_) => Err("`plugins.command.wiki.options.dir` is not a directory path.".to_owned()),
     }
 }
 

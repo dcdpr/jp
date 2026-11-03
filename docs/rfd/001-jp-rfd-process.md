@@ -146,7 +146,7 @@ feedback from collaborators is encouraged.
 
 Drafts do not have a permanent number.
 They live in `docs/rfd/drafts/` and are named `DNN-slug.md`, where `D` stands
-for "Draft" and `NN` is a two-digit draft slot (`D01`–`D99`).
+for "Draft" and `NN` is a two-digit draft slot, from `01` to `99`.
 This prevents speculative cross-draft dependencies and avoids number gaps from
 abandoned drafts.
 The permanent number is assigned when the RFD advances to Discussion.
@@ -171,10 +171,10 @@ preserving as a record of the rejected idea); the choice is the author's.
 ### Discussion
 
 The RFD is complete enough to review.
-When the author runs `just rfd-promote D01` (using the draft ID), the tooling:
+When the author runs `just rfd-promote DNN` (using the draft ID), the tooling:
 
 1. Assigns the next available sequential permanent number.
-2. Moves the file from `docs/rfd/drafts/D01-slug.md` to `docs/rfd/042-slug.md`
+2. Moves the file from `docs/rfd/drafts/DNN-slug.md` to `docs/rfd/042-slug.md`
    (for example).
 3. Updates the heading in the file.
 
@@ -252,7 +252,7 @@ Drafts live under `docs/rfd/drafts/` and use a `DNN` prefix (`D` for Draft, `NN`
 a two-digit slot):
 
 ```
-docs/rfd/drafts/D01-short-title.md
+docs/rfd/drafts/DNN-short-title.md
 ```
 
 When promoted to Discussion, the tooling assigns a permanent number and moves
@@ -309,9 +309,9 @@ jp rfd draft process "Release Process"        # workflow / policy
 ```
 
 This copies the appropriate template to
-`docs/rfd/drafts/D01-my-feature-title.md` (or the next available draft slot),
-fills in the title, author, date, and category, and sets the status to
-**Draft**.
+`docs/rfd/drafts/DNN-my-feature-title.md`, where `DNN` is the next available
+draft slot, fills in the title, author, date, and category, and sets the status
+to **Draft**.
 The draft prefix is replaced with a permanent number and the file moves up to
 `docs/rfd/` when the RFD is promoted to Discussion.
 
@@ -462,8 +462,8 @@ gets its permanent number.
 2. Run `jp rfd draft CATEGORY Your Title` to generate the file from the
    appropriate template.
    Category is one of: `design`, `decision`, `guide`, `process`.
-   The file is created under `docs/rfd/drafts/` with a `DNN` prefix (e.g.
-   `docs/rfd/drafts/D01-your-title.md`).
+   The file is created under `docs/rfd/drafts/` with a `DNN` prefix:
+   `docs/rfd/drafts/DNN-your-title.md`.
 3. Fill in the sections.
    Write your proposal.
 4. Push your branch.
@@ -471,7 +471,7 @@ gets its permanent number.
 
 ### Opening for Discussion
 
-1. Run `just rfd-promote D01` to advance the status to **Discussion**.
+1. Run `just rfd-promote DNN` to advance the status to **Discussion**.
    This assigns a permanent number and renames the file.
 2. Add the `Summary` field to the metadata header.
    The docs build rejects a published RFD without one.

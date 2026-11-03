@@ -271,12 +271,12 @@ fn slugify(text: &str) -> String {
 /// Slugger that de-duplicates by appending `-1`, `-2`, etc. Matches the
 /// GitHub-flavored markdown convention.
 #[derive(Default)]
-struct Slugger {
+pub(super) struct Slugger {
     seen: HashMap<String, usize>,
 }
 
 impl Slugger {
-    fn slug(&mut self, text: &str) -> String {
+    pub(super) fn slug(&mut self, text: &str) -> String {
         let base = slugify(text);
         if base.is_empty() {
             return String::new();

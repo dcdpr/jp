@@ -108,8 +108,12 @@ jobs:
       # a label changed without the sync would publish stale ones.
       - if: ${{ steps.task.outputs.sync == 'true' }}
         run: just site-ci
+      # VitePress needs Node 22 or later, and `corepack enable` below needs a
+      # Node that still ships Corepack, which 25 and later don't.
       - if: ${{ steps.task.outputs.run == 'true' }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
       - if: ${{ steps.task.outputs.run == 'true' }}
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
       - if: ${{ steps.task.outputs.run == 'true' }}

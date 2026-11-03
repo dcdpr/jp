@@ -90,6 +90,25 @@ fn run_tool(dir: &Utf8TempDir, name: &str, args: Value) -> Outcome {
     dispatch(dir, ToolAction::Run, name, args, json!({}), json!({}))
 }
 
+/// Run a tool in a workspace that formats tickets as they are written.
+fn run_tool_formatting(dir: &Utf8TempDir, name: &str, args: Value) -> Outcome {
+    let mut init = init(dir);
+    init.config = json!({ "plugins": { "command": {
+        "ticket": { "options": { "format_on_write": true } }
+    } } });
+    let call = ToolCall {
+        action: ToolAction::Run,
+        name: name.to_owned(),
+        arguments: object(args),
+        answers: Map::new(),
+        options: Map::new(),
+        access: None,
+        conversation: "test".to_owned(),
+    };
+
+    run(&init, &call, &options())
+}
+
 /// Run a tool the way JP runs it again once a question has been answered.
 fn run_tool_with_answers(dir: &Utf8TempDir, name: &str, args: Value, answers: Value) -> Outcome {
     dispatch(dir, ToolAction::Run, name, args, answers, json!({}))
@@ -134,6 +153,7 @@ fn tickets(dir: &Utf8TempDir) -> Tickets<'_> {
         dir: dir.path().join(store::DEFAULT_DIR),
         author: "jp",
         options: &OPTIONS,
+        formatting: Formatting::default(),
     }
 }
 
@@ -183,6 +203,7 @@ fn draft<'a>(title: &'a str, labels: &'a Labels) -> NewTicket<'a> {
         date: DATE,
         labels,
         description: "Something is wrong.",
+        parent: None,
     }
 }
 
@@ -541,12 +562,12 @@ fn preview_rejects_the_arguments_execution_would_reject() {
     );
 }
 
-/// Markdown in this repository is laid out by `comfort`, and a body arrives
-/// from the model as one long line per paragraph.
+/// A body arrives from the model as one long line per paragraph, and a
+/// workspace that formats tickets lays it out with `comfort`.
 #[test]
 fn create_reflows_the_body_with_comfort() {
     let dir = Utf8TempDir::new().unwrap();
-    content(run_tool(
+    content(run_tool_formatting(
         &dir,
         "create",
         json!({
@@ -566,6 +587,33 @@ fn create_reflows_the_body_with_comfort() {
         source.ends_with(
             "\nThe first sentence.\nThe second one, which the model wrote on the same line.\n"
         ),
+        "{source}"
+    );
+}
+
+/// Formatting is off unless the workspace turns it on, so the body lands as the
+/// model wrote it.
+#[test]
+fn create_leaves_the_body_alone_when_the_workspace_does_not_format() {
+    let dir = Utf8TempDir::new().unwrap();
+    content(run_tool(
+        &dir,
+        "create",
+        json!({
+            "title": "Wrapping is wrong",
+            "body": "The first sentence. The second one, on the same line."
+        }),
+    ));
+
+    let id = ids(&dir)[0];
+    let source = fs::read_to_string(dir.path().join(format!(
+        "docs/ticket/{}wrapping-is-wrong.md",
+        id.file_prefix()
+    )))
+    .unwrap();
+
+    assert!(
+        source.ends_with("\nThe first sentence. The second one, on the same line.\n"),
         "{source}"
     );
 }
@@ -871,7 +919,7 @@ fn comment_reflows_the_body_with_comfort() {
     create_ticket(&dir, "Wrapping is wrong");
     let id = ids(&dir)[0];
 
-    content(run_tool(
+    content(run_tool_formatting(
         &dir,
         "comment",
         json!({
@@ -1023,8 +1071,8 @@ fn edit_needs_something_to_change() {
     let dir = Utf8TempDir::new().unwrap();
     write_ticket(&dir, "Wrapping is wrong");
 
-    let nothing =
-        "Name what to change: `title`, `description`, `status`, `add_labels`, or `remove_labels`.";
+    let nothing = "Name what to change: `title`, `description`, `status`, `parent`, `add_labels`, \
+                   or `remove_labels`.";
 
     assert_eq!(
         error_message(run_tool(&dir, "edit", json!({ "id": FIXED_ID }))),
@@ -1177,7 +1225,7 @@ fn edit_replaces_the_description_and_keeps_the_rest() {
         json!({ "id": id.to_string(), "body": "Reproduced at 72 columns." }),
     ));
 
-    let out = content(run_tool(
+    let out = content(run_tool_formatting(
         &dir,
         "edit",
         json!({
@@ -1358,7 +1406,13 @@ fn list_follows_the_board_order() {
     let second = write_ticket_as(&dir, "T-02wt0k2", "Filed second");
     let started = write_ticket_as(&dir, "T-02wt0k3", "Started");
     let tickets = dir.path().join(store::DEFAULT_DIR);
-    store::set_status(&tickets, started, Status::InProgress).unwrap();
+    store::set_status(
+        &tickets,
+        &Formatting::default(),
+        started,
+        Status::InProgress,
+    )
+    .unwrap();
     board::rank(&tickets, second, board::Place::Before, first).unwrap();
 
     let out = content(run_tool(&dir, "list", json!({})));
@@ -1570,6 +1624,219 @@ fn show_adds_the_comments_when_asked() {
             "Reproduced at 72 columns.\n\nNot shown: the description (`description: true`).\n```"
         ),
         "{out}"
+    );
+}
+
+/// File a ticket under `id`, beneath `parent`.
+fn write_child_as(dir: &Utf8TempDir, id: &str, title: &str, parent: TicketId) -> TicketId {
+    let id: TicketId = id.parse().unwrap();
+    let labels = Labels::default();
+    let mut new = draft(title, &labels);
+    new.parent = Some(parent);
+    fs::write(
+        dir.path()
+            .join(store::DEFAULT_DIR)
+            .join(format!("{}slug.md", id.file_prefix())),
+        render::ticket(&new),
+    )
+    .unwrap();
+
+    id
+}
+
+/// A parent at [`FIXED_ID`] with two children, the second of them Done.
+fn family(dir: &Utf8TempDir) -> (TicketId, TicketId, TicketId) {
+    let parent = write_ticket(dir, "Investigate the harness");
+    let first = write_child_as(dir, "T-02wt0m0", "Bound tool output", parent);
+    let second = write_child_as(dir, "T-02wt0m1", "Record token usage", parent);
+    store::set_status(
+        &tickets(dir).dir,
+        &Formatting::default(),
+        second,
+        Status::Done,
+    )
+    .unwrap();
+
+    (parent, first, second)
+}
+
+#[test]
+fn create_files_a_ticket_under_its_parent() {
+    let dir = Utf8TempDir::new().unwrap();
+    create_ticket(&dir, "Investigate the harness");
+    let parent = ids(&dir)[0];
+
+    let out = content(run_tool(
+        &dir,
+        "create",
+        json!({ "title": "Bound tool output", "parent": parent.to_string() }),
+    ));
+
+    let child = ids(&dir).into_iter().find(|id| *id != parent).unwrap();
+    assert_eq!(
+        out,
+        format!(
+            "Created {child} under {parent} at docs/ticket/{}bound-tool-output.md",
+            child.file_prefix()
+        )
+    );
+    let path = store::locate_ticket(&tickets(&dir).dir, child).unwrap();
+    let ticket = parse::document(&fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(ticket.metadata.parent, Some(parent));
+}
+
+#[test]
+fn create_under_a_missing_parent_is_refused_and_files_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "Unrelated");
+
+    assert_eq!(
+        error_message(run_tool(
+            &dir,
+            "create",
+            json!({ "title": "Bound tool output", "parent": "T-0zzzzzz" }),
+        )),
+        "No ticket T-0zzzzzz to file under."
+    );
+    assert_eq!(ids(&dir).len(), 1);
+}
+
+#[test]
+fn edit_sets_and_clears_a_parent() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_ticket(&dir, "Investigate the harness");
+    let child = write_ticket_as(&dir, "T-02wt0m0", "Bound tool output");
+
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "edit",
+            json!({ "id": child.to_string(), "parent": FIXED_ID }),
+        )),
+        "Edited T-02wt0m0:\n- parent: none -> T-02wt0kx\n"
+    );
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "edit",
+            json!({ "id": child.to_string(), "parent": "none" }),
+        )),
+        "Edited T-02wt0m0:\n- parent: T-02wt0kx -> none\n"
+    );
+}
+
+/// The refusal comes before the labels in the same call are written, so the
+/// call changes nothing.
+#[test]
+fn edit_closing_a_parent_with_open_children_is_refused_whole() {
+    let dir = Utf8TempDir::new().unwrap();
+    let (parent, ..) = family(&dir);
+
+    assert_eq!(
+        error_message(run_tool(
+            &dir,
+            "edit",
+            json!({ "id": FIXED_ID, "status": "done", "add_labels": ["client=cli"] }),
+        )),
+        "T-02wt0kx has open children: T-02wt0m0. Close them, or move them out from under \
+         T-02wt0kx, first."
+    );
+    let path = store::locate_ticket(&tickets(&dir).dir, parent).unwrap();
+    let ticket = parse::document(&fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(ticket.metadata.status, Status::Todo);
+    assert!(ticket.metadata.labels.is_empty());
+}
+
+#[test]
+fn show_lists_a_parents_children_with_how_many_are_done() {
+    let dir = Utf8TempDir::new().unwrap();
+    family(&dir);
+
+    let out = content(run_tool(&dir, "show", json!({ "id": FIXED_ID })));
+
+    assert_eq!(
+        out,
+        r"```markdown
+# T-02wt0kx: Investigate the harness
+
+- **Path**: docs/ticket/02wt0kx-slug.md
+- **Status**: Todo
+- **Authors**: jp
+- **Date**: 2026-08-05
+
+## Children (1 of 2 done)
+
+- T-02wt0m0 (Todo) Bound tool output
+- T-02wt0m1 (Done) Record token usage
+
+Not shown: the description (`description: true`).
+```"
+    );
+}
+
+#[test]
+fn show_names_a_childs_parent_and_offers_its_description() {
+    let dir = Utf8TempDir::new().unwrap();
+    let (_, child, _) = family(&dir);
+
+    let out = content(run_tool(&dir, "show", json!({ "id": child.to_string() })));
+
+    assert_eq!(
+        out,
+        r"```markdown
+# T-02wt0m0: Bound tool output
+
+- **Path**: docs/ticket/02wt0m0-slug.md
+- **Status**: Todo
+- **Authors**: jp
+- **Date**: 2026-08-05
+- **Parent**: T-02wt0kx (Todo) Investigate the harness
+
+Not shown: the description (`description: true`) and the parent's description (`parent_description: true`).
+```"
+    );
+}
+
+#[test]
+fn show_adds_the_parents_description_when_asked() {
+    let dir = Utf8TempDir::new().unwrap();
+    let (_, child, _) = family(&dir);
+
+    let out = content(run_tool(
+        &dir,
+        "show",
+        json!({ "id": child.to_string(), "parent_description": true }),
+    ));
+
+    assert_eq!(
+        out,
+        r"```markdown
+# T-02wt0m0: Bound tool output
+
+- **Path**: docs/ticket/02wt0m0-slug.md
+- **Status**: Todo
+- **Authors**: jp
+- **Date**: 2026-08-05
+- **Parent**: T-02wt0kx (Todo) Investigate the harness
+
+## Parent T-02wt0kx: Investigate the harness
+
+Something is wrong.
+
+Not shown: the description (`description: true`).
+```"
+    );
+}
+
+#[test]
+fn list_under_a_parent_shows_only_its_children() {
+    let dir = Utf8TempDir::new().unwrap();
+    family(&dir);
+    write_ticket_as(&dir, "T-02wt0m2", "Unrelated");
+
+    assert_eq!(
+        content(run_tool(&dir, "list", json!({ "under": FIXED_ID }))),
+        "T-02wt0m0 Todo         Bound tool output\nT-02wt0m1 Done         Record token usage\n"
     );
 }
 

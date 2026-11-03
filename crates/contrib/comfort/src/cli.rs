@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use crate::DEFAULT_MAX_WIDTH;
+use crate::config::Config;
 
 /// Source language to format.
 /// With [`Auto`], per-file detection (extension or `--stdin-filename`)
@@ -79,7 +79,11 @@ pub enum Invocation {
     about = "Format Rust doc comments with semantic line breaks.",
     long_about = "Reflows outer (`///`) and inner (`//!`) doc-comment blocks using semantic line \
                   breaks (one sentence per line), with an optional `--max-width` safety net. \
-                  Inline `//` comments and `/** */` block-style doc comments are left untouched.",
+                  Inline `//` comments and `/** */` block-style doc comments are left \
+                  untouched.\n\nThe style flags (`--max-width`, `--format-markdown`, \
+                  `--reference-links`, `--prune-reference-links`) can also be set in a \
+                  `.comfort.toml`, found in the current directory or the nearest one above it. A \
+                  flag given here wins over the file.",
     version
 )]
 pub struct Cli {
@@ -133,30 +137,44 @@ pub struct Cli {
     /// tables, normalise list markers, prefer fenced over indented code blocks,
     /// etc. Off by default — in default mode, only paragraph prose gets
     /// reflowed and everything else is preserved byte-for-byte.
-    #[arg(long)]
+    #[arg(long, overrides_with = "no_format_markdown")]
     pub format_markdown: bool,
+
+    /// Leave markdown structure as written, whatever `.comfort.toml` sets.
+    #[arg(long, overrides_with = "format_markdown")]
+    pub no_format_markdown: bool,
 
     /// Convert inline markdown links to reference-style links and move all
     /// reference definitions to the bottom of the body.
     /// Adaptive: shortcut form `[text]` where possible, full form
     /// `[text][label]` for collisions.
     /// Independent of `--format-markdown` — enable either, both, or neither.
-    #[arg(long)]
+    #[arg(long, overrides_with = "no_reference_links")]
     pub reference_links: bool,
+
+    /// Leave inline links inline, whatever `.comfort.toml` sets.
+    #[arg(long, overrides_with = "reference_links")]
+    pub no_reference_links: bool,
 
     /// Remove reference-link definitions that nothing points at.
     /// A `[label]: url` is dropped when no `[label]`, `[label][]`, or
     /// `[text][label]` (link or image) resolves to it; surrounding content is
     /// untouched.
     /// Independent of `--reference-links` — enable either, both, or neither.
-    #[arg(long)]
+    #[arg(long, overrides_with = "no_prune_reference_links")]
     pub prune_reference_links: bool,
+
+    /// Keep reference-link definitions nothing points at, whatever
+    /// `.comfort.toml` sets.
+    #[arg(long, overrides_with = "prune_reference_links")]
+    pub no_prune_reference_links: bool,
 
     /// Maximum line width for reflow.
     /// Long sentences wrap at word boundaries within sembr blocks.
     /// `0` disables width wrapping.
-    #[arg(long, default_value_t = DEFAULT_MAX_WIDTH)]
-    pub max_width: usize,
+    /// Defaults to `max_width` in `.comfort.toml`, then 80.
+    #[arg(long)]
+    pub max_width: Option<usize>,
 
     /// The original filename for content piped via stdin.
     /// In `--language auto` (default), the extension drives format detection —
@@ -164,4 +182,27 @@ pub struct Cli {
     /// Also improves diagnostic messages; defaults to `<stdin>`.
     #[arg(long, value_name = "PATH")]
     pub stdin_filename: Option<PathBuf>,
+}
+
+impl Cli {
+    /// The style settings the flags set, each unset when neither its flag nor
+    /// its `--no-` form was given.
+    #[must_use]
+    pub fn style(&self) -> Config {
+        let switch = |on: bool, off: bool| match (on, off) {
+            (true, _) => Some(true),
+            (_, true) => Some(false),
+            _ => None,
+        };
+
+        Config {
+            max_width: self.max_width,
+            format_markdown: switch(self.format_markdown, self.no_format_markdown),
+            reference_links: switch(self.reference_links, self.no_reference_links),
+            prune_reference_links: switch(
+                self.prune_reference_links,
+                self.no_prune_reference_links,
+            ),
+        }
+    }
 }

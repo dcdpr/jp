@@ -12,20 +12,31 @@ readme.workspace = true
 repository.workspace = true
 version.workspace = true
 
+[features]
+default = ["cli"]
+
+# The `comfort` and `cargo-comfort` binaries: argument parsing, the workspace
+# walk, and `--check` diffs. A crate that only formats text turns it off.
+cli = ["dep:cargo_metadata", "dep:clap", "dep:ignore", "dep:similar"]
+
 [dependencies]
-cargo_metadata = { workspace = true }
-clap = { workspace = true, features = ["std", "derive", "help", "usage", "error-context"] }
 comrak = { workspace = true }
-ignore = { workspace = true }
 ra-ap-rustc_lexer = { workspace = true }
 regex = { workspace = true, features = ["std", "perf", "unicode-perl"] }
-similar = { workspace = true, features = ["text"] }
+serde = { workspace = true, features = ["std", "derive"] }
 textwrap = { workspace = true }
-thiserror = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
+toml = { workspace = true, features = ["std", "parse", "serde"] }
 unicode-segmentation = { workspace = true }
 unicode-width = { workspace = true }
 
+cargo_metadata = { workspace = true, optional = true }
+clap = { workspace = true, optional = true, features = ["std", "derive", "help", "usage", "error-context"] }
+ignore = { workspace = true, optional = true }
+similar = { workspace = true, optional = true, features = ["text"] }
+
 [dev-dependencies]
+camino-tempfile = { workspace = true }
 indoc = { workspace = true }
 pretty_assertions = { workspace = true, features = ["std"] }
 
@@ -40,9 +51,11 @@ doctest = false
 [[bin]]
 name = "comfort"
 path = "src/bin/comfort.rs"
+required-features = ["cli"]
 test = false
 
 [[bin]]
 name = "cargo-comfort"
 path = "src/bin/cargo-comfort.rs"
+required-features = ["cli"]
 test = false
