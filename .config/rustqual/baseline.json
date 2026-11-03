@@ -1,13 +1,13 @@
 {
   "version": 2,
-  "quality_score": 0.7254407261697544,
-  "iosp_score": 0.9199416578883397,
+  "quality_score": 0.7255288963785753,
+  "iosp_score": 0.9200841219768665,
   "violations": 988,
-  "total": 16858,
-  "complexity_warnings": 197,
+  "total": 16885,
+  "complexity_warnings": 198,
   "magic_number_warnings": 267,
   "nesting_depth_warnings": 30,
-  "function_length_warnings": 489,
+  "function_length_warnings": 492,
   "unsafe_warnings": 74,
   "error_handling_warnings": 203,
   "duplicate_groups": 0,
@@ -16,7 +16,7 @@
   "fragment_groups": 0,
   "boilerplate_warnings": 314,
   "srp_struct_warnings": 50,
-  "srp_module_warnings": 259,
+  "srp_module_warnings": 260,
   "wildcard_import_warnings": 0,
   "sdp_violations": 0,
   "coupling_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 51,
   "structural_coupling_warnings": 10,
-  "total_findings": 3159,
+  "total_findings": 3164,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -1018,17 +1018,17 @@
     {
       "name": "InstructionsConfig::to_section",
       "file": "crates/jp_config/src/assistant/instructions.rs",
-      "line": 114
+      "line": 115
     },
     {
       "name": "PartialExampleConfig::assign",
       "file": "crates/jp_config/src/assistant/instructions.rs",
-      "line": 180
+      "line": 181
     },
     {
       "name": "PartialContrastConfig::assign",
       "file": "crates/jp_config/src/assistant/instructions.rs",
-      "line": 231
+      "line": 232
     },
     {
       "name": "PartialSectionConfigOrString::assign",
@@ -1483,22 +1483,17 @@
     {
       "name": "KvAssignment::try_some_mergeable_vec",
       "file": "crates/jp_config/src/assignment.rs",
-      "line": 1163
+      "line": 1168
     },
     {
       "name": "KvAssignment::try_vec_of_nested",
       "file": "crates/jp_config/src/assignment.rs",
-      "line": 1231
-    },
-    {
-      "name": "flatten_recursive",
-      "file": "crates/jp_config/src/assignment.rs",
-      "line": 1338
+      "line": 1241
     },
     {
       "name": "missing_key",
       "file": "crates/jp_config/src/assignment.rs",
-      "line": 1600
+      "line": 1565
     },
     {
       "name": "PartialProviderConfig::assign",
@@ -1608,7 +1603,7 @@
     {
       "name": "PartialSummaryConfig::assign",
       "file": "crates/jp_config/src/conversation/compaction.rs",
-      "line": 377
+      "line": 383
     },
     {
       "name": "PartialAccessConfig::assign",
@@ -1643,12 +1638,17 @@
     {
       "name": "PartialAttachmentConfig::assign",
       "file": "crates/jp_config/src/conversation/attachment.rs",
-      "line": 31
+      "line": 32
+    },
+    {
+      "name": "object_form",
+      "file": "crates/jp_config/src/conversation/attachment.rs",
+      "line": 63
     },
     {
       "name": "PartialAttachmentObjectConfig::assign",
       "file": "crates/jp_config/src/conversation/attachment.rs",
-      "line": 127
+      "line": 188
     },
     {
       "name": "Workspace::resolvable_history",
