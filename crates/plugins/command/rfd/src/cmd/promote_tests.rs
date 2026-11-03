@@ -1,3 +1,6 @@
+use comfort::format::FormatOptions;
+use doc::format::Formatting;
+
 use super::*;
 use crate::cmd::tests::{Workspace, ticket};
 
@@ -477,11 +480,20 @@ fn an_rfd_past_accepted_is_not_promoted() {
     );
 }
 
-/// The promoted file is laid out the way CI's markdown check wants it, so the
-/// promotion leaves nothing for `fmt-markdown-ci` to report.
+/// In a workspace that formats RFDs, the promoted file is laid out in its
+/// style, so the promotion leaves nothing for a markdown check to report.
 #[test]
-fn the_promoted_file_is_reflowed() {
-    let workspace = Workspace::new();
+fn the_promoted_file_is_reflowed_when_the_workspace_formats_rfds() {
+    let mut workspace = Workspace::new();
+    workspace.paths.formatting = Formatting::new(
+        FormatOptions {
+            max_width: 80,
+            canonical: true,
+            reference_links: true,
+            prune_reference_links: true,
+        },
+        vec![workspace.paths.rfds.clone()],
+    );
     workspace.rfd(
         "040-x.md",
         &[("Status", "Discussion")],
@@ -496,4 +508,25 @@ fn the_promoted_file_is_reflowed() {
         "{text}"
     );
     assert!(text.ends_with("[RFD 001]: 001-process.md\n"), "{text}");
+}
+
+/// Formatting is off unless the workspace turns it on, so only the status line
+/// changes.
+#[test]
+fn the_promoted_file_is_left_as_written_when_the_workspace_does_not_format() {
+    let workspace = Workspace::new();
+    workspace.rfd(
+        "040-x.md",
+        &[("Status", "Discussion")],
+        "One sentence. Another on the same line.",
+    );
+
+    promote(&workspace.paths, id("040"), None).unwrap();
+
+    let text = workspace.read("docs/rfd/040-x.md");
+    assert!(
+        text.contains("- **Status**: Accepted\n")
+            && text.contains("One sentence. Another on the same line.\n"),
+        "{text}"
+    );
 }

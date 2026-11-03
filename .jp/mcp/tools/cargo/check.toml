@@ -3,7 +3,7 @@ enable = false
 run = "allow"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "Run `cargo check` for the given package, validating if the code compiles. Also reports doc comments that are badly formatted; run `cargo_fmt` to auto-fix them."
+summary = "Run `cargo check` for the given package, validating if the code compiles. Also reports doc comments that are badly formatted, which `cargo_fmt` auto-fixes, and wiki pages a change broke."
 
 examples = """
 ```json
@@ -21,6 +21,10 @@ When no package is specified, all workspace packages will be checked.
 # other's stale artifacts. Requires nightly cargo (rust-lang/cargo#14136);
 # defaults to off so the tool also works on stable Rust.
 options.checksum_freshness = true
+
+# Run `jp wiki check` too: wiki pages link to line ranges and symbols in the
+# source, so a code change can break one.
+options.wiki_check = true
 
 [conversation.tools.cargo_check.style]
 inline_results = "full"

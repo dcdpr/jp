@@ -9,6 +9,7 @@
 use std::{fs, io};
 
 use camino::Utf8PathBuf;
+use doc::references::markdown_files;
 use ticket::{TicketId, store};
 
 use super::{alternatives, capitalized};
@@ -17,7 +18,6 @@ use crate::{
     document::Document,
     id::{self, RfdId},
     paths::{self, Paths},
-    references::markdown_files,
 };
 
 /// What a new draft is made of.
@@ -96,7 +96,7 @@ pub(crate) fn from_ticket(
     }
 
     if let Some((id, seeded)) = find_seeded(paths, ticket)? {
-        let promoted = store::promote(&paths.tickets, ticket, &id.to_string())
+        let promoted = store::promote(&paths.tickets, &paths.formatting, ticket, &id.to_string())
             .map_err(|error| error.to_string())?;
         output.text = format!(
             "{ticket} already seeded {}; linking it.\n{}: promoted to {id}, closed as Done\n",
@@ -118,7 +118,7 @@ pub(crate) fn from_ticket(
     };
     let (id, file) = create(paths, categories, &seeded, Some(&seed))?;
 
-    let promoted = store::promote(&paths.tickets, ticket, &id.to_string())
+    let promoted = store::promote(&paths.tickets, &paths.formatting, ticket, &id.to_string())
         .map_err(|error| error.to_string())?;
     output.text = format!(
         "Created {}\n{}: promoted to {id}, closed as Done\n",
@@ -172,7 +172,7 @@ fn create(
     fs::create_dir_all(&drafts).map_err(|error| format!("{drafts}: {error}"))?;
 
     let file = drafts.join(format!("{id}-{}.md", id::slug(title)));
-    paths::create(&file, &text)?;
+    paths.create(&file, &text)?;
 
     Ok((id, file))
 }

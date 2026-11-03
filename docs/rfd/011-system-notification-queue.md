@@ -654,7 +654,7 @@ Each producer is independent and can be added incrementally.
 - [RFD 028: Structured Inquiry System][RFD 028] — the inquiry system, a
   potential future notification producer.
 
-[Query Stream Pipeline]: ../architecture/query-stream-pipeline.md
+[Query Stream Pipeline]: ../wiki/00dxyb6-query-stream-pipeline-architecture.md
 [RFD 009]: 009-stateful-tool-protocol.md
 [RFD 010]: 010-pty-infrastructure-and-interactive-tool-sdk.md
 [RFD 028]: 028-structured-inquiry-system-for-tool-questions.md

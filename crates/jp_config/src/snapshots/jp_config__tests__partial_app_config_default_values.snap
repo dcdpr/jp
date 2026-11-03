@@ -338,6 +338,14 @@ Ok(
                     extend_across_tool_calls: Some(
                         true,
                     ),
+                    window: PartialReasoningWindowConfig {
+                        rows: Some(
+                            Off,
+                        ),
+                        timer: Some(
+                            true,
+                        ),
+                    },
                 },
                 streaming: PartialStreamingConfig {
                     progress: PartialProgressConfig {

@@ -3,7 +3,7 @@ use camino_tempfile::Utf8TempDir;
 use serde_json::json;
 
 use super::*;
-use crate::site::Owned;
+use crate::{git::Remote, site::Owned};
 
 /// What a plugin built alongside this binary's site files prints.
 fn current(plugin: &str) -> String {
@@ -34,6 +34,7 @@ fn a_site_whose_plugins_agree_has_no_problem() {
     let revisions = Revisions {
         rfd: Some(Ok(current("rfd"))),
         ticket: Some(Ok(current("ticket"))),
+        wiki: Some(Ok(current("wiki"))),
     };
 
     assert_eq!(problems(&[], Utf8Path::new(SNAPSHOT), &revisions), None);
@@ -46,6 +47,7 @@ fn a_changed_snapshot_is_no_problem() {
     let revisions = Revisions {
         rfd: None,
         ticket: None,
+        wiki: None,
     };
 
     assert_eq!(
@@ -59,6 +61,7 @@ fn loaders_from_another_release_are_named() {
     let revisions = Revisions {
         rfd: None,
         ticket: None,
+        wiki: None,
     };
 
     assert_eq!(
@@ -83,6 +86,7 @@ fn a_plugin_built_from_other_site_files_is_named() {
     let revisions = Revisions {
         rfd: Some(Ok(current("rfd"))),
         ticket: Some(Ok("jp ticket 0.1.0 (site ffffffffffffffff)\n".to_owned())),
+        wiki: None,
     };
 
     let problem = problems(&[], Utf8Path::new(SNAPSHOT), &revisions).unwrap();
@@ -91,11 +95,34 @@ fn a_plugin_built_from_other_site_files_is_named() {
         problem,
         format!(
             "`jp ticket` was built with site files ffffffffffffffff, and `jp vite` with {}, so the \
-             site may misread the tickets `jp ticket` writes. Install the three from one JP \
+             site may misread the tickets `jp ticket` writes. Install them all from one JP \
              revision:\n  cargo install --git https://github.com/dcdpr/jp --rev <rev> jp-ticket \
-             jp-rfd jp-vite",
+             jp-rfd jp-wiki jp-vite",
             site::REVISION
         )
+    );
+}
+
+/// A project with a wiki asks `jp wiki` too.
+#[test]
+fn a_wiki_plugin_built_from_other_site_files_is_named() {
+    let revisions = Revisions {
+        rfd: None,
+        ticket: None,
+        wiki: Some(Ok("jp wiki 0.1.0 (site ffffffffffffffff)\n".to_owned())),
+    };
+
+    let problem = problems(&[], Utf8Path::new(SNAPSHOT), &revisions).unwrap();
+
+    assert!(
+        problem.starts_with(
+            "`jp wiki` was built with site files ffffffffffffffff, and `jp vite` with "
+        ),
+        "{problem}"
+    );
+    assert!(
+        problem.contains("so the site may misread the wiki pages `jp wiki` writes."),
+        "{problem}"
     );
 }
 
@@ -106,14 +133,15 @@ fn a_missing_plugin_is_named_with_how_to_install_it() {
     let revisions = Revisions {
         rfd: Some(Err("unknown command `rfd`".to_owned())),
         ticket: None,
+        wiki: None,
     };
 
     assert_eq!(
         problems(&[], Utf8Path::new(SNAPSHOT), &revisions).unwrap(),
         "`jp rfd` didn't answer (unknown command `rfd`). The site shows RFDs, and reads them the \
          way `jp rfd` writes them. Install it from the JP revision `jp-vite` came from, in one \
-         command with the other two:\n  cargo install --git https://github.com/dcdpr/jp --rev \
-         <rev> jp-ticket jp-rfd jp-vite"
+         command with the others:\n  cargo install --git https://github.com/dcdpr/jp --rev \
+         <rev> jp-ticket jp-rfd jp-wiki jp-vite"
     );
 }
 
@@ -122,6 +150,7 @@ fn a_plugin_older_than_the_revision_check_is_named() {
     let revisions = Revisions {
         rfd: None,
         ticket: Some(Ok("jp ticket 0.1.0\n".to_owned())),
+        wiki: None,
     };
 
     assert!(
@@ -136,6 +165,7 @@ fn every_problem_is_reported_at_once() {
     let revisions = Revisions {
         rfd: Some(Err("unknown command `rfd`".to_owned())),
         ticket: Some(Ok("jp ticket 0.1.0\n".to_owned())),
+        wiki: None,
     };
 
     let problem = problems(
@@ -146,6 +176,63 @@ fn every_problem_is_reported_at_once() {
     .unwrap();
 
     assert_eq!(problem.split("\n\n").count(), 3, "{problem}");
+}
+
+#[test]
+fn a_directory_without_any_init_file_has_no_site() {
+    let root = Utf8TempDir::new().unwrap();
+    let site_dir = root.path().join("docs");
+    fs::create_dir_all(&site_dir).unwrap();
+
+    assert_eq!(
+        unready(root.path(), &site_dir).as_deref(),
+        Some("There is no VitePress site in docs: run `jp vite init` to set one up.")
+    );
+}
+
+/// A site that lost its `package.json` is named by the file, not reported as
+/// absent.
+#[test]
+fn a_site_missing_its_package_json_names_it() {
+    let root = Utf8TempDir::new().unwrap();
+    let site_dir = root.path().join("docs");
+    fs::create_dir_all(site_dir.join(".vitepress/theme")).unwrap();
+    fs::write(site_dir.join(".vitepress/config.mts"), "").unwrap();
+    fs::write(site_dir.join(".vitepress/theme/index.js"), "").unwrap();
+    fs::write(site_dir.join("index.md"), "").unwrap();
+
+    assert_eq!(
+        unready(root.path(), &site_dir).as_deref(),
+        Some("docs/package.json is missing, re-run `jp vite init`.")
+    );
+}
+
+#[test]
+fn a_site_missing_several_init_files_names_each() {
+    let root = Utf8TempDir::new().unwrap();
+    let site_dir = root.path().join("docs");
+    fs::create_dir_all(site_dir.join(".vitepress")).unwrap();
+    fs::write(site_dir.join(".vitepress/config.mts"), "").unwrap();
+
+    assert_eq!(
+        unready(root.path(), &site_dir).as_deref(),
+        Some(
+            "docs/package.json, docs/.vitepress/theme/index.js, docs/index.md are missing, re-run \
+             `jp vite init`."
+        )
+    );
+}
+
+/// Only `package.json` is needed to run `vitepress`; the other files are the
+/// project's to remove.
+#[test]
+fn a_site_with_its_package_json_is_ready() {
+    let root = Utf8TempDir::new().unwrap();
+    let site_dir = root.path().join("docs");
+    fs::create_dir_all(&site_dir).unwrap();
+    fs::write(site_dir.join("package.json"), "{}").unwrap();
+
+    assert_eq!(unready(root.path(), &site_dir), None);
 }
 
 #[test]
@@ -166,7 +253,13 @@ fn vitepress_runs_through_the_package_manager_the_project_names() {
 }
 
 fn settings(root: &Utf8TempDir) -> Settings {
-    snapshot(root.path(), &Options::default(), &json!({}), None).unwrap()
+    snapshot(
+        root.path(),
+        &Options::default(),
+        &json!({}),
+        &Remote::default(),
+    )
+    .unwrap()
 }
 
 #[test]
@@ -221,16 +314,28 @@ fn a_reloaded_configuration_gives_new_settings_only_when_they_differ() {
     let current = settings(&root);
 
     assert_eq!(
-        reloaded(root.path(), &Options::default(), &json!({}), None, &current),
+        reloaded(
+            root.path(),
+            &Options::default(),
+            &json!({}),
+            &Remote::default(),
+            &current
+        ),
         Ok(None)
     );
 
     let labelled = json!({ "plugins": { "command": { "ticket": { "options": {
         "labels": { "type": { "description": "The type", "values": ["bug"] } }
     } } } } });
-    let fresh = reloaded(root.path(), &Options::default(), &labelled, None, &current)
-        .unwrap()
-        .unwrap();
+    let fresh = reloaded(
+        root.path(),
+        &Options::default(),
+        &labelled,
+        &Remote::default(),
+        &current,
+    )
+    .unwrap()
+    .unwrap();
     assert_eq!(fresh.ticket.unwrap().labels.keys().collect::<Vec<_>>(), [
         "type"
     ]);
@@ -246,7 +351,13 @@ fn a_reloaded_configuration_keeps_the_source_directory() {
     let moved = json!({ "plugins": { "command": { "vite": { "options": { "dir": "site" } } } } });
 
     assert_eq!(
-        reloaded(root.path(), &Options::default(), &moved, None, &current),
+        reloaded(
+            root.path(),
+            &Options::default(),
+            &moved,
+            &Remote::default(),
+            &current
+        ),
         Ok(None)
     );
 }

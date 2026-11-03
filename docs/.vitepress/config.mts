@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
 import { defineConfig } from 'vitepress'
-import abnfGrammar from './grammars/abnf.tmLanguage.json'
+import abnfGrammar from './grammars/abnf.tmLanguage.json' with { type: 'json' }
 import { withJpVite } from './jp-vite/config.mjs'
 
 // Serve raw `.md` files with an explicit UTF-8 charset on the dev server. The
@@ -35,11 +35,12 @@ const serveMarkdownAsUtf8 = {
 
 // https://vitepress.dev/reference/site-config
 //
-// `withJpVite` adds what the RFD and ticket pages need, from the files
-// `jp vite sync` keeps in `./jp-vite/`: the dev server's board and ticket
-// endpoints, RFD short links, the markdown fixes for inline code, and links to
-// repository files outside the site. Those files are synced from
-// `crates/plugins/command/vite/site/`; change them there.
+// `withJpVite` adds what the RFD, ticket, and wiki pages need, from the files
+// `jp vite sync` keeps in `./jp-vite/`: the dev server's board, ticket, and wiki
+// endpoints, short links and redirects, the wiki's sidebar and embeds, the
+// markdown fixes for inline code, and links to repository files outside the
+// site. Those files are synced from `crates/plugins/command/vite/site/`; change
+// them there.
 export default defineConfig(withJpVite({
     markdown: {
         languages: [abnfGrammar],
@@ -88,6 +89,7 @@ export default defineConfig(withJpVite({
             { text: 'Change Log', link: '/change-log' },
             { text: 'RFDs', link: '/rfd/' },
             { text: 'Tickets', link: '/ticket/' },
+            { text: 'Wiki', link: '/wiki/' },
         ],
 
         sidebar: [

@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 
 import { knownDocuments } from '../references.mjs'
 import { readSettings, workflowDir, workflowPath } from '../settings.mjs'
-import { field } from './metadata.mjs'
+import { readMetadata } from './metadata.mjs'
 import { referencedLabels } from './rfd-shared.mjs'
 
 // Reading the tickets in the ticket directory for the site.
@@ -35,18 +35,20 @@ const DEFAULT_DONE_LIMIT = 8
 // `referencedLabels`.
 export function parseTicket(content, filename, known = new Map()) {
     const id = filename.match(/^([0-9a-z]{7})-/)?.[1] ?? '0000000'
-    const title = content.match(/^# (.+)/m)?.[1]?.trim() ?? filename
+    const meta = readMetadata(content)
 
     return {
         id: `T-${id}`,
         num: id,
-        title,
-        status: field(content, 'Status'),
-        authors: field(content, 'Authors'),
-        date: field(content, 'Date'),
-        labels: readLabels(content),
-        promotedTo: field(content, 'Promoted to'),
-        github: field(content, 'GitHub'),
+        title: meta.title ?? filename,
+        status: meta.get('Status'),
+        authors: meta.get('Authors'),
+        date: meta.get('Date'),
+        labels: readLabels(meta),
+        promotedTo: meta.get('Promoted to'),
+        github: meta.get('GitHub'),
+        // The ticket this one sits under, as `T-0a1b2c3`.
+        parent: meta.get('Parent') ?? null,
         comments: countComments(content),
         // Cross-kind links, resolved in the browser against both sets.
         links: referencedLabels(content, known).filter(label => label !== `T-${id}`),
@@ -54,32 +56,14 @@ export function parseTicket(content, filename, known = new Map()) {
     }
 }
 
-// Every `- **Label**: key=value` line in a ticket's metadata block, in order.
-//
-// The field repeats once per pair rather than joining them onto one line, so no
-// line grows with the number of labels and the block survives `comfort`'s width
-// wrapping. A formatter escapes what would otherwise be emphasis (`jp_config`
-// becomes `jp\_config`), so reading undoes that.
+// A ticket's labels, sorted: the `Label` field repeats once per `key=value`
+// pair, so no line grows with the number of labels.
 //
 // Read as written rather than checked against the vocabulary: a listing that
 // hid a label the file carries would disagree with the file.
 // `findUnknownLabels` below is what catches one the board doesn't define.
-//
-// Line endings are normalized first: the header match needs a literal blank
-// line, and `.` does not consume the `\r` of a CRLF file. Rust's `str::lines()`
-// reads such a file fine, so without this the CLI and the board disagree.
-export function readLabels(content) {
-    const block = content.replace(/\r\n/g, '\n')
-        .match(/^# .+\n\n((?:- \*\*[^*]+\*\*:.*\n)+)/m)?.[1]
-    if (!block) return []
-
-    return block
-        .split('\n')
-        .map(line => line.match(/^- \*\*Label\*\*:\s*(.*)$/i)?.[1])
-        .filter(value => value !== undefined)
-        .map(value => value.replace(/\\([!-/:-@[-`{-~])/g, '$1').trim())
-        .filter(Boolean)
-        .sort()
+function readLabels(meta) {
+    return meta.all('Label').sort()
 }
 
 // The labels the board defines, as a map of key to `{ values, open, retired,
@@ -212,10 +196,46 @@ export function findSharedLabels(tickets, vocabulary) {
     if (shared.length === 0) return null
 
     const report = shared.map(({ name, ids }) => `  ${name}: ${ids.join(', ')}`).join('\n')
-    return `Labels the board lets one ticket carry are on several:\n${report}\n\n` +
+    return `The following label can only be added to a single ticket on the board:\n${report}\n\n` +
         `Keep each on one ticket by taking it off the others ` +
         `(\`jp ticket label rm --id <id> key=value\`), or drop \`unique\` from the key in ` +
         `\`plugins.command.ticket.options.labels\`.`
+}
+
+// Tickets breaking a rule of the parent relation: one naming a parent that
+// isn't a ticket, or one that sits under a parent of its own, and a Done
+// parent with open children.
+//
+// `jp ticket` refuses each as a write; this catches a ticket edited by hand.
+export function findBrokenParents(tickets) {
+    const byId = new Map(tickets.map(ticket => [ticket.id, ticket]))
+    const problems = []
+    for (const ticket of tickets) {
+        if (ticket.parent) {
+            const parent = byId.get(ticket.parent)
+            if (ticket.parent === ticket.id) {
+                problems.push(`  ${ticket.id}: is its own parent`)
+            } else if (!parent) {
+                problems.push(`  ${ticket.id}: names ${ticket.parent} as its parent, which is not a ticket`)
+            } else if (parent.parent) {
+                problems.push(`  ${ticket.id}: sits under ${parent.id}, which sits under ${parent.parent}`)
+            }
+        }
+
+        if (ticket.status === 'Done') {
+            const open = tickets
+                .filter(child => child.parent === ticket.id && child.id !== ticket.id && child.status !== 'Done')
+                .map(child => child.id)
+            if (open.length > 0) problems.push(`  ${ticket.id}: is Done with open children ${open.join(', ')}`)
+        }
+    }
+
+    if (problems.length === 0) return null
+
+    return `Tickets break the rules of the parent relation:\n${problems.join('\n')}\n\n` +
+        `A ticket sits under one that exists and sits under nothing, and a parent closes ` +
+        `once its children have. \`jp ticket check\` says the same, and \`jp ticket edit ` +
+        `--parent\` and \`--status\` fix it.`
 }
 
 // A key's bounds in words, as the count they ask for.
@@ -381,6 +401,8 @@ export function loadTickets(settings = readSettings()) {
     if (miscounted) throw new Error(miscounted)
     const shared = findSharedLabels(tickets, vocabulary)
     if (shared) throw new Error(shared)
+    const broken = findBrokenParents(tickets)
+    if (broken) throw new Error(broken)
 
     return tickets
 }

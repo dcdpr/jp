@@ -15,6 +15,7 @@
 use std::collections::BTreeSet;
 
 use camino::Utf8Path;
+use doc::references;
 
 use super::{is_draft, parse};
 use crate::{
@@ -22,7 +23,7 @@ use crate::{
     document::{Document, NoMetadata},
     id::RfdId,
     paths::{self, Paths},
-    priority, references,
+    priority,
 };
 
 /// A dependency between two RFDs.
@@ -148,7 +149,7 @@ fn link(paths: &Paths, relation: Relation, source: RfdId, target: RfdId) -> Resu
     }
 
     if wrote_forward {
-        paths::write(&source_file, &source_document.render())?;
+        paths.write(&source_file, &source_document.render())?;
         output.text.push_str(&format!(
             "{}: {forward}: RFD {target}\n",
             paths.show(&source_file)
@@ -162,7 +163,7 @@ fn link(paths: &Paths, relation: Relation, source: RfdId, target: RfdId) -> Resu
 
     match target_document {
         Some((document, true)) => {
-            paths::write(&target_file, &document.render())?;
+            paths.write(&target_file, &document.render())?;
             output.text.push_str(&format!(
                 "{}: {inverse}: RFD {source}\n",
                 paths.show(&target_file)
@@ -269,8 +270,8 @@ pub(crate) fn supersede(paths: &Paths, old: RfdId, by: RfdId) -> Result<Output, 
         )
         .map_err(|NoMetadata| no_metadata(paths, &new_file))?;
 
-    paths::write(&old_file, &old_document.render())?;
-    paths::write(&new_file, &new_document.render())?;
+    paths.write(&old_file, &old_document.render())?;
+    paths.write(&new_file, &new_document.render())?;
 
     // The replacement carries the work now; whether it belongs on the board is
     // the call of whoever ranks it.

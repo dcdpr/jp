@@ -1935,9 +1935,9 @@ ticket-import NNN *ARGS: _install-ticket
 # Locally develop the documentation, with hot-reloading.
 #
 # Runs through `jp vite serve`, which keeps the site's settings in step with the
-# configuration and is the only dev server the RFD and ticket pages accept
-# edits from. It checks `jp ticket` and `jp rfd` were built from the same site
-# files as `jp vite`, so all three are installed first.
+# configuration and is the only dev server the RFD, ticket, and wiki pages
+# accept edits from. It checks `jp ticket`, `jp rfd`, and `jp wiki` were built
+# from the same site files as `jp vite`, so all four are installed first.
 [group('docs')]
 develop-docs *FLAGS="--host --allowedHosts --open": _docs-install _install-jp _install-site-plugins
     jp vite serve -- {{FLAGS}}
@@ -2182,8 +2182,8 @@ install-plugin PLUGIN:
 # Run all formatting-related tasks
 fmt: (_rustup_component "rustfmt") _install-comfort
     cargo fmt --all
-    comfort --workspace --language rust --format-markdown --reference-links --prune-reference-links
-    comfort --workspace --language markdown --format-markdown --reference-links --prune-reference-links
+    comfort --workspace --language rust
+    comfort --workspace --language markdown
 
 # Run all ci tasks.
 [group('ci')]
@@ -2342,12 +2342,12 @@ fmt-ci: (_rustup_component "rustfmt") _install_ci_matchers
 # Check Rust doc-comment formatting on CI.
 [group('ci')]
 fmt-comments-ci: _install-comfort _install_ci_matchers
-    comfort --check --workspace --language rust --format-markdown --reference-links --prune-reference-links
+    comfort --check --workspace --language rust
 
 # Check standalone Markdown formatting on CI.
 [group('ci')]
 fmt-markdown-ci: _install-comfort _install_ci_matchers
-    comfort --check --workspace --language markdown --format-markdown --reference-links --prune-reference-links
+    comfort --check --workspace --language markdown
 
 # Type-check the web UI's scripts on CI.
 #
@@ -2501,16 +2501,30 @@ _install-vite *args:
     fi
     cargo install {{quiet_flag}} --locked --path crates/plugins/command/vite --debug {{args}}
 
-# Install the three plugins the site needs, from this checkout.
+# Build and install the `jp-wiki` command plugin that backs `jp wiki`.
 #
-# `jp vite serve` refuses to trust the RFD and ticket pages unless `jp ticket`
-# and `jp rfd` were built from the same site files as `jp vite`, so the three
-# are rebuilt together.
+# The plugin is not in the published registry, so `jp` picks it up from `$PATH`
+# (`plugins.command.wiki.run` in `.jp/config.toml` approves it).
+_install-wiki *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -z "${JP_INSTALL:-}" ] && command -v jp-wiki >/dev/null 2>&1; then
+        echo "Skipping jp-wiki rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
+        exit 0
+    fi
+    cargo install {{quiet_flag}} --locked --path crates/plugins/command/wiki --debug {{args}}
+
+# Install the four plugins the site needs, from this checkout.
+#
+# `jp vite serve` refuses to trust the RFD, ticket, and wiki pages unless `jp
+# ticket`, `jp rfd`, and `jp wiki` were built from the same site files as `jp
+# vite`, so the four are rebuilt together.
 _install-site-plugins:
     #!/usr/bin/env sh
     set -eu
     JP_INSTALL=1 just _install-ticket
     JP_INSTALL=1 just _install-rfd
+    JP_INSTALL=1 just _install-wiki
     JP_INSTALL=1 just _install-vite
 
 # Build the `jp-serve-web` command plugin into JP's plugin directory.

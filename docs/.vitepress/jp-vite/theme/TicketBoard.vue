@@ -3,8 +3,13 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { data } from '../loaders/tickets.data.js'
 import { createSortable, isDev, loadBoard, saveBoard } from './board.mjs'
-import { describeLabelFilter, matchesLabelFilter, parseLabelFilter } from './label-filter.mjs'
+import DocLabelFilter from './DocLabelFilter.vue'
+import DocLabels from './DocLabels.vue'
+import { matchesLabelFilter } from './label-filter.mjs'
 import { problem } from './problem.mjs'
+import { childrenOf, inGroup, progress } from './ticket-tree.mjs'
+import { useLabelFilter } from './use-label-filter.mjs'
+import { useParentFilter } from './use-parent-filter.mjs'
 
 // The ticket board, which a page renders with `<TicketBoard />`.
 //
@@ -13,7 +18,13 @@ import { problem } from './problem.mjs'
 //
 // `?label=` and `?any-label=` narrow the board to the tickets carrying those
 // labels (see `label-filter.mjs`), and a narrowed board shows the whole of
-// Done.
+// Done. Clicking a card's label narrows the board to it, and clicking it again
+// takes it back out; see `DocLabels.vue`.
+//
+// `?under=` narrows the board to one parent and the tickets filed under it
+// (see `ticket-tree.mjs`), alongside any label filter. A child's card names its
+// parent, and a parent's card counts its children done; clicking either
+// narrows the board to the group, and clicking it again widens it back.
 
 const ENDPOINT = '/__ticket-board'
 const LABELS = { todo: 'Todo', in_progress: 'In Progress', done: 'Done' }
@@ -33,13 +44,32 @@ let noticeTimer = null
 
 // The page's label filter. The server renders the whole board, so the filter
 // applies once the page has mounted in the browser.
-const filter = ref(null)
+const { filter, toggle, clear } = useLabelFilter()
+const { parent, toggle: toggleParent, clear: clearParent } = useParentFilter()
 
-// The columns as the board shows them: the tickets the filter lets through,
+// Every ticket on the board, for finding a parent's children and title.
+const everyTicket = computed(() => columns.value.flatMap(column => column.tickets))
+
+// How many of each parent's children are done, by the parent's id.
+const families = computed(() => {
+    const counted = new Map()
+    for (const ticket of everyTicket.value) {
+        const children = childrenOf(everyTicket.value, ticket.id)
+        if (children.length > 0) counted.set(ticket.id, progress(children))
+    }
+    return counted
+})
+
+// The parent the board is narrowed to, as a ticket, when it is one.
+const parentTicket = computed(() => everyTicket.value.find(ticket => ticket.id === parent.value) ?? null)
+
+// The columns as the board shows them: the tickets the filters let through,
 // or, with no filter, Done cut to its limit. `total` counts what passed.
 const shown = computed(() => columns.value.map(column => {
-    const passing = column.tickets.filter(ticket => matchesLabelFilter(ticket.labels ?? [], filter.value))
-    const cut = !filter.value && column.key === 'done' ? passing.slice(0, doneLimit.value) : passing
+    const passing = column.tickets.filter(ticket =>
+        matchesLabelFilter(ticket.labels ?? [], filter.value) && inGroup(ticket, parent.value))
+    const narrowed = filter.value || parent.value
+    const cut = !narrowed && column.key === 'done' ? passing.slice(0, doneLimit.value) : passing
 
     return { ...column, total: passing.length, tickets: cut }
 }))
@@ -113,7 +143,6 @@ async function onDrop(event) {
 }
 
 onMounted(async () => {
-    filter.value = parseLabelFilter(window.location.search)
     if (!isDev) return
 
     // The board file carries order only; statuses live in the ticket files. A
@@ -128,8 +157,9 @@ onMounted(async () => {
         group: GROUP,
         dataIdAttr: 'data-id',
         // The title is most of the card, so it has to be draggable. A click
-        // without movement still follows the link.
-        filter: 'input, label, button',
+        // without movement still follows the link. A label is for filtering,
+        // so it starts no drag.
+        filter: 'input, label, button, .doc-labels',
         onEnd: onDrop,
     })))
 })
@@ -142,9 +172,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-<p v-if="!problem && filter" class="ticket-board-filter">
-    {{ describeLabelFilter(filter) }}.
-    <a href="?">Show every ticket</a>
+<DocLabelFilter v-if="!problem" :filter="filter" noun="Tickets" :clear="clear" />
+<p v-if="!problem && parent" class="doc-label-filter">
+    {{ parent }}{{ parentTicket ? `, ${parentTicket.title},` : '' }} and the tickets under it.
+    <button class="doc-label-filter-clear" @click="clearParent()">Show every group</button>
 </p>
 <div v-if="!problem" class="ticket-board">
     <section v-for="(column, index) in shown" :key="column.key" class="ticket-column">
@@ -162,17 +193,31 @@ onBeforeUnmount(() => {
             >
                 <div class="ticket-card-head">
                     <span class="ticket-id">{{ ticket.id }}</span>
+                    <button
+                        v-if="ticket.parent"
+                        class="ticket-group"
+                        :class="{ 'is-active': parent === ticket.parent }"
+                        :title="`Show only ${ticket.parent} and the tickets under it`"
+                        @click="toggleParent(ticket.parent)"
+                    >under {{ ticket.parent }}</button>
+                    <button
+                        v-if="families.has(ticket.id)"
+                        class="ticket-group"
+                        :class="{ 'is-active': parent === ticket.id }"
+                        :title="`Show only ${ticket.id} and the tickets under it`"
+                        @click="toggleParent(ticket.id)"
+                    >{{ families.get(ticket.id).done }}/{{ families.get(ticket.id).total }} done</button>
                 </div>
                 <a :href="ticket.path" class="ticket-card-title">{{ ticket.title }}</a>
-                <div class="ticket-card-foot">
-                    <span
-                        v-for="label in ticket.labels ?? []"
-                        :key="label"
-                        class="ticket-badge doc-badge--label"
-                    >{{ label }}</span>
-                    <span v-if="ticket.comments" class="ticket-meta">
-                        {{ ticket.comments }} {{ ticket.comments === 1 ? 'comment' : 'comments' }}
-                    </span>
+                <DocLabels
+                    v-if="ticket.labels?.length"
+                    :labels="ticket.labels"
+                    kind="ticket"
+                    :filter="filter"
+                    :pick="toggle"
+                />
+                <div v-if="ticket.comments" class="ticket-meta">
+                    {{ ticket.comments }} {{ ticket.comments === 1 ? 'comment' : 'comments' }}
                 </div>
             </article>
         </div>
@@ -190,10 +235,6 @@ onBeforeUnmount(() => {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 1rem;
     margin-top: 2rem;
-}
-.ticket-board-filter {
-    font-size: 0.85rem;
-    color: var(--vp-c-text-2);
 }
 .ticket-column {
     min-width: 0;
@@ -238,20 +279,29 @@ onBeforeUnmount(() => {
     font-size: 0.75rem;
     color: var(--vp-c-text-3);
 }
+.ticket-group {
+    padding: 0 0.35rem;
+    border: 1px solid var(--vp-c-divider);
+    border-radius: 4px;
+    background: transparent;
+    font-family: var(--vp-font-family-mono);
+    font-size: 0.7rem;
+    color: var(--vp-c-text-2);
+    cursor: pointer;
+}
+.ticket-group:hover,
+.ticket-group.is-active {
+    border-color: var(--vp-c-brand-1);
+    color: var(--vp-c-brand-1);
+}
 .ticket-card-title {
     display: block;
     font-size: 0.9rem;
     line-height: 1.35;
     font-weight: 500;
 }
-.ticket-card-foot {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.4rem;
-    margin-top: 0.35rem;
-}
 .ticket-meta {
+    margin-top: 0.25rem;
     font-size: 0.75rem;
     color: var(--vp-c-text-3);
 }
@@ -259,16 +309,6 @@ onBeforeUnmount(() => {
     font-size: 0.8rem;
     color: var(--vp-c-text-3);
     margin: 0.25rem 0 0 !important;
-}
-.ticket-badge {
-    display: inline-block;
-    padding: 0.1rem 0.45rem;
-    border-radius: 10px;
-    font-size: 0.7rem;
-    line-height: 1.5;
-    white-space: nowrap;
-    background: var(--vp-c-default-soft);
-    color: var(--vp-c-text-2);
 }
 @media (max-width: 767px) {
     .ticket-board {

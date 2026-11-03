@@ -1,0 +1,4 @@
+max_width = 80
+format_markdown = true
+reference_links = true
+prune_reference_links = true

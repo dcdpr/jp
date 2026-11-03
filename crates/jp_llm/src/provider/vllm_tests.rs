@@ -64,7 +64,7 @@ fn create_request_plain_message() {
             "model": "Qwen/Qwen3-8B",
             "messages": [{ "role": "user", "content": "Hello" }],
             "stream": true,
-            "chat_template_kwargs": { "enable_thinking": false },
+            "chat_template_kwargs": { "enable_thinking": false, "thinking": false },
         })
     );
 }
@@ -119,7 +119,7 @@ fn create_request_forwards_sampling_parameters() {
             "model": "Qwen/Qwen3-8B",
             "messages": [{ "role": "user", "content": "Hello" }],
             "stream": true,
-            "chat_template_kwargs": { "enable_thinking": false },
+            "chat_template_kwargs": { "enable_thinking": false, "thinking": false },
             "temperature": 0.5,
             "top_p": 0.75,
             "top_k": 20,
@@ -139,7 +139,7 @@ fn create_request_asks_the_template_to_think_when_reasoning_is_on() {
 
     assert_eq!(
         body["chat_template_kwargs"],
-        json!({ "enable_thinking": true })
+        json!({ "enable_thinking": true, "thinking": true })
     );
     assert!(body.get("reasoning_format").is_none());
 }

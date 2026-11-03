@@ -3,9 +3,71 @@
 
 use std::path::Path;
 
+use clap::Parser;
 use pretty_assertions::assert_eq;
 
-use super::{Format, Language};
+use super::{Cli, Format, Language};
+use crate::config::Config;
+
+fn style(args: &[&str]) -> Config {
+    Cli::parse_from(std::iter::once("comfort").chain(args.iter().copied())).style()
+}
+
+#[test]
+fn no_style_flags_set_nothing() {
+    // Every setting is left to `.comfort.toml`, so the file isn't overridden
+    // by defaults the user never typed.
+    assert_eq!(style(&[]), Config::default());
+}
+
+#[test]
+fn style_flags_set_their_settings() {
+    assert_eq!(
+        style(&[
+            "--max-width",
+            "72",
+            "--format-markdown",
+            "--reference-links",
+            "--prune-reference-links",
+        ]),
+        Config {
+            max_width: Some(72),
+            format_markdown: Some(true),
+            reference_links: Some(true),
+            prune_reference_links: Some(true),
+        }
+    );
+}
+
+#[test]
+fn no_flags_turn_their_settings_off() {
+    assert_eq!(
+        style(&[
+            "--no-format-markdown",
+            "--no-reference-links",
+            "--no-prune-reference-links",
+        ]),
+        Config {
+            max_width: None,
+            format_markdown: Some(false),
+            reference_links: Some(false),
+            prune_reference_links: Some(false),
+        }
+    );
+}
+
+#[test]
+fn the_last_of_a_flag_and_its_negation_wins() {
+    let config = style(&[
+        "--format-markdown",
+        "--no-format-markdown",
+        "--no-reference-links",
+        "--reference-links",
+    ]);
+
+    assert_eq!(config.format_markdown, Some(false));
+    assert_eq!(config.reference_links, Some(true));
+}
 
 #[test]
 fn auto_with_rust_extension_resolves_to_rust() {

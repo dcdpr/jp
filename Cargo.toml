@@ -42,12 +42,14 @@ jp_test = { path = "crates/jp_test" }
 jp_tool = { path = "crates/jp_tool" }
 jp_workspace = { path = "crates/jp_workspace" }
 
-comfort = { path = "crates/contrib/comfort" }
+comfort = { path = "crates/contrib/comfort", default-features = false }
 async-anthropic = { path = "crates/contrib/async-anthropic" }
+doc = { path = "crates/internal/doc" }
 grizzly = { path = "crates/contrib/grizzly", default-features = false }
 schematic = { path = "crates/contrib/schematic", default-features = false }
 site-revision = { path = "crates/internal/site-revision" }
 ticket = { path = "crates/internal/ticket" }
+tool-definitions = { path = "crates/internal/tool-definitions" }
 xct2cli = { path = "crates/contrib/xct2cli" }
 
 addr2line = { version = "0.27" }
@@ -168,6 +170,7 @@ tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
 two-face = { version = "0.5", default-features = false }
 typetag = { version = "0.2", default-features = false }
+unicode-normalization = { version = "0.1", default-features = false }
 unicode-segmentation = { version = "1", default-features = false }
 unicode-width = { version = "0.2", default-features = false }
 url = { version = "2", default-features = false }

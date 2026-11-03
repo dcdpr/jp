@@ -177,7 +177,7 @@ impl<'a> Place<'a> {
 
         Ok(Self {
             name: &call.name,
-            paths: Paths::new(root, &rfds, &tickets),
+            paths: Paths::new(root, &rfds, &tickets).formatted(&init.config)?,
             rfds,
             tickets,
             links: options.links.clone(),

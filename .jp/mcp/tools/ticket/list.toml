@@ -10,8 +10,9 @@ first. The first Todo ticket is the next one to work on.
 
 Use it to find what is open before filing something new, and to resolve a title
 you half-remember into an id for `ticket_show`. Filter by status to read one
-column of the board, by label to read one area of the system, or by `query` to
-find the tickets that mention something.
+column of the board, by label to read one area of the system, by `query` to
+find the tickets that mention something, or by `under` to read the children of
+one parent.
 
 A long listing comes a page at a time: the result ends with the page it shows,
 how many there are, and the `page` to ask for next.
@@ -55,6 +56,11 @@ Every ticket carrying any `package` label:
 ```json
 {"labels": ["package"]}
 ```
+
+The open tickets filed under one parent:
+```json
+{"under": "T-02wt0kx", "status": "todo"}
+```
 """
 
 [conversation.tools.ticket_list.style]
@@ -72,6 +78,11 @@ summary = "Only tickets at this status."
 type = "string"
 required = false
 summary = "Only tickets whose title, description, or comments contain this text, ignoring case."
+
+[conversation.tools.ticket_list.parameters.under]
+type = "string"
+required = false
+summary = "Only the tickets filed under this one, such as `T-02wt0kx`."
 
 [conversation.tools.ticket_list.parameters.page]
 type = "integer"

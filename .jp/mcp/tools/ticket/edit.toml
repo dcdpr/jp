@@ -1,7 +1,7 @@
 [conversation.tools.ticket_edit]
 enable = false
 source = "plugin.command.ticket.edit"
-summary = "Change a ticket's title, description, status, or labels."
+summary = "Change a ticket's title, description, status, labels, or parent."
 description = """
 Change any part of a ticket in one call: pass what changes, and the rest stays
 as it is.
@@ -11,7 +11,10 @@ as it is.
   changed. Read it first with `ticket_show`, passing `description: true`.
 - `status` moves it between `todo`, `in progress`, and `done`; `done` closes
   it. Move a ticket to `in progress` when work on it starts, and back to `todo`
-  when it stops before it is finished.
+  when it stops before it is finished. A parent closes only once its children
+  are all `done`.
+- `parent` files it under another ticket, or `none` takes it out from under
+  one.
 - `remove_labels` takes labels off: `key=value` that label, a bare `key`
   every label under it. `add_labels` then puts labels on. The labels neither
   names stay, its `tracking-rfd` and `relevant-rfd` links among them, so there
@@ -42,7 +45,17 @@ Change its `type`, which a ticket carries exactly one of:
 ```json
 {"id": "T-02wt0kx", "remove_labels": ["type"], "add_labels": ["type=bug"]}
 ```
+
+File it under another ticket:
+```json
+{"id": "T-02wt0kx", "parent": "T-02wt0m3"}
+```
 """
+
+# Several tickets changed in one call, such as closing a parent's children, are
+# changed one at a time in the order written: two edits to one file must not
+# race, and a parent closed after its children has to see them closed.
+fan_out = { concurrency = 1 }
 
 [conversation.tools.ticket_edit.style]
 parameters = "function_call"
@@ -69,6 +82,11 @@ type = "string"
 required = false
 enum = ["todo", "in progress", "done"]
 summary = "The column to move it to; `done` closes it."
+
+[conversation.tools.ticket_edit.parameters.parent]
+type = "string"
+required = false
+summary = "The ticket to file it under, such as `T-02wt0kx`, or `none` to take it out from under its parent."
 
 [conversation.tools.ticket_edit.parameters.add_labels]
 type = "array"

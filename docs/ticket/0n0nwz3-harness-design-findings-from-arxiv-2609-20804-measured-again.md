@@ -1,12 +1,13 @@
 # Harness-design findings from arXiv 2609.20804, measured against JP
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-09-18
 - **Label**: domain=conversation
 - **Label**: domain=llm
 - **Label**: domain=tooling
 - **Label**: type=task
+- **Promoted to**: W-00e1dvx
 
 "An Empirical Study of Harness Design for Coding Agents"
 (<https://arxiv.org/abs/2609.20804>, Fan et al., September 2026) ablates three

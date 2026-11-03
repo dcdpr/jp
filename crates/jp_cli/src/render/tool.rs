@@ -14,7 +14,7 @@ use std::{
 use crossterm::style::Stylize as _;
 use jp_config::{
     conversation::tool::style::{InlineResults, LinkStyle, ParametersStyle, TruncateLines},
-    style::{StyleConfig, stderr_rows::StderrRows},
+    style::{StyleConfig, window_rows::WindowRows},
 };
 use jp_conversation::event::ToolCallResponse;
 use jp_md::format::Formatter;
@@ -22,16 +22,16 @@ use jp_printer::{ErrChannel, LineSink, OutputLines, RegionStyle, StatusRegion};
 use jp_term::{background::DefaultBackground, osc::hyperlink, shade::ShadedWriter};
 use serde_json::{Map, Value};
 
-/// Map the `stderr_rows` config key onto the printer's window budget.
+/// Map a window size from the config onto the printer's window budget.
 ///
 /// The two enums are deliberately separate: `jp_printer` knows nothing about
-/// JP's config tree, and the config key is a user-facing contract that outlives
-/// any one renderer.
-pub(crate) const fn output_lines(stderr_rows: StderrRows) -> OutputLines {
-    match stderr_rows {
-        StderrRows::Off => OutputLines::Off,
-        StderrRows::Auto => OutputLines::Auto,
-        StderrRows::Fixed(count) => OutputLines::Rows(count.rows),
+/// JP's config tree, and the config keys are a user-facing contract that
+/// outlives any one renderer.
+pub(crate) const fn output_lines(rows: WindowRows) -> OutputLines {
+    match rows {
+        WindowRows::Off => OutputLines::Off,
+        WindowRows::Auto => OutputLines::Auto,
+        WindowRows::Fixed(count) => OutputLines::Rows(count.rows),
     }
 }
 

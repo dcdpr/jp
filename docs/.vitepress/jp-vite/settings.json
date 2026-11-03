@@ -1,7 +1,8 @@
 {
-  "revision": "37b0570f960bd945",
+  "revision": "c860ec5ba23d7ceb",
   "site": "docs",
   "repository": "https://github.com/dcdpr/jp",
+  "branch": "main",
   "rfd": {
     "dir": "docs/rfd",
     "route": "rfd",
@@ -120,5 +121,10 @@
         "max": 1
       }
     }
+  },
+  "wiki": {
+    "dir": "docs/wiki",
+    "route": "wiki",
+    "relevantKey": "relevant-rfd"
   }
 }
