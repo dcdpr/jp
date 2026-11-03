@@ -7,7 +7,7 @@ use crate::{
     delta::{PartialConfigDelta, delta_opt},
     fill::FillDefaults,
     partial::{ToPartial, partial_opt},
-    style::stderr_rows::StderrRows,
+    style::window_rows::WindowRows,
 };
 
 /// Progress indicator shown while MCP servers are starting.
@@ -65,7 +65,7 @@ pub struct McpStartupConfig {
     /// The rows are the child's own output and nothing inspects them for
     /// secrets.
     #[setting(default = "auto")]
-    pub stderr_rows: StderrRows,
+    pub stderr_rows: WindowRows,
 }
 
 impl AssignKeyValue for PartialMcpStartupConfig {

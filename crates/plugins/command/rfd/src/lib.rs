@@ -539,13 +539,15 @@ fn handle_command<R: BufRead, W: Write>(
         Ok(options) => options,
         Err(message) => return send_exit(session.stdout, 1, Some(&message)),
     };
-    let tickets = match ticket_dir(&init.config) {
-        Ok(tickets) => tickets,
+    let paths = match ticket_dir(&init.config).and_then(|tickets| {
+        Paths::new(&init.workspace.root, &options.dir, &tickets).formatted(&init.config)
+    }) {
+        Ok(paths) => paths,
         Err(message) => return send_exit(session.stdout, 1, Some(&message)),
     };
 
     let ctx = Context {
-        paths: Paths::new(&init.workspace.root, &options.dir, &tickets),
+        paths,
         config: &init.config,
         options: &options,
         format: init.output_format,

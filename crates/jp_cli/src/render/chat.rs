@@ -15,6 +15,13 @@
 //! └────────┘               └───────────┘            └──────────┘
 //! ```
 //!
+//! Model output is filtered as `style.sanitize` asks before it reaches the
+//! buffer, and a user message before it is formatted.
+//! The formatter filters text it decodes from character references (`&#27;`)
+//! again.
+//! A user message keeps its styling and ends with a reset, so that styling
+//! stops where the message does.
+//!
 //! # Display Modes
 //!
 //! Reasoning content can be displayed in different modes:
@@ -27,8 +34,15 @@
 //! | `Progress`    | Show "reasoning..." then dots            |
 //! | `Static`      | Show "reasoning..." once                 |
 //! | `Timer`       | Show a running timer, erase when done    |
+//!
+//! With `style.reasoning.window` set, `Full` and `Truncate(N)` render into a
+//! status-region window at the bottom of the terminal instead, erased when the
+//! reasoning block ends.
+//! Where no window fits, they render as the table says.
 
 use std::{
+    fmt::Write as _,
+    mem,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -47,9 +61,18 @@ use jp_md::{
     format::{CodeBlockState, Formatter, TerminalOptions, render_separator},
     theme,
 };
-use jp_printer::{OutputWidth, PrintableExt as _, Printer, RegionStyle, StatusRegion};
-use jp_term::background::{BackgroundFill, DefaultBackground};
+use jp_printer::{
+    LineSink, OutputLines, OutputWidth, PrintableExt as _, Printer, RegionStyle, StatusRegion,
+};
+use jp_term::{
+    ansi::RESET,
+    background::{BackgroundFill, DefaultBackground},
+    sanitize::{ContentClass, ContentWriter, SanitizeMode, sanitize_str},
+};
 use tracing::warn;
+
+use super::tool::output_lines;
+use crate::format::sanitize_mode;
 
 /// The kind of content last pushed into the renderer.
 ///
@@ -96,10 +119,70 @@ pub(crate) enum RenderFlow {
     Replay,
 }
 
+/// How long reasoning chrome stays off screen after it is claimed.
+///
+/// Reasoning shorter than this never flashes a status row or a window, and
+/// longer reasoning appears with its window rows already buffered.
+const REASONING_REGION_DELAY: Duration = Duration::from_millis(300);
+
+/// Where the reasoning block being rendered goes.
+///
+/// Decided on the block's first chunk and held until the block ends, so a
+/// terminal resized part-way through cannot move the rest of the block
+/// somewhere else.
+enum ReasoningBlock {
+    /// Into the transcript, as `style.reasoning.display` says.
+    Inline,
+
+    /// Into the reasoning window, which is erased when the block ends.
+    Window(WindowBlock),
+}
+
+/// A reasoning block rendering into the status-region window.
+struct WindowBlock {
+    /// Pushes the block's rows into the window.
+    ///
+    /// `None` once the window is released, after which whatever the block still
+    /// renders is discarded.
+    sink: Option<LineSink>,
+
+    /// Output after the last newline, held until a later emission completes its
+    /// row.
+    held: String,
+
+    /// The content kind before the block opened, restored when it ends.
+    ///
+    /// The window leaves nothing in the transcript, so the content after it is
+    /// spaced from the content before it.
+    prior_kind: Option<ContentKind>,
+}
+
+impl WindowBlock {
+    /// Push every row `output` completes, holding back a trailing partial one.
+    fn push(&mut self, output: &str) {
+        let Some(sink) = &self.sink else {
+            return;
+        };
+
+        self.held.push_str(output);
+        let Some(end) = self.held.rfind('\n') else {
+            return;
+        };
+
+        let rest = self.held.split_off(end + 1);
+        let rows = mem::replace(&mut self.held, rest);
+        for row in rows[..end].split('\n') {
+            sink.push(row);
+        }
+    }
+}
+
 /// Renders chat events to the terminal.
 ///
 /// Handles user messages, assistant reasoning, and assistant message content,
 /// applying the configured display mode for reasoning.
+/// Reasoning goes into a status-region window instead when
+/// `style.reasoning.window` asks for one and the terminal has room for it.
 /// Tracks content-kind transitions to insert appropriate spacing between
 /// different content types (e.g. blank lines between tool calls and message
 /// text).
@@ -123,15 +206,27 @@ pub struct ChatRenderer {
     /// to match).
     /// Cleared at role headers and user requests, since a reasoning region
     /// never crosses a turn boundary or survives a user message.
-    /// Only the persistent display paths set it; ephemeral reasoning chrome
-    /// (`progress`/`static`/`timer`) never reaches them, so it never marks a
-    /// non-shaded region as continuable.
+    /// Only reasoning that stays in the transcript sets it; ephemeral reasoning
+    /// chrome (`progress`/`static`/`timer`, and reasoning in the window) never
+    /// does, so it never marks a non-shaded region as continuable.
     last_response_kind: Option<ContentKind>,
     reasoning_chars_count: usize,
     /// State for the current streaming fenced code block, if any.
     code_block: Option<CodeBlockState>,
-    /// Active reasoning timer region, used by `Timer` display mode.
-    reasoning_timer: StatusRegion,
+    /// Status region claimed for reasoning: the `timer` display's row, or the
+    /// reasoning window.
+    reasoning_region: StatusRegion,
+    /// The reasoning block being rendered and where it goes; `None` between
+    /// blocks.
+    reasoning_block: Option<ReasoningBlock>,
+    /// Lays out reasoning placed in the window, which wraps to the chrome
+    /// channel's width rather than stdout's.
+    ///
+    /// `None` when this renderer never opens a window: in a replay, or with
+    /// `style.reasoning.window.rows` off.
+    window_formatter: Option<Formatter>,
+    /// How long reasoning chrome stays off screen after it is claimed.
+    region_delay: Duration,
     /// The blank-line separator owed before the next rendered content, if any.
     ///
     /// Raised by a rendered reasoning block and by the tool-call boundary a
@@ -161,17 +256,35 @@ pub struct ChatRenderer {
     /// formatter failed, leaves nothing to be spaced from.
     /// `None` until wired, in which case every region counts as drawn.
     tool_drawn: Option<Arc<AtomicBool>>,
+    /// How `style.sanitize` has untrusted content shown.
+    sanitize: SanitizeMode,
+    /// Filters reasoning text before it reaches the markdown buffer.
+    ///
+    /// Reasoning and message text interleave within a turn, so each has a
+    /// filter of its own: a sequence one of them leaves unfinished never joins
+    /// the other's text.
+    reasoning_filter: ContentWriter<String>,
+    /// Filters message text before it reaches the markdown buffer.
+    message_filter: ContentWriter<String>,
 }
 
 impl ChatRenderer {
     pub fn new(printer: Arc<Printer>, config: StyleConfig, flow: RenderFlow) -> Self {
         let pretty = printer.pretty_printing_enabled();
         let formatter = formatter_from_config(&config, pretty, printer.output_width().columns());
+        let window_formatter = (flow == RenderFlow::Live
+            && config.reasoning.window.rows.is_enabled())
+        .then(|| formatter_from_config(&config, pretty, printer.chrome_columns()));
         // Configure the printer's bounded-latency controller from the
         // typewriter style. `max_latency = 0` (the default) leaves the
         // controller disabled, preserving the original static per-character
         // delay behavior.
         printer.set_max_latency(config.typewriter.max_latency.into());
+        // A turn renders under its own config, which can ask for a different
+        // `style.sanitize` than the one the run started with; the printer's
+        // floor follows it, or `off` could not show content as written.
+        let sanitize = sanitize_mode(config.sanitize);
+        printer.set_sanitize_mode(sanitize);
         Self {
             buffer: Buffer::new(),
             formatter,
@@ -182,12 +295,18 @@ impl ChatRenderer {
             last_response_kind: None,
             reasoning_chars_count: 0,
             code_block: None,
-            reasoning_timer: StatusRegion::inert(),
+            reasoning_region: StatusRegion::inert(),
+            reasoning_block: None,
+            window_formatter,
+            region_delay: REASONING_REGION_DELAY,
             pending_separator: None,
             fixups: Fixups::llm_quirks(),
             para_source: String::new(),
             para_emitted: 0,
             tool_drawn: None,
+            sanitize,
+            reasoning_filter: model_output_filter(sanitize),
+            message_filter: model_output_filter(sanitize),
         }
     }
 
@@ -218,10 +337,19 @@ impl ChatRenderer {
         self.flush_on_transition(ContentKind::Message);
         self.flush();
 
-        let formatted = self
+        let source = sanitize_str(content, ContentClass::UserMessage, self.sanitize);
+        let source = source.trim_end();
+        let options = TerminalOptions {
+            // The message is one block, with no separator after it.
+            suppress_trailing_separator: true,
+            content: Some((ContentClass::UserMessage, self.sanitize)),
+            ..TerminalOptions::default()
+        };
+        let mut formatted = self
             .formatter
-            .format_terminal(content.trim_end())
-            .unwrap_or_else(|_| content.trim_end().to_owned());
+            .format_terminal_with(source, &options)
+            .unwrap_or_else(|_| source.to_owned());
+        close_span(&mut formatted);
         self.print_framing(&formatted);
 
         self.last_content_kind = Some(ContentKind::Message);
@@ -292,7 +420,14 @@ impl ChatRenderer {
     /// display): persistent content arriving, even of the same `ContentKind` as
     /// before, must stop the running timer, since the timer line and the
     /// upcoming content share the terminal row.
+    /// A reasoning window is the exception: it stays claimed while reasoning
+    /// continues, and ends with its block once other content arrives.
     fn flush_on_transition(&mut self, next: ContentKind) {
+        // Ending a window puts back the kind it opened over, which is the kind
+        // this transition is from.
+        if next != ContentKind::Reasoning {
+            self.end_reasoning_block();
+        }
         self.cancel_reasoning_timer();
         if let Some(prev) = self.last_content_kind
             && prev != next
@@ -363,18 +498,22 @@ impl ChatRenderer {
             ReasoningDisplayConfig::Hidden => self.flush(),
 
             ReasoningDisplayConfig::Full => {
-                self.flush_on_transition(ContentKind::Reasoning);
-                self.render_content(content);
+                self.enter_reasoning();
+                let text = self.filter(ContentKind::Reasoning, content);
+                self.render_content(&text);
             }
 
             ReasoningDisplayConfig::Truncate(TruncateChars { characters }) => {
-                self.flush_on_transition(ContentKind::Reasoning);
+                self.enter_reasoning();
 
-                if let Some(data) = self.truncated_reasoning(content, characters) {
+                // Filtered first, so an escape sequence neither spends the
+                // budget nor gets cut in half by it.
+                let text = self.filter(ContentKind::Reasoning, content);
+                if let Some(data) = self.truncated_reasoning(&text, characters) {
                     self.render_content(&data);
                 }
 
-                self.reasoning_chars_count += content.chars().count();
+                self.reasoning_chars_count += text.chars().count();
             }
 
             ReasoningDisplayConfig::Progress => {
@@ -402,16 +541,9 @@ impl ChatRenderer {
                 // that no later content ever "earns" back. Use the timer
                 // token itself for re-entry detection instead of
                 // `last_content_kind`.
-                if !self.reasoning_timer.is_active() {
+                if !self.reasoning_region.is_active() {
                     self.flush();
-
-                    self.reasoning_timer = self.printer.status_region(RegionStyle::new(
-                        Duration::from_millis(300),
-                        Duration::from_millis(100),
-                        |secs, _detail| {
-                            format!("\x1b[2m\u{23f1} Reasoning\u{2026} {secs:.1}s\x1b[22m")
-                        },
-                    ));
+                    self.reasoning_region = self.claim_reasoning_region(true, OutputLines::Off);
                 }
             }
 
@@ -446,18 +578,226 @@ impl ChatRenderer {
         Some(data)
     }
 
+    /// Start or continue the reasoning block a chunk belongs to.
+    ///
+    /// The block's first chunk decides where the whole block goes: into the
+    /// window when the terminal has room for one, into the transcript
+    /// otherwise.
+    fn enter_reasoning(&mut self) {
+        if self.is_windowed() {
+            return;
+        }
+
+        if self.reasoning_block.is_none() && self.window_rows() > 0 {
+            self.open_window();
+            return;
+        }
+
+        self.flush_on_transition(ContentKind::Reasoning);
+        // Recorded after the transition, whose flush ends the block before it.
+        self.reasoning_block = Some(ReasoningBlock::Inline);
+    }
+
+    /// Open a reasoning block in the window.
+    ///
+    /// Opens the way the `timer` display does: what is still buffered belongs
+    /// to the content before the window and is committed first, and no gap is
+    /// drawn after a tool call, since the window leaves nothing on screen for a
+    /// gap to separate.
+    /// Whatever follows the window settles the gap instead.
+    fn open_window(&mut self) {
+        self.flush();
+
+        let window = &self.config.reasoning.window;
+        let region = self.claim_reasoning_region(window.timer, output_lines(window.rows));
+        if let Some(background) = self.reasoning_background() {
+            region.background().set(&background.param);
+        }
+
+        self.reasoning_block = Some(ReasoningBlock::Window(WindowBlock {
+            sink: Some(region.source("reasoning")),
+            held: String::new(),
+            prior_kind: self.last_content_kind.replace(ContentKind::Reasoning),
+        }));
+        self.reasoning_region = region;
+    }
+
+    /// End the reasoning block being rendered.
+    ///
+    /// A window is released before the rest of its block is drained, and what
+    /// the drain renders is discarded: the window would erase it a moment
+    /// later, and the event builder has already recorded it.
+    /// The separator owed inside the window ends with it, and the content kind
+    /// it opened over is put back.
+    fn end_reasoning_block(&mut self) {
+        let Some(ReasoningBlock::Window(window)) = &mut self.reasoning_block else {
+            self.reasoning_block = None;
+            return;
+        };
+
+        window.sink = None;
+        let prior_kind = window.prior_kind;
+        self.reasoning_region.release();
+        self.drain_buffer();
+
+        self.reasoning_block = None;
+        self.pending_separator = None;
+        self.last_content_kind = prior_kind;
+    }
+
+    /// Claim the status region reasoning chrome is drawn in, with `output`
+    /// window rows.
+    ///
+    /// With `timer`, a status row below the window counts the seconds reasoning
+    /// has taken; without it, the region is the window alone.
+    fn claim_reasoning_region(&self, timer: bool, output: OutputLines) -> StatusRegion {
+        let interval = Duration::from_millis(100);
+        let style = if timer {
+            RegionStyle::new(self.region_delay, interval, |secs, _detail| {
+                reasoning_status(secs)
+            })
+        } else {
+            RegionStyle::window_only(self.region_delay, interval)
+        };
+
+        self.printer.status_region(style.with_output(output))
+    }
+
+    /// The window rows a reasoning block opened now would get; zero when it
+    /// would go into the transcript.
+    ///
+    /// A replay builds a document, and never opens a window.
+    fn window_rows(&self) -> usize {
+        let rows = self.config.reasoning.window.rows;
+        if self.flow != RenderFlow::Live || !rows.is_enabled() {
+            return 0;
+        }
+
+        self.printer.window_rows(output_lines(rows))
+    }
+
+    /// Whether the reasoning block being rendered goes into the window.
+    const fn is_windowed(&self) -> bool {
+        matches!(self.reasoning_block, Some(ReasoningBlock::Window(_)))
+    }
+
+    /// Whether a reasoning chunk rendered now would go into the window.
+    ///
+    /// The open block's placement when there is one; otherwise, whether the
+    /// block the chunk would open gets window rows.
+    fn reasoning_goes_to_window(&self) -> bool {
+        match self.reasoning_block {
+            Some(ReasoningBlock::Window(_)) => true,
+            Some(ReasoningBlock::Inline) => false,
+            None => {
+                matches!(
+                    self.config.reasoning.display,
+                    ReasoningDisplayConfig::Full | ReasoningDisplayConfig::Truncate(_)
+                ) && self.window_rows() > 0
+            }
+        }
+    }
+
+    /// The formatter for the content being rendered: the window's while a block
+    /// is placed there.
+    fn active_formatter(&self) -> &Formatter {
+        match (&self.reasoning_block, &self.window_formatter) {
+            (Some(ReasoningBlock::Window(_)), Some(formatter)) => formatter,
+            _ => &self.formatter,
+        }
+    }
+
+    /// Write rendered output into the window while the reasoning block being
+    /// rendered is placed there, and onto stdout otherwise.
+    ///
+    /// The window takes no typewriter delay: the delay paces the transcript,
+    /// and the window is a preview.
+    fn emit(&mut self, output: String, delay: Duration) {
+        match &mut self.reasoning_block {
+            Some(ReasoningBlock::Window(window)) => window.push(&output),
+            _ => self.printer.print(output.typewriter(delay)),
+        }
+    }
+
     fn render_message(&mut self, content: &str) {
         self.flush_on_transition(ContentKind::Message);
-        self.render_content(content);
+        let text = self.filter(ContentKind::Message, content);
+        self.render_content(&text);
+    }
+
+    /// `content` with what model output may not show removed.
+    ///
+    /// Each kind keeps its own filter across chunks, so a sequence split
+    /// between two chunks is recognized whole.
+    fn filter(&mut self, kind: ContentKind, content: &str) -> String {
+        let Some(filter) = self.model_filter(kind) else {
+            return content.to_owned();
+        };
+
+        // Writing to a `String` is infallible.
+        let _ = filter.write_str(content);
+        std::mem::take(filter.get_mut())
+    }
+
+    /// The filter model output of `kind` passes through, or `None` for tool
+    /// chrome, which is not model output.
+    fn model_filter(&mut self, kind: ContentKind) -> Option<&mut ContentWriter<String>> {
+        match kind {
+            ContentKind::Reasoning => Some(&mut self.reasoning_filter),
+            ContentKind::Message => Some(&mut self.message_filter),
+            ContentKind::ToolCall => None,
+        }
+    }
+
+    /// Resolve a sequence the current kind's filter still holds, ahead of the
+    /// end of its region.
+    ///
+    /// A sequence the stream cut short is dropped there rather than completed
+    /// by the next region's text.
+    /// Under `visualize` its `␛` stays in the region it started in, and a
+    /// truncated reasoning display spends budget on it like on any other text.
+    fn settle_filter(&mut self) {
+        let Some(kind) = self.last_content_kind else {
+            return;
+        };
+        let Some(filter) = self.model_filter(kind) else {
+            return;
+        };
+
+        // Writing to a `String` is infallible.
+        let _ = filter.finish();
+        let tail = std::mem::take(filter.get_mut());
+        if tail.is_empty() {
+            return;
+        }
+
+        let tail = match (kind, self.config.reasoning.display) {
+            (
+                ContentKind::Reasoning,
+                ReasoningDisplayConfig::Truncate(TruncateChars { characters }),
+            ) => {
+                let shown = self.truncated_reasoning(&tail, characters);
+                self.reasoning_chars_count += tail.chars().count();
+                let Some(shown) = shown else {
+                    return;
+                };
+                shown
+            }
+            _ => tail,
+        };
+
+        self.buffer.push(&tail);
     }
 
     fn render_content(&mut self, content: &str) {
-        // Persistent chat-response content (full/truncate reasoning, messages)
-        // flows through here; remember its kind so the tool-call boundary can
-        // tell whether a following tool call continues a reasoning region.
-        // Ephemeral reasoning chrome never reaches this path, so it can't mark
-        // the region as reasoning.
-        self.set_response_kind(self.last_content_kind);
+        // Chat-response content (full/truncate reasoning, messages) flows
+        // through here; remember its kind so the tool-call boundary can tell
+        // whether a following tool call continues a reasoning region.
+        // Reasoning in the window is erased again, leaving no region to
+        // continue, and ephemeral reasoning chrome never reaches this path.
+        if !self.is_windowed() {
+            self.set_response_kind(self.last_content_kind);
+        }
         self.buffer.push(content);
         self.flush_buffer_blocks();
     }
@@ -496,20 +836,29 @@ impl ChatRenderer {
                 if self.last_content_kind == Some(ContentKind::Reasoning) {
                     self.emit_pending_separator(true);
                 }
-                self.code_block = Some(self.formatter.begin_code_block(language));
+                self.code_block = Some(self.active_formatter().begin_code_block(language));
                 let bg = self.terminal_options(0).default_background;
-                let rendered =
-                    self.formatter
-                        .render_code_fence(&format!("{event}\n"), bg.as_ref(), indent);
+                let rendered = self.active_formatter().render_code_fence(
+                    &format!("{event}\n"),
+                    bg.as_ref(),
+                    indent,
+                );
                 self.print_code(&rendered, indent);
             }
             Event::FencedCodeLine { content, indent } => {
                 let bg = self.terminal_options(0).default_background;
-                let rendered = if let Some(ref mut state) = self.code_block {
-                    self.formatter
-                        .render_code_line(&content, state, bg.as_ref(), indent)
-                } else {
-                    content
+                let rendered = match self.code_block.take() {
+                    Some(mut state) => {
+                        let line = self.active_formatter().render_code_line(
+                            &content,
+                            &mut state,
+                            bg.as_ref(),
+                            indent,
+                        );
+                        self.code_block = Some(state);
+                        line
+                    }
+                    None => content,
                 };
                 self.print_code(&rendered, indent);
             }
@@ -522,9 +871,11 @@ impl ChatRenderer {
                 // visual flow of the list, so we emit the fence on
                 // its own and let the next event handle its own
                 // separation.
-                let mut rendered =
-                    self.formatter
-                        .render_code_fence(&format!("{fence}\n"), bg.as_ref(), indent);
+                let mut rendered = self.active_formatter().render_code_fence(
+                    &format!("{fence}\n"),
+                    bg.as_ref(),
+                    indent,
+                );
                 if indent == 0 {
                     rendered.push_str(&render_separator(bg.as_ref()));
                 }
@@ -543,21 +894,21 @@ impl ChatRenderer {
         }
     }
 
-    /// Print a raw code string with the code typewriter delay.
+    /// Emit a raw code string, paced by the code typewriter delay on stdout.
     ///
     /// The content is already highlighted and has background applied by the
     /// formatter's streaming code block API, which was told the same `indent`
     /// so its line fill accounts for the spaces added here.
     /// `indent` is the visual column the renderer should put each line at (used
     /// when the code block is inside a list item).
-    fn print_code(&self, content: &str, indent: usize) {
+    fn print_code(&mut self, content: &str, indent: usize) {
         let delay = self.config.typewriter.code_delay;
         let content = if indent == 0 {
             content.to_string()
         } else {
             indent_lines(content, indent)
         };
-        self.printer.print(content.typewriter(delay.into()));
+        self.emit(content, delay.into());
     }
 
     /// Format `source` with the reasoning-aware terminal options for the
@@ -577,7 +928,7 @@ impl ChatRenderer {
         let mut opts = self.terminal_options(indent);
         opts.suppress_trailing_separator = suppress_trailing;
         opts.force_trailing_separator = force_trailing;
-        self.formatter
+        self.active_formatter()
             .format_terminal_with(source, &opts)
             .unwrap_or_else(|_| source.to_string())
     }
@@ -606,7 +957,7 @@ impl ChatRenderer {
         let formatted = self.format_styled(block, indent, is_reasoning, terminal && !is_reasoning);
 
         let delay = self.config.typewriter.text_delay;
-        self.printer.print(formatted.typewriter(delay.into()));
+        self.emit(formatted, delay.into());
 
         if is_reasoning {
             self.pending_separator = Some(SeparatorOrigin::Content);
@@ -656,7 +1007,7 @@ impl ChatRenderer {
         if cut > self.para_emitted {
             let delta = rendered[self.para_emitted..cut].to_string();
             let delay = self.config.typewriter.text_delay;
-            self.printer.print(delta.typewriter(delay.into()));
+            self.emit(delta, delay.into());
             self.para_emitted = cut;
         }
 
@@ -674,13 +1025,14 @@ impl ChatRenderer {
     fn terminal_options(&self, indent: usize) -> TerminalOptions {
         TerminalOptions {
             default_background: if self.last_content_kind == Some(ContentKind::Reasoning) {
-                self.reasoning_background()
+                self.formatted_background()
             } else {
                 None
             },
             indent,
             suppress_trailing_separator: false,
             force_trailing_separator: false,
+            content: Some((ContentClass::ModelOutput, self.sanitize)),
         }
     }
 
@@ -705,6 +1057,19 @@ impl ChatRenderer {
             })
     }
 
+    /// The background reasoning is formatted against.
+    ///
+    /// In the window the region shades each row to its edge, so the formatter
+    /// colours only the text: the fill it would otherwise emit, `\x1b[K` on a
+    /// terminal, is filtered out of a window row anyway.
+    fn formatted_background(&self) -> Option<DefaultBackground> {
+        let mut background = self.reasoning_background()?;
+        if self.is_windowed() {
+            background.fill = BackgroundFill::Content;
+        }
+        Some(background)
+    }
+
     /// Emit the deferred blank-line separator, if one is owed.
     ///
     /// Reasoning blocks and the tool-call boundaries a reasoning region
@@ -719,18 +1084,19 @@ impl ChatRenderer {
         }
 
         let background = if shaded {
-            self.reasoning_background()
+            self.formatted_background()
         } else {
             None
         };
         let separator = render_separator(background.as_ref());
         let delay = self.config.typewriter.text_delay;
-        self.printer.print(separator.typewriter(delay.into()));
+        self.emit(separator, delay.into());
     }
 
     pub fn flush(&mut self) {
         // Leaving the region ends any ephemeral chrome: the timer line and the
         // content about to be committed share the terminal row.
+        self.end_reasoning_block();
         self.cancel_reasoning_timer();
         self.drain_buffer();
         // A plain flush leaves the current content region (a content-kind
@@ -749,9 +1115,12 @@ impl ChatRenderer {
     /// block would inside one streaming cycle.
     /// Pair with [`reset_preserving_region`], which carries the pending
     /// separator across the reset the continuation performs.
+    /// Reasoning in the window owes none: the window ends here, as it does at
+    /// every boundary.
     ///
     /// [`reset_preserving_region`]: Self::reset_preserving_region
     pub fn flush_for_continuation(&mut self) {
+        self.end_reasoning_block();
         self.cancel_reasoning_timer();
         self.drain_buffer();
     }
@@ -767,6 +1136,8 @@ impl ChatRenderer {
     ///
     /// [`emit_pending_separator`]: Self::emit_pending_separator
     fn drain_buffer(&mut self) {
+        self.settle_filter();
+
         // Drain the buffer's end-of-region events through the same fixup +
         // render path as streaming.
         for raw_event in self.buffer.flush_events() {
@@ -791,8 +1162,11 @@ impl ChatRenderer {
     ///
     /// Releasing the region erases its row; the printer also erases it ahead of
     /// whatever the caller renders next, so no ordering is owed here.
+    /// A window is left alone: it is released when its block ends.
     fn cancel_reasoning_timer(&mut self) {
-        self.reasoning_timer.release();
+        if !self.is_windowed() {
+            self.reasoning_region.release();
+        }
     }
 
     /// Whether rendering `content` as reasoning supplies its own separation
@@ -819,17 +1193,28 @@ impl ChatRenderer {
     /// A chunk still sitting in the markdown buffer counts as rendered: the
     /// buffer is drained ahead of the next tool header, so its content lands
     /// first and separates the header.
+    ///
+    /// Reasoning bound for the window supplies none: the window is erased
+    /// before anything that follows it renders.
     pub(crate) fn reasoning_supplies_separation(&self, content: &str) -> bool {
         // Mirrors the guard at the top of `render_reasoning`.
         if content.is_empty() {
             return false;
         }
 
+        if self.reasoning_goes_to_window() {
+            return false;
+        }
+
+        // A filter of its own, so a sequence split across chunks is judged per
+        // chunk; the render carries it over to the next one.
+        let shown = || sanitize_str(content, ContentClass::ModelOutput, self.sanitize);
+
         match self.config.reasoning.display {
             ReasoningDisplayConfig::Static => true,
-            ReasoningDisplayConfig::Full => !content.trim().is_empty(),
+            ReasoningDisplayConfig::Full => !shown().trim().is_empty(),
             ReasoningDisplayConfig::Truncate(TruncateChars { characters }) => self
-                .truncated_reasoning(content, characters)
+                .truncated_reasoning(&shown(), characters)
                 .is_some_and(|data| !data.trim().is_empty()),
             // `Summary` is unimplemented; `render_reasoning` panics on it.
             ReasoningDisplayConfig::Hidden
@@ -925,7 +1310,9 @@ impl ChatRenderer {
     /// call does not extend a shaded reasoning region.
     pub fn enter_tool_call(&mut self) -> Option<DefaultBackground> {
         let continues = self.reasoning_region_continues();
-        // The tool header takes over the terminal row the timer line occupies.
+        // The tool header takes over the rows the timer line or the window
+        // occupy.
+        self.end_reasoning_block();
         self.cancel_reasoning_timer();
         self.drain_buffer();
         if self.pending_separator == Some(SeparatorOrigin::ToolCall) {
@@ -958,6 +1345,7 @@ impl ChatRenderer {
     /// Does not transition into tool-call mode: with no chrome there is no
     /// boundary for the next content to react to.
     pub fn skip_tool_call(&mut self) {
+        self.end_reasoning_block();
         self.cancel_reasoning_timer();
         self.drain_buffer();
     }
@@ -969,6 +1357,7 @@ impl ChatRenderer {
     /// The partial content in the buffer has already been captured by the event
     /// builder, so it's safe to discard.
     pub fn reset(&mut self) {
+        self.end_reasoning_block();
         self.cancel_reasoning_timer();
         self.buffer = Buffer::new();
         let pretty = self.printer.pretty_printing_enabled();
@@ -984,6 +1373,10 @@ impl ChatRenderer {
         // captured by the event builder, so it is safe to discard.
         self.para_source.clear();
         self.para_emitted = 0;
+        // A sequence the interrupted stream left unfinished is discarded with
+        // it, rather than completed by the next stream's text.
+        self.reasoning_filter = model_output_filter(self.sanitize);
+        self.message_filter = model_output_filter(self.sanitize);
     }
 
     /// Reset the renderer state, keeping the content region open.
@@ -993,6 +1386,9 @@ impl ChatRenderer {
     /// decide its shading, so the continuation's first content resolves the gap
     /// the interrupted block owed.
     pub fn reset_preserving_region(&mut self) {
+        // A window leaves nothing on screen, so the region kept open is the one
+        // it opened over.
+        self.end_reasoning_block();
         let last_content_kind = self.last_content_kind;
         let last_response_kind = self.last_response_kind;
         let pending_separator = self.pending_separator;
@@ -1003,6 +1399,12 @@ impl ChatRenderer {
         self.set_response_kind(last_response_kind);
         self.pending_separator = pending_separator;
     }
+}
+
+/// The status row shown while the assistant reasons, counting the seconds it
+/// has spent.
+fn reasoning_status(secs: f64) -> String {
+    format!("\x1b[2m\u{23f1} Reasoning\u{2026} {secs:.1}s\x1b[22m")
 }
 
 /// Build a labeled horizontal rule used as a role-boundary marker.
@@ -1045,6 +1447,20 @@ fn build_role_header_line(
     } else {
         format!("{left}{dashes}{detail_part}")
     }
+}
+
+/// A fresh filter for model output shown under `mode`.
+fn model_output_filter(mode: SanitizeMode) -> ContentWriter<String> {
+    ContentWriter::new(String::new(), ContentClass::ModelOutput, mode)
+}
+
+/// Close a user message's content span on its formatted output.
+///
+/// The reset goes before the trailing line breaks: a line break written under a
+/// background the message left open paints the row below it.
+fn close_span(formatted: &mut String) {
+    let end = formatted.trim_end_matches('\n').len();
+    formatted.insert_str(end, RESET);
 }
 
 /// Prepend `indent` spaces to every line of `content`.
@@ -1137,6 +1553,7 @@ fn formatter_from_config(
                 .background
                 .map(crate::format::color_to_bg_param),
         )
+        .style_sheet(crate::format::markdown_style_sheet(&config.markdown))
 }
 
 #[cfg(test)]

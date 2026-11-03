@@ -3116,7 +3116,7 @@ fn turn_structured_data_refuses_a_turn_that_did_not_start() {
 #[test]
 fn turn_structured_data_refuses_a_turn_that_did_not_start_after_sanitizing() {
     let mut stream = stream_with_structured(serde_json::json!({"turn": 1}));
-    stream.push_event(ConversationEvent::now(TurnStart));
+    stream.push_event(ConversationEvent::now(TurnStart::default()));
     let before = last_request_id(&stream);
 
     stream.sanitize();
@@ -3268,6 +3268,134 @@ fn pending_trim_replay_removes_an_unreadable_chat_response_with_its_turn() {
         "the replayed turn's unreadable chat response survived: {events:#?}"
     );
     assert_eq!(turn_start_count(&stream), 2);
+}
+
+fn turn_summaries(stream: &ConversationStream) -> Vec<Option<String>> {
+    stream
+        .iter_turns()
+        .map(|turn| turn.summary().map(str::to_owned))
+        .collect()
+}
+
+fn summarize_turns(stream: &mut ConversationStream, summaries: &[&str]) {
+    let turn_ids: Vec<_> = stream
+        .iter_turns()
+        .filter_map(|turn| turn.id().cloned())
+        .collect();
+
+    for (turn_id, summary) in turn_ids.iter().zip(summaries) {
+        assert!(stream.set_turn_summary(turn_id, *summary));
+    }
+}
+
+/// `--replay` replays the whole last turn, including a reply sent while it was
+/// interrupted, so the turn goes with its summary and the turn before keeps its
+/// own.
+#[test]
+fn pending_trim_replay_removes_a_turn_holding_an_interrupt_reply() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("Set up the project");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("Done."))
+        .build()
+        .unwrap();
+    stream.start_turn("Add retries to the stream handler");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("I'll retry every second"))
+        .add_chat_request(ChatRequest::from("Use exponential backoff instead."))
+        .add_chat_response(ChatResponse::message("Done. Retries now back off."))
+        .build()
+        .unwrap();
+    summarize_turns(&mut stream, &[
+        "Set up the project",
+        "Switch stream retries to exponential backoff",
+    ]);
+
+    PendingStreamTrim {
+        replay_turn: true,
+        pop_request: false,
+    }
+    .apply(&mut stream);
+
+    assert_eq!(turn_summaries(&stream), [Some(
+        "Set up the project".to_owned()
+    )]);
+}
+
+#[test]
+fn pending_trim_replay_of_a_whole_turn_keeps_the_summary_before_it() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("Set up the project");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("Done."))
+        .build()
+        .unwrap();
+    stream.start_turn("Add retries to the stream handler");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("Added."))
+        .build()
+        .unwrap();
+    summarize_turns(&mut stream, &["Set up the project", "Add stream retries"]);
+
+    PendingStreamTrim {
+        replay_turn: true,
+        pop_request: false,
+    }
+    .apply(&mut stream);
+
+    assert_eq!(turn_summaries(&stream), [Some(
+        "Set up the project".to_owned()
+    )]);
+}
+
+/// Bare `--no-edit` popping a turn's only request empties the turn, which goes
+/// with its summary, and leaves the summary of the turn before it alone.
+#[test]
+fn pending_trim_pop_request_of_a_turns_only_request_keeps_the_summary_before_it() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("Set up the project");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("Done."))
+        .build()
+        .unwrap();
+    stream.start_turn("Add retries to the stream handler");
+    summarize_turns(&mut stream, &["Set up the project", "Add stream retries"]);
+
+    PendingStreamTrim {
+        replay_turn: false,
+        pop_request: true,
+    }
+    .apply(&mut stream);
+
+    assert_eq!(turn_summaries(&stream), [Some(
+        "Set up the project".to_owned()
+    )]);
+}
+
+#[test]
+fn pending_trim_pop_request_clears_the_summary_of_a_turn_it_shortens() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("Add retries to the stream handler");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("I'll retry every second"))
+        .add_chat_request(ChatRequest::from("Use exponential backoff instead."))
+        .build()
+        .unwrap();
+    summarize_turns(&mut stream, &["Add stream retries"]);
+
+    PendingStreamTrim {
+        replay_turn: false,
+        pop_request: true,
+    }
+    .apply(&mut stream);
+
+    assert_eq!(turn_summaries(&stream), [None]);
 }
 
 #[test]
@@ -4409,7 +4537,7 @@ impl PromptBackend for InterruptedPrompts {
         _options: Vec<String>,
         _default: Option<usize>,
         _writer: &mut dyn io::Write,
-    ) -> std::result::Result<String, InquireError> {
+    ) -> std::result::Result<usize, InquireError> {
         Err(InquireError::OperationInterrupted)
     }
 

@@ -519,7 +519,7 @@ mod extract_sections {
             </html>
         "#;
 
-        let result = extract_sections(html, &["install".to_owned(), "api".to_owned()]);
+        let result = extract_sections(html, &["install".to_owned(), "api".to_owned()]).unwrap();
 
         assert!(result.contains("Install steps"));
         assert!(result.contains("API reference"));
@@ -529,10 +529,16 @@ mod extract_sections {
     }
 
     #[test]
-    fn falls_back_to_full_html_when_no_ids_found() {
-        let html = "<html><body><p>Hello</p></body></html>";
-        let result = extract_sections(html, &["nonexistent".to_owned()]);
-        assert!(result.contains("Hello"));
+    fn reports_every_id_the_page_does_not_have() {
+        let html = r#"<html><body><h2 id="real">Real</h2><p>Hello</p></body></html>"#;
+
+        let result = extract_sections(html, &[
+            "nope".to_owned(),
+            "real".to_owned(),
+            "also-nope".to_owned(),
+        ]);
+
+        assert_eq!(result, Err(vec!["nope".to_owned(), "also-nope".to_owned()]));
     }
 
     #[test]
@@ -550,9 +556,54 @@ mod extract_sections {
             </body></html>
         "#;
 
-        let result = extract_sections(html, &["config".to_owned()]);
+        let result = extract_sections(html, &["config".to_owned()]).unwrap();
         assert!(result.contains("Config details"));
         assert!(!result.contains("Deploy details"));
+    }
+}
+
+mod render {
+    use assert_matches::assert_matches;
+    use jp_tool::Outcome;
+
+    use super::*;
+
+    const PAGE: &str = r#"<html><body>
+        <h2 id="install">Installation</h2><p>Install steps</p>
+        <h2 id="usage">Usage</h2><p>Usage info</p>
+    </body></html>"#;
+
+    async fn render_sections(ids: &[&str]) -> Outcome {
+        let url = Url::parse("https://example.com/docs").unwrap();
+        let ids = ids.iter().map(|&id| id.to_owned()).collect();
+
+        render(&url, PAGE.to_owned(), false, Some(ids))
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn returns_the_requested_section() {
+        assert_eq!(render_sections(&["usage"]).await, Outcome::Success {
+            content: "## Usage\n\nUsage info".to_owned()
+        });
+    }
+
+    #[tokio::test]
+    async fn an_unknown_id_is_an_error_not_the_whole_page() {
+        assert_matches!(render_sections(&["usage", "nope"]).await, Outcome::Error { message, .. } => {
+            assert_eq!(
+                message,
+                "No section `nope` on this page. Call with `list_sections` to see its section ids."
+            );
+        });
+    }
+
+    #[tokio::test]
+    async fn an_empty_list_returns_the_whole_page() {
+        assert_eq!(render_sections(&[]).await, Outcome::Success {
+            content: "## Installation\n\nInstall steps\n\n## Usage\n\nUsage info".to_owned()
+        });
     }
 }
 

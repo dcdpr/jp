@@ -2,6 +2,7 @@ use std::fs;
 
 use camino_tempfile::Utf8TempDir;
 use clap::CommandFactory;
+use comfort::format::FormatOptions;
 use jp_plugin::message::{
     EditFilesRequest, EditedResponse, ErrorResponse, OutputFormat, ToolAction, WorkspaceInfo,
 };
@@ -77,6 +78,7 @@ fn run_with(
             root: dir,
             config: &config,
             options,
+            formatting: Formatting::default(),
             format,
         },
         command,
@@ -92,6 +94,7 @@ fn write_ticket(dir: &Utf8Path, body: &str, title: &str, status: Status) -> Tick
         date: "2026-08-05",
         labels: &Labels::default(),
         description: "",
+        parent: None,
     });
     let document = ticket::render::set_metadata(&document, "Status", &status.to_string()).unwrap();
     std::fs::create_dir_all(dir).unwrap();
@@ -103,6 +106,7 @@ fn write_ticket(dir: &Utf8Path, body: &str, title: &str, status: Status) -> Tick
 /// File a labelled ticket and hand back its id.
 fn add_labelled(dir: &Utf8TempDir, title: &str, labels: &[&str]) -> TicketId {
     run_command(dir, Command::Add {
+        parent: None,
         title: Some(title.to_owned()),
         author: Some("john".to_owned()),
         body: None,
@@ -282,11 +286,13 @@ fn add_takes_a_title_and_defaults_the_author() {
             author,
             body,
             labels,
+            parent,
         } => {
             assert_eq!(title.as_deref(), Some("Tool call header misaligned"));
             assert_eq!(author, None);
             assert_eq!(body, None);
             assert!(labels.is_empty());
+            assert_eq!(parent, None);
         }
         other => panic!("expected add, got {other:?}"),
     }
@@ -533,10 +539,12 @@ fn list_filters_are_optional() {
             status,
             labels,
             query,
+            under,
         } => {
             assert_eq!(query, None);
             assert_eq!(status, Some(Status::InProgress));
             assert!(labels.is_empty());
+            assert_eq!(under, None);
         }
         other => panic!("expected list, got {other:?}"),
     }
@@ -739,6 +747,7 @@ fn write_with_labels(dir: &Utf8Path, body: &str, labels: &[(&str, &str)]) {
         date: "2026-08-05",
         labels: &labels,
         description: "",
+        parent: None,
     });
     fs::write(dir.join(format!("{body}-slug.md")), document).unwrap();
 }
@@ -939,6 +948,7 @@ fn unreadable_options_end_the_run() {
 fn rename_moves_the_file() {
     let dir = Utf8TempDir::new().unwrap();
     run_command(&dir, Command::Add {
+        parent: None,
         title: Some("Tool call header misaligned".to_owned()),
         author: Some("John Doe".to_owned()),
         body: None,
@@ -1004,11 +1014,14 @@ fn edit_rewrites_the_description_and_keeps_the_title() {
     let id = write_ticket(dir.path(), "02wt0kx", "Kept title", Status::Todo);
 
     let edited = run_command(&dir, Command::Edit {
+        parent: None,
         id: Some(id),
         title: None,
         body: Some("A new description.".to_owned()),
         status: None,
         labels: vec![],
+        check: vec![],
+        uncheck: vec![],
     })
     .unwrap();
 
@@ -1027,11 +1040,14 @@ fn edit_changes_the_title_and_the_labels_at_once() {
     let id = write_ticket(dir.path(), "02wt0kx", "Wrapping is wrong", Status::Todo);
 
     let edited = run_command(&dir, Command::Edit {
+        parent: None,
         id: Some(id),
         title: Some("The wrap calculation is off".to_owned()),
         body: None,
         status: None,
         labels: vec!["client=cli".to_owned()],
+        check: vec![],
+        uncheck: vec![],
     })
     .unwrap();
 
@@ -1050,11 +1066,14 @@ fn edit_reports_the_labels_it_removes() {
     let path = store::locate_ticket(dir.path(), id).unwrap();
 
     let edited = run_command(&dir, Command::Edit {
+        parent: None,
         id: Some(id),
         title: None,
         body: None,
         status: None,
         labels: owned(&["client=cli"]),
+        check: vec![],
+        uncheck: vec![],
     })
     .unwrap();
 
@@ -1075,11 +1094,14 @@ fn edit_refuses_a_label_before_changing_anything() {
     let before = std::fs::read_to_string(&path).unwrap();
 
     let error = run_command(&dir, Command::Edit {
+        parent: None,
         id: Some(id),
         title: Some("The wrap calculation is off".to_owned()),
         body: None,
         status: None,
         labels: vec!["client=windows".to_owned()],
+        check: vec![],
+        uncheck: vec![],
     })
     .unwrap_err();
 
@@ -1437,6 +1459,7 @@ fn commands_run_against_the_resolved_directory() {
     let dir = Utf8TempDir::new().unwrap();
 
     let created = run_command(&dir, Command::Add {
+        parent: None,
         title: Some("Tool call header misaligned".to_owned()),
         author: Some("John Doe".to_owned()),
         body: Some("The header renders one column left of the body.".to_owned()),
@@ -1464,6 +1487,7 @@ fn commands_run_against_the_resolved_directory() {
     assert_eq!(commented.text, format!("Added {id}#1 by john\n"));
 
     let listed = run_command(&dir, Command::List {
+        under: None,
         status: None,
         labels: vec![],
         query: None,
@@ -1478,6 +1502,7 @@ fn commands_run_against_the_resolved_directory() {
     assert!(closed.text.contains("Todo -> Done"), "{}", closed.text);
 
     let json = run_json(&dir, Command::List {
+        under: None,
         status: Some(Status::Done),
         labels: vec![],
         query: None,
@@ -1778,7 +1803,7 @@ fn rewriting_an_unreadable_file_is_an_error() {
     std::fs::create_dir(&directory).unwrap();
 
     // Reading a directory fails with neither `NotFound` nor `InvalidData`.
-    let error = rewrite(&directory, "T-02wt0kx", "T-03abcde").unwrap_err();
+    let error = rewrite(&directory, &Formatting::default(), "T-02wt0kx", "T-03abcde").unwrap_err();
 
     assert!(error.starts_with(directory.as_str()), "{error}");
 }
@@ -1790,11 +1815,58 @@ fn rewriting_an_unreadable_file_is_an_error() {
 fn rewriting_a_missing_or_binary_file_is_skipped() {
     let dir = Utf8TempDir::new().unwrap();
 
-    assert!(!rewrite(&dir.path().join("gone.md"), "a", "b").unwrap());
+    assert!(
+        !rewrite(
+            &dir.path().join("gone.md"),
+            &Formatting::default(),
+            "a",
+            "b"
+        )
+        .unwrap()
+    );
 
     let binary = dir.path().join("binary.bin");
     std::fs::write(&binary, [0xff, 0xfe, 0x00]).unwrap();
-    assert!(!rewrite(&binary, "a", "b").unwrap());
+    assert!(!rewrite(&binary, &Formatting::default(), "a", "b").unwrap());
+}
+
+/// `jp ticket add` writes through the same formatting as the tools, so a ticket
+/// filed on the command line is laid out like one the assistant filed.
+#[test]
+fn add_formats_the_ticket_when_the_workspace_formats_tickets() {
+    let dir = Utf8TempDir::new().unwrap();
+    let config = json!({});
+    let options = Options::default();
+    let ctx = Context {
+        dir: dir.path().to_path_buf(),
+        root: dir.path(),
+        config: &config,
+        options: &options,
+        formatting: Formatting::new(
+            FormatOptions {
+                max_width: 80,
+                ..FormatOptions::default()
+            },
+            vec![dir.path().to_path_buf()],
+        ),
+        format: OutputFormat::default(),
+    };
+
+    execute(&ctx, Command::Add {
+        parent: None,
+        title: Some("Wrapped".to_owned()),
+        author: Some("john".to_owned()),
+        body: Some("First sentence. Second sentence.".to_owned()),
+        labels: vec![],
+    })
+    .unwrap();
+
+    let path = store::list(dir.path()).unwrap().remove(0).path;
+    let source = fs::read_to_string(&path).unwrap();
+    assert!(
+        source.ends_with("\n\nFirst sentence.\nSecond sentence.\n"),
+        "{source}"
+    );
 }
 
 /// The ticket document has no id of its own, so the output has to carry it.
@@ -1802,6 +1874,7 @@ fn rewriting_a_missing_or_binary_file_is_skipped() {
 fn show_json_carries_the_id() {
     let dir = Utf8TempDir::new().unwrap();
     run_command(&dir, Command::Add {
+        parent: None,
         title: Some("Tool call header misaligned".to_owned()),
         author: Some("john".to_owned()),
         body: Some("The header renders one column left.".to_owned()),
@@ -1817,6 +1890,61 @@ fn show_json_carries_the_id() {
     assert_eq!(detail["id"], id.to_string());
     assert_eq!(detail["title"], "Tool call header misaligned");
     assert_eq!(detail["description"], "The header renders one column left.");
+}
+
+#[test]
+fn edit_parent_takes_an_id_or_none() {
+    let args = parse(&["edit", "T-02wt0kx", "--parent", "T-02wt0m0"]).unwrap();
+    let Command::Edit { parent, .. } = args.command else {
+        panic!("expected edit");
+    };
+    assert_eq!(
+        parent,
+        Some(ParentArg::Ticket("T-02wt0m0".parse().unwrap()))
+    );
+
+    let args = parse(&["edit", "T-02wt0kx", "--parent", "none"]).unwrap();
+    let Command::Edit { parent, .. } = args.command else {
+        panic!("expected edit");
+    };
+    assert_eq!(parent, Some(ParentArg::None));
+}
+
+/// A parent's children follow its description, each with its status, and a
+/// child names its parent with the parent's status and title.
+#[test]
+fn show_prints_the_parent_and_the_children() {
+    let dir = Utf8TempDir::new().unwrap();
+    let parent = write_ticket(dir.path(), "02wt0kx", "Investigate", Status::Todo);
+    let child = write_ticket(dir.path(), "02wt0m0", "Bound output", Status::Todo);
+    store::set_parent(dir.path(), &Formatting::default(), child, Some(parent)).unwrap();
+
+    let shown = run_command(&dir, Command::Show { id: Some(parent) }).unwrap();
+    assert_eq!(
+        shown.text,
+        format!(
+            "# T-02wt0kx: Investigate\n\n- **Path**: {}\n- **Status**: Todo\n\n## Children (0 of \
+             1 done)\n\nT-02wt0m0 Todo         Bound output\n",
+            dir.path().join("02wt0kx-slug.md")
+        )
+    );
+
+    let shown = run_command(&dir, Command::Show { id: Some(child) }).unwrap();
+    assert_eq!(
+        shown.text,
+        format!(
+            "# T-02wt0m0: Bound output\n\n- **Path**: {}\n- **Status**: Todo\n- **Parent**: \
+             T-02wt0kx (Todo) Investigate\n",
+            dir.path().join("02wt0m0-slug.md")
+        )
+    );
+
+    let json = run_json(&dir, Command::Show { id: Some(parent) }).unwrap();
+    let detail: serde_json::Value = serde_json::from_str(&json.text).unwrap();
+    assert_eq!(
+        detail["children"],
+        json!([{ "id": "T-02wt0m0", "title": "Bound output", "status": "Todo" }])
+    );
 }
 
 #[test]
@@ -2034,6 +2162,7 @@ fn labels_survive_the_round_trip_and_show_in_the_listing() {
     ]);
 
     let listed = run_command(&dir, Command::List {
+        under: None,
         status: None,
         labels: vec![],
         query: None,
@@ -2055,6 +2184,7 @@ fn listing_narrows_to_tickets_carrying_every_label() {
     add_labelled(&dir, "None", &[]);
 
     let listed = run_command(&dir, Command::List {
+        under: None,
         status: None,
         labels: vec!["package=jp_cli".to_owned(), "client=macos".to_owned()],
         query: None,
@@ -2077,6 +2207,7 @@ fn listing_narrows_on_a_bare_key() {
     add_labelled(&dir, "Crate work", &["package=jp_cli"]);
 
     let listed = run_command(&dir, Command::List {
+        under: None,
         status: None,
         labels: vec!["client".to_owned()],
         query: None,
@@ -2096,15 +2227,19 @@ fn listing_narrows_on_a_query() {
     let described = add_labelled(&dir, "Header misaligned", &[]);
     add_labelled(&dir, "Unrelated", &[]);
     run_command(&dir, Command::Edit {
+        parent: None,
         id: Some(described),
         title: None,
         body: Some("The WRAP width ignores the gutter.".to_owned()),
         status: None,
         labels: vec![],
+        check: vec![],
+        uncheck: vec![],
     })
     .unwrap();
     let listing = |query: &str| {
         run_command(&dir, Command::List {
+            under: None,
             status: None,
             labels: vec![],
             query: Some(query.to_owned()),
@@ -2286,6 +2421,7 @@ fn label_changes_no_ticket_when_one_is_refused() {
         run_with_options(
             dir.path(),
             Command::Add {
+                parent: None,
                 title: Some(title.to_owned()),
                 author: Some("john".to_owned()),
                 body: None,
@@ -2330,6 +2466,7 @@ fn adding_to_a_full_key_points_at_set() {
     run_with_options(
         dir.path(),
         Command::Add {
+            parent: None,
             title: Some("A bug".to_owned()),
             author: Some("john".to_owned()),
             body: None,
@@ -2371,6 +2508,7 @@ fn an_unknown_label_is_refused_with_the_known_set() {
     let dir = Utf8TempDir::new().unwrap();
 
     let error = run_command(&dir, Command::Add {
+        parent: None,
         title: Some("Typo".to_owned()),
         author: Some("john".to_owned()),
         body: None,
@@ -2505,6 +2643,7 @@ fn a_broken_vocabulary_fails_what_labels_or_files() {
     let error = run_with_options(
         dir.path(),
         Command::Add {
+            parent: None,
             title: Some("Unlabelled".to_owned()),
             author: Some("john".to_owned()),
             body: None,
@@ -2518,6 +2657,7 @@ fn a_broken_vocabulary_fails_what_labels_or_files() {
     run_with_options(
         dir.path(),
         Command::List {
+            under: None,
             status: None,
             labels: vec![],
             query: None,
@@ -2548,6 +2688,7 @@ fn adding_a_ticket_without_a_required_label_is_refused() {
         run_with_options(
             dir.path(),
             Command::Add {
+                parent: None,
                 title: Some("Header misaligned".to_owned()),
                 author: Some("john".to_owned()),
                 body: None,
@@ -2577,6 +2718,7 @@ fn the_labels_are_checked_before_the_composer_opens() {
         dir.path(),
         &typed(),
         Command::Add {
+            parent: None,
             title: None,
             author: None,
             body: None,
@@ -2601,6 +2743,7 @@ fn removing_a_required_label_is_refused() {
     run_with_options(
         dir.path(),
         Command::Add {
+            parent: None,
             title: Some("Header misaligned".to_owned()),
             author: Some("john".to_owned()),
             body: None,
@@ -2634,7 +2777,15 @@ fn removing_a_required_label_is_refused() {
 fn importing_a_new_issue_without_required_labels_fetches_nothing() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let error = import_all(dir.path(), &typed(), &[123], "dcdpr/jp", &[]).unwrap_err();
+    let error = import_all(
+        dir.path(),
+        &Formatting::default(),
+        &typed(),
+        &[123],
+        "dcdpr/jp",
+        &[],
+    )
+    .unwrap_err();
 
     assert_eq!(
         error,
@@ -2660,6 +2811,7 @@ fn add_unique(dir: &Utf8TempDir, title: &str, labels: &[&str]) -> Result<Output,
     run_with_options(
         dir.path(),
         Command::Add {
+            parent: None,
             title: Some(title.to_owned()),
             author: Some("john".to_owned()),
             body: None,
@@ -2702,6 +2854,7 @@ fn a_taken_label_is_refused_before_the_composer_opens() {
         dir.path(),
         &unique_board(),
         Command::Add {
+            parent: None,
             title: None,
             author: None,
             body: None,
@@ -2824,6 +2977,7 @@ fn the_label_listing_names_each_bound() {
 fn unreadable_tickets_are_warned_about_separately() {
     let dir = Utf8TempDir::new().unwrap();
     run_command(&dir, Command::Add {
+        parent: None,
         title: Some("Readable".to_owned()),
         author: Some("john".to_owned()),
         body: None,
@@ -2833,6 +2987,7 @@ fn unreadable_tickets_are_warned_about_separately() {
     std::fs::write(dir.path().join("zzzzzzz-mangled.md"), "no heading here\n").unwrap();
 
     let listed = run_json(&dir, Command::List {
+        under: None,
         status: None,
         labels: vec![],
         query: None,
@@ -2898,4 +3053,225 @@ fn warnings_are_printed_on_stderr() {
             .any(|message| matches!(message, PluginToHost::Log(_))),
         "{messages:?}"
     );
+}
+
+/// Write a ticket under `02wt0kx` at `status`, whose description is a checklist
+/// of three items, the first one checked.
+fn write_checklist_ticket(dir: &Utf8Path, status: Status) -> TicketId {
+    let id = write_ticket(dir, "02wt0kx", "Exercise recorded tool rounds", status);
+    store::edit(
+        dir,
+        &Formatting::default(),
+        id,
+        None,
+        Some("- [x] Keep tools declared\n- [ ] Cover a second call\n- [ ] Cover parallel calls"),
+    )
+    .unwrap();
+
+    id
+}
+
+#[test]
+fn edit_takes_items_to_check_and_uncheck() {
+    let args = parse(&[
+        "edit",
+        "T-02wt0kx",
+        "--check",
+        "second call",
+        "--check",
+        "parallel",
+        "--uncheck",
+        "declared",
+    ])
+    .unwrap();
+
+    match args.command {
+        Command::Edit { check, uncheck, .. } => {
+            assert_eq!(check, ["second call", "parallel"]);
+            assert_eq!(uncheck, ["declared"]);
+        }
+        other => panic!("expected edit, got {other:?}"),
+    }
+}
+
+/// A new description and items to check in the old one ask two different things
+/// of the same text.
+#[test]
+fn edit_refuses_a_body_and_items_to_check_together() {
+    let error = parse(&["edit", "T-02wt0kx", "--body", "New.", "--check", "x"]).unwrap_err();
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
+fn edit_checks_items_and_reports_the_checklist() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_checklist_ticket(dir.path(), Status::Todo);
+    let path = dir.path().join("02wt0kx-slug.md");
+
+    let edited = run_command(&dir, Command::Edit {
+        id: Some(id),
+        title: None,
+        body: None,
+        status: None,
+        labels: vec![],
+        parent: None,
+        check: owned(&["second call", "declared"]),
+        uncheck: vec![],
+    })
+    .unwrap();
+
+    assert_eq!(
+        edited.text,
+        format!(
+            "Edited {path}\nChecked: Cover a second call\nAlready checked: Keep tools \
+             declared\nChecklist: 2 of 3 checked\n"
+        )
+    );
+    let ticket = ticket::parse::document(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(
+        ticket.description,
+        "- [x] Keep tools declared\n- [x] Cover a second call\n- [ ] Cover parallel calls"
+    );
+}
+
+/// A name matching no item is refused before anything is written, the status
+/// included.
+#[test]
+fn edit_refuses_an_unknown_item_before_changing_anything() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_checklist_ticket(dir.path(), Status::Todo);
+    let path = dir.path().join("02wt0kx-slug.md");
+    let before = std::fs::read_to_string(&path).unwrap();
+
+    let error = run_command(&dir, Command::Edit {
+        id: Some(id),
+        title: None,
+        body: None,
+        status: Some(Status::Done),
+        labels: vec![],
+        parent: None,
+        check: owned(&["reasoning"]),
+        uncheck: vec![],
+    })
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        "No checklist item contains `reasoning`.\nThe checklist items are:\n- [x] Keep tools \
+         declared\n- [ ] Cover a second call\n- [ ] Cover parallel calls"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+}
+
+/// Closing isn't refused, but the items left unchecked are named, by `close`
+/// and by `status` alike.
+#[test]
+fn closing_with_unchecked_items_warns() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_checklist_ticket(dir.path(), Status::Todo);
+    let warning = "closed with 2 of 3 checklist items unchecked: \"Cover a second call\", \"Cover \
+                   parallel calls\". Check the ones that are done, and remove the rest with a \
+                   comment saying why.";
+
+    let closed = run_command(&dir, Command::Close { id: Some(id) }).unwrap();
+    assert_eq!(closed.warnings, [warning]);
+
+    let again = run_command(&dir, Command::Status {
+        id,
+        status: Status::Done,
+        before: None,
+        after: None,
+    })
+    .unwrap();
+    assert_eq!(again.warnings, [warning]);
+
+    let reopened = run_command(&dir, Command::Status {
+        id,
+        status: Status::Todo,
+        before: None,
+        after: None,
+    })
+    .unwrap();
+    assert!(reopened.warnings.is_empty(), "{:?}", reopened.warnings);
+}
+
+/// `edit --status done` judges the checklist the edit leaves, so checking the
+/// last items while closing says nothing more.
+#[test]
+fn edit_closing_with_the_last_items_checked_does_not_warn() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_checklist_ticket(dir.path(), Status::Todo);
+
+    let edit = |check: &[&str]| {
+        run_command(&dir, Command::Edit {
+            id: Some(id),
+            title: None,
+            body: None,
+            status: Some(Status::Done),
+            labels: vec![],
+            parent: None,
+            check: owned(check),
+            uncheck: vec![],
+        })
+        .unwrap()
+    };
+
+    assert_eq!(edit(&["second"]).warnings.len(), 1);
+    assert!(edit(&["parallel"]).warnings.is_empty());
+}
+
+#[test]
+fn show_list_and_board_count_the_checklist() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_checklist_ticket(dir.path(), Status::Todo);
+    let path = dir.path().join("02wt0kx-slug.md");
+
+    let shown = run_command(&dir, Command::Show { id: Some(id) }).unwrap();
+    assert_eq!(
+        shown.text,
+        format!(
+            "# T-02wt0kx: Exercise recorded tool rounds\n\n- **Path**: {path}\n- **Status**: \
+             Todo\n- **Checklist**: 1 of 3 checked\n\n- [x] Keep tools declared\n- [ ] Cover a \
+             second call\n- [ ] Cover parallel calls\n"
+        )
+    );
+
+    let listed = run_command(&dir, Command::List {
+        status: None,
+        labels: vec![],
+        query: None,
+        under: None,
+    })
+    .unwrap();
+    assert_eq!(
+        listed.text,
+        "T-02wt0kx Todo         Exercise recorded tool rounds (1 of 3 checked)\n"
+    );
+
+    let board = run_command(&dir, Command::Board).unwrap();
+    assert_eq!(
+        board.text,
+        "Todo (1)\nT-02wt0kx Exercise recorded tool rounds (1 of 3 checked)\n\nIn Progress \
+         (0)\n\nDone (0)\n"
+    );
+}
+
+#[test]
+fn list_json_counts_the_checklist() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_checklist_ticket(dir.path(), Status::Todo);
+    write_ticket(dir.path(), "02wt0kz", "No checklist", Status::Todo);
+
+    let out = run_json(&dir, Command::List {
+        status: None,
+        labels: vec![],
+        query: None,
+        under: None,
+    })
+    .unwrap();
+
+    let rows: serde_json::Value = serde_json::from_str(&out.text).unwrap();
+    assert_eq!(rows[0]["checklist"], json!({ "checked": 1, "count": 3 }));
+    assert!(rows[1].get("checklist").is_none(), "{}", rows[1]);
 }

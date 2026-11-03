@@ -671,6 +671,7 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 name = "comfort"
 version = "0.1.0"
 dependencies = [
+ "camino-tempfile",
  "cargo_metadata",
  "clap",
  "comrak",
@@ -679,9 +680,11 @@ dependencies = [
  "pretty_assertions",
  "ra-ap-rustc_lexer",
  "regex",
+ "serde",
  "similar",
  "textwrap",
  "thiserror 2.0.20",
+ "toml",
  "unicode-segmentation",
  "unicode-width",
 ]
@@ -1122,6 +1125,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "comfort",
  "comrak",
  "ignore",
  "indoc",
@@ -2084,7 +2088,7 @@ dependencies = [
 [[package]]
 name = "inquire"
 version = "0.9.1"
-source = "git+https://github.com/JeanMertz/inquire?branch=merged#93ecb2750bc244b2af69b4294d6809957ec7adf0"
+source = "git+https://github.com/JeanMertz/inquire?branch=merged#0b680682388aabd4deeba3f2e0d2f5672037a891"
 dependencies = [
  "bitflags 2.11.1",
  "crossterm",
@@ -2246,6 +2250,7 @@ dependencies = [
  "chrono",
  "clap",
  "comfort",
+ "doc",
  "jp_github",
  "jp_md",
  "jp_plugin",
@@ -2285,6 +2290,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "clap",
+ "comfort",
  "comrak",
  "doc",
  "indoc",
@@ -2493,6 +2499,7 @@ dependencies = [
  "jp_plugin",
  "jp_printer",
  "jp_process",
+ "jp_pty",
  "jp_storage",
  "jp_task",
  "jp_term",
@@ -2672,6 +2679,8 @@ version = "0.1.0"
 dependencies = [
  "crossterm",
  "inquire",
+ "jp_pty",
+ "nu-ansi-term",
  "parking_lot",
  "reedline",
 ]
@@ -2880,6 +2889,7 @@ name = "jp_task"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "futures",
  "jp_config",
  "jp_conversation",
@@ -2901,6 +2911,7 @@ dependencies = [
  "strip-ansi-escapes",
  "unicode-segmentation",
  "unicode-width",
+ "vte 0.14.1",
 ]
 
 [[package]]
@@ -5103,6 +5114,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "comfort",
  "doc",
  "indoc",
  "jp_label",

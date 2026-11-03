@@ -1,6 +1,10 @@
-use jp_term::background::BackgroundFill;
+use jp_term::{
+    background::BackgroundFill,
+    sanitize::{ContentClass, SanitizeMode},
+};
 
 use super::*;
+use crate::style::{Color, MarkdownStyleSheet, Style};
 
 struct TestCase {
     input: &'static str,
@@ -1488,5 +1492,231 @@ fn test_terminal_no_end_list_marker_between_adjacent_lists() {
     assert!(
         !out.contains("end list"),
         "Unexpected `<!-- end list -->` marker in terminal output: {out:?}"
+    );
+}
+
+/// Format `input` as one block of `class` content shown under `mode`.
+fn format_as(input: &str, class: ContentClass, mode: SanitizeMode) -> String {
+    Formatter::new()
+        .format_terminal_with(input, &TerminalOptions {
+            content: Some((class, mode)),
+            suppress_trailing_separator: true,
+            ..Default::default()
+        })
+        .unwrap()
+}
+
+#[test]
+fn a_character_reference_in_model_output_cannot_write_an_escape() {
+    // The parser decodes `&#27;` into a real `ESC` after the source filter has
+    // run, so the formatter filters decoded text again.
+    assert_eq!(
+        format_as(
+            "Clear &#27;[2J here",
+            ContentClass::ModelOutput,
+            SanitizeMode::Strip
+        ),
+        "Clear [2J here\n"
+    );
+}
+
+#[test]
+fn visualize_marks_the_control_character_a_reference_decoded_to() {
+    assert_eq!(
+        format_as(
+            "Clear &#27;[2J here",
+            ContentClass::ModelOutput,
+            SanitizeMode::Visualize
+        ),
+        "Clear \u{241b}[2J here\n"
+    );
+}
+
+#[test]
+fn link_destinations_and_titles_are_filtered_after_decoding() {
+    assert_eq!(
+        format_as(
+            "[a](http://x/&#27;[2J \"t&#27;[1A\")",
+            ContentClass::ModelOutput,
+            SanitizeMode::Strip
+        ),
+        "[a](http://x/[2J \"t[1A\")\n"
+    );
+    assert_eq!(
+        format_as(
+            "![a](http://x/&#7; \"&#27;b\")",
+            ContentClass::ModelOutput,
+            SanitizeMode::Strip
+        ),
+        "![a](http://x/ \"b\")\n"
+    );
+    assert_eq!(
+        format_as(
+            "<http://x/&#27;>",
+            ContentClass::ModelOutput,
+            SanitizeMode::Strip
+        ),
+        "<http://x/>\n"
+    );
+}
+
+#[test]
+fn a_fence_info_string_is_filtered_after_decoding() {
+    // CommonMark decodes references in the info string as well.
+    assert_eq!(
+        format_as(
+            "```&#27;[2J\ncode\n```",
+            ContentClass::ModelOutput,
+            SanitizeMode::Strip
+        ),
+        "```[2J\ncode\n```\n"
+    );
+}
+
+#[test]
+fn a_table_cell_is_filtered_after_decoding() {
+    // Cells render through a formatter of their own, which inherits the policy.
+    assert_eq!(
+        format_as(
+            "| h |\n|---|\n| &#27;[2J |",
+            ContentClass::ModelOutput,
+            SanitizeMode::Strip
+        ),
+        "| h   |\n|-----|\n| [2J |\n"
+    );
+}
+
+#[test]
+fn a_user_message_keeps_the_styling_a_reference_decodes_to() {
+    // A user typing `&#27;[31m` gets red, but nothing that moves the cursor or
+    // clears the screen.
+    assert_eq!(
+        format_as(
+            "&#27;[31mred&#27;[0m and &#27;[2Jgone",
+            ContentClass::UserMessage,
+            SanitizeMode::Strip
+        ),
+        "\x1b[31mred\x1b[0m and gone\n"
+    );
+}
+
+#[test]
+fn decoded_text_is_written_as_decoded_under_off() {
+    assert_eq!(
+        format_as("a&#27;[2Jb", ContentClass::ModelOutput, SanitizeMode::Off),
+        "a\x1b[2Jb\n"
+    );
+}
+
+#[test]
+fn test_terminal_math_default_unstyled_preserves_markdown_chars() {
+    let formatter = Formatter::new();
+    let actual = formatter
+        .format_terminal("Formula $a_1 * b_2$ and $$x^2$$ here.")
+        .unwrap();
+    assert_eq!(actual, "Formula $a_1 * b_2$ and $$x^2$$ here.\n");
+}
+
+#[test]
+fn test_terminal_math_foreground_and_background() {
+    let fg_only = Formatter::new().style_sheet(MarkdownStyleSheet {
+        math: Style {
+            fg: Some(Color::Ansi256(3)),
+            bg: None,
+        },
+    });
+    assert_eq!(
+        fg_only.format_terminal("Turn $N$'s request").unwrap(),
+        "Turn \x1b[38;5;3m$N$\x1b[39m's request\n"
+    );
+
+    let fg_and_bg = Formatter::new().style_sheet(MarkdownStyleSheet {
+        math: Style {
+            fg: Some(Color::Rgb {
+                r: 250,
+                g: 189,
+                b: 47,
+            }),
+            bg: Some(Color::Ansi256(236)),
+        },
+    });
+    assert_eq!(
+        fg_and_bg
+            .format_terminal("Inline $\\le N-1$ and display $$0..N-1$$.")
+            .unwrap(),
+        "Inline \x1b[38;2;250;189;47m\x1b[48;5;236m$\\le N-1$\x1b[39m\x1b[49m and display \
+         \x1b[38;2;250;189;47m\x1b[48;5;236m$$0..N-1$$\x1b[39m\x1b[49m.\n"
+    );
+}
+
+#[test]
+fn test_terminal_math_restores_blockquote_fg_and_reasoning_bg() {
+    let formatter = Formatter::with_width(0).style_sheet(MarkdownStyleSheet {
+        math: Style {
+            fg: Some(Color::Ansi256(3)),
+            bg: Some(Color::Ansi256(52)),
+        },
+    });
+
+    // Inside a blockquote, closing `$` must restore the blockquote's gutter fg
+    // (`38;2;131;148;150`), not reset to `39`.
+    let quote = formatter.format_terminal("> before $N$ after\n").unwrap();
+    assert_eq!(
+        quote,
+        "\x1b[38;2;131;148;150m> before \
+         \x1b[38;5;3m\x1b[48;5;52m$N$\x1b[38;2;131;148;150m\x1b[49m after\x1b[39m\n"
+    );
+
+    // Inside a reasoning block, closing `$` must restore `default_background`
+    // (`48;5;236`), not reset to `49`.
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: "48;5;236".into(),
+            fill: BackgroundFill::Content,
+        }),
+        suppress_trailing_separator: true,
+        ..Default::default()
+    };
+    let reasoning = formatter
+        .format_terminal_with("before $N$ after\n", &opts)
+        .unwrap();
+    assert_eq!(
+        reasoning,
+        "\x1b[48;5;236mbefore \x1b[38;5;3m\x1b[48;5;52m$N$\x1b[39m\x1b[48;5;236m after\x1b[0m\n"
+    );
+}
+
+#[test]
+fn test_terminal_math_in_wrapped_table_cells() {
+    let formatter = Formatter::with_width(80)
+        .table_max_column_width(18)
+        .style_sheet(MarkdownStyleSheet {
+            math: Style {
+                fg: Some(Color::Ansi256(3)),
+                bg: None,
+            },
+        });
+
+    let input = "| Option | Accuracy |\n| :--- | :--- |\n| Turn $\\le N-1$ during Turn $N$ | High \
+                 on $0..N-1$ |\n";
+    let actual = formatter.format_terminal(input).unwrap();
+    let plain = strip_ansi_for_test(&actual);
+
+    assert_eq!(
+        plain,
+        "| Option             | Accuracy         |\n|:-------------------|:-----------------|\n| \
+         Turn $\\le N-1$     | High on $0..N-1$ |\n┆ during Turn $N$    |                  |\n"
+    );
+    assert!(
+        actual.contains("\x1b[38;5;3m$\\le N-1$\x1b[39m"),
+        "expected styled $\\le N-1$ in table output: {actual:?}"
+    );
+    assert!(
+        actual.contains("\x1b[38;5;3m$N$\x1b[39m"),
+        "expected styled $N$ on wrapped continuation row: {actual:?}"
+    );
+    assert!(
+        actual.contains("\x1b[38;5;3m$0..N-1$\x1b[39m"),
+        "expected styled $0..N-1$ in table output: {actual:?}"
     );
 }

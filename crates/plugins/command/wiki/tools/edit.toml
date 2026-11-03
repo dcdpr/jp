@@ -51,6 +51,10 @@ Retitle it and change a label:
 
 run = "ask"
 
+# Several edits in one call are made one at a time in the order written: two
+# sections of one page, or two moves in the wiki's order file, must not race.
+fan_out = { concurrency = 1 }
+
 [conversation.tools.wiki_edit.style]
 parameters = "function_call"
 inline_results = "full"

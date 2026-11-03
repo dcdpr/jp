@@ -20,7 +20,7 @@ use std::ops::Range;
 
 use doc::metadata::{self, Field, Header, split, unescape};
 
-use crate::{Comment, LABEL_KEY, Labels, Metadata, ParseError, Ticket};
+use crate::{Comment, LABEL_KEY, Labels, Metadata, ParseError, Ticket, TicketId};
 
 /// Read a ticket document.
 pub fn document(source: &str) -> Result<Ticket, ParseError> {
@@ -242,6 +242,7 @@ fn metadata(fields: Vec<Field>) -> Result<Metadata, ParseError> {
     let mut date = None;
     let mut promoted_to = None;
     let mut github = None;
+    let mut parent = None;
 
     for Field { key, value, .. } in fields {
         match key.to_ascii_lowercase().as_str() {
@@ -253,6 +254,16 @@ fn metadata(fields: Vec<Field>) -> Result<Metadata, ParseError> {
             "date" => date = Some(value),
             "promoted to" => promoted_to = Some(value),
             "github" => github = Some(value),
+            "parent" => {
+                parent = Some(
+                    value
+                        .parse::<TicketId>()
+                        .map_err(|_| ParseError::InvalidValue {
+                            field: "Parent",
+                            value,
+                        })?,
+                );
+            }
             _ => {}
         }
     }
@@ -264,12 +275,13 @@ fn metadata(fields: Vec<Field>) -> Result<Metadata, ParseError> {
         date: date.ok_or(ParseError::MissingField("Date"))?,
         promoted_to,
         github,
+        parent,
     })
 }
 
 /// Tracks fenced code block state while walking a document line by line.
 #[derive(Default)]
-struct Fences {
+pub(crate) struct Fences {
     open: Option<(char, usize)>,
 }
 
@@ -278,7 +290,7 @@ impl Fences {
     ///
     /// The opening and closing fences count as inside, so a `-----` sitting
     /// between them is never read as a comment boundary.
-    fn consume(&mut self, line: &str) -> bool {
+    pub(crate) fn consume(&mut self, line: &str) -> bool {
         let Some((char_, count, has_info)) = fence(line) else {
             return self.open.is_some();
         };

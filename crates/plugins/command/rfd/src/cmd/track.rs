@@ -10,8 +10,8 @@
 //!
 //! `track` files the ticket, or finds the one already filed.
 //! The plan is read out of the document by a model, since the phases differ per
-//! RFD; when it isn't read, the marker [`PENDING`] stands in for it and the
-//! next `track` reads it again.
+//! RFD, and written as a checklist, one item per phase; when it isn't read, the
+//! marker [`PENDING`] stands in for it and the next `track` reads it again.
 //! Only the marker is ever replaced: the rest of the description is the
 //! project's to edit.
 
@@ -162,12 +162,13 @@ pub(crate) fn track(
         .ok_or_else(|| format!("No heading found in {shown}; cannot title the ticket."))?;
     let plan = phases(id, read_plan(&request)?, &mut report);
 
-    let (ticket, path) = store::create(&paths.tickets, vocabulary, &NewTicket {
+    let (ticket, path) = store::create(&paths.tickets, &paths.formatting, vocabulary, &NewTicket {
         title: &title,
         authors: &filer.author,
         date: &filer.date,
         labels: &labels,
         description: &description(id, &link, plan.as_deref()),
+        parent: None,
     })
     .map_err(|error| error.to_string())?;
     report.notes.push(format!(
@@ -207,8 +208,13 @@ pub(crate) fn start(
     read_plan: &mut ReadPlan<'_>,
 ) -> Result<Output, String> {
     let tracked = track(paths, vocabulary, links, id, filer, read_plan)?;
-    let (path, previous) = store::set_status(&paths.tickets, tracked.ticket, Status::InProgress)
-        .map_err(|error| error.to_string())?;
+    let (path, previous) = store::set_status(
+        &paths.tickets,
+        &paths.formatting,
+        tracked.ticket,
+        Status::InProgress,
+    )
+    .map_err(|error| error.to_string())?;
 
     let mut output = tracked.report;
     output.text = moved(paths, &path, previous, Status::InProgress);
@@ -234,8 +240,9 @@ pub(crate) fn stop(paths: &Paths, links: &Links, id: RfdId) -> Result<Output, St
         return Ok(output);
     };
 
-    let (path, previous) = store::set_status(&paths.tickets, ticket, Status::Todo)
-        .map_err(|error| error.to_string())?;
+    let (path, previous) =
+        store::set_status(&paths.tickets, &paths.formatting, ticket, Status::Todo)
+            .map_err(|error| error.to_string())?;
     output.text = moved(paths, &path, previous, Status::Todo);
 
     Ok(output)
@@ -360,8 +367,14 @@ fn fill(
     let description = current
         .description
         .replacen(PENDING, &plan_section(phases), 1);
-    let edited = store::edit(&paths.tickets, ticket, None, Some(&description))
-        .map_err(|error| error.to_string())?;
+    let edited = store::edit(
+        &paths.tickets,
+        &paths.formatting,
+        ticket,
+        None,
+        Some(&description),
+    )
+    .map_err(|error| error.to_string())?;
     report.notes.push(format!(
         "Read the Implementation Plan of RFD {id} into {} ({ticket}).",
         paths.show(&edited.to)
@@ -402,12 +415,14 @@ fn description(id: RfdId, link: &str, phases: Option<&[Phase]>) -> String {
     text.trim_end().to_owned()
 }
 
-/// The plan as a tracking ticket lists it: a heading, then one item per phase.
+/// The plan as a tracking ticket lists it: a heading, then one unchecked
+/// checklist item per phase, which the ticket's tooling checks off as the
+/// phases land.
 fn plan_section(phases: &[Phase]) -> String {
     let mut text = String::from("## Implementation plan\n\n");
     for phase in phases {
         text.push_str(&format!(
-            "- **{}**: {}\n",
+            "- [ ] **{}**: {}\n",
             one_line(&phase.title),
             one_line(&phase.summary)
         ));

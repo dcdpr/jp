@@ -786,8 +786,8 @@ default_values: ["false"]
 help_heading: None
 conflicts: ["new_conversation"]
 set: []
-help: Some("Replay the last message in the conversation")
-long_help: Some("Replay the last message in the conversation.\n\nIf a query is provided, it will be appended to the end of the previous message. If no query is provided, $EDITOR will open with the last message in the conversation.")
+help: Some("Replay the last turn in the conversation")
+long_help: Some("Replay the last turn in the conversation.\n\nThe turn is removed, including any reply sent while it was interrupted, and the message that started it is sent again. If a query is provided, it is placed before that message. If no query is provided, $EDITOR will open with that message.")
 
 ### id
 short: Some('i')
@@ -2355,7 +2355,7 @@ help_heading: None
 conflicts: ["local", "pin", "expires_at", "no_expires_at", "title", "no_title"]
 set: []
 help: Some("Open `events.json` in `$EDITOR`")
-long_help: Some("Open `events.json` in `$EDITOR`.\n\nEach entry carries an `event_id` identifying it. Keep it when you edit an entry's content, and drop it when you add one: a missing, empty, or duplicated ID is replaced on the next load.")
+long_help: Some("Open `events.json` in `$EDITOR`.\n\nEach entry carries an `event_id` identifying it. Keep it when you edit an entry's content, and drop it when you add one: a missing, empty, or duplicated ID is replaced on the next load.\n\nA `turn_start` entry can also carry a `summary` of its turn. Remove it when you change the turn's content: a stored summary is never rewritten, and a turn without one is summarized again by a later `jp query` while `conversation.turn_summary.generate.auto` is on.")
 
 ### metadata
 short: Some('m')

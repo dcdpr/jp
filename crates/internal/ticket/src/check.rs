@@ -10,7 +10,11 @@ use camino::Utf8PathBuf;
 use jp_label::{Clash, Rejected};
 
 use crate::{
-    Labels, ParseError, TicketId, Vocabulary, epoch::EpochError, parse, store::held_to_one,
+    Labels, ParseError, TicketId, Vocabulary,
+    epoch::EpochError,
+    parent::{self, Member, Refusal},
+    parse,
+    store::held_to_one,
 };
 
 /// A ticket directory as read.
@@ -39,7 +43,7 @@ pub struct Report {
     pub tickets: usize,
 
     /// Every problem, file-wide ones first, then each ticket's in id order,
-    /// then labels shared across tickets.
+    /// then labels shared across tickets, then broken parent relations.
     pub problems: Vec<Problem>,
 }
 
@@ -85,6 +89,15 @@ pub enum Problem {
 
     /// A label the board lets one ticket carry, on several.
     Shared { clash: Clash, ids: Vec<TicketId> },
+
+    /// A ticket breaking a rule of the parent relation: a parent that isn't
+    /// there, is the ticket itself, or sits under another, or a Done parent
+    /// with open children.
+    Parent {
+        id: TicketId,
+        path: Utf8PathBuf,
+        refusal: Refusal,
+    },
 }
 
 impl fmt::Display for Problem {
@@ -117,6 +130,13 @@ impl fmt::Display for Problem {
                 join(ids),
                 held_to_one(clash)
             ),
+            // The message names the parent, which isn't the ticket at fault.
+            Self::Parent {
+                id,
+                refusal: refusal @ Refusal::Nested { .. },
+                ..
+            } => write!(f, "{id}: {refusal}"),
+            Self::Parent { refusal, .. } => refusal.fmt(f),
         }
     }
 }
@@ -138,13 +158,15 @@ pub fn report(directory: &Directory, vocabulary: &Vocabulary) -> Report {
     problems.extend(duplicates(&directory.tickets));
 
     let mut labelled = vec![];
+    let mut members = vec![];
     for ticket in &directory.tickets {
-        if let Err(error) = parse::document(&ticket.source) {
-            problems.push(Problem::Malformed {
+        match parse::document(&ticket.source) {
+            Ok(parsed) => members.push(Member::of(ticket.id, &parsed)),
+            Err(error) => problems.push(Problem::Malformed {
                 id: ticket.id,
                 path: ticket.path.clone(),
                 error,
-            });
+            }),
         }
 
         let tokens = parse::label_tokens(&ticket.source);
@@ -161,6 +183,26 @@ pub fn report(directory: &Directory, vocabulary: &Vocabulary) -> Report {
         labelled.push((ticket.id, carried));
     }
     problems.extend(shared(vocabulary, &labelled));
+    problems.extend(
+        parent::problems(&members)
+            .into_iter()
+            // A parent that is there but doesn't parse is reported as
+            // malformed, not as missing.
+            .filter(|(_, refusal)| match refusal {
+                Refusal::NoSuchParent { parent, .. } => {
+                    !directory.tickets.iter().any(|ticket| ticket.id == *parent)
+                }
+                _ => true,
+            })
+            .filter_map(|(id, refusal)| {
+                let ticket = directory.tickets.iter().find(|ticket| ticket.id == id)?;
+                Some(Problem::Parent {
+                    id,
+                    path: ticket.path.clone(),
+                    refusal,
+                })
+            }),
+    );
 
     Report {
         tickets: directory.tickets.len(),

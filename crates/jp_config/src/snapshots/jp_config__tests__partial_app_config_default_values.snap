@@ -115,6 +115,17 @@ Ok(
                         true,
                     ),
                 },
+                turn_summary: PartialTurnSummaryConfig {
+                    generate: PartialTurnSummaryGenerateConfig {
+                        auto: Some(
+                            true,
+                        ),
+                        batch_size: Some(
+                            5,
+                        ),
+                        model: None,
+                    },
+                },
                 tools: PartialToolsConfig {
                     defaults: PartialToolsDefaultsConfig {
                         enable: None,
@@ -281,6 +292,7 @@ Ok(
                 default_id: None,
             },
             style: PartialStyleConfig {
+                sanitize: None,
                 code: PartialCodeConfig {
                     color: Some(
                         true,
@@ -312,6 +324,12 @@ Ok(
                         "gruvbox-dark",
                     ),
                     hr_style: None,
+                    elements: PartialElementsConfig {
+                        math: PartialElementStyleConfig {
+                            fg: None,
+                            bg: None,
+                        },
+                    },
                 },
                 mcp_startup: PartialMcpStartupConfig {
                     show: Some(
@@ -338,6 +356,14 @@ Ok(
                     extend_across_tool_calls: Some(
                         true,
                     ),
+                    window: PartialReasoningWindowConfig {
+                        rows: Some(
+                            Off,
+                        ),
+                        timer: Some(
+                            true,
+                        ),
+                    },
                 },
                 streaming: PartialStreamingConfig {
                     progress: PartialProgressConfig {

@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    io,
+    sync::{Arc, Mutex},
+};
 
 use jp_editor::MockEditorBackend;
 use jp_inquire::{ReplyOutcome, prompt::MockPromptBackend};
@@ -594,10 +597,218 @@ fn question_text_cancelled_is_a_user_cancellation() {
 
 #[test]
 fn question_select_uses_backend() {
-    let prompt = MockPromptBackend::new().with_select_responses(["Option B"]);
+    let prompt = MockPromptBackend::new().with_select_responses([1]);
     let question = jp_tool::Question::select("q3", "Choose:")
         .unwrap()
         .with_options(vec!["Option A".to_string(), "Option B".to_string()]);
     let result = prompter(prompt).prompt_question(&question).unwrap();
     assert_eq!(result.answer, Value::String("Option B".to_string()));
+}
+
+/// What a question prompt was asked to show.
+#[derive(Debug, Clone, PartialEq)]
+enum Shown {
+    /// A boolean question, asked as an inline choice.
+    Choice {
+        message: String,
+    },
+    Select {
+        message: String,
+        options: Vec<String>,
+        default: Option<usize>,
+    },
+    /// A text question, asked in the inline reply widget.
+    Reply {
+        message: String,
+        seed: String,
+    },
+    Secret {
+        message: String,
+    },
+}
+
+/// Answers like the mock it wraps, and records what each question prompt was
+/// asked to show.
+struct RecordingBackend {
+    inner: MockPromptBackend,
+    log: Mutex<Vec<Shown>>,
+}
+
+impl RecordingBackend {
+    fn record(&self, shown: Shown) {
+        self.log.lock().unwrap().push(shown);
+    }
+
+    fn shown(&self) -> Vec<Shown> {
+        self.log.lock().unwrap().clone()
+    }
+}
+
+impl PromptBackend for RecordingBackend {
+    fn inline_select(
+        &self,
+        message: &str,
+        options: Vec<InlineOption>,
+        default: Option<char>,
+        writer: &mut dyn io::Write,
+    ) -> Result<char, InquireError> {
+        self.record(Shown::Choice {
+            message: message.to_owned(),
+        });
+        self.inner.inline_select(message, options, default, writer)
+    }
+
+    fn inline_reply(
+        &self,
+        message: &str,
+        initial_text: &str,
+        edit_mode: ReplyEditMode,
+        editor_escape: bool,
+        help: Option<&str>,
+        output: Box<dyn io::Write + Send>,
+    ) -> Result<ReplyOutcome, InquireError> {
+        self.record(Shown::Reply {
+            message: message.to_owned(),
+            seed: initial_text.to_owned(),
+        });
+        self.inner.inline_reply(
+            message,
+            initial_text,
+            edit_mode,
+            editor_escape,
+            help,
+            output,
+        )
+    }
+
+    fn select(
+        &self,
+        message: &str,
+        options: Vec<String>,
+        default: Option<usize>,
+        writer: &mut dyn io::Write,
+    ) -> Result<usize, InquireError> {
+        self.record(Shown::Select {
+            message: message.to_owned(),
+            options: options.clone(),
+            default,
+        });
+        self.inner.select(message, options, default, writer)
+    }
+
+    fn password(&self, message: &str, writer: &mut dyn io::Write) -> Result<String, InquireError> {
+        self.record(Shown::Secret {
+            message: message.to_owned(),
+        });
+        self.inner.password(message, writer)
+    }
+}
+
+/// A prompter answering with `prompt`, and the record of what it showed.
+fn recording_prompter(prompt: MockPromptBackend) -> (ToolPrompter, Arc<RecordingBackend>) {
+    let backend = Arc::new(RecordingBackend {
+        inner: prompt,
+        log: Mutex::default(),
+    });
+    let prompter = ToolPrompter::with_backends(printer(), None, backend.clone());
+
+    (prompter, backend)
+}
+
+#[test]
+fn a_pre_amble_keeps_its_lines_and_loses_its_controls() {
+    // A patch under review is the usual pre-amble, so its line breaks and tabs
+    // stay. A carriage return or a cursor movement could redraw a line of it
+    // before the user approves.
+    let (prompter, out) =
+        prompter_with_output(MockPromptBackend::new().with_inline_responses(['y']));
+    let question = jp_tool::Question::boolean("apply", "Apply the patch?")
+        .unwrap()
+        .with_preamble("-\told\r\n+\tnew\x1b[1A\x1b[2K");
+
+    prompter.prompt_question(&question).unwrap();
+    prompter.printer.flush();
+
+    assert_eq!(*out.lock(), "-\told\n+\tnew[1A[2K\n");
+}
+
+#[test]
+fn a_question_is_shown_as_one_plain_line() {
+    let (prompter, backend) =
+        recording_prompter(MockPromptBackend::new().with_inline_responses(['n']));
+    let question =
+        jp_tool::Question::boolean("confirm", "Delete\x1b[8m every\x1b[28m file?\r\nProceed?")
+            .unwrap();
+
+    prompter.prompt_question(&question).unwrap();
+
+    assert_eq!(backend.shown(), [Shown::Choice {
+        message: "Delete[8m every[28m file?Proceed?".into()
+    }]);
+}
+
+#[test]
+fn select_labels_are_plain_and_the_answer_is_the_option_offered() {
+    let (prompter, backend) =
+        recording_prompter(MockPromptBackend::new().with_select_responses([1]));
+    let question = jp_tool::Question::select("branch", "Branch?\x07")
+        .unwrap()
+        .with_options(vec!["main".into(), "release\x1b[31m".into()])
+        .with_default("release\x1b[31m");
+
+    let result = prompter.prompt_question(&question).unwrap();
+
+    assert_eq!(backend.shown(), [Shown::Select {
+        message: "Branch?".into(),
+        options: vec!["main".into(), "release[31m".into()],
+        default: Some(1),
+    }]);
+    assert_eq!(result.answer, json!("release\x1b[31m"));
+}
+
+#[test]
+fn options_that_look_the_same_answer_with_the_one_chosen() {
+    // Both options show as `main`. The answer follows the row the user chose,
+    // not the first label that matches it.
+    let prompt = MockPromptBackend::new().with_select_responses([1]);
+    let question = jp_tool::Question::select("branch", "Branch?")
+        .unwrap()
+        .with_options(vec!["main".into(), "main\x07".into()]);
+
+    let result = prompter(prompt).prompt_question(&question).unwrap();
+
+    assert_eq!(result.answer, json!("main\x07"));
+}
+
+#[test]
+fn a_text_question_is_plain_and_its_default_reaches_the_widget_intact() {
+    // The widget paints a control character in its buffer as a stand-in, and
+    // submitting the buffer unchanged answers with the default as offered.
+    let (prompter, backend) = recording_prompter(
+        MockPromptBackend::new().with_reply_outcomes([ReplyOutcome::Submit("v1.2\x07".into())]),
+    );
+    let question = jp_tool::Question::text("tag", "Tag\x1b[8m?")
+        .unwrap()
+        .with_default("v1.2\x07");
+
+    let result = prompter.prompt_question(&question).unwrap();
+
+    assert_eq!(backend.shown(), [Shown::Reply {
+        message: "Tag[8m?".into(),
+        seed: "v1.2\x07".into(),
+    }]);
+    assert_eq!(result.answer, json!("v1.2\x07"));
+}
+
+#[test]
+fn a_secret_question_is_shown_as_one_plain_line() {
+    let (prompter, backend) =
+        recording_prompter(MockPromptBackend::new().with_password_responses(["hunter2"]));
+    let question = jp_tool::Question::secret("token", "Token\x1b[8m?").unwrap();
+
+    prompter.prompt_question(&question).unwrap();
+
+    assert_eq!(backend.shown(), [Shown::Secret {
+        message: "Token[8m?".into()
+    }]);
 }

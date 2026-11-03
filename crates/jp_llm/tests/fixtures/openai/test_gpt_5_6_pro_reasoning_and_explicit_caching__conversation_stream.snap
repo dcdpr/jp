@@ -52,6 +52,12 @@ expression: v
         },
         "from_heading": true
       },
+      "turn_summary": {
+        "generate": {
+          "auto": false,
+          "batch_size": 5
+        }
+      },
       "tools": {
         "*": {
           "run": "ask",
@@ -93,6 +99,7 @@ expression: v
       "start_local": false
     },
     "style": {
+      "sanitize": "strip",
       "code": {
         "color": true,
         "line_numbers": false,
@@ -115,7 +122,11 @@ expression: v
       "reasoning": {
         "display": "full",
         "background": 236,
-        "extend_across_tool_calls": true
+        "extend_across_tool_calls": true,
+        "window": {
+          "rows": "off",
+          "timer": true
+        }
       },
       "streaming": {
         "progress": {

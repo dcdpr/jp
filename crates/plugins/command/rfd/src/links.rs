@@ -15,6 +15,7 @@
 use std::{collections::BTreeMap, fs};
 
 use camino::Utf8Path;
+use doc::format::Formatting;
 use serde::Serialize;
 use ticket::{LABEL_KEY, Labels, Status, parse, render, store};
 
@@ -151,8 +152,14 @@ impl Links {
     /// instead, returning whether the file changed.
     ///
     /// A file without a metadata block, such as the ticket index, is left
-    /// alone.
-    pub(crate) fn relink(&self, path: &Utf8Path, old: RfdId, new: RfdId) -> Result<bool, String> {
+    /// alone; a file that changed is written through `formatting`.
+    pub(crate) fn relink(
+        &self,
+        path: &Utf8Path,
+        old: RfdId,
+        new: RfdId,
+        formatting: &Formatting,
+    ) -> Result<bool, String> {
         let source = fs::read_to_string(path).map_err(|error| format!("{path}: {error}"))?;
 
         let mut relinked = Labels::default();
@@ -181,7 +188,9 @@ impl Links {
             return Ok(false);
         };
 
-        fs::write(path, updated).map_err(|error| format!("{path}: {error}"))?;
+        formatting
+            .write(path, &updated)
+            .map_err(|error| format!("{path}: {error}"))?;
         Ok(true)
     }
 }

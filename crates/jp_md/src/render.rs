@@ -23,6 +23,7 @@
 //! [`writer`]: crate::writer
 
 use std::{
+    borrow::Cow,
     cmp::max,
     fmt::{self, Write},
 };
@@ -31,7 +32,7 @@ use comrak::{
     Node,
     nodes::{
         ListDelimType, ListType, NodeCodeBlock, NodeHeading, NodeHtmlBlock, NodeLink, NodeList,
-        NodeTaskItem, NodeValue,
+        NodeMath, NodeTaskItem, NodeValue,
     },
 };
 use jp_term::{
@@ -40,11 +41,13 @@ use jp_term::{
         STRIKETHROUGH_START, UNDERLINE_END, UNDERLINE_START,
     },
     background::DefaultBackground,
+    sanitize::{ContentClass, SanitizeMode, sanitize_decoded},
 };
 use syntect::highlighting::Theme;
 
 use crate::{
     format::{HrStyle, SYNTAXES},
+    style::MarkdownStyleSheet,
     table,
     writer::TerminalWriter,
 };
@@ -92,8 +95,18 @@ pub struct RenderOptions<'a> {
     /// Override background for inline code spans, if configured.
     pub inline_code_bg: Option<&'a (String, String)>,
 
+    /// Per-element style overrides.
+    pub style_sheet: &'a MarkdownStyleSheet,
+
     /// Visual indent (in spaces) applied to wrap-routed content.
     pub indent: usize,
+
+    /// Where the markdown comes from, and the sanitizer mode it is shown under.
+    ///
+    /// Decides how text the parser decoded from character references is
+    /// filtered before it is written.
+    /// `None` writes it as it is.
+    pub content: Option<(ContentClass, SanitizeMode)>,
 }
 
 /// Format a comrak AST as styled terminal output.
@@ -248,17 +261,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             NodeValue::FrontMatter(ref literal) if entering => {
                 self.writer.output(literal, false)?;
             }
-            NodeValue::Math(ref math) if entering => {
-                let delim = if math.dollar_math {
-                    if math.display_math { "$$" } else { "$" }
-                } else {
-                    "$`"
-                };
-                let end_delim = if delim == "$`" { "`$" } else { delim };
-                self.writer.output(delim, false)?;
-                self.writer.output(&math.literal, false)?;
-                self.writer.output(end_delim, false)?;
-            }
+            NodeValue::Math(ref math) => self.format_math(math, entering)?,
             NodeValue::FootnoteDefinition(ref nfd) if entering => {
                 self.writer.output(&format!("[^{}]: ", nfd.name), false)?;
             }
@@ -459,7 +462,8 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             self.writer.output(&fence_byte.to_string(), false)?;
         }
         if !info.is_empty() {
-            self.writer.output(info, false)?;
+            let shown = self.decoded(info);
+            self.writer.output(&shown, false)?;
         }
         self.writer.cr();
 
@@ -534,8 +538,21 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             return Ok(());
         }
 
-        self.writer.output(literal, true)?;
+        let shown = self.decoded(literal);
+        self.writer.output(&shown, true)?;
         Ok(())
+    }
+
+    /// `text` the parser decoded from character references, as the content's
+    /// policy lets it be shown.
+    ///
+    /// A reference such as `&#27;` only becomes a real `ESC` during parsing,
+    /// after the caller filtered the source.
+    fn decoded<'t>(&self, text: &'t str) -> Cow<'t, str> {
+        match self.options.content {
+            Some((class, mode)) => sanitize_decoded(text, class, mode),
+            None => Cow::Borrowed(text),
+        }
     }
 
     /// Format a hard line break.
@@ -639,12 +656,73 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
 
             let spaces = tail.bytes().take_while(|&b| b == b' ').count();
             let (run, tail) = tail.split_at(spaces);
-            self.writer.output(run, spaces == 1)?;
+            self.writer
+                .output(run, spaces == 1 && !self.writer.begin_line)?;
             rest = tail;
         }
 
         if !rest.is_empty() {
             self.writer.output(rest, false)?;
+        }
+
+        Ok(())
+    }
+
+    /// Format a math span (`$..$`, `$$..$$`, or ``$`..`$``).
+    fn format_math(&mut self, math: &NodeMath, entering: bool) -> fmt::Result {
+        if !entering {
+            return Ok(());
+        }
+
+        let delim = if math.dollar_math {
+            if math.display_math { "$$" } else { "$" }
+        } else {
+            "$`"
+        };
+        let end_delim = if delim == "$`" { "`$" } else { delim };
+
+        let style = self.options.style_sheet.math;
+        let saved_foreground = self.writer.attrs.foreground.clone();
+        let saved_background = self.writer.attrs.background.clone();
+
+        if let Some(fg) = style.fg {
+            let param = fg.fg_param();
+            let esc = format!("\x1b[{param}m");
+            self.writer.attrs.foreground = Some(param);
+            self.writer.write_escape(&esc)?;
+        }
+
+        if let Some(bg) = style.bg {
+            let param = bg.bg_param();
+            let esc = format!("\x1b[{param}m");
+            self.writer.attrs.background = Some(param);
+            self.writer.write_escape(&esc)?;
+        }
+
+        self.writer.output(delim, false)?;
+        self.write_code_literal(&math.literal)?;
+        self.writer.output(end_delim, false)?;
+
+        if style.fg.is_some() {
+            if let Some(param) = saved_foreground {
+                let esc = format!("\x1b[{param}m");
+                self.writer.attrs.foreground = Some(param);
+                self.writer.write_escape(&esc)?;
+            } else {
+                self.writer.attrs.foreground = None;
+                self.writer.write_escape(FG_END)?;
+            }
+        }
+
+        if style.bg.is_some() {
+            if let Some(param) = saved_background {
+                let esc = format!("\x1b[{param}m");
+                self.writer.attrs.background = Some(param);
+                self.writer.write_escape(&esc)?;
+            } else {
+                self.writer.attrs.background = None;
+                self.writer.write_escape(BG_END)?;
+            }
         }
 
         Ok(())
@@ -780,7 +858,8 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
     ) -> Result<bool, fmt::Error> {
         if is_autolink(node, nl) {
             if entering {
-                let url = nl.url.strip_prefix("mailto:").unwrap_or(&nl.url);
+                let url = self.decoded(&nl.url);
+                let url = url.strip_prefix("mailto:").unwrap_or(&url);
                 self.writer.output("<", false)?;
                 self.writer.output(url, false)?;
                 self.writer.output(">", false)?;
@@ -790,10 +869,12 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             self.writer.output("[", false)?;
         } else {
             self.writer.output("](", false)?;
-            self.writer.output(&nl.url, false)?;
+            let url = self.decoded(&nl.url);
+            self.writer.output(&url, false)?;
             if !nl.title.is_empty() {
+                let title = self.decoded(&nl.title);
                 self.writer.output(" \"", false)?;
-                self.writer.output(&nl.title, false)?;
+                self.writer.output(&title, false)?;
                 self.writer.output("\"", false)?;
             }
             self.writer.output(")", false)?;
@@ -808,10 +889,12 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             self.writer.output("![", false)?;
         } else {
             self.writer.output("](", false)?;
-            self.writer.output(&nl.url, false)?;
+            let url = self.decoded(&nl.url);
+            self.writer.output(&url, false)?;
             if !nl.title.is_empty() {
+                let title = self.decoded(&nl.title);
                 self.writer.output(" \"", false)?;
-                self.writer.output(&nl.title, false)?;
+                self.writer.output(&title, false)?;
                 self.writer.output("\"", false)?;
             }
             self.writer.output(")", false)?;

@@ -215,14 +215,18 @@ fn create_request(
     // Models such as Qwen3 default to thinking-on, so
     // `chat_template_kwargs.enable_thinking` tells the chat template whether to
     // prompt the model to think at all. Models whose template doesn't read the
-    // kwarg silently ignore it.
+    // kwarg silently ignore it. DeepSeek templates read `thinking` instead, so
+    // both keys are sent and each family's template uses the one it knows.
     let reasoning_enabled = !matches!(parameters.reasoning, None | Some(ReasoningConfig::Off));
 
     let mut body = json!({
         "model": slug,
         "messages": messages,
         "stream": true,
-        "chat_template_kwargs": { "enable_thinking": reasoning_enabled },
+        "chat_template_kwargs": {
+            "enable_thinking": reasoning_enabled,
+            "thinking": reasoning_enabled,
+        },
     });
 
     if let Some(temperature) = parameters.temperature {

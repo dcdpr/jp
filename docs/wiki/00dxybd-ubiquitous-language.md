@@ -30,12 +30,15 @@ In disagreements between code and docs, the code is authoritative.
     - [Background Task](#background-task)
     - [Changelog Fragment](#changelog-fragment)
     - [CommandConfig](#commandconfig)
+    - [Checklist Item](#checklist-item)
+    - [CommandConfig](#commandconfig)
     - [Compacted View](#compacted-view)
     - [Compaction](#compaction)
     - [Compaction Rule](#compaction-rule)
     - [Config Delta](#config-delta)
     - [Conversation](#conversation)
     - [Conversation Event](#conversation-event)
+    - [Display Sanitization](#display-sanitization)
     - [EditorBackend](#editorbackend)
     - [Envelope](#envelope)
     - [Event Overlay](#event-overlay)
@@ -49,6 +52,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Match](#match)
     - [MCP Host](#mcp-host)
     - [Operation](#operation)
+    - [Parent Ticket](#parent-ticket)
     - [Pinned Conversation](#pinned-conversation)
     - [Provider](#provider)
     - [RFD](#rfd)
@@ -99,8 +103,20 @@ after it.
 Parsed by `changelog::fragment`, and written by `jp release add`.
 See [RFD-121].
 
-**Not the same as** a conventional-commit type, which classifies a code change
-for developers rather than what it means for users.
+### Checklist Item
+
+One step or acceptance criterion of a ticket's work, written in its description
+as a markdown task-list item, `- [ ] text` or `- [x] text`.
+Whether it is checked lives in that line alone: a ticket's checklist progress is
+counted from the description whenever it is read, and stored nowhere else.
+Only the description holds a checklist, since the tooling only ever appends
+comments.
+The `checklist` module of the `ticket` crate reads and checks them.
+
+**Not the same as** a child of a [Parent Ticket](#parent-ticket), which is work
+that can be picked up, merged, or discussed separately; nor a step of the `plan`
+tool, which tracks the assistant's progress through one conversation and is kept
+with it.
 
 ### CommandConfig
 
@@ -203,6 +219,35 @@ The variants are `TurnStart`, `ChatRequest`, `ChatResponse`, `ToolCallRequest`,
 Not every event is sent to LLM providers.
 `EventKind::is_provider_visible()` filters the stream down to the chat and
 tool-call events; turn markers and inquiries are internal.
+
+### Display Sanitization
+
+Filtering untrusted content on its way to the terminal, so escape sequences in
+it cannot rewrite the screen, retitle the window, or write the clipboard.
+Untrusted content is anything JP relays rather than writes: the user's messages,
+the assistant's output, tool output, and conversation titles.
+Stored conversations, and what the assistant receives, keep the original bytes.
+Implemented in `jp_term::sanitize`, where `ContentWriter` filters a stream of
+content, and configured by `style.sanitize` (`strip`, `visualize`, or `off`).
+See [RFD-096].
+
+What survives depends on the **content class** (`ContentClass`): user messages
+and tool output keep their styling, while the assistant's output keeps no escape
+sequences at all.
+User messages and tool output are written in a **content span**: JP ends it with
+a styling reset where it stops writing the content, so their styling cannot run
+into what JP writes next.
+Beneath every class sits the **output floor** (`OutputFloor`): the printer holds
+everything it writes to the sequences JP's own output uses, whatever filtered it
+before.
+Text with no class, such as a conversation title, relies on the floor alone.
+
+**Not the same as** the other two operations JP calls sanitize, which change
+data rather than how it is shown.
+Storage sanitization (`Workspace::sanitize`, [RFD-052]) checks the conversations
+on disk at startup and moves broken ones to the trash.
+Stream repair (`ConversationStream::sanitize`) fixes structural problems in an
+event stream, such as a tool call with no response.
 
 ### EditorBackend
 
@@ -366,6 +411,19 @@ its tool call id, and the conversation records one response for all of them.
 Nor the informal sense used by access policies, where an operation is whatever
 one tool execution does to a path.
 
+### Parent Ticket
+
+A ticket that groups the tickets filed under it, its children, and holds the
+context they share.
+The relation is recorded on the child alone, as its `Parent` field, so a
+parent's children are the tickets that name it.
+One level deep: a parent sits under nothing.
+`Metadata::parent` in the `ticket` crate holds the field, and `ticket::parent`
+the rules the relation keeps.
+
+**Not the same as** a [Tracking Ticket](#tracking-ticket), which stands for an
+RFD through a label rather than for other tickets through their `Parent`.
+
 ### Pinned Conversation
 
 A conversation the user has marked as important, so it stays prominent and is
@@ -474,6 +532,8 @@ wider range, an authored one cannot.
 **Not the same as** the mechanical compaction policies (reasoning stripping,
 tool-call stripping), which filter events within their range rather than
 replacing the range.
+Also not a [Turn Summary], which describes a single turn in one line and never
+stands in for it.
 
 ### Thread
 
@@ -552,7 +612,10 @@ See [RFD-031].
 
 [RFD-001]: ../rfd/001-jp-rfd-process.md
 [RFD-031]: ../rfd/031-durable-conversation-storage-with-workspace-projection.md
+[RFD-052]: ../rfd/052-workspace-data-store-sanitization.md
 [RFD-064]: ../rfd/064-non-destructive-conversation-compaction.md
 [RFD-087]: ../rfd/087-session-scoped-active-workspace.md
+[RFD-096]: ../rfd/096-terminal-output-sanitization-for-untrusted-content.md
 [RFD-121]: ../rfd/121-changelog-fragments-and-validation.md
+[Turn Summary]: 00dxybc-conversation.md#turn-summary
 [`shlex::split`]: https://docs.rs/shlex

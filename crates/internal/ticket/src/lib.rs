@@ -45,6 +45,13 @@
 //! The id is in the filename and nowhere else, so renaming a ticket is a rename
 //! and there is no second copy to keep in step.
 //!
+//! A ticket can sit under another, its parent, by naming it in a `Parent`
+//! field; [`parent`] holds the rules that relation keeps.
+//!
+//! A description can hold a checklist, as markdown task-list items;
+//! [`checklist`] reads it and checks its items off.
+//! Its progress is counted from the text each time, never stored.
+//!
 //! The format is specified in `docs/rfd/100-in-repo-ticket-tracking.md`.
 
 use std::{fmt, str::FromStr};
@@ -53,8 +60,10 @@ use serde::Serialize;
 
 pub mod board;
 pub mod check;
+pub mod checklist;
 pub mod id;
 pub mod import;
+pub mod parent;
 pub mod parse;
 pub mod render;
 pub mod store;
@@ -68,6 +77,9 @@ pub use jp_label::{Labels, Selector, Unique, Vocabulary};
 /// Singular, and repeated once per `key=value` pair, so no line grows with the
 /// number of labels a ticket carries.
 pub const LABEL_KEY: &str = "Label";
+
+/// The metadata key a ticket names its parent under.
+pub const PARENT_KEY: &str = "Parent";
 
 /// Where a ticket sits on the board.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -126,6 +138,11 @@ pub struct Metadata {
     pub date: String,
     pub promoted_to: Option<String>,
     pub github: Option<String>,
+    /// The ticket this one sits under.
+    ///
+    /// The child names its parent and the parent names nothing, so a parent's
+    /// children are found by reading the other tickets.
+    pub parent: Option<TicketId>,
 }
 
 /// The parts of a ticket that are settled when it is filed.
@@ -138,6 +155,7 @@ pub struct NewTicket<'a> {
     pub date: &'a str,
     pub labels: &'a Labels,
     pub description: &'a str,
+    pub parent: Option<TicketId>,
 }
 
 /// One comment on a ticket.
@@ -181,6 +199,13 @@ impl Ticket {
         contains(&self.title)
             || contains(&self.description)
             || self.comments.iter().any(|comment| contains(&comment.body))
+    }
+
+    /// How many of the checklist items in the description are checked, or
+    /// `None` when it holds none.
+    #[must_use]
+    pub fn checklist(&self) -> Option<checklist::Progress> {
+        checklist::progress(&self.description)
     }
 }
 

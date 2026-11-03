@@ -14,10 +14,21 @@ tool call header misaligns below 80 columns" is a ticket even if the fix is
 subtle; "how should tool output be bounded?" is an RFD even if the
 implementation is trivial.
 
+Write the steps or acceptance criteria of the work as a checklist in the body,
+one `- [ ] item` per line: `ticket_edit` checks the items off as they land, and
+`ticket_show` and `ticket_list` count them. A step that could be picked up and
+merged on its own is a ticket of its own instead.
+
 The ticket opens at status `Todo`, draws a collision-resistant id, and is
 attributed to you (`jp`). The title becomes the filename slug, so
 keep it short and specific: at most 60 characters, or the tool asks you for a
 shorter one before it files anything.
+
+Work that splits into several items sharing one goal is filed as a parent and
+its children: the parent holds the shared context and tracks the group, and
+each child names it as its `parent`. Write what the children share once, in the
+parent's description, rather than repeating it in each. File the children in
+one call.
 """
 
 examples = """
@@ -32,12 +43,22 @@ File a task with no description:
 ```json
 {"title": "Bump the deny list", "labels": ["type=task"]}
 ```
+
+File a task under a parent:
+```json
+{"title": "Bound tool output", "labels": ["type=task"], "parent": "T-02wt0kx"}
+```
 """
 
 # A title past the limit is put back as a question rather than an error, so the
 # ticket is retitled without the body being sent a second time. The assistant
 # wrote the title, so the assistant shortens it.
 questions.shorter_title.target = "assistant"
+
+# Several tickets filed in one call, such as the children of a new parent, are
+# created one at a time in the order written, so their ids, and the order they
+# sit in on the board, follow it. One that fails says nothing about the next.
+fan_out = { concurrency = 1 }
 
 [conversation.tools.ticket_create.style]
 parameters = "tool"
@@ -53,6 +74,15 @@ summary = "One-line summary of the work, at most 60 characters. Becomes the head
 type = "string"
 required = false
 summary = "The description, as markdown. Omit for a ticket whose title says everything."
+
+[conversation.tools.ticket_create.parameters.parent]
+type = "string"
+required = false
+summary = "The ticket to file this one under, such as `T-02wt0kx`."
+description = """
+The parent tracks a group of related tickets and holds what they share. It has
+to exist, can't itself sit under a parent, and can't be Done.
+"""
 
 # Not marked required here: `jp ticket tools sync` marks it when the board
 # requires a label, and a value set here would compete with that one.

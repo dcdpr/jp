@@ -12,7 +12,7 @@
 use std::fs;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use doc::files;
+use doc::{files, format::Formatting};
 use jp_tool::Capability;
 
 use crate::{
@@ -154,12 +154,16 @@ impl Wiki {
 
 /// Write a new page, `contents`, named for a fresh id and `title`, returning
 /// its id and path.
+///
+/// `formatting` lays `contents` out as the workspace formats pages.
 pub(crate) fn create(
     dir: &Utf8Path,
+    formatting: &Formatting,
     title: &str,
     contents: &str,
 ) -> Result<(PageId, Utf8PathBuf), String> {
-    files::create::<WikiKind>(dir, &files::slug(title), contents).map_err(|error| error.to_string())
+    files::create::<WikiKind>(dir, formatting, &files::slug(title), contents)
+        .map_err(|error| error.to_string())
 }
 
 /// Where the page `id` lives once its title is `title`.
@@ -171,11 +175,6 @@ pub(crate) fn path_for(dir: &Utf8Path, id: PageId, title: &str) -> Utf8PathBuf {
 /// Read a file, with an error naming it.
 pub(crate) fn read(path: &Utf8Path) -> Result<String, String> {
     fs::read_to_string(path).map_err(|error| format!("{path}: {error}"))
-}
-
-/// Write a file, with an error naming it.
-pub(crate) fn write(path: &Utf8Path, text: &str) -> Result<(), String> {
-    fs::write(path, text).map_err(|error| format!("{path}: {error}"))
 }
 
 #[cfg(test)]

@@ -42,7 +42,7 @@ jp_test = { path = "crates/jp_test" }
 jp_tool = { path = "crates/jp_tool" }
 jp_workspace = { path = "crates/jp_workspace" }
 
-comfort = { path = "crates/contrib/comfort" }
+comfort = { path = "crates/contrib/comfort", default-features = false }
 async-anthropic = { path = "crates/contrib/async-anthropic" }
 changelog = { path = "crates/internal/changelog" }
 doc = { path = "crates/internal/doc" }
@@ -108,6 +108,7 @@ libc = { version = "0.2", default-features = false }
 linkme = { version = "0.3", default-features = false }
 maud = { version = "0.27", default-features = false }
 minijinja = { version = "2", default-features = false }
+nu-ansi-term = { version = "0.50", default-features = false } # reedline's styling type
 object = { version = "0.40" }
 # Pinned to a rev rather than a branch: a branch dependency follows its HEAD on
 # `cargo update`. Carries the `LocalModel` model-details fields on top of 0.3.4,

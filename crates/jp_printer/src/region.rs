@@ -1,7 +1,9 @@
 //! Ephemeral status regions, drawn and erased by the printer's worker thread.
 //!
 //! A **status region** is a block of chrome rows at the bottom of the terminal:
-//! a status row carrying a subject, an elapsed time, and an optional detail.
+//! a status row carrying a subject, an elapsed time, and an optional detail,
+//! below an optional window of recent source output.
+//! A region claimed with [`RegionStyle::window_only`] is the window alone.
 //! The worker draws it, ticks it, and erases it before any printer-managed
 //! write on any channel reaches the terminal, so a client never has to order
 //! its own clear against its own output.
@@ -29,7 +31,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use jp_term::width::{display_width, prefix_end_for_width};
+use jp_term::{
+    sanitize::visible_sgr,
+    width::{display_width, prefix_end_for_width},
+};
 use parking_lot::Mutex;
 
 use crate::printer::{Command, OutputFormat};
@@ -72,9 +77,6 @@ const LABEL_COLOURS: [u8; 10] = [36, 35, 32, 33, 34, 96, 95, 92, 93, 94];
 /// SGR reset, appended to a filtered line that left an attribute open so child
 /// styling cannot bleed into the region's own rows.
 const SGR_RESET: &str = "\x1b[0m";
-
-/// SGR conceal, which hides text from the reader and has no place in a preview.
-const CONCEAL: &str = "8";
 
 /// Lines a region's window buffer holds before evicting its oldest.
 ///
@@ -178,7 +180,7 @@ impl TerminalCapability {
     /// window that shrank below the drawn row count turns a captured height
     /// into a hazard, because the erase then walks up further than the viewport
     /// has rows and clears content that was never the region's.
-    fn live_size(self) -> (Option<u16>, Option<u16>) {
+    pub(crate) fn live_size(self) -> (Option<u16>, Option<u16>) {
         if !self.measured {
             return (self.columns, self.rows);
         }
@@ -232,7 +234,7 @@ impl OutputLines {
     ///
     /// Zero when the height is unknown: the worker cannot bound a window it
     /// cannot size, and an unbounded one is what makes an erase eat content.
-    fn rows(self, height: Option<u16>) -> usize {
+    pub(crate) fn rows(self, height: Option<u16>) -> usize {
         let Some(height) = height else {
             return 0;
         };
@@ -262,8 +264,9 @@ pub struct RegionStyle {
     /// The detail the first frame renders with, before any update arrives.
     detail: Option<String>,
 
-    /// Renders the status row from elapsed seconds and the current detail.
-    format: RowFormat,
+    /// Renders the status row from elapsed seconds and the current detail;
+    /// `None` for a region that is its window alone.
+    format: Option<RowFormat>,
 }
 
 impl RegionStyle {
@@ -287,7 +290,25 @@ impl RegionStyle {
             interval: interval.max(MIN_INTERVAL),
             output: OutputLines::Off,
             detail: None,
-            format: Box::new(format),
+            format: Some(Box::new(format)),
+        }
+    }
+
+    /// A region that is its window alone, with no status row.
+    ///
+    /// It appears `delay` after the claim and redraws every `interval`, and
+    /// draws nothing while its window is empty.
+    /// [`Self::with_output`] sizes the window.
+    ///
+    /// Intervals below 10ms are raised to 10ms.
+    #[must_use]
+    pub fn window_only(delay: Duration, interval: Duration) -> Self {
+        Self {
+            delay,
+            interval: interval.max(MIN_INTERVAL),
+            output: OutputLines::Off,
+            detail: None,
+            format: None,
         }
     }
 
@@ -745,7 +766,8 @@ impl RegionEntry {
         self.claimed_at.elapsed() >= self.style.delay
     }
 
-    /// The physical rows to paint: window rows above, status row last.
+    /// The physical rows to paint: window rows above, then the status row when
+    /// the region has one.
     ///
     /// Every row is bounded to the terminal's current width, and the whole
     /// block to its current height, so a resize can never leave the worker
@@ -753,8 +775,10 @@ impl RegionEntry {
     fn rows(&self) -> Vec<String> {
         let (columns, height) = self.terminal.live_size();
 
-        let secs = self.claimed_at.elapsed().as_secs_f64();
-        let status = (self.style.format)(secs, self.detail.as_deref());
+        let status = self.style.format.as_ref().map(|format| {
+            let secs = self.claimed_at.elapsed().as_secs_f64();
+            format(secs, self.detail.as_deref())
+        });
 
         // The buffer holds more than the window shows, so what is on screen is
         // its tail. Labelling and alignment key on that tail, not the buffer:
@@ -788,7 +812,7 @@ impl RegionEntry {
             })
             .collect();
         drop(buffer);
-        rows.push(status);
+        rows.extend(status);
 
         if let Some(columns) = columns {
             for row in &mut rows {
@@ -1101,6 +1125,13 @@ impl RegionStack {
         }
 
         let rows = entry.rows();
+
+        // A window-only region whose window is empty has nothing to show.
+        if rows.is_empty() {
+            self.erase(writer);
+            return;
+        }
+
         let background = entry.background.clone();
 
         // The rows the block still occupies on screen, which is not what it
@@ -1233,57 +1264,6 @@ fn filter_line(line: &str) -> String {
     }
 
     out
-}
-
-/// The SGR sequence `escape` carries with a standalone conceal removed, or
-/// `None` when it is not an SGR sequence or has nothing left to say.
-///
-/// Parameters are walked rather than filtered, because `38`, `48` and `58`
-/// carry an operand group after them — `5;n` for an indexed colour, `2;r;g;b`
-/// for an RGB one — and a component that happens to be `8` is a colour value,
-/// not the conceal attribute.
-fn visible_sgr(escape: &str) -> Option<String> {
-    let body = escape.strip_prefix("\x1b[")?.strip_suffix('m')?;
-
-    // A bare `\x1b[m` is a reset, which is worth keeping as-is.
-    if body.is_empty() {
-        return Some(escape.to_owned());
-    }
-
-    let mut kept: Vec<&str> = Vec::new();
-    let mut params = body.split(';');
-
-    while let Some(param) = params.next() {
-        if matches!(param, "38" | "48" | "58") {
-            kept.push(param);
-
-            // How many operands follow is fixed by the colour space named next.
-            let Some(space) = params.next() else { continue };
-            kept.push(space);
-            let operands = match space {
-                "5" => 1,
-                "2" => 3,
-                _ => 0,
-            };
-
-            for _ in 0..operands {
-                let Some(operand) = params.next() else { break };
-                kept.push(operand);
-            }
-
-            continue;
-        }
-
-        if param != CONCEAL {
-            kept.push(param);
-        }
-    }
-
-    if kept.is_empty() {
-        return None;
-    }
-
-    Some(format!("\x1b[{}m", kept.join(";")))
 }
 
 /// Write a region frame, discarding I/O errors.

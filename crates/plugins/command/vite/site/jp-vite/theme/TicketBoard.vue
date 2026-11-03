@@ -7,7 +7,9 @@ import DocLabelFilter from './DocLabelFilter.vue'
 import DocLabels from './DocLabels.vue'
 import { matchesLabelFilter } from './label-filter.mjs'
 import { problem } from './problem.mjs'
+import { childrenOf, inGroup, progress } from './ticket-tree.mjs'
 import { useLabelFilter } from './use-label-filter.mjs'
+import { useParentFilter } from './use-parent-filter.mjs'
 
 // The ticket board, which a page renders with `<TicketBoard />`.
 //
@@ -18,6 +20,11 @@ import { useLabelFilter } from './use-label-filter.mjs'
 // labels (see `label-filter.mjs`), and a narrowed board shows the whole of
 // Done. Clicking a card's label narrows the board to it, and clicking it again
 // takes it back out; see `DocLabels.vue`.
+//
+// `?under=` narrows the board to one parent and the tickets filed under it
+// (see `ticket-tree.mjs`), alongside any label filter. A child's card names its
+// parent, and a parent's card counts its children done; clicking either
+// narrows the board to the group, and clicking it again widens it back.
 
 const ENDPOINT = '/__ticket-board'
 const LABELS = { todo: 'Todo', in_progress: 'In Progress', done: 'Done' }
@@ -38,12 +45,31 @@ let noticeTimer = null
 // The page's label filter. The server renders the whole board, so the filter
 // applies once the page has mounted in the browser.
 const { filter, toggle, clear } = useLabelFilter()
+const { parent, toggle: toggleParent, clear: clearParent } = useParentFilter()
 
-// The columns as the board shows them: the tickets the filter lets through,
+// Every ticket on the board, for finding a parent's children and title.
+const everyTicket = computed(() => columns.value.flatMap(column => column.tickets))
+
+// How many of each parent's children are done, by the parent's id.
+const families = computed(() => {
+    const counted = new Map()
+    for (const ticket of everyTicket.value) {
+        const children = childrenOf(everyTicket.value, ticket.id)
+        if (children.length > 0) counted.set(ticket.id, progress(children))
+    }
+    return counted
+})
+
+// The parent the board is narrowed to, as a ticket, when it is one.
+const parentTicket = computed(() => everyTicket.value.find(ticket => ticket.id === parent.value) ?? null)
+
+// The columns as the board shows them: the tickets the filters let through,
 // or, with no filter, Done cut to its limit. `total` counts what passed.
 const shown = computed(() => columns.value.map(column => {
-    const passing = column.tickets.filter(ticket => matchesLabelFilter(ticket.labels ?? [], filter.value))
-    const cut = !filter.value && column.key === 'done' ? passing.slice(0, doneLimit.value) : passing
+    const passing = column.tickets.filter(ticket =>
+        matchesLabelFilter(ticket.labels ?? [], filter.value) && inGroup(ticket, parent.value))
+    const narrowed = filter.value || parent.value
+    const cut = !narrowed && column.key === 'done' ? passing.slice(0, doneLimit.value) : passing
 
     return { ...column, total: passing.length, tickets: cut }
 }))
@@ -147,6 +173,10 @@ onBeforeUnmount(() => {
 
 <template>
 <DocLabelFilter v-if="!problem" :filter="filter" noun="Tickets" :clear="clear" />
+<p v-if="!problem && parent" class="doc-label-filter">
+    {{ parent }}{{ parentTicket ? `, ${parentTicket.title},` : '' }} and the tickets under it.
+    <button class="doc-label-filter-clear" @click="clearParent()">Show every group</button>
+</p>
 <div v-if="!problem" class="ticket-board">
     <section v-for="(column, index) in shown" :key="column.key" class="ticket-column">
         <h2 class="ticket-column-head">
@@ -163,6 +193,20 @@ onBeforeUnmount(() => {
             >
                 <div class="ticket-card-head">
                     <span class="ticket-id">{{ ticket.id }}</span>
+                    <button
+                        v-if="ticket.parent"
+                        class="ticket-group"
+                        :class="{ 'is-active': parent === ticket.parent }"
+                        :title="`Show only ${ticket.parent} and the tickets under it`"
+                        @click="toggleParent(ticket.parent)"
+                    >under {{ ticket.parent }}</button>
+                    <button
+                        v-if="families.has(ticket.id)"
+                        class="ticket-group"
+                        :class="{ 'is-active': parent === ticket.id }"
+                        :title="`Show only ${ticket.id} and the tickets under it`"
+                        @click="toggleParent(ticket.id)"
+                    >{{ families.get(ticket.id).done }}/{{ families.get(ticket.id).total }} done</button>
                 </div>
                 <a :href="ticket.path" class="ticket-card-title">{{ ticket.title }}</a>
                 <DocLabels
@@ -172,8 +216,13 @@ onBeforeUnmount(() => {
                     :filter="filter"
                     :pick="toggle"
                 />
-                <div v-if="ticket.comments" class="ticket-meta">
-                    {{ ticket.comments }} {{ ticket.comments === 1 ? 'comment' : 'comments' }}
+                <div v-if="ticket.comments || ticket.checklist" class="ticket-meta">
+                    <span v-if="ticket.checklist">
+                        {{ ticket.checklist.checked }} of {{ ticket.checklist.count }} checked
+                    </span>
+                    <span v-if="ticket.comments">
+                        {{ ticket.comments }} {{ ticket.comments === 1 ? 'comment' : 'comments' }}
+                    </span>
                 </div>
             </article>
         </div>
@@ -235,6 +284,21 @@ onBeforeUnmount(() => {
     font-size: 0.75rem;
     color: var(--vp-c-text-3);
 }
+.ticket-group {
+    padding: 0 0.35rem;
+    border: 1px solid var(--vp-c-divider);
+    border-radius: 4px;
+    background: transparent;
+    font-family: var(--vp-font-family-mono);
+    font-size: 0.7rem;
+    color: var(--vp-c-text-2);
+    cursor: pointer;
+}
+.ticket-group:hover,
+.ticket-group.is-active {
+    border-color: var(--vp-c-brand-1);
+    color: var(--vp-c-brand-1);
+}
 .ticket-card-title {
     display: block;
     font-size: 0.9rem;
@@ -242,6 +306,8 @@ onBeforeUnmount(() => {
     font-weight: 500;
 }
 .ticket-meta {
+    display: flex;
+    gap: 0.75rem;
     margin-top: 0.25rem;
     font-size: 0.75rem;
     color: var(--vp-c-text-3);

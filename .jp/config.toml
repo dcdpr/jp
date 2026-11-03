@@ -35,9 +35,11 @@ arguments = [
 run = "allow"
 
 # Tickets and comments the assistant files through the `ticket_*` tools are
-# attributed to `jp`.
+# attributed to `jp`. Every ticket written is laid out in the style of
+# `.comfort.toml`, so it passes `fmt-markdown-ci` as it lands.
 [plugins.command.ticket.options]
 assistant = "jp"
+format_on_write = true
 
 # The labels a ticket can carry: each key, what it covers, and the values it
 # takes. `jp ticket tools sync .jp/mcp/tools/ticket` mirrors them into the
@@ -131,6 +133,10 @@ values = [
 [plugins.command.rfd]
 run = "allow"
 
+# RFDs are laid out in the style of `.comfort.toml` as they are written.
+[plugins.command.rfd.options]
+format_on_write = true
+
 # A tracking ticket carries `type=tracking` beside its `tracking-rfd` link, since
 # every ticket here carries exactly one `type`.
 [plugins.command.rfd.options.tracking]
@@ -142,9 +148,11 @@ labels = ["type=tracking"]
 [plugins.command.wiki]
 run = "allow"
 
-# Pages the assistant writes through the `wiki_*` tools are attributed to `jp`.
+# Pages the assistant writes through the `wiki_*` tools are attributed to `jp`,
+# and every page is laid out in the style of `.comfort.toml` as it is written.
 [plugins.command.wiki.options]
 assistant = "jp"
+format_on_write = true
 
 # The labels a page can carry. `domain` matches the tickets' vocabulary, so a
 # note moved from a ticket keeps its labels. `jp wiki tools sync
@@ -180,44 +188,30 @@ fragments_dir = "changelog.d"
 
 [providers.llm.aliases]
 # Anthropic aliases
-anthropic = "anthropic/claude-sonnet-5-5"
-claude = "anthropic/claude-sonnet-5-5"
-sonnet = "anthropic/claude-sonnet-5-5"
-opus = "anthropic/claude-opus-5-5"
 fable = "anthropic/claude-fable-5-1"
-haiku = "anthropic/claude-haiku-4-5"
-zai = "cerebras/zai-glm-4.7"
+opus = "anthropic/claude-opus-5-5"
+sonnet = "anthropic/claude-sonnet-5-5"
+haiku = "anthropic/claude-haiku-5-5"
+anthropic = "sonnet"
+claude = "sonnet"
 # OpenAI aliases
-openai = "openai/gpt-6.1-sol"
-chatgpt = "openai/gpt-6.1-sol"
-gpt = "openai/gpt-6.1-sol"
-gpt5 = "openai/gpt-5.6-sol"
-gpt55 = "openai/gpt-5.5"
 astra = "openai/gpt-6-astra"
 sol = "openai/gpt-6.1-sol"
-terra = "openai/gpt-5.6-terra"
+terra = "openai/gpt-6.1-terra"
 luna = "openai/gpt-6-luna"
-gpt5-pro = "openai/gpt-5.5-pro"
-gpt-pro = "openai/gpt-5.5-pro"
-gpt5-mini = "openai/gpt-5.4-mini"
-gpt-mini = "openai/gpt-5.4-mini"
-gpt5-nano = "openai/gpt-5.4-nano"
-gpt-nano = "openai/gpt-5.4-nano"
-o3-research = "openai/o3-deep-research"
-o4-mini-research = "openai/o4-mini-deep-research"
-codex = "openai/gpt-5.3-codex"
-gpt-5-codex = "openai/gpt-5-codex"
-codex-mini = "openai/gpt-5.1-codex-mini"
+openai = "sol"
+gpt = "sol"
 # Google aliases
-google = "google/gemini-3.1-pro-preview"
-gemini = "google/gemini-3.1-pro-preview"
-gemini-pro = "google/gemini-3.1-pro-preview"
-gemini-flash = "google/gemini-3-flash-preview"
-gemini-lite = "google/gemini-2.5-flash-lite"
+argon = "google/gemini-4-argon"
+flash = "google/gemini-3.8-flash"
+google = "flash"
+gemini = "flash"
 
 # dcd models
-dcd = "glm"
+dcd = "ds"
 glm = "vllm/glm-5.3"
+ds = "vllm/deepseek-v4.1-flash"
+qwen = "vllm/Qwen/Qwen3.8-27B-FP8"
 
 [providers.llm.vllm]
 api_key_env = ["DCD_API_KEY", "VLLM_API_KEY"]
@@ -236,6 +230,9 @@ copy_link = "off"
 
 [style.reasoning]
 display = "full"
+
+[style.markdown.elements.math]
+fg = "yellow"
 
 [conversation.tools.'*']
 run = "ask"

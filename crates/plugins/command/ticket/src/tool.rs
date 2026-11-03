@@ -17,14 +17,11 @@
 //! runs: the directory has to be inside the workspace, and the policy has to
 //! grant what the tool does there.
 
-use std::{collections::HashMap, fs, io, path::MAIN_SEPARATOR};
+use std::{collections::HashMap, fs, path::MAIN_SEPARATOR};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{Local, SecondsFormat, Utc};
-use comfort::{
-    DEFAULT_MAX_WIDTH,
-    format::{FormatOptions, format_markdown_with},
-};
+use doc::format::Formatting;
 use jp_md::format::Formatter;
 use jp_plugin::message::{InitMessage, ToolAction, ToolCall};
 use jp_tool::{AccessPolicy, Action, Capability, Context, FsAccessError, Outcome, Question};
@@ -33,10 +30,11 @@ use serde_json::{Map, Value};
 use ticket::{
     Comment, Labels, NewTicket, Selector, Status, Ticket, TicketId, Vocabulary,
     board::{self, Order},
+    checklist::{self, Marked},
     parse, render, store,
 };
 
-use crate::{label, options::Options};
+use crate::{PLUGIN, label, options::Options};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -151,6 +149,9 @@ struct Tickets<'a> {
 
     /// The plugin's settings, which hold the board's label vocabulary.
     options: &'a Options,
+
+    /// How tickets are laid out as they are written.
+    formatting: Formatting,
 }
 
 impl<'a> Tickets<'a> {
@@ -193,11 +194,15 @@ impl<'a> Tickets<'a> {
             })?;
         }
 
+        let dir = root.join(relative);
+        let formatting = Formatting::configure(root, &init.config, &[(PLUGIN, &dir)])?;
+
         Ok(Self {
             root,
-            dir: root.join(relative),
+            dir,
             author: &options.assistant,
             options,
+            formatting,
         })
     }
 
@@ -290,6 +295,11 @@ fn refuse(message: impl Into<String>) -> Answer {
 fn create(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall, preview: bool) -> Answer {
     let title = args.required::<String>("title")?;
     let body = args.optional::<String>("body")?;
+    let parent = match args.optional::<Value>("parent")?.as_ref().map(id_arg) {
+        Some(Ok(parent)) => Some(parent),
+        Some(Err(refusal)) => return refuse(format!("`parent`: {refusal}")),
+        None => None,
+    };
 
     // Checked before the action split so a preview fails too: an unattended
     // formatter that errors fails the call ahead of the approval prompt, which
@@ -311,6 +321,13 @@ fn create(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall, preview:
         Err(taken @ store::Error::Taken(_)) => return refuse(taken.to_string()),
         Err(other) => return Err(other.into()),
     }
+    if parent.is_some() {
+        match store::check_relations(&tickets.dir, None, Status::Todo, parent) {
+            Ok(()) => {}
+            Err(refused @ store::Error::Parent(_)) => return refuse(refused.to_string()),
+            Err(other) => return Err(other.into()),
+        }
+    }
 
     let limit = option_or(&call.options, "max_title_length", DEFAULT_MAX_TITLE_LENGTH);
     let title = match fitting_title(&title, &call.answers, limit) {
@@ -325,16 +342,20 @@ fn create(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall, preview:
         date: &date,
         labels: &labels,
         description: body.as_deref().unwrap_or_default(),
+        parent,
     };
 
     if preview {
         return Ok(preview_create(&new).into());
     }
 
-    let (id, path) = store::create(&tickets.dir, &vocabulary, &new)?;
-    reflow(&path)?;
+    let (id, path) = store::create(&tickets.dir, &tickets.formatting, &vocabulary, &new)?;
 
-    Ok(format!("Created {id} at {}", tickets.relative(&path)).into())
+    Ok(match parent {
+        Some(parent) => format!("Created {id} under {parent} at {}", tickets.relative(&path)),
+        None => format!("Created {id} at {}", tickets.relative(&path)),
+    }
+    .into())
 }
 
 /// Settle on a title of at most `limit` characters.
@@ -439,11 +460,16 @@ fn comment(tickets: &Tickets<'_>, args: &Arguments<'_>, preview: bool) -> Answer
         return preview_comment(tickets, id, re, &body, &date);
     }
 
-    match store::append_comment(&tickets.dir, id, tickets.author, &date, re, body.trim()) {
-        Ok(position) => {
-            reflow(&store::locate_ticket(&tickets.dir, id)?)?;
-            Ok(format!("Added {id}#{position}").into())
-        }
+    match store::append_comment(
+        &tickets.dir,
+        &tickets.formatting,
+        id,
+        tickets.author,
+        &date,
+        re,
+        body.trim(),
+    ) {
+        Ok(position) => Ok(format!("Added {id}#{position}").into()),
         Err(store::Error::NoSuchTicket(_) | store::Error::NoSuchComment { .. }) => refuse(format!(
             "No {id}, or no comment #{} on it.",
             re.unwrap_or(0)
@@ -498,16 +524,23 @@ fn preview_comment(
     Ok(preview(&format!("{heading}\n\n{}", render::comment(&comment))).into())
 }
 
-/// Change any of a ticket's title, description, status, and labels in one call,
-/// leaving the rest as it is.
+/// Change any of a ticket's title, description, status, labels, checklist, and
+/// parent in one call, leaving the rest as it is.
 ///
 /// Labels are added and removed rather than replaced, so a call can't drop one
 /// it doesn't name: `remove_labels` first, where a bare key takes every label
 /// under it, then `add_labels`.
+/// Checklist items are named by their text in `check` and `uncheck`, and only
+/// their checkboxes change.
+/// `parent` takes a ticket id, or `none` to take the parent away.
 ///
-/// Every argument is checked before anything is written.
+/// Every argument is checked before anything is written, the checklist items
+/// named and where the status and the parent leave the ticket included.
 /// The labels, which the vocabulary can still refuse, are written first, so a
-/// refused call changes nothing; the title last, since it moves the file.
+/// refused call changes nothing; the status and the parent together, judged by
+/// where they leave the ticket; the title last, since it moves the file.
+/// Closing a ticket whose checklist has unchecked items is allowed, and warned
+/// about.
 fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     let id = match args.id()? {
         Ok(id) => id,
@@ -530,11 +563,24 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
         .optional::<Vec<String>>("remove_labels")?
         .unwrap_or_default();
     let relabels = !add.is_empty() || !remove.is_empty();
+    let check = args.optional::<Vec<String>>("check")?.unwrap_or_default();
+    let uncheck = args.optional::<Vec<String>>("uncheck")?.unwrap_or_default();
+    let marks = !check.is_empty() || !uncheck.is_empty();
+    let parent = match parent_change(args)? {
+        Ok(parent) => parent,
+        Err(refusal) => return refuse(refusal),
+    };
 
-    if title.is_none() && description.is_none() && status.is_none() && !relabels {
+    if title.is_none()
+        && description.is_none()
+        && status.is_none()
+        && parent.is_none()
+        && !relabels
+        && !marks
+    {
         return refuse(
-            "Name what to change: `title`, `description`, `status`, `add_labels`, or \
-             `remove_labels`.",
+            "Name what to change: `title`, `description`, `status`, `parent`, `check`, `uncheck`, \
+             `add_labels`, or `remove_labels`.",
         );
     }
     if let Err(error) = Labels::from_tokens(&remove) {
@@ -555,11 +601,24 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
         return refuse("`description` must not be empty.");
     }
 
-    match store::locate_ticket(&tickets.dir, id) {
-        Ok(_) => {}
+    let path = match store::locate_ticket(&tickets.dir, id) {
+        Ok(path) => path,
         Err(store::Error::NoSuchTicket(_)) => return refuse(format!("No {id}.")),
         Err(other) => return Err(other.into()),
+    };
+    if status.is_some() || parent.is_some() {
+        match store::check_relate(&tickets.dir, id, status, parent) {
+            Ok(()) => {}
+            Err(refused @ store::Error::Parent(_)) => return refuse(refused.to_string()),
+            Err(other) => return Err(other.into()),
+        }
     }
+
+    let closes = status == Some(Status::Done);
+    let content = match settle_content(&path, description.as_deref(), &check, &uncheck, closes)? {
+        Ok(content) => content,
+        Err(refusal) => return refuse(refusal),
+    };
 
     let mut changed = vec![];
     if relabels {
@@ -568,36 +627,19 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
             Err(refusal) => return refuse(refusal),
         }
     }
-    if let Some(status) = status {
-        let (_, previous) = store::set_status(&tickets.dir, id, status)?;
-        changed.push(if previous == status {
-            format!("status: already {status}")
-        } else {
-            format!("status: {previous} -> {status}")
-        });
+    if status.is_some() || parent.is_some() {
+        let related = store::relate(&tickets.dir, &tickets.formatting, id, status, parent)?;
+        changed.extend(describe_related(&related, status, parent));
     }
-    if title.is_some() || description.is_some() {
-        let store::Edited { from, to } = store::edit(
-            &tickets.dir,
-            id,
-            title.as_deref().map(str::trim),
-            description.as_deref(),
-        )?;
-        if description.is_some() {
-            reflow(&to)?;
-            changed.push("description replaced".to_owned());
-        }
-        if title.is_some() {
-            changed.push(if from == to {
-                format!("title changed, still at {}", tickets.relative(&to))
-            } else {
-                format!(
-                    "title changed, moved {} -> {}",
-                    tickets.relative(&from),
-                    tickets.relative(&to)
-                )
-            });
-        }
+    changed.extend(write_content(
+        tickets,
+        id,
+        title.as_deref(),
+        &content,
+        description.is_some(),
+    )?);
+    if let Some(warning) = content.left.as_deref().and_then(unchecked_on_close) {
+        changed.push(format!("warning: {warning}"));
     }
 
     let mut text = format!("Edited {id}:\n");
@@ -606,6 +648,219 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     }
 
     Ok(text.into())
+}
+
+/// What an `edit` call does to a ticket's description, settled before anything
+/// is written.
+struct Content {
+    /// The checklist items `check` and `uncheck` named, and the description
+    /// they leave.
+    marked: Option<Marked>,
+
+    /// The description to write, or `None` when it stays as it is, which it
+    /// does when every item named is in place already.
+    rewritten: Option<String>,
+
+    /// The description the call leaves the ticket with, when the call closes it
+    /// and the checklist has to be judged.
+    left: Option<String>,
+}
+
+/// Settle what `edit` does to the description of the ticket at `path`: write
+/// the `description` it was given, or check and uncheck the items `check` and
+/// `uncheck` name.
+///
+/// The ticket is read only when its checklist is needed: to mark items, or
+/// because the call `closes` it.
+/// The inner error is the refusal, for the assistant: a description and items
+/// to mark both given, or an item named wrongly.
+fn settle_content(
+    path: &Utf8Path,
+    description: Option<&str>,
+    check: &[String],
+    uncheck: &[String],
+    closes: bool,
+) -> Result<Result<Content, String>, Error> {
+    let marks = !check.is_empty() || !uncheck.is_empty();
+    if description.is_some() && marks {
+        return Ok(Err("Pass `description` or `check` and `uncheck`, not \
+                       both: check the items in the new description itself."
+            .to_owned()));
+    }
+    let current = if marks || closes {
+        Some(parse::document(&fs::read_to_string(path)?)?)
+    } else {
+        None
+    };
+    let marked = match current.as_ref().filter(|_| marks) {
+        Some(ticket) => match checklist::mark(&ticket.description, check, uncheck) {
+            Ok(marked) => Some(marked),
+            Err(refused) => return Ok(Err(refused.to_string())),
+        },
+        None => None,
+    };
+
+    // Nothing is written when every item named is in place already, so a
+    // hand-edited file isn't reflowed for a call that changes nothing in it.
+    let rewritten = description.map(ToOwned::to_owned).or_else(|| {
+        marked
+            .as_ref()
+            .filter(|marked| marked.changes.iter().any(|change| change.changed))
+            .map(|marked| marked.description.clone())
+    });
+    let left = if closes {
+        description
+            .map(ToOwned::to_owned)
+            .or_else(|| marked.as_ref().map(|marked| marked.description.clone()))
+            .or_else(|| current.map(|ticket| ticket.description))
+    } else {
+        None
+    };
+
+    Ok(Ok(Content {
+        marked,
+        rewritten,
+        left,
+    }))
+}
+
+/// Write the title and the description `edit` settled on, returning what
+/// changed, in words.
+///
+/// `replaced` is whether the call gave a description of its own, rather than
+/// checklist items to mark.
+fn write_content(
+    tickets: &Tickets<'_>,
+    id: TicketId,
+    title: Option<&str>,
+    content: &Content,
+    replaced: bool,
+) -> Result<Vec<String>, Error> {
+    let edited = if title.is_some() || content.rewritten.is_some() {
+        Some(store::edit(
+            &tickets.dir,
+            &tickets.formatting,
+            id,
+            title.map(str::trim),
+            content.rewritten.as_deref(),
+        )?)
+    } else {
+        None
+    };
+
+    let mut changed = vec![];
+    if replaced {
+        changed.push("description replaced".to_owned());
+    }
+    if let Some(marked) = &content.marked {
+        changed.extend(describe_marked(marked));
+    }
+    if let (Some(_), Some(store::Edited { from, to })) = (title, &edited) {
+        changed.push(if from == to {
+            format!("title changed, still at {}", tickets.relative(to))
+        } else {
+            format!(
+                "title changed, moved {} -> {}",
+                tickets.relative(from),
+                tickets.relative(to)
+            )
+        });
+    }
+
+    Ok(changed)
+}
+
+/// What `edit` says about the checklist items it was asked to check and
+/// uncheck: a line per item, then the checklist's progress.
+fn describe_marked(marked: &Marked) -> Vec<String> {
+    let mut lines: Vec<String> = marked
+        .changes
+        .iter()
+        .map(|change| {
+            let state = if change.checked {
+                "checked"
+            } else {
+                "unchecked"
+            };
+            let already = if change.changed { "" } else { "already " };
+
+            format!("{already}{state}: {}", change.text)
+        })
+        .collect();
+    lines.push(format!("checklist: {}", marked.progress));
+
+    lines
+}
+
+/// What closing a ticket whose description is `description` leaves unchecked,
+/// as a warning, or `None` when every item is checked.
+///
+/// Closing isn't refused: the items are the ticket's own, and whoever closes it
+/// decides what is left of them.
+pub(crate) fn unchecked_on_close(description: &str) -> Option<String> {
+    let items = checklist::items(description);
+    let open: Vec<String> = items
+        .iter()
+        .filter(|item| !item.checked)
+        .map(|item| format!("{:?}", item.text))
+        .collect();
+    if open.is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "closed with {} of {} checklist items unchecked: {}. Check the ones that are done, and \
+         remove the rest with a comment saying why.",
+        open.len(),
+        items.len(),
+        open.join(", ")
+    ))
+}
+
+/// Read `edit`'s `parent` argument: `None` when it is absent, `Some(None)` for
+/// `none`.
+///
+/// The inner error is the refusal, for the assistant.
+fn parent_change(args: &Arguments<'_>) -> Result<Result<Option<Option<TicketId>>, String>, Error> {
+    Ok(match args.optional::<Value>("parent")? {
+        None => Ok(None),
+        Some(Value::String(none)) if none.trim().eq_ignore_ascii_case("none") => Ok(Some(None)),
+        Some(value) => id_arg(&value)
+            .map(|parent| Some(Some(parent)))
+            .map_err(|refusal| format!("`parent`: {refusal}")),
+    })
+}
+
+/// What `edit` says about the status and parent it asked for, given what
+/// `relate` found before writing them.
+fn describe_related(
+    related: &store::Related,
+    status: Option<Status>,
+    parent: Option<Option<TicketId>>,
+) -> Vec<String> {
+    let name = |parent: Option<TicketId>| parent.map_or("none".to_owned(), |id| id.to_string());
+    let mut changed = vec![];
+
+    if let Some(status) = status {
+        changed.push(if related.previous_status == status {
+            format!("status: already {status}")
+        } else {
+            format!("status: {} -> {status}", related.previous_status)
+        });
+    }
+    if let Some(parent) = parent {
+        changed.push(if related.previous_parent == parent {
+            format!("parent: already {}", name(parent))
+        } else {
+            format!(
+                "parent: {} -> {}",
+                name(related.previous_parent),
+                name(parent)
+            )
+        });
+    }
+
+    changed
 }
 
 /// Apply `edit`'s label changes to a ticket: `remove`, then `add`.
@@ -619,11 +874,17 @@ fn edit_labels(
     remove: &[String],
 ) -> Result<Result<String, String>, Error> {
     let vocabulary = tickets.options.vocabulary()?;
-    let relabeled = store::relabel(&tickets.dir, &vocabulary, &[id], |current| {
-        let mut tokens = label::remove(current, remove);
-        tokens.extend(add.iter().cloned());
-        tokens
-    });
+    let relabeled = store::relabel(
+        &tickets.dir,
+        &tickets.formatting,
+        &vocabulary,
+        &[id],
+        |current| {
+            let mut tokens = label::remove(current, remove);
+            tokens.extend(add.iter().cloned());
+            tokens
+        },
+    );
 
     match relabeled {
         Ok(relabeled) => Ok(Ok(relabeled.first().map_or_else(String::new, |ticket| {
@@ -636,8 +897,8 @@ fn edit_labels(
     }
 }
 
-/// Read one ticket: its metadata, and the description and comments when the
-/// call asks for them.
+/// Read one ticket: its metadata, its parent and children, and the description,
+/// the comments, and the parent's description when the call asks for them.
 fn show(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     let id = match args.id()? {
         Ok(id) => id,
@@ -646,10 +907,11 @@ fn show(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     let parts = Parts {
         description: args.optional("description")?.unwrap_or(false),
         comments: args.optional("comments")?.unwrap_or(false),
+        parent_description: args.optional("parent_description")?.unwrap_or(false),
     };
 
     let entries = store::list(&tickets.dir)?;
-    let Some(entry) = entries.into_iter().find(|entry| {
+    let Some(entry) = entries.iter().find(|entry| {
         entry
             .path
             .file_name()
@@ -658,9 +920,22 @@ fn show(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
         return refuse(format!("No {id}."));
     };
 
-    match entry.ticket {
+    match &entry.ticket {
         Ok(ticket) => {
-            let rendered = render_ticket(entry.id, &ticket, &tickets.relative(&entry.path), parts);
+            // An order file that can't be read costs the children their order,
+            // as it costs `list` its columns'.
+            let order = board::read(&tickets.dir).unwrap_or_default();
+            let family = Family {
+                entries: &entries,
+                children: children_of(&entries, entry.id, &order),
+            };
+            let rendered = render_ticket(
+                entry.id,
+                ticket,
+                &tickets.relative(&entry.path),
+                &family,
+                parts,
+            );
             // The terminal keys syntax highlighting off a leading code fence,
             // so the fence is what gets a ticket displayed as markdown rather
             // than as a flat wall of text.
@@ -691,6 +966,11 @@ fn list(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall) -> Answer 
         .optional::<String>("query")?
         .map(|query| query.trim().to_owned())
         .filter(|query| !query.is_empty());
+    let under = match args.optional::<Value>("under")?.as_ref().map(id_arg) {
+        Some(Ok(under)) => Some(under),
+        Some(Err(refusal)) => return refuse(format!("`under`: {refusal}")),
+        None => None,
+    };
     let page = args.optional::<usize>("page")?.unwrap_or(1);
     if page == 0 {
         return refuse("`page` counts from 1.");
@@ -717,6 +997,7 @@ fn list(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall) -> Answer 
         status.is_none_or(|status| status == ticket.metadata.status)
             && ticket.metadata.labels.matches(&selectors)
             && query.as_deref().is_none_or(|query| ticket.mentions(query))
+            && under.is_none_or(|under| ticket.metadata.parent == Some(under))
     });
 
     // An order file that can't be read costs the order, not the listing: the
@@ -754,6 +1035,45 @@ fn list(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall) -> Answer 
     Ok(render_list(shown, footer.as_deref(), &unreadable).into())
 }
 
+/// The readable tickets among `entries` filed under `id`, in board order.
+pub(crate) fn children_of<'a>(
+    entries: &'a [store::Entry],
+    id: TicketId,
+    order: &Order,
+) -> Vec<(TicketId, &'a Ticket)> {
+    let children: Vec<(TicketId, &Ticket)> = entries
+        .iter()
+        .filter_map(|entry| Some((entry.id, entry.ticket.as_ref().ok()?)))
+        .filter(|(child, ticket)| *child != id && ticket.metadata.parent == Some(id))
+        .collect();
+
+    in_board_order(&children, order)
+}
+
+/// A parent as a child's metadata shows it: its id, then its status and title
+/// when it can be read.
+pub(crate) fn describe_parent(entries: &[store::Entry], parent: TicketId) -> String {
+    let found = entries
+        .iter()
+        .find(|entry| entry.id == parent)
+        .and_then(|entry| entry.ticket.as_ref().ok());
+
+    match found {
+        Some(ticket) => format!("{parent} ({}) {}", ticket.metadata.status, ticket.title),
+        None => format!("{parent} (not found)"),
+    }
+}
+
+/// The heading above a parent's children, counting how many are Done.
+pub(crate) fn children_heading(children: &[(TicketId, &Ticket)]) -> String {
+    let done = children
+        .iter()
+        .filter(|(_, ticket)| ticket.metadata.status == Status::Done)
+        .count();
+
+    format!("## Children ({done} of {} done)", children.len())
+}
+
 /// `found` laid out the way the board shows it: Todo, In Progress, then Done,
 /// each column in `order`.
 fn in_board_order<'a>(
@@ -779,28 +1099,6 @@ fn in_board_order<'a>(
     }
 
     laid_out
-}
-
-/// Lay out a markdown file the way `comfort` does.
-///
-/// A body arrives as the model wrote it, one long line per paragraph, and the
-/// repository's markdown carries semantic line breaks.
-/// The options mirror the `fmt-markdown-ci` recipe in JP's justfile, so a
-/// ticket written here is one that recipe accepts as it stands.
-fn reflow(path: &Utf8Path) -> io::Result<()> {
-    let source = fs::read_to_string(path)?;
-    let formatted = format_markdown_with(&source, &FormatOptions {
-        max_width: DEFAULT_MAX_WIDTH,
-        canonical: true,
-        reference_links: true,
-        prune_reference_links: true,
-    });
-
-    if formatted == source {
-        return Ok(());
-    }
-
-    fs::write(path, formatted)
 }
 
 /// Prefix every line of `document` with a markdown blockquote marker.
@@ -858,9 +1156,12 @@ fn render_list(
         } else {
             format!(" [{}]", ticket.metadata.labels)
         };
+        let checklist = ticket
+            .checklist()
+            .map_or_else(String::new, |progress| format!(" ({progress})"));
 
         out.push_str(&format!(
-            "{id:<9} {status:<12} {}{labels}{comments}\n",
+            "{id:<9} {status:<12} {}{labels}{checklist}{comments}\n",
             ticket.title
         ));
     }
@@ -884,14 +1185,43 @@ fn render_list(
 struct Parts {
     description: bool,
     comments: bool,
+    parent_description: bool,
 }
 
-/// Render one ticket's metadata, and the parts `parts` asks for.
+/// The tickets a ticket being shown is related to.
+struct Family<'a> {
+    /// Every ticket, where the parent is looked up.
+    entries: &'a [store::Entry],
+
+    /// The tickets filed under the one shown, in board order.
+    children: Vec<(TicketId, &'a Ticket)>,
+}
+
+impl Family<'_> {
+    /// The parent of `ticket`, when it names one that can be read.
+    fn parent_of(&self, ticket: &Ticket) -> Option<(TicketId, &Ticket)> {
+        let parent = ticket.metadata.parent?;
+        let entry = self.entries.iter().find(|entry| entry.id == parent)?;
+
+        Some((parent, entry.ticket.as_ref().ok()?))
+    }
+}
+
+/// Render one ticket's metadata, its parent and children, and the parts `parts`
+/// asks for.
 ///
 /// Comments are numbered so a reply can name its target.
+/// The parent's description is the brief its children share, so it is offered
+/// on every child rather than copied into each.
 /// A part left out that the ticket has is named at the end, with the argument
 /// that shows it, so the reader knows there is more without asking.
-fn render_ticket(id: TicketId, ticket: &Ticket, path: &str, parts: Parts) -> String {
+fn render_ticket(
+    id: TicketId,
+    ticket: &Ticket,
+    path: &str,
+    family: &Family<'_>,
+    parts: Parts,
+) -> String {
     let metadata = &ticket.metadata;
     // The rendered view names the ticket even though the file doesn't: the id
     // is what a reply or a later reference has to quote.
@@ -912,16 +1242,47 @@ fn render_ticket(id: TicketId, ticket: &Ticket, path: &str, parts: Parts) -> Str
             out.push_str(&format!("- **{label}**: {value}\n"));
         }
     }
+    if let Some(parent) = metadata.parent {
+        out.push_str(&format!(
+            "- **Parent**: {}\n",
+            describe_parent(family.entries, parent)
+        ));
+    }
+    if let Some(progress) = ticket.checklist() {
+        out.push_str(&format!("- **Checklist**: {progress}\n"));
+    }
 
     if parts.description && !ticket.description.is_empty() {
         out.push_str(&format!("\n{}\n", ticket.description));
+    }
+
+    let parent = family.parent_of(ticket);
+    if parts.parent_description
+        && let Some((parent_id, parent)) = parent
+        && !parent.description.is_empty()
+    {
+        out.push_str(&format!(
+            "\n## Parent {parent_id}: {}\n\n{}\n",
+            parent.title, parent.description
+        ));
+    }
+
+    if !family.children.is_empty() {
+        out.push_str(&format!("\n{}\n\n", children_heading(&family.children)));
+        for (child, child_ticket) in &family.children {
+            out.push_str(&format!(
+                "- {child} ({}) {}\n",
+                child_ticket.metadata.status, child_ticket.title
+            ));
+        }
     }
 
     if parts.comments {
         push_comments(&mut out, id, &ticket.comments);
     }
 
-    let left_out = left_out(ticket, parts);
+    let parent_brief = parent.is_some_and(|(_, parent)| !parent.description.is_empty());
+    let left_out = left_out(ticket, parent_brief, parts);
     if !left_out.is_empty() {
         out.push_str(&format!("\nNot shown: {left_out}.\n"));
     }
@@ -961,11 +1322,15 @@ fn push_comments(out: &mut String, id: TicketId, comments: &[Comment]) {
 /// The parts of `ticket` that `parts` leaves out and the ticket has, each with
 /// the argument that shows it.
 ///
+/// `parent_brief` is whether the ticket's parent has a description to show.
 /// Empty when nothing was left out.
-fn left_out(ticket: &Ticket, parts: Parts) -> String {
+fn left_out(ticket: &Ticket, parent_brief: bool, parts: Parts) -> String {
     let mut left_out = vec![];
     if !parts.description && !ticket.description.is_empty() {
         left_out.push("the description (`description: true`)".to_owned());
+    }
+    if !parts.parent_description && parent_brief {
+        left_out.push("the parent's description (`parent_description: true`)".to_owned());
     }
     if !parts.comments {
         match ticket.comments.len() {

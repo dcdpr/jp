@@ -31,7 +31,7 @@ use jp_config::{
     },
     interrupt::ToolInterruptAction,
     model::id::{self, ProviderId},
-    style::stderr_rows::{RowCount, StderrRows},
+    style::window_rows::{RowCount, WindowRows},
 };
 use jp_conversation::{
     Conversation, ConversationEvent,
@@ -1900,7 +1900,7 @@ impl PromptBackend for DelayedPromptBackend {
         options: Vec<String>,
         default: Option<usize>,
         writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<usize, InquireError> {
         self.started.notify_one();
         std::thread::sleep(self.delay);
         self.inner.select(message, options, default, writer)
@@ -5654,13 +5654,13 @@ async fn fan_out_turn(tool: Value, arguments: &Value) -> FanOutTurn {
 /// and the provider gets back the single response its one call is waiting for.
 #[tokio::test]
 async fn a_fanned_out_call_runs_every_operation_and_answers_once() {
-    let turn = timeout(
+    let turn = Box::pin(timeout(
         Duration::from_secs(10),
         fan_out_turn(
             json!({"source": "builtin", "run": "allow", "fan_out": true}),
             &json!({ "ops": [{ "path": "a.rs" }, { "path": "b.rs" }, { "path": "c.rs" }] }),
         ),
-    )
+    ))
     .await
     .expect("the turn ends");
 
@@ -5700,7 +5700,7 @@ async fn a_fanned_out_call_runs_every_operation_and_answers_once() {
 /// the service settling it as not run is what lets the Host finish.
 #[tokio::test]
 async fn a_stop_policy_that_rules_out_the_rest_ends_the_turn() {
-    let turn = timeout(
+    let turn = Box::pin(timeout(
         Duration::from_secs(10),
         fan_out_turn(
             json!({
@@ -5710,7 +5710,7 @@ async fn a_stop_policy_that_rules_out_the_rest_ends_the_turn() {
             }),
             &json!({ "ops": [{ "path": "bad.rs" }, { "path": "good.rs" }] }),
         ),
-    )
+    ))
     .await
     .expect("the turn ends");
 
@@ -5730,13 +5730,13 @@ async fn a_stop_policy_that_rules_out_the_rest_ends_the_turn() {
 /// tool never runs.
 #[tokio::test]
 async fn a_fanned_out_call_with_an_empty_envelope_is_refused() {
-    let turn = timeout(
+    let turn = Box::pin(timeout(
         Duration::from_secs(10),
         fan_out_turn(
             json!({"source": "builtin", "run": "allow", "fan_out": true}),
             &json!({ "ops": [] }),
         ),
-    )
+    ))
     .await
     .expect("the turn ends");
 
@@ -5757,13 +5757,13 @@ async fn a_fanned_out_call_with_an_empty_envelope_is_refused() {
 /// A call to a fan-out tool without the envelope runs as an ordinary call.
 #[tokio::test]
 async fn a_bare_call_to_a_fan_out_tool_runs_once_unframed() {
-    let turn = timeout(
+    let turn = Box::pin(timeout(
         Duration::from_secs(10),
         fan_out_turn(
             json!({"source": "builtin", "run": "allow", "fan_out": true}),
             &json!({ "path": "a.rs" }),
         ),
-    )
+    ))
     .await
     .expect("the turn ends");
 
@@ -5858,7 +5858,7 @@ fn talking_tool_config(names: &[&str]) -> AppConfig {
     config.style.tool_call.progress.show = true;
     config.style.tool_call.progress.delay_secs = 0;
     config.style.tool_call.progress.interval_ms = 10;
-    config.style.tool_call.progress.stderr_rows = StderrRows::Fixed(RowCount { rows: 2 });
+    config.style.tool_call.progress.stderr_rows = WindowRows::Fixed(RowCount { rows: 2 });
     config.conversation.tools.defaults.run = RunMode::Allow;
 
     for name in names {
@@ -6577,7 +6577,7 @@ impl PromptBackend for ObservingPromptBackend {
         options: Vec<String>,
         default: Option<usize>,
         writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<usize, InquireError> {
         self.observe();
         self.inner.select(message, options, default, writer)
     }
@@ -9667,7 +9667,7 @@ async fn a_formatters_question_is_answered_before_the_call_runs() {
             chrome.lock().as_str(),
             "\n── \x1b[1mjp\x1b[0m \x1b[2m(anthropic/test)\x1b[0m \
              ─────────────────────────────────────────────────────────\n\nCalling tool \
-             \x1b[38;5;11m\x1b[1mhttp_tool\x1b[0m\n\nconfirm = true\n\nconfirmed\n\n"
+             \x1b[38;5;11m\x1b[1mhttp_tool\x1b[0m\n\nconfirm = true\x1b[0m\n\nconfirmed\x1b[0m\n\n"
         );
         owner.shutdown().await.unwrap();
     })
@@ -9784,10 +9784,10 @@ async fn an_approval_prompt_shows_the_call_its_formatter_describes_with_the_answ
             seen,
             "\n── \x1b[1mjp\x1b[0m \x1b[2m(anthropic/test)\x1b[0m \
              ─────────────────────────────────────────────────────────\n\nCalling tool \
-             \x1b[38;5;11m\x1b[1mhttp_tool\x1b[0m\n\nconfirm = true\n"
+             \x1b[38;5;11m\x1b[1mhttp_tool\x1b[0m\n\nconfirm = true\x1b[0m\n"
         );
         // Only the result follows: the call was already described.
-        assert_eq!(after, "\nconfirmed\n\n");
+        assert_eq!(after, "\nconfirmed\x1b[0m\n\n");
         owner.shutdown().await.unwrap();
     })
     .await

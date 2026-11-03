@@ -12,7 +12,8 @@ when:
       ],
       "stream": true,
       "chat_template_kwargs": {
-        "enable_thinking": false
+        "enable_thinking": false,
+        "thinking": false
       },
       "response_format": {
         "type": "json_schema",

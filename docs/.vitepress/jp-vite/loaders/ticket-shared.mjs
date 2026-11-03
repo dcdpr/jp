@@ -11,8 +11,9 @@ import { referencedLabels } from './rfd-shared.mjs'
 // `tickets.data.js` composes these into the index and the board. The document
 // format is specified in RFD 100 and implemented for the tooling side by the
 // `ticket` crate; this is the site's reader, and it needs less: metadata, a
-// comment count, and the board's column order. Ticket pages are rendered from
-// the markdown file itself, so comment bodies never come through here.
+// comment count, the checklist's progress, and the board's column order.
+// Ticket pages are rendered from the markdown file itself, so comment bodies
+// never come through here.
 //
 // Where the tickets live, the label vocabulary, and how much of the Done column
 // the board shows come from the settings `jp vite sync` writes.
@@ -47,7 +48,10 @@ export function parseTicket(content, filename, known = new Map()) {
         labels: readLabels(meta),
         promotedTo: meta.get('Promoted to'),
         github: meta.get('GitHub'),
+        // The ticket this one sits under, as `T-0a1b2c3`.
+        parent: meta.get('Parent') ?? null,
         comments: countComments(content),
+        checklist: readChecklist(content),
         // Cross-kind links, resolved in the browser against both sets.
         links: referencedLabels(content, known).filter(label => label !== `T-${id}`),
         slug: filename.replace(/\.md$/, ''),
@@ -194,10 +198,46 @@ export function findSharedLabels(tickets, vocabulary) {
     if (shared.length === 0) return null
 
     const report = shared.map(({ name, ids }) => `  ${name}: ${ids.join(', ')}`).join('\n')
-    return `Labels the board lets one ticket carry are on several:\n${report}\n\n` +
+    return `The following label can only be added to a single ticket on the board:\n${report}\n\n` +
         `Keep each on one ticket by taking it off the others ` +
         `(\`jp ticket label rm --id <id> key=value\`), or drop \`unique\` from the key in ` +
         `\`plugins.command.ticket.options.labels\`.`
+}
+
+// Tickets breaking a rule of the parent relation: one naming a parent that
+// isn't a ticket, or one that sits under a parent of its own, and a Done
+// parent with open children.
+//
+// `jp ticket` refuses each as a write; this catches a ticket edited by hand.
+export function findBrokenParents(tickets) {
+    const byId = new Map(tickets.map(ticket => [ticket.id, ticket]))
+    const problems = []
+    for (const ticket of tickets) {
+        if (ticket.parent) {
+            const parent = byId.get(ticket.parent)
+            if (ticket.parent === ticket.id) {
+                problems.push(`  ${ticket.id}: is its own parent`)
+            } else if (!parent) {
+                problems.push(`  ${ticket.id}: names ${ticket.parent} as its parent, which is not a ticket`)
+            } else if (parent.parent) {
+                problems.push(`  ${ticket.id}: sits under ${parent.id}, which sits under ${parent.parent}`)
+            }
+        }
+
+        if (ticket.status === 'Done') {
+            const open = tickets
+                .filter(child => child.parent === ticket.id && child.id !== ticket.id && child.status !== 'Done')
+                .map(child => child.id)
+            if (open.length > 0) problems.push(`  ${ticket.id}: is Done with open children ${open.join(', ')}`)
+        }
+    }
+
+    if (problems.length === 0) return null
+
+    return `Tickets break the rules of the parent relation:\n${problems.join('\n')}\n\n` +
+        `A ticket sits under one that exists and sits under nothing, and a parent closes ` +
+        `once its children have. \`jp ticket check\` says the same, and \`jp ticket edit ` +
+        `--parent\` and \`--status\` fix it.`
 }
 
 // A key's bounds in words, as the count they ask for.
@@ -216,8 +256,33 @@ function describeBound(min, max) {
 // doesn't inflate its own total.
 export function countComments(content) {
     const lines = content.split('\n')
+
+    return unfenced(lines).filter(i => opensComment(lines, i)).length
+}
+
+// Whether line `i` of `lines` opens a comment: five or more dashes, a blank
+// line, and a metadata block carrying both `From` and `Date`.
+function opensComment(lines, i) {
+    if (!/^-{5,}\s*$/.test(lines[i])) return false
+    if ((lines[i + 1] ?? 'x').trim() !== '') return false
+
+    let from = false
+    let date = false
+    for (let j = i + 2; j < lines.length; j++) {
+        const key = lines[j].match(/^- \*\*([^*]+)\*\*:/)?.[1]?.trim().toLowerCase()
+        if (!key) break
+        if (key === 'from') from = true
+        if (key === 'date') date = true
+    }
+
+    return from && date
+}
+
+// The indices of the lines of `lines` outside fenced code blocks, the fences
+// themselves left out too.
+function unfenced(lines) {
+    const outside = []
     let fence = null
-    let count = 0
 
     for (let i = 0; i < lines.length; i++) {
         const delimiter = fenceAt(lines[i])
@@ -227,23 +292,46 @@ export function countComments(content) {
                 && !delimiter.info) fence = null
             continue
         }
-        if (fence !== null) continue
-
-        if (!/^-{5,}\s*$/.test(lines[i])) continue
-        if ((lines[i + 1] ?? 'x').trim() !== '') continue
-
-        let from = false
-        let date = false
-        for (let j = i + 2; j < lines.length; j++) {
-            const key = lines[j].match(/^- \*\*([^*]+)\*\*:/)?.[1]?.trim().toLowerCase()
-            if (!key) break
-            if (key === 'from') from = true
-            if (key === 'date') date = true
-        }
-        if (from && date) count++
+        if (fence === null) outside.push(i)
     }
 
-    return count
+    return outside
+}
+
+// How many of a ticket's checklist items are checked, as `{ checked, count }`,
+// or `null` when it has none.
+//
+// Only the description counts, everything above the first comment: the
+// tooling only ever appends comments, so an item in one could never be checked
+// through it.
+export function readChecklist(content) {
+    const lines = content.split('\n')
+    const end = unfenced(lines).find(i => opensComment(lines, i)) ?? lines.length
+    const items = checklistItems(lines.slice(0, end).join('\n'))
+    if (items.length === 0) return null
+
+    return { checked: items.filter(item => item.checked).length, count: items.length }
+}
+
+// A list item opening with a checkbox: indentation, a bullet or up to nine
+// digits and `.` or `)`, whitespace, `[ ]` or `[x]`, whitespace, and text.
+const CHECKLIST_ITEM = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\[([ xX])\][ \t]+(\S.*)$/
+
+// The checklist items in `text`, as `{ checked, text }`, outside fenced code
+// blocks.
+//
+// The same rule as the `ticket` crate's `checklist` module, tested against the
+// same cases (`checklist_cases.json` there).
+export function checklistItems(text) {
+    const lines = text.split('\n')
+
+    return unfenced(lines).flatMap((i) => {
+        // Trimmed first, so a `\r` left by CRLF line endings isn't the text.
+        const match = lines[i].trimEnd().match(CHECKLIST_ITEM)
+        if (!match) return []
+
+        return [{ checked: match[1] !== ' ', text: match[2].trim() }]
+    })
 }
 
 // Read a line as a code fence delimiter.
@@ -363,6 +451,8 @@ export function loadTickets(settings = readSettings()) {
     if (miscounted) throw new Error(miscounted)
     const shared = findSharedLabels(tickets, vocabulary)
     if (shared) throw new Error(shared)
+    const broken = findBrokenParents(tickets)
+    if (broken) throw new Error(broken)
 
     return tickets
 }
