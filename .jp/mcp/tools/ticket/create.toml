@@ -14,6 +14,11 @@ tool call header misaligns below 80 columns" is a ticket even if the fix is
 subtle; "how should tool output be bounded?" is an RFD even if the
 implementation is trivial.
 
+Write the steps or acceptance criteria of the work as a checklist in the body,
+one `- [ ] item` per line: `ticket_edit` checks the items off as they land, and
+`ticket_show` and `ticket_list` count them. A step that could be picked up and
+merged on its own is a ticket of its own instead.
+
 The ticket opens at status `Todo`, draws a collision-resistant id, and is
 attributed to you (`jp`). The title becomes the filename slug, so
 keep it short and specific: at most 60 characters, or the tool asks you for a

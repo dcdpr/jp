@@ -45,6 +45,10 @@
 //! The id is in the filename and nowhere else, so renaming a ticket is a rename
 //! and there is no second copy to keep in step.
 //!
+//! A description can hold a checklist, as markdown task-list items;
+//! [`checklist`] reads it and checks its items off.
+//! Its progress is counted from the text each time, never stored.
+//!
 //! The format is specified in `docs/rfd/100-in-repo-ticket-tracking.md`.
 
 use std::{fmt, str::FromStr};
@@ -53,6 +57,7 @@ use serde::Serialize;
 
 pub mod board;
 pub mod check;
+pub mod checklist;
 pub mod id;
 pub mod import;
 pub mod parse;
@@ -181,6 +186,13 @@ impl Ticket {
         contains(&self.title)
             || contains(&self.description)
             || self.comments.iter().any(|comment| contains(&comment.body))
+    }
+
+    /// How many of the checklist items in the description are checked, or
+    /// `None` when it holds none.
+    #[must_use]
+    pub fn checklist(&self) -> Option<checklist::Progress> {
+        checklist::progress(&self.description)
     }
 }
 

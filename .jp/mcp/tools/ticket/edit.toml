@@ -1,7 +1,7 @@
 [conversation.tools.ticket_edit]
 enable = false
 source = "plugin.command.ticket.edit"
-summary = "Change a ticket's title, description, status, or labels."
+summary = "Change a ticket's title, description, status, labels, or checklist."
 description = """
 Change any part of a ticket in one call: pass what changes, and the rest stays
 as it is.
@@ -11,7 +11,13 @@ as it is.
   changed. Read it first with `ticket_show`, passing `description: true`.
 - `status` moves it between `todo`, `in progress`, and `done`; `done` closes
   it. Move a ticket to `in progress` when work on it starts, and back to `todo`
-  when it stops before it is finished.
+  when it stops before it is finished. Closing a ticket with checklist items
+  unchecked is allowed, and the result names them.
+- `check` and `uncheck` tick items of the checklist in the description, its
+  `- [ ]` and `- [x]` lines, without sending the description back. Name an
+  item by its whole text, or by part of it that no other item contains,
+  ignoring case. A name matching no item, or several, is refused with the items
+  listed, and nothing is changed. Not together with `description`.
 - `remove_labels` takes labels off: `key=value` that label, a bare `key`
   every label under it. `add_labels` then puts labels on. The labels neither
   names stay, its `tracking-rfd` and `relevant-rfd` links among them, so there
@@ -31,6 +37,11 @@ Start work on a ticket:
 Close it:
 ```json
 {"id": "T-02wt0kx", "status": "done"}
+```
+
+Check off two checklist items as their work lands:
+```json
+{"id": "T-02wt0kx", "check": ["second tool call", "parallel calls"]}
 ```
 
 Retitle it and add labels, naming one key twice:
@@ -69,6 +80,22 @@ type = "string"
 required = false
 enum = ["todo", "in progress", "done"]
 summary = "The column to move it to; `done` closes it."
+
+[conversation.tools.ticket_edit.parameters.check]
+type = "array"
+required = false
+summary = "Checklist items to check, each named by its text or a part of it no other item contains."
+
+[conversation.tools.ticket_edit.parameters.check.items]
+type = "string"
+
+[conversation.tools.ticket_edit.parameters.uncheck]
+type = "array"
+required = false
+summary = "Checklist items to uncheck, each named by its text or a part of it no other item contains."
+
+[conversation.tools.ticket_edit.parameters.uncheck.items]
+type = "string"
 
 [conversation.tools.ticket_edit.parameters.add_labels]
 type = "array"

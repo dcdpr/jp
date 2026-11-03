@@ -39,6 +39,7 @@ use ticket::{
     Comment, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId, Unique, Vocabulary,
     board::{self, Place},
     check::Problem,
+    checklist::{self, Progress},
     import::Import,
     store,
 };
@@ -189,7 +190,7 @@ enum Command {
         title: String,
     },
 
-    /// Change a ticket's title, description, status, or labels.
+    /// Change a ticket's title, description, status, labels, or checklist.
     ///
     /// Without any of those flags, opens the ticket's file in your editor: the
     /// one `editor.cmd` names, or `JP_EDITOR`, `VISUAL`, or `EDITOR`.
@@ -217,6 +218,18 @@ enum Command {
         /// Repeat for more than one.
         #[arg(long = "label")]
         labels: Vec<String>,
+
+        /// Check the checklist item whose text this is, or the one item whose
+        /// text contains it, ignoring case.
+        /// Repeat for more than one.
+        #[arg(long, value_name = "ITEM", conflicts_with = "body")]
+        check: Vec<String>,
+
+        /// Uncheck the checklist item whose text this is, or the one item whose
+        /// text contains it, ignoring case.
+        /// Repeat for more than one.
+        #[arg(long, value_name = "ITEM", conflicts_with = "body")]
+        uncheck: Vec<String>,
     },
 
     /// Delete a ticket outright.
@@ -433,6 +446,11 @@ struct Detail<'a> {
     #[serde(flatten)]
     ticket: &'a Ticket,
     path: &'a str,
+
+    /// How many of the description's checklist items are checked; absent when
+    /// it holds none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    checklist: Option<Progress>,
 }
 
 /// One ticket in `jp -F json ticket list` output.
@@ -444,6 +462,10 @@ struct Row<'a> {
     metadata: &'a Metadata,
     comments: usize,
     path: &'a str,
+
+    /// As [`Detail::checklist`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    checklist: Option<Progress>,
 }
 
 /// What a subcommand produced: text for the user, and warnings.
@@ -568,7 +590,9 @@ impl Command {
                 body: None,
                 status: None,
                 labels,
-            } if labels.is_empty() => Some(*id),
+                check,
+                uncheck,
+            } if labels.is_empty() && check.is_empty() && uncheck.is_empty() => Some(*id),
             _ => None,
         }
     }
@@ -773,19 +797,12 @@ fn compose_missing(
             id: Some(pick_ticket(dir, stdin, stdout, "Show", false)?),
         }),
 
-        Command::Edit {
-            id: None,
-            title,
-            body,
-            status,
-            labels,
-        } => Ok(Command::Edit {
-            id: Some(pick_ticket(dir, stdin, stdout, "Edit", false)?),
-            title,
-            body,
-            status,
-            labels,
-        }),
+        mut edit @ Command::Edit { id: None, .. } => {
+            if let Command::Edit { id, .. } = &mut edit {
+                *id = Some(pick_ticket(dir, stdin, stdout, "Edit", false)?);
+            }
+            Ok(edit)
+        }
 
         Command::Label { ids, verb } => {
             // Before the picker, so an id written where a label goes is caught
@@ -1406,11 +1423,15 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             body,
             status,
             labels,
+            check,
+            uncheck,
         } => edit(dir, ctx.options, required(id, "ticket id")?, &Changes {
             title,
             body,
             status,
             labels,
+            check,
+            uncheck,
         }),
 
         Command::Board => show_board(dir, ctx.options.board.done_limit),
@@ -1491,13 +1512,27 @@ fn move_ticket(
         board::move_to(dir, id, status, at).map_err(|error| error.to_string())?;
     let next_to = at.map(|(place, other)| format!("{} {other}", relation(place)));
 
-    Ok(match next_to {
+    let mut output = Output::from(match next_to {
         None if previous == status => format!("{path}: already {status}\n"),
         None => format!("{path}: {previous} -> {status}\n"),
         Some(next_to) if previous == status => format!("{path}: {next_to} in {status}\n"),
         Some(next_to) => format!("{path}: {previous} -> {status}, {next_to}\n"),
+    });
+    if status == Status::Done {
+        output.warnings.extend(unchecked_at(&path)?);
     }
-    .into())
+
+    Ok(output)
+}
+
+/// The warning closing the ticket at `path` earns when its checklist has items
+/// unchecked.
+fn unchecked_at(path: &Utf8Path) -> Result<Option<String>, String> {
+    let source =
+        std::fs::read_to_string(path).map_err(|error| format!("failed to read {path}: {error}"))?;
+    let ticket = ticket::parse::document(&source).map_err(|error| format!("{path}: {error}"))?;
+
+    Ok(tool::unchecked_on_close(&ticket.description))
 }
 
 /// The place `--before` or `--after` names, if either does.
@@ -1607,7 +1642,15 @@ fn board_row(id: TicketId, ticket: &Ticket) -> String {
         format!(" [{}]", ticket.metadata.labels)
     };
 
-    format!("{id:<9} {}{labels}\n", ticket.title)
+    format!("{id:<9} {}{labels}{}\n", ticket.title, progress(ticket))
+}
+
+/// A ticket's checklist progress as a listing appends it, `  (2 of 5 checked)
+/// `, or nothing when its description holds no checklist.
+fn progress(ticket: &Ticket) -> String {
+    ticket
+        .checklist()
+        .map_or_else(String::new, |progress| format!(" ({progress})"))
 }
 
 /// Move a ticket directly above or below another in its column.
@@ -2120,19 +2163,28 @@ fn describe_vocabulary(vocabulary: &Vocabulary, leftover: Option<&str>) -> Strin
     out
 }
 
-/// What `edit` changes; `None`, or no labels, leaves that part as it is.
+/// What `edit` changes; `None`, or no labels or items, leaves that part as it
+/// is.
 struct Changes {
     title: Option<String>,
     body: Option<String>,
     status: Option<Status>,
     labels: Vec<String>,
+
+    /// Checklist items to check, by their text.
+    check: Vec<String>,
+
+    /// Checklist items to uncheck, by their text.
+    uncheck: Vec<String>,
 }
 
 /// Apply an edit, touching only the parts the caller named.
 ///
-/// Labels are written first: the vocabulary can still refuse them, and a
-/// refused edit should change nothing.
+/// The checklist items named are found before anything is written, and labels
+/// are written first: either can still be refused, and a refused edit should
+/// change nothing.
 /// The title goes last, since it moves the file.
+/// Closing a ticket with checklist items unchecked is warned about.
 fn edit(
     dir: &Utf8Path,
     options: &Options,
@@ -2150,6 +2202,25 @@ fn edit(
     }
 
     let mut path = store::locate_ticket(dir, id).map_err(failed)?;
+    let marked = if changes.check.is_empty() && changes.uncheck.is_empty() {
+        None
+    } else {
+        let source = std::fs::read_to_string(&path)
+            .map_err(|error| format!("failed to read {path}: {error}"))?;
+        let ticket =
+            ticket::parse::document(&source).map_err(|error| format!("{path}: {error}"))?;
+        let marked = checklist::mark(&ticket.description, &changes.check, &changes.uncheck)
+            .map_err(|refused| refused.to_string())?;
+        Some(marked)
+    };
+    // Nothing is written when every item named is in place already.
+    let body = changes.body.clone().or_else(|| {
+        marked
+            .as_ref()
+            .filter(|marked| marked.changes.iter().any(|change| change.changed))
+            .map(|marked| marked.description.clone())
+    });
+
     let mut removed = vec![];
     if !changes.labels.is_empty() {
         let vocabulary = options.vocabulary()?;
@@ -2163,9 +2234,9 @@ fn edit(
     if let Some(status) = changes.status {
         path = store::set_status(dir, id, status).map_err(failed)?.0;
     }
-    if changes.title.is_some() || changes.body.is_some() {
+    if changes.title.is_some() || body.is_some() {
         let title = changes.title.as_deref().map(str::trim);
-        path = store::edit(dir, id, title, changes.body.as_deref())
+        path = store::edit(dir, id, title, body.as_deref())
             .map_err(failed)?
             .to;
     }
@@ -2176,8 +2247,25 @@ fn edit(
     if !removed.is_empty() {
         text.push_str(&format!("Removed labels: {}\n", removed.join(", ")));
     }
+    if let Some(marked) = &marked {
+        for change in &marked.changes {
+            let what = match (change.changed, change.checked) {
+                (true, true) => "Checked",
+                (true, false) => "Unchecked",
+                (false, true) => "Already checked",
+                (false, false) => "Already unchecked",
+            };
+            text.push_str(&format!("{what}: {}\n", change.text));
+        }
+        text.push_str(&format!("Checklist: {}\n", marked.progress));
+    }
 
-    Ok(text.into())
+    let mut output = Output::from(text);
+    if changes.status == Some(Status::Done) {
+        output.warnings.extend(unchecked_at(&path)?);
+    }
+
+    Ok(output)
 }
 
 /// Read one ticket, as markdown or as JSON for scripting.
@@ -2200,6 +2288,7 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
             id: entry.id,
             ticket: &ticket,
             path: entry.path.as_str(),
+            checklist: ticket.checklist(),
         })
         .map_err(|error| format!("failed to serialize {id}: {error}"))?;
 
@@ -2217,6 +2306,9 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
     out.push_str(&format!("- **Status**: {}\n", ticket.metadata.status));
     for token in ticket.metadata.labels.to_tokens() {
         out.push_str(&format!("- **Label**: {token}\n"));
+    }
+    if let Some(progress) = ticket.checklist() {
+        out.push_str(&format!("- **Checklist**: {progress}\n"));
     }
     if !ticket.description.is_empty() {
         out.push_str(&format!("\n{}\n", ticket.description));
@@ -2280,6 +2372,7 @@ fn list(dir: &Utf8Path, filter: &Filter<'_>, json: bool) -> Result<Output, Strin
                 metadata: &ticket.metadata,
                 comments: ticket.comments.len(),
                 path,
+                checklist: ticket.checklist(),
             })
             .collect();
 
@@ -2312,7 +2405,11 @@ fn row(id: TicketId, ticket: &Ticket) -> String {
         format!(" [{}]", ticket.metadata.labels)
     };
 
-    format!("{id:<9} {status:<12} {}{labels}\n", ticket.title)
+    format!(
+        "{id:<9} {status:<12} {}{labels}{}\n",
+        ticket.title,
+        progress(ticket)
+    )
 }
 
 /// The usage text, rendered from the same clap definition the commands parse.

@@ -28,6 +28,7 @@ In disagreements between code and docs, the code is authoritative.
   - [Terms](#terms)
     - [Attachment](#attachment)
     - [Background Task](#background-task)
+    - [Checklist Item](#checklist-item)
     - [CommandConfig](#commandconfig)
     - [Compacted View](#compacted-view)
     - [Compaction](#compaction)
@@ -84,6 +85,20 @@ A task is two-phase: `run` (off the main critical path, cancellable, accumulates
 state) and `sync` (with `&mut Workspace`, commits the accumulated state).
 The handler lives at `Ctx::task_handler` and is drained exactly once per `jp`
 invocation, at the end of `jp_cli::lib::run`.
+
+### Checklist Item
+
+One step or acceptance criterion of a ticket's work, written in its description
+as a markdown task-list item, `- [ ] text` or `- [x] text`.
+Whether it is checked lives in that line alone: a ticket's checklist progress is
+counted from the description whenever it is read, and stored nowhere else.
+Only the description holds a checklist, since the tooling only ever appends
+comments.
+The `checklist` module of the `ticket` crate reads and checks them.
+
+**Not the same as** a ticket of its own, which is work that can be picked up,
+merged, or discussed separately; nor a step of the `plan` tool, which tracks the
+assistant's progress through one conversation and is kept with it.
 
 ### CommandConfig
 

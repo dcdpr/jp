@@ -2,9 +2,10 @@
 source = "plugin.command.ticket.show"
 summary = "Read one ticket's metadata, and its description and discussion when asked."
 description = """
-Print a ticket's metadata: its title, path, status, labels, authors, and date.
-Pass `description` or `comments` to add those; the result names anything it
-left out.
+Print a ticket's metadata: its title, path, status, labels, authors, and date,
+and how many of its checklist items are checked when its description holds a
+checklist. Pass `description` or `comments` to add those; the result names
+anything it left out.
 
 Comments are numbered so a reply can name the comment it answers
 (`ticket_comment` takes that number as `re`). The whole discussion comes back in

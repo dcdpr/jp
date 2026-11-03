@@ -2,7 +2,8 @@
 source = "plugin.command.ticket.list"
 summary = "List the tickets in the repository, in board order."
 description = """
-One line per ticket: id, status, title, labels, and comment count.
+One line per ticket: id, status, title, labels, checklist progress, and comment
+count.
 
 Tickets come in board order: Todo, In Progress, then Done, each column top
 first. The first Todo ticket is the next one to work on.
