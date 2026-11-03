@@ -26,6 +26,7 @@ pub mod directory;
 mod document;
 pub mod fragment;
 pub mod highlight;
+mod links;
 
 pub use directory::{CheckError, Problem, ProblemKind, Report, check, reserved_for};
 pub use document::FrontmatterError;

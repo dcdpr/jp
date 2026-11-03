@@ -4,10 +4,11 @@
 //! [`parse`] splits a document and reads its frontmatter into the fields of its
 //! format.
 //! [`marker`] finds the lines both formats hold to the rules about upgrade
-//! sections.
+//! sections, and [`markdown_options`] says how a body is read as Markdown.
 
 use std::fmt;
 
+use comrak::{Options, options::Extension};
 use serde::de::DeserializeOwned;
 
 /// The tokens that open an upgrade section: the one Conventional Commits uses,
@@ -86,6 +87,18 @@ pub(crate) fn parse<T: DeserializeOwned>(source: &str) -> Result<Parsed<T>, Fron
 /// with one.
 pub(crate) fn marker(line: &str) -> Option<&'static str> {
     MARKERS.into_iter().find(|marker| line.starts_with(marker))
+}
+
+/// Parse options that read a body as GitHub renders it, tables included: a
+/// table can take a line that would otherwise start a paragraph.
+pub(crate) fn markdown_options() -> Options<'static> {
+    Options {
+        extension: Extension {
+            table: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
 }
 
 /// The frontmatter of `source`, and the offset its body starts at.

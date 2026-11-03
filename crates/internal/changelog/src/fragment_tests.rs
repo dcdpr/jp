@@ -440,6 +440,66 @@ fn an_upgrade_section_needs_a_body() {
     assert_eq!(error, FragmentError::EmptyUpgradeBody { line: 6 });
 }
 
+/// A formatter that gathers definitions at the end of the file puts them below
+/// the upgrade section, and each part still reads its links' URLs from them.
+#[test]
+fn each_part_reads_its_links_urls_from_definitions_anywhere_in_the_file() {
+    let fragment = parse(indoc! {r#"
+        ---
+        type: removed
+        ---
+        `jp query --legacy` is gone, as [the flag's docs] said it would be.
+
+        BREAKING CHANGE: [`--legacy`] is no longer accepted
+
+        Drop the flag; [the upgrade notes][notes] say what replaces it.
+
+        [`--legacy`]: https://example.com/legacy
+        [notes]: https://example.com/notes
+        [the flag's docs]: https://example.com/flags "Flags"
+    "#})
+    .unwrap();
+
+    assert_eq!(
+        fragment.entry,
+        r#"`jp query --legacy` is gone, as [the flag's docs](https://example.com/flags "Flags") said it would be."#
+    );
+    assert_eq!(
+        fragment.upgrade,
+        Some(Upgrade {
+            title: "[`--legacy`](https://example.com/legacy) is no longer accepted".to_owned(),
+            body: "Drop the flag; [the upgrade notes](https://example.com/notes) say what \
+                   replaces it."
+                .to_owned(),
+        })
+    );
+}
+
+#[test]
+fn a_body_of_definitions_alone_has_no_entry() {
+    assert_eq!(
+        parse("---\ntype: fixed\n---\n[docs]: https://example.com/docs\n"),
+        Err(FragmentError::EmptyBody)
+    );
+}
+
+#[test]
+fn an_upgrade_body_of_definitions_alone_is_empty() {
+    let error = parse(indoc! {"
+        ---
+        type: changed
+        ---
+        See [the docs].
+
+        BREAKING CHANGE: Title
+
+        [the docs]: https://example.com/docs
+    "})
+    .unwrap_err();
+
+    assert_eq!(error, FragmentError::EmptyUpgradeBody { line: 6 });
+}
+
 #[test]
 fn a_misplaced_token_says_how_to_show_it_instead() {
     assert_eq!(

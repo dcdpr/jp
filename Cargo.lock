@@ -2182,6 +2182,7 @@ dependencies = [
  "changelog",
  "clap",
  "comfort",
+ "comrak",
  "indoc",
  "jp_md",
  "jp_plugin",

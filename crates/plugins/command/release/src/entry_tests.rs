@@ -116,6 +116,39 @@ fn markdown_does_not_reach_a_derived_slug() {
     assert_eq!(derive_slug("**ÉÉ**"), None);
 }
 
+/// The file keeps its links in the reference form the formatter writes, and the
+/// slug is named after the entry's words, not its URLs.
+#[test]
+fn an_entry_with_links_is_named_after_its_words() {
+    let root = workspace();
+
+    let planned = plan(
+        &fragments(&root),
+        &fixed("See [the docs](https://example.com/docs) for setup."),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(planned.shown, "changelog.d/see-the-docs-for-setup.md");
+    assert_eq!(planned.text, indoc! {"
+        ---
+        type: fixed
+        ---
+        See [the docs] for setup.
+
+        [the docs]: https://example.com/docs
+    "});
+}
+
+/// A block break separates words, and markup inside a word doesn't split it.
+#[test]
+fn plain_text_reads_words_as_they_render() {
+    assert_eq!(
+        derive_slug(&plain_text("One\n\nTwo, then **re**try.")),
+        Some("one-two-then-retry".to_owned())
+    );
+}
+
 /// A first word longer than a slug may be is cut, rather than leaving the entry
 /// without a name.
 #[test]
