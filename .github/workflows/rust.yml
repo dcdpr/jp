@@ -116,9 +116,10 @@ jobs:
             name_suffix: " (windows)"
             cache_suffix: "-windows"
             # Restoring a 3.9 GB `target/` cache costs Windows more than
-            # compiling from a warm sccache does, so this job caches only
-            # `~/.cargo` and lets sccache carry compilation.
-            cache_targets: "false"
+            # compiling from a warm sccache does, and restoring `~/.cargo`
+            # costs about 12s more than downloading the crates again, so this
+            # job skips rust-cache and lets sccache carry compilation.
+            rust_cache: "false"
             # Windows pays a steep per-file cost to unpack, compile and link, so
             # PR runs cover only the crates that make up `jp` itself. The Linux
             # `test` job still builds and tests everything on every PR, and
@@ -202,13 +203,12 @@ jobs:
         id: week
         shell: bash
         run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
-      - if: ${{ steps.task.outputs.run == 'true' }}
+      - if: ${{ steps.task.outputs.run == 'true' && matrix.rust_cache != 'false' }}
         uses: Swatinem/rust-cache@7e1e2d0a10862b34e5df481373b2b0f295d1a2ef # v2
         with:
           key: ${{ matrix.task }}-${{ steps.week.outputs.week }}
           cache-bin: false
           cache-workspace-crates: true
-          cache-targets: ${{ matrix.cache_targets || 'true' }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - if: ${{ steps.task.outputs.run == 'true' && matrix.task != 'coverage' && matrix.task != 'shear' }}
         uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # V0.10
@@ -221,11 +221,13 @@ jobs:
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-      # `rust-cache` strips `~/.cargo/registry/src` before saving, so the first
-      # cargo invocation of the job re-extracts every `.crate` archive. That is
-      # the single most expensive non-build phase on Windows. Doing it in a
-      # named step keeps the cost visible instead of burying it in the silent
-      # `cargo metadata` that `cargo nextest run` shells out to on startup.
+      # `rust-cache` strips `~/.cargo/registry/src` before saving, and the
+      # Windows job restores no registry at all, so the first cargo invocation
+      # of the job extracts every `.crate` archive, downloading them first on
+      # Windows. That is the single most expensive non-build phase there. Doing
+      # it in a named step keeps the cost visible instead of burying it in the
+      # silent `cargo metadata` that `cargo nextest run` shells out to on
+      # startup.
       - name: Warm the registry source tree
         if: ${{ steps.task.outputs.run == 'true' && matrix.task == 'test' }}
         shell: bash

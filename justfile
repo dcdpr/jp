@@ -17,12 +17,14 @@ vet_version          := "0.10.2"
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
 
 # Workspace crates that no `jp_*` crate depends on: standalone tooling binaries,
-# docs infrastructure, and command plugins. Skipping them drops their
-# dependencies from the build entirely, rather than merely skipping their tests.
+# docs infrastructure, command plugins, and the macOS-only `jp_ffi` (the app's C
+# interface) and `xct2cli` (an Xcode Instruments trace reader). Skipping them
+# drops their dependencies from the build entirely, rather than merely skipping
+# their tests.
 #
 # `grizzly` is deliberately absent: `jp_attachment_bear_note` depends on it, so
 # it is compiled either way.
-non_jp_excludes := "--exclude bookworm --exclude build-registry --exclude comfort --exclude jp-gui --exclude jp-path --exclude jp-serve-web --exclude json_edit --exclude tools"
+non_jp_excludes := "--exclude bookworm --exclude build-registry --exclude comfort --exclude jp-gui --exclude jp-path --exclude jp-serve-web --exclude jp_ffi --exclude json_edit --exclude tools --exclude xct2cli"
 
 alias r := run
 alias i := install
