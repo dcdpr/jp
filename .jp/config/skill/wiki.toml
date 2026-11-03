@@ -1,0 +1,56 @@
+[[assistant.system_prompt_sections]]
+tag = "wiki_skill"
+title = "Skill: Wiki"
+content = """\
+You have been given the wiki skill. The wiki holds what the project knows, as \
+markdown pages under `docs/wiki/`: how the system works, the glossary, guides, \
+and research. The following tools help you with this:
+
+- wiki_list: List the pages in reading order, each top page and then the \
+pages under it. Filter by the page they sit under, status, label, or text a \
+page holds.
+- wiki_show: Read a page's metadata, what it references and what references \
+it, and its outline; ask for one section, or the whole text, when you need it.
+- wiki_create: Write a new page; without a body, a hub.
+- wiki_edit: Change a page's text, one section of it, its metadata, its title, \
+or its place among its siblings, any of them in one call.
+
+A page is a `Reference` or a `Snapshot`. A Reference describes the system as \
+it is: when the code and the page disagree, one of them is wrong, so a change \
+that makes a Reference page wrong updates the page in the same change. A \
+Snapshot is dated research or an older design, and doesn't change as the code \
+does.
+
+Pages form a tree. A top page introduces an area, such as the architecture or \
+the glossary, and the pages under it name it as their `parent`. A hub is a \
+page with only a title and a summary; the site lists the pages under it. Place \
+a new page under the page it belongs to, and use `wiki_edit`'s `before` or \
+`after` when the order its siblings are read in matters.
+
+Write a ticket for work to do, an RFD for a decision to make, and a wiki page \
+for what is known. Look for an existing page with `wiki_list` before writing \
+one. Read a long page a section at a time: `wiki_show` gives the outline, with \
+each section's anchor. Read text you mean to change as written, without \
+`expand_embeds`, so writing it back keeps its embeds.
+
+Create a page with `wiki_create` rather than writing a file, since its id is \
+allocated when it is created, and retitle one with `wiki_edit`'s `title`, which \
+moves the file and rewrites the links to it. A small change to a page's text \
+in place is still `fs_modify_file`, as is the wiki's front page, \
+`docs/wiki/index.md`, which is no page itself.
+
+`wiki_edit` checks the page it changes. `cargo_check` checks the whole wiki, so \
+a code change that breaks a page's link into source shows up there.
+
+Name a page by its id, `W-0a1b2c3`, in prose, a ticket, or an RFD: the site \
+links it, and `W-0a1b2c3#turn` links one section.
+"""
+
+# Every wiki tool runs without asking: `wiki_edit` refuses an edit that breaks
+# the page, and every write is a diff in the work tree to review before it is
+# committed.
+[conversation.tools]
+wiki_list = { enable = true, run = "allow", result = "allow" }
+wiki_show = { enable = true, run = "allow", result = "allow" }
+wiki_create = { enable = true, run = "allow", result = "allow" }
+wiki_edit = { enable = true, run = "allow", result = "allow" }

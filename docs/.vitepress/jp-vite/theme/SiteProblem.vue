@@ -6,12 +6,13 @@ import settings from '../settings.json'
 import { problem } from './problem.mjs'
 
 // The problem `jp vite serve` found before starting the site, on every page the
-// RFD and ticket loaders feed. The index and board pages show nothing else; a
-// document still shows its own text below it, which it reads from its file.
+// RFD, ticket, and wiki loaders feed. The index and board pages show nothing
+// else; a document still shows its own text below it, which it reads from its
+// file.
 
 const route = useRoute()
 
-const prefixes = ['rfd', 'ticket']
+const prefixes = ['rfd', 'ticket', 'wiki']
     .map(kind => settings[kind]?.route)
     .filter(Boolean)
     .map(path => `/${path}/`)

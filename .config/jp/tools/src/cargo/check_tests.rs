@@ -47,7 +47,15 @@ fn test_cargo_check_with_warnings() {
         .expect("comfort")
         .returns_success("");
 
-    let result = cargo_check_impl(&ctx.root, "-W warnings", None, None, false, &runner).unwrap();
+    let result = cargo_check_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        Checks::default(),
+        &runner,
+    )
+    .unwrap();
 
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {r#"
             ```
@@ -77,7 +85,15 @@ fn test_cargo_check_no_warnings() {
         .expect("comfort")
         .returns_success("");
 
-    let result = cargo_check_impl(&ctx.root, "-W warnings", None, None, false, &runner).unwrap();
+    let result = cargo_check_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        Checks::default(),
+        &runner,
+    )
+    .unwrap();
 
     assert_eq!(
         result.into_content().unwrap(),
@@ -100,7 +116,15 @@ fn clean_clippy_with_comfort_drift_appends_note() {
             status: ExitCode::from_code(1),
         });
 
-    let result = cargo_check_impl(&ctx.root, "-W warnings", None, None, false, &runner).unwrap();
+    let result = cargo_check_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        Checks::default(),
+        &runner,
+    )
+    .unwrap();
 
     // The header is clippy-scoped, not a blanket "Check succeeded", so it does
     // not contradict the drift note below it.
@@ -131,7 +155,15 @@ fn clippy_warnings_and_comfort_drift_are_both_reported() {
             status: ExitCode::from_code(1),
         });
 
-    let result = cargo_check_impl(&ctx.root, "-W warnings", None, None, false, &runner).unwrap();
+    let result = cargo_check_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        Checks::default(),
+        &runner,
+    )
+    .unwrap();
 
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
             ```
@@ -160,9 +192,16 @@ fn comfort_drift_listing_is_bounded() {
             status: ExitCode::from_code(1),
         });
 
-    let content = cargo_check_impl(&ctx.root, "-W warnings", None, None, false, &runner)
-        .unwrap()
-        .unwrap_content();
+    let content = cargo_check_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        Checks::default(),
+        &runner,
+    )
+    .unwrap()
+    .unwrap_content();
 
     assert!(
         content.len() < MAX_DIAGNOSTIC_BYTES + 200,
@@ -190,7 +229,15 @@ fn comfort_real_failure_is_reported_as_error() {
             status: ExitCode::from_code(2),
         });
 
-    let result = cargo_check_impl(&ctx.root, "-W warnings", None, None, false, &runner).unwrap();
+    let result = cargo_check_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        Checks::default(),
+        &runner,
+    )
+    .unwrap();
     match result {
         Outcome::Error { message, .. } => {
             assert_eq!(message, "comfort failed: comfort: parse error");
@@ -211,7 +258,15 @@ fn clippy_failure_short_circuits_before_running_comfort() {
             status: ExitCode::from_code(101),
         });
 
-    let result = cargo_check_impl(&ctx.root, "-W warnings", None, None, false, &runner).unwrap();
+    let result = cargo_check_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        Checks::default(),
+        &runner,
+    )
+    .unwrap();
     match result {
         Outcome::Error { message, .. } => {
             assert_eq!(message, "Cargo command failed: error: build failed");
@@ -254,7 +309,7 @@ fn package_scope_is_passed_through_to_both_tools() {
         "-W warnings",
         None,
         Some("my_pkg"),
-        false,
+        Checks::default(),
         &runner,
     )
     .unwrap();
@@ -293,7 +348,7 @@ fn profile_is_passed_through_to_clippy() {
         "-W warnings",
         Some("agent"),
         None,
-        false,
+        Checks::default(),
         &runner,
     )
     .unwrap();
@@ -323,7 +378,15 @@ fn clippy_gets_no_profile_flag_unless_configured() {
         .expect("comfort")
         .returns_success("");
 
-    let result = cargo_check_impl(&ctx.root, "-W warnings", None, None, false, &runner).unwrap();
+    let result = cargo_check_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        Checks::default(),
+        &runner,
+    )
+    .unwrap();
 
     assert_eq!(
         result.into_content().unwrap(),
@@ -346,7 +409,18 @@ fn checksum_freshness_reaches_cargo() {
         .expect("comfort")
         .returns_success("");
 
-    cargo_check_impl(&ctx.root, "-W warnings", None, None, true, &runner).unwrap();
+    cargo_check_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        Checks {
+            checksum_freshness: true,
+            wiki: false,
+        },
+        &runner,
+    )
+    .unwrap();
 
     let call = call_with_arg(&runner, "clippy").expect("the clippy pass must have run");
 
@@ -370,7 +444,15 @@ fn checksum_freshness_is_absent_unless_opted_into() {
         .expect("comfort")
         .returns_success("");
 
-    cargo_check_impl(&ctx.root, "-W warnings", None, None, false, &runner).unwrap();
+    cargo_check_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        Checks::default(),
+        &runner,
+    )
+    .unwrap();
 
     let call = call_with_arg(&runner, "clippy").expect("the clippy pass must have run");
 
@@ -381,6 +463,91 @@ fn checksum_freshness_is_absent_unless_opted_into() {
             .any(|(key, _)| key == "CARGO_UNSTABLE_CHECKSUM_FRESHNESS"),
         "the clippy pass must not require nightly cargo unless asked to",
     );
+}
+
+const WIKI: Checks = Checks {
+    checksum_freshness: false,
+    wiki: true,
+};
+
+/// A clean wiki adds nothing: the run reads as it would without the check.
+#[test]
+fn a_clean_wiki_adds_nothing() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("jp")
+        .args(&["--no-interactive", "wiki", "check"])
+        .returns_success("Checked 12 pages: 0 errors, 0 warnings.\n");
+
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, None, WIKI, &runner).unwrap();
+
+    assert_eq!(
+        result.into_content().unwrap(),
+        "Check succeeded. No warnings or errors found."
+    );
+}
+
+/// A wiki page broken by a code change is reported beside clippy's findings,
+/// warnings included, which `jp wiki check` exits 0 on.
+#[test]
+fn wiki_findings_are_reported() {
+    let (_dir, ctx) = ctx();
+    let found = "error: docs/wiki/a.md:9: `../../x.rs#L2-L9`: lines 2 to 9 are past the \
+                 file.\n\nChecked 1 page: 1 error, 0 warnings.\n";
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("jp")
+        .returns(ProcessOutput {
+            stdout: found.to_owned(),
+            stderr: String::new(),
+            status: ExitCode::from_code(1),
+        });
+
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, None, WIKI, &runner).unwrap();
+
+    assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
+            `cargo clippy` found no warnings or errors.
+
+            `jp wiki check` found problems:
+            ```
+            error: docs/wiki/a.md:9: `../../x.rs#L2-L9`: lines 2 to 9 are past the file.
+
+            Checked 1 page: 1 error, 0 warnings.
+            ```"});
+}
+
+/// A wiki `jp` can't check is a note, not a failed run: the code was checked.
+#[test]
+fn a_wiki_that_cant_be_checked_is_a_note() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("jp")
+        .returns(ProcessOutput {
+            stdout: String::new(),
+            stderr: "error: unknown command `wiki`".to_owned(),
+            status: ExitCode::from_code(2),
+        });
+
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, None, WIKI, &runner).unwrap();
+
+    assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
+            `cargo clippy` found no warnings or errors.
+
+            The wiki wasn't checked: `jp wiki check` failed: error: unknown command `wiki`"});
 }
 
 /// The first command `runner` ran whose first argument is `arg`.

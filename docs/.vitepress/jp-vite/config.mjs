@@ -1,12 +1,16 @@
 import { posix } from 'node:path'
 
+import { embedSections, lineRange } from './embed.mjs'
 import { joinMultilineInlineCode } from './join-inline-code.mjs'
+import { metadataHeader } from './meta-header.mjs'
 import { devServer } from './middleware.mjs'
-import { rfdRedirectServer, writeRfdRedirects } from './redirects.mjs'
+import { redirectServer, writeRedirects } from './redirects.mjs'
 import { knownDocuments, linkMentions, relativeHref } from './references.mjs'
 import { readSettings } from './settings.mjs'
+import { slugify } from './slugify.mjs'
+import { wikiSidebar } from './wiki.mjs'
 
-// What the RFD and ticket pages need from the VitePress configuration.
+// What the RFD, ticket, and wiki pages need from the VitePress configuration.
 //
 // A project's `.vitepress/config.mts` passes its own configuration through
 // `withJpVite`, which adds this to it:
@@ -18,9 +22,11 @@ import { readSettings } from './settings.mjs'
 //
 // Hooks the project sets as well (`markdown.preConfig`, `markdown.config`,
 // `transformPageData`, `buildEnd`) run after these, and lists are joined, so
-// neither side has to know what the other adds.
+// neither side has to know what the other adds. A slug function, a wiki
+// sidebar, or an edit link the project sets itself is kept.
 
-// The project's configuration, with the RFD and ticket pages' needs added.
+// The project's configuration, with the RFD, ticket, and wiki pages' needs
+// added.
 export function withJpVite(config = {}) {
     const settings = readSettings()
     const markdown = config.markdown ?? {}
@@ -31,8 +37,14 @@ export function withJpVite(config = {}) {
 
     return {
         ...config,
+        themeConfig: withSearch(
+            withEditLink(withWikiSidebar(config.themeConfig ?? {}, settings), settings),
+        ),
         markdown: {
             ...markdown,
+            // The anchors `jp wiki check` computes, whatever VitePress's
+            // default becomes. See `./slugify.mjs`.
+            anchor: { slugify, ...markdown.anchor },
             preConfig: chain((md) => {
                 // Collapse newlines inside inline backtick spans before any
                 // block parsing runs. See `./join-inline-code.mjs` for why.
@@ -42,23 +54,29 @@ export function withJpVite(config = {}) {
             }, markdown.preConfig),
             config: chain((md) => {
                 escapeInlineCodeInterpolation(md)
+                // Before the links are rewritten, so the links an embed adds
+                // are rewritten like any other. See `./embed.mjs`.
+                embedSections(md)
                 rewriteRepositoryLinks(md, settings)
                 linkDocumentMentions(md)
+                // Last, so the header keeps the links the rules above made.
+                compactMetadata(md)
             }, markdown.config),
         },
         // RFDs and tickets aren't in the sidebar, so VitePress's prev/next links
         // would point at whatever page happens to sit next to them in the
-        // config. They're indexed documents, not a reading order.
+        // config. They're indexed documents, not a reading order. Wiki pages
+        // are: theirs follow the sidebar.
         transformPageData: chain((pageData) => {
-            if (isDocumentPage(pageData.relativePath, readSettings())) {
+            if (isDocumentPage(pageData.relativePath, readSettings(), ['rfd', 'ticket'])) {
                 pageData.frontmatter.prev ??= false
                 pageData.frontmatter.next ??= false
             }
         }, config.transformPageData),
-        buildEnd: chain(writeRfdRedirects, config.buildEnd),
+        buildEnd: chain(writeRedirects, config.buildEnd),
         vite: {
             ...vite,
-            plugins: [rfdRedirectServer, ...devServer, ...(vite.plugins ?? [])],
+            plugins: [redirectServer, ...devServer, ...(vite.plugins ?? [])],
             // What `jp vite serve` found before starting the site, for the
             // pages to show and the boards to obey. Always read-only and
             // trusted in a build.
@@ -70,6 +88,10 @@ export function withJpVite(config = {}) {
                 __JP_VITE_PROBLEM__: JSON.stringify(process.env.JP_VITE_PROBLEM || null),
             },
             server: {
+                // The site is served wherever the user reaches it from (a
+                // tailnet name, a LAN address), so any `Host` is accepted. A
+                // project that wants Vite's check sets `allowedHosts` itself.
+                allowedHosts: true,
                 ...server,
                 // The boards persist themselves through the dev server, and own
                 // their in-memory state. Their files aren't part of the module
@@ -110,11 +132,73 @@ function chain(first, second) {
     }
 }
 
-// Whether a page is an RFD or ticket document, or one of their index pages.
-function isDocumentPage(relativePath, settings) {
-    return ['rfd', 'ticket'].some((kind) => {
+// Whether a page is a document of one of `kinds`, or one of their index pages.
+function isDocumentPage(relativePath, settings, kinds = ['rfd', 'ticket', 'wiki']) {
+    return kinds.some((kind) => {
         const route = settings[kind]?.route
         return route && relativePath.startsWith(`${route}/`)
+    })
+}
+
+// `themeConfig` with the wiki's sidebar for the wiki's pages, in reading order.
+// See `./wiki.mjs`.
+//
+// A sidebar the project gives every page stays on every other page. The
+// sidebar is read when the configuration loads, so a page added while the dev
+// server runs shows in it once the server restarts.
+function withWikiSidebar(themeConfig, settings) {
+    const sidebar = wikiSidebar(settings)
+    if (!sidebar) return themeConfig
+
+    const key = `/${settings.wiki.route}/`
+    const existing = themeConfig.sidebar
+    if (existing && !Array.isArray(existing) && existing[key]) return themeConfig
+
+    const others = !existing ? {} : Array.isArray(existing) ? { '/': existing } : existing
+
+    return { ...themeConfig, sidebar: { ...others, [key]: sidebar } }
+}
+
+// `themeConfig` with a link from each page to the forge's editor for its file
+// on the default branch, when the settings name a repository.
+//
+// Without a default branch, the link opens the file instead, one click from
+// editing it: the forge's editor needs a branch's name. On a dev server `jp
+// vite serve` started, wiki pages are edited in place as well.
+function withEditLink(themeConfig, settings) {
+    if (themeConfig.editLink || !settings.repository) return themeConfig
+
+    const dir = settings.site === '.' ? '' : `${settings.site}/`
+    const editLink = settings.branch
+        ? { pattern: `${settings.repository}/edit/${settings.branch}/${dir}:path`, text: 'Edit this page on GitHub' }
+        : { pattern: `${settings.repository}/blob/HEAD/${dir}:path`, text: 'View or edit this page on GitHub' }
+
+    return { ...themeConfig, editLink }
+}
+
+// `themeConfig` with VitePress's built-in local search, so the RFDs, tickets,
+// and wiki pages can be searched together from every page.
+//
+// A search the project configures itself, including `false`, is kept.
+export function withSearch(themeConfig) {
+    if (themeConfig.search !== undefined) return themeConfig
+
+    return { ...themeConfig, search: { provider: 'local' } }
+}
+
+// Render the metadata block an RFD, ticket, or wiki page opens with as a
+// compact header. See `./meta-header.mjs`.
+function compactMetadata(md) {
+    md.core.ruler.push('jp_vite_metadata_header', (state) => {
+        const page = state.env?.relativePath
+        const settings = readSettings()
+        if (!page) return
+
+        const kind = ['wiki', 'ticket', 'rfd']
+            .find(kind => settings[kind] && page.startsWith(`${settings[kind].route}/`))
+        if (!kind) return
+
+        metadataHeader(state.tokens, state.Token, { kind })
     })
 }
 
@@ -130,9 +214,10 @@ function escapeInlineCodeInterpolation(md) {
     }
 }
 
-// Link the RFDs and tickets an RFD or ticket page names in its text, such as
-// `RFD 042` or `T-005zd00`, to their pages. A name of a document that doesn't
-// exist stays text. See `./references.mjs`.
+// Link the RFDs, tickets, and wiki pages an RFD, ticket, or wiki page names in
+// its text, such as `RFD 042`, `T-005zd00`, or `W-0a1b2c3#turn`, to their
+// pages. A name of a document that doesn't exist stays text. See
+// `./references.mjs`.
 //
 // Runs at parse time, so VitePress's link render rule treats the links like
 // ones written by hand. The documents are read on every page, so one created
@@ -176,8 +261,10 @@ function rewriteRepositoryLinks(md, settings) {
 // Where a relative link from `pageDir` points in the repository, when it
 // leaves the site: `null` for any link VitePress handles itself.
 //
-// `pageDir` is relative to the workspace root, as `settings.site` is.
-function repositoryLinkFor(href, pageDir, settings) {
+// `pageDir` is relative to the workspace root, as `settings.site` is. A
+// fragment naming lines, in any form `jp wiki check` reads, is written the way
+// a forge reads it: `#L12`, or `#L12-L24`.
+export function repositoryLinkFor(href, pageDir, settings) {
     if (!href || !settings.repository) return null
     // Schemes, protocol-relative, anchors, and site-absolute links: leave as-is.
     if (/^(?:[a-z][a-z0-9+.-]*:|\/\/|[#/])/i.test(href)) return null
@@ -198,5 +285,15 @@ function repositoryLinkFor(href, pageDir, settings) {
     // name.
     const last = resolved.slice(resolved.lastIndexOf('/') + 1)
     const kind = last.includes('.') ? 'blob' : 'tree'
-    return `${settings.repository}/${kind}/HEAD/${resolved}${suffix}`
+    return `${settings.repository}/${kind}/HEAD/${resolved}${forgeLines(suffix)}`
+}
+
+// `suffix`, the `?query` or `#fragment` of a link, with a fragment naming lines
+// written as a forge reads it.
+function forgeLines(suffix) {
+    const range = suffix.startsWith('#') ? lineRange(suffix.slice(1)) : null
+    if (!range) return suffix
+
+    const [start, end] = range
+    return start === end ? `#L${start}` : `#L${start}-L${end}`
 }

@@ -18,7 +18,7 @@
 //! Turn positions are 1-based on the CLI and 0-based in the stream; the
 //! translation happens here.
 //! A position may also count from the end, where `-1` is the last turn.
-//! See `docs/architecture/indexing-conventions.md`.
+//! See `docs/wiki/00dxyba-indexing-and-counting-conventions.md`.
 
 use std::{fmt, str::FromStr as _, time::Duration};
 

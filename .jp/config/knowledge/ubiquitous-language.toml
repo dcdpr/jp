@@ -7,10 +7,11 @@ value is that one word means one concept everywhere, so contributors (human or \
 AI) reason about the system without re-deriving what each concept means each \
 time.
 
-The canonical glossary lives at `docs/architecture/ubiquitous-language.md`, \
-with a per-cluster directory under `docs/architecture/ubiquitous-language/` \
-being filled in incrementally. Consult it before introducing a term, and \
-update it when the vocabulary shifts.
+The canonical glossary lives in the wiki at \
+`docs/wiki/00dxybd-ubiquitous-language.md` (W-00dxybd), with its terms moving \
+into clusters, one page each, under `docs/wiki/00dxybb-ubiquitous-language.md` \
+(W-00dxybb). Consult it before introducing a term, and update it when the \
+vocabulary shifts.
 
 The code is authoritative. When documentation and code disagree on what a term \
 means or what it is called, the code wins — update the docs and the glossary to \

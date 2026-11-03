@@ -170,7 +170,7 @@ items = [
     """,
     """\
     **Naming and ubiquitous language**: Do new terms match the project glossary (see \
-    `docs/architecture/ubiquitous-language.md`)? Drift in language is a smell.\
+    `docs/wiki/00dxybd-ubiquitous-language.md`)? Drift in language is a smell.\
     """,
     """\
     **Scope creep**: Is the PR doing one thing, or three? Suggest splitting if it's three.\

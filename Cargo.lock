@@ -1102,6 +1102,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "doc"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "chrono",
+ "comrak",
+ "ignore",
+ "indoc",
+ "serde",
+ "serde_json",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "document-features"
 version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2154,7 +2169,7 @@ dependencies = [
  "chrono",
  "clap",
  "comfort",
- "ignore",
+ "doc",
  "jp_config",
  "jp_label",
  "jp_plugin",
@@ -2165,6 +2180,7 @@ dependencies = [
  "site-revision",
  "ticket",
  "toml",
+ "tool-definitions",
 ]
 
 [[package]]
@@ -2206,6 +2222,7 @@ dependencies = [
  "ticket",
  "tokio",
  "toml",
+ "tool-definitions",
 ]
 
 [[package]]
@@ -2215,6 +2232,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "clap",
+ "doc",
  "jp_config",
  "jp_label",
  "jp_plugin",
@@ -2222,6 +2240,29 @@ dependencies = [
  "serde_json",
  "site-revision",
  "toml",
+]
+
+[[package]]
+name = "jp-wiki"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "chrono",
+ "clap",
+ "comrak",
+ "doc",
+ "indoc",
+ "jp_label",
+ "jp_plugin",
+ "jp_tool",
+ "regex",
+ "serde",
+ "serde_json",
+ "site-revision",
+ "ticket",
+ "toml",
+ "tool-definitions",
 ]
 
 [[package]]
@@ -5027,6 +5068,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "doc",
  "indoc",
  "jp_label",
  "serde",
@@ -5178,6 +5220,18 @@ name = "toml_writer"
 version = "1.0.6+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab16f14aed21ee8bfd8ec22513f7287cd4a91aa92e44edfe2c17ddd004e92607"
+
+[[package]]
+name = "tool-definitions"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "jp_config",
+ "jp_label",
+ "serde_json",
+ "toml",
+]
 
 [[package]]
 name = "tools"

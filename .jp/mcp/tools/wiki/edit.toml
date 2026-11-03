@@ -1,0 +1,126 @@
+[conversation.tools.wiki_edit]
+enable = false
+source = "plugin.command.wiki.edit"
+summary = "Change a wiki page: its text, one section, its metadata, its title, or its place."
+description = """
+Change any part of a page in one call: pass what changes, and the rest stays as
+it is. The page is checked before it is kept, and an edit that breaks a link or
+the page's format is refused, naming what to fix.
+
+- `body` replaces the page's text below its metadata, so pass all of it. With
+  `section`, it replaces only that section, from its heading to the next heading
+  of the same or a higher level; text opening with a heading replaces the
+  section's heading too. Read what you replace first, with `wiki_show`.
+- `title` renames the page and moves its file; links to the file are rewritten.
+- `status` moves it between `reference`, `snapshot`, and `archived`. A page
+  becoming a Snapshot has its links into source turned into links to the commit
+  holding that code. An archived page is retired and kept so links to it still
+  work; `superseded_by` names what replaced it, and a page with active child
+  pages can't be archived.
+- `parent` places it under another page, or `none` makes it a top page.
+- `before` or `after` names a sibling, a page sharing its parent or another
+  top page, to place it directly above or below; siblings are read in that
+  order. With `parent`, the sibling is one under the new parent.
+- `remove_labels` takes labels off: `key=value` that label, a bare `key` every
+  label under it. `add_labels` then puts labels on. The labels neither names
+  stay.
+"""
+
+examples = """
+Rewrite one section:
+```json
+{"id": "W-0a1b2c3", "section": "pinned-conversation", "body": "A pinned \
+conversation stays at the top of the list."}
+```
+
+Retire a page in favour of another:
+```json
+{"id": "W-0a1b2c3", "status": "archived", "superseded_by": "W-0b42fs5"}
+```
+
+Move it under another page, directly above one already there:
+```json
+{"id": "W-0a1b2c3", "parent": "W-0b42fs5", "before": "W-0c91k2p"}
+```
+
+Retitle it and change a label:
+```json
+{"id": "W-0a1b2c3", "title": "Conversation Terms", "remove_labels": ["domain"], \
+"add_labels": ["domain=conversation"]}
+```
+"""
+
+run = "ask"
+
+[conversation.tools.wiki_edit.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.wiki_edit.parameters.id]
+type = "string"
+required = true
+summary = "The page to change: `W-0a1b2c3`, `W0a1b2c3`, or `0a1b2c3`."
+
+[conversation.tools.wiki_edit.parameters.title]
+type = "string"
+required = false
+summary = "A new title. The file moves to match, and links to it follow."
+
+[conversation.tools.wiki_edit.parameters.summary]
+type = "string"
+required = false
+summary = "A new one-sentence summary."
+
+[conversation.tools.wiki_edit.parameters.status]
+type = "string"
+required = false
+enum = ["reference", "snapshot", "archived"]
+summary = "A new status; `archived` retires the page."
+
+[conversation.tools.wiki_edit.parameters.parent]
+type = "string"
+required = false
+summary = "The page to place it under, `W-0a1b2c3`, or `none` to make it a top page."
+
+[conversation.tools.wiki_edit.parameters.before]
+type = "string"
+required = false
+summary = "A sibling to place the page directly above: `W-0a1b2c3`."
+
+[conversation.tools.wiki_edit.parameters.after]
+type = "string"
+required = false
+summary = "A sibling to place the page directly below: `W-0a1b2c3`."
+
+[conversation.tools.wiki_edit.parameters.superseded_by]
+type = "string"
+required = false
+summary = "What replaced an archived page: a page, `W-0a1b2c3`, or an RFD, `RFD 042`; `none` clears it."
+
+[conversation.tools.wiki_edit.parameters.body]
+type = "string"
+required = false
+summary = "The page's whole new text, as markdown, or with `section` that section's."
+
+[conversation.tools.wiki_edit.parameters.section]
+type = "string"
+required = false
+summary = "The section `body` replaces, by its `#anchor` from `wiki_show` or by its title."
+
+[conversation.tools.wiki_edit.parameters.add_labels]
+type = "array"
+required = false
+summary = "`key=value` labels to put on the page; it keeps the ones it carries."
+
+# The accepted values are mirrored from the vocabulary by `jp wiki tools sync`.
+[conversation.tools.wiki_edit.parameters.add_labels.items]
+type = "string"
+
+[conversation.tools.wiki_edit.parameters.remove_labels]
+type = "array"
+required = false
+summary = "Labels to take off: `key=value` that label, a bare `key` all under it."
+
+[conversation.tools.wiki_edit.parameters.remove_labels.items]
+type = "string"

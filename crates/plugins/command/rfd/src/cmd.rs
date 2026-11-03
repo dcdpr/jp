@@ -19,11 +19,11 @@ pub(crate) mod renumber;
 pub(crate) mod track;
 
 use camino::{Utf8Path, Utf8PathBuf};
+use doc::references;
 
 use crate::{
     id::{self, RfdId},
     paths::Paths,
-    references,
 };
 
 /// Whether `id` names a draft.

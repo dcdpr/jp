@@ -483,7 +483,7 @@ Update `MissingConfigFile` error to group by root.
 Rewrite affected tests.
 
 **Phase 4: Documentation and migration.** Update
-`docs/architecture/ubiquitous-language.md` with Project, Workspace, Workspace
+`docs/wiki/00dxybd-ubiquitous-language.md` with Project, Workspace, Workspace
 marker, Workspace storage entries.
 Update `docs/configuration.md` with the symmetric model and worked examples.
 Update [RFD 035]'s drawbacks section with a tip note pointing here.

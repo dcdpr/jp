@@ -509,7 +509,7 @@ seeds the decisecond floor, prefer it over `id.timestamp()` when seeding
 
 ### Phase 5: Vocabulary
 
-Add a Conversation ID entry to `docs/architecture/ubiquitous-language.md`: an
+Add a Conversation ID entry to `docs/wiki/00dxybd-ubiquitous-language.md`: an
 allocated identifier that approximates creation time, distinguished from
 `created_at`.
 

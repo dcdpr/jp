@@ -98,7 +98,9 @@ fn writing_creates_the_files_and_their_directories() {
     ]);
     let theme = fs::read_to_string(site.join(".vitepress/theme/index.js")).unwrap();
     assert!(
-        theme.contains("import { docBefore, enhanceApp } from '../jp-vite/theme/index.mjs'"),
+        theme.contains(
+            "import { docAfter, docBefore, enhanceApp } from '../jp-vite/theme/index.mjs'"
+        ),
         "{theme}"
     );
     assert!(theme.contains("    enhanceApp,\n"), "{theme}");

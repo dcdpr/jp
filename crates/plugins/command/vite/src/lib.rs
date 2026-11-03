@@ -1,23 +1,24 @@
-//! `jp-vite`: set up, sync, and serve the site that renders a workspace's RFDs
-//! and tickets.
+//! `jp-vite`: set up, sync, and serve the site that renders a workspace's RFDs,
+//! tickets, and wiki pages.
 //!
 //! A command plugin providing three commands: `jp vite init`, `jp vite sync`,
 //! and `jp vite serve`.
 //! The site's own files are built into the binary (the `site` module): the
-//! loaders for both document kinds, the components, the styles, the dev-server
+//! loaders for each document kind, the components, the styles, the dev-server
 //! middleware, and a configuration fragment, which go to the project's
 //! `.vitepress/jp-vite/` with a snapshot of the settings they read (the
-//! `settings` module); and a starting index and board page for the RFD and
-//! ticket directories.
+//! `settings` module); and a starting index and board page for the RFD, ticket,
+//! and wiki directories.
 //! Each command has a module of its own: `init` writes the files that stay the
 //! project's own; `sync` rewrites the owned ones and creates the pages a
 //! project doesn't have, only where git can restore what it overwrites (the
 //! `git` module); and `serve` runs the dev server.
 //!
-//! Settings come from `plugins.command.vite.options`, and from `jp rfd`'s and
-//! `jp ticket`'s options, read by the `options` module.
+//! Settings come from `plugins.command.vite.options`, and from `jp rfd`'s, `jp
+//! ticket`'s, and `jp wiki`'s options, read by the `options` module.
 //!
-//! See: `docs/rfd/116-shareable-rfd-ticket-and-site-tooling.md`, "Site"
+//! See: `docs/rfd/116-shareable-rfd-ticket-and-site-tooling.md`, "Site", and
+//! `docs/rfd/127-in-repo-project-wiki.md`, "Site Integration"
 
 mod git;
 mod init;
@@ -322,13 +323,13 @@ fn init_site<R: BufRead, W: Write>(
     Ok(text)
 }
 
-/// The navigation links to the workflows the project has: the RFD and ticket
-/// indexes.
+/// The navigation links to the workflows the project has: the RFD, ticket, and
+/// wiki indexes.
 ///
 /// A configuration `sync` would refuse gets no links rather than no site:
 /// `sync` names the problem when it is run.
 fn nav(root: &Utf8Path, options: &Options, config: &Value) -> Vec<(String, String)> {
-    let Ok(settings) = snapshot(root, options, config, None) else {
+    let Ok(settings) = snapshot(root, options, config, &git::Remote::default()) else {
         return vec![];
     };
 
@@ -338,6 +339,9 @@ fn nav(root: &Utf8Path, options: &Options, config: &Value) -> Vec<(String, Strin
     }
     if let Some(ticket) = &settings.ticket {
         nav.push(("Tickets".to_owned(), format!("/{}/", ticket.route)));
+    }
+    if let Some(wiki) = &settings.wiki {
+        nav.push(("Wiki".to_owned(), format!("/{}/", wiki.route)));
     }
 
     nav
@@ -369,8 +373,7 @@ fn sync_site<R: BufRead, W: Write>(
         ));
     }
 
-    let origin = git::origin(root);
-    let settings = snapshot(root, options, config, origin.as_deref())?;
+    let settings = snapshot(root, options, config, &git::remote(root))?;
     let owned_dir = site::owned_dir(&settings);
     let changes = changes(root, &settings)?;
 

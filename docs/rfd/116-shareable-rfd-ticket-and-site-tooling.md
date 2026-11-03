@@ -5,6 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-30
 - **Extends**: [RFD 001], [RFD 100]
+- **Extended by**: [RFD 127], [RFD 128]
 - **Summary**: Three `jp` command plugins, `ticket`, `rfd`, and `vite`, own the
   ticket workflow, the RFD workflow, and the site that renders them, configured
   through JP so any project can adopt the parts it uses.
@@ -821,3 +822,5 @@ Depends on Phases 1 to 5.
 [RFD 077]: 077-plugin-configuration-and-trust-policy.md
 [RFD 100]: 100-in-repo-ticket-tracking.md
 [RFD 102]: 102-collision-resistant-ticket-identifiers.md
+[RFD 127]: 127-in-repo-project-wiki.md
+[RFD 128]: 128-workspace-source-explorer-in-jp-vite.md

@@ -1,0 +1,68 @@
+[conversation.tools.wiki_show]
+source = "plugin.command.wiki.show"
+summary = "Read one wiki page: its metadata, references, and sections, or its text."
+description = """
+Print a page's metadata, the pages, RFDs, and tickets it references and those
+that reference it, and its table of contents: each section's title and its
+`#anchor`.
+
+Pass `section`, an anchor or a title, to read only that section, or `body: true`
+for the whole text. Either comes back as written: what the page embeds is the
+`![...](...)` image naming it, and that text is what `wiki_edit` replaces. Pass
+`expand_embeds: true` to read the embedded sections and source lines in place
+instead, each between `<!-- embed ... -->` and `<!-- /embed -->` markers naming
+where it comes from. Never write expanded text back with `wiki_edit`: the
+embeds would become copies.
+
+Read the outline first and then the section you need: a long page costs less a
+section at a time.
+"""
+
+examples = """
+A page's outline:
+```json
+{"id": "W-0a1b2c3"}
+```
+
+One section, by the anchor the outline gives:
+```json
+{"id": "W-0a1b2c3", "section": "pinned-conversation"}
+```
+
+The whole page, as written:
+```json
+{"id": "W-0a1b2c3", "body": true}
+```
+
+The whole page, with what it embeds shown in place:
+```json
+{"id": "W-0a1b2c3", "body": true, "expand_embeds": true}
+```
+"""
+
+run = "allow"
+
+[conversation.tools.wiki_show.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.wiki_show.parameters.id]
+type = "string"
+required = true
+summary = "The page: `W-0a1b2c3`, `W0a1b2c3`, or `0a1b2c3`."
+
+[conversation.tools.wiki_show.parameters.section]
+type = "string"
+required = false
+summary = "Only this section, by its `#anchor` from the outline or by its title."
+
+[conversation.tools.wiki_show.parameters.body]
+type = "boolean"
+required = false
+summary = "The page's whole text, in place of its outline."
+
+[conversation.tools.wiki_show.parameters.expand_embeds]
+type = "boolean"
+required = false
+summary = "Show what the text embeds in place, between markers; not for text you will edit."

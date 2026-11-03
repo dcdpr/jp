@@ -5,8 +5,9 @@
 //! `.vitepress/jp-vite/`, together with the settings snapshot, and every sync
 //! rewrites it.
 //! `pages/` holds a starting page for each list the workflows show:
-//! `pages/rfd/` goes to the RFD directory and `pages/ticket/` to the ticket
-//! directory, for the workflows the project has.
+//! `pages/rfd/` goes to the RFD directory, `pages/ticket/` to the ticket
+//! directory, and `pages/wiki/` to the wiki directory, for the workflows the
+//! project has.
 //! A page is written only where there is none, and is the project's from then
 //! on: it renders its list with one tag, such as `<RfdIndex />`, which the
 //! theme entry registers.
@@ -97,10 +98,12 @@ pub(crate) fn pages(settings: &Settings) -> Vec<Owned> {
         .filter_map(|(path, contents)| {
             let (dir, rest) = if let Some(rest) = path.strip_prefix("pages/rfd/") {
                 (&settings.rfd.as_ref()?.dir, rest)
+            } else if let Some(rest) = path.strip_prefix("pages/ticket/") {
+                (&settings.ticket.as_ref()?.dir, rest)
             } else {
                 (
-                    &settings.ticket.as_ref()?.dir,
-                    path.strip_prefix("pages/ticket/")?,
+                    &settings.wiki.as_ref()?.dir,
+                    path.strip_prefix("pages/wiki/")?,
                 )
             };
 

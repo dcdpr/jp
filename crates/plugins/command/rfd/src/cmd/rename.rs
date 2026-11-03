@@ -9,6 +9,7 @@
 use std::fs;
 
 use camino::{Utf8Path, Utf8PathBuf};
+use doc::references::{self, Rule};
 
 use super::{Leftovers, check_title};
 use crate::{
@@ -16,7 +17,6 @@ use crate::{
     document::Document,
     id::{self, RfdId},
     paths::{self, Paths},
-    references::{self, Rule},
 };
 
 /// Give `id` the title `title`.
