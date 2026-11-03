@@ -17,14 +17,20 @@ vet_version          := "0.10.2"
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
 
 # Workspace crates that no `jp_*` crate depends on: standalone tooling binaries,
-# docs infrastructure, command plugins, and the macOS-only `jp_ffi` (the app's C
-# interface) and `xct2cli` (an Xcode Instruments trace reader). Skipping them
-# drops their dependencies from the build entirely, rather than merely skipping
-# their tests.
+# docs infrastructure, command plugins, and the macOS app's C interface
+# `jp_ffi`. Skipping them drops their dependencies from the build entirely,
+# rather than merely skipping their tests.
+#
+# A crate belongs here only if it is not the sole crate enabling some feature of
+# a shared dependency. Cargo builds each dependency once with the union of the
+# features asked for, so excluding such a crate changes that dependency's build,
+# and every crate above it, and the build stops matching the sccache entries a
+# full-workspace build writes on `main`. That is why `xct2cli` is absent: it is
+# the only crate that turns on serde's `rc` feature.
 #
 # `grizzly` is deliberately absent: `jp_attachment_bear_note` depends on it, so
 # it is compiled either way.
-non_jp_excludes := "--exclude bookworm --exclude build-registry --exclude comfort --exclude jp-gui --exclude jp-path --exclude jp-serve-web --exclude jp_ffi --exclude json_edit --exclude tools --exclude xct2cli"
+non_jp_excludes := "--exclude bookworm --exclude build-registry --exclude comfort --exclude jp-gui --exclude jp-path --exclude jp-serve-web --exclude jp_ffi --exclude json_edit --exclude tools"
 
 alias r := run
 alias i := install
