@@ -153,9 +153,12 @@ async fn run_browser(browser: &Path, url: &Url, profile: Option<&Path>) -> Resul
             &log,
         )),
         Ok(Err(e)) => Err(format!("failed to read output of {}: {e}", browser.display()).into()),
-        Ok(Ok(_)) if dom.trim().is_empty() => {
-            Err(render_error("produced an empty document", browser, &log))
-        }
+        Ok(Ok(_)) if dom.trim().is_empty() => Err(render_error(
+            "produced an empty document (a URL that serves a download, such as a PDF, renders \
+             nothing; fetch it without `headless`)",
+            browser,
+            &log,
+        )),
         Ok(Ok(_)) => Ok(dom),
     }
 }

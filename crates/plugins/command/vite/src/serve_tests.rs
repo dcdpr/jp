@@ -179,6 +179,63 @@ fn every_problem_is_reported_at_once() {
 }
 
 #[test]
+fn a_directory_without_any_init_file_has_no_site() {
+    let root = Utf8TempDir::new().unwrap();
+    let site_dir = root.path().join("docs");
+    fs::create_dir_all(&site_dir).unwrap();
+
+    assert_eq!(
+        unready(root.path(), &site_dir).as_deref(),
+        Some("There is no VitePress site in docs: run `jp vite init` to set one up.")
+    );
+}
+
+/// A site that lost its `package.json` is named by the file, not reported as
+/// absent.
+#[test]
+fn a_site_missing_its_package_json_names_it() {
+    let root = Utf8TempDir::new().unwrap();
+    let site_dir = root.path().join("docs");
+    fs::create_dir_all(site_dir.join(".vitepress/theme")).unwrap();
+    fs::write(site_dir.join(".vitepress/config.mts"), "").unwrap();
+    fs::write(site_dir.join(".vitepress/theme/index.js"), "").unwrap();
+    fs::write(site_dir.join("index.md"), "").unwrap();
+
+    assert_eq!(
+        unready(root.path(), &site_dir).as_deref(),
+        Some("docs/package.json is missing, re-run `jp vite init`.")
+    );
+}
+
+#[test]
+fn a_site_missing_several_init_files_names_each() {
+    let root = Utf8TempDir::new().unwrap();
+    let site_dir = root.path().join("docs");
+    fs::create_dir_all(site_dir.join(".vitepress")).unwrap();
+    fs::write(site_dir.join(".vitepress/config.mts"), "").unwrap();
+
+    assert_eq!(
+        unready(root.path(), &site_dir).as_deref(),
+        Some(
+            "docs/package.json, docs/.vitepress/theme/index.js, docs/index.md are missing, re-run \
+             `jp vite init`."
+        )
+    );
+}
+
+/// Only `package.json` is needed to run `vitepress`; the other files are the
+/// project's to remove.
+#[test]
+fn a_site_with_its_package_json_is_ready() {
+    let root = Utf8TempDir::new().unwrap();
+    let site_dir = root.path().join("docs");
+    fs::create_dir_all(&site_dir).unwrap();
+    fs::write(site_dir.join("package.json"), "{}").unwrap();
+
+    assert_eq!(unready(root.path(), &site_dir), None);
+}
+
+#[test]
 fn vitepress_runs_through_the_package_manager_the_project_names() {
     let dir = Utf8TempDir::new().unwrap();
 

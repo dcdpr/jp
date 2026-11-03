@@ -2,6 +2,7 @@ use std::fs;
 
 use camino_tempfile::Utf8TempDir;
 use clap::CommandFactory;
+use comfort::format::FormatOptions;
 use jp_plugin::message::{
     EditFilesRequest, EditedResponse, ErrorResponse, OutputFormat, ToolAction, WorkspaceInfo,
 };
@@ -77,6 +78,7 @@ fn run_with(
             root: dir,
             config: &config,
             options,
+            formatting: Formatting::default(),
             format,
         },
         command,
@@ -1793,7 +1795,7 @@ fn rewriting_an_unreadable_file_is_an_error() {
     std::fs::create_dir(&directory).unwrap();
 
     // Reading a directory fails with neither `NotFound` nor `InvalidData`.
-    let error = rewrite(&directory, "T-02wt0kx", "T-03abcde").unwrap_err();
+    let error = rewrite(&directory, &Formatting::default(), "T-02wt0kx", "T-03abcde").unwrap_err();
 
     assert!(error.starts_with(directory.as_str()), "{error}");
 }
@@ -1805,11 +1807,58 @@ fn rewriting_an_unreadable_file_is_an_error() {
 fn rewriting_a_missing_or_binary_file_is_skipped() {
     let dir = Utf8TempDir::new().unwrap();
 
-    assert!(!rewrite(&dir.path().join("gone.md"), "a", "b").unwrap());
+    assert!(
+        !rewrite(
+            &dir.path().join("gone.md"),
+            &Formatting::default(),
+            "a",
+            "b"
+        )
+        .unwrap()
+    );
 
     let binary = dir.path().join("binary.bin");
     std::fs::write(&binary, [0xff, 0xfe, 0x00]).unwrap();
-    assert!(!rewrite(&binary, "a", "b").unwrap());
+    assert!(!rewrite(&binary, &Formatting::default(), "a", "b").unwrap());
+}
+
+/// `jp ticket add` writes through the same formatting as the tools, so a ticket
+/// filed on the command line is laid out like one the assistant filed.
+#[test]
+fn add_formats_the_ticket_when_the_workspace_formats_tickets() {
+    let dir = Utf8TempDir::new().unwrap();
+    let config = json!({});
+    let options = Options::default();
+    let ctx = Context {
+        dir: dir.path().to_path_buf(),
+        root: dir.path(),
+        config: &config,
+        options: &options,
+        formatting: Formatting::new(
+            FormatOptions {
+                max_width: 80,
+                ..FormatOptions::default()
+            },
+            vec![dir.path().to_path_buf()],
+        ),
+        format: OutputFormat::default(),
+    };
+
+    execute(&ctx, Command::Add {
+        parent: None,
+        title: Some("Wrapped".to_owned()),
+        author: Some("john".to_owned()),
+        body: Some("First sentence. Second sentence.".to_owned()),
+        labels: vec![],
+    })
+    .unwrap();
+
+    let path = store::list(dir.path()).unwrap().remove(0).path;
+    let source = fs::read_to_string(&path).unwrap();
+    assert!(
+        source.ends_with("\n\nFirst sentence.\nSecond sentence.\n"),
+        "{source}"
+    );
 }
 
 /// The ticket document has no id of its own, so the output has to carry it.
@@ -1860,7 +1909,7 @@ fn show_prints_the_parent_and_the_children() {
     let dir = Utf8TempDir::new().unwrap();
     let parent = write_ticket(dir.path(), "02wt0kx", "Investigate", Status::Todo);
     let child = write_ticket(dir.path(), "02wt0m0", "Bound output", Status::Todo);
-    store::set_parent(dir.path(), child, Some(parent)).unwrap();
+    store::set_parent(dir.path(), &Formatting::default(), child, Some(parent)).unwrap();
 
     let shown = run_command(&dir, Command::Show { id: Some(parent) }).unwrap();
     assert_eq!(
@@ -2718,7 +2767,15 @@ fn removing_a_required_label_is_refused() {
 fn importing_a_new_issue_without_required_labels_fetches_nothing() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let error = import_all(dir.path(), &typed(), &[123], "dcdpr/jp", &[]).unwrap_err();
+    let error = import_all(
+        dir.path(),
+        &Formatting::default(),
+        &typed(),
+        &[123],
+        "dcdpr/jp",
+        &[],
+    )
+    .unwrap_err();
 
     assert_eq!(
         error,

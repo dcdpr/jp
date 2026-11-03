@@ -8,14 +8,7 @@ use pretty_assertions::assert_eq;
 use super::*;
 
 /// The flags every invocation carries, in the order the tool builds them.
-const BASE_ARGS: &[&str] = &[
-    "--list-changed",
-    "--format-markdown",
-    "--reference-links",
-    "--prune-reference-links",
-    "--language",
-    "markdown",
-];
+const BASE_ARGS: &[&str] = &["--list-changed", "--language", "markdown"];
 
 fn ctx() -> (Utf8TempDir, Context) {
     let dir = tempdir().unwrap();

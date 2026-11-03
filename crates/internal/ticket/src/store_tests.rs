@@ -1,5 +1,6 @@
 use camino_tempfile::Utf8TempDir;
 use chrono::Utc;
+use comfort::format::FormatOptions;
 
 use super::*;
 
@@ -22,6 +23,7 @@ fn draft<'a>(title: &'a str, labels: &'a Labels) -> NewTicket<'a> {
 fn new_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
     create(
         dir.path(),
+        &Formatting::default(),
         &Vocabulary::default(),
         &draft(title, &Labels::default()),
     )
@@ -55,7 +57,10 @@ fn replace(
     id: TicketId,
     labels: &[String],
 ) -> Result<Relabeled> {
-    relabel(dir, vocabulary, &[id], |_| labels.to_vec()).map(|mut done| done.remove(0))
+    relabel(dir, &Formatting::default(), vocabulary, &[id], |_| {
+        labels.to_vec()
+    })
+    .map(|mut done| done.remove(0))
 }
 
 /// The labels a ticket's file carries, as tokens.
@@ -69,14 +74,19 @@ fn labels_of(dir: &Utf8TempDir, id: TicketId) -> Vec<String> {
 fn create_writes_a_file_named_for_its_id() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let (id, path) = create(dir.path(), &Vocabulary::default(), &NewTicket {
-        title: "Tool call header misaligned",
-        authors: "John Doe",
-        date: DATE,
-        labels: &Labels::default(),
-        description: "The header renders one column left of the body.",
-        parent: None,
-    })
+    let (id, path) = create(
+        dir.path(),
+        &Formatting::default(),
+        &Vocabulary::default(),
+        &NewTicket {
+            title: "Tool call header misaligned",
+            authors: "John Doe",
+            date: DATE,
+            labels: &Labels::default(),
+            description: "The header renders one column left of the body.",
+            parent: None,
+        },
+    )
     .unwrap();
 
     assert_eq!(
@@ -87,6 +97,56 @@ fn create_writes_a_file_named_for_its_id() {
     let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(ticket.title, "Tool call header misaligned");
     assert_eq!(ticket.metadata.status, Status::Todo);
+}
+
+/// A workspace that formats tickets gets every write formatted: the new file,
+/// and the file a later write leaves.
+#[test]
+fn writes_are_formatted_when_the_workspace_formats_tickets() {
+    let dir = Utf8TempDir::new().unwrap();
+    let formatting = Formatting::new(
+        FormatOptions {
+            max_width: 80,
+            ..FormatOptions::default()
+        },
+        vec![dir.path().to_path_buf()],
+    );
+
+    let (id, path) = create(
+        dir.path(),
+        &formatting,
+        &Vocabulary::default(),
+        &NewTicket {
+            title: "Wrapped",
+            authors: "John Doe",
+            date: DATE,
+            labels: &Labels::default(),
+            description: "First sentence. Second sentence.",
+            parent: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "# Wrapped\n\n- **Status**: Todo\n- **Authors**: John Doe\n- **Date**: \
+         2026-08-05\n\nFirst sentence.\nSecond sentence.\n"
+    );
+
+    edit(
+        dir.path(),
+        &formatting,
+        id,
+        None,
+        Some("Third sentence. Fourth sentence."),
+    )
+    .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "# Wrapped\n\n- **Status**: Todo\n- **Authors**: John Doe\n- **Date**: \
+         2026-08-05\n\nThird sentence.\nFourth sentence.\n"
+    );
 }
 
 /// Tickets created back to back land in one bucket, where the tail increments
@@ -179,8 +239,26 @@ fn comments_append_and_number_from_one() {
     let dir = Utf8TempDir::new().unwrap();
     let id = new_ticket(&dir, "Tool call header misaligned");
 
-    let first = append_comment(dir.path(), id, "john", STAMP, None, "Reproduced at 72.").unwrap();
-    let second = append_comment(dir.path(), id, "jp", STAMP, Some(1), "The wrap is off.").unwrap();
+    let first = append_comment(
+        dir.path(),
+        &Formatting::default(),
+        id,
+        "john",
+        STAMP,
+        None,
+        "Reproduced at 72.",
+    )
+    .unwrap();
+    let second = append_comment(
+        dir.path(),
+        &Formatting::default(),
+        id,
+        "jp",
+        STAMP,
+        Some(1),
+        "The wrap is off.",
+    )
+    .unwrap();
 
     assert_eq!(first, 1);
     assert_eq!(second, 2);
@@ -197,7 +275,16 @@ fn replies_must_reference_an_existing_comment() {
     let dir = Utf8TempDir::new().unwrap();
     let id = new_ticket(&dir, "Tool call header misaligned");
 
-    let error = append_comment(dir.path(), id, "jp", STAMP, Some(1), "Reply.").unwrap_err();
+    let error = append_comment(
+        dir.path(),
+        &Formatting::default(),
+        id,
+        "jp",
+        STAMP,
+        Some(1),
+        "Reply.",
+    )
+    .unwrap_err();
 
     assert_eq!(
         error.to_string(),
@@ -211,7 +298,16 @@ fn commenting_on_a_missing_ticket_fails() {
 
     let missing: TicketId = "T-zzzzzzz".parse().unwrap();
 
-    let error = append_comment(dir.path(), missing, "jp", STAMP, None, "Hi.").unwrap_err();
+    let error = append_comment(
+        dir.path(),
+        &Formatting::default(),
+        missing,
+        "jp",
+        STAMP,
+        None,
+        "Hi.",
+    )
+    .unwrap_err();
 
     assert_eq!(error.to_string(), "No ticket T-zzzzzzz.");
 }
@@ -221,7 +317,7 @@ fn close_moves_the_ticket_to_done() {
     let dir = Utf8TempDir::new().unwrap();
     let id = new_ticket(&dir, "Tool call header misaligned");
 
-    let (path, previous) = close(dir.path(), id).unwrap();
+    let (path, previous) = close(dir.path(), &Formatting::default(), id).unwrap();
 
     assert_eq!(previous, Status::Todo);
     let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -233,9 +329,9 @@ fn closing_twice_is_a_no_op() {
     let dir = Utf8TempDir::new().unwrap();
     let id = new_ticket(&dir, "Tool call header misaligned");
 
-    close(dir.path(), id).unwrap();
+    close(dir.path(), &Formatting::default(), id).unwrap();
     let before = fs::read_to_string(locate(dir.path(), id).unwrap()).unwrap();
-    let (_, previous) = close(dir.path(), id).unwrap();
+    let (_, previous) = close(dir.path(), &Formatting::default(), id).unwrap();
     let after = fs::read_to_string(locate(dir.path(), id).unwrap()).unwrap();
 
     assert_eq!(previous, Status::Done);
@@ -286,20 +382,25 @@ fn an_import_creates_a_ticket_linked_to_its_issue() {
     let dir = Utf8TempDir::new().unwrap();
     let labels = test_vocabulary().resolve(&owned(&["client=cli"])).unwrap();
 
-    let imported = import(dir.path(), &Vocabulary::default(), &Import {
-        number: 123,
-        title: "Crash on empty input",
-        description: "Running `jp q` with no argument panics.",
-        comments: vec![Comment {
-            from: "gh:someone".to_owned(),
-            date: "2026-08-05T00:00:00Z".to_owned(),
-            re: None,
-            body: "Still happens on main.".to_owned(),
-        }],
-        labels: &labels,
-        authors: "gh:someone",
-        date: "2026-08-05",
-    })
+    let imported = import(
+        dir.path(),
+        &Formatting::default(),
+        &Vocabulary::default(),
+        &Import {
+            number: 123,
+            title: "Crash on empty input",
+            description: "Running `jp q` with no argument panics.",
+            comments: vec![Comment {
+                from: "gh:someone".to_owned(),
+                date: "2026-08-05T00:00:00Z".to_owned(),
+                re: None,
+                body: "Still happens on main.".to_owned(),
+            }],
+            labels: &labels,
+            authors: "gh:someone",
+            date: "2026-08-05",
+        },
+    )
     .unwrap();
 
     assert!(imported.created);
@@ -320,15 +421,20 @@ fn an_imported_issue_is_found_by_its_number() {
     let dir = Utf8TempDir::new().unwrap();
     assert!(imported(dir.path(), 123).unwrap().is_none());
 
-    let first = import(dir.path(), &Vocabulary::default(), &Import {
-        number: 123,
-        title: "Crash",
-        description: "",
-        comments: vec![],
-        labels: &Labels::default(),
-        authors: "gh:someone",
-        date: "2026-08-05",
-    })
+    let first = import(
+        dir.path(),
+        &Formatting::default(),
+        &Vocabulary::default(),
+        &Import {
+            number: 123,
+            title: "Crash",
+            description: "",
+            comments: vec![],
+            labels: &Labels::default(),
+            authors: "gh:someone",
+            date: "2026-08-05",
+        },
+    )
     .unwrap();
 
     assert_eq!(
@@ -356,6 +462,7 @@ fn re_importing_replaces_content_and_keeps_triage() {
 
     let first = import(
         dir.path(),
+        &Formatting::default(),
         &Vocabulary::default(),
         &upstream("Crash", "First telling."),
     )
@@ -369,6 +476,7 @@ fn re_importing_replaces_content_and_keeps_triage() {
 
     let second = import(
         dir.path(),
+        &Formatting::default(),
         &Vocabulary::default(),
         &upstream("Crash, revised", "Second telling."),
     )
@@ -389,15 +497,20 @@ fn re_importing_replaces_content_and_keeps_triage() {
 fn imported_content_is_escaped_on_the_way_in() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let imported = import(dir.path(), &Vocabulary::default(), &Import {
-        number: 7,
-        title: "<script>x</script>",
-        description: "Uses {{ interpolation }}.",
-        comments: vec![],
-        labels: &Labels::default(),
-        authors: "gh:someone",
-        date: "2026-08-05",
-    })
+    let imported = import(
+        dir.path(),
+        &Formatting::default(),
+        &Vocabulary::default(),
+        &Import {
+            number: 7,
+            title: "<script>x</script>",
+            description: "Uses {{ interpolation }}.",
+            comments: vec![],
+            labels: &Labels::default(),
+            authors: "gh:someone",
+            date: "2026-08-05",
+        },
+    )
     .unwrap();
 
     let source = fs::read_to_string(&imported.path).unwrap();
@@ -410,10 +523,33 @@ fn imported_content_is_escaped_on_the_way_in() {
 fn editing_keeps_metadata_and_comments() {
     let dir = Utf8TempDir::new().unwrap();
     let id = new_ticket(&dir, "Original title");
-    append_comment(dir.path(), id, "john", STAMP, None, "Still relevant.").unwrap();
-    set_field(dir.path(), id, "Status", "In Progress").unwrap();
+    append_comment(
+        dir.path(),
+        &Formatting::default(),
+        id,
+        "john",
+        STAMP,
+        None,
+        "Still relevant.",
+    )
+    .unwrap();
+    set_field(
+        dir.path(),
+        &Formatting::default(),
+        id,
+        "Status",
+        "In Progress",
+    )
+    .unwrap();
 
-    let done = edit(dir.path(), id, Some("Revised title"), Some("Revised body.")).unwrap();
+    let done = edit(
+        dir.path(),
+        &Formatting::default(),
+        id,
+        Some("Revised title"),
+        Some("Revised body."),
+    )
+    .unwrap();
 
     let ticket = parse::document(&fs::read_to_string(&done.to).unwrap()).unwrap();
     assert_eq!(ticket.title, "Revised title");
@@ -428,7 +564,14 @@ fn editing_one_part_leaves_the_other() {
     let dir = Utf8TempDir::new().unwrap();
     let id = new_ticket(&dir, "Original title");
 
-    let done = edit(dir.path(), id, Some("Revised title"), None).unwrap();
+    let done = edit(
+        dir.path(),
+        &Formatting::default(),
+        id,
+        Some("Revised title"),
+        None,
+    )
+    .unwrap();
 
     let ticket = parse::document(&fs::read_to_string(&done.to).unwrap()).unwrap();
     assert_eq!(ticket.title, "Revised title");
@@ -442,10 +585,26 @@ fn editing_one_part_leaves_the_other() {
 fn editing_the_title_moves_the_file_to_the_new_slug() {
     let dir = Utf8TempDir::new().unwrap();
     let id = new_ticket(&dir, "Original title");
-    append_comment(dir.path(), id, "john", STAMP, None, "Still relevant.").unwrap();
+    append_comment(
+        dir.path(),
+        &Formatting::default(),
+        id,
+        "john",
+        STAMP,
+        None,
+        "Still relevant.",
+    )
+    .unwrap();
     let before = locate(dir.path(), id).unwrap();
 
-    let done = edit(dir.path(), id, Some("Tool call header misaligned"), None).unwrap();
+    let done = edit(
+        dir.path(),
+        &Formatting::default(),
+        id,
+        Some("Tool call header misaligned"),
+        None,
+    )
+    .unwrap();
 
     assert_eq!(done.from, before);
     assert!(!before.exists());
@@ -467,7 +626,14 @@ fn editing_within_one_slug_keeps_the_path() {
     let dir = Utf8TempDir::new().unwrap();
     let id = new_ticket(&dir, "Header misaligned");
 
-    let done = edit(dir.path(), id, Some("Header misaligned!"), None).unwrap();
+    let done = edit(
+        dir.path(),
+        &Formatting::default(),
+        id,
+        Some("Header misaligned!"),
+        None,
+    )
+    .unwrap();
 
     assert_eq!(done.from, done.to);
     assert!(done.to.exists());
@@ -500,7 +666,14 @@ fn editing_only_the_description_leaves_the_filename_alone() {
     )
     .unwrap();
 
-    let done = edit(dir.path(), id, None, Some("Revised body.")).unwrap();
+    let done = edit(
+        dir.path(),
+        &Formatting::default(),
+        id,
+        None,
+        Some("Revised body."),
+    )
+    .unwrap();
 
     assert_eq!(done.from, path);
     assert_eq!(done.to, path);
@@ -516,7 +689,13 @@ fn new_child(dir: &Utf8TempDir, title: &str, parent: TicketId) -> Result<TicketI
     let mut new = draft(title, &labels);
     new.parent = Some(parent);
 
-    create(dir.path(), &Vocabulary::default(), &new).map(|(id, _)| id)
+    create(
+        dir.path(),
+        &Formatting::default(),
+        &Vocabulary::default(),
+        &new,
+    )
+    .map(|(id, _)| id)
 }
 
 fn metadata_of(dir: &Utf8TempDir, id: TicketId) -> crate::Metadata {
@@ -567,7 +746,7 @@ fn closing_a_parent_waits_for_its_children() {
     let parent = new_ticket(&dir, "Investigation");
     let child = new_child(&dir, "Do the thing", parent).unwrap();
 
-    let error = close(dir.path(), parent).unwrap_err();
+    let error = close(dir.path(), &Formatting::default(), parent).unwrap_err();
     assert_eq!(
         error.to_string(),
         format!(
@@ -577,8 +756,8 @@ fn closing_a_parent_waits_for_its_children() {
     );
     assert_eq!(metadata_of(&dir, parent).status, Status::Todo);
 
-    close(dir.path(), child).unwrap();
-    close(dir.path(), parent).unwrap();
+    close(dir.path(), &Formatting::default(), child).unwrap();
+    close(dir.path(), &Formatting::default(), parent).unwrap();
     assert_eq!(metadata_of(&dir, parent).status, Status::Done);
 }
 
@@ -588,7 +767,7 @@ fn promoting_a_parent_with_open_children_is_refused_before_the_link_is_written()
     let parent = new_ticket(&dir, "Investigation");
     new_child(&dir, "Do the thing", parent).unwrap();
 
-    promote(dir.path(), parent, "D01").unwrap_err();
+    promote(dir.path(), &Formatting::default(), parent, "D01").unwrap_err();
 
     let metadata = metadata_of(&dir, parent);
     assert_eq!(metadata.status, Status::Todo);
@@ -610,7 +789,7 @@ fn deleting_a_parent_is_refused_until_its_children_move() {
         )
     );
 
-    set_parent(dir.path(), child, None).unwrap();
+    set_parent(dir.path(), &Formatting::default(), child, None).unwrap();
     delete(dir.path(), parent).unwrap();
     assert_eq!(metadata_of(&dir, child).parent, None);
 }
@@ -621,11 +800,12 @@ fn set_parent_writes_the_field_and_clearing_it_removes_the_line() {
     let parent = new_ticket(&dir, "Investigation");
     let child = new_ticket(&dir, "Do the thing");
 
-    let (_, previous) = set_parent(dir.path(), child, Some(parent)).unwrap();
+    let (_, previous) =
+        set_parent(dir.path(), &Formatting::default(), child, Some(parent)).unwrap();
     assert_eq!(previous, None);
     assert_eq!(metadata_of(&dir, child).parent, Some(parent));
 
-    let (path, previous) = set_parent(dir.path(), child, None).unwrap();
+    let (path, previous) = set_parent(dir.path(), &Formatting::default(), child, None).unwrap();
     assert_eq!(previous, Some(parent));
     assert!(!fs::read_to_string(path).unwrap().contains("Parent"));
 }
@@ -636,11 +816,18 @@ fn set_parent_writes_the_field_and_clearing_it_removes_the_line() {
 fn relate_checks_the_end_state_not_each_step() {
     let dir = Utf8TempDir::new().unwrap();
     let parent = new_ticket(&dir, "Investigation");
-    close(dir.path(), parent).unwrap();
+    close(dir.path(), &Formatting::default(), parent).unwrap();
     let child = new_ticket(&dir, "Already done elsewhere");
 
-    set_parent(dir.path(), child, Some(parent)).unwrap_err();
-    relate(dir.path(), child, Some(Status::Done), Some(Some(parent))).unwrap();
+    set_parent(dir.path(), &Formatting::default(), child, Some(parent)).unwrap_err();
+    relate(
+        dir.path(),
+        &Formatting::default(),
+        child,
+        Some(Status::Done),
+        Some(Some(parent)),
+    )
+    .unwrap();
 
     let metadata = metadata_of(&dir, child);
     assert_eq!(metadata.status, Status::Done);
@@ -691,9 +878,15 @@ fn editing_a_missing_ticket_is_refused() {
     let id: TicketId = "T-02wt0kx".parse().unwrap();
 
     assert_eq!(
-        edit(dir.path(), id, Some("Anything"), None)
-            .unwrap_err()
-            .to_string(),
+        edit(
+            dir.path(),
+            &Formatting::default(),
+            id,
+            Some("Anything"),
+            None
+        )
+        .unwrap_err()
+        .to_string(),
         format!("No ticket {id}.")
     );
 }
@@ -726,7 +919,7 @@ fn a_write_by_a_duplicated_id_is_refused() {
     )
     .unwrap();
 
-    let error = close(dir.path(), id).unwrap_err();
+    let error = close(dir.path(), &Formatting::default(), id).unwrap_err();
 
     assert!(
         error
@@ -812,7 +1005,12 @@ fn file_unique(dir: &Utf8TempDir, title: &str, labels: &[&str]) -> Result<(Ticke
     let vocabulary = unique_vocabulary();
     let labels = vocabulary.resolve(&owned(labels)).unwrap();
 
-    create(dir.path(), &vocabulary, &draft(title, &labels))
+    create(
+        dir.path(),
+        &Formatting::default(),
+        &vocabulary,
+        &draft(title, &labels),
+    )
 }
 
 /// A label the board lets one ticket carry is refused on a second, naming the
@@ -870,11 +1068,17 @@ fn relabel_refuses_a_unique_label_two_named_tickets_would_share() {
     let (first, _) = file_unique(&dir, "First", &["client=cli"]).unwrap();
     let (second, _) = file_unique(&dir, "Second", &["client=cli"]).unwrap();
 
-    let error = relabel(dir.path(), &vocabulary, &[first, second], |current| {
-        let mut tokens = current.to_tokens();
-        tokens.push("rfd=116".to_owned());
-        tokens
-    })
+    let error = relabel(
+        dir.path(),
+        &Formatting::default(),
+        &vocabulary,
+        &[first, second],
+        |current| {
+            let mut tokens = current.to_tokens();
+            tokens.push("rfd=116".to_owned());
+            tokens
+        },
+    )
     .unwrap_err();
 
     assert_eq!(
@@ -895,7 +1099,14 @@ fn relabel_reads_a_ticket_named_twice_as_one() {
     let vocabulary = unique_vocabulary();
     let (id, _) = file_unique(&dir, "Tracks 116", &[]).unwrap();
 
-    let done = relabel(dir.path(), &vocabulary, &[id, id], |_| owned(&["rfd=116"])).unwrap();
+    let done = relabel(
+        dir.path(),
+        &Formatting::default(),
+        &vocabulary,
+        &[id, id],
+        |_| owned(&["rfd=116"]),
+    )
+    .unwrap();
 
     assert_eq!(done.len(), 1);
     assert_eq!(labels_of(&dir, id), ["rfd=116"]);
@@ -909,14 +1120,32 @@ fn relabel_changes_each_ticket_from_its_own_labels() {
     let vocabulary = test_vocabulary();
     let cli = vocabulary.resolve(&owned(&["package=jp_cli"])).unwrap();
     let config = vocabulary.resolve(&owned(&["package=jp_config"])).unwrap();
-    let (first, _) = create(dir.path(), &vocabulary, &draft("First", &cli)).unwrap();
-    let (second, _) = create(dir.path(), &vocabulary, &draft("Second", &config)).unwrap();
+    let (first, _) = create(
+        dir.path(),
+        &Formatting::default(),
+        &vocabulary,
+        &draft("First", &cli),
+    )
+    .unwrap();
+    let (second, _) = create(
+        dir.path(),
+        &Formatting::default(),
+        &vocabulary,
+        &draft("Second", &config),
+    )
+    .unwrap();
 
-    let done = relabel(dir.path(), &vocabulary, &[first, second], |current| {
-        let mut tokens = current.to_tokens();
-        tokens.push("client=cli".to_owned());
-        tokens
-    })
+    let done = relabel(
+        dir.path(),
+        &Formatting::default(),
+        &vocabulary,
+        &[first, second],
+        |current| {
+            let mut tokens = current.to_tokens();
+            tokens.push("client=cli".to_owned());
+            tokens
+        },
+    )
     .unwrap();
 
     assert_eq!(done[0].before.to_tokens(), ["package=jp_cli"]);
@@ -937,11 +1166,17 @@ fn relabel_refuses_a_ticket_without_a_metadata_block_before_writing_any() {
     let good_path = locate(dir.path(), good).unwrap();
     let before = fs::read_to_string(&good_path).unwrap();
 
-    let error = relabel(dir.path(), &vocabulary, &[good, bare], |current| {
-        let mut tokens = current.to_tokens();
-        tokens.push("client=cli".to_owned());
-        tokens
-    })
+    let error = relabel(
+        dir.path(),
+        &Formatting::default(),
+        &vocabulary,
+        &[good, bare],
+        |current| {
+            let mut tokens = current.to_tokens();
+            tokens.push("client=cli".to_owned());
+            tokens
+        },
+    )
     .unwrap_err();
 
     assert_eq!(
@@ -976,11 +1211,17 @@ fn relabel_writes_every_ticket_or_none() {
 
     // Keeping each ticket's labels and adding the retired value: the old ticket
     // may keep it, the fresh one may not take it.
-    let error = relabel(dir.path(), &vocabulary, &[fresh, old], |current| {
-        let mut tokens = current.to_tokens();
-        tokens.extend(owned(&["client=cli", "package=jp_legacy"]));
-        tokens
-    })
+    let error = relabel(
+        dir.path(),
+        &Formatting::default(),
+        &vocabulary,
+        &[fresh, old],
+        |current| {
+            let mut tokens = current.to_tokens();
+            tokens.extend(owned(&["client=cli", "package=jp_legacy"]));
+            tokens
+        },
+    )
     .unwrap_err();
 
     assert!(
@@ -1018,7 +1259,14 @@ fn relabel_leaves_an_unchanged_ticket_as_it_is() {
     .unwrap();
     let before = fs::read_to_string(&path).unwrap();
 
-    let done = relabel(dir.path(), &vocabulary, &[id], Labels::to_tokens).unwrap();
+    let done = relabel(
+        dir.path(),
+        &Formatting::default(),
+        &vocabulary,
+        &[id],
+        Labels::to_tokens,
+    )
+    .unwrap();
 
     assert_eq!(done[0].before, done[0].after);
     assert_eq!(fs::read_to_string(&path).unwrap(), before);
@@ -1054,6 +1302,7 @@ fn create_writes_one_line_per_label() {
         .unwrap();
     let (_, path) = create(
         dir.path(),
+        &Formatting::default(),
         &Vocabulary::default(),
         &draft("Labelled", &resolved),
     )
@@ -1075,9 +1324,16 @@ fn check_reads_every_ticket_and_names_files_in_the_four_digit_form() {
     let vocabulary = test_vocabulary();
 
     let labelled = vocabulary.resolve(&owned(&["client=cli"])).unwrap();
-    create(dir.path(), &vocabulary, &draft("Labelled", &labelled)).unwrap();
+    create(
+        dir.path(),
+        &Formatting::default(),
+        &vocabulary,
+        &draft("Labelled", &labelled),
+    )
+    .unwrap();
     let (unknown, unknown_path) = create(
         dir.path(),
+        &Formatting::default(),
         &Vocabulary::default(),
         &draft("Unknown", &[("area", ["cli"])].into_iter().collect()),
     )
@@ -1138,6 +1394,7 @@ fn no_label_line_grows_with_the_number_of_labels() {
         .unwrap();
     let (_, path) = create(
         dir.path(),
+        &Formatting::default(),
         &Vocabulary::default(),
         &draft("Labelled", &resolved),
     )
@@ -1159,6 +1416,7 @@ fn relabel_writes_the_set_the_change_gives() {
         .unwrap();
     let (id, _) = create(
         dir.path(),
+        &Formatting::default(),
         &Vocabulary::default(),
         &draft("Labelled", &resolved),
     )
@@ -1184,6 +1442,7 @@ fn relabel_to_nothing_drops_every_line() {
         .unwrap();
     let (id, _) = create(
         dir.path(),
+        &Formatting::default(),
         &Vocabulary::default(),
         &draft("Labelled", &resolved),
     )
@@ -1293,6 +1552,7 @@ fn a_rejected_relabel_writes_nothing() {
     let resolved = vocabulary.resolve(&owned(&["client=cli"])).unwrap();
     let (id, path) = create(
         dir.path(),
+        &Formatting::default(),
         &Vocabulary::default(),
         &draft("Labelled", &resolved),
     )
@@ -1315,7 +1575,8 @@ fn set_status_moves_a_ticket_and_reports_where_it_was() {
     let dir = Utf8TempDir::new().unwrap();
     let id = new_ticket(&dir, "Moving");
 
-    let (path, previous) = set_status(dir.path(), id, Status::InProgress).unwrap();
+    let (path, previous) =
+        set_status(dir.path(), &Formatting::default(), id, Status::InProgress).unwrap();
 
     assert_eq!(previous, Status::Todo);
     let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -1331,7 +1592,7 @@ fn set_status_to_the_current_status_writes_nothing() {
     let path = locate(dir.path(), id).unwrap();
     let before = fs::read_to_string(&path).unwrap();
 
-    let (_, previous) = set_status(dir.path(), id, Status::Todo).unwrap();
+    let (_, previous) = set_status(dir.path(), &Formatting::default(), id, Status::Todo).unwrap();
 
     assert_eq!(previous, Status::Todo);
     assert_eq!(fs::read_to_string(&path).unwrap(), before);
@@ -1389,6 +1650,7 @@ fn create_refuses_tickets_without_an_epoch() {
 
     let error = create(
         dir.path(),
+        &Formatting::default(),
         &Vocabulary::default(),
         &draft("Second", &Labels::default()),
     )
@@ -1413,6 +1675,7 @@ fn create_refuses_a_malformed_epoch() {
 
     let error = create(
         dir.path(),
+        &Formatting::default(),
         &Vocabulary::default(),
         &draft("First", &Labels::default()),
     )

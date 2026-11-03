@@ -35,9 +35,11 @@ arguments = [
 run = "allow"
 
 # Tickets and comments the assistant files through the `ticket_*` tools are
-# attributed to `jp`.
+# attributed to `jp`. Every ticket written is laid out in the style of
+# `.comfort.toml`, so it passes `fmt-markdown-ci` as it lands.
 [plugins.command.ticket.options]
 assistant = "jp"
+format_on_write = true
 
 # The labels a ticket can carry: each key, what it covers, and the values it
 # takes. `jp ticket tools sync .jp/mcp/tools/ticket` mirrors them into the
@@ -131,6 +133,10 @@ values = [
 [plugins.command.rfd]
 run = "allow"
 
+# RFDs are laid out in the style of `.comfort.toml` as they are written.
+[plugins.command.rfd.options]
+format_on_write = true
+
 # A tracking ticket carries `type=tracking` beside its `tracking-rfd` link, since
 # every ticket here carries exactly one `type`.
 [plugins.command.rfd.options.tracking]
@@ -142,9 +148,11 @@ labels = ["type=tracking"]
 [plugins.command.wiki]
 run = "allow"
 
-# Pages the assistant writes through the `wiki_*` tools are attributed to `jp`.
+# Pages the assistant writes through the `wiki_*` tools are attributed to `jp`,
+# and every page is laid out in the style of `.comfort.toml` as it is written.
 [plugins.command.wiki.options]
 assistant = "jp"
+format_on_write = true
 
 # The labels a page can carry. `domain` matches the tickets' vocabulary, so a
 # note moved from a ticket keeps its labels. `jp wiki tools sync

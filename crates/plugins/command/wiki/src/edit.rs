@@ -447,7 +447,7 @@ fn follow_up(
     }
 
     let mut output = Output::default();
-    store::write(&from, &after.source)?;
+    ctx.paths.write(&from, &after.source)?;
     if to != from {
         fs::rename(&from, &to).map_err(|error| format!("{from}: {error}"))?;
         output.extend(rewrite_links(ctx, &from, &to)?);
@@ -507,7 +507,7 @@ fn rewrite_links(ctx: &Context<'_>, from: &Utf8Path, to: &Utf8Path) -> Result<Ou
 
         match access.check(Capability::Update, &file) {
             Ok(()) => {
-                store::write(&file, &rewritten)?;
+                paths.write(&file, &rewritten)?;
                 output
                     .text
                     .push_str(&format!("  updated links in {}\n", paths.show(&file)));

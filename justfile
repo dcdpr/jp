@@ -2182,8 +2182,8 @@ install-plugin PLUGIN:
 # Run all formatting-related tasks
 fmt: (_rustup_component "rustfmt") _install-comfort
     cargo fmt --all
-    comfort --workspace --language rust --format-markdown --reference-links --prune-reference-links
-    comfort --workspace --language markdown --format-markdown --reference-links --prune-reference-links
+    comfort --workspace --language rust
+    comfort --workspace --language markdown
 
 # Run all ci tasks.
 [group('ci')]
@@ -2342,12 +2342,12 @@ fmt-ci: (_rustup_component "rustfmt") _install_ci_matchers
 # Check Rust doc-comment formatting on CI.
 [group('ci')]
 fmt-comments-ci: _install-comfort _install_ci_matchers
-    comfort --check --workspace --language rust --format-markdown --reference-links --prune-reference-links
+    comfort --check --workspace --language rust
 
 # Check standalone Markdown formatting on CI.
 [group('ci')]
 fmt-markdown-ci: _install-comfort _install_ci_matchers
-    comfort --check --workspace --language markdown --format-markdown --reference-links --prune-reference-links
+    comfort --check --workspace --language markdown
 
 # Type-check the web UI's scripts on CI.
 #

@@ -98,7 +98,8 @@ fn duplicate_names_the_first_shared_id() {
 fn the_first_document_writes_an_epoch_naming_its_writer() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let (id, path) = create::<Page>(dir.path(), "first", "# First\n").unwrap();
+    let (id, path) =
+        create::<Page>(dir.path(), &Formatting::default(), "first", "# First\n").unwrap();
 
     let source = fs::read_to_string(dir.path().join(EPOCH_FILE)).unwrap();
     assert!(
@@ -114,7 +115,13 @@ fn the_first_document_writes_an_epoch_naming_its_writer() {
 fn create_names_the_file_for_its_id_and_slug() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let (id, path) = create::<Page>(dir.path(), "ubiquitous-language", "").unwrap();
+    let (id, path) = create::<Page>(
+        dir.path(),
+        &Formatting::default(),
+        "ubiquitous-language",
+        "",
+    )
+    .unwrap();
 
     assert_eq!(
         path,
@@ -129,8 +136,12 @@ fn create_names_the_file_for_its_id_and_slug() {
 fn ids_created_in_sequence_stay_ordered() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let first = create::<Page>(dir.path(), "first", "").unwrap().0;
-    let second = create::<Page>(dir.path(), "second", "").unwrap().0;
+    let first = create::<Page>(dir.path(), &Formatting::default(), "first", "")
+        .unwrap()
+        .0;
+    let second = create::<Page>(dir.path(), &Formatting::default(), "second", "")
+        .unwrap()
+        .0;
 
     assert!(first < second, "{first} !< {second}");
     // A run straddling a bucket boundary is still ordered, by the time
@@ -180,7 +191,7 @@ fn a_malformed_epoch_is_named() {
     let dir = Utf8TempDir::new().unwrap();
     fs::write(dir.path().join(EPOCH_FILE), "yesterday\n").unwrap();
 
-    let error = create::<Page>(dir.path(), "first", "").unwrap_err();
+    let error = create::<Page>(dir.path(), &Formatting::default(), "first", "").unwrap_err();
 
     assert_eq!(
         error.to_string(),

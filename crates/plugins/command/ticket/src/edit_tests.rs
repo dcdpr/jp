@@ -2,6 +2,7 @@ use std::{collections::VecDeque, io};
 
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
+use comfort::format::FormatOptions;
 use serde_json::{Value, json};
 use ticket::{Labels, NewTicket, render};
 
@@ -115,10 +116,42 @@ fn a_saved_edit_is_kept_where_it_is() {
     let edited = original.replace("Something is wrong.", "Off by one at 80 columns.");
     let mut editing = Scripted::editing([(Some(edited.clone()), true)]);
 
-    let output = in_editor(dir.path(), id(), &options(), &mut editing).unwrap();
+    let output = in_editor(
+        dir.path(),
+        &Formatting::default(),
+        id(),
+        &options(),
+        &mut editing,
+    )
+    .unwrap();
 
     assert_eq!(output.text, format!("Edited {path}\n"));
     assert_eq!(fs::read_to_string(&path).unwrap(), edited);
+}
+
+/// The editor wrote the file, so it comes back as the user left it; a workspace
+/// that formats tickets lays it out once the edit is accepted.
+#[test]
+fn a_saved_edit_is_formatted_when_the_workspace_formats_tickets() {
+    let dir = Utf8TempDir::new().unwrap();
+    let (path, original) = write_ticket(&dir);
+    let edited = original.replace("Something is wrong.", "Off by one. At 80 columns.");
+    let mut editing = Scripted::editing([(Some(edited), true)]);
+    let formatting = Formatting::new(
+        FormatOptions {
+            max_width: 80,
+            ..FormatOptions::default()
+        },
+        vec![dir.path().to_path_buf()],
+    );
+
+    in_editor(dir.path(), &formatting, id(), &options(), &mut editing).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "# Wrapping is wrong\n\n- **Status**: Todo\n- **Authors**: jp\n- **Date**: \
+         2026-08-05\n\nOff by one.\nAt 80 columns.\n"
+    );
 }
 
 /// A new heading takes the file name with it, as `rename` does.
@@ -129,7 +162,14 @@ fn a_new_title_moves_the_file() {
     let edited = original.replace("# Wrapping is wrong", "# The wrap calculation is off");
     let mut editing = Scripted::editing([(Some(edited.clone()), true)]);
 
-    let output = in_editor(dir.path(), id(), &options(), &mut editing).unwrap();
+    let output = in_editor(
+        dir.path(),
+        &Formatting::default(),
+        id(),
+        &options(),
+        &mut editing,
+    )
+    .unwrap();
 
     let moved = dir.path().join("02wt0kx-the-wrap-calculation-is-off.md");
     assert_eq!(
@@ -146,7 +186,14 @@ fn an_untouched_file_is_reported_unchanged() {
     let (path, _) = write_ticket(&dir);
     let mut editing = Scripted::editing([(None, true)]);
 
-    let output = in_editor(dir.path(), id(), &options(), &mut editing).unwrap();
+    let output = in_editor(
+        dir.path(),
+        &Formatting::default(),
+        id(),
+        &options(),
+        &mut editing,
+    )
+    .unwrap();
 
     assert_eq!(output.text, format!("{path}: unchanged\n"));
 }
@@ -159,7 +206,14 @@ fn an_edit_abandoned_in_the_editor_is_undone() {
     let (path, original) = write_ticket(&dir);
     let mut editing = Scripted::editing([(Some("half an edit".to_owned()), false)]);
 
-    let error = in_editor(dir.path(), id(), &options(), &mut editing).unwrap_err();
+    let error = in_editor(
+        dir.path(),
+        &Formatting::default(),
+        id(),
+        &options(),
+        &mut editing,
+    )
+    .unwrap_err();
 
     assert_eq!(
         error,
@@ -179,7 +233,14 @@ fn a_file_that_no_longer_reads_as_a_ticket_goes_back_to_the_editor() {
     ])
     .answering([true]);
 
-    let output = in_editor(dir.path(), id(), &options(), &mut editing).unwrap();
+    let output = in_editor(
+        dir.path(),
+        &Formatting::default(),
+        id(),
+        &options(),
+        &mut editing,
+    )
+    .unwrap();
 
     assert_eq!(output.text, format!("Edited {path}\n"));
     assert_eq!(fs::read_to_string(&path).unwrap(), fixed);
@@ -199,7 +260,14 @@ fn an_edit_given_up_on_is_undone() {
     let mut editing =
         Scripted::editing([(Some("no heading here\n".to_owned()), true)]).answering([false]);
 
-    let error = in_editor(dir.path(), id(), &options(), &mut editing).unwrap_err();
+    let error = in_editor(
+        dir.path(),
+        &Formatting::default(),
+        id(),
+        &options(),
+        &mut editing,
+    )
+    .unwrap_err();
 
     assert!(
         error.starts_with("T-02wt0kx is unchanged: Ticket does not open with"),
@@ -221,7 +289,14 @@ fn a_label_the_board_refuses_goes_back_to_the_editor() {
     assert_ne!(edited, original, "the fixture has no status line to follow");
     let mut editing = Scripted::editing([(Some(edited), true)]).answering([false]);
 
-    let error = in_editor(dir.path(), id(), &options(), &mut editing).unwrap_err();
+    let error = in_editor(
+        dir.path(),
+        &Formatting::default(),
+        id(),
+        &options(),
+        &mut editing,
+    )
+    .unwrap_err();
 
     assert!(error.contains("client=windows"), "{error}");
     assert_eq!(fs::read_to_string(&path).unwrap(), original);
@@ -240,7 +315,14 @@ fn a_label_line_that_is_not_a_label_goes_back_to_the_editor() {
     assert_ne!(edited, original, "the fixture has no status line to follow");
     let mut editing = Scripted::editing([(Some(edited), true)]).answering([false]);
 
-    let error = in_editor(dir.path(), id(), &options(), &mut editing).unwrap_err();
+    let error = in_editor(
+        dir.path(),
+        &Formatting::default(),
+        id(),
+        &options(),
+        &mut editing,
+    )
+    .unwrap_err();
 
     assert_eq!(editing.asked, [format!(
         "{ID} can't be saved: `client cli` is not a `key=value` label. Labels you can add: \
@@ -282,7 +364,14 @@ fn a_label_another_ticket_holds_goes_back_to_the_editor() {
         "rfd": { "description": "The RFD.", "values": [], "unique": "key-value" }
     }));
 
-    let error = in_editor(dir.path(), id(), &options, &mut editing).unwrap_err();
+    let error = in_editor(
+        dir.path(),
+        &Formatting::default(),
+        id(),
+        &options,
+        &mut editing,
+    )
+    .unwrap_err();
 
     assert_eq!(editing.asked, [format!(
         "{ID} can't be saved: `rfd=116` is already on {holder}, and the board lets one ticket \
@@ -306,6 +395,7 @@ fn an_edit_that_leaves_the_labels_alone_needs_no_vocabulary() {
 
     let output = in_editor(
         dir.path(),
+        &Formatting::default(),
         id(),
         &options_with(&json!("not a map")),
         &mut editing,
@@ -329,6 +419,7 @@ fn an_edit_checked_against_a_broken_vocabulary_is_undone() {
 
     let error = in_editor(
         dir.path(),
+        &Formatting::default(),
         id(),
         &options_with(&json!("not a map")),
         &mut editing,
@@ -352,7 +443,14 @@ fn an_interrupted_retry_is_undone() {
         .answering([true])
         .interrupted();
 
-    let error = in_editor(dir.path(), id(), &options(), &mut editing).unwrap_err();
+    let error = in_editor(
+        dir.path(),
+        &Formatting::default(),
+        id(),
+        &options(),
+        &mut editing,
+    )
+    .unwrap_err();
 
     assert_eq!(error, "Interrupted.");
     assert_eq!(fs::read_to_string(&path).unwrap(), original);
@@ -366,6 +464,7 @@ fn an_older_host_is_told_to_upgrade() {
     let error = through_host(
         12,
         dir.path(),
+        &Formatting::default(),
         id(),
         &options(),
         &mut io::empty(),
