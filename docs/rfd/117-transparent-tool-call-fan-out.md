@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-18
+- **Extended by**: [RFD 128]
 - **Summary**: A per-tool `fan_out` setting lets one tool call carry several
   independent operations, which JP's MCP server runs separately and folds into
   one response.
@@ -266,6 +267,12 @@ The parent waits on its children, not on the Host, so a `stop` that rules out
 every remaining operation ends the call instead of leaving it waiting for work
 that will never start.
 
+> [!TIP]
+> [RFD 128] moves the concurrency limit and the ordering to the MCP Host, which
+> applies them at release across every call to the tool, not only the operations
+> of one call.
+> The parent keeps only the `on_error = "stop"` check.
+
 ### What the Host does
 
 The Host (`jp_cli::cmd::query::tool`) keeps its role: prompt, render, route
@@ -406,6 +413,12 @@ A `concurrency` of `0` reads as unbounded rather than "never run anything".
 `fan_out` is a per-tool key with no counterpart on the `conversation.tools.*`
 defaults block, so no tool inherits it: whether a tool's calls may be batched
 depends on what the tool does.
+
+> [!TIP]
+> [RFD 128] replaces `fan_out.concurrency` with a tool-level `concurrency`,
+> which counts separate calls and operations against one limit and can be shared
+> across tools by key.
+> `fan_out` keeps `enabled` and `on_error`.
 
 ### Where the safety boundary sits
 
@@ -570,3 +583,4 @@ Route pause, resume, and cancel to the right invocation.
 [RFD 082]: 082-unified-inquiry-event-recording.md
 [RFD 109]: 109-in-process-jp-mcp-server.md
 [RFD 110]: 110-anthropic-subscription-queries-via-acp.md
+[RFD 128]: 128-tool-concurrency-limits.md
