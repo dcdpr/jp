@@ -1,6 +1,6 @@
 # Ephemeral Reasoning Window
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-10-08
 - **Label**: tracking-rfd=120

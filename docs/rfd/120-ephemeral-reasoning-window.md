@@ -1,6 +1,6 @@
 # RFD 120: Ephemeral Reasoning Window
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-10-07
