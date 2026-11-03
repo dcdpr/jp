@@ -17,12 +17,20 @@ vet_version          := "0.10.2"
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
 
 # Workspace crates that no `jp_*` crate depends on: standalone tooling binaries,
-# docs infrastructure, and command plugins. Skipping them drops their
-# dependencies from the build entirely, rather than merely skipping their tests.
+# docs infrastructure, command plugins, and the macOS app's C interface
+# `jp_ffi`. Skipping them drops their dependencies from the build entirely,
+# rather than merely skipping their tests.
+#
+# A crate belongs here only if it is not the sole crate enabling some feature of
+# a shared dependency. Cargo builds each dependency once with the union of the
+# features asked for, so excluding such a crate changes that dependency's build,
+# and every crate above it, and the build stops matching the sccache entries a
+# full-workspace build writes on `main`. That is why `xct2cli` is absent: it is
+# the only crate that turns on serde's `rc` feature.
 #
 # `grizzly` is deliberately absent: `jp_attachment_bear_note` depends on it, so
 # it is compiled either way.
-non_jp_excludes := "--exclude bookworm --exclude build-registry --exclude comfort --exclude jp-gui --exclude jp-path --exclude jp-serve-web --exclude json_edit --exclude tools"
+non_jp_excludes := "--exclude bookworm --exclude build-registry --exclude comfort --exclude jp-gui --exclude jp-path --exclude jp-serve-web --exclude jp_ffi --exclude json_edit --exclude tools"
 
 alias r := run
 alias i := install
@@ -2422,9 +2430,14 @@ _insta-ci-setup: (_install "cargo-nextest@" + nextest_version + " cargo-insta@" 
 # that opted out would never run, and CI would stay green over it. The flag also
 # promotes unlinked files, empty files, unused optional dependencies, and the
 # redundant-ignore reports to failures.
+#
+# `SCOPE` selects how deeply sources are read: `source` checks the code as
+# written, `expand` expands macros first, so a dependency used only inside a
+# macro's output counts as used. Expanding compiles every crate. An
+# unrecognised scope expands.
 [group('ci')]
-shear-ci: (_install "cargo-expand@" + expand_version)
-    @just shear --expand --deny-warnings
+shear-ci SCOPE="expand": (_install "cargo-expand@" + expand_version)
+    @just shear {{ if SCOPE == "source" { "" } else { "--expand" } }} --deny-warnings
 
 # Verify supply-chain audits on CI.
 [group('ci')]
