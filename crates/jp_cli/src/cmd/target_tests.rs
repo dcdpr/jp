@@ -506,6 +506,15 @@ fn format_picker_label_with_title_only() {
 }
 
 #[test]
+fn format_picker_label_shows_a_title_as_one_plain_line() {
+    // The row is redrawn as the cursor moves: an escape or a line break in a
+    // stored title would put the picker out of step with the screen.
+    let row = picker_row(1000, "", Some("Evil\x1b[2J\ntitle"));
+    let label = format_picker_label(&row, 0);
+    assert_eq!(label, format!("{}  Evil[2Jtitle", row.id));
+}
+
+#[test]
 fn format_picker_label_with_time_only() {
     let row = picker_row(1000, "3 days ago", None);
     let label = format_picker_label(&row, 10);

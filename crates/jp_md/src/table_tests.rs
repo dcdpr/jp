@@ -345,6 +345,7 @@ fn test_format_table_fits_the_budget() {
             inline_code_bg: None,
             style_sheet: &crate::style::MarkdownStyleSheet::default(),
             indent: 0,
+            content: None,
         },
         Some(40),
     )
@@ -393,6 +394,7 @@ fn test_format_simple_table() {
             inline_code_bg: None,
             style_sheet: &crate::style::MarkdownStyleSheet::default(),
             indent: 0,
+            content: None,
         },
         None,
     )
@@ -451,6 +453,7 @@ fn test_format_table_with_wrapping() {
             inline_code_bg: None,
             style_sheet: &crate::style::MarkdownStyleSheet::default(),
             indent: 0,
+            content: None,
         },
         None,
     )
@@ -516,6 +519,7 @@ fn test_format_table_wrapping_respects_alignment() {
             inline_code_bg: None,
             style_sheet: &crate::style::MarkdownStyleSheet::default(),
             indent: 0,
+            content: None,
         },
         None,
     )
@@ -588,6 +592,7 @@ fn test_wrapped_rows_open_with_the_continuation_edge() {
             inline_code_bg: None,
             style_sheet: &crate::style::MarkdownStyleSheet::default(),
             indent: 0,
+            content: None,
         },
         None,
     )
@@ -631,6 +636,7 @@ fn test_continuation_edge_can_be_disabled() {
             inline_code_bg: None,
             style_sheet: &crate::style::MarkdownStyleSheet::default(),
             indent: 0,
+            content: None,
         },
         None,
     )
@@ -676,6 +682,7 @@ fn test_wide_header_is_truncated_not_wrapped() {
             inline_code_bg: None,
             style_sheet: &crate::style::MarkdownStyleSheet::default(),
             indent: 0,
+            content: None,
         },
         None,
     )
@@ -718,6 +725,7 @@ fn test_format_aligned_table() {
             inline_code_bg: None,
             style_sheet: &crate::style::MarkdownStyleSheet::default(),
             indent: 0,
+            content: None,
         },
         None,
     )

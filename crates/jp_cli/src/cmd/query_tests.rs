@@ -4537,7 +4537,7 @@ impl PromptBackend for InterruptedPrompts {
         _options: Vec<String>,
         _default: Option<usize>,
         _writer: &mut dyn io::Write,
-    ) -> std::result::Result<String, InquireError> {
+    ) -> std::result::Result<usize, InquireError> {
         Err(InquireError::OperationInterrupted)
     }
 

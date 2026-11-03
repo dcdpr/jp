@@ -45,14 +45,14 @@ pub trait PromptBackend: Send + Sync {
         output: Box<dyn Write + Send>,
     ) -> Result<ReplyOutcome, InquireError>;
 
-    /// Display a selection menu.
+    /// Display a selection menu, returning the index of the chosen option.
     fn select(
         &self,
         message: &str,
         options: Vec<String>,
         default: Option<usize>,
         writer: &mut dyn Write,
-    ) -> Result<String, InquireError>;
+    ) -> Result<usize, InquireError>;
 
     /// Display a single-line no-echo input prompt for a secret value.
     fn password(&self, message: &str, writer: &mut dyn Write) -> Result<String, InquireError>;
@@ -95,7 +95,7 @@ impl<P: PromptBackend + ?Sized> PromptBackend for &P {
         options: Vec<String>,
         default: Option<usize>,
         writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<usize, InquireError> {
         (*self).select(message, options, default, writer)
     }
 
@@ -161,12 +161,14 @@ impl PromptBackend for TerminalPromptBackend {
         options: Vec<String>,
         default: Option<usize>,
         writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<usize, InquireError> {
         let mut prompt = inquire::Select::new(message, options);
         if let Some(idx) = default {
             prompt = prompt.with_starting_cursor(idx);
         }
-        prompt.prompt_with_writer(writer)
+        prompt
+            .raw_prompt_with_writer(writer)
+            .map(|choice| choice.index)
     }
 
     fn password(&self, message: &str, writer: &mut dyn Write) -> Result<String, InquireError> {
@@ -187,7 +189,7 @@ pub struct MockPromptBackend {
     inline_responses: Mutex<VecDeque<char>>,
     reply_outcomes: Mutex<VecDeque<ReplyOutcome>>,
     reply_seeds: Mutex<Vec<String>>,
-    select_responses: Mutex<VecDeque<String>>,
+    select_responses: Mutex<VecDeque<usize>>,
     password_responses: Mutex<VecDeque<String>>,
 }
 
@@ -220,12 +222,10 @@ impl MockPromptBackend {
         self.reply_seeds.lock().clone()
     }
 
+    /// Script the option indices returned by `select`, in order.
     #[must_use]
-    pub fn with_select_responses(
-        self,
-        responses: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Self {
-        *self.select_responses.lock() = responses.into_iter().map(Into::into).collect();
+    pub fn with_select_responses(self, responses: impl IntoIterator<Item = usize>) -> Self {
+        *self.select_responses.lock() = responses.into_iter().collect();
         self
     }
 
@@ -282,7 +282,7 @@ impl PromptBackend for MockPromptBackend {
         _options: Vec<String>,
         _default: Option<usize>,
         _writer: &mut dyn Write,
-    ) -> Result<String, InquireError> {
+    ) -> Result<usize, InquireError> {
         self.select_responses
             .lock()
             .pop_front()

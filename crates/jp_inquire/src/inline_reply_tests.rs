@@ -114,6 +114,47 @@ fn editor_sentinel_maps_to_open_editor_with_buffer() {
 }
 
 #[test]
+fn the_buffer_shows_control_characters_as_question_marks() {
+    // A tool result seeded into the buffer can carry escape sequences, and
+    // reedline writes what the highlighter returns to the terminal as it is.
+    // Line breaks and tabs are part of the text being edited.
+    let shown = PlainBuffer.highlight("a\x1b[2Jb\tc\nd\r", 0);
+
+    assert_eq!(shown.buffer, [
+        (text_style(), "a".to_owned()),
+        (marker_style(), "?".to_owned()),
+        (text_style(), "[2Jb\tc\nd".to_owned()),
+        (marker_style(), "?".to_owned()),
+    ]);
+}
+
+#[test]
+fn a_stand_in_takes_the_bytes_of_the_character_it_replaces() {
+    // reedline cuts what it paints at the cursor's byte offset into the buffer,
+    // so the two have to line up at every place the cursor can be. U+009B is
+    // two bytes long.
+    let line = "\u{e9}\u{9b}x\x7f\u{65e5}";
+    let shown = PlainBuffer.highlight(line, 0);
+    let expected = "\u{e9}??x?\u{65e5}";
+    assert_eq!(shown.raw_string(), expected);
+
+    let prompt = ReplyPrompt {
+        message: String::new(),
+        help: String::new(),
+    };
+    let cursors = line.char_indices().map(|(at, _)| at).chain([line.len()]);
+    for at in cursors {
+        let painted = shown.render_around_insertion_point(at, &prompt, false, None);
+
+        assert_eq!(
+            painted,
+            (expected[..at].to_owned(), expected[at..].to_owned()),
+            "cursor at byte {at}"
+        );
+    }
+}
+
+#[test]
 fn builders_set_fields() {
     let reply = InlineReply::new("Reply:")
         .with_initial_text("seed")

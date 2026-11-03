@@ -3,6 +3,7 @@
 pub mod ansi;
 pub mod background;
 pub mod osc;
+pub mod sanitize;
 pub mod shade;
 pub mod table;
 pub mod width;

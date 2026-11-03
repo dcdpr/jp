@@ -8,6 +8,7 @@ expression: "AppConfig::fields()"
     "inherit",
     "user.name",
     "template.values",
+    "style.sanitize",
     "style.typewriter.code_delay",
     "style.typewriter.max_latency",
     "style.typewriter.text_delay",
