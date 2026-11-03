@@ -19,7 +19,7 @@ pub use self::{
         InquiryResponse, InquirySource, SelectOption,
     },
     tool_call::{ToolCallRequest, ToolCallResponse},
-    turn::TurnStart,
+    turn::{MAX_SUMMARY_CHARS, TurnStart, format_turn_summary},
 };
 
 /// Key used in `ConversationEvent::metadata` to indicate that a cache
@@ -330,6 +330,15 @@ impl ConversationEvent {
     #[must_use]
     pub const fn as_turn_start(&self) -> Option<&TurnStart> {
         match &self.kind {
+            EventKind::TurnStart(turn_start) => Some(turn_start),
+            _ => None,
+        }
+    }
+
+    /// Returns a mutable reference to the [`TurnStart`], if applicable.
+    #[must_use]
+    pub const fn as_turn_start_mut(&mut self) -> Option<&mut TurnStart> {
+        match &mut self.kind {
             EventKind::TurnStart(turn_start) => Some(turn_start),
             _ => None,
         }

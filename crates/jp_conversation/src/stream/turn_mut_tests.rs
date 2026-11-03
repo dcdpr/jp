@@ -74,7 +74,7 @@ fn add_event_rejects_turn_start() {
 
     stream
         .current_turn_mut()
-        .add_event(TurnStart)
+        .add_event(TurnStart::default())
         .build()
         .unwrap();
 
@@ -88,7 +88,7 @@ fn with_event_rejects_turn_start() {
     stream.start_turn("hello");
 
     let mut turn = stream.current_turn_mut();
-    turn.with_event(TurnStart);
+    turn.with_event(TurnStart::default());
     turn.build().unwrap();
 
     // TurnStart + ChatRequest only

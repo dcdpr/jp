@@ -116,7 +116,7 @@ use jp_md::format::Formatter;
 use jp_printer::Printer;
 use jp_process::SystemProcessRunner;
 use jp_storage::backend::{FsStorageBackend, Projection};
-use jp_task::task::TitleGeneratorTask;
+use jp_task::task::{TitleGeneratorTask, TurnSummaryTask};
 use jp_tool::{Error as ToolError, InvocationContext, ToolDefinition, ToolDocs};
 use jp_workspace::{
     ConversationHandle, ConversationLock, ConversationMut, Id as WorkspaceId, Workspace,
@@ -634,6 +634,17 @@ impl Query {
                     }
                 }
                 NewTitle::Skip => {}
+            }
+        }
+
+        // Spawn background summarization for earlier completed turns that do
+        // not yet have a summary. A misconfigured summary model logs a warning
+        // rather than failing the query.
+        if cfg.conversation.turn_summary.generate.auto && ctx.term.args.persist {
+            match TurnSummaryTask::new(cid, &stream, &cfg, notice_sink(&ctx.printer)) {
+                Ok(Some(task)) => ctx.task_handler.spawn(task),
+                Ok(None) => {}
+                Err(error) => warn!(%error, "Skipping turn summaries."),
             }
         }
 

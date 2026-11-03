@@ -99,13 +99,13 @@ highlighting — the same pattern as `Makefile` or `Dockerfile`.
 # - Reorder lines to reorder events.
 # - Edit    event contents in the corresponding files.
 
-# Turn 0
+# Turn 1 (k3m9x2a): Set up project structure with error handling
 000-request.md
 001-message.md
 002-tool-call-fs_create_file.md
 003-tool-result-fs_create_file.md
 
-# Turn 1
+# Turn 2 (p8q2r4b): Add retry backoff to stream handler
 004-config-delta.toml
 005-request.md
 006-reasoning.md
@@ -113,7 +113,7 @@ highlighting — the same pattern as `Makefile` or `Dockerfile`.
 008-tool-result-fs_read_file.md
 009-message.md
 
-# Turn 2
+# Turn 3 (t5v7w1c): Why does the retry test still fail?
 010-compaction.toml
 011-request.md
 012-message.md
@@ -123,6 +123,12 @@ The `CONVERSATION` file controls **structure**: which events survive and in what
 order.
 Users delete lines to drop events and reorder lines to reorder events.
 Comment lines (`#`) are ignored during parsing.
+
+Each turn header names the turn's `TurnStart` `event_id` ([RFD 097]) and its
+turn summary ([RFD 126]).
+A turn with no stored summary shows the mechanical fallback instead: the first
+line of its request, truncated to 72 characters.
+Headers are comments like any other, so editing one changes nothing.
 
 The `CONVERSATION` file is authoritative for structure.
 If a line is removed, the event is dropped — regardless of whether the file
@@ -209,7 +215,7 @@ suffix:
 
 | Event type     | Suffix                    | Extension |
 | -------------- | ------------------------- | --------- |
-| `ChatRequest`  | `request`                 | `.md`     |
+| `ChatRequest`  | `request`, `reply`        | `.md`     |
 | `ChatResponse` | `message`, `reasoning`,   | `.md`     |
 |                | `structured`              |           |
 | `ToolCallReq`  | `tool-call-{tool_name}`   | `.md`     |
@@ -223,11 +229,32 @@ The numeric prefix establishes original ordering for orientation — it is an
 address, not a sort key.
 The `CONVERSATION` file determines final ordering.
 
-`TurnStart` events are not represented as files.
-They are internal markers inferred from the event sequence during reconstruction
-(a `ChatRequest` starts a new turn).
-The turn comments in the plan file (`# Turn N`) provide visual grouping but have
-no semantic effect.
+#### Turn Markers
+
+`TurnStart` events are not represented as files, and the turn headers in the
+plan file have no semantic effect.
+Turn boundaries are inferred during reconstruction: each `request` file starts a
+turn.
+
+A `ChatRequest` is not always the first in its turn.
+Replying to an interrupt (`InterruptAction::Reply`) adds one to the running
+turn, after whatever the assistant had written by then.
+Such a request is written as a `reply` file (`type: reply`) and continues the
+turn it appears in.
+Changing a file's `type` from `reply` to `request` splits its turn in two, and
+the reverse joins two turns into one.
+
+A reconstructed turn opened by a `request` that opened a turn before the edit
+reuses that turn's `TurnStart`, so it keeps its `event_id`:
+
+- The turn summary survives only if the turn is unchanged: the same event files
+  in the same order, each with its original hash.
+  Config deltas and compactions belong to no turn and do not count.
+  Otherwise the summary is cleared, and the next `jp query` regenerates it.
+- A turn opened by a new `request` file, or by a `reply` changed to a `request`,
+  gets a fresh `TurnStart` with no summary.
+
+This is the contract [RFD 126] sets for any consumer that rewrites the stream.
 
 #### The Edit Cycle
 
@@ -291,8 +318,10 @@ Validation enforces structural invariants that providers require:
 1. **Tool result follows its tool call.** A `tool-result` must appear after the
    `tool-call` with the matching call ID.
 2. **Request/response alternation.** A `ChatRequest` (user role) must not be
-   immediately followed by another `ChatRequest` without an intervening
-   assistant response.
+   immediately followed by a `request` without an intervening assistant
+   response.
+   A `reply` may directly follow a `ChatRequest`: an interrupt can come before
+   the assistant has written anything.
 3. **Orphaned references.** A `tool-result` whose call ID doesn't match any
    `tool-call` in the plan is rejected.
    Similarly for inquiry responses.
@@ -300,6 +329,8 @@ Validation enforces structural invariants that providers require:
    plan gets a synthetic error response injected (consistent with
    `sanitize_orphaned_tool_calls`).
 5. **Non-empty stream.** The plan must contain at least one `ChatRequest`.
+6. **Reply placement.** A `reply` continues a turn, so it cannot come before the
+   plan's first `request`.
 
 Validation reuses and extends the existing `ConversationStream::sanitize()`
 logic.
@@ -315,7 +346,7 @@ When validation fails, JP prepends error messages to `CONVERSATION`:
 #
 # Fix the errors above and save, or clear this file to abort.
 
-# Turn 0
+# Turn 1 (k3m9x2a): Set up project structure with error handling
 000-request.md
 ...
 ```
@@ -344,6 +375,10 @@ Key concerns:
 - **Base config.** The conversation's `base_config.json` is not part of the edit
   session.
   It is immutable and preserved as-is.
+- **Event identity.** Every listed file maps back to the stream entry it was
+  written from, so an edited event keeps its `event_id` ([RFD 097]).
+  A new file gets a fresh ID.
+  A file listed twice is a copy, and its second occurrence gets a fresh ID.
 
 ## Drawbacks
 
@@ -443,6 +478,11 @@ arbitrary events).
   Adding a conversation-edit-specific editor config (e.g. for opening a
   directory vs. a file) is deferred.
 
+- **On-demand turn summaries.** The plan file shows stored summaries and the
+  mechanical fallback; JP makes no LLM request before opening `$EDITOR`.
+  The most recent turn usually has no summary yet, because [RFD 126] generates
+  it during the next query, so its header shows the fallback.
+
 ## Risks and Open Questions
 
 - **Frontmatter parsing robustness.** YAML frontmatter in markdown is a de-facto
@@ -478,7 +518,8 @@ arbitrary events).
 
 ### Phase 1: Event Serialization Format
 
-1. Define the markdown-with-frontmatter format for each `EventKind` variant.
+1. Define the markdown-with-frontmatter format for each `EventKind` variant,
+   including the `request` and `reply` types of a `ChatRequest`.
 2. Define the TOML format for `ConfigDelta` and `Compaction` events.
 3. Implement `serialize_to_edit_file()` and `deserialize_from_edit_file()` for
    each event type.
@@ -492,8 +533,10 @@ No behavioral changes.
 
 1. Implement the temporary directory builder: given a `ConversationStream`,
    produce the file tree (`CONVERSATION` + event files).
-2. Implement the file naming scheme (numeric prefix + descriptive suffix).
-3. Implement turn-grouped comments in the plan file.
+2. Implement the file naming scheme (numeric prefix + descriptive suffix), with
+   each `ChatRequest` after the first in its turn written as a `reply`.
+3. Implement turn-grouped comments in the plan file, naming each turn's
+   `TurnStart` `event_id` and its stored summary or mechanical fallback.
 4. Add unit tests for directory generation from sample streams.
 
 Depends on Phase 1.
@@ -505,7 +548,16 @@ Depends on Phase 1.
 2. Implement the reconstruction pipeline: parse the plan, read event files
    (using originals for unchanged files), rebuild the `ConversationStream`.
 3. Implement hash-based change detection for event files.
-4. Add unit tests for plan parsing, reconstruction, and change detection.
+4. Carry identity through reconstruction: edited events keep their `event_id`,
+   each turn reuses the `TurnStart` its opening request came from, and a changed
+   turn has its summary cleared.
+5. Add unit tests for plan parsing, reconstruction, and change detection.
+   Turn-marker tests cover an untouched turn (ID and summary kept), a turn with
+   an edited event (ID kept, summary cleared), a reordered turn, and a turn
+   opened by a new request (fresh `TurnStart`).
+   They also cover a turn holding an interrupt reply (kept as one turn) and a
+   `reply` changed to a `request` (the turn split, its second half with a fresh
+   `TurnStart`).
 
 Depends on Phase 2.
 
@@ -535,6 +587,8 @@ Depends on Phase 4.
 - [RFD 047] — Editor and Path Access for Conversations
 - [RFD 064] — Non-Destructive Conversation Compaction (defers interactive
   editing as a non-goal)
+- [RFD 097] — Stable Event Identifiers (`event_id` kept across edits)
+- [RFD 126] — Turn Summaries (summaries in turn headers, consumer contract)
 - [Issue #57] — Make conversation management more powerful
 - `crates/jp_conversation/src/stream.rs` — `ConversationStream` and
   `InternalEvent` definitions
@@ -545,3 +599,5 @@ Depends on Phase 4.
 [Issue #57]: https://github.com/dcdpr/jp/issues/57
 [RFD 047]: ../047-editor-and-path-access-for-conversations.md
 [RFD 064]: ../064-non-destructive-conversation-compaction.md
+[RFD 097]: ../097-stable-event-identifiers.md
+[RFD 126]: ../126-turn-summaries.md
