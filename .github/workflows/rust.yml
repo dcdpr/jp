@@ -132,7 +132,7 @@ jobs:
             scope: ${{ github.ref == 'refs/heads/main' && 'workspace' || 'jp-only' }}
             # Record which crates the build waits on, to judge whether more
             # cores would shorten it. The report is uploaded as an artifact.
-            ci_args: --timings=html
+            ci_args: --timings
           # Expanding macros makes `shear` compile every crate, one after the
           # other, which makes it the slowest job of a pull request run. `main`
           # keeps the expansion, so a dependency used only inside a macro is
