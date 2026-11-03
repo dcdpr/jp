@@ -303,6 +303,33 @@ Positions are not identifiers: two branches appending concurrently can shift
 one, and a reply then points at the wrong comment.
 Accepted rather than solved; stable ids are the fix if it ever bites.
 
+### Checklists
+
+A description can hold a checklist: the steps or acceptance criteria of the
+work, as markdown task-list items.
+
+```markdown
+- [x] Keep tools declared after a result
+- [ ] Cover a second tool call
+```
+
+An item is a line opening with optional indentation, a list marker, whitespace,
+the checkbox, whitespace, and text.
+Items inside fenced code blocks don't count, and neither do items in comments,
+which the tooling only ever appends.
+
+A checklist's progress is counted from the description whenever it is read, and
+never written into the metadata, so a checkbox ticked by hand and the tooling
+can't disagree.
+The tooling ticks an item by its text, changing the one character inside its
+checkbox and nothing else.
+Closing a ticket with items unchecked is allowed and reported, not refused: the
+items are the ticket's own, and whoever closes it decides what is left of them.
+
+An item is a step inside one piece of work.
+Work that could be picked up, merged, or argued about on its own is a ticket of
+its own.
+
 ### Parsing
 
 A comment boundary is a line of five or more dashes at column zero, followed by
@@ -355,7 +382,7 @@ They meet in three places.
 
 When an RFD is accepted, `jp rfd promote` offers to file its tracking ticket:
 one ticket labelled `tracking-rfd=045`, with the phases of the Implementation
-Plan as its description.
+Plan as its description, one checklist item per phase.
 A prompt, not an automatic step — the same shape as the existing tracking-issue
 prompt — because acceptance records an agreed direction, not a commitment to
 start building.

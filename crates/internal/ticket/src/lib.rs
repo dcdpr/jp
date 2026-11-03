@@ -48,6 +48,10 @@
 //! A ticket can sit under another, its parent, by naming it in a `Parent`
 //! field; [`parent`] holds the rules that relation keeps.
 //!
+//! A description can hold a checklist, as markdown task-list items;
+//! [`checklist`] reads it and checks its items off.
+//! Its progress is counted from the text each time, never stored.
+//!
 //! The format is specified in `docs/rfd/100-in-repo-ticket-tracking.md`.
 
 use std::{fmt, str::FromStr};
@@ -56,6 +60,7 @@ use serde::Serialize;
 
 pub mod board;
 pub mod check;
+pub mod checklist;
 pub mod id;
 pub mod import;
 pub mod parent;
@@ -194,6 +199,13 @@ impl Ticket {
         contains(&self.title)
             || contains(&self.description)
             || self.comments.iter().any(|comment| contains(&comment.body))
+    }
+
+    /// How many of the checklist items in the description are checked, or
+    /// `None` when it holds none.
+    #[must_use]
+    pub fn checklist(&self) -> Option<checklist::Progress> {
+        checklist::progress(&self.description)
     }
 }
 

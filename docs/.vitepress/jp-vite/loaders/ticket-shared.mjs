@@ -11,8 +11,9 @@ import { referencedLabels } from './rfd-shared.mjs'
 // `tickets.data.js` composes these into the index and the board. The document
 // format is specified in RFD 100 and implemented for the tooling side by the
 // `ticket` crate; this is the site's reader, and it needs less: metadata, a
-// comment count, and the board's column order. Ticket pages are rendered from
-// the markdown file itself, so comment bodies never come through here.
+// comment count, the checklist's progress, and the board's column order.
+// Ticket pages are rendered from the markdown file itself, so comment bodies
+// never come through here.
 //
 // Where the tickets live, the label vocabulary, and how much of the Done column
 // the board shows come from the settings `jp vite sync` writes.
@@ -50,6 +51,7 @@ export function parseTicket(content, filename, known = new Map()) {
         // The ticket this one sits under, as `T-0a1b2c3`.
         parent: meta.get('Parent') ?? null,
         comments: countComments(content),
+        checklist: readChecklist(content),
         // Cross-kind links, resolved in the browser against both sets.
         links: referencedLabels(content, known).filter(label => label !== `T-${id}`),
         slug: filename.replace(/\.md$/, ''),
@@ -254,8 +256,33 @@ function describeBound(min, max) {
 // doesn't inflate its own total.
 export function countComments(content) {
     const lines = content.split('\n')
+
+    return unfenced(lines).filter(i => opensComment(lines, i)).length
+}
+
+// Whether line `i` of `lines` opens a comment: five or more dashes, a blank
+// line, and a metadata block carrying both `From` and `Date`.
+function opensComment(lines, i) {
+    if (!/^-{5,}\s*$/.test(lines[i])) return false
+    if ((lines[i + 1] ?? 'x').trim() !== '') return false
+
+    let from = false
+    let date = false
+    for (let j = i + 2; j < lines.length; j++) {
+        const key = lines[j].match(/^- \*\*([^*]+)\*\*:/)?.[1]?.trim().toLowerCase()
+        if (!key) break
+        if (key === 'from') from = true
+        if (key === 'date') date = true
+    }
+
+    return from && date
+}
+
+// The indices of the lines of `lines` outside fenced code blocks, the fences
+// themselves left out too.
+function unfenced(lines) {
+    const outside = []
     let fence = null
-    let count = 0
 
     for (let i = 0; i < lines.length; i++) {
         const delimiter = fenceAt(lines[i])
@@ -265,23 +292,46 @@ export function countComments(content) {
                 && !delimiter.info) fence = null
             continue
         }
-        if (fence !== null) continue
-
-        if (!/^-{5,}\s*$/.test(lines[i])) continue
-        if ((lines[i + 1] ?? 'x').trim() !== '') continue
-
-        let from = false
-        let date = false
-        for (let j = i + 2; j < lines.length; j++) {
-            const key = lines[j].match(/^- \*\*([^*]+)\*\*:/)?.[1]?.trim().toLowerCase()
-            if (!key) break
-            if (key === 'from') from = true
-            if (key === 'date') date = true
-        }
-        if (from && date) count++
+        if (fence === null) outside.push(i)
     }
 
-    return count
+    return outside
+}
+
+// How many of a ticket's checklist items are checked, as `{ checked, count }`,
+// or `null` when it has none.
+//
+// Only the description counts, everything above the first comment: the
+// tooling only ever appends comments, so an item in one could never be checked
+// through it.
+export function readChecklist(content) {
+    const lines = content.split('\n')
+    const end = unfenced(lines).find(i => opensComment(lines, i)) ?? lines.length
+    const items = checklistItems(lines.slice(0, end).join('\n'))
+    if (items.length === 0) return null
+
+    return { checked: items.filter(item => item.checked).length, count: items.length }
+}
+
+// A list item opening with a checkbox: indentation, a bullet or up to nine
+// digits and `.` or `)`, whitespace, `[ ]` or `[x]`, whitespace, and text.
+const CHECKLIST_ITEM = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\[([ xX])\][ \t]+(\S.*)$/
+
+// The checklist items in `text`, as `{ checked, text }`, outside fenced code
+// blocks.
+//
+// The same rule as the `ticket` crate's `checklist` module, tested against the
+// same cases (`checklist_cases.json` there).
+export function checklistItems(text) {
+    const lines = text.split('\n')
+
+    return unfenced(lines).flatMap((i) => {
+        // Trimmed first, so a `\r` left by CRLF line endings isn't the text.
+        const match = lines[i].trimEnd().match(CHECKLIST_ITEM)
+        if (!match) return []
+
+        return [{ checked: match[1] !== ' ', text: match[2].trim() }]
+    })
 }
 
 // Read a line as a code fence delimiter.

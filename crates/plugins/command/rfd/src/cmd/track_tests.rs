@@ -147,8 +147,8 @@ Tracking ticket for [RFD 116](../rfd/116-shareable-tooling.md).
 
 ## Implementation plan
 
-- **Configure tickets**: Reads the options.
-- **Read RFDs**: Lists them, on two lines.
+- [ ] **Configure tickets**: Reads the options.
+- [ ] **Read RFDs**: Lists them, on two lines.
 "
     );
 
@@ -268,8 +268,8 @@ Tracking ticket for [RFD 116](../rfd/116-shareable-tooling.md).
 
 ## Implementation plan
 
-- **Configure tickets**: Reads the options.
-- **Read RFDs**: Lists them, on two lines.
+- [ ] **Configure tickets**: Reads the options.
+- [ ] **Read RFDs**: Lists them, on two lines.
 ";
     assert!(text.ends_with(description), "{text}");
 }
@@ -327,8 +327,8 @@ Tracking ticket.
 
 ## Implementation plan
 
-- **Configure tickets**: Reads the options.
-- **Read RFDs**: Lists them, on two lines.
+- [ ] **Configure tickets**: Reads the options.
+- [ ] **Read RFDs**: Lists them, on two lines.
 
 Notes added by hand.
 ";
