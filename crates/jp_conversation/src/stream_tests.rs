@@ -723,7 +723,7 @@ fn test_sanitize_orphaned_tool_calls_handles_partial_set() {
 #[test]
 fn test_trim_trailing_empty_turn_removes_lone_turn_start() {
     let mut stream = ConversationStream::new_test();
-    stream.push(TurnStart);
+    stream.push(TurnStart::default());
     assert_eq!(stream.len(), 1);
 
     stream.trim_trailing_empty_turn();
@@ -1344,9 +1344,9 @@ fn test_sanitize_deduplicates_leading_turn_starts() {
 
     // Simulate --from keeping TurnStarts from multiple filtered turns
     // that all precede the first ChatRequest.
-    stream.push(TurnStart);
-    stream.push(TurnStart);
-    stream.push(TurnStart);
+    stream.push(TurnStart::default());
+    stream.push(TurnStart::default());
+    stream.push(TurnStart::default());
     stream.push(ConversationEvent::new(
         ChatRequest::from("hello"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
@@ -1367,7 +1367,7 @@ fn test_sanitize_reindexes_turn_starts() {
     let mut stream = ConversationStream::new_test();
 
     // Two turns with non-sequential indices (from filtering).
-    stream.push(TurnStart);
+    stream.push(TurnStart::default());
     stream.push(ConversationEvent::new(
         ChatRequest::from("first"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
@@ -1376,7 +1376,7 @@ fn test_sanitize_reindexes_turn_starts() {
         ChatResponse::message("reply"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
     ));
-    stream.push(TurnStart);
+    stream.push(TurnStart::default());
     stream.push(ConversationEvent::new(
         ChatRequest::from("second"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
@@ -1545,7 +1545,7 @@ fn test_schema_ignores_interrupt_reply() {
 fn test_sanitize_noop_on_healthy_stream() {
     let mut stream = ConversationStream::new_test();
 
-    stream.push(TurnStart);
+    stream.push(TurnStart::default());
     stream.push(ConversationEvent::new(
         ChatRequest::from("hello"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
@@ -1710,9 +1710,15 @@ fn test_legacy_config_delta_without_op_decodes_as_apply() {
     // Every config delta written before the reset variant existed lacks an
     // `op` field; those must keep decoding as `Apply`.
     let raw = serde_json::json!({
-        "type": "config_delta",
-        "timestamp": "2025-01-01 00:00:00.0",
-        "delta": { "style": { "code": { "color": false } } }
+      "type": "config_delta",
+      "timestamp": "2025-01-01 00:00:00.0",
+      "delta": {
+        "style": {
+          "code": {
+            "color": false
+          }
+        }
+      }
     });
 
     let internal = serde_json::from_value::<StoredEvent>(raw)
@@ -1727,10 +1733,16 @@ fn test_legacy_config_delta_without_op_decodes_as_apply() {
 #[test]
 fn test_config_delta_with_explicit_apply_op_decodes_as_apply() {
     let raw = serde_json::json!({
-        "type": "config_delta",
-        "op": "apply",
-        "timestamp": "2025-01-01 00:00:00.0",
-        "delta": { "style": { "code": { "color": false } } }
+      "type": "config_delta",
+      "op": "apply",
+      "timestamp": "2025-01-01 00:00:00.0",
+      "delta": {
+        "style": {
+          "code": {
+            "color": false
+          }
+        }
+      }
     });
 
     let internal = serde_json::from_value::<StoredEvent>(raw)
@@ -1903,10 +1915,14 @@ fn test_iter_config_reflects_reset() {
 #[test]
 fn test_deserialize_config_delta_extracts_timestamp_and_delta() {
     let value = serde_json::json!({
-        "timestamp": "2025-01-01 00:00:00.0",
-        "delta": {
-            "style": { "code": { "color": false } }
+      "timestamp": "2025-01-01 00:00:00.0",
+      "delta": {
+        "style": {
+          "code": {
+            "color": false
+          }
         }
+      }
     });
 
     let delta = config_delta::deserialize(&value).unwrap();
@@ -1920,8 +1936,8 @@ fn test_deserialize_config_delta_extracts_timestamp_and_delta() {
 #[test]
 fn test_deserialize_config_delta_preserves_timestamp_on_bad_delta() {
     let value = serde_json::json!({
-        "timestamp": "2024-12-25 18:30:00.0",
-        "delta": "not an object at all"
+      "timestamp": "2024-12-25 18:30:00.0",
+      "delta": "not an object at all"
     });
 
     let delta = config_delta::deserialize(&value).unwrap();
@@ -2098,8 +2114,13 @@ fn test_from_parts_tolerates_legacy_compaction_bounds_in_base_config() {
     // would end it at the second-to-last turn instead, compacting every turn
     // in between.
     base_config["conversation"]["compaction"]["rules"] = serde_json::json!({
-        "value": [{ "keep_first": "last", "keep_last": "@7" }],
-        "strategy": "replace"
+      "value": [
+        {
+          "keep_first": "last",
+          "keep_last": "@7"
+        }
+      ],
+      "strategy": "replace"
     });
 
     let result =
@@ -2127,11 +2148,20 @@ fn test_from_parts_survives_a_field_a_newer_jp_added_under_a_tool() {
     let (mut base_config, events) = stream.to_parts().unwrap();
 
     base_config["conversation"]["tools"]["bash"] = serde_json::json!({
-        "source": "local",
-        "access": {
-            "fs": [{ "path": ".", "read": true }],
-            "from_a_newer_jp": [{ "host": "example.com" }]
-        }
+      "source": "local",
+      "access": {
+        "fs": [
+          {
+            "path": ".",
+            "read": true
+          }
+        ],
+        "from_a_newer_jp": [
+          {
+            "host": "example.com"
+          }
+        ]
+      }
     });
 
     let config = ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty())
@@ -2172,8 +2202,12 @@ fn test_from_parts_repairs_only_what_recovery_had_to_drop() {
     // it lost, and on its own for everything it kept.
     let stream = ConversationStream::new_test();
     let (mut base_config, events) = stream.to_parts().unwrap();
-    base_config["conversation"]["tools"]["bash"] =
-        serde_json::json!({ "source": "local", "summary": { "was": "a string" } });
+    base_config["conversation"]["tools"]["bash"] = serde_json::json!({
+      "source": "local",
+      "summary": {
+        "was": "a string"
+      }
+    });
 
     assert!(
         ConversationStream::from_parts(
@@ -2219,9 +2253,13 @@ fn test_from_parts_tolerates_config_deltas_with_only_unknown_fields() {
 
     // Inject config delta events where every field is unknown.
     events.push(serde_json::json!({
-        "type": "config_delta",
-        "timestamp": "2025-01-01 00:01:00.0",
-        "delta": { "removed_section": { "a": 1 } }
+      "type": "config_delta",
+      "timestamp": "2025-01-01 00:01:00.0",
+      "delta": {
+        "removed_section": {
+          "a": 1
+        }
+      }
     }));
 
     let result =
@@ -2594,7 +2632,7 @@ fn test_compaction_skipped_by_into_iter() {
 #[test]
 fn test_compaction_preserved_by_sanitize() {
     let mut stream = ConversationStream::new_test();
-    stream.push(TurnStart);
+    stream.push(TurnStart::default());
     stream.push(ConversationEvent::new(
         ChatRequest::from("hello"),
         Utc.with_ymd_and_hms(2025, 7, 1, 12, 0, 0).unwrap(),
@@ -2699,7 +2737,7 @@ fn test_turn_count_two_turns() {
 fn test_turn_at_time() {
     let mut stream = ConversationStream::new_test();
     stream.push(ConversationEvent::new(
-        TurnStart,
+        TurnStart::default(),
         Utc.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
     ));
     stream.push(ConversationEvent::new(
@@ -2707,7 +2745,7 @@ fn test_turn_at_time() {
         Utc.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
     ));
     stream.push(ConversationEvent::new(
-        TurnStart,
+        TurnStart::default(),
         Utc.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
     ));
     stream.push(ConversationEvent::new(
@@ -3073,11 +3111,13 @@ fn test_internal_event_known_kind_deserializes_as_event() {
 fn test_internal_event_preserves_unknown_kind_verbatim() {
     // An event written by a newer jp with a kind this build doesn't know.
     let raw = serde_json::json!({
-        "event_id": "future1",
-        "type": "unknown_future_kind",
-        "timestamp": "2025-01-01 00:00:00.0",
-        "summary": "a compacted summary",
-        "metadata": { "foo": "YmFy" }
+      "event_id": "future1",
+      "type": "unknown_future_kind",
+      "timestamp": "2025-01-01 00:00:00.0",
+      "summary": "a compacted summary",
+      "metadata": {
+        "foo": "YmFy"
+      }
     });
 
     let internal = serde_json::from_value::<StoredEvent>(raw.clone())
@@ -3103,10 +3143,10 @@ fn test_from_parts_tolerates_unknown_event_kind() {
 
     // A newer jp appended an event kind this build doesn't understand.
     let unknown = serde_json::json!({
-        "event_id": "future1",
-        "type": "unknown_future_kind",
-        "timestamp": "2025-01-01 00:01:00.0",
-        "summary": "a compacted summary"
+      "event_id": "future1",
+      "type": "unknown_future_kind",
+      "timestamp": "2025-01-01 00:01:00.0",
+      "summary": "a compacted summary"
     });
     events.push(unknown.clone());
 
@@ -3129,11 +3169,13 @@ fn test_internal_event_preserves_unknown_chat_response_verbatim() {
     // A chat response written by a newer jp, selected by a content key this
     // build doesn't know.
     let raw = serde_json::json!({
-        "event_id": "future1",
-        "type": "chat_response",
-        "timestamp": "2025-01-01 00:00:00.0",
-        "commentary": "Found it. Editing the parser next.",
-        "metadata": { "foo": "YmFy" }
+      "event_id": "future1",
+      "type": "chat_response",
+      "timestamp": "2025-01-01 00:00:00.0",
+      "commentary": "Found it. Editing the parser next.",
+      "metadata": {
+        "foo": "YmFy"
+      }
     });
 
     let internal = serde_json::from_value::<StoredEvent>(raw.clone())
@@ -3156,10 +3198,10 @@ fn test_from_parts_tolerates_unknown_chat_response() {
     let (base_config, mut events) = stream.to_parts().unwrap();
 
     let unknown = serde_json::json!({
-        "event_id": "future1",
-        "type": "chat_response",
-        "timestamp": "2025-01-01 00:01:00.0",
-        "commentary": "Found it. Editing the parser next."
+      "event_id": "future1",
+      "type": "chat_response",
+      "timestamp": "2025-01-01 00:01:00.0",
+      "commentary": "Found it. Editing the parser next."
     });
     events.push(unknown.clone());
 
@@ -3181,9 +3223,9 @@ fn test_malformed_known_chat_response_fails_deserialization() {
     // A known content key with a value of the wrong type is corruption, not a
     // newer format, and keeps failing loudly.
     let raw = serde_json::json!({
-        "type": "chat_response",
-        "timestamp": "2025-01-01 00:00:00.0",
-        "message": 5
+      "type": "chat_response",
+      "timestamp": "2025-01-01 00:00:00.0",
+      "message": 5
     });
 
     assert!(serde_json::from_value::<StoredEvent>(raw).is_err());
@@ -3425,7 +3467,7 @@ fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
         partial1,
     ));
     source.push(ConversationEvent::new(
-        TurnStart,
+        TurnStart::default(),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
     ));
     source.push(ConversationEvent::new(
@@ -3441,7 +3483,7 @@ fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
         partial2,
     ));
     source.push(ConversationEvent::new(
-        TurnStart,
+        TurnStart::default(),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
     ));
     source.push(ConversationEvent::new(
