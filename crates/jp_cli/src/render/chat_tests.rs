@@ -1,7 +1,15 @@
-use std::fmt::Write as _;
+use std::{fmt::Write as _, io};
 
-use jp_config::{AppConfig, style::typewriter::DelayDuration, types::color::Color};
+use jp_config::{
+    AppConfig,
+    style::{
+        typewriter::DelayDuration,
+        window_rows::{RowCount, WindowRows},
+    },
+    types::color::Color,
+};
 use jp_printer::{OutputFormat, OutputWidth, SharedBuffer, TerminalCapability};
+use jp_pty::{Screen, Size, Terminal};
 
 use super::*;
 
@@ -470,13 +478,13 @@ async fn test_timer_reasoning_released_when_entering_tool_call() {
         reasoning: "Thinking hard\n\n".into(),
     });
     assert!(
-        renderer.reasoning_timer.is_active(),
+        renderer.reasoning_region.is_active(),
         "reasoning should have claimed the timer region"
     );
 
     renderer.enter_tool_call();
     assert!(
-        !renderer.reasoning_timer.is_active(),
+        !renderer.reasoning_region.is_active(),
         "the tool-call boundary must release the timer region"
     );
 }
@@ -2198,4 +2206,442 @@ fn test_extend_across_tool_calls_disabled_ends_the_region_at_the_tool_call() {
         !output.contains("\x1b[48;5;236m\x1b[K\x1b[49m"),
         "the separator before the tool call must be unshaded, got: {output:?}"
     );
+}
+
+/// Reasoning rendered in full into a window of `rows` rows above its status
+/// row.
+fn window_config(rows: u16) -> AppConfig {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.window.rows = WindowRows::Fixed(RowCount { rows });
+    config
+}
+
+/// A live renderer whose printer draws status regions on a terminal 80 columns
+/// wide and `rows` rows tall.
+///
+/// The reasoning window appears the moment it is claimed rather than after the
+/// delay that keeps short reasoning from flashing one, so a test can read it as
+/// soon as the printer has flushed.
+fn create_window_renderer(
+    config: AppConfig,
+    rows: u16,
+) -> (ChatRenderer, SharedBuffer, SharedBuffer) {
+    let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer =
+        printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(rows)));
+    let mut renderer = ChatRenderer::new(Arc::new(printer), config.style, RenderFlow::Live);
+    renderer.region_delay = Duration::ZERO;
+
+    (renderer, out, err)
+}
+
+/// What a terminal shows once it has been sent everything written to `err`.
+fn chrome_screen(err: &SharedBuffer) -> Screen {
+    let terminal = Terminal::modelled(Size::new(24, 80));
+    let mut writer = terminal.writer().expect("a modelled terminal is writable");
+    io::Write::write_all(&mut writer, err.lock().as_bytes()).expect("the model takes every byte");
+
+    terminal.screen()
+}
+
+/// A live renderer drawing stdout and stderr into one terminal, the way they
+/// share a screen when neither is redirected.
+///
+/// Like [`create_window_renderer`], the window appears the moment it is
+/// claimed.
+fn create_screen_renderer(config: AppConfig, rows: u16, columns: u16) -> (ChatRenderer, Terminal) {
+    let terminal = Terminal::open(Size::new(rows, columns));
+    let out = terminal.writer().expect("an open terminal is writable");
+    let err = terminal.writer().expect("an open terminal is writable");
+    let printer = Printer::new(out, err, None, OutputFormat::TextPretty)
+        .with_terminal(TerminalCapability::interactive(Some(columns)).with_rows(Some(rows)));
+    let mut renderer = ChatRenderer::new(Arc::new(printer), config.style, RenderFlow::Live);
+    renderer.region_delay = Duration::ZERO;
+
+    (renderer, terminal)
+}
+
+/// Wait for `predicate`, failing with the screen when it does not hold.
+///
+/// On a pty the printer's bytes reach the screen on another thread, so reading
+/// it without waiting can catch a half-drawn frame.
+fn wait(terminal: &Terminal, what: &str, predicate: impl Fn(&Screen) -> bool) -> Screen {
+    match terminal.wait_for(what, predicate) {
+        Ok(screen) => screen,
+        Err(error) => panic!("{error}"),
+    }
+}
+
+/// Reasoning in the window is chrome: its rows are drawn on stderr in the order
+/// they render, the blank line between two paragraphs is an empty row, and none
+/// of it reaches stdout, where the transcript is.
+#[test]
+fn the_window_shows_reasoning_rows_in_order_and_none_on_stdout() {
+    let (mut renderer, out, err) = create_window_renderer(window_config(4), 24);
+
+    renderer.render_response(&ChatResponse::reasoning(
+        "First paragraph.\n\nSecond paragraph.\n\n",
+    ));
+    renderer.printer.flush();
+
+    let screen = chrome_screen(&err);
+    assert_eq!(
+        screen.rows()[..3],
+        ["First paragraph.", "", "Second paragraph."],
+        "{screen}"
+    );
+    assert!(screen.row(3).starts_with("⏱ Reasoning… "), "{screen}");
+    assert_eq!(*out.lock(), "");
+}
+
+/// Consecutive reasoning chunks render into one window: the second chunk's rows
+/// join the first's instead of replacing them.
+#[test]
+fn the_window_survives_consecutive_reasoning_chunks() {
+    let (mut renderer, _out, err) = create_window_renderer(window_config(4), 24);
+
+    renderer.render_response(&ChatResponse::reasoning("First paragraph.\n\n"));
+    renderer.render_response(&ChatResponse::reasoning("Second paragraph.\n\n"));
+    renderer.printer.flush();
+
+    let screen = chrome_screen(&err);
+    assert_eq!(
+        screen.rows()[..3],
+        ["First paragraph.", "", "Second paragraph."],
+        "{screen}"
+    );
+}
+
+/// A tool call takes over the screen: the window is released, reasoning still
+/// buffered when the call arrives goes with it rather than onto stdout, and the
+/// call's chrome is not shaded, since no reasoning is left on screen for it to
+/// continue.
+#[test]
+fn a_tool_call_releases_the_window_and_the_reasoning_still_buffered() {
+    let (mut renderer, out, err) = create_window_renderer(window_config(4), 24);
+
+    renderer.render_response(&ChatResponse::reasoning(
+        "Checking the README.\n\nStill thinking",
+    ));
+    let background = renderer.enter_tool_call();
+    renderer.printer.flush();
+
+    assert!(
+        !renderer.reasoning_region.is_active(),
+        "the tool call released the window"
+    );
+    assert_eq!(background, None);
+    assert_eq!(*out.lock(), "");
+    let screen = chrome_screen(&err);
+    assert!(screen.used().is_empty(), "{screen}");
+}
+
+/// The answer starts on a clear screen: the window is released before the
+/// message renders, and reasoning still buffered at that point never reaches
+/// stdout.
+#[test]
+fn the_message_releases_the_window_and_the_reasoning_still_buffered() {
+    let (mut renderer, out, err) = create_window_renderer(window_config(4), 24);
+
+    renderer.render_response(&ChatResponse::reasoning(
+        "Checking the README.\n\nStill thinking",
+    ));
+    renderer.render_response(&ChatResponse::message("Answer.\n\n"));
+    renderer.printer.flush();
+
+    assert!(
+        !renderer.reasoning_region.is_active(),
+        "the message released the window"
+    );
+    assert_eq!(*out.lock(), "Answer.\n\n");
+    let screen = chrome_screen(&err);
+    assert!(screen.used().is_empty(), "{screen}");
+}
+
+/// Ending the turn, or interrupting it, releases the window, and the reasoning
+/// still buffered goes with it rather than onto stdout.
+#[test]
+fn a_flush_releases_the_window_and_the_reasoning_still_buffered() {
+    let (mut renderer, out, err) = create_window_renderer(window_config(4), 24);
+
+    renderer.render_response(&ChatResponse::reasoning(
+        "Checking the README.\n\nStill thinking",
+    ));
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert!(
+        !renderer.reasoning_region.is_active(),
+        "the flush released the window"
+    );
+    assert_eq!(*out.lock(), "");
+    let screen = chrome_screen(&err);
+    assert!(screen.used().is_empty(), "{screen}");
+}
+
+/// A stream retry erases the window, and the reasoning that resumes after it
+/// opens a fresh one rather than adding to rows that were already erased.
+#[test]
+fn reasoning_resumed_after_a_stream_retry_opens_a_fresh_window() {
+    let (mut renderer, out, err) = create_window_renderer(window_config(4), 24);
+
+    renderer.render_response(&ChatResponse::reasoning("First paragraph.\n\n"));
+    renderer.flush_for_continuation();
+    renderer.reset_preserving_region();
+    assert!(
+        !renderer.reasoning_region.is_active(),
+        "the retry released the window"
+    );
+
+    renderer.render_response(&ChatResponse::reasoning("Second paragraph.\n\n"));
+    renderer.printer.flush();
+
+    let screen = chrome_screen(&err);
+    assert_eq!(screen.row(0), "Second paragraph.", "{screen}");
+    assert!(!screen.contains("First paragraph."), "{screen}");
+    assert_eq!(*out.lock(), "");
+}
+
+/// The window keeps the reasoning background behind each row's text, and an
+/// inline code span that sets a background of its own hands it back.
+#[test]
+fn the_window_keeps_the_reasoning_background_after_inline_code() {
+    let mut config = window_config(4);
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    config.style.inline_code.background = Some(Color::Ansi256(240));
+    let (mut renderer, _out, err) = create_window_renderer(config, 24);
+
+    renderer.render_response(&ChatResponse::reasoning("Run `cargo test` first.\n\n"));
+    renderer.printer.flush();
+
+    let drawn = err.lock().clone();
+    assert!(
+        drawn.contains("\x1b[48;5;240m`cargo test`\x1b[48;5;236m first."),
+        "the span closes back onto the reasoning background, got: {drawn:?}"
+    );
+}
+
+/// A replay builds a document, which has no screen for a window to sit on:
+/// reasoning renders as `display` says, whatever `window` says.
+#[test]
+fn a_replay_renders_reasoning_inline_whatever_the_window_says() {
+    let mut config = window_config(4);
+    config.style.reasoning.background = None;
+    let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer =
+        printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24)));
+    let mut renderer = ChatRenderer::new(Arc::new(printer), config.style, RenderFlow::Replay);
+
+    renderer.render_response(&ChatResponse::reasoning("Checking the README.\n\n"));
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "Checking the README.\n\n");
+    assert_eq!(*err.lock(), "");
+}
+
+/// Where no status region can render, as when stderr is not a terminal,
+/// reasoning renders inline exactly as it would with no window configured.
+#[test]
+fn reasoning_renders_inline_where_no_region_can_render() {
+    let mut config = window_config(4);
+    config.style.reasoning.background = None;
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let mut renderer = ChatRenderer::new(Arc::new(printer), config.style, RenderFlow::Live);
+
+    renderer.render_response(&ChatResponse::reasoning("Checking the README.\n\n"));
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "Checking the README.\n\n");
+}
+
+/// A terminal with no room for a single window row gets the reasoning inline,
+/// rather than a window holding nothing but its status row.
+#[test]
+fn reasoning_renders_inline_when_the_window_would_have_no_rows() {
+    let cases = [
+        // A terminal whose height is unknown cannot size a window.
+        (
+            WindowRows::Fixed(RowCount { rows: 4 }),
+            TerminalCapability::interactive(Some(80)),
+        ),
+        // A tenth of nine rows is none.
+        (
+            WindowRows::Auto,
+            TerminalCapability::interactive(Some(80)).with_rows(Some(9)),
+        ),
+    ];
+
+    for (rows, terminal) in cases {
+        let mut config = window_config(4);
+        config.style.reasoning.window.rows = rows;
+        config.style.reasoning.background = None;
+        let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let mut renderer = ChatRenderer::new(
+            Arc::new(printer.with_terminal(terminal)),
+            config.style,
+            RenderFlow::Live,
+        );
+
+        renderer.render_response(&ChatResponse::reasoning("Checking the README.\n\n"));
+        renderer.flush();
+        renderer.printer.flush();
+
+        assert_eq!(*out.lock(), "Checking the README.\n\n", "rows = {rows:?}");
+    }
+}
+
+/// Reasoning in the window leaves nothing on screen to space a following tool
+/// call from, so a separator a tool result owes stays owed.
+#[test]
+fn reasoning_in_the_window_supplies_no_separation() {
+    let (mut renderer, _out, _err) = create_window_renderer(window_config(4), 24);
+
+    assert!(
+        !renderer.reasoning_supplies_separation("Checking the README.\n\n"),
+        "a chunk that opens the window"
+    );
+
+    renderer.render_response(&ChatResponse::reasoning("Checking the README.\n\n"));
+
+    assert!(
+        !renderer.reasoning_supplies_separation("Still thinking.\n\n"),
+        "a chunk for the window already open"
+    );
+}
+
+/// The window is drawn on stderr, so its prose wraps to stderr's width, even
+/// when stdout has no width to offer, as when it is redirected.
+#[test]
+fn the_window_wraps_at_the_width_of_stderr() {
+    let mut config = window_config(4);
+    config.style.markdown.wrap_width = 80;
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer =
+        printer.with_terminal(TerminalCapability::interactive(Some(30)).with_rows(Some(24)));
+    let mut renderer = ChatRenderer::new(Arc::new(printer), config.style, RenderFlow::Live);
+    renderer.region_delay = Duration::ZERO;
+
+    renderer.render_response(&ChatResponse::reasoning(
+        "The loader already handles the empty case, so what is left is the glob.\n\n",
+    ));
+    renderer.printer.flush();
+
+    // A row wider than the terminal is cut at its edge, so every word survives
+    // only when the paragraph was wrapped to fit.
+    let screen = chrome_screen(&err);
+    let (_status, rows) = screen.used().split_last().expect("the window is drawn");
+    assert_eq!(
+        rows.join(" "),
+        "The loader already handles the empty case, so what is left is the glob.",
+        "{screen}"
+    );
+}
+
+/// With `timer` off, the window is the reasoning rows alone, with no status row
+/// below them.
+#[test]
+fn the_window_has_no_status_row_when_the_timer_is_off() {
+    let mut config = window_config(4);
+    config.style.reasoning.window.timer = false;
+    let (mut renderer, _out, err) = create_window_renderer(config, 24);
+
+    renderer.render_response(&ChatResponse::reasoning("Checking the README.\n\n"));
+    renderer.printer.flush();
+
+    let screen = chrome_screen(&err);
+    assert_eq!(screen.used(), ["Checking the README."], "{screen}");
+}
+
+/// A character budget applies in the window as it does inline: the first
+/// characters, then the elision marker.
+#[test]
+fn a_truncated_display_fills_the_window_with_its_first_characters() {
+    let mut config = window_config(4);
+    config.style.reasoning.display =
+        ReasoningDisplayConfig::Truncate(TruncateChars { characters: 10 });
+    let (mut renderer, out, err) = create_window_renderer(config, 24);
+
+    renderer.render_response(&ChatResponse::reasoning(
+        "This is a very long reasoning that should be truncated\n\n",
+    ));
+    renderer.printer.flush();
+
+    let screen = chrome_screen(&err);
+    assert_eq!(screen.row(0), "This is a ...", "{screen}");
+    assert_eq!(*out.lock(), "");
+}
+
+/// The window is on screen while the assistant reasons and gone once the answer
+/// starts, which renders where the window was.
+#[test]
+fn the_window_is_on_screen_while_reasoning_and_gone_once_the_answer_starts() {
+    let (mut renderer, terminal) = create_screen_renderer(window_config(3), 12, 40);
+
+    renderer.render_response(&ChatResponse::reasoning(
+        "Checking the README.\n\nIts first line is the title.\n\n",
+    ));
+    renderer.printer.flush();
+
+    let screen = wait(&terminal, "the window to show the reasoning", |screen| {
+        screen.row(2) == "Its first line is the title."
+            && screen.row(3).starts_with("⏱ Reasoning… ")
+    });
+    assert_eq!(
+        screen.rows()[..3],
+        ["Checking the README.", "", "Its first line is the title."],
+        "{screen}"
+    );
+
+    renderer.render_response(&ChatResponse::message("The title is Jean-Pierre.\n\n"));
+    renderer.flush();
+    renderer.printer.flush();
+
+    wait(&terminal, "the answer where the window was", |screen| {
+        screen.used() == ["The title is Jean-Pierre."]
+    });
+}
+
+/// The content after the window is spaced from the content before it as if the
+/// window had never opened: the answer after a tool call's chrome gets the one
+/// blank line it would get without a window between them.
+#[test]
+fn the_answer_after_a_window_keeps_its_gap_from_the_tool_call_before_it() {
+    let (mut renderer, terminal) = create_screen_renderer(window_config(3), 12, 40);
+
+    renderer.enter_tool_call();
+    // Stands in for the tool renderer, which writes the call's chrome.
+    renderer.printer.eprintln("Calling tool fs_read_file");
+    renderer.render_response(&ChatResponse::reasoning("Checking the README.\n\n"));
+    renderer.render_response(&ChatResponse::message("The title is Jean-Pierre.\n\n"));
+    renderer.flush();
+    renderer.printer.flush();
+
+    wait(
+        &terminal,
+        "one blank line between the call and the answer",
+        |screen| screen.used() == ["Calling tool fs_read_file", "", "The title is Jean-Pierre."],
+    );
+}
+
+/// Between two tool calls the window leaves their chrome as it found it: the
+/// chat renderer adds no gap for reasoning that is no longer on screen.
+/// A gap a tool result owes is the tool renderer's to draw.
+#[test]
+fn the_window_between_two_tool_calls_adds_no_gap() {
+    let (mut renderer, terminal) = create_screen_renderer(window_config(3), 12, 40);
+
+    renderer.enter_tool_call();
+    renderer.printer.eprintln("Calling tool fs_read_file");
+    renderer.render_response(&ChatResponse::reasoning("Checking the README.\n\n"));
+    renderer.enter_tool_call();
+    renderer.printer.eprintln("Calling tool fs_grep_files");
+    renderer.flush();
+    renderer.printer.flush();
+
+    wait(&terminal, "the two calls on consecutive rows", |screen| {
+        screen.used() == ["Calling tool fs_read_file", "Calling tool fs_grep_files"]
+    });
 }

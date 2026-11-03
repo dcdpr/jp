@@ -1522,7 +1522,7 @@ style: StyleConfig
     delay_secs?: int
     interval_ms?: int
     show?: bool
-    stderr_rows?: "off" (aka false) | "auto" (aka true) | string
+    stderr_rows?: "off" (aka false) | "auto" (aka true) | bool | int
   reasoning: ReasoningConfig
     background?: int | string | null
     display?: "hidden" | "summary" | "static" | "progress" | "timer" | "full" | string
@@ -1551,6 +1551,9 @@ style: StyleConfig
           top_k: int | null
           top_p: float | null
       |: null
+    window: ReasoningWindowConfig
+      rows?: "off" (aka false) | "auto" (aka true) | bool | int
+      timer?: bool
   streaming: StreamingConfig
     progress: ProgressConfig
       delay_secs?: int
@@ -1565,7 +1568,7 @@ style: StyleConfig
       delay_secs?: int
       interval_ms?: int
       show?: bool
-      stderr_rows?: "off" (aka false) | "auto" (aka true) | string
+      stderr_rows?: "off" (aka false) | "auto" (aka true) | bool | int
     show?: bool
   typewriter: TypewriterConfig
     code_delay?: string

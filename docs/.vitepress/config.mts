@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
 import { defineConfig } from 'vitepress'
-import abnfGrammar from './grammars/abnf.tmLanguage.json'
+import abnfGrammar from './grammars/abnf.tmLanguage.json' with { type: 'json' }
 import { withJpVite } from './jp-vite/config.mjs'
 
 // Serve raw `.md` files with an explicit UTF-8 charset on the dev server. The

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use jp_config::{
     AppConfig,
     conversation::tool::{PartialEnableConfig, PartialToolConfig},
-    style::stderr_rows::{RowCount, StderrRows},
+    style::window_rows::{RowCount, WindowRows},
     util::build,
 };
 use jp_mcp::{Startup, StderrLine};
@@ -37,14 +37,14 @@ fn immediate_config() -> McpStartupConfig {
         interval_ms: 10,
         // Most of these cases assert on the status row alone; the ones that
         // exercise the window override this.
-        stderr_rows: StderrRows::Off,
+        stderr_rows: WindowRows::Off,
     }
 }
 
 /// A startup wait that shows two window rows above the status row.
 fn windowed_config() -> McpStartupConfig {
     McpStartupConfig {
-        stderr_rows: StderrRows::Fixed(RowCount { rows: 2 }),
+        stderr_rows: WindowRows::Fixed(RowCount { rows: 2 }),
         ..immediate_config()
     }
 }

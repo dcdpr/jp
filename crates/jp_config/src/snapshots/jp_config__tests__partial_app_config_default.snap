@@ -166,6 +166,10 @@ PartialAppConfig {
             summary_model: None,
             background: None,
             extend_across_tool_calls: None,
+            window: PartialReasoningWindowConfig {
+                rows: None,
+                timer: None,
+            },
         },
         streaming: PartialStreamingConfig {
             progress: PartialProgressConfig {
