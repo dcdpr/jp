@@ -347,8 +347,8 @@ context they share.
 The relation is recorded on the child alone, as its `Parent` field, so a
 parent's children are the tickets that name it.
 One level deep: a parent sits under nothing.
-`Metadata::parent` in the `ticket` crate holds the field, and
-`ticket::parent` the rules the relation keeps.
+`Metadata::parent` in the `ticket` crate holds the field, and `ticket::parent`
+the rules the relation keeps.
 
 **Not the same as** a [Tracking Ticket](#tracking-ticket), which stands for an
 RFD through a label rather than for other tickets through their `Parent`.
