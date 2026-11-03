@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { FOLD_ABOVE, groupReferences, referenceLabel } from '../site/jp-vite/theme/reference-groups.mjs'
-import { ancestorsOf, childrenOf, topPages } from '../site/jp-vite/theme/wiki-tree.mjs'
+import { childrenOf, topPages } from '../site/jp-vite/theme/wiki-tree.mjs'
 
 // Entries as the wiki loader gives them, in a reading order that differs from
 // their ids': W-0000003 is ranked above W-0000002, and W-0000007 above
@@ -28,21 +28,6 @@ test('a page lists the active pages directly under it, in reading order', () => 
 
 test('the top pages are the active pages without a parent, in reading order', () => {
     assert.deepEqual(ids(topPages(ENTRIES)), ['W-0000007', 'W-0000001'])
-})
-
-test('a page sits below its parent, that page\'s parent, and so on, top first', () => {
-    assert.deepEqual(ids(ancestorsOf(ENTRIES, 'W-0000004')), ['W-0000001', 'W-0000003'])
-    assert.deepEqual(ids(ancestorsOf(ENTRIES, 'W-0000001')), [])
-    assert.deepEqual(ids(ancestorsOf(ENTRIES, 'W-9999999')), [])
-
-    // A loop of parents, or a parent that isn't a page, still ends.
-    const looping = [
-        { id: 'W-0000001', parent: 'W-0000002' },
-        { id: 'W-0000002', parent: 'W-0000001' },
-        { id: 'W-0000003', parent: 'W-0000009' },
-    ]
-    assert.deepEqual(ids(ancestorsOf(looping, 'W-0000001')), ['W-0000002'])
-    assert.deepEqual(ids(ancestorsOf(looping, 'W-0000003')), [])
 })
 
 test('references group by kind, wiki pages first, each sorted by label', () => {

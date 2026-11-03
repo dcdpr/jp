@@ -7,7 +7,7 @@ use crate::{
     delta::{PartialConfigDelta, delta_opt},
     fill::FillDefaults,
     partial::{ToPartial, partial_opt},
-    style::stderr_rows::StderrRows,
+    style::window_rows::WindowRows,
 };
 
 /// Tool call content style configuration.
@@ -90,7 +90,7 @@ pub struct ToolProgressConfig {
     /// `conversation.tools.<name>.style.print_stderr = false` rather than
     /// shrinking the window for everything.
     #[setting(default = "auto")]
-    pub stderr_rows: StderrRows,
+    pub stderr_rows: WindowRows,
 }
 
 /// Configuration for the "(receiving arguments…)" indicator shown while tool

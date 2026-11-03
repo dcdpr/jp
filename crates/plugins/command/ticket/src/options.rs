@@ -11,6 +11,9 @@
 //! values = ["bug", "feature", "tracking"]
 //! ```
 //!
+//! `format_on_write = true` lays every ticket out in the style of the
+//! workspace's `.comfort.toml` as it is written; it is off by default.
+//!
 //! Every option is optional.
 //! Keys this plugin doesn't read are ignored, so a configuration written for a
 //! newer `jp-ticket` still loads.

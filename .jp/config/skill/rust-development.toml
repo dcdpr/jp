@@ -12,7 +12,7 @@ current project. The following tools help you with this:
 - cargo_check: Run the project's tests and lints.
 - cargo_test: Run the project's tests.
 - cargo_expand: Expand macros in the project's code.
-- cargo_format: Format the project's code.
+- cargo_format: Format the project's Rust code (`cargo fmt`) and reflow doc-comment paragraphs (`comfort`).
 - cargo_update: Update named dependencies in `Cargo.lock`, optionally to a pinned version.
 - cargo_install_tools: Rebuild the binary serving these local tools, after editing `.config/jp/tools`.
 """
@@ -40,7 +40,7 @@ items = [
     Unit tests should be isolated into a separate file named with the `_tests` suffix, using the \
     `path` attribute to specify the file path next to the under-test module.\
     """,
-    "Run `cargo fmt` and `cargo clippy` to ensure consistency.",
+    "Run `cargo_format` and `cargo_check` to format code and doc comments and verify lints.",
 ]
 
 [[assistant.instructions]]

@@ -53,7 +53,11 @@ use crate::{extract::find_blocks, sentence::split_sentences};
 /// Options that control which transformations the markdown pipeline applies on
 /// top of the always-on sembr reflow.
 /// Used by [`format_markdown_with`] and [`format_rust_source_with`].
-#[derive(Debug, Clone, Default)]
+///
+/// [`Config::format_options`] builds one from a `.comfort.toml`.
+///
+/// [`Config::format_options`]: crate::config::Config::format_options
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FormatOptions {
     /// Maximum line width passed to the sembr engine.
     pub max_width: usize,

@@ -52,17 +52,11 @@ fn cargo_format_impl<R: ProcessRunner>(
     //    doesn't matter; running comfort second keeps rustfmt as the
     //    authoritative source for everything outside `///`/`//!`.
     //
-    //    `--language rust` restricts discovery to `.rs` files; the markdown
-    //    flags still apply, but only to the markdown inside doc comments, not
-    //    to standalone markdown files (READMEs, docs) in the workspace.
-    let mut comfort_args = vec![
-        "--list-changed",
-        "--format-markdown",
-        "--reference-links",
-        "--prune-reference-links",
-        "--language",
-        "rust",
-    ];
+    //    `--language rust` restricts discovery to `.rs` files; the style in
+    //    `.comfort.toml` still applies, but only to the markdown inside doc
+    //    comments, not to standalone markdown files (READMEs, docs) in the
+    //    workspace.
+    let mut comfort_args = vec!["--list-changed", "--language", "rust"];
     if let Some(pkg) = package {
         comfort_args.push("--package");
         comfort_args.push(pkg);

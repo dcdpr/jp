@@ -35,10 +35,10 @@ use jp_plugin::message::{HostToPlugin, PluginToHost, ReadConfigRequest};
 use serde_json::Value;
 
 use crate::{
-    git,
+    git, init,
     options::Options,
     print_to, read_message, send,
-    settings::{Settings, snapshot, source_dir},
+    settings::{Settings, below, snapshot, source_dir},
     shown, site,
     sync::{self, Change},
 };
@@ -72,11 +72,8 @@ where
     W: Write,
 {
     let site_dir = source_dir(root, options)?;
-    if !site_dir.join("package.json").is_file() {
-        return Err(format!(
-            "There is no VitePress site in {}: run `jp vite init` to set one up.",
-            shown(root, &site_dir)
-        ));
+    if let Some(reason) = unready(root, &site_dir) {
+        return Err(reason);
     }
 
     let remote = git::remote(root);
@@ -331,6 +328,39 @@ fn finished(status: ExitStatus) -> Result<(), String> {
     } else {
         Err(format!("`vitepress dev` stopped: {status}."))
     }
+}
+
+/// Why the site in `site_dir` can't be served, or `None` when it can.
+///
+/// The site needs its `package.json`.
+/// When every file `jp vite init` writes is missing, there is no site;
+/// otherwise each missing one is named.
+pub(crate) fn unready(root: &Utf8Path, site_dir: &Utf8Path) -> Option<String> {
+    if site_dir.join("package.json").is_file() {
+        return None;
+    }
+
+    let missing = init::missing(site_dir);
+    if missing.len() == init::TEMPLATES.len() {
+        return Some(format!(
+            "There is no VitePress site in {}: run `jp vite init` to set one up.",
+            shown(root, site_dir)
+        ));
+    }
+
+    let paths: Vec<_> = missing
+        .iter()
+        .map(|template| {
+            let path = site_dir.join(template.path);
+            below(root, &path).unwrap_or_else(|| path.to_string())
+        })
+        .collect();
+    let verb = if paths.len() == 1 { "is" } else { "are" };
+
+    Some(format!(
+        "{} {verb} missing, re-run `jp vite init`.",
+        paths.join(", ")
+    ))
 }
 
 /// The command that runs the project's `vitepress`, through the package manager

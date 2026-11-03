@@ -11,7 +11,7 @@ use scraper::{ElementRef, Html, Selector};
 use serde::Deserialize;
 use url::Url;
 
-use super::{SUMMARIZE_THRESHOLD, http_client, is_binary, truncate};
+use super::{SUMMARIZE_THRESHOLD, http_client, is_binary, pdf, truncate};
 use crate::{
     Error,
     util::{ToolResult, error},
@@ -65,7 +65,20 @@ pub(super) async fn fetch(
         .unwrap_or("")
         .to_owned();
 
+    if pdf::is_pdf_content_type(&content_type) {
+        let bytes = response.bytes().await?;
+        return pdf::render(url, &bytes, list_sections, sections).await;
+    }
+
     if is_binary(&content_type) {
+        // Servers often label a PDF as generic binary data, so the body's own
+        // signature decides.
+        if content_type.starts_with("application/octet-stream")
+            && let Some(bytes) = pdf::read_if_pdf(response).await?
+        {
+            return pdf::render(url, &bytes, list_sections, sections).await;
+        }
+
         return error(format!(
             "Cannot fetch binary content (Content-Type: {content_type})"
         ));
@@ -83,7 +96,8 @@ pub(super) async fn fetch(
 /// Turn an HTML document into the tool's output.
 ///
 /// With `list_sections`, returns the anchor listing instead of the content.
-/// With `sections`, returns only those anchors' content.
+/// With `sections`, returns only those anchors' content, or an error naming the
+/// ones the page doesn't have.
 /// Otherwise the whole document is converted to markdown, narrowed to `url`'s
 /// fragment when it has one, and summarized or truncated if it exceeds the size
 /// threshold.
@@ -97,8 +111,11 @@ pub(super) async fn render(
         return Ok(format_section_listing(&body).into());
     }
 
-    if let Some(ids) = sections {
-        let html = extract_sections(&body, &ids);
+    if let Some(ids) = sections.filter(|ids| !ids.is_empty()) {
+        let html = match extract_sections(&body, &ids) {
+            Ok(html) => html,
+            Err(unknown) => return error(unknown_sections(&unknown)),
+        };
         let md = html_to_markdown(&html)?;
         return Ok(truncate(&md, SUMMARIZE_THRESHOLD).into());
     }
@@ -130,7 +147,7 @@ struct SectionHeader {
     preview: String,
 }
 
-fn html_to_markdown(html: &str) -> Result<String, Error> {
+pub(super) fn html_to_markdown(html: &str) -> Result<String, Error> {
     let converter = HtmlToMarkdown::builder()
         .skip_tags(vec!["script", "style", "noscript", "svg", "iframe"])
         .build();
@@ -573,7 +590,7 @@ fn escape_css_value(s: &str) -> String {
 
 /// Build an XML listing of all anchored sections on the page (headings and
 /// definition-list terms).
-fn format_section_listing(html: &str) -> String {
+pub(super) fn format_section_listing(html: &str) -> String {
     let headers = list_section_headers(html);
     if headers.is_empty() {
         return "No sections with anchors found on this page.".to_owned();
@@ -825,8 +842,11 @@ fn truncate_str(s: &str, max: usize) -> String {
     format!("{}...", &s[..end])
 }
 
-/// Extract multiple sections by anchor ID and combine into one HTML document.
-fn extract_sections(html: &str, ids: &[String]) -> String {
+/// Extract multiple sections by anchor ID and combine into one HTML document,
+/// in the order the IDs are given.
+///
+/// Returns the IDs that match nothing on the page as the error, if any.
+pub(super) fn extract_sections(html: &str, ids: &[String]) -> Result<String, Vec<String>> {
     let doc = Html::parse_document(html);
 
     let head_html = Selector::parse("head")
@@ -836,19 +856,30 @@ fn extract_sections(html: &str, ids: &[String]) -> String {
         .unwrap_or_default();
 
     let mut body_parts = Vec::new();
+    let mut unknown = Vec::new();
     for id in ids {
-        if let Some(section) = extract_section_html_from_doc(&doc, id) {
-            body_parts.push(section);
+        match extract_section_html_from_doc(&doc, id) {
+            Some(section) => body_parts.push(section),
+            None => unknown.push(id.clone()),
         }
     }
 
-    if body_parts.is_empty() {
-        return html.to_owned();
+    if !unknown.is_empty() {
+        return Err(unknown);
     }
 
-    format!(
+    Ok(format!(
         "<html>{head_html}<body>{}</body></html>",
         body_parts.join("\n")
+    ))
+}
+
+/// Error message for `sections` IDs that match nothing on the page.
+fn unknown_sections(unknown: &[String]) -> String {
+    let ids: Vec<String> = unknown.iter().map(|id| format!("`{id}`")).collect();
+    format!(
+        "No section {} on this page. Call with `list_sections` to see its section ids.",
+        ids.join(", ")
     )
 }
 
