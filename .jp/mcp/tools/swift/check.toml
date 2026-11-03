@@ -1,6 +1,6 @@
 [conversation.tools.swift_check]
 enable = false
-run = "unattended"
+run = "allow"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "Build the macOS app in `apps/macos`, validating that the Swift code compiles. The project treats warnings as errors, so anything reported is a failure. Builds the `jp_ffi` static library and regenerates the Xcode project first, so no setup step is needed."

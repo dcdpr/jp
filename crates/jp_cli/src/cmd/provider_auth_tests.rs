@@ -6,7 +6,7 @@ use std::{
 
 use async_trait::async_trait;
 use camino_tempfile::Utf8TempDir;
-use clap::{Parser as _, error::ErrorKind};
+use clap::error::ErrorKind;
 use jp_credentials::{FsCredentialBackend, PROVIDER_ANTHROPIC};
 use jp_llm::credential::ExternalAuth;
 use jp_printer::OutputFormat;

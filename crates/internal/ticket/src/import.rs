@@ -3,19 +3,19 @@
 //! The import is one-way and wholesale: the title, description, and comments
 //! are replaced by whatever upstream says, and the metadata block is never
 //! touched.
-//! GitHub owns what was written on GitHub; the repository owns `Status`,
-//! `Kind`, `Blocked by`, and `Implements`, so an imported ticket can be triaged
-//! and moved across the board without the next import undoing it.
+//! GitHub owns what was written on GitHub; the repository owns `Status` and the
+//! labels, so an imported ticket can be triaged and moved across the board
+//! without the next import undoing it.
 //!
 //! Imported text is untrusted.
 //! [`escape`] neutralises it before it reaches the working tree, so the site
 //! renders it as data and never as page source.
 
-use crate::{Comment, Kind};
+use crate::{Comment, Labels};
 
 /// What an upstream issue contributes to a ticket.
 ///
-/// `kind`, `authors`, and `date` are only used when the import creates the
+/// `labels`, `authors`, and `date` are only used when the import creates the
 /// ticket; a later import of the same issue leaves the metadata block alone.
 pub struct Import<'a> {
     /// The upstream issue number, recorded as `GitHub: #123`.
@@ -23,7 +23,9 @@ pub struct Import<'a> {
     pub title: &'a str,
     pub description: &'a str,
     pub comments: Vec<Comment>,
-    pub kind: Kind,
+    /// The labels a new ticket is filed with, from whoever runs the import
+    /// rather than from upstream.
+    pub labels: &'a Labels,
     pub authors: &'a str,
     pub date: &'a str,
 }
@@ -32,8 +34,13 @@ impl Import<'_> {
     /// The `GitHub` metadata value that links a ticket to this issue.
     #[must_use]
     pub fn marker(&self) -> String {
-        format!("#{}", self.number)
+        github_marker(self.number)
     }
+}
+
+/// The `GitHub` metadata value that links a ticket to upstream issue `number`.
+pub(crate) fn github_marker(number: u64) -> String {
+    format!("#{number}")
 }
 
 /// Neutralise untrusted markdown so the site renders it as content.

@@ -1,5 +1,6 @@
 //! LLM-driven conversation title generation.
 
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use jp_config::{AppConfig, PartialAppConfig};
 use jp_conversation::ConversationStream;
 use jp_llm::{
@@ -7,9 +8,11 @@ use jp_llm::{
     provider,
     title::{self, TitleRequest},
 };
+use jp_term::sanitize::strip_controls;
 use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
+    cli::{CommandArgs, required},
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
@@ -30,30 +33,68 @@ const MORE: &str = "More...";
 /// Picker entry that takes a hand-written title instead of a generated one.
 const MANUAL: &str = "Manually enter a title";
 
-#[derive(Debug, clap::Args)]
+/// `jp conversation title`.
+#[derive(Debug)]
 pub(crate) struct Title {
-    #[command(flatten)]
     target: PositionalIds<true, true>,
 
     /// How many candidate titles to generate.
-    ///
-    /// The candidates are offered as a picker, which can also generate a fresh
-    /// batch or take a hand-written title.
-    /// Without a terminal to pick with, the first candidate is applied.
-    #[arg(long, short = 'n', default_value_t = DEFAULT_COUNT, value_parser = parse_count)]
     count: usize,
 
     /// The model to generate the title with.
-    ///
-    /// Accepts a model alias or a full `provider/name` ID, the same values as
-    /// `jp query --model`.
-    /// Overrides `conversation.title.generate.model` for this invocation.
-    #[arg(long, short = 'm')]
     model: Option<String>,
 
     /// Print the candidate titles without applying one.
-    #[arg(long)]
     dry_run: bool,
+}
+
+impl CommandArgs for Title {
+    fn augment(cmd: Command) -> Command {
+        PositionalIds::<true, true>::augment(cmd)
+            .arg(
+                Arg::new("count")
+                    .short('n')
+                    .long("count")
+                    .value_name("COUNT")
+                    .value_parser(parse_count)
+                    // clap takes the default as text; `title_tests` pins it to
+                    // `DEFAULT_COUNT`.
+                    .default_value("3")
+                    .help("How many candidate titles to generate")
+                    .long_help(
+                        "How many candidate titles to generate.\n\nThe candidates are offered as \
+                         a picker, which can also generate a fresh batch or take a hand-written \
+                         title. Without a terminal to pick with, the first candidate is applied.",
+                    ),
+            )
+            .arg(
+                Arg::new("model")
+                    .short('m')
+                    .long("model")
+                    .value_name("MODEL")
+                    .help("The model to generate the title with")
+                    .long_help(
+                        "The model to generate the title with.\n\nAccepts a model alias or a full \
+                         `provider/name` ID, the same values as `jp query --model`. Overrides \
+                         `conversation.title.generate.model` for this invocation.",
+                    ),
+            )
+            .arg(
+                Arg::new("dry_run")
+                    .long("dry-run")
+                    .action(ArgAction::SetTrue)
+                    .help("Print the candidate titles without applying one"),
+            )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> std::result::Result<Self, clap::Error> {
+        Ok(Self {
+            target: PositionalIds::from_matches(matches)?,
+            count: required(matches, "count")?,
+            model: matches.get_one("model").cloned(),
+            dry_run: matches.get_flag("dry_run"),
+        })
+    }
 }
 
 fn parse_count(s: &str) -> std::result::Result<usize, String> {
@@ -166,24 +207,38 @@ pub(super) async fn select(
 
         // Discarded candidates stay selectable: a user who asked for more may
         // still prefer one of the earlier suggestions.
-        let mut choices = candidates.clone();
-        choices.extend(rejected.iter().cloned());
-        choices.push(MORE.to_owned());
-        choices.push(MANUAL.to_owned());
+        let mut titles = candidates.clone();
+        titles.extend(rejected.iter().cloned());
 
         let mut writer = ctx.printer.prompt_writer();
-        let choice =
-            inquire::Select::new("Conversation Title", choices).prompt_with_writer(&mut writer)?;
+        let index = inquire::Select::new("Conversation Title", picker_rows(&titles))
+            .raw_prompt_with_writer(&mut writer)?
+            .index;
 
-        match choice.as_str() {
-            MORE => rejected.extend(candidates),
-            MANUAL => {
+        // The rows are the titles in order, then the two actions, so the index
+        // names the title as the model wrote it.
+        match index.checked_sub(titles.len()) {
+            None => return Ok(titles.swap_remove(index)),
+            Some(0) => rejected.extend(candidates),
+            Some(_) => {
                 let title = inquire::Text::new("Title").prompt_with_writer(&mut writer)?;
                 return Ok(title.trim().to_owned());
             }
-            _ => return Ok(choice),
         }
     }
+}
+
+/// The title picker's rows: each title as one line of plain text, then the
+/// action that generates more and the one that takes a hand-written title.
+///
+/// A picker row is redrawn in place as the cursor moves, so a title keeps no
+/// control character there, whatever `style.sanitize` says.
+fn picker_rows(titles: &[String]) -> Vec<String> {
+    titles
+        .iter()
+        .map(|title| strip_controls(title, &[]))
+        .chain([MORE.to_owned(), MANUAL.to_owned()])
+        .collect()
 }
 
 /// Generate `count` candidate titles for a conversation.

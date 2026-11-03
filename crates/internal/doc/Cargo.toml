@@ -1,0 +1,34 @@
+[package]
+description = "The document format JP's in-repo documents share: metadata blocks, epoch ids, references, and heading anchors."
+name = "doc"
+
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+comfort = { workspace = true }
+
+camino = { workspace = true }
+chrono = { workspace = true }
+comrak = { workspace = true }
+ignore = { workspace = true }
+serde = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }
+unicode-normalization = { workspace = true }
+
+[dev-dependencies]
+camino-tempfile = { workspace = true }
+indoc = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false

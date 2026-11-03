@@ -1,7 +1,6 @@
 # Reconciling a conversation directory deletes stale same-id copies with their drafts
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-27
 - **Label**: domain=storage

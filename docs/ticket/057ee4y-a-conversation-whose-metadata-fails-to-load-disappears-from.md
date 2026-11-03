@@ -1,7 +1,6 @@
 # A conversation whose metadata fails to load disappears from every listing
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-20
 - **Label**: domain=conversation

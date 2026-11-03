@@ -2,18 +2,36 @@
 
 use std::fs;
 
+use clap::{ArgMatches, Command};
 use jp_printer::Printer;
 
-use super::{approvals::ApprovalStore, discovery, registry};
-use crate::cmd;
+use super::{approvals::ApprovalStore, discovery, plugin_name_arg, registry};
+use crate::{
+    cli::{CommandArgs, required},
+    cmd,
+};
 
 /// Remove a plugin JP installed, and its approval.
 ///
 /// A binary on `$PATH` belongs to whatever put it there, and is left in place.
-#[derive(Debug, clap::Args)]
+#[derive(Debug)]
 pub(crate) struct Uninstall {
     /// The plugin's name: its file name without `jp-`.
     name: String,
+}
+
+impl CommandArgs for Uninstall {
+    fn augment(cmd: Command) -> Command {
+        cmd.arg(plugin_name_arg(
+            "The plugin's name: its file name without `jp-`",
+        ))
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            name: required(matches, "name")?,
+        })
+    }
 }
 
 impl Uninstall {

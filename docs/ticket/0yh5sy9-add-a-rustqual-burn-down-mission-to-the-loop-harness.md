@@ -1,7 +1,6 @@
 # Add a rustqual burn-down mission to the loop harness
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: domain=tooling

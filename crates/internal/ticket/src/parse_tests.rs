@@ -1,14 +1,13 @@
 use indoc::indoc;
 
 use super::*;
-use crate::{Kind, Status};
+use crate::Status;
 
 /// A ticket with a description and no comments.
 const PLAIN: &str = indoc! {"
     # Tool call header misaligned
 
     - **Status**: Todo
-    - **Kind**: Bug
     - **Authors**: Jean Mertz
     - **Date**: 2026-08-05
 
@@ -20,10 +19,9 @@ const WITH_COMMENTS: &str = indoc! {"
     # Tool call header misaligned
 
     - **Status**: In Progress
-    - **Kind**: Bug
     - **Authors**: Jean Mertz
     - **Date**: 2026-08-05
-    - **Implements**: 095
+    - **Promoted to**: 095
 
     The header renders one column left of the body below 80 columns.
 
@@ -51,7 +49,6 @@ fn reads_title_metadata_and_description() {
 
     assert_eq!(ticket.title, "Tool call header misaligned");
     assert_eq!(ticket.metadata.status, Status::Todo);
-    assert_eq!(ticket.metadata.kind, Kind::Bug);
     assert_eq!(ticket.metadata.authors, "Jean Mertz");
     assert_eq!(ticket.metadata.date, "2026-08-05");
     assert_eq!(
@@ -66,8 +63,7 @@ fn reads_optional_metadata_fields() {
     let ticket = document(WITH_COMMENTS).unwrap();
 
     assert_eq!(ticket.metadata.status, Status::InProgress);
-    assert_eq!(ticket.metadata.implements.as_deref(), Some("095"));
-    assert_eq!(ticket.metadata.blocked_by, None);
+    assert_eq!(ticket.metadata.promoted_to.as_deref(), Some("095"));
     assert_eq!(ticket.metadata.github, None);
     assert!(ticket.metadata.labels.is_empty());
 }
@@ -81,7 +77,6 @@ fn reads_every_label_line() {
         # Labelled
 
         - **Status**: Todo
-        - **Kind**: Bug
         - **Authors**: john
         - **Date**: 2026-08-05
         - **Label**: package=jp_config
@@ -108,7 +103,6 @@ fn reads_an_empty_label_line_as_no_label() {
         # Labelled
 
         - **Status**: Todo
-        - **Kind**: Bug
         - **Authors**: john
         - **Date**: 2026-08-05
         - **Label**:
@@ -129,7 +123,6 @@ fn reads_a_label_the_formatter_escaped() {
         # Labelled
 
         - **Status**: Todo
-        - **Kind**: Bug
         - **Authors**: john
         - **Date**: 2026-08-05
         - **Label**: package=jp\_config
@@ -149,7 +142,6 @@ fn a_malformed_label_line_does_not_take_the_others_with_it() {
         # Labelled
 
         - **Status**: Todo
-        - **Kind**: Bug
         - **Authors**: john
         - **Date**: 2026-08-05
         - **Label**: client=cli
@@ -161,6 +153,45 @@ fn a_malformed_label_line_does_not_take_the_others_with_it() {
     assert_eq!(document(source).unwrap().metadata.labels.to_tokens(), [
         "client=cli"
     ]);
+}
+
+/// `comfort` wraps a long value onto an indented line; the fields after it
+/// still belong to the block, and the value reads whole.
+#[test]
+fn a_wrapped_value_keeps_the_fields_after_it() {
+    let source = indoc! {"
+        # Wrapped
+
+        - **Status**: Todo
+        - **Authors**: Jane Doe <jane@example.com>, John Doe
+          <john@example.com>
+        - **Date**: 2026-08-05
+        - **Label**: client=cli
+
+        Description.
+    "};
+
+    let ticket = document(source).unwrap();
+
+    assert_eq!(
+        ticket.metadata.authors,
+        "Jane Doe <jane@example.com>, John Doe <john@example.com>"
+    );
+    assert_eq!(ticket.metadata.date, "2026-08-05");
+    assert_eq!(ticket.metadata.labels.to_tokens(), ["client=cli"]);
+    assert_eq!(ticket.description, "Description.");
+    assert_eq!(label_tokens(source), ["client=cli"]);
+}
+
+/// A key spelled in another case still names its field.
+#[test]
+fn keys_read_without_case() {
+    let source = "# Lower\n\n- **status**: Done\n- **AUTHORS**: jean\n- **date**: 2026-08-05\n";
+
+    let ticket = document(source).unwrap();
+
+    assert_eq!(ticket.metadata.status, Status::Done);
+    assert_eq!(ticket.metadata.authors, "jean");
 }
 
 #[test]
@@ -198,7 +229,6 @@ fn separators_inside_fenced_blocks_are_not_boundaries() {
         # Quoting a ticket
 
         - **Status**: Todo
-        - **Kind**: Chore
         - **Authors**: jean
         - **Date**: 2026-08-05
 
@@ -237,7 +267,6 @@ fn longer_fences_contain_shorter_ones() {
         # Nested fences
 
         - **Status**: Todo
-        - **Kind**: Chore
         - **Authors**: jean
         - **Date**: 2026-08-05
 
@@ -276,7 +305,6 @@ fn separator_without_a_metadata_block_is_not_a_boundary() {
         # Horizontal rules
 
         - **Status**: Todo
-        - **Kind**: Chore
         - **Authors**: jean
         - **Date**: 2026-08-05
 
@@ -301,7 +329,6 @@ fn comments_heading_alone_creates_no_comments() {
         # Decorative heading
 
         - **Status**: Todo
-        - **Kind**: Chore
         - **Authors**: jean
         - **Date**: 2026-08-05
 
@@ -331,7 +358,6 @@ fn reads_the_title_without_validating_the_header() {
         # Tool call header misaligned
 
         - **Status**: Todo
-        - **Kind**: Bug
         - **Date**: 2026-08-05
 
         The header renders one column left of the body.
@@ -366,14 +392,34 @@ fn rejects_a_title_without_a_metadata_block() {
 #[test]
 fn rejects_a_missing_required_field() {
     let source = indoc! {"
-        # No kind
+        # No status
 
-        - **Status**: Todo
         - **Authors**: jean
         - **Date**: 2026-08-05
     "};
 
-    assert_eq!(document(source), Err(ParseError::MissingField("Kind")));
+    assert_eq!(document(source), Err(ParseError::MissingField("Status")));
+}
+
+/// A field the format doesn't define is skipped rather than refused, so a
+/// ticket carrying a `Kind`, `Blocked by`, or `Implements` line still reads.
+#[test]
+fn ignores_a_field_the_format_does_not_define() {
+    let source = indoc! {"
+        # Old fields
+
+        - **Status**: Todo
+        - **Kind**: Enhancement
+        - **Authors**: jean
+        - **Date**: 2026-08-05
+        - **Implements**: 095
+        - **Blocked by**: T-02wt0kx
+    "};
+
+    let ticket = document(source).unwrap();
+
+    assert_eq!(ticket.metadata.status, Status::Todo);
+    assert_eq!(ticket.metadata.authors, "jean");
 }
 
 #[test]
@@ -382,7 +428,6 @@ fn rejects_an_unknown_status() {
         # Bad status
 
         - **Status**: Blocked
-        - **Kind**: Bug
         - **Authors**: jean
         - **Date**: 2026-08-05
     "};
@@ -398,26 +443,8 @@ fn rejects_an_unknown_status() {
 
 #[test]
 fn locates_the_metadata_block() {
-    assert_eq!(metadata_range(PLAIN), Some(2..6));
+    assert_eq!(metadata_range(PLAIN), Some(2..5));
     assert_eq!(metadata_range("# No metadata\n"), None);
-}
-
-#[test]
-fn splits_metadata_lines() {
-    assert_eq!(
-        meta_line("- **Blocked by**: T-02wt0m3"),
-        Some(("Blocked by", "T-02wt0m3"))
-    );
-    assert_eq!(meta_line("- **Re**:"), Some(("Re", "")));
-    assert_eq!(meta_line("- not metadata"), None);
-    assert_eq!(meta_line("  - **Indented**: value"), None);
-}
-
-/// A value opening with `#` reaches the parser bare: it sits mid-line, where no
-/// markdown formatter has reason to escape it.
-#[test]
-fn reads_a_value_that_opens_with_a_hash() {
-    assert_eq!(meta_line("- **Re**: #1"), Some(("Re", "#1")));
 }
 
 #[test]

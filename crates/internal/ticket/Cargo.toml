@@ -14,13 +14,18 @@ version.workspace = true
 
 [dependencies]
 camino = { workspace = true }
+chrono = { workspace = true }
+doc = { workspace = true }
 jp_label = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
+# The style a test formats tickets in.
+comfort = { workspace = true }
+
 camino-tempfile = { workspace = true }
 indoc = { workspace = true }
-serde_json = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true

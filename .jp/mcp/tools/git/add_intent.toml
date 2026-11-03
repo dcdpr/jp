@@ -1,6 +1,6 @@
 [conversation.tools.git_add_intent]
 enable = "explicit"
-run = "unattended"
+run = "allow"
 style.inline_results = "off"
 style.parameters = "function_call"
 

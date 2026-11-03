@@ -38,6 +38,18 @@ use crate::{
     stream::EventStream,
 };
 
+/// Synthetic user message appended when a request would otherwise end with
+/// assistant content the model cannot continue from directly.
+///
+/// A conversation ends with assistant content after an interrupt or a retry
+/// commits a partial response.
+/// Models that accept assistant prefill continue from that content as-is; for
+/// the rest, a provider appends this message so the model picks up where it
+/// left off.
+/// It goes on the wire only and is never recorded in the conversation.
+pub(crate) const CONTINUE_MESSAGE: &str = "Continue your response exactly from where you left \
+                                           off. Do not repeat content you already produced.";
+
 #[async_trait]
 pub trait Provider: Send + Sync {
     /// Provider-specific hints advertised by the Host on its MCP tool

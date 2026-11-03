@@ -41,7 +41,7 @@ fn the_marker_links_a_ticket_to_its_issue() {
         title: "t",
         description: "d",
         comments: vec![],
-        kind: Kind::Bug,
+        labels: &Labels::default(),
         authors: "gh:someone",
         date: "2026-08-05",
     };
@@ -61,7 +61,7 @@ fn every_field_is_escaped() {
             re: None,
             body: "<div>hi</div>".to_owned(),
         }],
-        kind: Kind::Bug,
+        labels: &Labels::default(),
         authors: "gh:someone",
         date: "2026-08-05",
     };

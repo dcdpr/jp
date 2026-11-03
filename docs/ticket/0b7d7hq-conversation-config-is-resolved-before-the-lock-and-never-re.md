@@ -1,7 +1,6 @@
 # Conversation config is resolved before the lock and never re-read after a wait
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-31
 - **Label**: domain=conversation

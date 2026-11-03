@@ -1,7 +1,6 @@
 # A model refusal discards the answer and reports success
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-07
 - **Label**: domain=llm

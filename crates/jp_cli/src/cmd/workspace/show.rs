@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
+use clap::{Arg, ArgMatches, Command, value_parser};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_printer::Printer;
@@ -11,6 +12,7 @@ use tracing::warn;
 
 use crate::{
     DEFAULT_STORAGE_DIR,
+    cli::CommandArgs,
     cmd::{
         Output,
         workspace::target::{self, ResolvedTarget, TargetEnv, WorkspaceTarget},
@@ -27,14 +29,33 @@ use crate::{
 /// `show` stays read-only and script-friendly: concrete targets never prompt —
 /// a multi-checkout workspace lists every live root — and only the picker
 /// targets (`?`, `?s`) require interactivity.
-#[derive(Debug, clap::Args)]
+#[derive(Debug)]
 pub(crate) struct Show {
-    /// The workspace to show.
-    /// See `jp w use help` for the grammar.
-    ///
-    /// Also settable with the global `--workspace` flag, but not both at once.
-    /// Defaults to the session's active workspace, then the cwd-derived one.
+    /// The workspace to show, or the session's active one, then the cwd-derived
+    /// one.
     pub(super) target: Option<WorkspaceTarget>,
+}
+
+impl CommandArgs for Show {
+    fn augment(cmd: Command) -> Command {
+        cmd.arg(
+            Arg::new("target")
+                .value_name("TARGET")
+                .value_parser(value_parser!(WorkspaceTarget))
+                .help("The workspace to show. See `jp w use help` for the grammar")
+                .long_help(
+                    "The workspace to show. See `jp w use help` for the grammar.\n\nAlso settable \
+                     with the global `--workspace` flag, but not both at once. Defaults to the \
+                     session's active workspace, then the cwd-derived one.",
+                ),
+        )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            target: matches.get_one("target").cloned(),
+        })
+    }
 }
 
 /// What `show` reports on: a workspace and how it was reached.

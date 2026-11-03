@@ -34,7 +34,7 @@ fn event(kind: impl Into<ConversationEvent>) -> ConversationEvent {
 fn fixture() -> ConversationStream {
     let mut stream = ConversationStream::new_test();
     stream.extend_entries([
-        entry("turn001", event(TurnStart)),
+        entry("turn001", event(TurnStart::default())),
         entry("chat001", event(ChatRequest::from("question"))),
         entry("reply01", event(ChatResponse::message("answer"))),
     ]);
@@ -536,10 +536,10 @@ fn trimming_a_turn_keeps_the_id_of_an_overlay_it_preserves() {
     stream.add_compaction(Compaction::new(0, 0));
     let overlay_id = ids(&stream)[3].clone();
 
-    let request = stream.trim_chat_request();
+    let request = stream.trim_last_turn();
 
     assert_eq!(request.map(|r| r.content), Some("question".to_owned()));
-    assert_eq!(ids(&stream), ["turn001".to_owned(), overlay_id]);
+    assert_eq!(ids(&stream), [overlay_id]);
 }
 
 #[test]
@@ -724,10 +724,10 @@ fn synthetic_summary_entries_have_distinct_ids() {
 fn partially_summarized() -> ConversationStream {
     let mut stream = ConversationStream::new_test();
     stream.extend_entries([
-        entry("turn001", event(TurnStart)),
+        entry("turn001", event(TurnStart::default())),
         entry("chat001", event(ChatRequest::from("old question"))),
         entry("reply01", event(ChatResponse::message("old answer"))),
-        entry("turn002", event(TurnStart)),
+        entry("turn002", event(TurnStart::default())),
         entry("chat002", event(ChatRequest::from("new question"))),
         entry("reply02", event(ChatResponse::message("new answer"))),
     ]);
@@ -835,7 +835,7 @@ fn a_stream_that_was_never_projected_covers_its_entries() {
 fn stripped_tool_call() -> ConversationStream {
     let mut stream = ConversationStream::new_test();
     stream.extend_entries([
-        entry("turn001", event(TurnStart)),
+        entry("turn001", event(TurnStart::default())),
         entry("chat001", event(ChatRequest::from("question"))),
         entry(
             "tool001",

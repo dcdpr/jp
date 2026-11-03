@@ -20,12 +20,7 @@ The active backlog in priority order lives on the [priorities] page.
 Proposals that haven't been assigned a permanent number yet live on the [draft
 RFDs] page.
 
-<script setup>
-import { data } from '../.vitepress/loaders/rfds.data.js'
-import DocIndex from '../.vitepress/theme/DocIndex.vue'
-</script>
-
-<DocIndex :entries="data" />
+<RfdIndex />
 
 [RFD 001]: ./001-jp-rfd-process
 [draft RFDs]: ./drafts/

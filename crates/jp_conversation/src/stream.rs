@@ -271,42 +271,47 @@ impl ConversationStream {
             .collect())
     }
 
-    /// Removes all events from the end of the stream, until a [`ChatRequest`]
-    /// is found, returning that request.
+    /// Removes the last turn from the stream, returning the [`ChatRequest`]
+    /// that opened it.
     ///
-    /// [`ConfigDelta`] and [`Compaction`] overlays encountered while trimming
-    /// are preserved (re-appended) rather than discarded — they apply to the
-    /// conversation as a whole, not to the turn being replayed.
+    /// The last turn is the one holding the stream's last `ChatRequest`, and it
+    /// runs from its [`TurnStart`] to the end of the stream.
+    /// Every turn entry in it is removed, including a request that answered an
+    /// interrupt partway through the turn.
+    /// [`ConfigDelta`] and [`Compaction`] overlays in it are kept: they apply
+    /// to the conversation as a whole, not to the turn they sit in.
+    ///
+    /// Returns `None`, leaving the stream unchanged, when it holds no
+    /// `ChatRequest`.
+    ///
+    /// [`TurnStart`]: crate::event::TurnStart
     #[must_use]
-    pub fn trim_chat_request(&mut self) -> Option<ChatRequest> {
-        let mut preserved = Vec::new();
-        let mut request = None;
+    pub fn trim_last_turn(&mut self) -> Option<ChatRequest> {
+        let last_request = self
+            .events
+            .iter()
+            .rposition(|e| e.as_event().is_some_and(ConversationEvent::is_chat_request))?;
 
-        while let Some(internal) = self.events.pop() {
-            match internal.scope() {
-                EventScope::Global => preserved.push(internal),
-                EventScope::Turn => {
-                    if let Some(req) = internal
-                        .into_event()
-                        .and_then(ConversationEvent::into_chat_request)
-                    {
-                        request = Some(req);
-                        break;
-                    }
-                    // A non-chat-request conversation event (response,
-                    // reasoning, tool call) — part of the replayed turn; drop.
-                }
-            }
-        }
+        // Events before the first `TurnStart` form an implicit leading turn,
+        // which starts at the beginning of the stream.
+        let start = self.events[..=last_request]
+            .iter()
+            .rposition(|e| e.as_event().is_some_and(ConversationEvent::is_turn_start))
+            .unwrap_or(0);
 
-        // Re-append preserved overlays in their original order, whether or not
-        // a request was found, so they survive the trim.
-        //
-        // Appended directly rather than through `adopt`: these are the entries
-        // just popped, so `event_ids` still holds their IDs and `adopt` would
-        // read that as a collision and reassign them.
-        preserved.reverse();
-        self.events.append(&mut preserved);
+        let request = self.events[start..]
+            .iter()
+            .find_map(|e| e.as_event().and_then(ConversationEvent::as_chat_request))
+            .cloned();
+
+        // Removed in place, so the overlays keep their IDs, and the IDs of the
+        // removed entries stay retired.
+        let mut index = 0;
+        self.events.retain(|e| {
+            let keep = index < start || e.scope() == EventScope::Global;
+            index += 1;
+            keep
+        });
 
         request
     }
@@ -558,7 +563,7 @@ impl ConversationStream {
     /// invisible to turn iteration ([`Self::iter`] skips them), so no attempt
     /// is made to associate trailing globals with the new turn.
     pub fn start_turn(&mut self, request: impl Into<ChatRequest>) {
-        self.push(ConversationEvent::now(TurnStart));
+        self.push(ConversationEvent::now(TurnStart::default()));
         self.push(ConversationEvent::now(request.into()));
     }
 
@@ -587,7 +592,7 @@ impl ConversationStream {
             .any(|e| matches!(&e.payload, EventPayload::Event(event) if event.is_turn_start()));
 
         if !has_turn {
-            self.push(ConversationEvent::now(TurnStart));
+            self.push(ConversationEvent::now(TurnStart::default()));
         }
 
         TurnMut::new(self)
@@ -772,13 +777,19 @@ impl ConversationStream {
 
         let internal = self.events.remove(pos);
         let event_id = internal.event_id.clone();
-        internal
+        let popped = internal
             .into_event()
             .map(|event| ConversationEventWithConfig {
                 event_id,
                 event,
                 config,
-            })
+            });
+
+        if popped.as_ref().is_some_and(|p| !p.event.is_turn_start()) {
+            self.clear_last_turn_summary();
+        }
+
+        popped
     }
 
     /// Returns the last turn-scoped [`ConversationEvent`] in the stream,
@@ -1173,7 +1184,10 @@ impl ConversationStream {
 
             self.insert(
                 insert_pos,
-                EventPayload::Event(Box::new(ConversationEvent::new(TurnStart, timestamp))),
+                EventPayload::Event(Box::new(ConversationEvent::new(
+                    TurnStart::default(),
+                    timestamp,
+                ))),
             );
         }
     }
@@ -1319,6 +1333,67 @@ impl ConversationStream {
             }
         }
         result
+    }
+
+    /// Normalize and store `summary` on the [`TurnStart`] entry with `event_id
+    /// == *turn_id`, replacing any existing summary.
+    ///
+    /// Whitespace is collapsed to a single line and truncated to
+    /// [`MAX_SUMMARY_CHARS`] characters via [`format_turn_summary`].
+    ///
+    /// Returns `false` without modifying the stream if `summary` is blank or
+    /// `turn_id` does not match a `TurnStart` entry.
+    ///
+    /// [`MAX_SUMMARY_CHARS`]: crate::event::MAX_SUMMARY_CHARS
+    /// [`format_turn_summary`]: crate::event::format_turn_summary
+    pub fn set_turn_summary(&mut self, turn_id: &EventId, summary: impl AsRef<str>) -> bool {
+        let Some(summary) = crate::event::format_turn_summary(summary.as_ref()) else {
+            return false;
+        };
+        let Some(turn_start) = self.turn_start_mut(turn_id) else {
+            return false;
+        };
+
+        turn_start.summary = Some(summary);
+        true
+    }
+
+    /// Clear the summary on the [`TurnStart`] entry with `event_id ==
+    /// *turn_id`.
+    ///
+    /// Returns `false` if `turn_id` does not match a `TurnStart` entry.
+    pub fn clear_turn_summary(&mut self, turn_id: &EventId) -> bool {
+        let Some(turn_start) = self.turn_start_mut(turn_id) else {
+            return false;
+        };
+
+        turn_start.summary = None;
+        true
+    }
+
+    /// Clear the summary on the last [`TurnStart`] in the stream, if any.
+    fn clear_last_turn_summary(&mut self) {
+        if let Some(turn_start) =
+            self.events
+                .iter_mut()
+                .rev()
+                .find_map(|entry| match &mut entry.payload {
+                    EventPayload::Event(event) => event.as_turn_start_mut(),
+                    _ => None,
+                })
+        {
+            turn_start.summary = None;
+        }
+    }
+
+    /// Mutable reference to the [`TurnStart`] entry with `event_id ==
+    /// *turn_id`.
+    fn turn_start_mut(&mut self, turn_id: &EventId) -> Option<&mut TurnStart> {
+        let entry = self.events.iter_mut().find(|e| e.event_id == *turn_id)?;
+        let EventPayload::Event(event) = &mut entry.payload else {
+            return None;
+        };
+        event.as_turn_start_mut()
     }
 
     /// Retain only the last `n` turns, dropping earlier ones.
@@ -1744,3 +1819,7 @@ mod event_id_tests;
 #[cfg(test)]
 #[path = "stream/event_id_repair_tests.rs"]
 mod event_id_repair_tests;
+
+#[cfg(test)]
+#[path = "stream/turn_summary_tests.rs"]
+mod turn_summary_tests;

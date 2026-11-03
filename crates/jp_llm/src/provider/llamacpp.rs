@@ -214,7 +214,8 @@ fn create_request(
     // Like Ollama, llama.cpp models may default to thinking-on, so
     // `chat_template_kwargs.enable_thinking` tells the chat template whether to
     // prompt the model to think at all. Models whose template doesn't read the
-    // kwarg silently ignore it.
+    // kwarg silently ignore it. DeepSeek templates read `thinking` instead, so
+    // both keys are sent and each family's template uses the one it knows.
     let reasoning_enabled = !matches!(parameters.reasoning, None | Some(ReasoningConfig::Off));
 
     // `reasoning_format` is a separate concern: it says how the server should
@@ -230,7 +231,10 @@ fn create_request(
         "messages": messages,
         "stream": true,
         "reasoning_format": "deepseek",
-        "chat_template_kwargs": { "enable_thinking": reasoning_enabled },
+        "chat_template_kwargs": {
+            "enable_thinking": reasoning_enabled,
+            "thinking": reasoning_enabled,
+        },
     });
 
     if let Some(temperature) = parameters.temperature {

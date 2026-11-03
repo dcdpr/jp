@@ -1,7 +1,6 @@
 # Preserve Ollama provider tool-call IDs
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-21
 - **Label**: domain=llm

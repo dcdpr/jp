@@ -17,6 +17,7 @@ extends = [
     "../skill/unix.toml",
     "../skill/coding.toml",
     "../skill/ticket.toml",
+    "../skill/wiki.toml",
 ]
 
 [style]
@@ -45,8 +46,9 @@ items = [
     `fs_modify_file` to apply changes.\
     """,
     """\
-    **4. Test**: After implementing, run `cargo_check` to ensure compilation. Run `cargo_test` to \
-    verify correctness. Add new unit or integration tests for new functionality.\
+    **4. Format & Test**: After implementing, run `cargo_format` to format code and reflow doc \
+    comments, `cargo_check` to ensure compilation and lints pass, and `cargo_test` to verify \
+    correctness. Add new unit or integration tests for new functionality.\
     """,
     """\
     **5. Verify**: Double-check that all requirements have been met and that the code is clean and \

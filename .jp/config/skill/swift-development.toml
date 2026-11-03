@@ -20,10 +20,10 @@ manifest, never the generated `.xcodeproj`.
 """
 
 [conversation.tools]
-swift_check = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-swift_test = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-swift_test_ui = { enable = true, run = "ask", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-swift_format = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+swift_check = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+swift_test = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+swift_test_ui = { enable = true, run = "ask", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+swift_format = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
 
 [[assistant.instructions]]
 title = "Swift Project Conventions"

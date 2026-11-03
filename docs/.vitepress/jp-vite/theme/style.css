@@ -1,0 +1,317 @@
+/* The badge and link palette the RFD, ticket, and wiki pages share, and the
+   box an embed sits in. */
+
+/* ── Status badges ─────────────────────────────────────────────────── */
+
+.doc-badge {
+    display: inline-block;
+    padding: 0.1rem 0.55rem;
+    border-radius: 9999px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+.doc-badge--implemented {
+    background: color-mix(in srgb, #10b981 20%, transparent);
+    color: #059669;
+}
+.doc-badge--accepted {
+    background: color-mix(in srgb, #3b82f6 20%, transparent);
+    color: #2563eb;
+}
+.doc-badge--discussion {
+    background: color-mix(in srgb, #a855f7 20%, transparent);
+    color: #7c3aed;
+}
+.doc-badge--superseded {
+    background: color-mix(in srgb, #f59e0b 20%, transparent);
+    color: #d97706;
+}
+.doc-badge--abandoned {
+    background: color-mix(in srgb, #ef4444 20%, transparent);
+    color: #dc2626;
+}
+.dark .doc-badge--implemented {
+    background: color-mix(in srgb, #10b981 25%, transparent);
+    color: #6ee7b7;
+}
+.dark .doc-badge--accepted {
+    background: color-mix(in srgb, #3b82f6 25%, transparent);
+    color: #93c5fd;
+}
+.dark .doc-badge--discussion {
+    background: color-mix(in srgb, #a855f7 25%, transparent);
+    color: #d8b4fe;
+}
+.dark .doc-badge--superseded {
+    background: color-mix(in srgb, #f59e0b 25%, transparent);
+    color: #fcd34d;
+}
+.dark .doc-badge--abandoned {
+    background: color-mix(in srgb, #ef4444 25%, transparent);
+    color: #fca5a5;
+}
+.doc-badge--indev {
+    background: color-mix(in srgb, #14b8a6 20%, transparent);
+    color: #0d9488;
+}
+.dark .doc-badge--indev {
+    background: color-mix(in srgb, #14b8a6 25%, transparent);
+    color: #5eead4;
+}
+.doc-badge--draft {
+    background: color-mix(in srgb, #64748b 22%, transparent);
+    color: #475569;
+}
+.dark .doc-badge--draft {
+    background: color-mix(in srgb, #64748b 28%, transparent);
+    color: #cbd5e1;
+}
+
+/* Ticket statuses, sharing the RFD badge shape: Todo reads like Draft (not
+   started), In Progress like Accepted (being worked), Done like Implemented. */
+.doc-badge--todo {
+    background: color-mix(in srgb, #64748b 22%, transparent);
+    color: #475569;
+}
+.dark .doc-badge--todo {
+    background: color-mix(in srgb, #64748b 28%, transparent);
+    color: #cbd5e1;
+}
+.doc-badge--in-progress {
+    background: color-mix(in srgb, #14b8a6 20%, transparent);
+    color: #0d9488;
+}
+.dark .doc-badge--in-progress {
+    background: color-mix(in srgb, #14b8a6 25%, transparent);
+    color: #5eead4;
+}
+.doc-badge--done {
+    background: color-mix(in srgb, #10b981 20%, transparent);
+    color: #059669;
+}
+.dark .doc-badge--done {
+    background: color-mix(in srgb, #10b981 25%, transparent);
+    color: #6ee7b7;
+}
+
+/* Wiki statuses, sharing the RFD badge shape: a Reference describes the system
+   as it is, like Implemented; a Snapshot is dated evidence, like Accepted;
+   Archived is retired, like Superseded. */
+.doc-badge--reference {
+    background: color-mix(in srgb, #10b981 20%, transparent);
+    color: #059669;
+}
+.dark .doc-badge--reference {
+    background: color-mix(in srgb, #10b981 25%, transparent);
+    color: #6ee7b7;
+}
+.doc-badge--snapshot {
+    background: color-mix(in srgb, #3b82f6 20%, transparent);
+    color: #2563eb;
+}
+.dark .doc-badge--snapshot {
+    background: color-mix(in srgb, #3b82f6 25%, transparent);
+    color: #93c5fd;
+}
+.doc-badge--archived {
+    background: color-mix(in srgb, #f59e0b 20%, transparent);
+    color: #d97706;
+}
+.dark .doc-badge--archived {
+    background: color-mix(in srgb, #f59e0b 25%, transparent);
+    color: #fcd34d;
+}
+
+/* ── Document link colors (status-coded) ──────────────────────────── */
+
+/* Ticket statuses, matching the badge palette above. */
+.doc-link--todo {
+    color: #475569;
+}
+.dark .doc-link--todo {
+    color: #cbd5e1;
+}
+.doc-link--in-progress {
+    color: #0d9488;
+}
+.dark .doc-link--in-progress {
+    color: #5eead4;
+}
+.doc-link--done {
+    color: #059669;
+}
+.dark .doc-link--done {
+    color: #6ee7b7;
+}
+
+/* Wiki statuses, matching the badge palette above. */
+.vp-doc a.doc-link--reference,
+.vp-doc a.doc-link--reference:hover,
+.doc-ref-link.doc-link--reference,
+.doc-ref-link.doc-link--reference:hover { color: #059669; }
+.vp-doc a.doc-link--snapshot,
+.vp-doc a.doc-link--snapshot:hover,
+.doc-ref-link.doc-link--snapshot,
+.doc-ref-link.doc-link--snapshot:hover  { color: #2563eb; }
+.vp-doc a.doc-link--archived,
+.vp-doc a.doc-link--archived:hover,
+.doc-ref-link.doc-link--archived,
+.doc-ref-link.doc-link--archived:hover  { color: #d97706; }
+.dark .vp-doc a.doc-link--reference,
+.dark .vp-doc a.doc-link--reference:hover,
+.dark .doc-ref-link.doc-link--reference,
+.dark .doc-ref-link.doc-link--reference:hover { color: #6ee7b7; }
+.dark .vp-doc a.doc-link--snapshot,
+.dark .vp-doc a.doc-link--snapshot:hover,
+.dark .doc-ref-link.doc-link--snapshot,
+.dark .doc-ref-link.doc-link--snapshot:hover  { color: #93c5fd; }
+.dark .vp-doc a.doc-link--archived,
+.dark .vp-doc a.doc-link--archived:hover,
+.dark .doc-ref-link.doc-link--archived,
+.dark .doc-ref-link.doc-link--archived:hover  { color: #fcd34d; }
+
+/* Inline body links and reference links both pick up the badge palette
+   via these classes. The selectors include `:hover` to keep the status
+   color when hovered (overriding VitePress's default brand-2 hover). */
+.vp-doc a.doc-link--implemented,
+.vp-doc a.doc-link--implemented:hover,
+.doc-ref-link.doc-link--implemented,
+.doc-ref-link.doc-link--implemented:hover { color: #059669; }
+.vp-doc a.doc-link--accepted,
+.vp-doc a.doc-link--accepted:hover,
+.doc-ref-link.doc-link--accepted,
+.doc-ref-link.doc-link--accepted:hover    { color: #2563eb; }
+.vp-doc a.doc-link--discussion,
+.vp-doc a.doc-link--discussion:hover,
+.doc-ref-link.doc-link--discussion,
+.doc-ref-link.doc-link--discussion:hover  { color: #7c3aed; }
+.vp-doc a.doc-link--superseded,
+.vp-doc a.doc-link--superseded:hover,
+.doc-ref-link.doc-link--superseded,
+.doc-ref-link.doc-link--superseded:hover  { color: #d97706; }
+.vp-doc a.doc-link--abandoned,
+.vp-doc a.doc-link--abandoned:hover,
+.doc-ref-link.doc-link--abandoned,
+.doc-ref-link.doc-link--abandoned:hover   { color: #dc2626; }
+
+.dark .vp-doc a.doc-link--implemented,
+.dark .vp-doc a.doc-link--implemented:hover,
+.dark .doc-ref-link.doc-link--implemented,
+.dark .doc-ref-link.doc-link--implemented:hover { color: #6ee7b7; }
+.dark .vp-doc a.doc-link--accepted,
+.dark .vp-doc a.doc-link--accepted:hover,
+.dark .doc-ref-link.doc-link--accepted,
+.dark .doc-ref-link.doc-link--accepted:hover    { color: #93c5fd; }
+.dark .vp-doc a.doc-link--discussion,
+.dark .vp-doc a.doc-link--discussion:hover,
+.dark .doc-ref-link.doc-link--discussion,
+.dark .doc-ref-link.doc-link--discussion:hover  { color: #d8b4fe; }
+.dark .vp-doc a.doc-link--superseded,
+.dark .vp-doc a.doc-link--superseded:hover,
+.dark .doc-ref-link.doc-link--superseded,
+.dark .doc-ref-link.doc-link--superseded:hover  { color: #fcd34d; }
+.dark .vp-doc a.doc-link--abandoned,
+.dark .vp-doc a.doc-link--abandoned:hover,
+.dark .doc-ref-link.doc-link--abandoned,
+.dark .doc-ref-link.doc-link--abandoned:hover   { color: #fca5a5; }
+
+/* ── Metadata header ──────────────────────────────────────────────────── */
+
+/* The metadata block under a document's title: for an RFD or ticket, one
+   compact line of status, category, date, and authors; the labels, styled by
+   `DocLabels.vue`; and any other field on a short line of its own. A wiki
+   page's summary, authors, date, and parent sit at its end instead, in small
+   print. */
+.vp-doc .doc-meta {
+    margin: 0.5rem 0 1.5rem;
+}
+.vp-doc .doc-meta p {
+    margin: 0.2rem 0;
+}
+.vp-doc .doc-meta-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.75rem;
+    font-size: 0.85rem;
+    color: var(--vp-c-text-3);
+}
+
+/* A wiki page's status, a letter in a circle after its title: green for a
+   Reference, blue for a Snapshot, amber for an Archived page. The letter is an
+   attribute rather than text, so the title and its search entry don't gain
+   it. */
+.vp-doc .doc-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 0.95rem;
+    height: 0.95rem;
+    margin-left: 0.5rem;
+    border-radius: 50%;
+    vertical-align: 0.2em;
+    background: var(--vp-c-text-3);
+    color: var(--vp-c-white);
+    font-size: 0.6rem;
+    font-weight: 700;
+    line-height: 1;
+    cursor: help;
+}
+.vp-doc .doc-status::after {
+    content: attr(data-letter);
+}
+.vp-doc .doc-status--reference { background: #059669; }
+.vp-doc .doc-status--snapshot  { background: #2563eb; }
+.vp-doc .doc-status--archived  { background: #d97706; }
+.vp-doc .doc-meta-footer {
+    margin-top: 3rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--vp-c-divider);
+}
+.vp-doc .doc-meta-footer .doc-meta-field {
+    margin: 0.15rem 0;
+    font-size: 0.75rem;
+    color: var(--vp-c-text-3);
+}
+.vp-doc .doc-meta-field {
+    font-size: 0.85rem;
+    color: var(--vp-c-text-2);
+}
+.vp-doc .doc-meta-key {
+    margin-right: 0.4rem;
+    color: var(--vp-c-text-3);
+}
+
+/* ── Embeds ───────────────────────────────────────────────────────────── */
+
+/* A section or a line range shown from elsewhere, set off from the page's own
+   text, under a link to where it comes from. */
+.vp-doc .jp-embed {
+    margin: 1rem 0;
+    padding: 0.25rem 1rem 0.5rem;
+    border-left: 3px solid var(--vp-c-divider);
+    border-radius: 0 6px 6px 0;
+    background: var(--vp-c-bg-soft);
+}
+.vp-doc .jp-embed-source {
+    margin: 0.5rem 0 0.25rem !important;
+    font-size: 0.8rem;
+    color: var(--vp-c-text-3);
+}
+.vp-doc .jp-embed--lines div[class*='language-'] {
+    margin: 0.5rem 0 0.25rem;
+}
+
+/* ── Checklists ───────────────────────────────────────────────────────── */
+
+/* A task-list item shows its checkbox where the bullet would be. See
+   `../tasklist.mjs`. */
+.vp-doc .task-list-item {
+    list-style: none;
+}
+.vp-doc .task-list-item-checkbox {
+    margin: 0 0.4rem 0 -1.4rem;
+    vertical-align: middle;
+}

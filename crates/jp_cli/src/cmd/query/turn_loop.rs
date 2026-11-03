@@ -1503,16 +1503,19 @@ async fn pick_served_model(
         }
     };
 
-    let options: Vec<String> = served
-        .iter()
-        .map(|served| served.id.name.to_string())
-        .filter(|name| name != model.id.name.as_ref())
+    let candidates: Vec<ModelDetails> = served
+        .into_iter()
+        .filter(|served| served.id.name != model.id.name)
         .collect();
 
-    if options.is_empty() {
+    if candidates.is_empty() {
         return None;
     }
 
+    let options = candidates
+        .iter()
+        .map(|candidate| candidate.id.name.to_string())
+        .collect();
     let message = format!(
         "The `{}` provider does not serve `{}`. Continue with:",
         model.id.provider, model.id.name
@@ -1522,9 +1525,7 @@ async fn pick_served_model(
         .select(&message, options, None, &mut writer)
         .ok()?;
 
-    served
-        .into_iter()
-        .find(|served| served.id.name.as_ref() == picked)
+    candidates.into_iter().nth(picked)
 }
 
 /// Record `model` as the conversation's model from here on, the way `-m` would.

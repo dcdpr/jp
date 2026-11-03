@@ -1,21 +1,37 @@
 [conversation.tools.rfd_require]
 enable = false
 run = "ask"
-source = "local"
-command = "just rfd-require {{tool.arguments.nnn}} {{tool.arguments.mmm}}"
-description = "Record that RFD NNN requires RFD MMM, updating both documents. Cycles are refused. The relationship is gated identically to `rfd_extend`: an Accepted RFD may not depend on something below Accepted, and an Implemented RFD may not depend on something below Implemented. Don't list the same target under both `Requires` and `Extends` — extension implies the dependency. Accepts draft IDs (DNN) on either side, subject to the draft-aware bidirectional rule (a published RFD cannot link to a draft)."
+source = "plugin.command.rfd.require"
+summary = "Record that one RFD can't be accepted or implemented before another."
+description = """
+`id` requires `target`: `id` gets `Requires: RFD <target>`, and `target` gets
+`Required by: RFD <id>`.
+
+`id` can't be accepted before `target` is, and not implemented before `target`
+is. A link that would close a loop through `Requires` and `Extends` is refused,
+and so is a target `id` already extends, since extending implies depending. A
+published RFD can't require a draft. A draft can require a published RFD; the
+published one gets its back-link when the draft is promoted.
+"""
+
+examples = """
+RFD 116 can't be accepted before RFD 072:
+```json
+{"id": "116", "target": "072"}
+```
+"""
 
 [conversation.tools.rfd_require.style]
+parameters = "function_call"
 inline_results = "full"
 results_file_link = "off"
-parameters = "function_call"
 
-[conversation.tools.rfd_require.parameters.nnn]
-description = "ID of the RFD that depends on the other (the requirer). Permanent number (e.g. 043) or draft ID (e.g. D07)."
-required = true
+[conversation.tools.rfd_require.parameters.id]
 type = "string"
+required = true
+summary = "The RFD that depends on the other."
 
-[conversation.tools.rfd_require.parameters.mmm]
-description = "ID of the RFD that is required (the dependency). Permanent number (e.g. 012) or draft ID (e.g. D05)."
-required = true
+[conversation.tools.rfd_require.parameters.target]
 type = "string"
+required = true
+summary = "The RFD it depends on."

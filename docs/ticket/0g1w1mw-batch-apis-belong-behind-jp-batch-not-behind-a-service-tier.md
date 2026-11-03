@@ -1,7 +1,6 @@
 # Batch APIs belong behind `jp batch`, not behind a service tier
 
 - **Status**: Done
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-09-09
 - **Label**: client=cli

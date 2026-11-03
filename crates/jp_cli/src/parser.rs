@@ -1,7 +1,6 @@
 use std::{convert::Infallible, fmt, str::FromStr};
 
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf, absolute_utf8};
-use clap::error::ErrorKind;
 use clean_path::Clean as _;
 use jp_id::Parts;
 use relative_path::RelativePathBuf;
@@ -23,8 +22,8 @@ use crate::error::{Error, Result};
 ///
 /// # Errors
 ///
-/// Returns an error if an item is empty or fails to parse.
-pub(crate) fn split_list<T>(value: &str, item: &str) -> std::result::Result<Vec<T>, clap::Error>
+/// Returns a message naming the item when one is empty or fails to parse.
+pub(crate) fn split_list<T>(value: &str, item: &str) -> std::result::Result<Vec<T>, String>
 where
     T: FromStr,
     T::Err: fmt::Display,
@@ -32,16 +31,10 @@ where
     value
         .split(',')
         .map(|part| match part.trim() {
-            "" => Err(clap::Error::raw(
-                ErrorKind::InvalidValue,
-                format!("empty {item} in '{value}'\n"),
-            )),
-            part => part.parse().map_err(|error| {
-                clap::Error::raw(
-                    ErrorKind::InvalidValue,
-                    format!("invalid {item} '{part}': {error}\n"),
-                )
-            }),
+            "" => Err(format!("empty {item} in '{value}'")),
+            part => part
+                .parse()
+                .map_err(|error| format!("invalid {item} '{part}': {error}")),
         })
         .collect()
 }

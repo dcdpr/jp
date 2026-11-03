@@ -1,9 +1,9 @@
 # The reasoning background drops out while a prompt is up
 
 - **Status**: Done
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-08
+- **Label**: type=bug
 
 A tool call inside a reasoning block renders its chrome against the reasoning
 background (RFD 095): every visual row shows the background to the right edge,

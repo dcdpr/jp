@@ -2,6 +2,7 @@ use std::{fs, sync::Arc, time::Duration};
 
 use camino::Utf8PathBuf;
 use camino_tempfile::{Utf8TempDir, tempdir};
+use clap::error::ErrorKind;
 use jp_config::{AppConfig, types::command::CommandConfigOrString};
 use jp_conversation::{Conversation, ConversationId};
 use jp_printer::{OutputFormat, Printer};
@@ -11,7 +12,29 @@ use serde_json::Value;
 use tokio::runtime::Runtime;
 
 use super::{Edit, ExpirationDuration};
-use crate::{Globals, cmd::conversation_id::PositionalIds, ctx::Ctx};
+use crate::{Globals, cli::parse_args, cmd::conversation_id::PositionalIds, ctx::Ctx};
+
+// An empty title or pin value, as an unset shell variable gives, must not read
+// as the flag written bare: that generates a title with the model, or toggles
+// the pin.
+#[test]
+fn an_empty_property_value_is_rejected() {
+    for args in [
+        &["--title="][..],
+        &["--title", ""][..],
+        &["--pin="][..],
+        &["--local="][..],
+    ] {
+        assert_eq!(
+            parse_args::<Edit>(args).unwrap_err().kind(),
+            ErrorKind::InvalidValue,
+            "an empty value must be rejected: {args:?}"
+        );
+    }
+
+    let edit = parse_args::<Edit>(&["--title"]).unwrap();
+    assert_eq!(edit.title, Some(None));
+}
 
 #[test]
 fn parse_now() {

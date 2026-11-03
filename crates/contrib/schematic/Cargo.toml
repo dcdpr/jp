@@ -28,7 +28,7 @@ serde_json = { workspace = true, optional = true, features = ["preserve_order"] 
 toml = { workspace = true, optional = true, features = ["parse", "display"] }
 
 # yaml
-serde_yaml = { workspace = true, optional = true }
+serde-saphyr = { workspace = true, optional = true, features = ["deserialize"] }
 
 # Self-dependency so the crate's own tests can exercise the schema derive,
 # which the default feature set leaves out.
@@ -51,7 +51,7 @@ json = [
     "schematic_types/serde_json",
 ]
 toml = ["dep:toml", "schematic_types/serde_toml"]
-yaml = ["dep:serde_yaml", "schematic_types/serde_yaml"]
+yaml = ["dep:serde-saphyr"]
 
 # Renderers
 renderer_template = ["schema"]

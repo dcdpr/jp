@@ -1,7 +1,6 @@
 # Prompt notice lines skip the region background
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-22
 - **Label**: package=jp_cli

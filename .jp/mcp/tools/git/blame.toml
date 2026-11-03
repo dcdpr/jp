@@ -1,6 +1,6 @@
 [conversation.tools.git_blame]
 enable = "explicit"
-run = "unattended"
+run = "allow"
 style.inline_results = "full"
 style.parameters = "function_call"
 

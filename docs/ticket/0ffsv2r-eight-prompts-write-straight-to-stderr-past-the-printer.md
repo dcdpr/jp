@@ -1,9 +1,9 @@
 # Eight prompts write straight to stderr, past the printer
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-08
+- **Label**: type=bug
 
 Eight interactive prompts construct their own `io::stderr()` writer, or let
 `inquire` pick its default, instead of taking one from `Printer`:

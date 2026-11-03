@@ -247,6 +247,136 @@ fn consecutive_structured_events_render_as_separate_fences() {
     );
 }
 
+/// The assistant header the view writes to stderr when a response starts.
+const HEADER: &str =
+    "\n── jp ──────────────────────────────────────────────────────────────────────────\n\n";
+
+/// A model can stop cleanly after reasoning without writing an answer or
+/// calling a tool.
+/// The turn ends either way, so the user is told why nothing followed the
+/// reasoning.
+#[test]
+fn completed_with_only_reasoning_prints_a_notice() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _out, err) = Printer::memory(OutputFormat::Text);
+    let printer = Arc::new(printer);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("plan it"));
+    coordinator.handle_event(&mut stream, Event::reasoning(0, "Refining the plan."));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    let outcome = coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    assert!(matches!(outcome.action, Action::Done));
+    printer.flush();
+    assert_eq!(
+        err.lock().as_str(),
+        format!("{HEADER}The model finished without responding.\n")
+    );
+}
+
+/// Gemini's shape for an empty answer: reasoning, then a message holding only a
+/// newline, then a clean stop.
+/// A whitespace-only message commits nothing, so it is no answer either.
+#[test]
+fn completed_with_a_whitespace_only_message_prints_a_notice() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _out, err) = Printer::memory(OutputFormat::Text);
+    let printer = Arc::new(printer);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("plan it"));
+    coordinator.handle_event(&mut stream, Event::reasoning(0, "Refining the plan."));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(&mut stream, Event::message(1, "\n"));
+    coordinator.handle_event(&mut stream, Event::flush(1));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    printer.flush();
+    assert_eq!(
+        err.lock().as_str(),
+        format!("{HEADER}The model finished without responding.\n")
+    );
+}
+
+#[test]
+fn completed_with_a_message_prints_no_notice() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _out, err) = Printer::memory(OutputFormat::Text);
+    let printer = Arc::new(printer);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("plan it"));
+    coordinator.handle_event(&mut stream, Event::reasoning(0, "Refining the plan."));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(&mut stream, Event::message(1, "Here is the plan."));
+    coordinator.handle_event(&mut stream, Event::flush(1));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    printer.flush();
+    assert_eq!(err.lock().as_str(), HEADER);
+}
+
+/// Only the response to the latest request counts.
+/// A tool call in the first cycle answers that cycle, and nothing after the
+/// tool results answers the follow-up, so exactly one notice is printed: for
+/// the follow-up.
+#[test]
+fn completed_follow_up_without_an_answer_prints_a_notice() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _out, err) = Printer::memory(OutputFormat::Text);
+    let printer = Arc::new(printer);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("look it up"));
+    coordinator.handle_event(&mut stream, Event::tool_call_start(0, "call-1", "lookup"));
+    coordinator.handle_event(&mut stream, Event::tool_call_args(0, "{}"));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    printer.flush();
+    // A tool call renders no assistant header, so nothing is on stderr yet.
+    assert_eq!(err.lock().as_str(), "", "a tool call answers its cycle");
+
+    coordinator.handle_tool_responses(&mut stream, vec![ToolCallResponse {
+        id: "call-1".into(),
+        result: Ok("done".into()),
+    }]);
+    coordinator.handle_event(&mut stream, Event::reasoning(0, "Thinking it over."));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    printer.flush();
+    assert_eq!(
+        err.lock().as_str(),
+        format!("{HEADER}The model finished without responding.\n")
+    );
+}
+
 #[test]
 fn finish_notice_silent_for_completed_and_retry() {
     assert!(finish_notice(&FinishReason::Completed, &[]).is_none());

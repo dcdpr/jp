@@ -1,0 +1,477 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+import { knownDocuments } from '../references.mjs'
+import { readSettings, workflowDir, workflowPath } from '../settings.mjs'
+import { readMetadata } from './metadata.mjs'
+import { referencedLabels } from './rfd-shared.mjs'
+
+// Reading the tickets in the ticket directory for the site.
+//
+// `tickets.data.js` composes these into the index and the board. The document
+// format is specified in RFD 100 and implemented for the tooling side by the
+// `ticket` crate; this is the site's reader, and it needs less: metadata, a
+// comment count, the checklist's progress, and the board's column order.
+// Ticket pages are rendered from the markdown file itself, so comment bodies
+// never come through here.
+//
+// Where the tickets live, the label vocabulary, and how much of the Done column
+// the board shows come from the settings `jp vite sync` writes.
+
+// The board's three columns, in flow order. `key` is the field in the board's
+// order file, `.board.json`; `status` is what the ticket file carries.
+export const COLUMNS = [
+    { key: 'todo', status: 'Todo' },
+    { key: 'in_progress', status: 'In Progress' },
+    { key: 'done', status: 'Done' },
+]
+
+// How much of the Done column the board shows when the settings don't say. The
+// rest lives in the index, which lists every ticket regardless of status.
+const DEFAULT_DONE_LIMIT = 8
+
+// Parse one ticket file.
+//
+// `known` holds the documents a bare ticket id in the text may name; see
+// `referencedLabels`.
+export function parseTicket(content, filename, known = new Map()) {
+    const id = filename.match(/^([0-9a-z]{7})-/)?.[1] ?? '0000000'
+    const meta = readMetadata(content)
+
+    return {
+        id: `T-${id}`,
+        num: id,
+        title: meta.title ?? filename,
+        status: meta.get('Status'),
+        authors: meta.get('Authors'),
+        date: meta.get('Date'),
+        labels: readLabels(meta),
+        promotedTo: meta.get('Promoted to'),
+        github: meta.get('GitHub'),
+        // The ticket this one sits under, as `T-0a1b2c3`.
+        parent: meta.get('Parent') ?? null,
+        comments: countComments(content),
+        checklist: readChecklist(content),
+        // Cross-kind links, resolved in the browser against both sets.
+        links: referencedLabels(content, known).filter(label => label !== `T-${id}`),
+        slug: filename.replace(/\.md$/, ''),
+    }
+}
+
+// A ticket's labels, sorted: the `Label` field repeats once per `key=value`
+// pair, so no line grows with the number of labels.
+//
+// Read as written rather than checked against the vocabulary: a listing that
+// hid a label the file carries would disagree with the file.
+// `findUnknownLabels` below is what catches one the board doesn't define.
+function readLabels(meta) {
+    return meta.all('Label').sort()
+}
+
+// The labels the board defines, as a map of key to `{ values, open, retired,
+// min, max, unique }`.
+//
+// A board that configures none defines none, and takes any label.
+export function loadVocabulary(settings = readSettings()) {
+    const labels = settings.ticket?.labels ?? {}
+    const isMap = v => v !== undefined && v !== null
+        && typeof v === 'object' && !Array.isArray(v)
+    if (!isMap(labels)) {
+        throw new Error('The label vocabulary in the site settings is not a map of label key to entry.')
+    }
+
+    return labels
+}
+
+// Whether the vocabulary accepts `label`, retired values included.
+//
+// Retired values count as defined: retiring one keeps existing tickets valid,
+// which is the whole difference between retiring and deleting. A key that
+// takes any value accepts every `key=value` under it, but not the key alone.
+function knownLabel(vocabulary) {
+    const known = new Set()
+    const open = new Set()
+    for (const [key, entry] of Object.entries(vocabulary)) {
+        if (entry?.open) {
+            open.add(key)
+            continue
+        }
+        const values = [...(entry?.values ?? []), ...(entry?.retired ?? [])]
+        if (values.length === 0) {
+            known.add(key)
+            continue
+        }
+        for (const value of values) known.add(`${key}=${value}`)
+    }
+
+    return label => {
+        if (known.has(label)) return true
+        const split = label.indexOf('=')
+        return split > 0 && split < label.length - 1 && open.has(label.slice(0, split))
+    }
+}
+
+// Labels used on a ticket that the vocabulary doesn't define.
+//
+// A typo in a hand-edited ticket would otherwise sit there silently, grouping
+// with nothing and showing up as its own one-ticket category. A board that
+// defines no labels takes any, so it has none to report.
+export function findUnknownLabels(tickets, vocabulary) {
+    if (Object.keys(vocabulary).length === 0) return null
+
+    const known = knownLabel(vocabulary)
+    const offenders = tickets
+        .map(ticket => [ticket.id, ticket.labels.filter(label => !known(label))])
+        .filter(([, unknown]) => unknown.length > 0)
+
+    if (offenders.length === 0) return null
+
+    const report = offenders
+        .map(([id, unknown]) => `  ${id}: ${unknown.join(', ')}`)
+        .join('\n')
+    return `Tickets carry labels the vocabulary doesn't define:\n${report}\n\n` +
+        `Add them to \`plugins.command.ticket.options.labels\`, or take them off the ` +
+        `tickets (\`jp ticket label rm --id <id> key=value\`).`
+}
+
+// Tickets carrying too few or too many values of a key the vocabulary bounds
+// with `min` or `max`.
+//
+// Every label write `jp ticket` makes is held to the bounds; this catches a
+// ticket edited by hand, or one filed before a bound was added.
+export function findMiscountedLabels(tickets, vocabulary) {
+    const bounded = Object.entries(vocabulary)
+        .map(([key, entry]) => [key, entry?.min ?? 0, entry?.max ?? Infinity])
+        .filter(([, min, max]) => min > 0 || max !== Infinity)
+    if (bounded.length === 0) return null
+
+    const offenders = []
+    for (const ticket of tickets) {
+        const problems = []
+        for (const [key, min, max] of bounded) {
+            const count = ticket.labels
+                .filter(label => label === key || label.startsWith(`${key}=`))
+                .length
+            if (count < min || count > max) {
+                problems.push(`${count} \`${key}\` (needs ${describeBound(min, max)})`)
+            }
+        }
+        if (problems.length > 0) offenders.push(`  ${ticket.id}: ${problems.join(', ')}`)
+    }
+
+    if (offenders.length === 0) return null
+
+    return `Tickets carry too few or too many labels of one key:\n${offenders.join('\n')}\n\n` +
+        `Set what each ticket carries (\`jp ticket label set --id <id> key=value\`), or ` +
+        `change the key's \`min\` and \`max\` in \`plugins.command.ticket.options.labels\`.`
+}
+
+// Labels the vocabulary lets one ticket carry, found on several.
+//
+// `unique: "key"` lets one ticket carry the key at all, and `"key-value"` lets
+// one carry each of its values; a key without values is held as a whole either
+// way. Values match without case, as `jp ticket` matches them. `jp ticket`
+// refuses such a write; this catches a ticket edited by hand, or one filed
+// before the key was made unique.
+export function findSharedLabels(tickets, vocabulary) {
+    const unique = Object.entries(vocabulary).filter(([, entry]) => entry?.unique)
+    if (unique.length === 0) return null
+
+    // Keyed without case; each holder keeps the first spelling it was seen in.
+    const holders = new Map()
+    for (const ticket of tickets) {
+        for (const [key, entry] of unique) {
+            const carried = ticket.labels.filter(label => label === key || label.startsWith(`${key}=`))
+            if (carried.length === 0) continue
+
+            const whole = entry.unique === 'key' || carried.every(label => label === key)
+            const names = new Map((whole ? [key] : carried).map(name => [name.toLowerCase(), name]))
+            for (const [folded, name] of names) {
+                const holder = holders.get(folded) ?? { name, ids: [] }
+                holder.ids.push(ticket.id)
+                holders.set(folded, holder)
+            }
+        }
+    }
+
+    const shared = [...holders.values()].filter(({ ids }) => ids.length > 1)
+    if (shared.length === 0) return null
+
+    const report = shared.map(({ name, ids }) => `  ${name}: ${ids.join(', ')}`).join('\n')
+    return `The following label can only be added to a single ticket on the board:\n${report}\n\n` +
+        `Keep each on one ticket by taking it off the others ` +
+        `(\`jp ticket label rm --id <id> key=value\`), or drop \`unique\` from the key in ` +
+        `\`plugins.command.ticket.options.labels\`.`
+}
+
+// Tickets breaking a rule of the parent relation: one naming a parent that
+// isn't a ticket, or one that sits under a parent of its own, and a Done
+// parent with open children.
+//
+// `jp ticket` refuses each as a write; this catches a ticket edited by hand.
+export function findBrokenParents(tickets) {
+    const byId = new Map(tickets.map(ticket => [ticket.id, ticket]))
+    const problems = []
+    for (const ticket of tickets) {
+        if (ticket.parent) {
+            const parent = byId.get(ticket.parent)
+            if (ticket.parent === ticket.id) {
+                problems.push(`  ${ticket.id}: is its own parent`)
+            } else if (!parent) {
+                problems.push(`  ${ticket.id}: names ${ticket.parent} as its parent, which is not a ticket`)
+            } else if (parent.parent) {
+                problems.push(`  ${ticket.id}: sits under ${parent.id}, which sits under ${parent.parent}`)
+            }
+        }
+
+        if (ticket.status === 'Done') {
+            const open = tickets
+                .filter(child => child.parent === ticket.id && child.id !== ticket.id && child.status !== 'Done')
+                .map(child => child.id)
+            if (open.length > 0) problems.push(`  ${ticket.id}: is Done with open children ${open.join(', ')}`)
+        }
+    }
+
+    if (problems.length === 0) return null
+
+    return `Tickets break the rules of the parent relation:\n${problems.join('\n')}\n\n` +
+        `A ticket sits under one that exists and sits under nothing, and a parent closes ` +
+        `once its children have. \`jp ticket check\` says the same, and \`jp ticket edit ` +
+        `--parent\` and \`--status\` fix it.`
+}
+
+// A key's bounds in words, as the count they ask for.
+function describeBound(min, max) {
+    if (min === max) return `exactly ${min}`
+    if (max === Infinity) return `at least ${min}`
+    if (min === 0) return `at most ${max}`
+    return `${min} to ${max}`
+}
+
+// Count the comments in a ticket.
+//
+// A comment opens at a line of five or more dashes at column zero, followed by
+// a blank line, followed by a metadata block carrying both `From` and `Date`.
+// Lines inside fenced code blocks don't count, so a ticket quoting the format
+// doesn't inflate its own total.
+export function countComments(content) {
+    const lines = content.split('\n')
+
+    return unfenced(lines).filter(i => opensComment(lines, i)).length
+}
+
+// Whether line `i` of `lines` opens a comment: five or more dashes, a blank
+// line, and a metadata block carrying both `From` and `Date`.
+function opensComment(lines, i) {
+    if (!/^-{5,}\s*$/.test(lines[i])) return false
+    if ((lines[i + 1] ?? 'x').trim() !== '') return false
+
+    let from = false
+    let date = false
+    for (let j = i + 2; j < lines.length; j++) {
+        const key = lines[j].match(/^- \*\*([^*]+)\*\*:/)?.[1]?.trim().toLowerCase()
+        if (!key) break
+        if (key === 'from') from = true
+        if (key === 'date') date = true
+    }
+
+    return from && date
+}
+
+// The indices of the lines of `lines` outside fenced code blocks, the fences
+// themselves left out too.
+function unfenced(lines) {
+    const outside = []
+    let fence = null
+
+    for (let i = 0; i < lines.length; i++) {
+        const delimiter = fenceAt(lines[i])
+        if (delimiter) {
+            if (fence === null) fence = delimiter
+            else if (delimiter.char === fence.char && delimiter.count >= fence.count
+                && !delimiter.info) fence = null
+            continue
+        }
+        if (fence === null) outside.push(i)
+    }
+
+    return outside
+}
+
+// How many of a ticket's checklist items are checked, as `{ checked, count }`,
+// or `null` when it has none.
+//
+// Only the description counts, everything above the first comment: the
+// tooling only ever appends comments, so an item in one could never be checked
+// through it.
+export function readChecklist(content) {
+    const lines = content.split('\n')
+    const end = unfenced(lines).find(i => opensComment(lines, i)) ?? lines.length
+    const items = checklistItems(lines.slice(0, end).join('\n'))
+    if (items.length === 0) return null
+
+    return { checked: items.filter(item => item.checked).length, count: items.length }
+}
+
+// A list item opening with a checkbox: indentation, a bullet or up to nine
+// digits and `.` or `)`, whitespace, `[ ]` or `[x]`, whitespace, and text.
+const CHECKLIST_ITEM = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\[([ xX])\][ \t]+(\S.*)$/
+
+// The checklist items in `text`, as `{ checked, text }`, outside fenced code
+// blocks.
+//
+// The same rule as the `ticket` crate's `checklist` module, tested against the
+// same cases (`checklist_cases.json` there).
+export function checklistItems(text) {
+    const lines = text.split('\n')
+
+    return unfenced(lines).flatMap((i) => {
+        // Trimmed first, so a `\r` left by CRLF line endings isn't the text.
+        const match = lines[i].trimEnd().match(CHECKLIST_ITEM)
+        if (!match) return []
+
+        return [{ checked: match[1] !== ' ', text: match[2].trim() }]
+    })
+}
+
+// Read a line as a code fence delimiter.
+function fenceAt(line) {
+    const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+    if (!match) return null
+
+    return { char: match[1][0], count: match[1].length, info: match[2].trim() !== '' }
+}
+
+// Read the board's column order from the ticket directory `dir`. A missing file,
+// or no directory, means no manual ranking, which is a valid board — every
+// ticket falls back to its default position.
+export function loadBoard(dir) {
+    let raw = {}
+    if (dir) {
+        try {
+            raw = JSON.parse(readFileSync(resolve(dir, '.board.json'), 'utf-8'))
+        } catch { /* no ranking yet */ }
+    }
+
+    const ids = v => (Array.isArray(v) ? v.map(String) : [])
+    const board = {}
+    for (const column of COLUMNS) board[column.key] = ids(raw?.[column.key])
+
+    return board
+}
+
+// Order the tickets of one column.
+//
+// Status decides which column a ticket is in; the board file decides the order
+// within it. Tickets the board file doesn't mention fall to the bottom, newest
+// first in Done and oldest first elsewhere — a new ticket enters Todo unranked,
+// below whatever has already been prioritised.
+export function orderColumn(tickets, column, order) {
+    const rank = new Map(order.map((id, index) => [id, index]))
+    const rows = tickets.filter(ticket => ticket.status === column.status)
+
+    return rows.sort((a, b) => {
+        const ar = rank.has(a.id) ? rank.get(a.id) : Infinity
+        const br = rank.has(b.id) ? rank.get(b.id) : Infinity
+        if (ar !== br) return ar - br
+        return column.key === 'done' ? b.num.localeCompare(a.num) : a.num.localeCompare(b.num)
+    })
+}
+
+// Files left in the pre-RFD-102 `NNNN-slug.md` shape.
+//
+// A branch cut before the id change carries them, and the reader below would
+// skip them silently — the ticket would vanish from the board with nothing
+// said. Aborting the build is the only way that becomes visible.
+export function findLegacyIds(files) {
+    const legacy = files.filter(f => /^\d{4}-.+\.md$/.test(f))
+    if (legacy.length === 0) return null
+
+    return `Tickets still in the pre-RFD-102 id format:\n` +
+        legacy.map(f => `  ${f}`).join('\n') + '\n\n' +
+        `Rename them to the \`<id>-slug.md\` form RFD 102 defines.`
+}
+
+// Ids claimed by more than one file.
+//
+// Ids are collision-resistant, not unique by construction, so two checkouts can
+// draw the same one. Every reference to it is then ambiguous, which is why the
+// build stops rather than rendering one of them.
+export function findDuplicateIds(files) {
+    const byId = new Map()
+    for (const f of files) {
+        const id = f.slice(0, 7)
+        byId.set(id, [...(byId.get(id) ?? []), f])
+    }
+
+    const clashes = [...byId.entries()].filter(([, group]) => group.length > 1)
+    if (clashes.length === 0) return null
+
+    const report = clashes
+        .map(([id, group]) => `  T-${id}: ${group.join(', ')}`)
+        .join('\n')
+    return `Duplicate ticket ids found:\n${report}\n\n` +
+        `Each ticket id must map to exactly one file. ` +
+        `Give the losing branch a fresh id before merging.`
+}
+
+// Read every ticket, ordered by id.
+//
+// A project without a ticket directory, or with one that doesn't exist yet,
+// holds no tickets.
+export function loadTickets(settings = readSettings()) {
+    const dir = workflowDir(settings, 'ticket')
+    const route = workflowPath(settings, 'ticket')
+    if (!dir) return []
+
+    let names
+    try {
+        names = readdirSync(dir)
+    } catch {
+        return []
+    }
+
+    const legacy = findLegacyIds(names)
+    if (legacy) throw new Error(legacy)
+
+    const files = names.filter(f => /^[0-9a-z]{7}-.+\.md$/.test(f)).sort()
+    const duplicate = findDuplicateIds(files)
+    if (duplicate) throw new Error(duplicate)
+
+    const known = knownDocuments(settings)
+    const tickets = files.map(f => ({
+        ...parseTicket(readFileSync(resolve(dir, f), 'utf-8'), f, known),
+        path: `${route}/${f.replace(/\.md$/, '')}`,
+    }))
+
+    const vocabulary = loadVocabulary(settings)
+    const unknown = findUnknownLabels(tickets, vocabulary)
+    if (unknown) throw new Error(unknown)
+    const miscounted = findMiscountedLabels(tickets, vocabulary)
+    if (miscounted) throw new Error(miscounted)
+    const shared = findSharedLabels(tickets, vocabulary)
+    if (shared) throw new Error(shared)
+    const broken = findBrokenParents(tickets)
+    if (broken) throw new Error(broken)
+
+    return tickets
+}
+
+// Assemble the board: every ticket, plus the three columns in display order.
+//
+// Every column holds all its tickets. The board shows the head of Done, up to
+// `doneLimit`, and the whole column only when a filter narrows it: a filtered
+// board has to find a matching ticket past the cap.
+export function assembleBoard(settings = readSettings()) {
+    const tickets = loadTickets(settings)
+    const order = loadBoard(workflowDir(settings, 'ticket'))
+    const doneLimit = settings.ticket?.doneLimit ?? DEFAULT_DONE_LIMIT
+
+    const columns = COLUMNS.map(column => ({
+        key: column.key,
+        status: column.status,
+        tickets: orderColumn(tickets, column, order[column.key]),
+    }))
+
+    return { tickets, columns, doneLimit }
+}

@@ -1,7 +1,6 @@
 # Split CI-invoked justfile recipes out of the monolithic justfile
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-10
 - **Label**: domain=tooling

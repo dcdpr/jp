@@ -1,13 +1,13 @@
 # Expired-conversation cleanup deletes a conversation whose turn is still running
 
 - **Status**: Done
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-10-01
 - **Label**: domain=plugins
 - **Label**: domain=storage
 - **Label**: package=jp_storage
 - **Label**: package=jp_workspace
+- **Label**: type=bug
 
 `Workspace::remove_ephemeral_conversations`
 (`crates/jp_workspace/src/lib.rs:498`) removes every conversation whose

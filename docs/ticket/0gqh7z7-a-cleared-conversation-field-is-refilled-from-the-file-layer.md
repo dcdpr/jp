@@ -1,7 +1,6 @@
 # A cleared conversation field is refilled from the file layer on the next invocation
 
 - **Status**: Done
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-10
 - **Label**: client=cli

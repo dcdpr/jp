@@ -7,7 +7,7 @@ use crate::{
     delta::{PartialConfigDelta, delta_opt},
     fill::FillDefaults,
     partial::{ToPartial, partial_opt},
-    style::LinkStyle,
+    style::{LinkStyle, boolean_shorthand},
 };
 
 /// Code style configuration.
@@ -24,13 +24,13 @@ pub struct CodeConfig {
 
     /// Show a link to the file containing the source code in code blocks.
     ///
-    /// - `off`: Do not show the link.
-    /// - `full`: Show the full file path.
+    /// - `off` or `false`: Do not show the link.
+    /// - `full` or `true`: Show the full file path.
     /// - `osc8`: Show a clickable link (OSC8 escape sequence).
     ///
     /// See:
     /// <https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda>
-    #[setting(default = "osc8")]
+    #[setting(default = "osc8", schema_union_with = boolean_shorthand)]
     pub file_link: LinkStyle,
 
     /// Similar to `file_link`, but adds a link with the scheme `copy://`.
@@ -54,7 +54,7 @@ pub struct CodeConfig {
     /// ```
     ///
     /// [WezTerm]: https://wezfurlong.org/wezterm/
-    #[setting(default = "off")]
+    #[setting(default = "off", schema_union_with = boolean_shorthand)]
     pub copy_link: LinkStyle,
 }
 
@@ -64,8 +64,8 @@ impl AssignKeyValue for PartialCodeConfig {
             "" => kv.try_merge_object(self)?,
             "color" => self.color = kv.try_some_bool()?,
             "line_numbers" => self.line_numbers = kv.try_some_bool()?,
-            "file_link" => self.file_link = kv.try_some_from_str()?,
-            "copy_link" => self.copy_link = kv.try_some_from_str()?,
+            "file_link" => self.file_link = kv.try_some_bool_or_from_str()?,
+            "copy_link" => self.copy_link = kv.try_some_bool_or_from_str()?,
             _ => return missing_key(&kv),
         }
 

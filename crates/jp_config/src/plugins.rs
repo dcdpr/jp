@@ -63,7 +63,9 @@ impl AssignKeyValue for PartialPluginsConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
-            "shutdown_timeout_secs" => self.shutdown_timeout_secs = kv.try_some_from_str()?,
+            "shutdown_timeout_secs" => {
+                self.shutdown_timeout_secs = kv.try_some_number_or_from_str()?;
+            }
             _ if kv.p("command") => kv.assign_to_mergeable_entry(&mut self.command)?,
             _ => return missing_key(&kv),
         }

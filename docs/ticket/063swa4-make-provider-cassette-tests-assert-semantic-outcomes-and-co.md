@@ -1,7 +1,6 @@
 # Make provider cassette tests assert semantic outcomes and consumed interactions
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-21
 - **Label**: domain=llm

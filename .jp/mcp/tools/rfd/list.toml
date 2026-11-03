@@ -1,0 +1,66 @@
+[conversation.tools.rfd_list]
+enable = false
+source = "plugin.command.rfd.list"
+summary = "List the RFDs in priority order, with their status and rank."
+description = """
+One row per RFD: its rank on the priority board, whether it is in development
+(`*`), its id, its status, and its title.
+
+With no section named, only the planned RFDs are listed, in priority order.
+`backlog` adds the RFDs on the board below them, and `all` adds every RFD the
+board doesn't place, which includes every Implemented, Superseded, and
+Abandoned one. `full` adds each RFD's summary and the RFDs it depends on.
+
+Use it before building on another RFD: an Accepted or highly ranked one is
+scheduled work, a backlog one is a weaker foundation.
+"""
+
+examples = """
+The planned RFDs:
+```json
+{}
+```
+
+Every RFD, with summaries:
+```json
+{"all": true, "full": true}
+```
+
+Only the design RFDs, planned and backlog:
+```json
+{"category": "design", "planned": true, "backlog": true}
+```
+"""
+
+[conversation.tools.rfd_list.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+# The accepted values live in `synced.toml`, generated from
+# `plugins.command.rfd.options.categories` by
+# `jp rfd tools sync .jp/mcp/tools/rfd`.
+[conversation.tools.rfd_list.parameters.category]
+type = "string"
+required = false
+summary = "Only RFDs of this category."
+
+[conversation.tools.rfd_list.parameters.planned]
+type = "boolean"
+required = false
+summary = "List the planned RFDs. The default when no section is named."
+
+[conversation.tools.rfd_list.parameters.backlog]
+type = "boolean"
+required = false
+summary = "List the RFDs on the board below the planned ones."
+
+[conversation.tools.rfd_list.parameters.all]
+type = "boolean"
+required = false
+summary = "List every RFD: planned, backlog, and those the board doesn't place."
+
+[conversation.tools.rfd_list.parameters.full]
+type = "boolean"
+required = false
+summary = "Add each RFD's summary and the RFDs it depends on."

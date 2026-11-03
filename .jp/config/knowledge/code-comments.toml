@@ -127,6 +127,40 @@ are additional, and specific to comments.
   keeps the design honest", "the reader deserves better than that". A \
   sentence that cannot be confirmed or refuted by reading the code is \
   decoration. Apply the test line by line and delete what fails it.
+
+- **Pronoun riddles and noun avoidance.** Replacing concrete technical nouns \
+  with pronouns and oblique relative clauses ("what it wrote", "the one that \
+  came back", "some other way", "what was taken"). Every sentence becomes a \
+  riddle the reader has to parse twice to resolve what "it" or "one" refers \
+  to. Repeat the concrete noun (`summary`, `turn_id`, `lock`, `transcript`) \
+  instead of dodging it with pronouns.
+
+- **Garden-path contact clauses.** Stacking relative clauses with omitted \
+  `that`/`which` ("a turn a stored summary stands in for", "Work a turn \
+  started beside it that finished after the turn let go of the \
+  conversation"). If a reader has to backtrack to find the verb, rewrite the \
+  sentence with explicit clauses or split it in two.
+
+- **Elliptical participle fragments.** Opening sentences with bare \
+  participles whose subject is implicit ("Never waited for, for the same \
+  reason a title is not", "Stored at the end rather than as they arrive", \
+  "Spawned rather than raced against the turn"). State the subject and verb \
+  plainly ("The turn does not wait for the summary task...").
+
+- **Euphemizing standard technical terms.** Avoiding standard engineering \
+  vocabulary in favor of vague everyday words: writing "cut" instead of \
+  *truncate*, "folded onto one line" instead of *collapse whitespace*, "the \
+  most X a Y holds" instead of *maximum*, "let go of the conversation" \
+  instead of *release the conversation lock*, "beside that turn" instead of \
+  *concurrently with the turn*, or "left out" / "passed over" instead of \
+  *omitted* / *skipped*. Use the standard technical term.
+
+- **Commenting self-explanatory struct fields and trivial test helpers.** \
+  Writing `/// The conversation the turns belong to.` on \
+  `conversation_id: ConversationId`, `/// The ID of the turn's TurnStart.` on \
+  `turn_id: EventId`, or one-line doc comments on 3-line test fixture \
+  builders (`/// A stream of turns, in order.`). When the field or helper \
+  name and type already state the whole fact, omit the comment.
 """
 
 [[assistant.instructions]]
@@ -176,6 +210,12 @@ items = [
     """\
     **Don't write what can't be checked against the code.** If a reader \
     cannot confirm or refute the sentence by reading, cut it.\
+    """,
+    """\
+    **Don't write pronoun riddles or garden-path clauses.** Name the concrete \
+    type, field, or operation instead of "what it wrote" or "the one that \
+    came back", and use standard technical terms (*truncate*, *collapse \
+    whitespace*, *release the lock*, *maximum*).\
     """,
 ]
 
@@ -370,4 +410,57 @@ Nothing in the bad version can be checked against the code: "honest" and \
 "respects the reader's attention" are opinions about the change, not facts \
 about the line. The good version answers the question the reader actually \
 has, which is whether truncating here loses the data.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+/// Fallback summary for a turn without a stored LLM summary.
+///
+/// Extracts the first non-empty line of the turn's first `ChatRequest`,
+/// collapses whitespace to single spaces, and truncates to
+/// [`MAX_SUMMARY_CHARS`] characters.
+pub fn fallback_summary(&self) -> Option<String> { ... }\
+"""
+bad = """\
+/// What to show for a turn with no stored summary.
+///
+/// The first non-empty line of the turn's first `ChatRequest`, with runs of
+/// whitespace folded to one space, cut to [`MAX_SUMMARY_CHARS`] characters.
+/// A line that was cut ends in `…`.
+pub fn fallback_summary(&self) -> Option<String> { ... }\
+"""
+reason = """\
+The bad version dodges technical terms ("what to show", "folded", "cut") \
+and writes in fragments. The good version uses direct verbs and standard \
+terminology.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+/// Generated turn summaries awaiting persistence.
+///
+/// When stored, each summary is written only if its turn still has no summary
+/// and its transcript fingerprint has not changed.
+pub struct TurnSummaries {
+    pub conversation_id: ConversationId,
+    pub summaries: Vec<GeneratedTurnSummary>,
+}\
+"""
+bad = """\
+/// Summaries the model wrote for a conversation's turns, not yet stored.
+///
+/// Storing keeps a summary only while its turn reads as it did when the model
+/// read it, and still has no summary.
+pub struct TurnSummaries {
+    /// The conversation the turns belong to.
+    pub conversation_id: ConversationId,
+
+    /// One summary per turn the model described.
+    pub summaries: Vec<GeneratedTurnSummary>,
+}\
+"""
+reason = """\
+The bad version uses a pronoun riddle ("while its turn reads as it did when \
+the model read it") instead of naming the fingerprint check, and pads \
+self-explanatory fields with redundant doc comments.\
 """

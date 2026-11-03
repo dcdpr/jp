@@ -1,6 +1,6 @@
 [conversation.tools.cargo_test]
 enable = false
-run = "unattended"
+run = "allow"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "Execute all unit and integration tests and build examples of the project."

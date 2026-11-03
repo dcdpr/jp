@@ -1,3 +1,4 @@
+use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use jp_config::{
     conversation::tool::style::{
         self, DisplayStyleConfig, ErrorStyleConfig, InlineResults, ParametersStyle,
@@ -8,6 +9,7 @@ use jp_conversation::stream::TurnOrigin;
 use jp_workspace::ConversationHandle;
 
 use crate::{
+    cli::CommandArgs,
     cmd::{
         ConversationLoadRequest, Output, conversation_id::PositionalIds,
         turn_selection::TurnSelection,
@@ -58,43 +60,81 @@ const FULL_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
     },
 };
 
-#[derive(Debug, clap::Args)]
+/// `jp conversation print`.
+#[derive(Debug)]
 pub(crate) struct Print {
-    #[command(flatten)]
     target: PositionalIds<true, true>,
 
     /// Which turns to print.
     ///
     /// Without any selector, prints the whole conversation.
-    #[command(flatten)]
     range: TurnSelection,
 
-    /// Use the current workspace config instead of the per-turn config.
-    ///
-    /// By default, each turn is rendered with the config that was active when
-    /// it was created.
-    /// This flag overrides that and uses the current workspace config for all
-    /// turns.
-    #[arg(long, default_value_t = false)]
+    /// Render every turn with the current workspace config instead of the
+    /// config active when it was created.
     current_config: bool,
 
     /// Output style preset.
-    ///
-    /// - `user`: Show only user messages.
-    ///   Hides assistant messages, reasoning, and tool calls entirely.
-    /// - `chat`: Show only user and assistant messages.
-    ///   Hides reasoning and tool calls entirely.
-    /// - `brief`: Hide reasoning, tool arguments, and tool results.
-    ///   Shows only user messages, assistant messages, and tool call headers.
-    /// - `full`: Show everything including reasoning, tool arguments, and
-    ///   untruncated tool results.
-    #[arg(long, short = 's', value_enum)]
     style: Option<PrintStyle>,
 
     /// Print the compacted view (what the LLM sees) instead of the full
     /// history.
-    #[arg(long)]
     compacted: bool,
+}
+
+impl CommandArgs for Print {
+    fn augment(cmd: Command) -> Command {
+        let cmd = PositionalIds::<true, true>::augment(cmd);
+
+        TurnSelection::augment(cmd)
+            .arg(
+                Arg::new("current_config")
+                    .long("current-config")
+                    .action(ArgAction::SetTrue)
+                    .help("Use the current workspace config instead of the per-turn config")
+                    .long_help(
+                        "Use the current workspace config instead of the per-turn config.\n\nBy \
+                         default, each turn is rendered with the config that was active when it \
+                         was created. This flag overrides that and uses the current workspace \
+                         config for all turns.",
+                    ),
+            )
+            .arg(
+                Arg::new("style")
+                    .short('s')
+                    .long("style")
+                    .value_name("STYLE")
+                    .value_parser(value_parser!(PrintStyle))
+                    .help("Output style preset")
+                    .long_help(
+                        "Output style preset.\n\n- `user`: Show only user messages. Hides \
+                         assistant messages, reasoning, and tool calls entirely.\n- `chat`: Show \
+                         only user and assistant messages. Hides reasoning and tool calls \
+                         entirely.\n- `brief`: Hide reasoning, tool arguments, and tool results. \
+                         Shows only user messages, assistant messages, and tool call headers.\n- \
+                         `full`: Show everything including reasoning, tool arguments, and \
+                         untruncated tool results.",
+                    ),
+            )
+            .arg(
+                Arg::new("compacted")
+                    .long("compacted")
+                    .action(ArgAction::SetTrue)
+                    .help(
+                        "Print the compacted view (what the LLM sees) instead of the full history",
+                    ),
+            )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            target: PositionalIds::from_matches(matches)?,
+            range: TurnSelection::from_matches(matches)?,
+            current_config: matches.get_flag("current_config"),
+            style: matches.get_one("style").copied(),
+            compacted: matches.get_flag("compacted"),
+        })
+    }
 }
 
 /// Output style presets for `jp conversation print`.

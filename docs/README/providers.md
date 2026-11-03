@@ -264,4 +264,4 @@ Named subscriptions remain available with this flow.
 [back to README]
 
 [back to README]: ../../README.md
-[qualification procedure]: ../architecture/anthropic-acp-qualification.md
+[qualification procedure]: ../wiki/00dxybe-anthropic-acp-qualification.md

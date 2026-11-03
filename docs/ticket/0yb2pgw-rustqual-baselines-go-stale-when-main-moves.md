@@ -1,7 +1,6 @@
 # Rustqual baselines go stale when main moves
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: domain=tooling

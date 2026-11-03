@@ -1,9 +1,9 @@
 # A recomputed config delta clears an unchanged access rule list
 
 - **Status**: Done
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-08
+- **Label**: type=bug
 
 On a continuing conversation, a `--cfg` that changes `access.env` for a tool
 also clears that tool's `access.fs` rules.

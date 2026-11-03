@@ -1,9 +1,9 @@
 # A request served from a different service tier is never reported
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-08
+- **Label**: type=bug
 
 `assistant.model.parameters.service_tier` asks a provider for a grade of
 capacity, and JP refuses the query when the provider sells no equivalent.

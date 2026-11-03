@@ -8,6 +8,7 @@
 //! [`format`]: super::format
 
 use std::{
+    env,
     io::{self, IsTerminal, Read, Write},
     path::{Path, PathBuf},
 };
@@ -17,6 +18,7 @@ use similar::{ChangeTag, TextDiff};
 use crate::{
     Error,
     cli::{Cli, Format, Invocation, Language},
+    config::Config,
     format::{FormatOptions, format_markdown_with, format_rust_source_with},
     walk::{expand_path, workspace_files},
 };
@@ -31,12 +33,7 @@ pub fn run(cli: &Cli, invocation: Invocation) -> Result<(), Error> {
     //   2. Explicit paths process those paths.
     //   3. No paths + cargo invocation: workspace (all packages).
     //   4. No paths + direct invocation: stdin/stdout.
-    let opts = FormatOptions {
-        max_width: cli.max_width,
-        canonical: cli.format_markdown,
-        reference_links: cli.reference_links,
-        prune_reference_links: cli.prune_reference_links,
-    };
+    let opts = style(cli)?;
     let workspace_mode = cli.workspace || !cli.packages.is_empty() || !cli.exclude.is_empty();
     if workspace_mode {
         let files = workspace_files(&cli.packages, &cli.exclude, cli.language)?;
@@ -70,6 +67,17 @@ pub fn run(cli: &Cli, invocation: Invocation) -> Result<(), Error> {
         cli.stdin_filename.as_deref(),
         &opts,
     )
+}
+
+/// The style to format with: `.comfort.toml` in the current directory or the
+/// nearest one above it, with the flags given on the command line on top.
+fn style(cli: &Cli) -> Result<FormatOptions, Error> {
+    let file = match Config::find(&env::current_dir()?) {
+        Some(path) => Config::read(&path)?,
+        None => Config::default(),
+    };
+
+    Ok(file.overridden_by(cli.style()).format_options())
 }
 
 fn run_stdin(

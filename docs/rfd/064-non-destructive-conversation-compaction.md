@@ -1009,7 +1009,7 @@ Can proceed in parallel with Phases 3 and 4.
 - [Issue #57] — Make conversation management more powerful
 - [Multi-turn degradation paper][paper] — cited in Issue #57
 
-[Indexing and Counting Conventions]: ../architecture/indexing-conventions.md
+[Indexing and Counting Conventions]: ../wiki/00dxyba-indexing-and-counting-conventions.md
 [InternalEvent]: https://github.com/dcdpr/jp/blob/main/crates/jp_conversation/src/stream.rs
 [Issue #57]: https://github.com/dcdpr/jp/issues/57
 [RFD 011]: 011-system-notification-queue.md

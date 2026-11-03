@@ -1,12 +1,10 @@
 use std::fs;
 
 use camino::Utf8Path;
-use jp_tool::{AccessPolicy, Capability, Outcome, Question};
+use jp_tool::{AccessPolicy, Capability, EntryKind, Outcome, Question, ResolvedPath};
 use serde_json::{Map, Value};
 
-use super::utils::{
-    EntryKind, ResolvedPath, authorize, authorize_entry, is_file_dirty, resolve_workspace_entry,
-};
+use super::utils::{authorize, authorize_entry, is_file_dirty, resolve_workspace_entry};
 use crate::util::{ToolResult, error};
 
 pub(crate) async fn fs_delete_file(

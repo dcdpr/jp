@@ -1,7 +1,6 @@
 # Decide whether a plan belongs in conversation history
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-18
 - **Label**: domain=conversation

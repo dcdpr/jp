@@ -83,6 +83,9 @@ intensity = "bold"
 fg = "#d3869b"
 bg = "#3c3836"
 
+[style.markdown.elements.math]
+fg = "yellow"
+
 # Suppress the theme-derived blockquote-body foreground without resetting
 # the channel, so the surrounding context's foreground shows through.
 [style.markdown.elements.blockquote.body]
@@ -111,11 +114,13 @@ Bold and dim share a single SGR slot (SGR 1 / 2, both cleared by SGR 22), so
 they are modeled as four mutually-exclusive states rather than independent
 booleans — see "Style composition" below.
 
-`fg` and `bg` accept a color value (an ANSI 256-color index such as `244`, or a
-hex RGB string such as `"#3c3836"`) or one of two literal strings: `"default"`
-resets that channel to the terminal's own default (SGR 39 / 49); `"inherit"`
-suppresses theme-derived and renderer defaults *without* resetting the channel,
-so the surrounding context shows through.
+`fg` and `bg` accept a color value (an ANSI 256-color index such as `244`, a
+standard named ANSI color such as `"yellow"` or `"bright_yellow"` mapping to
+palette indices `0`–`15`, or a hex RGB string such as `"#3c3836"`) or one of
+two literal strings: `"default"` resets that channel to the terminal's own
+default (SGR 39 / 49); `"inherit"` suppresses theme-derived and renderer
+defaults *without* resetting the channel, so the surrounding context shows
+through.
 Omitting the key keeps today's behavior — theme-derived defaults apply first,
 then the renderer baseline, then the surrounding context.
 
@@ -228,6 +233,7 @@ pub struct MarkdownStyleSheet {
     pub ordered_marker: Style,
     pub task_checkbox: TaskCheckboxStyles,
     pub inline_code: InlineCodeStyles,
+    pub math: Style,
     pub code_fence: Style,              // ``` glyphs and info string
     pub blockquote: BlockquoteStyles,
     pub link: LinkStyles,
@@ -442,9 +448,13 @@ Four paths need wiring:
 
 1. **AST walker (`format_terminal` / `format_terminal_with`).** The stylesheet
    is held on `TerminalFormatter`.
-   All AST elements — headings, lists, blockquotes, inline code, strong,
+   All AST elements — headings, lists, blockquotes, inline code, math, strong,
    emphasis, underline, strikethrough, links, thematic breaks — go through
    `push_style` / `pop_style` against it.
+   Comrak's `math_dollars` extension is enabled so `$..$` and `$$..$$` parse as
+   `NodeValue::Math`, and `Buffer`'s inline ground-state scanner tracks `$`
+   delimiters so streaming paragraphs hold open math spans across chunk
+   boundaries.
 2. **Streaming code fence helpers (`render_code_fence`, `render_closing_fence`,
    `render_code_line`).** These live outside the AST walker
    (`crates/jp_md/src/format.rs`, around the `Formatter::render_code_*` block)
@@ -645,7 +655,7 @@ stay decoupled.
   Whether the terminal actually renders 24-bit RGB, ANSI 256, italic, dim, etc.
   is the terminal's problem.
   Detection is a separate concern.
-- **Styling every comrak node.** Math, footnote definitions and references, wiki
+- **Styling every comrak node.** Footnote definitions and references, wiki
   links, image delimiters, raw/HTML inline and block content, front matter, and
   escaped tags are passed through unstyled today and remain so.
   Slots can be added in a later RFD if a concrete need appears.

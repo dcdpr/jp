@@ -1,13 +1,12 @@
 # Tool-execution tests that spawn a process only run on Unix
 
 - **Status**: Done
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-14
-- **Implements**: 109
 - **Label**: domain=mcp
 - **Label**: package=jp_cli
 - **Label**: package=jp_mcp
+- **Label**: relevant-rfd=109
 - **Label**: type=task
 
 Seven tests covering the JP MCP Server's process-spawning paths are gated

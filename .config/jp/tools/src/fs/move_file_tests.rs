@@ -569,6 +569,86 @@ fn symlink_source_renames_the_link_entry() {
     assert!(std::fs::symlink_metadata(root.join("link.txt")).is_err());
 }
 
+/// A versioned checkout: `<w>/current -> <w>/releases/v1`, the workspace at
+/// `<w>/releases/v1/packages/jp`, and a read-write mount `up -> <w>`.
+#[cfg(unix)]
+fn checkout_with_alias() -> (
+    camino_tempfile::Utf8TempDir,
+    camino::Utf8PathBuf,
+    AccessPolicy,
+) {
+    use std::os::unix::fs::symlink;
+
+    let w = tempdir().unwrap();
+    let w_canonical = w.path().canonicalize_utf8().unwrap();
+    let root = w_canonical.join("releases/v1/packages/jp");
+    std::fs::create_dir_all(&root).unwrap();
+    symlink(w_canonical.join("releases/v1"), w_canonical.join("current")).unwrap();
+    symlink(&w_canonical, root.join("up")).unwrap();
+
+    let mount = FsRule::new("up")
+        .with_external(true)
+        .with_approved_target(Some(w_canonical))
+        .with_read(true)
+        .with_write(true);
+    let exclusion = mount.workspace_exclusion(&root).unwrap();
+    let policy = AccessPolicy {
+        fs: vec![
+            FsRule::new("").with_read(true).with_write(true),
+            mount,
+            exclusion,
+        ],
+        ..AccessPolicy::default()
+    };
+
+    (w, root, policy)
+}
+
+/// The deny rule a mount gets sits at the workspace's real path, so naming a
+/// directory that holds the workspace through an alias must not get past it.
+#[cfg(unix)]
+#[test]
+fn refuses_to_move_a_directory_holding_the_workspace_through_an_alias() {
+    let (_w, root, policy) = checkout_with_alias();
+
+    let result = fs_move_file_impl(
+        &root,
+        Some(&policy),
+        &no_answers(),
+        "up/current/packages",
+        "up/packages-old",
+        &never_git_runner(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        unwrap_error(result),
+        "Access denied: cannot delete 'up/current/packages': it contains the workspace."
+    );
+    assert!(root.join("up").is_symlink());
+}
+
+/// The alias itself is a link, and renaming it leaves the checkout in place.
+#[cfg(unix)]
+#[test]
+fn moves_an_alias_for_a_directory_holding_the_workspace() {
+    let (_w, root, policy) = checkout_with_alias();
+
+    let result = fs_move_file_impl(
+        &root,
+        Some(&policy),
+        &no_answers(),
+        "up/current",
+        "up/previous",
+        &clean_git_runner(),
+    )
+    .unwrap();
+
+    unwrap_success(result);
+    assert!(root.join("up/previous").is_symlink());
+    assert!(root.join("up").is_symlink());
+}
+
 #[test]
 fn moving_last_root_level_file_preserves_workspace() {
     // Regression for the same bug as `delete_file`: when the source lived

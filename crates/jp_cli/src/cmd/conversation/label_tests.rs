@@ -1,21 +1,15 @@
-use clap::Parser as _;
 use jp_conversation::Labels;
 use jp_printer::OutputFormat;
 use strip_ansi_escapes::strip_str;
 
 use super::*;
-use crate::cmd::{
-    conversation_id::ConversationIds as _, label::Grouped, target::ConversationTarget,
+use crate::{
+    cli::parse_args,
+    cmd::{conversation_id::ConversationIds as _, label::Grouped, target::ConversationTarget},
 };
 
-#[derive(Debug, clap::Parser)]
-struct Cmd {
-    #[command(flatten)]
-    label: Label,
-}
-
 fn parse(args: &[&str]) -> Label {
-    Cmd::try_parse_from(args).unwrap().label
+    parse_args(args).unwrap()
 }
 
 /// `--id` is global, so it reads the same on either side of the verb.
@@ -23,8 +17,8 @@ fn parse(args: &[&str]) -> Label {
 /// expect one to work and the other not to.
 #[test]
 fn the_id_flag_is_accepted_on_either_side_of_the_verb() {
-    let before = parse(&["label", "--id=jp-c17866928997", "add", "a=1"]);
-    let after = parse(&["label", "add", "--id=jp-c17866928997", "a=1"]);
+    let before = parse(&["--id=jp-c17866928997", "add", "a=1"]);
+    let after = parse(&["add", "--id=jp-c17866928997", "a=1"]);
 
     let expected = [ConversationTarget::Id(
         "jp-c17866928997".parse().expect("valid id"),
@@ -37,31 +31,28 @@ fn the_id_flag_is_accepted_on_either_side_of_the_verb() {
 /// A bare `jp c label` lists, so it needs no verb.
 #[test]
 fn a_bare_invocation_has_no_verb() {
-    assert!(parse(&["label"]).command.is_none());
-    assert!(parse(&["label", "--id=jp-c17866928997"]).command.is_none());
+    assert!(parse(&[]).command.is_none());
+    assert!(parse(&["--id=jp-c17866928997"]).command.is_none());
 }
 
 #[test]
 fn the_verbs_parse_and_carry_their_arguments() {
-    let Some(Commands::Add(add)) = parse(&["label", "add", "a=1", "b", ":c"]).command else {
+    let Some(Commands::Add(add)) = parse(&["add", "a=1", "b", ":c"]).command else {
         panic!("expected `add`");
     };
     assert_eq!(add.labels, ["a=1", "b", ":c"]);
 
-    let Some(Commands::Set(set)) = parse(&["label", "set", "a=1", "a=2"]).command else {
+    let Some(Commands::Set(set)) = parse(&["set", "a=1", "a=2"]).command else {
         panic!("expected `set`");
     };
     assert_eq!(set.labels, ["a=1", "a=2"]);
 
-    let Some(Commands::Rm(rm)) = parse(&["label", "rm", "a", "b=2"]).command else {
+    let Some(Commands::Rm(rm)) = parse(&["rm", "a", "b=2"]).command else {
         panic!("expected `rm`");
     };
     assert_eq!(rm.labels, ["a", "b=2"]);
 
-    assert!(matches!(
-        parse(&["label", "ls"]).command,
-        Some(Commands::Ls)
-    ));
+    assert!(matches!(parse(&["ls"]).command, Some(Commands::Ls)));
 }
 
 /// A bare `rm` clears every label.
@@ -69,7 +60,7 @@ fn the_verbs_parse_and_carry_their_arguments() {
 /// conversation target the way an optional flag value would.
 #[test]
 fn a_bare_rm_removes_everything() {
-    let Some(Commands::Rm(rm)) = parse(&["label", "rm"]).command else {
+    let Some(Commands::Rm(rm)) = parse(&["rm"]).command else {
         panic!("expected `rm`");
     };
 
@@ -80,33 +71,30 @@ fn a_bare_rm_removes_everything() {
 #[test]
 fn the_verbs_have_short_aliases() {
     assert!(matches!(
-        parse(&["label", "a", "x=1"]).command,
+        parse(&["a", "x=1"]).command,
         Some(Commands::Add(_))
     ));
     assert!(matches!(
-        parse(&["label", "s", "x=1"]).command,
+        parse(&["s", "x=1"]).command,
         Some(Commands::Set(_))
     ));
-    assert!(matches!(
-        parse(&["label", "r", "x"]).command,
-        Some(Commands::Rm(_))
-    ));
+    assert!(matches!(parse(&["r", "x"]).command, Some(Commands::Rm(_))));
 }
 
 /// Applying nothing is a mistake, not a no-op.
 /// Removing nothing means "remove everything", so it parses.
 #[test]
 fn add_and_set_require_at_least_one_argument() {
-    assert!(Cmd::try_parse_from(["label", "add"]).is_err());
-    assert!(Cmd::try_parse_from(["label", "set"]).is_err());
-    assert!(Cmd::try_parse_from(["label", "rm"]).is_ok());
+    assert!(parse_args::<Label>(&["add"]).is_err());
+    assert!(parse_args::<Label>(&["set"]).is_err());
+    assert!(parse_args::<Label>(&["rm"]).is_ok());
 }
 
 /// Values and keys are bare arguments, so the shell splits them and nothing
 /// needs escaping: a comma is just a character.
 #[test]
 fn arguments_carry_values_verbatim() {
-    let Some(Commands::Add(add)) = parse(&["label", "add", "branch=feat,exp"]).command else {
+    let Some(Commands::Add(add)) = parse(&["add", "branch=feat,exp"]).command else {
         panic!("expected `add`");
     };
 
@@ -124,7 +112,7 @@ fn arguments_carry_values_verbatim() {
 /// looks like a conversation target is unambiguous.
 #[test]
 fn a_target_keyword_is_an_ordinary_key() {
-    let Some(Commands::Rm(rm)) = parse(&["label", "rm", "active"]).command else {
+    let Some(Commands::Rm(rm)) = parse(&["rm", "active"]).command else {
         panic!("expected `rm`");
     };
 
@@ -142,7 +130,7 @@ fn a_target_keyword_is_an_ordinary_key() {
 /// because only they can carry an alias.
 #[test]
 fn only_the_applying_verbs_layer_the_target_config() {
-    for args in [&["label", "add", "a=1"][..], &["label", "set", "a=1"][..]] {
+    for args in [&["add", "a=1"][..], &["set", "a=1"][..]] {
         assert_eq!(
             parse(args).conversation_load_request().config_conversation,
             Some(0),
@@ -150,7 +138,7 @@ fn only_the_applying_verbs_layer_the_target_config() {
         );
     }
 
-    for args in [&["label", "rm", "a"][..], &["label"][..]] {
+    for args in [&["rm", "a"][..], &[][..]] {
         assert_eq!(
             parse(args).conversation_load_request().config_conversation,
             None,

@@ -1,12 +1,12 @@
 # Measure fan-out use on the fs read tools
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-10-06
-- **Implements**: 117
 - **Label**: domain=mcp
 - **Label**: domain=tooling
+- **Label**: relevant-rfd=117
+- **Label**: type=task
 
 RFD 117 adds `fan_out` but enables it for no tool.
 Its open question "Does the assistant use it?" is answered by turning it on for

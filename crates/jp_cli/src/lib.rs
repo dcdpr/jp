@@ -1,5 +1,6 @@
 mod access;
 mod bootstrap;
+mod cli;
 mod cmd;
 mod config_pipeline;
 mod ctx;
@@ -32,11 +33,7 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::NamedUtf8TempFile;
-use clap::{
-    ArgAction, Parser,
-    builder::{BoolValueParser, TypedValueParser as _},
-};
-use cmd::{Commands, workspace::target::WorkspaceTarget};
+use cmd::Commands;
 use crossterm::{style::Stylize as _, terminal};
 use ctx::{Ctx, IntoPartialAppConfig};
 use error::{Error, Result};
@@ -49,6 +46,7 @@ use jp_config::{
         load_partials_with_inheritance, log_load_diagnostics,
     },
 };
+use jp_inquire::prompt::TerminalPromptBackend;
 use jp_printer::{Chrome, OutputFormat, OutputWidth, Printer, RegionStyle};
 use jp_storage::backend::{
     FsStorageBackend, NullLockBackend, NullPersistBackend, ReadOnlySessionBackend,
@@ -62,8 +60,10 @@ use serde_json::Value;
 use tokio::runtime::{self, Runtime};
 use tracing::{debug, info, trace, warn};
 
+pub(crate) use crate::cli::{Cli, Globals, Spelling};
 use crate::{
     bootstrap::WorkspaceRequirement,
+    cli::flag::{ArgPrompts, Parsed},
     cmd::{plugin::help::print_root_section, target::resolve_request},
     config_pipeline::{ConfigPipeline, ConfigReset, ConfigResetEvents, build_partial_over},
 };
@@ -79,180 +79,6 @@ const DEFAULT_VARIABLE_PREFIX: &str = "JP_";
 
 /// The prefix used to parse a CLI argument as a path instead of a string.
 const PATH_STRING_PREFIX: char = '@';
-
-// Jean Pierre's LLM Toolkit.
-#[derive(Parser)]
-#[command(name = "jp", author, version, long_version = env!("LONG_VERSION"), about, long_about = None)]
-struct Cli {
-    #[command(flatten, next_help_heading = "Global Options")]
-    globals: Globals,
-
-    #[command(flatten)]
-    root: RootOpts,
-
-    #[command(subcommand, next_help_heading = "Options")]
-    command: Commands,
-}
-
-/// The root options for the CLI.
-///
-/// These options are only available at the root level, e.g. `jp --foo` but not
-/// `jp query --foo`.
-#[derive(Parser)]
-pub struct RootOpts {
-    /// Number of threads to use for processing (default is number of available
-    /// cores)
-    #[arg(short = 't', long = "threads")]
-    pub threads: Option<NonZeroUsize>,
-}
-
-#[derive(Debug, Default, clap::Args)]
-struct Globals {
-    /// Override a configuration value for the duration of the command.
-    #[arg(
-        short = 'c',
-        long = "cfg",
-        global = true,
-        action = ArgAction::Append,
-        value_name = "KEY=VALUE",
-        value_parser = KeyValueOrPath::from_str,
-    )]
-    config: Vec<KeyValueOrPath>,
-
-    /// Shorthand for `--cfg=NONE`: skip implicit config loading and start from
-    /// program defaults.
-    ///
-    /// Subsequent `--cfg` values layer on top of the defaults.
-    #[arg(long = "no-cfg", global = true, default_value_t = false)]
-    no_config: bool,
-
-    /// Increase verbosity of logging.
-    ///
-    /// Can be specified multiple times to increase verbosity.
-    ///
-    /// Defaults to printing "error" messages.
-    /// For each increase in verbosity, the log level is set to "warn", "info",
-    /// "debug", and "trace" respectively.
-    #[arg(short = 'v', long, global = true, action = ArgAction::Count)]
-    verbose: u8,
-
-    /// Suppress chrome: progress indicators, status lines, and tool call
-    /// headers.
-    ///
-    /// Command output and the assistant's response still go to stdout, and a
-    /// failing run still reports its error.
-    /// Redirect them (`>/dev/null`, `2>/dev/null`) to drop those as well.
-    ///
-    /// Tracing written to stderr by `-v` or `--log-file=-` is suppressed too.
-    /// The trace log file still records the run in full.
-    #[arg(short = 'q', long, global = true)]
-    quiet: bool,
-
-    /// Assume no user is available to answer prompts.
-    ///
-    /// Everything JP would ask about resolves the way it does when JP runs
-    /// without a terminal: the workspace and conversation pickers, the
-    /// lock-timeout prompt, and a third-party plugin's approval all fail, and a
-    /// tool set to ask before running runs unconfirmed.
-    ///
-    /// A command with no answer to fall back on fails too: `jp init`, and any
-    /// removal or archive it would have to confirm.
-    ///
-    /// Set `JP_NONINTERACTIVE=1` to apply this to every invocation in an
-    /// environment, such as a script or a CI job.
-    ///
-    /// This does not change output formatting; use `--format` for that.
-    #[arg(long, global = true, visible_alias = "non-interactive")]
-    no_interactive: bool,
-
-    /// The output format.
-    #[arg(
-        short = 'F',
-        long = "format",
-        global = true,
-        value_enum,
-        default_value_t = CliFormat::Auto,
-    )]
-    format: CliFormat,
-
-    /// Persist modified state to disk.
-    ///
-    /// This is enabled by default, but can be disabled to debug certain
-    /// actions.
-    /// It is also useful to send a query to the assistant, without adding that
-    /// query to the conversation history.
-    #[arg(
-        short = '!',
-        long = "no-persist",
-        visible_short_alias = 'P',
-        global = true,
-        default_value_t = false,
-        value_parser = BoolValueParser::new().map(|v| !v),
-        help = "Disable persistence for the duration of the command.",
-    )]
-    persist: bool,
-
-    /// The workspace to use for the command.
-    ///
-    /// Accepts the workspace targeting grammar (see `jp w use help`): a
-    /// workspace ID, a path, `cwd` / `.`, or `-` to read an ID from stdin.
-    /// Interactive runs can also use the session keywords (`s`, `?s`), the
-    /// pickers (`?`), and free-text matching.
-    ///
-    /// Selects the workspace for this invocation only; it does not change the
-    /// session's active workspace (that is `jp w use`).
-    ///
-    /// On `jp workspace use` and `jp workspace show` it names the workspace the
-    /// subcommand acts on, as an alternative to their positional target.
-    #[arg(short = 'w', long, global = true)]
-    workspace: Option<WorkspaceTarget>,
-
-    /// Lay output out against this many columns.
-    ///
-    /// Detected automatically when stdout is a terminal.
-    /// Set it when stdout is a pipe that still renders for a human at a known
-    /// width, such as a preview pane laid out by another program.
-    /// `0` means unknown, which is the default when piped: content keeps its
-    /// natural width instead of being fitted to a guess.
-    #[arg(long, global = true, value_name = "COLUMNS")]
-    width: Option<u16>,
-
-    /// The format of the log output written to stderr.
-    ///
-    /// Defaults to "text" when stderr is a terminal, and "json" when stderr is
-    /// redirected to a file or pipe.
-    /// Only takes effect when tracing is written to stderr (via `-v` or
-    /// `--log-file=-`).
-    #[arg(long, global = true, value_enum, default_value_t = LogFormat::Auto)]
-    log_format: LogFormat,
-
-    /// Write the full tracing log to the given file.
-    ///
-    /// Use `-` to stream logs to stderr instead.
-    /// When unset, the log is written to a temporary file.
-    /// `JP_DEBUG=1` announces its path before execution and keeps it afterward.
-    /// Runs lasting at least five minutes repeat the path at completion.
-    /// A failed run without `JP_DEBUG` reports the retained path at completion.
-    #[arg(long, global = true, value_name = "PATH")]
-    log_file: Option<String>,
-
-    /// Filter log output by target and level.
-    ///
-    /// Accepts a comma-separated list of `target=level` pairs.
-    /// Levels are one of: off, error, warn, info, debug, trace.
-    /// Targets match path prefixes.
-    ///
-    /// Examples: --log=tool::stderr=trace Show stderr output from local tools.
-    /// --log=mcp::stderr=debug Show stderr from MCP servers.
-    /// --log='jp_llm=trace,plugin=off' Trace jp_llm internals, silence plugins.
-    ///
-    /// Composes with `-v`: verbosity sets the baseline for jp's own modules;
-    /// `--log` adds or overrides specific targets.
-    /// Passing `--log` without `-v` still enables stderr log output.
-    #[allow(clippy::doc_markdown)]
-    #[arg(long, global = true, value_name = "DIRECTIVE")]
-    log: Option<String>,
-}
 
 /// The format used for log output on stderr.
 #[derive(Debug, Default, Clone, Copy, clap::ValueEnum)]
@@ -411,7 +237,7 @@ pub fn run() -> ExitCode {
     #[cfg(feature = "dhat")]
     let _profiler = run_dhat();
 
-    let mut cli = match Cli::try_parse() {
+    let mut cli = match Cli::try_parse_from(env::args_os()) {
         Ok(cli) => cli,
         Err(e) => {
             if e.kind() == clap::error::ErrorKind::DisplayHelp && is_root_help_request() {
@@ -711,8 +537,14 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     // [RFD 038]: https://jp.computer/rfd/038
     let cfg_overrides = effective_cfg_overrides(&cli.globals);
 
-    let (config, handles, start_new, config_reset) = resolve_config(
-        &cli.command,
+    let Resolved {
+        command,
+        config,
+        handles,
+        start_new,
+        config_reset,
+    } = resolve_config(
+        cli.command,
         || load_base_partial(fs_backend.as_deref(), exec.config_cwd().to_owned()),
         &cfg_overrides,
         &mut workspace,
@@ -749,7 +581,7 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let output = rt.block_on(async {
         tokio::select! {
             biased;
-            output = cli.command.run(&mut ctx, handles, start_new) => output,
+            output = command.run(&mut ctx, handles, start_new) => output,
             () = shutdown.cancelled() => Err(cmd::Error::interrupted()),
         }
     });
@@ -969,6 +801,18 @@ fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
     (code.into(), error)
 }
 
+/// The error for a command whose CLI flags could not be applied.
+///
+/// A [`cmd::Error`] carries the run's exit status, such as the shell's
+/// interrupt status for a prompt ended with Ctrl-C, and is kept whole.
+/// Anything else is reported as the flags' configuration error.
+fn cli_config_error(error: Box<dyn std::error::Error + Send + Sync>) -> Error {
+    match error.downcast::<cmd::Error>() {
+        Ok(error) => Error::Command(*error),
+        Err(error) => Error::CliConfig(error.to_string()),
+    }
+}
+
 /// Resolve the final [`AppConfig`] and conversation handles.
 ///
 /// Takes a loader for the base partial (the `files + env` layer) and runs the
@@ -979,30 +823,30 @@ fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
 /// 2. Extract `default_id` for conversation resolution (loading-time only).
 /// 3. Resolve conversation handles from the command's load request.
 /// 4. Merge per-conversation config layer.
-/// 5. Apply CLI flag overrides via [`IntoPartialAppConfig`].
+/// 5. Settle the command's arguments whose meaning depends on the
+///    configuration, then apply its CLI flag overrides via
+///    [`IntoPartialAppConfig`].
 /// 6. Consume `default_id` so it doesn't leak into the runtime config.
 /// 7. Build the final [`AppConfig`].
 ///
 /// Step 3 can open the conversation picker, which happens here rather than in
 /// the command because the conversation it selects supplies a config layer.
-/// `interactive` decides whether that prompt is available; without it, a target
-/// that resolves to nothing fails with keyword help.
+/// Step 5 can ask the user to confirm what an argument means, since that too
+/// depends on the configuration.
+/// `interactive` decides whether either prompt is available; without it, a
+/// target that resolves to nothing fails with keyword help, and an argument
+/// that needs confirming is refused.
 ///
 /// [RFD 038]: https://jp.computer/rfd/038
 pub(crate) fn resolve_config(
-    command: &Commands,
+    command: Commands<Parsed>,
     load_base: impl FnOnce() -> Result<PartialAppConfig>,
     cfg_overrides: &[KeyValueOrPath],
     workspace: &mut Workspace,
     session: Option<&jp_workspace::session::Session>,
     fs: Option<&FsStorageBackend>,
     interactive: bool,
-) -> Result<(
-    AppConfig,
-    Vec<jp_workspace::ConversationHandle>,
-    bool,
-    Option<ConfigResetEvents>,
-)> {
+) -> Result<Resolved> {
     let pipeline = ConfigPipeline::new(cfg_overrides, Some(workspace), fs, load_base)?;
 
     // Repair values for a stored conversation config that lost a required
@@ -1051,7 +895,7 @@ pub(crate) fn resolve_config(
 
             Some(
                 command
-                    .apply_conversation_config(workspace, PartialAppConfig::default(), None, handle)
+                    .apply_conversation_config(workspace, PartialAppConfig::default(), handle)
                     .map_err(|error| Error::CliConfig(error.to_string()))?,
             )
         }
@@ -1066,9 +910,17 @@ pub(crate) fn resolve_config(
     };
 
     // Phase 3: CLI flag overrides.
+    let prompts = if interactive {
+        ArgPrompts::new(Arc::new(TerminalPromptBackend))
+    } else {
+        ArgPrompts::default()
+    };
+    let command = command
+        .settle(&partial, &prompts)
+        .map_err(cli_config_error)?;
     partial = command
         .apply_cli_config(Some(workspace), partial, None)
-        .map_err(|error| Error::CliConfig(error.to_string()))?;
+        .map_err(cli_config_error)?;
 
     // Consume default_id so it doesn't appear in the runtime config.
     partial.conversation.default_id.take();
@@ -1104,7 +956,32 @@ pub(crate) fn resolve_config(
         }
     });
 
-    Ok((config, handles, outcome.start_new, config_reset))
+    Ok(Resolved {
+        command,
+        config,
+        handles,
+        start_new: outcome.start_new,
+        config_reset,
+    })
+}
+
+/// A command settled against its configuration, and what it runs with.
+#[derive(Debug)]
+pub(crate) struct Resolved {
+    /// The command, with every argument's meaning decided.
+    pub(crate) command: Commands,
+
+    /// The configuration the command runs with.
+    pub(crate) config: AppConfig,
+
+    /// The conversations the command asked for.
+    pub(crate) handles: Vec<jp_workspace::ConversationHandle>,
+
+    /// Whether the user chose to start a new conversation from the picker.
+    pub(crate) start_new: bool,
+
+    /// The reset point this invocation records, if any.
+    pub(crate) config_reset: Option<ConfigResetEvents>,
 }
 
 /// The `--cfg` directive list used for config resolution.

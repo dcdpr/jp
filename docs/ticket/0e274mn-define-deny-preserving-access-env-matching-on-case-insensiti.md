@@ -1,11 +1,10 @@
 # Define deny-preserving `access.env` matching on case-insensitive platforms
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-05
-- **Implements**: 076
 - **Label**: package=jp_tool
+- **Label**: relevant-rfd=076
 - **Label**: type=question
 
 `EnvRule::matches` is case-sensitive on every platform.

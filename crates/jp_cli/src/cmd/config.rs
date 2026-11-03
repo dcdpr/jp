@@ -1,18 +1,45 @@
 use camino::Utf8Path;
+use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use jp_config::fs::{ConfigFile, ConfigLoader, ConfigLoaderError, user_global_config_dir};
 use jp_workspace::ConversationHandle;
 
 use super::{ConversationLoadRequest, Output};
-use crate::ctx::Ctx;
+use crate::{
+    cli::{CommandArgs, subcommand_of, unread_subcommand},
+    ctx::Ctx,
+};
 
 mod fmt;
 mod set;
 mod show;
 
-#[derive(Debug, clap::Args)]
+/// `jp config`.
+#[derive(Debug)]
 pub(crate) struct Config {
-    #[command(subcommand)]
     command: Commands,
+}
+
+impl CommandArgs for Config {
+    fn augment(cmd: Command) -> Command {
+        cmd.subcommand_required(true)
+            .arg_required_else_help(true)
+            .subcommand(
+                show::Show::augment(Command::new("show")).about("Show the current configuration"),
+            )
+            .subcommand(set::Set::augment(Command::new("set")).about("Set a configuration option"))
+            .subcommand(fmt::Fmt::augment(Command::new("fmt")).about("Format a configuration file"))
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        let command = match subcommand_of(matches)? {
+            ("show", sub) => Commands::Show(show::Show::from_matches(sub)?),
+            ("set", sub) => Commands::Set(set::Set::from_matches(sub)?),
+            ("fmt", sub) => Commands::Fmt(fmt::Fmt::from_matches(sub)?),
+            (name, _) => return Err(unread_subcommand(name)),
+        };
+
+        Ok(Self { command })
+    }
 }
 
 impl Config {
@@ -38,38 +65,61 @@ impl Config {
     }
 }
 
-#[derive(Debug, clap::Subcommand)]
+#[derive(Debug)]
 enum Commands {
-    /// Show the current configuration.
-    #[command(name = "show")]
     Show(show::Show),
-
-    /// Set a configuration option.
-    #[command(name = "set")]
     Set(set::Set),
-
-    /// Format a configuration file.
-    #[command(name = "fmt")]
     Fmt(fmt::Fmt),
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, clap::Args)]
-#[group(required = false, multiple = false)]
+/// Which configuration file a command acts on; at most one is given.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct Target {
-    /// The workspace's user-specific configuration target.
-    #[arg(long)]
+    /// The workspace's user-specific configuration file.
     pub(crate) user_workspace: bool,
 
-    /// The global user-specific configuration target.
-    #[arg(long)]
+    /// The global user-specific configuration file.
     pub(crate) user_global: bool,
 
-    /// The current-working-directory configuration target, recursively upwards.
-    #[arg(long)]
+    /// The `.jp.toml` nearest the working directory, searched upwards.
     pub(crate) cwd: bool,
 }
 
 impl Target {
+    /// Declare the target flags on `cmd` as the group `group`, each described
+    /// by its `help` and conflicting with `conflicts`.
+    fn augment(
+        cmd: Command,
+        group: &'static str,
+        help: [&'static str; 3],
+        conflicts: Option<&'static str>,
+    ) -> Command {
+        let [user_workspace, user_global, cwd] = help;
+        let flag = |id: &'static str, long: &'static str, help: &'static str| {
+            let arg = Arg::new(id)
+                .long(long)
+                .action(ArgAction::SetTrue)
+                .help(help);
+            match conflicts {
+                Some(other) => arg.conflicts_with(other),
+                None => arg,
+            }
+        };
+
+        cmd.group(ArgGroup::new(group).multiple(false))
+            .arg(flag("user_workspace", "user-workspace", user_workspace).group(group))
+            .arg(flag("user_global", "user-global", user_global).group(group))
+            .arg(flag("cwd", "cwd", cwd).group(group))
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Self {
+        Self {
+            user_workspace: matches.get_flag("user_workspace"),
+            user_global: matches.get_flag("user_global"),
+            cwd: matches.get_flag("cwd"),
+        }
+    }
+
     /// Get the the configuration file, if one exists.
     pub(crate) fn config_file(self, ctx: &Ctx) -> Result<Option<ConfigFile>, ConfigLoaderError> {
         let mut loader = ConfigLoader {

@@ -12,18 +12,18 @@ current project. The following tools help you with this:
 - cargo_check: Run the project's tests and lints.
 - cargo_test: Run the project's tests.
 - cargo_expand: Expand macros in the project's code.
-- cargo_format: Format the project's code.
+- cargo_format: Format the project's Rust code (`cargo fmt`) and reflow doc-comment paragraphs (`comfort`).
 - cargo_update: Update named dependencies in `Cargo.lock`, optionally to a pinned version.
 - cargo_install_tools: Rebuild the binary serving these local tools, after editing `.config/jp/tools`.
 """
 
 [conversation.tools]
-cargo_check = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-cargo_test = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-cargo_expand = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-cargo_format = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-cargo_update = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-cargo_install_tools = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+cargo_check = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+cargo_test = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+cargo_expand = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+cargo_format = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+cargo_update = { enable = true, result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+cargo_install_tools = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
 
 [[assistant.instructions]]
 title = "Rust Project Conventions"
@@ -40,7 +40,7 @@ items = [
     Unit tests should be isolated into a separate file named with the `_tests` suffix, using the \
     `path` attribute to specify the file path next to the under-test module.\
     """,
-    "Run `cargo fmt` and `cargo clippy` to ensure consistency.",
+    "Run `cargo_format` and `cargo_check` to format code and doc comments and verify lints.",
 ]
 
 [[assistant.instructions]]

@@ -165,6 +165,7 @@ fn send_exit(stdout: &mut impl Write, code: u8, reason: Option<&str>) -> Result<
         &PluginToHost::Exit(ExitMessage {
             code,
             reason: reason.map(String::from),
+            expected: false,
         }),
     )
 }

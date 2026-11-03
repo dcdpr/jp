@@ -13,18 +13,36 @@ use std::collections::HashSet;
 
 use camino::Utf8PathBuf;
 use chrono::Utc;
+use clap::{ArgMatches, Command};
 use jp_inquire::{InlineOption, InlineSelect};
 use jp_plugin::registry::{ApprovedPlugin, PluginKind, Registry, RegistryPlugin};
 use jp_printer::Printer;
 
-use super::{approvals::ApprovalStore, registry};
-use crate::cmd;
+use super::{approvals::ApprovalStore, plugin_name_arg, registry};
+use crate::{
+    cli::{CommandArgs, required},
+    cmd,
+};
 
 /// Install a plugin from the registry, with the plugins it requires.
-#[derive(Debug, clap::Args)]
+#[derive(Debug)]
 pub(crate) struct Install {
     /// Name of the plugin to install (e.g. "serve-web").
     name: String,
+}
+
+impl CommandArgs for Install {
+    fn augment(cmd: Command) -> Command {
+        cmd.arg(plugin_name_arg(
+            "Name of the plugin to install (e.g. \"serve-web\")",
+        ))
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            name: required(matches, "name")?,
+        })
+    }
 }
 
 impl Install {

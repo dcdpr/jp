@@ -6,7 +6,7 @@ summary = "Move a file or directory in the project's local filesystem."
 description = """
 Tickets and RFDs cannot be moved here, in or out. Their filenames pair an
 allocated id with a slug derived from the title, and the tools that own those
-trees keep the two in step: `ticket_rename` retitles a ticket and moves its
+trees keep the two in step: `ticket_edit` retitles a ticket and moves its
 file, and `rfd_rename`, `rfd_renumber`, and `rfd_promote` do the equivalent for
 an RFD.
 """

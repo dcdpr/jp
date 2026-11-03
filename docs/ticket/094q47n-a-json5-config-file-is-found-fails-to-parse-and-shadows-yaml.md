@@ -1,7 +1,6 @@
 # A `.json5` config file is found, fails to parse, and shadows `.yaml`
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-27
 - **Label**: package=jp_config

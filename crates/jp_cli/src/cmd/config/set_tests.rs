@@ -147,7 +147,7 @@ fn set_in_conversation_applies_config_delta() {
 
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
     let set = Set {
-        file_target: FileTarget::default(),
+        file_target: Target::default(),
         conversation: FlagIds::default(),
     };
     rt.block_on(set.run(&mut ctx, vec![handle])).unwrap();
@@ -179,7 +179,7 @@ fn set_in_conversation_skips_a_value_already_in_effect() {
 
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
     let set = Set {
-        file_target: FileTarget::default(),
+        file_target: Target::default(),
         conversation: FlagIds::default(),
     };
     rt.block_on(set.run(&mut ctx, vec![handle])).unwrap();
@@ -208,7 +208,7 @@ fn set_in_conversation_twice_records_one_delta() {
     for _ in 0..2 {
         let handle = ctx.workspace.acquire_conversation(&id).unwrap();
         let set = Set {
-            file_target: FileTarget::default(),
+            file_target: Target::default(),
             conversation: FlagIds::default(),
         };
         rt.block_on(set.run(&mut ctx, vec![handle])).unwrap();
@@ -231,7 +231,7 @@ fn set_in_multiple_conversations() {
     let h1 = ctx.workspace.acquire_conversation(&id1).unwrap();
     let h2 = ctx.workspace.acquire_conversation(&id2).unwrap();
     let set = Set {
-        file_target: FileTarget::default(),
+        file_target: Target::default(),
         conversation: FlagIds::default(),
     };
     rt.block_on(set.run(&mut ctx, vec![h1, h2])).unwrap();
@@ -254,7 +254,7 @@ fn set_in_workspace_file() {
     fs::write(&config_path, "").unwrap();
 
     let set = Set {
-        file_target: FileTarget::default(),
+        file_target: Target::default(),
         conversation: FlagIds::default(),
     };
     rt.block_on(set.run(&mut ctx, vec![])).unwrap();
@@ -281,7 +281,7 @@ fn set_multiple_values_in_file() {
     fs::write(&config_path, "").unwrap();
 
     let set = Set {
-        file_target: FileTarget::default(),
+        file_target: Target::default(),
         conversation: FlagIds::default(),
     };
     rt.block_on(set.run(&mut ctx, vec![])).unwrap();
@@ -306,7 +306,7 @@ fn set_from_toml_file_into_conversation() {
 
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
     let set = Set {
-        file_target: FileTarget::default(),
+        file_target: Target::default(),
         conversation: FlagIds::default(),
     };
     rt.block_on(set.run(&mut ctx, vec![handle])).unwrap();
@@ -323,7 +323,7 @@ fn set_errors_without_cfg_args() {
     let rt = ctx.handle().clone();
 
     let set = Set {
-        file_target: FileTarget::default(),
+        file_target: Target::default(),
         conversation: FlagIds::default(),
     };
     let result = rt.block_on(set.run(&mut ctx, vec![]));
@@ -352,7 +352,7 @@ fn set_in_file_preserves_existing_formatting() {
     fs::write(&config_path, original).unwrap();
 
     let set = Set {
-        file_target: FileTarget::default(),
+        file_target: Target::default(),
         conversation: FlagIds::default(),
     };
     rt.block_on(set.run(&mut ctx, vec![])).unwrap();
@@ -383,7 +383,7 @@ fn set_in_file_preserves_existing_formatting() {
 #[test]
 fn load_request_none_when_no_ids() {
     let set = Set {
-        file_target: FileTarget::default(),
+        file_target: Target::default(),
         conversation: FlagIds::default(),
     };
     let req = set.conversation_load_request();
@@ -393,7 +393,7 @@ fn load_request_none_when_no_ids() {
 #[test]
 fn load_request_explicit_when_ids_present() {
     let set = Set {
-        file_target: FileTarget::default(),
+        file_target: Target::default(),
         conversation: FlagIds::from_targets(vec![ConversationTarget::Recent]),
     };
     let req = set.conversation_load_request();

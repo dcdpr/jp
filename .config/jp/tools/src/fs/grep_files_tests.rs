@@ -102,6 +102,57 @@ async fn greps_files_under_approved_external_mount() {
     assert!(matches.contains("fork/a.rs"), "path missing: {matches}");
 }
 
+/// `--mount fs_grep_files:..` from `<tmp>/a/b` mounts `a -> <tmp>/a`, whose
+/// walk passes through the workspace.
+/// The workspace's files are not the mount's to grant, so a denied one stays
+/// unread.
+#[cfg(unix)]
+#[tokio::test]
+async fn grep_through_a_mount_containing_the_workspace_skips_the_workspace() {
+    use std::os::unix::fs::symlink;
+
+    use jp_tool::{AccessPolicy, FsRule};
+
+    let grand = tempdir().unwrap();
+    let grand_canonical = grand.path().canonicalize_utf8().unwrap();
+    let root = grand_canonical.join("a/b");
+    std::fs::create_dir_all(root.join("secret")).unwrap();
+    std::fs::create_dir_all(grand_canonical.join("a/c")).unwrap();
+    std::fs::write(root.join("secret/f.txt"), "needle in secret").unwrap();
+    std::fs::write(grand_canonical.join("a/c/lib.rs"), "needle beside").unwrap();
+    symlink(grand_canonical.join("a"), root.join("a")).unwrap();
+
+    let mount = FsRule::new("a")
+        .with_external(true)
+        .with_approved_target(Some(grand_canonical.join("a")))
+        .with_read(true);
+    let exclusion = mount.workspace_exclusion(&root).unwrap();
+    let policy = AccessPolicy {
+        fs: vec![
+            FsRule::new("").with_read(true),
+            FsRule::new("secret").with_read(false),
+            mount,
+            exclusion,
+        ],
+        ..AccessPolicy::default()
+    };
+
+    let matches = fs_grep_files(
+        &root,
+        Some(&policy),
+        "needle".to_owned(),
+        None,
+        Some(vec!["a".to_owned()].into()),
+        None,
+        &Gitignore::empty(),
+    )
+    .await
+    .unwrap()
+    .replace('\\', "/");
+
+    assert_eq!(matches, "a/c/lib.rs (1 matches)\n1:needle beside\n");
+}
+
 #[tokio::test]
 async fn dot_means_workspace_root() {
     // Regression: pre-PR, `paths: ["."]` resolved via `root.join(".")` and

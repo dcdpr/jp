@@ -1,19 +1,25 @@
-use clap::Parser as _;
 use jp_config::{PartialAppConfig, model::id::PartialModelIdOrAliasConfig};
 
-use super::{DEFAULT_COUNT, IntoPartialAppConfig as _, Title};
+use super::{DEFAULT_COUNT, IntoPartialAppConfig as _, MANUAL, MORE, Title, picker_rows};
+use crate::cli::parse_args;
 
 /// Parse a `Title` from `jp conversation title <args>` for flag tests.
 fn parse_title(args: &[&str]) -> Title {
-    #[derive(clap::Parser)]
-    struct TestCli {
-        #[command(flatten)]
-        title: Title,
-    }
+    parse_args(args).unwrap()
+}
 
-    let mut argv = vec!["title"];
-    argv.extend_from_slice(args);
-    TestCli::try_parse_from(argv).unwrap().title
+#[test]
+fn the_picker_shows_titles_as_plain_lines_then_its_actions() {
+    // The row is redrawn as the cursor moves: a line break or an escape in a
+    // generated title would put the picker out of step with the screen.
+    let titles = ["Fix the\x1b[2J build".to_owned(), "Two\nlines".to_owned()];
+
+    assert_eq!(picker_rows(&titles), [
+        "Fix the[2J build",
+        "Twolines",
+        MORE,
+        MANUAL
+    ]);
 }
 
 #[test]
@@ -25,13 +31,13 @@ fn count_defaults_to_three() {
 /// time rather than producing an empty picker.
 #[test]
 fn count_of_zero_is_rejected() {
-    #[derive(clap::Parser)]
-    struct TestCli {
-        #[command(flatten)]
-        title: Title,
-    }
+    let error = parse_args::<Title>(&["--count", "0"]).unwrap_err();
 
-    assert!(TestCli::try_parse_from(["title", "--count", "0"]).is_err());
+    assert_eq!(
+        error.render().to_string(),
+        "error: invalid value '0' for '--count <COUNT>': at least one title must be \
+         generated\n\nFor more information, try '--help'.\n"
+    );
 }
 
 /// `--model` reaches the title generator through `assistant.model`, which is

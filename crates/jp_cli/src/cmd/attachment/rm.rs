@@ -1,11 +1,37 @@
+use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use jp_config::{Config as _, PartialAppConfig, conversation::attachment::AttachmentConfig};
 use jp_workspace::Workspace;
 
-use crate::{IntoPartialAppConfig, cmd::Output, ctx::Ctx, parser::AttachmentUrlOrPath};
+use crate::{
+    IntoPartialAppConfig,
+    cli::{CommandArgs, many},
+    cmd::Output,
+    ctx::Ctx,
+    parser::AttachmentUrlOrPath,
+};
 
-#[derive(Debug, clap::Args)]
+/// `jp attachment rm`.
+#[derive(Debug)]
 pub(crate) struct Rm {
     attachments: Vec<AttachmentUrlOrPath>,
+}
+
+impl CommandArgs for Rm {
+    fn augment(cmd: Command) -> Command {
+        cmd.arg(
+            Arg::new("attachments")
+                .action(ArgAction::Append)
+                .num_args(1..)
+                .value_name("ATTACHMENTS")
+                .value_parser(value_parser!(AttachmentUrlOrPath)),
+        )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            attachments: many(matches, "attachments"),
+        })
+    }
 }
 
 impl Rm {

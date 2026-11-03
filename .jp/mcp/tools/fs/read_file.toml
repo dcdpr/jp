@@ -1,6 +1,6 @@
 [conversation.tools.fs_read_file]
 enable = false
-run = "unattended"
+run = "allow"
 
 # Paths this tool may read but never returns. Reading them is a separate
 # question, governed by `access.fs` — `.git` in particular stays readable, since

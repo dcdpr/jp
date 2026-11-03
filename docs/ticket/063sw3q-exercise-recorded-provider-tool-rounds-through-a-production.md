@@ -1,7 +1,6 @@
 # Exercise recorded provider tool rounds through a production-shaped loop
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-21
 - **Label**: domain=llm

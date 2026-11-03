@@ -1,7 +1,6 @@
 # `Workspace::open` returns a workspace with an empty conversation index
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-19
 - **Label**: package=jp_workspace

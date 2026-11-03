@@ -375,6 +375,31 @@ fn merge_delta_into_empty_file() {
 }
 
 #[test]
+fn format_content_yaml() {
+    let mut config = ConfigFile {
+        path: "config.yaml".into(),
+        format: Format::Yaml,
+        content: indoc! {"
+            conversation:
+                start_local:    true
+            providers: { llm: { google: { base_url: 'https://google.example.com' } } }
+        "}
+        .to_owned(),
+    };
+
+    config.format_content::<PartialAppConfig>().unwrap();
+
+    assert_eq!(config.content, indoc! {"
+        conversation:
+          start_local: true
+        providers:
+          llm:
+            google:
+              base_url: https://google.example.com
+    "});
+}
+
+#[test]
 fn merge_delta_rejects_non_toml() {
     let mut config = ConfigFile {
         path: "test.json".into(),

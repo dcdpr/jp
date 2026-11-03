@@ -5,6 +5,7 @@ pub mod compaction;
 pub mod label;
 pub mod title;
 pub mod tool;
+pub mod turn_summary;
 
 use schematic::{Config, ConfigEnum, ConfigError, HandlerError};
 
@@ -17,6 +18,7 @@ use crate::{
         label::LabelConfig,
         title::{PartialTitleConfig, TitleConfig},
         tool::{PartialToolsConfig, ToolsConfig},
+        turn_summary::{PartialTurnSummaryConfig, TurnSummaryConfig},
     },
     delta::{
         PartialConfigDelta, delta_mergeable_map, delta_mergeable_map_at, delta_mergeable_vec,
@@ -41,6 +43,13 @@ pub struct ConversationConfig {
     /// This section configures how conversation titles are generated.
     #[setting(nested)]
     pub title: TitleConfig,
+
+    /// Turn summary configuration.
+    ///
+    /// This section configures how turn summaries are generated: one-line
+    /// descriptions of what each turn asked and accomplished.
+    #[setting(nested)]
+    pub turn_summary: TurnSummaryConfig,
 
     /// Tool configuration.
     ///
@@ -121,6 +130,7 @@ impl AssignKeyValue for PartialConversationConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             _ if kv.p("title") => self.title.assign(kv)?,
+            _ if kv.p("turn_summary") => self.turn_summary.assign(kv)?,
             _ if kv.p("tools") => self.tools.assign(kv)?,
             _ if kv.p("compaction") => self.compaction.assign(kv)?,
             _ if kv.p("attachments") => kv.try_vec_of_nested(self.attachments.as_mut())?,
@@ -139,6 +149,7 @@ impl PartialConfigDelta for PartialConversationConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             title: self.title.delta(next.title),
+            turn_summary: self.turn_summary.delta(next.turn_summary),
             tools: self.tools.delta(next.tools),
             compaction: self.compaction.delta(next.compaction),
             attachments: delta_mergeable_vec(&self.attachments, next.attachments),
@@ -154,6 +165,11 @@ impl PartialConfigDelta for PartialConversationConfig {
             title: self
                 .title
                 .delta_with_unsets(next.title, &path(prefix, "title"), unsets),
+            turn_summary: self.turn_summary.delta_with_unsets(
+                next.turn_summary,
+                &path(prefix, "turn_summary"),
+                unsets,
+            ),
             tools: self
                 .tools
                 .delta_with_unsets(next.tools, &path(prefix, "tools"), unsets),
@@ -183,6 +199,7 @@ impl FillDefaults for PartialConversationConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             title: self.title.fill_from(defaults.title),
+            turn_summary: self.turn_summary.fill_from(defaults.turn_summary),
             tools: self.tools.fill_from(defaults.tools),
             compaction: self.compaction.fill_from(defaults.compaction),
             attachments: self.attachments.fill_from(defaults.attachments),
@@ -206,6 +223,7 @@ impl ToPartial for ConversationConfig {
 
         Self::Partial {
             title: self.title.to_partial(),
+            turn_summary: self.turn_summary.to_partial(),
             tools: self.tools.to_partial(),
             compaction: self.compaction.to_partial(),
             attachments: vec_to_mergeable_partial(&self.attachments),

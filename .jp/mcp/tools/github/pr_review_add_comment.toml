@@ -5,7 +5,7 @@ command = "just serve-tools {{context}} {{tool}}"
 # Render the call ahead of the approval prompt: the user sees the comment
 # preview (snippet + body) before deciding whether to post. The formatter
 # is read-only (fetches PR head + file content), so this is safe.
-format = "unattended"
+format = "allow"
 summary = "Append one inline comment to your draft (PENDING) review on a pull request."
 description = """
 Adds a single inline review comment to the PR's pending review by the

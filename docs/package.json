@@ -1,10 +1,11 @@
 {
   "name": "docs",
   "packageManager": "yarn@4.9.1",
+  "type": "module",
   "devDependencies": {
     "sortablejs": "^1.15.7",
     "typescript": "^5",
-    "vitepress": "2.0.0-alpha.17",
-    "vue": "^3.5.16"
+    "vitepress": "2.0.0-alpha.21",
+    "vue": "^3.5.43"
   }
 }

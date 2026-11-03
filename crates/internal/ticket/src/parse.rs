@@ -4,6 +4,11 @@
 //! its description, and its comments.
 //! Everything here is pure — the caller supplies the text.
 //!
+//! The metadata block is read the way `doc::metadata` reads every document's,
+//! RFDs and wiki pages included: from its first field line to the blank line
+//! that closes it, a value wrapped onto more lines read whole, and keys matched
+//! without case.
+//!
 //! Comment boundaries are found structurally rather than by looking for the
 //! decorative `## Comments` heading: a boundary is a line of five or more
 //! dashes at column zero, a blank line, then a metadata block carrying both
@@ -13,14 +18,16 @@
 
 use std::ops::Range;
 
-use crate::{Comment, LABEL_KEY, Labels, Metadata, ParseError, Ticket};
+use doc::metadata::{self, Field, Header, split, unescape};
+
+use crate::{Comment, LABEL_KEY, Labels, Metadata, ParseError, Ticket, TicketId};
 
 /// Read a ticket document.
 pub fn document(source: &str) -> Result<Ticket, ParseError> {
     let doc = Doc::new(source);
     let title = doc.title()?;
     let header = doc.metadata_range().ok_or(ParseError::MissingMetadata)?;
-    let metadata = metadata(header.clone().filter_map(|i| meta_line(doc.lines[i])))?;
+    let metadata = metadata(Header::of(&doc.lines).fields())?;
 
     let boundaries = doc.boundaries();
     let description_end = boundaries.first().copied().unwrap_or(doc.lines.len());
@@ -74,67 +81,31 @@ pub fn title(source: &str) -> Option<String> {
 /// the file.
 #[must_use]
 pub fn labels(source: &str) -> Labels {
-    let doc = Doc::new(source);
-    let Some(header) = doc.metadata_range() else {
-        return Labels::default();
-    };
-
-    let tokens = header
-        .filter_map(|i| meta_line(doc.lines[i]))
-        .filter(|(key, _)| key.eq_ignore_ascii_case(LABEL_KEY))
-        .map(|(_, value)| unescaped(value));
-
-    Labels::from_tokens_lossy(tokens).0
+    Labels::from_tokens_lossy(label_tokens(source)).0
 }
 
-/// Undo the escaping a markdown formatter applies inside a metadata value.
+/// The value of every label line in a document's metadata block, as written.
 ///
-/// The block is a markdown list, so a formatter escapes what would otherwise be
-/// emphasis or a heading: `package=jp_config` is written `package=jp\_config`.
-/// Reading has to undo it, or a value round-trips into something else.
-fn unescaped(value: &str) -> String {
-    if !value.contains('\\') {
-        return value.to_owned();
-    }
+/// Keeps a value that isn't a well-formed label, so a caller can report it.
+/// Tolerant of a malformed header, as [`labels`] is.
+#[must_use]
+pub fn label_tokens(source: &str) -> Vec<String> {
+    let lines: Vec<&str> = source.lines().collect();
 
-    let mut out = String::with_capacity(value.len());
-    let mut chars = value.chars();
-    while let Some(char_) = chars.next() {
-        if char_ != '\\' {
-            out.push(char_);
-            continue;
-        }
-
-        // A backslash escapes ASCII punctuation and nothing else, so one before
-        // anything is itself.
-        match chars.next() {
-            Some(next) if next.is_ascii_punctuation() => out.push(next),
-            Some(next) => {
-                out.push('\\');
-                out.push(next);
-            }
-            None => out.push('\\'),
-        }
-    }
-
-    out
+    Header::of(&lines)
+        .values(LABEL_KEY)
+        .iter()
+        .map(|value| unescape(value))
+        .collect()
 }
 
-/// The line range of the metadata block that follows the title heading.
+/// The line range of the metadata block under the title heading: from its first
+/// `- **Key**: Value` line to the blank line that closes it.
 ///
-/// Returns `None` when the heading is missing, or when the first thing after it
-/// isn't a `- **Key**: Value` line.
+/// Returns `None` when there is no such line before the first section heading.
 #[must_use]
 pub fn metadata_range(source: &str) -> Option<Range<usize>> {
     Doc::new(source).metadata_range()
-}
-
-/// Split a `- **Key**: Value` line into its key and value.
-#[must_use]
-pub fn meta_line(line: &str) -> Option<(&str, &str)> {
-    let (key, value) = line.strip_prefix("- **")?.split_once("**:")?;
-
-    Some((key.trim(), value.trim()))
 }
 
 /// A line of five or more dashes at column zero: the shape that opens a
@@ -175,15 +146,9 @@ impl<'a> Doc<'a> {
     }
 
     fn metadata_range(&self) -> Option<Range<usize>> {
-        let title_index = self.lines.iter().position(|line| !line.trim().is_empty())?;
-        let start = (title_index + 1..self.lines.len())
-            .find(|&i| !self.lines[i].trim().is_empty())
-            .filter(|&i| meta_line(self.lines[i]).is_some())?;
-        let end = (start..self.lines.len())
-            .find(|&i| meta_line(self.lines[i]).is_none())
-            .unwrap_or(self.lines.len());
+        let block = metadata::block(&self.lines);
 
-        Some(start..end)
+        (!block.is_empty()).then_some(block)
     }
 
     /// Line indices at which a comment starts.
@@ -208,7 +173,7 @@ impl<'a> Doc<'a> {
         let mut from = false;
         let mut date = false;
         for line in self.lines.iter().skip(index + 2) {
-            let Some((key, _)) = meta_line(line) else {
+            let Some((key, _)) = split(line) else {
                 break;
             };
             from |= key.eq_ignore_ascii_case("from");
@@ -222,13 +187,13 @@ impl<'a> Doc<'a> {
     fn comment(&self, range: Range<usize>) -> Result<Comment, ParseError> {
         let meta_start = (range.start + 2).min(range.end);
         let meta_end = (meta_start..range.end)
-            .find(|&i| meta_line(self.lines[i]).is_none())
+            .find(|&i| split(self.lines[i]).is_none())
             .unwrap_or(range.end);
 
         let mut from = None;
         let mut date = None;
         let mut re = None;
-        for (key, value) in (meta_start..meta_end).filter_map(|i| meta_line(self.lines[i])) {
+        for (key, value) in (meta_start..meta_end).filter_map(|i| split(self.lines[i])) {
             match key.to_ascii_lowercase().as_str() {
                 "from" => from = Some(value.to_owned()),
                 "date" => date = Some(value.to_owned()),
@@ -266,54 +231,57 @@ fn without_comments_heading(text: String) -> String {
         .unwrap_or(text)
 }
 
-/// Build a [`Metadata`] from the key/value pairs of a ticket's header.
+/// Build a [`Metadata`] from the fields of a ticket's header.
 ///
 /// Unknown keys are ignored: the file keeps them, and a write only ever
-/// replaces the line it targets.
-fn metadata<'a>(pairs: impl Iterator<Item = (&'a str, &'a str)>) -> Result<Metadata, ParseError> {
+/// replaces the lines of the field it targets.
+fn metadata(fields: Vec<Field>) -> Result<Metadata, ParseError> {
     let mut status = None;
-    let mut kind = None;
     let mut label_tokens = vec![];
     let mut authors = None;
     let mut date = None;
-    let mut blocked_by = None;
-    let mut implements = None;
     let mut promoted_to = None;
     let mut github = None;
+    let mut parent = None;
 
-    for (key, value) in pairs {
+    for Field { key, value, .. } in fields {
         match key.to_ascii_lowercase().as_str() {
             "status" => status = Some(value.parse()?),
-            "kind" => kind = Some(value.parse()?),
             // Repeated once per pair, so every occurrence contributes rather
             // than the last one winning.
-            "label" => label_tokens.push(unescaped(value)),
-            "authors" => authors = Some(value.to_owned()),
-            "date" => date = Some(value.to_owned()),
-            "blocked by" => blocked_by = Some(value.to_owned()),
-            "implements" => implements = Some(value.to_owned()),
-            "promoted to" => promoted_to = Some(value.to_owned()),
-            "github" => github = Some(value.to_owned()),
+            "label" => label_tokens.push(unescape(&value)),
+            "authors" => authors = Some(value),
+            "date" => date = Some(value),
+            "promoted to" => promoted_to = Some(value),
+            "github" => github = Some(value),
+            "parent" => {
+                parent = Some(
+                    value
+                        .parse::<TicketId>()
+                        .map_err(|_| ParseError::InvalidValue {
+                            field: "Parent",
+                            value,
+                        })?,
+                );
+            }
             _ => {}
         }
     }
 
     Ok(Metadata {
         status: status.ok_or(ParseError::MissingField("Status"))?,
-        kind: kind.ok_or(ParseError::MissingField("Kind"))?,
         labels: Labels::from_tokens_lossy(label_tokens).0,
         authors: authors.ok_or(ParseError::MissingField("Authors"))?,
         date: date.ok_or(ParseError::MissingField("Date"))?,
-        blocked_by,
-        implements,
         promoted_to,
         github,
+        parent,
     })
 }
 
 /// Tracks fenced code block state while walking a document line by line.
 #[derive(Default)]
-struct Fences {
+pub(crate) struct Fences {
     open: Option<(char, usize)>,
 }
 
@@ -322,7 +290,7 @@ impl Fences {
     ///
     /// The opening and closing fences count as inside, so a `-----` sitting
     /// between them is never read as a comment boundary.
-    fn consume(&mut self, line: &str) -> bool {
+    pub(crate) fn consume(&mut self, line: &str) -> bool {
         let Some((char_, count, has_info)) = fence(line) else {
             return self.open.is_some();
         };

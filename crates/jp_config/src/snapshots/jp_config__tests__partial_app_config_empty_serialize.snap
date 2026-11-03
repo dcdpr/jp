@@ -54,6 +54,13 @@ PartialAppConfig {
             },
             from_heading: None,
         },
+        turn_summary: PartialTurnSummaryConfig {
+            generate: PartialTurnSummaryGenerateConfig {
+                auto: None,
+                batch_size: None,
+                model: None,
+            },
+        },
         tools: PartialToolsConfig {
             defaults: PartialToolsDefaultsConfig {
                 enable: None,
@@ -133,6 +140,7 @@ PartialAppConfig {
         default_id: None,
     },
     style: PartialStyleConfig {
+        sanitize: None,
         code: PartialCodeConfig {
             color: None,
             line_numbers: None,
@@ -148,6 +156,12 @@ PartialAppConfig {
             table_continuation_edge: None,
             theme: None,
             hr_style: None,
+            elements: PartialElementsConfig {
+                math: PartialElementStyleConfig {
+                    fg: None,
+                    bg: None,
+                },
+            },
         },
         mcp_startup: PartialMcpStartupConfig {
             show: None,
@@ -160,6 +174,10 @@ PartialAppConfig {
             summary_model: None,
             background: None,
             extend_across_tool_calls: None,
+            window: PartialReasoningWindowConfig {
+                rows: None,
+                timer: None,
+            },
         },
         streaming: PartialStreamingConfig {
             progress: PartialProgressConfig {

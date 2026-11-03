@@ -103,29 +103,6 @@ mod serde_toml_feature {
     }
 }
 
-#[cfg(feature = "serde_yaml")]
-mod serde_yaml_feature {
-    use super::{IntegerKind, IntegerType, ObjectType, Schema, SchemaBuilder, Schematic};
-
-    impl_unknown!(serde_yaml::Value);
-
-    // This isn't accurate since we can't access the `N` enum
-    impl Schematic for serde_yaml::Number {
-        fn build_schema(mut schema: SchemaBuilder) -> Schema {
-            schema.integer(IntegerType::new_kind(IntegerKind::I64))
-        }
-    }
-
-    impl Schematic for serde_yaml::Mapping {
-        fn build_schema(mut schema: SchemaBuilder) -> Schema {
-            schema.object(ObjectType::new(
-                schema.infer::<serde_yaml::Value>(),
-                schema.infer::<serde_yaml::Value>(),
-            ))
-        }
-    }
-}
-
 #[cfg(feature = "url")]
 mod url_feature {
     use super::{Schema, SchemaBuilder, Schematic, StringType};

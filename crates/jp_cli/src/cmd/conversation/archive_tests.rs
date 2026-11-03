@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, TimeZone as _, Utc};
-use clap::Parser as _;
 use jp_config::{AppConfig, conversation::DefaultConversationId};
 use jp_conversation::{Conversation, ConversationId};
 use jp_workspace::{
@@ -10,7 +9,10 @@ use jp_workspace::{
 };
 
 use super::*;
-use crate::cmd::{conversation_id::PositionalIds, target::resolve_request, time::CreationRange};
+use crate::{
+    cli::parse_args,
+    cmd::{conversation_id::PositionalIds, target::resolve_request, time::CreationRange},
+};
 
 fn make_id(secs: u64) -> ConversationId {
     ConversationId::try_from(DateTime::<Utc>::UNIX_EPOCH + std::time::Duration::from_secs(secs))
@@ -38,14 +40,6 @@ fn workspace_with_active_conversation(id: ConversationId) -> (Workspace, Session
     .unwrap();
 
     (ws, session)
-}
-
-/// Wraps `Archive` so its arguments can be parsed from a command line.
-#[derive(Debug, clap::Parser)]
-#[command(name = "archive")]
-struct TestArchive {
-    #[command(flatten)]
-    archive: Archive,
 }
 
 /// Default constructor for tests — no targets, no filters, default confirm.
@@ -103,9 +97,7 @@ fn session_keyword_targets_every_session_conversation() {
     )
     .unwrap();
 
-    let cmd = TestArchive::try_parse_from(["archive", "+s"])
-        .expect("+s is a valid archive target")
-        .archive;
+    let cmd = parse_args::<Archive>(&["+s"]).expect("+s is a valid archive target");
 
     let mut ids: Vec<_> = resolve_request(
         &cmd.conversation_load_request(),

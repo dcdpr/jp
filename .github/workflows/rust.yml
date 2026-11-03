@@ -15,12 +15,21 @@ env:
   CARGO_PROFILE_DOCS_DEBUG: 0
   CARGO_PROFILE_COVERAGE_DEBUG: line-tables-only
   CARGO_PROFILE_NEXTEST_DEBUG: 0
+  # `shear` builds under `dev` and `insta` under `test`. Full DWARF in those
+  # profiles makes up most of their cached `target/` directories.
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
   CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld.exe
   # Use content checksums instead of file mtimes for cargo's fingerprints.
   # `actions/checkout` rewrites source mtimes on every run, which would
   # otherwise invalidate cached workspace-crate artifacts even when the
   # content is unchanged. See rust-lang/cargo#14136.
   CARGO_UNSTABLE_CHECKSUM_FRESHNESS: "true"
+  # sccache refuses to cache incremental compiles, which cargo uses for
+  # workspace members by default, and it hashes every `CARGO_*` variable into
+  # its cache keys. rust-cache exports this same value, but the Windows job
+  # skips rust-cache, so setting it here keeps the keys identical across jobs.
+  CARGO_INCREMENTAL: "0"
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
@@ -99,6 +108,10 @@ jobs:
     needs: changes
     runs-on: ${{ matrix.os }}
     strategy:
+      # One failing task must not cancel the others. A cancelled job on `main`
+      # never saves its cache, so every pull request starts that task cold, and
+      # on a pull request each cancellation hides a failure until the next push.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest]
         task: [lint, fmt, fmt-comments, fmt-markdown, typecheck-js, test, docs, coverage, deny, insta, shear, vet, qual]
@@ -108,14 +121,21 @@ jobs:
             name_suffix: " (windows)"
             cache_suffix: "-windows"
             # Restoring a 3.9 GB `target/` cache costs Windows more than
-            # compiling from a warm sccache does, so this job caches only
-            # `~/.cargo` and lets sccache carry compilation.
-            cache_targets: "false"
+            # compiling from a warm sccache does, and restoring `~/.cargo`
+            # costs about 12s more than downloading the crates again, so this
+            # job skips rust-cache and lets sccache carry compilation.
+            rust_cache: "false"
             # Windows pays a steep per-file cost to unpack, compile and link, so
             # PR runs cover only the crates that make up `jp` itself. The Linux
             # `test` job still builds and tests everything on every PR, and
             # `main` covers the full workspace on Windows too.
             scope: ${{ github.ref == 'refs/heads/main' && 'workspace' || 'jp-only' }}
+          # Expanding macros makes `shear` compile every crate, one after the
+          # other, which makes it the slowest job of a pull request run. `main`
+          # keeps the expansion, so a dependency used only inside a macro is
+          # still checked after every merge.
+          - task: shear
+            scope: ${{ github.ref == 'refs/heads/main' && 'expand' || 'source' }}
     name: ${{ matrix.task }}${{ matrix.name_suffix }}
     # A run without a target cache falls back to a full build. Cap it so a
     # pathological run doesn't burn an hour of Windows minutes unnoticed.
@@ -178,13 +198,22 @@ jobs:
             toolchain-${{ matrix.task }}${{ matrix.cache_suffix }}
       - if: ${{ steps.task.outputs.run == 'true' }}
         uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
-      - if: ${{ steps.task.outputs.run == 'true' }}
+      # rust-cache prunes `target/` by crate name only, so every stale build of a
+      # crate still in the graph survives each save, and a key that changes only
+      # with `Cargo.lock` restores and re-saves that growing pile until it no
+      # longer fits on the runner's disk. The week in the key starts each cache
+      # over, since rust-cache's prefix fallback does not cross key inputs.
+      - name: Compute cache week
+        if: ${{ steps.task.outputs.run == 'true' }}
+        id: week
+        shell: bash
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+      - if: ${{ steps.task.outputs.run == 'true' && matrix.rust_cache != 'false' }}
         uses: Swatinem/rust-cache@7e1e2d0a10862b34e5df481373b2b0f295d1a2ef # v2
         with:
-          key: ${{ matrix.task }}
+          key: ${{ matrix.task }}-${{ steps.week.outputs.week }}
           cache-bin: false
           cache-workspace-crates: true
-          cache-targets: ${{ matrix.cache_targets || 'true' }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - if: ${{ steps.task.outputs.run == 'true' && matrix.task != 'coverage' && matrix.task != 'shear' }}
         uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # V0.10
@@ -197,11 +226,13 @@ jobs:
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-      # `rust-cache` strips `~/.cargo/registry/src` before saving, so the first
-      # cargo invocation of the job re-extracts every `.crate` archive. That is
-      # the single most expensive non-build phase on Windows. Doing it in a
-      # named step keeps the cost visible instead of burying it in the silent
-      # `cargo metadata` that `cargo nextest run` shells out to on startup.
+      # `rust-cache` strips `~/.cargo/registry/src` before saving, and the
+      # Windows job restores no registry at all, so the first cargo invocation
+      # of the job extracts every `.crate` archive, downloading them first on
+      # Windows. That is the single most expensive non-build phase there. Doing
+      # it in a named step keeps the cost visible instead of burying it in the
+      # silent `cargo metadata` that `cargo nextest run` shells out to on
+      # startup.
       - name: Warm the registry source tree
         if: ${{ steps.task.outputs.run == 'true' && matrix.task == 'test' }}
         shell: bash

@@ -1,7 +1,6 @@
 # Cerebras silently shortens answers as a conversation fills the context window
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-04
 - **Label**: domain=llm

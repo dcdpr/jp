@@ -13,4 +13,4 @@ messages in the Conventional Commit style. The following tools help you with thi
 """
 
 [conversation.tools]
-git_commit = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+git_commit = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }

@@ -12,4 +12,4 @@ The following tools help you with this:
 """
 
 [conversation.tools]
-unix_utils = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+unix_utils = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }

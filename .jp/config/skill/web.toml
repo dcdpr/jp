@@ -33,4 +33,4 @@ small; the cost of answering without context the user expected you to have is la
 """
 
 [conversation.tools]
-web_fetch = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+web_fetch = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }

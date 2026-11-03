@@ -1,7 +1,6 @@
 # Write a process RFD for unattended agent runs
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: domain=tooling

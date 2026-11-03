@@ -1,11 +1,15 @@
 use chrono::Utc;
+use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use crossterm::style::Stylize as _;
 use jp_printer::Printer;
 use tracing::{debug, warn};
 
-use crate::cmd::{
-    Output,
-    workspace::target::{self, ResolvedTarget, TargetEnv, WorkspaceTarget},
+use crate::{
+    cli::CommandArgs,
+    cmd::{
+        Output,
+        workspace::target::{self, ResolvedTarget, TargetEnv, WorkspaceTarget},
+    },
 };
 
 /// Select the session's active workspace.
@@ -21,27 +25,52 @@ use crate::cmd::{
 /// Interactive-only in every form — including `cwd` — because it mutates
 /// session state; scripts target a workspace per invocation with `jp
 /// --workspace` instead.
-#[derive(Debug, clap::Args)]
+#[derive(Debug)]
 pub(crate) struct Use {
-    /// The workspace to select.
-    /// See `jp w use help` for the grammar.
-    ///
-    /// Also settable with the global `--workspace` flag, but not both at once.
-    /// Defaults to the previously active workspace (`s`), or the picker (`?`)
-    /// when the session has none.
+    /// The workspace to select, or the previously active one (`s`), or the
+    /// picker (`?`) when the session has none.
     pub(super) target: Option<WorkspaceTarget>,
 
     /// Keep using this workspace even from inside another one.
-    ///
-    /// Without it, standing in a different workspace makes JP ask which of the
-    /// two you meant.
-    /// With it, the selection wins and JP stops asking; every run from
-    /// elsewhere reports the workspace it used.
-    ///
-    /// A later `jp workspace use` without `--always` releases it, and `jp
-    /// workspace use cwd` clears the selection outright.
-    #[arg(long)]
     pub(super) always: bool,
+}
+
+impl CommandArgs for Use {
+    fn augment(cmd: Command) -> Command {
+        cmd.arg(
+            Arg::new("target")
+                .value_name("TARGET")
+                .value_parser(value_parser!(WorkspaceTarget))
+                .help("The workspace to select. See `jp w use help` for the grammar")
+                .long_help(
+                    "The workspace to select. See `jp w use help` for the grammar.\n\nAlso \
+                     settable with the global `--workspace` flag, but not both at once. Defaults \
+                     to the previously active workspace (`s`), or the picker (`?`) when the \
+                     session has none.",
+                ),
+        )
+        .arg(
+            Arg::new("always")
+                .long("always")
+                .action(ArgAction::SetTrue)
+                .help("Keep using this workspace even from inside another one")
+                .long_help(
+                    "Keep using this workspace even from inside another one.\n\nWithout it, \
+                     standing in a different workspace makes JP ask which of the two you meant. \
+                     With it, the selection wins and JP stops asking; every run from elsewhere \
+                     reports the workspace it used.\n\nA later `jp workspace use` without \
+                     `--always` releases it, and `jp workspace use cwd` clears the selection \
+                     outright.",
+                ),
+        )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            target: matches.get_one("target").cloned(),
+            always: matches.get_flag("always"),
+        })
+    }
 }
 
 impl Use {

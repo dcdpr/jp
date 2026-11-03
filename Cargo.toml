@@ -42,14 +42,17 @@ jp_test = { path = "crates/jp_test" }
 jp_tool = { path = "crates/jp_tool" }
 jp_workspace = { path = "crates/jp_workspace" }
 
-comfort = { path = "crates/contrib/comfort" }
+comfort = { path = "crates/contrib/comfort", default-features = false }
 async-anthropic = { path = "crates/contrib/async-anthropic" }
+doc = { path = "crates/internal/doc" }
 grizzly = { path = "crates/contrib/grizzly", default-features = false }
 schematic = { path = "crates/contrib/schematic", default-features = false }
+site-revision = { path = "crates/internal/site-revision" }
 ticket = { path = "crates/internal/ticket" }
+tool-definitions = { path = "crates/internal/tool-definitions" }
 xct2cli = { path = "crates/contrib/xct2cli" }
 
-addr2line = { version = "0.26" }
+addr2line = { version = "0.27" }
 ahash = { version = "0.8", default-features = false, features = ["runtime-rng", "std", "serde"] }
 assert_matches = { version = "1", default-features = false }
 async-stream = { version = "0.3", default-features = false }
@@ -62,6 +65,7 @@ camino-tempfile = { version = "1", default-features = false }
 cargo_metadata = { version = "0.23", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4", default-features = false }
+clap_lex = { version = "0.7", default-features = false }
 clean-path = { version = "0.2", default-features = false }
 comfy-table = { version = "7", default-features = false }
 comrak = { version = "0.52", default-features = false }
@@ -83,7 +87,7 @@ form_urlencoded = { version = "1", default-features = false, features = ["alloc"
 futures = { version = "0.3", default-features = false }
 gemini_client_rs = { git = "https://github.com/JeanMertz/gemini-client", default-features = false } # <https://github.com/Adriftdev/gemini-client/pull/16>
 getrandom = { version = "0.3", default-features = false }
-gimli = { version = "0.33" }
+gimli = { version = "0.34" }
 glob = { version = "0.3", default-features = false }
 grep-matcher = { version = "0.1", default-features = false }
 grep-printer = { version = "0.3", default-features = false }
@@ -103,7 +107,8 @@ libc = { version = "0.2", default-features = false }
 linkme = { version = "0.3", default-features = false }
 maud = { version = "0.27", default-features = false }
 minijinja = { version = "2", default-features = false }
-object = { version = "0.39" }
+nu-ansi-term = { version = "0.50", default-features = false } # reedline's styling type
+object = { version = "0.40" }
 # Pinned to a rev rather than a branch: a branch dependency follows its HEAD on
 # `cargo update`. Carries the `LocalModel` model-details fields on top of 0.3.4,
 # which is the last release on reqwest 0.12.
@@ -139,11 +144,11 @@ secrecy = { version = "0.10", default-features = false }
 semver = { version = "1", default-features = false }
 serde = { version = "1", default-features = false }
 serde-content = { version = "0.1", default-features = false }
+serde-saphyr = { version = "2", default-features = false }
 serde-untagged = { version = "0.1", default-features = false }
 serde_json = { version = "1", default-features = false }
 serde_json5 = { version = "0.2", default-features = false }
 serde_path_to_error = { version = "0.1", default-features = false }
-serde_yaml = { version = "0.9", default-features = false }
 serial_test = { version = "3", default-features = false }
 sha1 = { version = "0.10", default-features = false }
 sha2 = { version = "0.10", default-features = false }
@@ -166,6 +171,7 @@ tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
 two-face = { version = "0.5", default-features = false }
 typetag = { version = "0.2", default-features = false }
+unicode-normalization = { version = "0.1", default-features = false }
 unicode-segmentation = { version = "1", default-features = false }
 unicode-width = { version = "0.2", default-features = false }
 url = { version = "2", default-features = false }
@@ -174,7 +180,7 @@ vt100 = { version = "0.16", default-features = false }
 vte = { version = "0.14", default-features = false }
 which = { version = "8", default-features = false }
 windows-sys = { version = "0.61", default-features = false }
-zip = { version = "8", default-features = false }
+zip = { version = "9", default-features = false }
 
 [patch.crates-io]
 openai_responses = { git = "https://github.com/JeanMertz/openai-responses-rs" } # <https://github.com/m1guelpf/openai-responses-rs/pull/6>

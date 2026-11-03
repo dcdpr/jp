@@ -1,7 +1,6 @@
 # Ctrl-C during streaming ended the run without showing the interrupt menu
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-11
 - **Label**: client=cli

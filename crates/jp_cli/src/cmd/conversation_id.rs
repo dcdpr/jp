@@ -1,4 +1,4 @@
-//! Shared clap argument types for conversation targeting.
+//! Shared argument types for conversation targeting.
 //!
 //! Two generic types handle all commands:
 //!
@@ -10,17 +10,18 @@
 //! - `SESSION`: whether the `session` keyword is accepted
 //! - `MULTI`: whether multiple IDs are accepted
 //!
-//! Because clap's derive macro doesn't evaluate const generics in `#[arg]`
-//! attributes, both types implement [`clap::Args`] and [`clap::FromArgMatches`]
-//! manually.
 //! The const generics control parser selection, help text, and validation.
 
 use std::{borrow::Cow, ffi::OsStr};
 
-use clap::{Arg, ArgAction, ArgMatches, Command, FromArgMatches, builder::TypedValueParser};
+use clap::{Arg, ArgAction, ArgMatches, Command, builder::TypedValueParser};
 use crossterm::style::Stylize as _;
 
-use super::target::ConversationTarget;
+use super::target::{ConversationTarget, PickerFilter};
+use crate::cli::{
+    CommandArgs,
+    flag::{Claim, Flag, FlagValues, OptionalValue, flag_arg},
+};
 
 /// Positional conversation ID arguments: `[ID]` or `[ID]...`
 ///
@@ -59,6 +60,68 @@ pub(crate) struct FlagIds<const SESSION: bool, const MULTI: bool, const GLOBAL: 
 impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> FlagIds<SESSION, MULTI, GLOBAL> {
     pub fn from_targets(ids: Vec<ConversationTarget>) -> Self {
         Self { ids }
+    }
+}
+
+/// The `-i` / `--id` flag that reads into a [`FlagIds`] of the same parameters.
+pub(crate) enum Ids<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> {}
+
+impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> OptionalValue
+    for Ids<SESSION, MULTI, GLOBAL>
+{
+    const ID: &'static str = "id";
+
+    type Context = ();
+    type Output = FlagIds<SESSION, MULTI, GLOBAL>;
+    type Value = ConversationTarget;
+
+    fn declare(arg: Arg) -> Arg {
+        let mut arg = arg
+            .short('i')
+            .long("id")
+            .visible_alias("ids")
+            .help(short_help())
+            .long_help(long_help(SESSION, MULTI));
+
+        if MULTI {
+            arg = arg.action(ArgAction::Append).value_delimiter(',');
+        }
+
+        // A global arg is accepted on either side of a subcommand, so
+        // `jp c label --id=X add k=v` and `jp c label add --id=X k=v` mean the
+        // same thing.
+        if GLOBAL {
+            arg = arg.global(true);
+        }
+
+        arg
+    }
+
+    fn parser() -> impl TypedValueParser<Value = ConversationTarget> {
+        TargetParser::<SESSION>
+    }
+
+    /// An ID, keyword, picker filter, or `-` is the flag's; free text, which
+    /// would otherwise search the picker by title, and `help` are not.
+    fn claim(word: &str, parsed: Option<ConversationTarget>, (): &()) -> Claim<ConversationTarget> {
+        match ConversationTarget::parse(word) {
+            ConversationTarget::Help
+            | ConversationTarget::Picker(PickerFilter { query: Some(_), .. }) => Claim::Text,
+            _ => Claim::from_parsed(parsed),
+        }
+    }
+
+    fn collect(values: FlagValues<ConversationTarget>) -> Result<Self::Output, clap::Error> {
+        // Written bare, or with a value given up to the query, the flag opens
+        // the picker.
+        let ids: Vec<_> = values
+            .into_indexed()
+            .into_iter()
+            .map(|(_, target)| target.unwrap_or_else(|| ConversationTarget::parse("")))
+            .collect();
+
+        validate_multi::<MULTI>(&ids)?;
+        Ok(FlagIds { ids })
     }
 }
 
@@ -104,8 +167,8 @@ impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> ConversationIds
     }
 }
 
-impl<const SESSION: bool, const MULTI: bool> clap::Args for PositionalIds<SESSION, MULTI> {
-    fn augment_args(cmd: Command) -> Command {
+impl<const SESSION: bool, const MULTI: bool> CommandArgs for PositionalIds<SESSION, MULTI> {
+    fn augment(cmd: Command) -> Command {
         let mut arg = Arg::new("id")
             .value_parser(TargetParser::<SESSION>)
             .help(short_help())
@@ -120,71 +183,22 @@ impl<const SESSION: bool, const MULTI: bool> clap::Args for PositionalIds<SESSIO
         cmd.arg(arg)
     }
 
-    fn augment_args_for_update(cmd: Command) -> Command {
-        Self::augment_args(cmd)
-    }
-}
-
-impl<const SESSION: bool, const MULTI: bool> FromArgMatches for PositionalIds<SESSION, MULTI> {
-    fn from_arg_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
         let ids = read_ids(matches);
         validate_multi::<MULTI>(&ids)?;
         Ok(Self { ids })
     }
-
-    fn update_from_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), clap::Error> {
-        self.ids = read_ids(matches);
-        validate_multi::<MULTI>(&self.ids)?;
-        Ok(())
-    }
 }
 
-impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> clap::Args
+impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> CommandArgs
     for FlagIds<SESSION, MULTI, GLOBAL>
 {
-    fn augment_args(cmd: Command) -> Command {
-        let mut arg = Arg::new("id")
-            .short('i')
-            .long("id")
-            .visible_alias("ids")
-            .value_parser(TargetParser::<SESSION>)
-            .help(short_help())
-            .long_help(long_help(SESSION, MULTI))
-            .num_args(0..=1)
-            .default_missing_value("");
-
-        if MULTI {
-            arg = arg.action(ArgAction::Append).value_delimiter(',');
-        }
-
-        // A global arg is accepted on either side of a subcommand, so
-        // `jp c label --id=X add k=v` and `jp c label add --id=X k=v` mean the
-        // same thing.
-        if GLOBAL {
-            arg = arg.global(true);
-        }
-
-        cmd.arg(arg)
+    fn augment(cmd: Command) -> Command {
+        cmd.arg(flag_arg::<Ids<SESSION, MULTI, GLOBAL>>())
     }
 
-    fn augment_args_for_update(cmd: Command) -> Command {
-        Self::augment_args(cmd)
-    }
-}
-
-impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> FromArgMatches
-    for FlagIds<SESSION, MULTI, GLOBAL>
-{
-    fn from_arg_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
-        let ids = read_ids(matches);
-        validate_multi::<MULTI>(&ids)?;
-        Ok(Self { ids })
-    }
-
-    fn update_from_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), clap::Error> {
-        self.ids = read_ids(matches);
-        validate_multi::<MULTI>(&self.ids)?;
-        Ok(())
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Flag::<Ids<SESSION, MULTI, GLOBAL>>::strict(matches)
     }
 }
 
@@ -277,17 +291,22 @@ impl<const SESSION: bool> TypedValueParser for TargetParser<SESSION> {
             .to_str()
             .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
 
-        let target = ConversationTarget::parse(s);
-
-        if !SESSION && target.requires_session() {
-            return Err(clap::Error::raw(
-                clap::error::ErrorKind::InvalidValue,
-                "session-based targets are not supported by this command\n",
-            ));
-        }
-
-        Ok(target)
+        parse_target::<SESSION>(s)
     }
+}
+
+/// Parse a conversation target, refusing a session-based one unless `SESSION`.
+fn parse_target<const SESSION: bool>(value: &str) -> Result<ConversationTarget, clap::Error> {
+    let target = ConversationTarget::parse(value);
+
+    if !SESSION && target.requires_session() {
+        return Err(clap::Error::raw(
+            clap::error::ErrorKind::InvalidValue,
+            "session-based targets are not supported by this command\n",
+        ));
+    }
+
+    Ok(target)
 }
 
 fn short_help() -> &'static str {
@@ -300,11 +319,11 @@ fn long_help(session: bool, multi: bool) -> String {
     } else {
         "Conversation ID, Interactive Filter/Picker, or Alias."
     };
-    let mut s = format!("{header}\n\n");
-    s.push_str(&keyword_help(session, multi, false));
+    let keywords = keyword_help(session, multi, false);
+    let mut s = format!("{header}\n\n{}", keywords.trim_end());
 
     if multi {
-        s.push_str("\nWhen multiple IDs are given, only literal conversation IDs are accepted.");
+        s.push_str("\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.");
     }
 
     s
@@ -332,18 +351,21 @@ fn keyword_help(session: bool, multi: bool, ansi: bool) -> String {
     let h_pick_all = h("select from all");
     let h_pick_pinned = h("select from pinned");
     let h_pick_session = h("select from session");
+    let h_pick_archived = h("select from archived");
 
     let h_alias_active = h("target the session's active conversation");
     let h_alias_recent = h("target most recently activated in workspace");
     let h_alias_newest = h("target newest created");
     let h_alias_pinned = h("target most recently pinned");
     let h_alias_session = h("target the session's previous conversation");
+    let h_alias_archived = h("target most recently archived");
 
     let mut help = indoc::formatdoc! {"
         {picker}:
           ?                             {h_pick_all}
           ?p, ?pinned                   {h_pick_pinned}
           ?s, ?session                  {h_pick_session}
+          ?a, ?archived                 {h_pick_archived}
 
         {aliases}:
           ., active                     {h_alias_active}
@@ -351,6 +373,7 @@ fn keyword_help(session: bool, multi: bool, ansi: bool) -> String {
           n, newest                     {h_alias_newest}
           p, pinned                     {h_alias_pinned}
           s, session                    {h_alias_session}
+          a, archived                   {h_alias_archived}
     "};
 
     if multi {
@@ -358,12 +381,14 @@ fn keyword_help(session: bool, multi: bool, ansi: bool) -> String {
         let h_multi_live = h("target all live conversations");
         let h_multi_pinned = h("target all pinned");
         let h_multi_session = h("target all activated in session");
+        let h_multi_archived = h("target all archived");
         let h_stdin = h("read IDs from stdin, one per line");
         help.push_str(&indoc::formatdoc! {"
             \n{multi_target}:
               +l, +live                     {h_multi_live}
               +p, +pinned                   {h_multi_pinned}
               +s, +session                  {h_multi_session}
+              +a, +archived                 {h_multi_archived}
               -                             {h_stdin}
         "});
     }

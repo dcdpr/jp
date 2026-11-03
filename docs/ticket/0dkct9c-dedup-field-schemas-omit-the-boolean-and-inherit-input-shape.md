@@ -1,7 +1,6 @@
 # Dedup field schemas omit the boolean and `inherit` input shapes
 
 - **Status**: Done
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-04
 - **Label**: package=jp_config
