@@ -313,10 +313,6 @@ impl ConversationStream {
             keep
         });
 
-        if request.is_some() {
-            self.clear_last_turn_summary();
-        }
-
         request
     }
 

@@ -219,8 +219,7 @@ impl<'a> Turn<'a> {
 
 `ConversationStream` gains targeted setters that address the turn by its
 `TurnStart` `EventId` rather than by positional turn index, and clears the
-trailing turn's summary when `pop` or `trim_chat_request` removes events from
-it:
+trailing turn's summary when `pop` removes events from it:
 
 ```rust
 impl ConversationStream {
@@ -436,8 +435,8 @@ Rejected for four reasons:
    rejecting `TurnEnd`, turns can be interrupted, crash mid-stream, or be edited
    by hand.
    A turn without a `TurnEnd` still needs to appear in `jp conversation edit
-   -i`, and every stream-mutating method (`pop`, `trim_chat_request`, `retain`,
-   `sanitize`) would have to maintain matching `TurnStart`/`TurnEnd` pairs.
+   -i`, and every stream-mutating method (`pop`, `retain`, `sanitize`) would
+   have to maintain matching `TurnStart`/`TurnEnd` pairs.
 3. **Does not avoid in-place mutation.** When a summary is generated in a
    background task on the next turn or regenerated on demand, `TurnEnd` has
    already been persisted, so updating the summary still rewrites a historical

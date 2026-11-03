@@ -3371,7 +3371,7 @@ fn trimming_the_last_turn_of_a_stream_without_turn_markers_removes_its_events() 
 #[test]
 fn trimming_a_stream_without_requests_changes_nothing() {
     let mut stream = ConversationStream::new_test();
-    stream.push(TurnStart);
+    stream.push(TurnStart::default());
     stream.add_compaction(Compaction::new(0, 0));
     let before = stream.clone();
 
