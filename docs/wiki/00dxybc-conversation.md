@@ -10,12 +10,14 @@
 
 The Conversation cluster covers JP's central abstraction: the persistent record
 of "talking to the assistant" and the event log that backs it.
-Six terms describe its structure — a **Conversation** is the stored entity, a
-**Turn** is one slice of it, an **Event** is the atomic unit inside a Turn,
-**Tool Calls** and **Inquiries** are specific event kinds, and a **Thread** is
-the projection of a Conversation that gets sent to an LLM provider.
+A **Conversation** is the stored entity, a **Turn** is one slice of it, an
+**Event** is the atomic unit inside a Turn, **Tool Calls** and **Inquiries** are
+specific event kinds, and a **Thread** is the projection of a Conversation that
+gets sent to an LLM provider.
 An **Event ID** names one entry in the log, so a reference to it survives edits
 that move the entry.
+A **Turn Summary** describes one Turn in a single line for navigation and stream
+editing.
 
 These terms are tightly coupled — paraphrasing one usually breaks the model for
 another.
@@ -27,8 +29,9 @@ annotated.
 second.
 
 > [!NOTE]
-> Cluster status: **Turn**, **Event ID**, **Active Conversation**, **Live
-> Conversation**, **Archived Conversation**, and **Label** are defined below.
+> Cluster status: **Turn**, **Turn Summary**, **Event ID**, **Active
+> Conversation**, **Live Conversation**, **Archived Conversation**, and
+> **Label** are defined below.
 > The remaining terms are placeholders and will land in subsequent passes.
 > Until then, see the [legacy single-page glossary] for the older definitions of
 > the unfilled terms.
@@ -226,6 +229,30 @@ None of these are project terms.
 When you mean a single user-prompt-to-final-response cycle with the assistant,
 the word is **Turn**.
 
+### Turn Summary
+
+A single-line description of what a **Turn** asked and accomplished, used to
+identify the turn when navigating or editing a conversation.
+
+**Implementation.** `TurnStart::summary` in `jp_conversation::event`, persisted
+as the optional `summary` key on the turn's `turn_start` entry and read through
+`Turn::summary` (`Turn::fallback_summary` provides the request-line fallback
+when unset).
+See [RFD-126].
+
+**In context.** A turn summary is display metadata.
+`TurnStart` is not provider-visible, so a summary can be written or cleared
+after its turn is persisted without altering provider requests, and is retained
+or dropped with its turn.
+
+**Not the same as.** A [compaction Summary], which is multi-paragraph text that
+replaces a range of turns in the provider-facing view.
+
+**Avoid.** *Turn title* and *turn label*: a title belongs to the whole
+conversation, and a **Label** is a `key=value` pair on it.
+
 [RFD-097]: ../rfd/097-stable-event-identifiers.md
+[RFD-126]: ../rfd/126-turn-summaries.md
 [`jp_label`]: https://github.com/dcdpr/jp/tree/main/crates/jp_label
+[compaction Summary]: 00dxybd-ubiquitous-language.md#summary
 [legacy single-page glossary]: 00dxybd-ubiquitous-language.md

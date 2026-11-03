@@ -19,7 +19,7 @@ fn conversation() -> ChatQuery {
     let mut stream =
         ConversationStream::new(AppConfig::new_test().into()).with_created_at(timestamp);
     stream.extend([
-        ConversationEvent::new(TurnStart, timestamp),
+        ConversationEvent::new(TurnStart::default(), timestamp),
         ConversationEvent::new(ChatRequest::from("Lookup."), timestamp),
         ConversationEvent::new(
             ToolCallRequest::new("call-fixed".into(), "lookup".into(), Map::new()),
@@ -41,7 +41,7 @@ fn conversation() -> ChatQuery {
         .unwrap(),
     );
     stream.extend([
-        ConversationEvent::new(TurnStart, timestamp),
+        ConversationEvent::new(TurnStart::default(), timestamp),
         ConversationEvent::new(ChatRequest::from("Check."), timestamp),
         ConversationEvent::new(ChatResponse::reasoning("Foreign reasoning."), timestamp),
         ConversationEvent::new(ChatResponse::message("Confirmed OAK."), timestamp),
@@ -53,7 +53,7 @@ fn conversation() -> ChatQuery {
         .unwrap(),
     );
     stream.extend([
-        ConversationEvent::new(TurnStart, timestamp),
+        ConversationEvent::new(TurnStart::default(), timestamp),
         ConversationEvent::new(ChatRequest::from("Continue."), timestamp),
     ]);
     ThreadBuilder::new()
@@ -105,7 +105,7 @@ fn replay_uses_the_replacement_request() {
     let mut query = conversation();
     query.thread.events.retain_turns(|index| index < 2);
     query.thread.events.extend([
-        ConversationEvent::new(TurnStart, datetime!(2026-09-11 12:01:00 Z)),
+        ConversationEvent::new(TurnStart::default(), datetime!(2026-09-11 12:01:00 Z)),
         ConversationEvent::new(
             ChatRequest::from("Revisit instead."),
             datetime!(2026-09-11 12:01:00 Z),

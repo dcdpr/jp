@@ -723,7 +723,7 @@ fn test_sanitize_orphaned_tool_calls_handles_partial_set() {
 #[test]
 fn test_trim_trailing_empty_turn_removes_lone_turn_start() {
     let mut stream = ConversationStream::new_test();
-    stream.push(TurnStart);
+    stream.push(TurnStart::default());
     assert_eq!(stream.len(), 1);
 
     stream.trim_trailing_empty_turn();
@@ -1344,9 +1344,9 @@ fn test_sanitize_deduplicates_leading_turn_starts() {
 
     // Simulate --from keeping TurnStarts from multiple filtered turns
     // that all precede the first ChatRequest.
-    stream.push(TurnStart);
-    stream.push(TurnStart);
-    stream.push(TurnStart);
+    stream.push(TurnStart::default());
+    stream.push(TurnStart::default());
+    stream.push(TurnStart::default());
     stream.push(ConversationEvent::new(
         ChatRequest::from("hello"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
@@ -1367,7 +1367,7 @@ fn test_sanitize_reindexes_turn_starts() {
     let mut stream = ConversationStream::new_test();
 
     // Two turns with non-sequential indices (from filtering).
-    stream.push(TurnStart);
+    stream.push(TurnStart::default());
     stream.push(ConversationEvent::new(
         ChatRequest::from("first"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
@@ -1376,7 +1376,7 @@ fn test_sanitize_reindexes_turn_starts() {
         ChatResponse::message("reply"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
     ));
-    stream.push(TurnStart);
+    stream.push(TurnStart::default());
     stream.push(ConversationEvent::new(
         ChatRequest::from("second"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
@@ -1545,7 +1545,7 @@ fn test_schema_ignores_interrupt_reply() {
 fn test_sanitize_noop_on_healthy_stream() {
     let mut stream = ConversationStream::new_test();
 
-    stream.push(TurnStart);
+    stream.push(TurnStart::default());
     stream.push(ConversationEvent::new(
         ChatRequest::from("hello"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
@@ -2594,7 +2594,7 @@ fn test_compaction_skipped_by_into_iter() {
 #[test]
 fn test_compaction_preserved_by_sanitize() {
     let mut stream = ConversationStream::new_test();
-    stream.push(TurnStart);
+    stream.push(TurnStart::default());
     stream.push(ConversationEvent::new(
         ChatRequest::from("hello"),
         Utc.with_ymd_and_hms(2025, 7, 1, 12, 0, 0).unwrap(),
@@ -2699,7 +2699,7 @@ fn test_turn_count_two_turns() {
 fn test_turn_at_time() {
     let mut stream = ConversationStream::new_test();
     stream.push(ConversationEvent::new(
-        TurnStart,
+        TurnStart::default(),
         Utc.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
     ));
     stream.push(ConversationEvent::new(
@@ -2707,7 +2707,7 @@ fn test_turn_at_time() {
         Utc.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
     ));
     stream.push(ConversationEvent::new(
-        TurnStart,
+        TurnStart::default(),
         Utc.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
     ));
     stream.push(ConversationEvent::new(
@@ -3360,7 +3360,7 @@ fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
         partial1,
     ));
     source.push(ConversationEvent::new(
-        TurnStart,
+        TurnStart::default(),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
     ));
     source.push(ConversationEvent::new(
@@ -3376,7 +3376,7 @@ fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
         partial2,
     ));
     source.push(ConversationEvent::new(
-        TurnStart,
+        TurnStart::default(),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
     ));
     source.push(ConversationEvent::new(
