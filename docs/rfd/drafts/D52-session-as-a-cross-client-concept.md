@@ -25,7 +25,7 @@ of naming a view.
 
 Two things make this worth settling now rather than later.
 
-**The term is undefined.** `docs/architecture/ubiquitous-language.md` has
+**The term is undefined.** `docs/wiki/00dxybd-ubiquitous-language.md` has
 entries for Attachment, Conversation, Event, Thread, and Turn.
 It has no entry for Session, despite sessions being implemented since [RFD 020].
 Three clients are about to need the word at once, with nothing written down.
@@ -151,7 +151,7 @@ web UI ever serves more than one user.
 ## Implementation Plan
 
 **Phase 1 — write the glossary entry.** Settle the name and the definition in
-`docs/architecture/ubiquitous-language.md`.
+`docs/wiki/00dxybd-ubiquitous-language.md`.
 No code.
 This is the phase that unblocks the other clients, and it is the phase most
 likely to change the rest.

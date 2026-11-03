@@ -1,7 +1,7 @@
 import DefaultTheme from 'vitepress/theme'
 import { h } from 'vue'
 
-import { docBefore, enhanceApp } from '../jp-vite/theme/index.mjs'
+import { docAfter, docBefore, enhanceApp } from '../jp-vite/theme/index.mjs'
 import PageActions from './PageActions.vue'
 import './custom.css'
 
@@ -12,6 +12,7 @@ export default {
     Layout() {
         return h(DefaultTheme.Layout, null, {
             'doc-before': () => [h(PageActions), ...docBefore()],
+            'doc-after': docAfter,
         })
     },
 }

@@ -1,0 +1,116 @@
+[
+  {
+    "case": "words",
+    "markdown": "## Pinned Conversation\n",
+    "texts": ["Pinned Conversation"],
+    "slugs": ["pinned-conversation"]
+  },
+  {
+    "case": "code, punctuation, and a leading digit",
+    "markdown": "### 1. Query Command (`jp_cli::cmd::query`)\n",
+    "texts": ["1. Query Command (jp_cli::cmd::query)"],
+    "slugs": ["_1-query-command-jp-cli-cmd-query"]
+  },
+  {
+    "case": "a leading number",
+    "markdown": "## 2026 Roadmap\n",
+    "texts": ["2026 Roadmap"],
+    "slugs": ["_2026-roadmap"]
+  },
+  {
+    "case": "repeated headings take suffixes",
+    "markdown": "## Examples\n\n## Examples\n\n## Examples\n",
+    "texts": ["Examples", "Examples", "Examples"],
+    "slugs": ["examples", "examples-1", "examples-2"]
+  },
+  {
+    "case": "the title counts toward suffixes",
+    "markdown": "# Examples\n\n## Examples\n",
+    "texts": ["Examples", "Examples"],
+    "slugs": ["examples", "examples-1"]
+  },
+  {
+    "case": "a suffixed slug can itself be taken",
+    "markdown": "## A\n\n## A\n\n## A-1\n",
+    "texts": ["A", "A", "A-1"],
+    "slugs": ["a", "a-1", "a-1-1"]
+  },
+  {
+    "case": "accents are dropped",
+    "markdown": "## Résumé Café\n",
+    "texts": ["Résumé Café"],
+    "slugs": ["resume-cafe"]
+  },
+  {
+    "case": "underscores separate words",
+    "markdown": "## snake_case_name\n",
+    "texts": ["snake_case_name"],
+    "slugs": ["snake-case-name"]
+  },
+  {
+    "case": "markup is not text",
+    "markdown": "## A **bold** [link](https://example.com) and *emphasis*\n",
+    "texts": ["A bold link and emphasis"],
+    "slugs": ["a-bold-link-and-emphasis"]
+  },
+  {
+    "case": "strikethrough markers are not text",
+    "markdown": "## ~~Old~~ New\n",
+    "texts": ["Old New"],
+    "slugs": ["old-new"]
+  },
+  {
+    "case": "surrounding punctuation is dropped",
+    "markdown": "## \"Quoted\" Title!\n",
+    "texts": ["\"Quoted\" Title!"],
+    "slugs": ["quoted-title"]
+  },
+  {
+    "case": "typographic quotes separate words",
+    "markdown": "## It’s “smart”\n",
+    "texts": ["It’s “smart”"],
+    "slugs": ["it-s-smart"]
+  },
+  {
+    "case": "letters outside ASCII are kept",
+    "markdown": "## 日本語 Heading\n",
+    "texts": ["日本語 Heading"],
+    "slugs": ["日本語-heading"]
+  },
+  {
+    "case": "inline HTML is not text",
+    "markdown": "## Status <Badge text=\"beta\"/>\n",
+    "texts": ["Status "],
+    "slugs": ["status"]
+  },
+  {
+    "case": "a closing sequence is not text",
+    "markdown": "## Closed ##\n",
+    "texts": ["Closed"],
+    "slugs": ["closed"]
+  },
+  {
+    "case": "a heading in a code block is no heading",
+    "markdown": "```markdown\n## Not a heading\n```\n\n## Real\n",
+    "texts": ["Real"],
+    "slugs": ["real"]
+  },
+  {
+    "case": "a heading in a block quote takes its slug",
+    "markdown": "> ## Quoted\n\n## Quoted\n",
+    "texts": ["Quoted", "Quoted"],
+    "slugs": ["quoted", "quoted-1"]
+  },
+  {
+    "case": "an underlined heading takes its slug",
+    "markdown": "Underlined\n----------\n\n## Underlined\n",
+    "texts": ["Underlined", "Underlined"],
+    "slugs": ["underlined", "underlined-1"]
+  },
+  {
+    "case": "frontmatter holds no heading",
+    "markdown": "---\ntitle: Front\n---\n\n## After\n",
+    "texts": ["After"],
+    "slugs": ["after"]
+  }
+]

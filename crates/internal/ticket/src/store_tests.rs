@@ -1,4 +1,5 @@
 use camino_tempfile::Utf8TempDir;
+use chrono::Utc;
 
 use super::*;
 
@@ -14,6 +15,7 @@ fn draft<'a>(title: &'a str, labels: &'a Labels) -> NewTicket<'a> {
         date: DATE,
         labels,
         description: "Description.",
+        parent: None,
     }
 }
 
@@ -73,6 +75,7 @@ fn create_writes_a_file_named_for_its_id() {
         date: DATE,
         labels: &Labels::default(),
         description: "The header renders one column left of the body.",
+        parent: None,
     })
     .unwrap();
 
@@ -492,6 +495,7 @@ fn editing_only_the_description_leaves_the_filename_alone() {
             date: DATE,
             labels: &Labels::default(),
             description: "Body.",
+            parent: None,
         }),
     )
     .unwrap();
@@ -504,6 +508,143 @@ fn editing_only_the_description_leaves_the_filename_alone() {
     let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(ticket.title, "A quite different title");
     assert_eq!(ticket.description, "Revised body.");
+}
+
+/// File a ticket under `parent`.
+fn new_child(dir: &Utf8TempDir, title: &str, parent: TicketId) -> Result<TicketId> {
+    let labels = Labels::default();
+    let mut new = draft(title, &labels);
+    new.parent = Some(parent);
+
+    create(dir.path(), &Vocabulary::default(), &new).map(|(id, _)| id)
+}
+
+fn metadata_of(dir: &Utf8TempDir, id: TicketId) -> crate::Metadata {
+    let path = locate(dir.path(), id).unwrap();
+
+    parse::document(&fs::read_to_string(path).unwrap())
+        .unwrap()
+        .metadata
+}
+
+#[test]
+fn a_child_is_filed_with_its_parent_named_last_in_the_block() {
+    let dir = Utf8TempDir::new().unwrap();
+    let parent = new_ticket(&dir, "Investigation");
+
+    let child = new_child(&dir, "Do the first thing", parent).unwrap();
+
+    let source = fs::read_to_string(locate(dir.path(), child).unwrap()).unwrap();
+    assert_eq!(
+        source,
+        format!(
+            "# Do the first thing\n\n- **Status**: Todo\n- **Authors**: john\n- **Date**: \
+             2026-08-05\n- **Parent**: {parent}\n\nDescription.\n"
+        )
+    );
+}
+
+#[test]
+fn filing_under_a_ticket_that_is_not_there_writes_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+    let existing = new_ticket(&dir, "Existing");
+    let missing: TicketId = "T-0zzzzzz".parse().unwrap();
+
+    let error = new_child(&dir, "Orphan", missing).unwrap_err();
+
+    assert_eq!(error.to_string(), "No ticket T-0zzzzzz to file under.");
+    let ids: Vec<TicketId> = list(dir.path())
+        .unwrap()
+        .iter()
+        .map(|entry| entry.id)
+        .collect();
+    assert_eq!(ids, vec![existing]);
+}
+
+#[test]
+fn closing_a_parent_waits_for_its_children() {
+    let dir = Utf8TempDir::new().unwrap();
+    let parent = new_ticket(&dir, "Investigation");
+    let child = new_child(&dir, "Do the thing", parent).unwrap();
+
+    let error = close(dir.path(), parent).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "{parent} has open children: {child}. Close them, or move them out from under \
+             {parent}, first."
+        )
+    );
+    assert_eq!(metadata_of(&dir, parent).status, Status::Todo);
+
+    close(dir.path(), child).unwrap();
+    close(dir.path(), parent).unwrap();
+    assert_eq!(metadata_of(&dir, parent).status, Status::Done);
+}
+
+#[test]
+fn promoting_a_parent_with_open_children_is_refused_before_the_link_is_written() {
+    let dir = Utf8TempDir::new().unwrap();
+    let parent = new_ticket(&dir, "Investigation");
+    new_child(&dir, "Do the thing", parent).unwrap();
+
+    promote(dir.path(), parent, "D01").unwrap_err();
+
+    let metadata = metadata_of(&dir, parent);
+    assert_eq!(metadata.status, Status::Todo);
+    assert_eq!(metadata.promoted_to, None);
+}
+
+#[test]
+fn deleting_a_parent_is_refused_until_its_children_move() {
+    let dir = Utf8TempDir::new().unwrap();
+    let parent = new_ticket(&dir, "Investigation");
+    let child = new_child(&dir, "Do the thing", parent).unwrap();
+
+    let error = delete(dir.path(), parent).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "{parent} has children: {child}. Give them another parent, or none, before deleting \
+             it."
+        )
+    );
+
+    set_parent(dir.path(), child, None).unwrap();
+    delete(dir.path(), parent).unwrap();
+    assert_eq!(metadata_of(&dir, child).parent, None);
+}
+
+#[test]
+fn set_parent_writes_the_field_and_clearing_it_removes_the_line() {
+    let dir = Utf8TempDir::new().unwrap();
+    let parent = new_ticket(&dir, "Investigation");
+    let child = new_ticket(&dir, "Do the thing");
+
+    let (_, previous) = set_parent(dir.path(), child, Some(parent)).unwrap();
+    assert_eq!(previous, None);
+    assert_eq!(metadata_of(&dir, child).parent, Some(parent));
+
+    let (path, previous) = set_parent(dir.path(), child, None).unwrap();
+    assert_eq!(previous, Some(parent));
+    assert!(!fs::read_to_string(path).unwrap().contains("Parent"));
+}
+
+/// Judged by where the ticket ends up: an open ticket can't be put under a Done
+/// parent, but one closed in the same write can.
+#[test]
+fn relate_checks_the_end_state_not_each_step() {
+    let dir = Utf8TempDir::new().unwrap();
+    let parent = new_ticket(&dir, "Investigation");
+    close(dir.path(), parent).unwrap();
+    let child = new_ticket(&dir, "Already done elsewhere");
+
+    set_parent(dir.path(), child, Some(parent)).unwrap_err();
+    relate(dir.path(), child, Some(Status::Done), Some(Some(parent))).unwrap();
+
+    let metadata = metadata_of(&dir, child);
+    assert_eq!(metadata.status, Status::Done);
+    assert_eq!(metadata.parent, Some(parent));
 }
 
 /// A heading changed in an editor takes the file name with it, keeping the id
@@ -1196,18 +1337,6 @@ fn set_status_to_the_current_status_writes_nothing() {
     assert_eq!(fs::read_to_string(&path).unwrap(), before);
 }
 
-#[test]
-fn slugs_are_lowercase_and_hyphenated() {
-    assert_eq!(
-        slug("Tool call header misaligned"),
-        "tool-call-header-misaligned"
-    );
-    assert_eq!(slug("`jp query --new` panics!"), "jp-query-new-panics");
-    assert_eq!(slug("  Spaced  out  "), "spaced-out");
-    assert_eq!(slug("!!!"), "untitled");
-    assert_eq!(slug(&"long ".repeat(20)).len(), 59);
-}
-
 /// `2026-08-10T00:00:00Z`.
 const JP_EPOCH_SECS: u64 = 1_786_320_000;
 
@@ -1225,7 +1354,8 @@ fn the_first_ticket_writes_an_epoch_starting_today() {
         "{source}"
     );
     let epoch: Epoch = source.parse().unwrap();
-    assert_eq!(epoch, Epoch::day_of(now_seconds().unwrap()).unwrap());
+    let today = u64::try_from(Utc::now().timestamp()).unwrap();
+    assert_eq!(epoch, Epoch::day_of(today).unwrap());
     // One day holds 17,280 five-second buckets.
     assert!(id.bucket() < 17_280, "{id} sits in bucket {}", id.bucket());
 }
@@ -1267,7 +1397,7 @@ fn create_refuses_tickets_without_an_epoch() {
     assert!(matches!(error, Error::MissingEpoch(_)), "{error}");
     assert!(!dir.path().join(EPOCH_FILE).exists());
     assert_eq!(
-        files(dir.path())
+        files::list(dir.path())
             .unwrap()
             .into_iter()
             .map(|(id, _)| id)
@@ -1341,6 +1471,6 @@ fn check_reports_a_malformed_epoch() {
 
     assert_eq!(report.problems, [Problem::MalformedEpoch {
         path: dir.path().join(EPOCH_FILE),
-        error: ParseError::EpochEmpty,
+        error: EpochError::Empty,
     }]);
 }

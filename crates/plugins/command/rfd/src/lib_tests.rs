@@ -207,6 +207,68 @@ fn show_takes_an_id() {
     assert!(parse(&["show"]).is_err());
 }
 
+/// A path is what tab completion and a file listing hand over, so every RFD or
+/// ticket argument takes one as readily as an id.
+#[test]
+fn rfd_and_ticket_arguments_take_a_file_path() {
+    match parse(&["show", "docs/rfd/drafts/D05-sketch.md"])
+        .unwrap()
+        .command
+    {
+        Command::Show { id, .. } => assert_eq!(id, RfdId::Draft(5)),
+        other => panic!("expected show, got {other:?}"),
+    }
+    match parse(&["extend", "docs/rfd/116-a.md", "100-b.md"])
+        .unwrap()
+        .command
+    {
+        Command::Extend { id, target } => {
+            assert_eq!((id, target), (RfdId::Published(116), RfdId::Published(100)));
+        }
+        other => panic!("expected extend, got {other:?}"),
+    }
+    match parse(&["rank", "60", "--after", "docs/rfd/050-x.md"])
+        .unwrap()
+        .command
+    {
+        Command::Rank { after, .. } => assert_eq!(after, Some(RfdId::Published(50))),
+        other => panic!("expected rank, got {other:?}"),
+    }
+    match parse(&[
+        "draft",
+        "design",
+        "--from-ticket",
+        "docs/ticket/02wt0kx-slug.md",
+    ])
+    .unwrap()
+    .command
+    {
+        Command::Draft { from_ticket, .. } => {
+            assert_eq!(from_ticket, Some("T-02wt0kx".parse().unwrap()));
+        }
+        other => panic!("expected draft, got {other:?}"),
+    }
+}
+
+#[test]
+fn promote_takes_an_optional_number() {
+    match parse(&["promote", "D23"]).unwrap().command {
+        Command::Promote { id, number } => {
+            assert_eq!((id, number), (RfdId::Draft(23), None));
+        }
+        other => panic!("expected promote, got {other:?}"),
+    }
+    match parse(&["promote", "D23", "100"]).unwrap().command {
+        Command::Promote { id, number } => {
+            assert_eq!(
+                (id, number),
+                (RfdId::Draft(23), Some(RfdId::Published(100)))
+            );
+        }
+        other => panic!("expected promote, got {other:?}"),
+    }
+}
+
 #[test]
 fn draft_takes_a_category_and_a_title_or_a_ticket() {
     match parse(&["draft", "design", "My", "Feature"])

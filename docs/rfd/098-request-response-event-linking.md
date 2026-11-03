@@ -446,7 +446,7 @@ Depends on Phase 1.
   may still describe it; point at `jp conversation compact --reset` for that
   case.
 - Glossary entries for "request link", "originating request", and "immediate
-  request" in `docs/architecture/ubiquitous-language.md`.
+  request" in `docs/wiki/00dxybd-ubiquitous-language.md`.
 
 Can land alongside Phase 2.
 

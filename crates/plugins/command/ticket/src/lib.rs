@@ -95,12 +95,18 @@ enum Command {
         /// board requires.
         #[arg(long = "label")]
         labels: Vec<String>,
+
+        /// File it under this ticket, which tracks it with its other children.
+        #[arg(long, value_parser = TicketId::parse_id_or_path)]
+        parent: Option<TicketId>,
     },
 
     /// Append a comment to a ticket.
     Comment {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
         /// Omit it to choose.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: Option<TicketId>,
 
         /// Who is commenting.
@@ -125,8 +131,15 @@ enum Command {
     /// Without it, you choose one.
     /// Without a verb, lists the labels.
     Label {
-        /// A ticket to act on: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
-        #[arg(long = "id", short = 'i', global = true, value_delimiter = ',')]
+        /// A ticket to act on: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path
+        /// of its file.
+        #[arg(
+            long = "id",
+            short = 'i',
+            global = true,
+            value_delimiter = ',',
+            value_parser = TicketId::parse_id_or_path
+        )]
         ids: Vec<TicketId>,
 
         #[command(subcommand)]
@@ -138,8 +151,10 @@ enum Command {
 
     /// Mark a ticket as Done.
     Close {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
         /// Omit it to choose.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: Option<TicketId>,
     },
 
@@ -150,38 +165,44 @@ enum Command {
     /// With one, it lands next to that ticket, which has to be in the column
     /// already; that is checked before anything changes.
     Status {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: TicketId,
 
         /// The column: `todo`, `in progress`, or `done`.
         status: Status,
 
         /// Place it directly above this ticket.
-        #[arg(long, conflicts_with = "after")]
+        #[arg(long, conflicts_with = "after", value_parser = TicketId::parse_id_or_path)]
         before: Option<TicketId>,
 
         /// Place it directly below this ticket.
-        #[arg(long)]
+        #[arg(long, value_parser = TicketId::parse_id_or_path)]
         after: Option<TicketId>,
     },
 
     /// Give a ticket a new title, moving its file to match.
     Rename {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: TicketId,
 
         /// New one-line summary.
         title: String,
     },
 
-    /// Change a ticket's title, description, status, or labels.
+    /// Change a ticket's title, description, status, labels, or parent.
     ///
     /// Without any of those flags, opens the ticket's file in your editor: the
     /// one `editor.cmd` names, or `JP_EDITOR`, `VISUAL`, or `EDITOR`.
     /// What the flags don't name is left alone.
     Edit {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
         /// Omit it to choose.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: Option<TicketId>,
 
         /// New one-line summary; the file moves to match, as with `rename`.
@@ -200,24 +221,35 @@ enum Command {
         /// Repeat for more than one.
         #[arg(long = "label")]
         labels: Vec<String>,
+
+        /// The ticket to sit under, or `none` to sit under nothing.
+        #[arg(long, value_parser = parent_arg)]
+        parent: Option<ParentArg>,
     },
 
     /// Delete a ticket outright.
     ///
     /// Its id is not retired: a later creation in the same time bucket can draw
     /// it again.
+    /// A ticket with children is refused until they have another parent, or
+    /// none.
     Delete {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
         /// Omit it to choose.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: Option<TicketId>,
     },
 
-    /// Read one ticket, with its comments numbered for replies.
+    /// Read one ticket, with its comments numbered for replies, and its parent
+    /// and children.
     ///
     /// With `jp -F json`, the ticket is printed as JSON.
     Show {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
         /// Omit it to choose.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: Option<TicketId>,
     },
 
@@ -229,22 +261,26 @@ enum Command {
     /// Move a ticket next to another in the same column of the board.
     #[command(group(ArgGroup::new("place").required(true)))]
     Rank {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: TicketId,
 
         /// Place it directly above this ticket.
-        #[arg(long, group = "place")]
+        #[arg(long, group = "place", value_parser = TicketId::parse_id_or_path)]
         before: Option<TicketId>,
 
         /// Place it directly below this ticket.
-        #[arg(long, group = "place")]
+        #[arg(long, group = "place", value_parser = TicketId::parse_id_or_path)]
         after: Option<TicketId>,
     },
 
     /// Record that a ticket became an RFD, and close it.
     Promote {
-        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, or the path of its
+        /// file.
         /// Omit it to choose.
+        #[arg(value_parser = TicketId::parse_id_or_path)]
         id: Option<TicketId>,
 
         /// The RFD the work moved to, e.g. `D07` or `045`.
@@ -301,6 +337,10 @@ enum Command {
         /// text, ignoring case.
         #[arg(long)]
         query: Option<String>,
+
+        /// Only the tickets filed under this one.
+        #[arg(long, value_parser = TicketId::parse_id_or_path)]
+        under: Option<TicketId>,
     },
 
     /// Check every ticket against the board's rules, and exit 1 if any breaks
@@ -309,7 +349,8 @@ enum Command {
     /// A write is checked when it is made, so this is what catches a ticket
     /// edited by hand, or filed before a rule was added: one that doesn't
     /// parse, carries a label the board doesn't define, breaks a key's `min` or
-    /// `max`, or shares a label the board lets one ticket carry.
+    /// `max`, shares a label the board lets one ticket carry, names a parent
+    /// that isn't there or sits under another, or is Done with open children.
     /// Also names files `jp ticket` can't read as tickets.
     ///
     /// With `jp -F json`, the problems are printed as JSON.
@@ -323,6 +364,35 @@ enum Command {
         #[command(subcommand)]
         command: ToolsCommand,
     },
+}
+
+/// What `edit --parent` asks for: a ticket to sit under, or none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParentArg {
+    Ticket(TicketId),
+    None,
+}
+
+impl ParentArg {
+    /// The parent the ticket ends up with.
+    fn ticket(self) -> Option<TicketId> {
+        match self {
+            Self::Ticket(id) => Some(id),
+            Self::None => None,
+        }
+    }
+}
+
+/// Read an `edit --parent` value: a ticket id or the path of its file, or
+/// `none`.
+fn parent_arg(value: &str) -> Result<ParentArg, String> {
+    if value.trim().eq_ignore_ascii_case("none") {
+        return Ok(ParentArg::None);
+    }
+
+    TicketId::parse_id_or_path(value)
+        .map(ParentArg::Ticket)
+        .map_err(|error| error.to_string())
 }
 
 /// What `label` does to the tickets it names.
@@ -408,6 +478,16 @@ struct Detail<'a> {
     #[serde(flatten)]
     ticket: &'a Ticket,
     path: &'a str,
+    /// The tickets filed under this one, in board order.
+    children: Vec<Child<'a>>,
+}
+
+/// A ticket filed under the one `jp -F json ticket show` prints.
+#[derive(Serialize)]
+struct Child<'a> {
+    id: TicketId,
+    title: &'a str,
+    status: Status,
 }
 
 /// One ticket in `jp -F json ticket list` output.
@@ -543,6 +623,7 @@ impl Command {
                 body: None,
                 status: None,
                 labels,
+                parent: None,
             } if labels.is_empty() => Some(*id),
             _ => None,
         }
@@ -683,12 +764,9 @@ fn compose_missing(
             author,
             body,
             labels,
+            parent,
         } => {
-            // Checked before composing, so labels the board refuses, or that
-            // another ticket holds, don't cost the user what they typed.
-            let resolved = resolve_labels(options, &labels)?;
-            store::check_unique(dir, &options.vocabulary()?, &resolved, None)
-                .map_err(|error| error.to_string())?;
+            check_new(dir, options, &labels, parent)?;
             let (title, body) = compose_add(body, stdin, stdout)?;
 
             Ok(Command::Add {
@@ -696,6 +774,7 @@ fn compose_missing(
                 author,
                 body,
                 labels,
+                parent,
             })
         }
 
@@ -723,21 +802,17 @@ fn compose_missing(
             author,
             re,
             body: None,
-        } => {
-            let body = compose(stdin, stdout, ComposeRequest {
+        } => Ok(Command::Comment {
+            body: Some(compose(stdin, stdout, ComposeRequest {
                 id: None,
                 message: format!("Comment on {id}"),
                 mode: ComposeMode::Buffer { initial_text: None },
                 help: None,
-            })?;
-
-            Ok(Command::Comment {
-                id: Some(id),
-                author,
-                re,
-                body: Some(body),
-            })
-        }
+            })?),
+            id: Some(id),
+            author,
+            re,
+        }),
 
         // Closing offers only what is still open.
         Command::Close { id: None } => Ok(Command::Close {
@@ -754,12 +829,14 @@ fn compose_missing(
             body,
             status,
             labels,
+            parent,
         } => Ok(Command::Edit {
             id: Some(pick_ticket(dir, stdin, stdout, "Edit", false)?),
             title,
             body,
             status,
             labels,
+            parent,
         }),
 
         Command::Label { ids, verb } => {
@@ -798,6 +875,28 @@ fn compose_missing(
 
         other => Ok(other),
     }
+}
+
+/// Refuse a ticket about to be composed whose labels the board refuses, or
+/// another ticket holds, or whose parent can't take it.
+///
+/// Checked before composing, so a refusal doesn't cost the user what they
+/// typed.
+fn check_new(
+    dir: &Utf8Path,
+    options: &Options,
+    labels: &[String],
+    parent: Option<TicketId>,
+) -> Result<(), String> {
+    let resolved = resolve_labels(options, labels)?;
+    store::check_unique(dir, &options.vocabulary()?, &resolved, None)
+        .map_err(|error| error.to_string())?;
+    if parent.is_some() {
+        store::check_relations(dir, None, Status::Todo, parent)
+            .map_err(|error| error.to_string())?;
+    }
+
+    Ok(())
 }
 
 /// Ask which of a repository's open issues to import.
@@ -1029,7 +1128,8 @@ fn compose(
     }
 }
 
-/// Read `jp ticket T-02wt0kx` as `jp ticket show T-02wt0kx`.
+/// Read `jp ticket T-02wt0kx` as `jp ticket show T-02wt0kx`, and the same for
+/// the path of a ticket file.
 ///
 /// A bare id is the most common thing to type.
 /// An exact subcommand name always wins: `comment` and `promote` are seven
@@ -1043,7 +1143,7 @@ fn with_show_alias(args: &[String]) -> Vec<String> {
     let is_subcommand = Args::command()
         .get_subcommands()
         .any(|sub| sub.get_name() == first || sub.get_all_aliases().any(|alias| alias == first));
-    if is_subcommand || first.parse::<TicketId>().is_err() {
+    if is_subcommand || TicketId::parse_id_or_path(first).is_err() {
         return args.to_vec();
     }
 
@@ -1334,12 +1434,14 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             author,
             body,
             labels,
+            parent,
         } => add(dir, &ctx.options.vocabulary()?, &NewTicket {
             title: &required(title, "title")?,
             authors: &resolve_author(author, config)?,
             date: &Local::now().format("%Y-%m-%d").to_string(),
             labels: &resolve_labels(ctx.options, &labels)?,
             description: body.as_deref().unwrap_or_default(),
+            parent,
         }),
 
         Command::Comment {
@@ -1380,11 +1482,13 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             body,
             status,
             labels,
+            parent,
         } => edit(dir, ctx.options, required(id, "ticket id")?, &Changes {
             title,
             body,
             status,
             labels,
+            parent,
         }),
 
         Command::Board => show_board(dir, ctx.options.board.done_limit),
@@ -1417,12 +1521,14 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
             status,
             labels,
             query,
+            under,
         } => list(
             dir,
             &Filter {
                 status,
                 labels: &labels,
                 query: query.as_deref(),
+                under,
             },
             ctx.format.is_json(),
         ),
@@ -1931,7 +2037,8 @@ struct CheckReport<'a> {
 /// One problem in `jp -F json ticket check` output.
 #[derive(Serialize)]
 struct Finding<'a> {
-    /// `legacy_name`, `duplicate`, `malformed`, `labels`, or `shared`.
+    /// `legacy_name`, `missing_epoch`, `malformed_epoch`, `duplicate`,
+    /// `malformed`, `labels`, `shared`, or `parent`.
     kind: &'static str,
 
     /// The tickets the problem is on.
@@ -1960,6 +2067,7 @@ impl<'a> From<&'a Problem> for Finding<'a> {
             Problem::Malformed { id, path, .. } => ("malformed", vec![*id], vec![path.as_path()]),
             Problem::Labels { id, path, .. } => ("labels", vec![*id], vec![path.as_path()]),
             Problem::Shared { ids, .. } => ("shared", ids.clone(), vec![]),
+            Problem::Parent { id, path, .. } => ("parent", vec![*id], vec![path.as_path()]),
         };
 
         Self {
@@ -2100,13 +2208,16 @@ struct Changes {
     body: Option<String>,
     status: Option<Status>,
     labels: Vec<String>,
+    parent: Option<ParentArg>,
 }
 
 /// Apply an edit, touching only the parts the caller named.
 ///
-/// Labels are written first: the vocabulary can still refuse them, and a
-/// refused edit should change nothing.
-/// The title goes last, since it moves the file.
+/// Where the status and the parent leave the ticket is checked before anything
+/// is written, and the labels are written first: the vocabulary can still
+/// refuse them, and a refused edit should change nothing.
+/// The status and the parent then land together, judged by where they leave the
+/// ticket, and the title goes last, since it moves the file.
 fn edit(
     dir: &Utf8Path,
     options: &Options,
@@ -2124,6 +2235,13 @@ fn edit(
     }
 
     let mut path = store::locate_ticket(dir, id).map_err(failed)?;
+    let parent = changes.parent.map(ParentArg::ticket);
+    // Only when asked: a relabel alone works on a ticket whose header doesn't
+    // parse, and this would refuse one.
+    if changes.status.is_some() || parent.is_some() {
+        store::check_relate(dir, id, changes.status, parent).map_err(failed)?;
+    }
+
     let mut removed = vec![];
     if !changes.labels.is_empty() {
         let vocabulary = options.vocabulary()?;
@@ -2134,8 +2252,10 @@ fn edit(
             path = ticket.path;
         }
     }
-    if let Some(status) = changes.status {
-        path = store::set_status(dir, id, status).map_err(failed)?.0;
+    if changes.status.is_some() || parent.is_some() {
+        path = store::relate(dir, id, changes.status, parent)
+            .map_err(failed)?
+            .path;
     }
     if changes.title.is_some() || changes.body.is_some() {
         let title = changes.title.as_deref().map(str::trim);
@@ -2155,10 +2275,13 @@ fn edit(
 }
 
 /// Read one ticket, as markdown or as JSON for scripting.
+///
+/// A parent is shown with its status and title, and the tickets filed under
+/// this one follow the description, in board order.
 fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
-    let entry = store::list(dir)
-        .map_err(|error| error.to_string())?
-        .into_iter()
+    let entries = store::list(dir).map_err(|error| error.to_string())?;
+    let entry = entries
+        .iter()
         .find(|entry| {
             entry
                 .path
@@ -2167,13 +2290,25 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
         })
         .ok_or_else(|| format!("No ticket {id}."))?;
 
-    let ticket = entry.ticket.map_err(|error| format!("{id}: {error}"))?;
+    let ticket = entry
+        .ticket
+        .as_ref()
+        .map_err(|error| format!("{id}: {error}"))?;
+    let children = tool::children_of(&entries, entry.id, &board::read(dir).unwrap_or_default());
 
     if json {
         let json = serde_json::to_string_pretty(&Detail {
             id: entry.id,
-            ticket: &ticket,
+            ticket,
             path: entry.path.as_str(),
+            children: children
+                .iter()
+                .map(|(id, child)| Child {
+                    id: *id,
+                    title: &child.title,
+                    status: child.metadata.status,
+                })
+                .collect(),
         })
         .map_err(|error| format!("failed to serialize {id}: {error}"))?;
 
@@ -2192,8 +2327,20 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
     for token in ticket.metadata.labels.to_tokens() {
         out.push_str(&format!("- **Label**: {token}\n"));
     }
+    if let Some(parent) = ticket.metadata.parent {
+        out.push_str(&format!(
+            "- **Parent**: {}\n",
+            tool::describe_parent(&entries, parent)
+        ));
+    }
     if !ticket.description.is_empty() {
         out.push_str(&format!("\n{}\n", ticket.description));
+    }
+    if !children.is_empty() {
+        out.push_str(&format!("\n{}\n\n", tool::children_heading(&children)));
+        for (child_id, child) in &children {
+            out.push_str(&row(*child_id, child));
+        }
     }
     for (index, comment) in ticket.comments.iter().enumerate() {
         out.push_str(&format!(
@@ -2214,6 +2361,8 @@ struct Filter<'a> {
     status: Option<Status>,
     labels: &'a [String],
     query: Option<&'a str>,
+    /// Only the tickets filed under this one.
+    under: Option<TicketId>,
 }
 
 /// List tickets, filtered by whatever the caller named.
@@ -2243,6 +2392,9 @@ fn list(dir: &Utf8Path, filter: &Filter<'_>, json: bool) -> Result<Output, Strin
             .is_none_or(|status| status == ticket.metadata.status)
             && ticket.metadata.labels.matches(&selectors)
             && query.is_none_or(|query| ticket.mentions(query))
+            && filter
+                .under
+                .is_none_or(|under| ticket.metadata.parent == Some(under))
     });
 
     let text = if json {

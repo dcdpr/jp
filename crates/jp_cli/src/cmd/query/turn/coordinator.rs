@@ -374,10 +374,16 @@ impl TurnCoordinator {
                 self.view.signal_typewriter_drain();
 
                 // Surface a chrome line for a non-standard finish (truncation,
-                // refusal, unknown stop reason); a clean completion stays
-                // silent.
+                // refusal, unknown stop reason), or for a clean completion
+                // that answered nothing. Otherwise a model that stops after
+                // reasoning ends the turn with no sign of why.
                 if let Some(notice) = finish_notice(&reason, &dropped_tools) {
                     self.printer.eprintln(notice);
+                } else if matches!(reason, FinishReason::Completed)
+                    && !current_cycle_has_answer(stream)
+                {
+                    self.printer
+                        .eprintln("The model finished without responding.");
                 }
 
                 HandleEventOutcome::new(self.transition_from_streaming(stream, reason))
@@ -702,6 +708,25 @@ fn has_unresponded_tool_calls_in_current_turn(stream: &ConversationStream) -> bo
             .as_tool_call_request()
             .is_some_and(|r| !responded_ids.contains(r.id.as_str()))
     })
+}
+
+/// Whether the model's response to the latest request holds a message,
+/// structured output, or a tool call.
+///
+/// The latest request is the user's [`ChatRequest`] or the most recent tool
+/// results.
+/// Reasoning alone is not an answer.
+fn current_cycle_has_answer(stream: &ConversationStream) -> bool {
+    stream
+        .iter()
+        .rev()
+        .take_while(|e| !e.event.is_chat_request() && !e.event.is_tool_call_response())
+        .any(|e| {
+            e.event.is_tool_call_request()
+                || e.event
+                    .as_chat_response()
+                    .is_some_and(|r| !r.is_reasoning())
+        })
 }
 
 /// Build the chrome notice for a stream that ended on a non-standard finish

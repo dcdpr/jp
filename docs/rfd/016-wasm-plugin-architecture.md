@@ -723,7 +723,7 @@ Bad for ecosystem stability.
 [RFD 017]: 017-wasm-attachment-handlers.md
 [WASI Preview 2 component model]: https://component-model.bytecodealliance.org/
 [WIT specification]: https://component-model.bytecodealliance.org/design/wit.html
-[Wasm Tools Architecture]: ../architecture/wasm-tools.md
+[Wasm Tools Architecture]: ../wiki/00dxyb9-wasm-tools-architecture.md
 [`wasmi`]: https://github.com/wasmi-labs/wasmi
 [`wasmtime`]: https://github.com/bytecodealliance/wasmtime
 [`wit-bindgen`]: https://github.com/bytecodealliance/wit-bindgen

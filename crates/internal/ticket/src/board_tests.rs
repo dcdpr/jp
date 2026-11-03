@@ -29,6 +29,7 @@ fn write_ticket(dir: &Utf8TempDir, body: &str, status: Status) {
         date: "2026-08-05",
         labels: &Labels::default(),
         description: "",
+        parent: None,
     });
     let document = render::set_metadata(&document, "Status", &status.to_string()).unwrap();
 

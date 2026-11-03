@@ -1,22 +1,22 @@
 {
   "version": 2,
-  "quality_score": 0.7213669590895615,
-  "iosp_score": 0.9183123096998695,
-  "violations": 939,
-  "total": 15801,
-  "complexity_warnings": 178,
-  "magic_number_warnings": 241,
+  "quality_score": 0.7235770153659836,
+  "iosp_score": 0.9190693809721645,
+  "violations": 974,
+  "total": 16482,
+  "complexity_warnings": 191,
+  "magic_number_warnings": 252,
   "nesting_depth_warnings": 30,
-  "function_length_warnings": 468,
+  "function_length_warnings": 486,
   "unsafe_warnings": 74,
-  "error_handling_warnings": 201,
+  "error_handling_warnings": 202,
   "duplicate_groups": 0,
   "dead_code_warnings": 0,
   "dead_type_warnings": 0,
   "fragment_groups": 0,
-  "boilerplate_warnings": 301,
-  "srp_struct_warnings": 48,
-  "srp_module_warnings": 240,
+  "boilerplate_warnings": 308,
+  "srp_struct_warnings": 49,
+  "srp_module_warnings": 254,
   "wildcard_import_warnings": 0,
   "sdp_violations": 0,
   "coupling_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 51,
   "structural_coupling_warnings": 10,
-  "total_findings": 2998,
+  "total_findings": 3105,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -466,6 +466,171 @@
       "line": 169
     },
     {
+      "name": "mentions",
+      "file": "crates/plugins/command/wiki/src/links.rs",
+      "line": 141
+    },
+    {
+      "name": "inline_text",
+      "file": "crates/plugins/command/wiki/src/links.rs",
+      "line": 190
+    },
+    {
+      "name": "percent_decode",
+      "file": "crates/plugins/command/wiki/src/links.rs",
+      "line": 305
+    },
+    {
+      "name": "edit",
+      "file": "crates/plugins/command/wiki/src/edit.rs",
+      "line": 78
+    },
+    {
+      "name": "kept",
+      "file": "crates/plugins/command/wiki/src/edit.rs",
+      "line": 129
+    },
+    {
+      "name": "apply",
+      "file": "crates/plugins/command/wiki/src/edit.rs",
+      "line": 147
+    },
+    {
+      "name": "reparent",
+      "file": "crates/plugins/command/wiki/src/edit.rs",
+      "line": 237
+    },
+    {
+      "name": "follow_up",
+      "file": "crates/plugins/command/wiki/src/edit.rs",
+      "line": 411
+    },
+    {
+      "name": "rewrite_links",
+      "file": "crates/plugins/command/wiki/src/edit.rs",
+      "line": 471
+    },
+    {
+      "name": "in_editor",
+      "file": "crates/plugins/command/wiki/src/edit.rs",
+      "line": 659
+    },
+    {
+      "name": "replace",
+      "file": "crates/plugins/command/wiki/src/section.rs",
+      "line": 112
+    },
+    {
+      "name": "Order::read",
+      "file": "crates/plugins/command/wiki/src/order.rs",
+      "line": 56
+    },
+    {
+      "name": "descend",
+      "file": "crates/plugins/command/wiki/src/order.rs",
+      "line": 278
+    },
+    {
+      "name": "Checker<'a>::format",
+      "file": "crates/plugins/command/wiki/src/check.rs",
+      "line": 206
+    },
+    {
+      "name": "Checker<'a>::labels",
+      "file": "crates/plugins/command/wiki/src/check.rs",
+      "line": 336
+    },
+    {
+      "name": "Checker<'a>::embeds",
+      "file": "crates/plugins/command/wiki/src/check.rs",
+      "line": 675
+    },
+    {
+      "name": "Checker<'a>::duplicates",
+      "file": "crates/plugins/command/wiki/src/check.rs",
+      "line": 743
+    },
+    {
+      "name": "Checker<'a>::shared_labels",
+      "file": "crates/plugins/command/wiki/src/check.rs",
+      "line": 830
+    },
+    {
+      "name": "Library::load",
+      "file": "crates/plugins/command/wiki/src/library.rs",
+      "line": 74
+    },
+    {
+      "name": "read",
+      "file": "crates/plugins/command/wiki/src/library.rs",
+      "line": 229
+    },
+    {
+      "name": "list",
+      "file": "crates/plugins/command/wiki/src/cmd.rs",
+      "line": 287
+    },
+    {
+      "name": "check",
+      "file": "crates/plugins/command/wiki/src/cmd.rs",
+      "line": 741
+    },
+    {
+      "name": "describe",
+      "file": "crates/plugins/command/wiki/src/cmd.rs",
+      "line": 775
+    },
+    {
+      "name": "handle_command",
+      "file": "crates/plugins/command/wiki/src/lib.rs",
+      "line": 524
+    },
+    {
+      "name": "execute",
+      "file": "crates/plugins/command/wiki/src/lib.rs",
+      "line": 584
+    },
+    {
+      "name": "read_message",
+      "file": "crates/plugins/command/wiki/src/lib.rs",
+      "line": 778
+    },
+    {
+      "name": "inline",
+      "file": "crates/plugins/command/wiki/src/embed.rs",
+      "line": 444
+    },
+    {
+      "name": "Wiki::load",
+      "file": "crates/plugins/command/wiki/src/store.rs",
+      "line": 53
+    },
+    {
+      "name": "permalink",
+      "file": "crates/plugins/command/wiki/src/pin.rs",
+      "line": 47
+    },
+    {
+      "name": "pin",
+      "file": "crates/plugins/command/wiki/src/pin.rs",
+      "line": 84
+    },
+    {
+      "name": "show",
+      "file": "crates/plugins/command/wiki/src/show.rs",
+      "line": 74
+    },
+    {
+      "name": "references",
+      "file": "crates/plugins/command/wiki/src/show.rs",
+      "line": 285
+    },
+    {
+      "name": "edit",
+      "file": "crates/plugins/command/wiki/src/tool.rs",
+      "line": 290
+    },
+    {
       "name": "Links::by_rfd",
       "file": "crates/plugins/command/rfd/src/links.rs",
       "line": 88
@@ -476,19 +641,24 @@
       "line": 155
     },
     {
+      "name": "promote",
+      "file": "crates/plugins/command/rfd/src/cmd/promote.rs",
+      "line": 55
+    },
+    {
       "name": "to_discussion",
       "file": "crates/plugins/command/rfd/src/cmd/promote.rs",
-      "line": 70
+      "line": 82
     },
     {
       "name": "to_implemented",
       "file": "crates/plugins/command/rfd/src/cmd/promote.rs",
-      "line": 323
+      "line": 362
     },
     {
       "name": "reflow",
       "file": "crates/plugins/command/rfd/src/cmd/promote.rs",
-      "line": 443
+      "line": 482
     },
     {
       "name": "track",
@@ -499,11 +669,6 @@
       "name": "rename",
       "file": "crates/plugins/command/rfd/src/cmd/rename.rs",
       "line": 26
-    },
-    {
-      "name": "abandon",
-      "file": "crates/plugins/command/rfd/src/cmd/abandon.rs",
-      "line": 28
     },
     {
       "name": "from_ticket",
@@ -543,12 +708,12 @@
     {
       "name": "link",
       "file": "crates/plugins/command/rfd/src/cmd/relate.rs",
-      "line": 90
+      "line": 91
     },
     {
       "name": "reaches",
       "file": "crates/plugins/command/rfd/src/cmd/relate.rs",
-      "line": 189
+      "line": 190
     },
     {
       "name": "renumber",
@@ -573,22 +738,7 @@
     {
       "name": "taken",
       "file": "crates/plugins/command/rfd/src/id.rs",
-      "line": 246
-    },
-    {
-      "name": "init",
-      "file": "crates/plugins/command/rfd/src/definitions.rs",
-      "line": 61
-    },
-    {
-      "name": "toml_key",
-      "file": "crates/plugins/command/rfd/src/definitions.rs",
-      "line": 216
-    },
-    {
-      "name": "toml_string",
-      "file": "crates/plugins/command/rfd/src/definitions.rs",
-      "line": 230
+      "line": 264
     },
     {
       "name": "capitalized",
@@ -611,29 +761,24 @@
       "line": 269
     },
     {
-      "name": "replace_where",
-      "file": "crates/plugins/command/rfd/src/references.rs",
-      "line": 61
-    },
-    {
       "name": "handle_command",
       "file": "crates/plugins/command/rfd/src/lib.rs",
-      "line": 501
+      "line": 522
     },
     {
       "name": "execute",
       "file": "crates/plugins/command/rfd/src/lib.rs",
-      "line": 608
+      "line": 629
     },
     {
       "name": "promote",
       "file": "crates/plugins/command/rfd/src/lib.rs",
-      "line": 764
+      "line": 785
     },
     {
       "name": "read_message",
       "file": "crates/plugins/command/rfd/src/lib.rs",
-      "line": 921
+      "line": 943
     },
     {
       "name": "load",
@@ -651,39 +796,39 @@
       "line": 385
     },
     {
-      "name": "Document::insert_before_sections",
-      "file": "crates/plugins/command/rfd/src/document.rs",
-      "line": 429
-    },
-    {
       "name": "start",
       "file": "crates/plugins/command/vite/src/serve.rs",
-      "line": 296
+      "line": 291
     },
     {
       "name": "ask_revision",
       "file": "crates/plugins/command/vite/src/serve.rs",
-      "line": 434
+      "line": 430
     },
     {
       "name": "handle_command",
       "file": "crates/plugins/command/vite/src/lib.rs",
-      "line": 212
+      "line": 213
     },
     {
       "name": "init_site",
       "file": "crates/plugins/command/vite/src/lib.rs",
-      "line": 276
+      "line": 277
     },
     {
       "name": "read_message",
       "file": "crates/plugins/command/vite/src/lib.rs",
-      "line": 557
+      "line": 560
     },
     {
-      "name": "rfd_options",
+      "name": "Options::read",
       "file": "crates/plugins/command/vite/src/options.rs",
-      "line": 179
+      "line": 105
+    },
+    {
+      "name": "categories",
+      "file": "crates/plugins/command/vite/src/options.rs",
+      "line": 344
     },
     {
       "name": "prefix",
@@ -751,99 +896,79 @@
       "line": 203
     },
     {
-      "name": "init",
-      "file": "crates/plugins/command/ticket/src/definitions.rs",
-      "line": 66
-    },
-    {
-      "name": "synced",
-      "file": "crates/plugins/command/ticket/src/definitions.rs",
-      "line": 235
-    },
-    {
-      "name": "toml_key",
-      "file": "crates/plugins/command/ticket/src/definitions.rs",
-      "line": 347
-    },
-    {
-      "name": "toml_string",
-      "file": "crates/plugins/command/ticket/src/definitions.rs",
-      "line": 361
-    },
-    {
       "name": "handle_command",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 552
+      "line": 633
     },
     {
       "name": "compose_missing",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 673
+      "line": 754
     },
     {
       "name": "with_show_alias",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1038
+      "line": 1138
     },
     {
       "name": "show_board",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1526
+      "line": 1632
     },
     {
       "name": "board_row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1576
+      "line": 1682
     },
     {
       "name": "import_all",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1625
+      "line": 1731
     },
     {
       "name": "label",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1803
+      "line": 1909
     },
     {
       "name": "label_refusal",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1854
+      "line": 1960
     },
     {
       "name": "list_labels",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1878
+      "line": 1984
     },
     {
       "name": "check",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1976
+      "line": 2084
     },
     {
       "name": "describe_vocabulary",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2046
+      "line": 2154
     },
     {
       "name": "show",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2158
+      "line": 2281
     },
     {
       "name": "list",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2224
+      "line": 2373
     },
     {
       "name": "row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2280
+      "line": 2432
     },
     {
       "name": "read_message",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2364
+      "line": 2516
     },
     {
       "name": "answer",
@@ -858,32 +983,32 @@
     {
       "name": "comment",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 425
+      "line": 442
     },
     {
       "name": "edit",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 511
+      "line": 531
     },
     {
       "name": "list",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 680
+      "line": 768
     },
     {
       "name": "reflow",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 790
+      "line": 923
     },
     {
       "name": "quote",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 810
+      "line": 943
     },
     {
       "name": "render_list",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 838
+      "line": 971
     },
     {
       "name": "project_turns",
@@ -1591,6 +1716,31 @@
       "line": 87
     },
     {
+      "name": "Mirror<'a>::render",
+      "file": "crates/internal/tool-definitions/src/lib.rs",
+      "line": 112
+    },
+    {
+      "name": "Definitions::init",
+      "file": "crates/internal/tool-definitions/src/lib.rs",
+      "line": 149
+    },
+    {
+      "name": "toml_key",
+      "file": "crates/internal/tool-definitions/src/lib.rs",
+      "line": 315
+    },
+    {
+      "name": "toml_string",
+      "file": "crates/internal/tool-definitions/src/lib.rs",
+      "line": 329
+    },
+    {
+      "name": "render",
+      "file": "crates/internal/tool-definitions/src/labels.rs",
+      "line": 38
+    },
+    {
       "name": "without_carriage_returns",
       "file": "crates/internal/site-revision/src/lib.rs",
       "line": 111
@@ -1598,17 +1748,12 @@
     {
       "name": "report",
       "file": "crates/internal/ticket/src/check.rs",
-      "line": 129
+      "line": 151
     },
     {
       "name": "relabel",
       "file": "crates/internal/ticket/src/store.rs",
-      "line": 439
-    },
-    {
-      "name": "slug",
-      "file": "crates/internal/ticket/src/store.rs",
-      "line": 1170
+      "line": 444
     },
     {
       "name": "escape",
@@ -1621,14 +1766,44 @@
       "line": 166
     },
     {
-      "name": "unescaped",
-      "file": "crates/internal/ticket/src/parse.rs",
-      "line": 103
-    },
-    {
       "name": "metadata",
       "file": "crates/internal/ticket/src/parse.rs",
-      "line": 281
+      "line": 238
+    },
+    {
+      "name": "Id<K>::new",
+      "file": "crates/internal/doc/src/id.rs",
+      "line": 83
+    },
+    {
+      "name": "unescape",
+      "file": "crates/internal/doc/src/metadata.rs",
+      "line": 58
+    },
+    {
+      "name": "Document::insert_before_sections",
+      "file": "crates/internal/doc/src/metadata.rs",
+      "line": 416
+    },
+    {
+      "name": "replace_where",
+      "file": "crates/internal/doc/src/references.rs",
+      "line": 63
+    },
+    {
+      "name": "slug",
+      "file": "crates/internal/doc/src/files.rs",
+      "line": 408
+    },
+    {
+      "name": "slugify",
+      "file": "crates/internal/doc/src/heading.rs",
+      "line": 91
+    },
+    {
+      "name": "text_of",
+      "file": "crates/internal/doc/src/heading.rs",
+      "line": 160
     },
     {
       "name": "FileContent::add",
@@ -4363,17 +4538,17 @@
     {
       "name": "map_candidate",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 822
+      "line": 872
     },
     {
       "name": "process_schema",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 1005
+      "line": 1065
     },
     {
       "name": "StreamError::from",
       "file": "crates/jp_llm/src/provider/google.rs",
-      "line": 1315
+      "line": 1380
     },
     {
       "name": "prepare_soft_force_retry_request",

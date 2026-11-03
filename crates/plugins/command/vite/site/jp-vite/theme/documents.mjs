@@ -1,24 +1,28 @@
 import { data as drafts } from '../loaders/rfd-drafts.data.js'
 import { data as published } from '../loaders/rfds.data.js'
 import { data as tickets } from '../loaders/tickets.data.js'
+import { data as pages } from '../loaders/wiki.data.js'
 import settings from '../settings.json'
 
-// The site's cross-linkable documents — RFDs and tickets — in one shape.
+// The site's cross-linkable documents — RFDs, tickets, and wiki pages — in one
+// shape.
 //
-// RFDs and tickets are different kinds of document with different lifecycles,
-// but they link to each other constantly, and the widgets that follow those
-// links (breadcrumbs, link colouring, references) shouldn't care which kind
-// they're pointing at. This is the seam where the two become one list.
+// They are different kinds of document with different lifecycles, but they
+// link to each other constantly, and the widgets that follow those links
+// (breadcrumbs, link colouring, references) shouldn't care which kind they're
+// pointing at. This is the seam where they become one list.
 
 /// Where each kind's pages are served, such as `/rfd`, for the kinds the
 /// project has.
 const RFDS = settings.rfd ? `/${settings.rfd.route}` : null
 const TICKETS = settings.ticket ? `/${settings.ticket.route}` : null
+const WIKI = settings.wiki ? `/${settings.wiki.route}` : null
 
 /// What each kind is called and where a trail starting cold points back to.
 export const KINDS = {
     ...(RFDS && { rfd: { name: 'RFDs', root: `${RFDS}/` } }),
     ...(TICKETS && { ticket: { name: 'Tickets', root: `${TICKETS}/` } }),
+    ...(WIKI && { wiki: { name: 'Wiki', root: `${WIKI}/` } }),
 }
 
 /// The pages a trail can start from.
@@ -36,16 +40,22 @@ export const ORIGINS = [
         { path: `${TICKETS}/`, name: 'Tickets' },
         { path: `${TICKETS}/board`, name: 'Board' },
     ] : []),
+    ...(WIKI ? [
+        { path: `${WIKI}/`, name: 'Wiki' },
+        { path: `${WIKI}/all`, name: 'All pages' },
+    ] : []),
 ]
 
 /// Every document, newest kind-agnostic shape.
 ///
-/// `label` is what a breadcrumb or badge shows (`042`, `T0007`); `status` feeds
-/// the link colouring.
+/// `label` is what a breadcrumb or badge shows (`042`, `T-0007abc`,
+/// `W-0a1b2c3`); `status` feeds the link colouring; `parent` is the label of
+/// the document a ticket or wiki page sits under, or `null`.
 export const DOCUMENTS = [
     ...published.map(entry => document('rfd', entry.num, entry)),
     ...drafts.map(entry => document('rfd', entry.num, entry)),
     ...tickets.tickets.map(entry => document('ticket', entry.id, entry)),
+    ...pages.map(entry => document('wiki', entry.id, entry)),
 ]
 
 function document(kind, label, entry) {
@@ -55,6 +65,7 @@ function document(kind, label, entry) {
         title: entry.title,
         status: entry.status,
         path: entry.path,
+        parent: entry.parent ?? null,
         links: entry.links ?? [],
     }
 }
@@ -86,6 +97,11 @@ function normalize(path) {
 /// document it names actually exists.
 export function documentAt(path) {
     return BY_PATH.get(normalize(path)) ?? null
+}
+
+/// The document a label such as `T-0007abc` names, if any.
+export function documentNamed(label) {
+    return BY_LABEL.get(label) ?? null
 }
 
 /// The origin a path is, if it is one.

@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { knownDocuments, mentionedLabels } from '../references.mjs'
 import { readSettings, workflowDir, workflowPath } from '../settings.mjs'
 import { anyLabelQuery } from '../theme/label-filter.mjs'
-import { field, wrappedField } from './metadata.mjs'
+import { readMetadata } from './metadata.mjs'
 import {
     checkMilestones,
     normalizePriority,
@@ -25,25 +25,24 @@ import { loadTickets } from './ticket-shared.mjs'
 // reads the same files in Rust, so a change to how the board is read belongs in
 // both.
 
-// Parse the inline metadata from an RFD markdown file.
-//
-// RFDs use `- **Key**: Value` lines instead of YAML frontmatter, so we need a
-// small custom parser. Handles both permanent (`NNN`) and draft (`DNN`) ids.
+// Parse the inline metadata from an RFD markdown file, through the reader every
+// kind of document shares (`./metadata.mjs`). Handles both permanent (`NNN`)
+// and draft (`DNN`) ids.
 export function parseMeta(content, filename) {
     const num = filename.match(/^(\d{3}|D\d{2})/)?.[1] ?? '000'
-    const title = content.match(/^# RFD (?:\d+|D\d+):\s*(.+)/m)?.[1]?.trim() ?? filename
+    const meta = readMetadata(content)
 
     return {
         num,
-        title,
-        status: field(content, 'Status'),
-        category: field(content, 'Category'),
+        // The title without the `RFD 042: ` every RFD's heading opens with.
+        title: meta.title?.replace(/^RFD (?:\d+|D\d+):\s*/, '') || filename,
+        status: meta.get('Status'),
+        category: meta.get('Category'),
         // The RFD number that superseded this one, if any (e.g. `033` -> `034`).
-        supersededBy: parseField(content, 'Superseded by')[0] ?? null,
-        authors: field(content, 'Authors'),
-        date: field(content, 'Date'),
-        // Long enough to wrap.
-        summary: wrappedField(content, 'Summary'),
+        supersededBy: citedRfds(meta, 'Superseded by')[0] ?? null,
+        authors: meta.get('Authors'),
+        date: meta.get('Date'),
+        summary: meta.get('Summary'),
         slug: filename.replace(/\.md$/, ''),
     }
 }
@@ -57,22 +56,25 @@ export function parseMeta(content, filename) {
 export function parseReferences(content, ownNum) {
     const refs = new Set()
     for (const label of referencedLabels(content)) {
-        // RFD ids only; ticket references belong to the cross-kind set the site
-        // builds in `theme/documents.mjs`.
-        if (label.startsWith('T')) continue
+        // RFD ids only; ticket and wiki references belong to the cross-kind set
+        // the site builds in `theme/documents.mjs`.
+        if (label.startsWith('T') || label.startsWith('W')) continue
         if (label !== '000' && label !== ownNum) refs.add(label)
     }
     return [...refs].sort()
 }
 
 // Every document a body links to, as the labels `documents.mjs` keys on:
-// `042` and `D12` for RFDs, `T-005zd00` for tickets.
+// `042` and `D12` for RFDs, `T-005zd00` for tickets, `W-0a1b2c3` for wiki
+// pages.
 //
 // RFDs are matched through their linked filename, whose slug must carry a
 // letter so a date like `2026-08-05` isn't read as a link, and by name in
-// prose, as `RFD 042`. Tickets are matched as `T-005zd00`, or as `005zd00`
-// when `known` holds that ticket. The names are the ones the page's text
-// links; see `../references.mjs`.
+// prose, as `RFD 042`. Wiki pages are matched through their filename when
+// `known` holds that page, which covers a section a page embeds, and as
+// `W-0a1b2c3`. Tickets are matched as `T-005zd00`, or as `005zd00` when `known`
+// holds that ticket. The names are the ones the page's text links; see
+// `../references.mjs`.
 export function referencedLabels(content, known = new Map()) {
     const labels = new Set()
 
@@ -80,6 +82,11 @@ export function referencedLabels(content, known = new Map()) {
     let match
     while ((match = rfds.exec(content)) !== null) {
         labels.add(match[1])
+    }
+    const pages = /\b([0-9a-z]{7})-[a-z0-9-]*[a-z][a-z0-9-]*\.md\b/g
+    while ((match = pages.exec(content)) !== null) {
+        const label = `W-${match[1]}`
+        if (known.get(label)?.endsWith(`/${match[0]}`)) labels.add(label)
     }
     for (const label of mentionedLabels(content, known)) labels.add(label)
 
@@ -392,7 +399,7 @@ export function findDuplicateIds(files) {
 // request that moves one and not the other says so in its diff.
 export function checkSummaries(dir, files) {
     const missing = files.filter(f =>
-        !wrappedField(readFileSync(resolve(dir, f), 'utf-8'), 'Summary'))
+        !readMetadata(readFileSync(resolve(dir, f), 'utf-8')).get('Summary'))
 
     if (missing.length === 0) return null
 
@@ -409,13 +416,11 @@ export function checkSummaries(dir, files) {
 // `D\d\d` token in a published RFD is either a stale promotion artefact (an
 // RFD that was promoted from DNN to NNN without its internal references being
 // rewritten) or an accidental cross-link to a draft — in any context,
-// including code blocks. The only RFD that may mention `D\d\d` is the one
-// describing the lifecycle and its numbering, RFD 001: files in `allowlist` are
-// skipped entirely.
-export function findStrayDraftRefs(dir, files, allowlist) {
+// including code blocks. A published RFD that documents the numbering writes
+// the `DNN` placeholder rather than a concrete id.
+export function findStrayDraftRefs(dir, files) {
     const strays = []
     for (const f of files) {
-        if (allowlist.has(f)) continue
         const content = readFileSync(resolve(dir, f), 'utf-8')
         const lines = content.split('\n')
         const hits = []
@@ -437,8 +442,8 @@ export function findStrayDraftRefs(dir, files, allowlist) {
     return `DNN-style references found in published RFDs:\n` +
         report + '\n\n' +
         `Drafts are not published; published RFDs must not reference ` +
-        `them. Only RFD 001, the process document, may describe the DNN ` +
-        `numbering convention.`
+        `them. To describe the draft numbering itself, write the \`DNN\` ` +
+        `placeholder instead of a concrete id.`
 }
 
 // CommonMark link labels are case-insensitive and collapse internal
@@ -550,10 +555,9 @@ export function findUndefinedRefLinks(dir, files) {
         `rewrite the text so it is not a reference.`
 }
 
-// The RFD ids a relationship field in the metadata block cites, wrapped lines
-// included.
-function parseField(content, field) {
-    const value = wrappedField(content, field) ?? ''
+// The RFD ids a relationship field in the metadata block cites.
+function citedRfds(meta, field) {
+    const value = meta.get(field) ?? ''
     return [...value.matchAll(/\bRFD\s+(\d{3}|D\d{2})\b/g)].map(m => m[1])
 }
 
@@ -562,18 +566,17 @@ function parseField(content, field) {
 export function buildGraph(dir, files) {
     const graph = new Map()
     for (const f of files) {
-        const content = readFileSync(resolve(dir, f), 'utf-8')
+        const meta = readMetadata(readFileSync(resolve(dir, f), 'utf-8'))
         const num = f.match(/^(\d{3}|D\d{2})/)?.[1]
         if (!num) continue
-        const status = content
-            .match(/^- \*\*Status\*\*:\s*(\w+)/m)?.[1] ?? null
         graph.set(num, {
             file: f,
-            status,
-            requires: parseField(content, 'Requires'),
-            extends_: parseField(content, 'Extends'),
-            requiredBy: parseField(content, 'Required by'),
-            extendedBy: parseField(content, 'Extended by'),
+            // The status word alone: `Superseded` from `Superseded (034)`.
+            status: meta.get('Status')?.match(/^\w+/)?.[0] ?? null,
+            requires: citedRfds(meta, 'Requires'),
+            extends_: citedRfds(meta, 'Extends'),
+            requiredBy: citedRfds(meta, 'Required by'),
+            extendedBy: citedRfds(meta, 'Extended by'),
         })
     }
     return graph

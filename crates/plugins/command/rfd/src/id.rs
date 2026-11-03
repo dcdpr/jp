@@ -73,6 +73,24 @@ impl RfdId {
             .contains(&number)
             .then_some(Self::Published(number))
     }
+
+    /// Read an id the way people type one, or the path of an RFD file, such as
+    /// `docs/rfd/drafts/D05-slug.md`.
+    ///
+    /// A path is read for its file name alone, which has to end in `.md`; the
+    /// file need not exist.
+    pub(crate) fn parse_id_or_path(text: &str) -> Result<Self, InvalidId> {
+        if let Ok(id) = text.parse() {
+            return Ok(id);
+        }
+
+        let given = text.trim();
+        let path = Utf8Path::new(given);
+        path.file_name()
+            .filter(|_| path.extension() == Some("md"))
+            .and_then(Self::of_file)
+            .ok_or_else(|| InvalidId(given.to_owned()))
+    }
 }
 
 impl fmt::Display for RfdId {

@@ -71,7 +71,7 @@ fn publishing() -> Workspace {
 fn a_draft_is_published_under_the_next_number() {
     let workspace = publishing();
 
-    let output = promote(&workspace.paths, id("D05")).unwrap();
+    let output = promote(&workspace.paths, id("D05"), None).unwrap();
 
     assert!(!workspace.exists("docs/rfd/drafts/D05-sketch.md"));
     let text = workspace.read("docs/rfd/003-sketch.md");
@@ -88,13 +88,72 @@ fn a_draft_is_published_under_the_next_number() {
     );
 }
 
+/// The next free number may be taken on another branch, so the caller can name
+/// the one to publish under, and the references follow it there.
+#[test]
+fn a_draft_is_published_under_the_number_it_is_given() {
+    let workspace = publishing();
+
+    let output = promote(&workspace.paths, id("D05"), Some(id("100"))).unwrap();
+
+    assert!(!workspace.exists("docs/rfd/drafts/D05-sketch.md"));
+    assert!(!workspace.exists("docs/rfd/003-sketch.md"));
+    let text = workspace.read("docs/rfd/100-sketch.md");
+    assert!(text.starts_with("# RFD 100: Sketch\n"), "{text}");
+    assert!(text.contains("This draft, 100, builds on"), "{text}");
+    assert!(workspace.read("docs/rfd/002-other.md").contains("RFD 100"),);
+    assert!(
+        output
+            .text
+            .contains("docs/rfd/100-sketch.md: Draft -> Discussion (assigned 100)\n"),
+        "{}",
+        output.text
+    );
+}
+
+#[test]
+fn a_draft_is_not_published_under_a_number_another_rfd_holds() {
+    let workspace = publishing();
+
+    assert_eq!(
+        promote(&workspace.paths, id("D05"), Some(id("2"))).unwrap_err(),
+        "Cannot publish D05 as 002: 002-other.md holds it."
+    );
+    assert!(workspace.exists("docs/rfd/drafts/D05-sketch.md"));
+}
+
+#[test]
+fn a_draft_is_published_under_a_permanent_number_only() {
+    let workspace = publishing();
+
+    assert_eq!(
+        promote(&workspace.paths, id("D05"), Some(id("D09"))).unwrap_err(),
+        "Cannot publish D05 as D09: a published RFD takes a number (001-999)."
+    );
+    assert!(workspace.exists("docs/rfd/drafts/D05-sketch.md"));
+}
+
+/// Only publishing a draft assigns a number; a published RFD keeps its own.
+#[test]
+fn only_a_draft_takes_a_number() {
+    let workspace = Workspace::new();
+    workspace.rfd("040-x.md", &[("Status", "Discussion")], "Body.");
+
+    assert_eq!(
+        promote(&workspace.paths, id("040"), Some(id("100"))).unwrap_err(),
+        "Only a draft is promoted under a new number; RFD 040 is at Discussion. Use `jp rfd \
+         renumber` to move it."
+    );
+    assert!(workspace.read("docs/rfd/040-x.md").contains("Discussion"));
+}
+
 /// The file moves up out of `drafts/`, so its links to published RFDs lose a
 /// `../`, and its mentions of its own draft id take the new number.
 #[test]
 fn the_published_file_links_from_its_new_directory() {
     let workspace = publishing();
 
-    promote(&workspace.paths, id("D05")).unwrap();
+    promote(&workspace.paths, id("D05"), None).unwrap();
 
     let text = workspace.read("docs/rfd/003-sketch.md");
     assert!(text.contains("This draft, 003, builds on"), "{text}");
@@ -108,7 +167,7 @@ fn the_published_file_links_from_its_new_directory() {
 fn draft_back_links_go_and_published_ones_are_filled_in() {
     let workspace = publishing();
 
-    let output = promote(&workspace.paths, id("D05")).unwrap();
+    let output = promote(&workspace.paths, id("D05"), None).unwrap();
 
     let text = workspace.read("docs/rfd/003-sketch.md");
     assert!(!text.contains("Required by"), "{text}");
@@ -130,7 +189,7 @@ fn draft_back_links_go_and_published_ones_are_filled_in() {
 fn references_to_the_draft_follow_it_in_every_document() {
     let workspace = publishing();
 
-    let output = promote(&workspace.paths, id("D05")).unwrap();
+    let output = promote(&workspace.paths, id("D05"), None).unwrap();
 
     assert!(
         workspace
@@ -171,7 +230,7 @@ fn references_to_the_draft_follow_it_in_every_document() {
 fn the_board_keeps_the_place_under_the_new_number() {
     let workspace = publishing();
 
-    promote(&workspace.paths, id("D05")).unwrap();
+    promote(&workspace.paths, id("D05"), None).unwrap();
 
     let board = workspace.read("docs/rfd/.priority.json");
     assert!(board.contains("\"003\""), "{board}");
@@ -188,7 +247,7 @@ fn a_draft_depending_on_a_draft_is_not_published() {
         "Body.",
     );
 
-    let error = promote(&workspace.paths, id("D03")).unwrap_err();
+    let error = promote(&workspace.paths, id("D03"), None).unwrap_err();
 
     assert_eq!(
         error,
@@ -210,7 +269,7 @@ fn a_draft_mentioning_another_draft_is_not_published() {
         "D03 is this one. Unlike D04 and D06, it ships. D04 again. XD08 and D081 are not ids.",
     );
 
-    let error = promote(&workspace.paths, id("D03")).unwrap_err();
+    let error = promote(&workspace.paths, id("D03"), None).unwrap_err();
 
     assert_eq!(
         error,
@@ -225,7 +284,7 @@ fn a_broken_board_file_stops_the_promotion_before_it_writes() {
     let workspace = publishing();
     workspace.board("{ nope");
 
-    let error = promote(&workspace.paths, id("D05")).unwrap_err();
+    let error = promote(&workspace.paths, id("D05"), None).unwrap_err();
 
     assert!(
         error
@@ -257,7 +316,7 @@ fn gated() -> Workspace {
 fn acceptance_waits_for_what_it_requires_and_extends() {
     let workspace = gated();
 
-    let error = promote(&workspace.paths, id("020")).unwrap_err();
+    let error = promote(&workspace.paths, id("020"), None).unwrap_err();
 
     assert_eq!(
         error,
@@ -277,7 +336,7 @@ fn an_rfd_whose_dependencies_are_accepted_is_accepted() {
     workspace.rfd("021-x.md", &[("Status", "Implemented")], "Body.");
     workspace.rfd("099-gone.md", &[("Status", "Superseded")], "Body.");
 
-    let output = promote(&workspace.paths, id("020")).unwrap();
+    let output = promote(&workspace.paths, id("020"), None).unwrap();
 
     assert_eq!(
         output.text,
@@ -300,7 +359,7 @@ fn implementation_waits_for_what_it_requires_to_be_built() {
     );
     workspace.rfd("011-x.md", &[("Status", "Accepted")], "Body.");
 
-    let error = promote(&workspace.paths, id("010")).unwrap_err();
+    let error = promote(&workspace.paths, id("010"), None).unwrap_err();
 
     assert_eq!(
         error,
@@ -360,7 +419,7 @@ fn implementing() -> Workspace {
 fn implementation_drops_the_requires_links_in_both_directions() {
     let workspace = implementing();
 
-    let output = promote(&workspace.paths, id("010")).unwrap();
+    let output = promote(&workspace.paths, id("010"), None).unwrap();
 
     let done = workspace.read("docs/rfd/010-done.md");
     assert!(done.contains("- **Status**: Implemented\n"), "{done}");
@@ -395,7 +454,7 @@ fn implementation_drops_the_requires_links_in_both_directions() {
 fn an_implemented_rfd_leaves_the_board() {
     let workspace = implementing();
 
-    promote(&workspace.paths, id("010")).unwrap();
+    promote(&workspace.paths, id("010"), None).unwrap();
 
     let board = workspace.read("docs/rfd/.priority.json");
     assert!(!board.contains("\"010\""), "{board}");
@@ -409,11 +468,11 @@ fn an_rfd_past_accepted_is_not_promoted() {
     workspace.rfd("031-x.md", &[("Status", "Abandoned")], "Body.");
 
     assert_eq!(
-        promote(&workspace.paths, id("030")).unwrap_err(),
+        promote(&workspace.paths, id("030"), None).unwrap_err(),
         "Cannot promote from 'Implemented'.\nPromotable statuses: Draft, Discussion, Accepted."
     );
     assert_eq!(
-        promote(&workspace.paths, id("031")).unwrap_err(),
+        promote(&workspace.paths, id("031"), None).unwrap_err(),
         "Cannot promote from 'Abandoned'.\nPromotable statuses: Draft, Discussion, Accepted."
     );
 }
@@ -429,7 +488,7 @@ fn the_promoted_file_is_reflowed() {
         "One sentence. Another on the same line, linking [RFD 001](001-process.md).",
     );
 
-    promote(&workspace.paths, id("040")).unwrap();
+    promote(&workspace.paths, id("040"), None).unwrap();
 
     let text = workspace.read("docs/rfd/040-x.md");
     assert!(

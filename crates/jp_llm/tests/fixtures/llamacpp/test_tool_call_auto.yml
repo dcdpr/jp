@@ -13,7 +13,8 @@ when:
       "stream": true,
       "reasoning_format": "deepseek",
       "chat_template_kwargs": {
-        "enable_thinking": false
+        "enable_thinking": false,
+        "thinking": false
       },
       "tools": [
         {
@@ -134,7 +135,8 @@ when:
       "stream": true,
       "reasoning_format": "deepseek",
       "chat_template_kwargs": {
-        "enable_thinking": false
+        "enable_thinking": false,
+        "thinking": false
       }
     }
 then:

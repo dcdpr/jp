@@ -16,6 +16,7 @@
 //! project's to edit.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use doc::references;
 use jp_plugin::message::QueryRequest;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -28,7 +29,6 @@ use crate::{
     links::Links,
     options::TICKET_LABELS_KEY,
     paths::{self, Paths},
-    references,
 };
 
 /// The marker standing in for a plan that hasn't been read yet.
@@ -168,6 +168,7 @@ pub(crate) fn track(
         date: &filer.date,
         labels: &labels,
         description: &description(id, &link, plan.as_deref()),
+        parent: None,
     })
     .map_err(|error| error.to_string())?;
     report.notes.push(format!(
