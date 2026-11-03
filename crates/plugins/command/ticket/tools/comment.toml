@@ -29,6 +29,10 @@ Reply to the first comment:
 # side effects, so it is drawn before the call is put to the user.
 format = "allow"
 
+# Several comments in one call are appended one at a time in the order written,
+# so two on one ticket land in that order rather than racing for the file.
+fan_out = { concurrency = 1 }
+
 [conversation.tools.ticket_comment.style]
 parameters = "tool"
 inline_results = "full"
