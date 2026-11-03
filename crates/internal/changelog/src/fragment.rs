@@ -1,0 +1,463 @@
+//! One changelog fragment: the entry recording a change for the people using
+//! the software.
+//!
+//! A fragment is a Markdown file whose YAML frontmatter names the change's
+//! [`Type`], and whose body is the entry the release notes list:
+//!
+//! ```markdown
+//! ---
+//! type: fixed
+//! ---
+//! A turn that stalls while idle is retried instead of failing.
+//! ```
+//!
+//! A change that requires users to act carries its section of the release's
+//! upgrade guide, an [`Upgrade`]: a paragraph that starts with `BREAKING
+//! CHANGE:` or `BREAKING-CHANGE:`, the rest of which is the section's title,
+//! and every paragraph after it, which are its body.
+//! A line that starts with either token anywhere else, inside a code block or
+//! partway through a paragraph, is an error rather than text.
+//! That keeps a plain search for the token in step with [`parse`]: a fragment
+//! the search finds has an upgrade section, or fails to parse.
+//!
+//! Paragraphs and code blocks are read as GitHub renders Markdown.
+
+use std::{fmt, num::NonZeroU64, ops::Range};
+
+use comrak::{
+    Arena, Options,
+    nodes::{NodeValue, Sourcepos},
+    options::Extension,
+    parse_document,
+};
+use serde::Deserialize;
+
+/// The tokens that open an upgrade section: the one Conventional Commits uses,
+/// and its synonym.
+const MARKERS: [&str; 2] = ["BREAKING CHANGE:", "BREAKING-CHANGE:"];
+
+/// The line that opens and closes a fragment's frontmatter.
+const DELIMITER: &str = "---";
+
+/// What a change means for the people using the software.
+///
+/// The ids are fixed, so a fragment means the same in every project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Type {
+    /// A new capability the user can now reach.
+    Added,
+    /// A change to existing behavior.
+    Changed,
+    /// Something still working but slated for removal.
+    Deprecated,
+    /// Something taken away.
+    Removed,
+    /// A bug fix the user would notice.
+    Fixed,
+    /// A fix with security relevance.
+    Security,
+    /// A user-visible performance improvement.
+    Performance,
+}
+
+/// A fragment, as [`parse`] reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fragment {
+    /// What the change means for users.
+    pub type_: Type,
+
+    /// The change requests to credit in place of the ones history names, when
+    /// the frontmatter lists them.
+    pub change_requests: Option<Vec<NonZeroU64>>,
+
+    /// The entry the release notes list, as Markdown: the body before its
+    /// upgrade section, or all of it.
+    pub entry: String,
+
+    /// The fragment's section of the upgrade guide, for a change that requires
+    /// users to act.
+    pub upgrade: Option<Upgrade>,
+}
+
+/// A fragment's section of a release's upgrade guide.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Upgrade {
+    /// What broke: the rest of the paragraph the token opens, on one line.
+    pub title: String,
+
+    /// What changed, why, and how to upgrade, as Markdown: every paragraph
+    /// after the title.
+    pub body: String,
+}
+
+/// A document that doesn't hold a well-formed fragment.
+///
+/// Lines count from 1 at the top of the file, frontmatter included.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FragmentError {
+    /// The first line isn't the `---` that opens the frontmatter.
+    MissingFrontmatter,
+
+    /// No `---` line closes the frontmatter.
+    UnclosedFrontmatter,
+
+    /// The frontmatter isn't YAML holding the fields a fragment's frontmatter
+    /// holds, and nothing else; the message is the YAML parser's.
+    Frontmatter(String),
+
+    /// Nothing but whitespace follows the frontmatter.
+    EmptyBody,
+
+    /// A line inside a code block starts with an upgrade section's token.
+    MarkerInCodeBlock { line: usize, marker: &'static str },
+
+    /// A line starts with an upgrade section's token without starting a
+    /// paragraph.
+    MarkerOutsideParagraph { line: usize, marker: &'static str },
+
+    /// A second paragraph opens an upgrade section.
+    SecondUpgradeSection { line: usize },
+
+    /// Nothing comes before the upgrade section.
+    EmptyEntry { line: usize, marker: &'static str },
+
+    /// The paragraph opening the upgrade section holds nothing but its token.
+    EmptyUpgradeTitle { line: usize, marker: &'static str },
+
+    /// Nothing follows the upgrade section's title.
+    EmptyUpgradeBody { line: usize },
+}
+
+impl fmt::Display for FragmentError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingFrontmatter => {
+                f.write_str("no frontmatter: a fragment's first line is `---`")
+            }
+            Self::UnclosedFrontmatter => f.write_str("no `---` line closes the frontmatter"),
+            Self::Frontmatter(message) => write!(f, "invalid frontmatter: {message}"),
+            Self::EmptyBody => {
+                f.write_str("no entry: say below the frontmatter what changed for users")
+            }
+            Self::MarkerInCodeBlock { line, marker } => write!(
+                f,
+                "line {line} starts with `{marker}` inside a code block; to show the token, \
+                 indent the line or put the token in inline code"
+            ),
+            Self::MarkerOutsideParagraph { line, marker } => write!(
+                f,
+                "line {line} starts with `{marker}` without starting a paragraph; an upgrade \
+                 section opens a paragraph of its own, after a blank line, and to show the token \
+                 instead, indent the line or put the token in inline code"
+            ),
+            Self::SecondUpgradeSection { line } => write!(
+                f,
+                "line {line} opens a second upgrade section, and a fragment has at most one"
+            ),
+            Self::EmptyEntry { line, marker } => write!(
+                f,
+                "no entry before the upgrade section on line {line}: say what changed for users \
+                 before `{marker}`"
+            ),
+            Self::EmptyUpgradeTitle { line, marker } => write!(
+                f,
+                "the upgrade section on line {line} has no title: name what broke after `{marker}`"
+            ),
+            Self::EmptyUpgradeBody { line } => write!(
+                f,
+                "the upgrade section on line {line} has no body: say what changed and how to \
+                 upgrade in the paragraphs after its title"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for FragmentError {}
+
+/// The fields a fragment's frontmatter holds; any other is an error rather than
+/// ignored, so a misspelled field doesn't vanish.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Frontmatter {
+    #[serde(rename = "type")]
+    type_: Type,
+    change_requests: Option<Vec<NonZeroU64>>,
+}
+
+/// Read `source` as a fragment, held to every rule of the format.
+///
+/// Lines may end in `\n` or `\r\n`, and a leading byte order mark is skipped.
+///
+/// # Errors
+///
+/// Returns the first rule `source` breaks, reading from the top.
+pub fn parse(source: &str) -> Result<Fragment, FragmentError> {
+    let source = source
+        .strip_prefix('\u{feff}')
+        .unwrap_or(source)
+        .replace("\r\n", "\n");
+
+    let split = split(&source)?;
+    let frontmatter: Frontmatter = serde_saphyr::from_str(split.frontmatter).map_err(|error| {
+        FragmentError::Frontmatter(
+            error
+                .without_snippet()
+                .render_with_formatter(&serde_saphyr::UserMessageFormatter),
+        )
+    })?;
+    let (entry, upgrade) = body(split.body, split.body_line)?;
+
+    Ok(Fragment {
+        type_: frontmatter.type_,
+        change_requests: frontmatter.change_requests,
+        entry,
+        upgrade,
+    })
+}
+
+/// A fragment's source, cut at the line closing its frontmatter.
+struct Split<'a> {
+    /// The frontmatter, its opening `---` line included, so the YAML parser
+    /// numbers lines as the file does.
+    frontmatter: &'a str,
+
+    /// Everything after the line closing the frontmatter.
+    body: &'a str,
+
+    /// The number of the body's first line in the file.
+    body_line: usize,
+}
+
+fn split(source: &str) -> Result<Split<'_>, FragmentError> {
+    let mut lines = source.split_inclusive('\n');
+    let opening = lines
+        .next()
+        .filter(|line| is_delimiter(line))
+        .ok_or(FragmentError::MissingFrontmatter)?;
+
+    let mut end = opening.len();
+    for line in lines {
+        if is_delimiter(line) {
+            let body_start = end + line.len();
+            return Ok(Split {
+                frontmatter: &source[..end],
+                body: &source[body_start..],
+                body_line: line_number(source, body_start),
+            });
+        }
+        end += line.len();
+    }
+
+    Err(FragmentError::UnclosedFrontmatter)
+}
+
+/// Whether `line` is the `---` that opens or closes the frontmatter, trailing
+/// whitespace aside.
+fn is_delimiter(line: &str) -> bool {
+    line.trim_end() == DELIMITER
+}
+
+/// The number of the line `text` has reached at byte `offset`, counting from 1.
+fn line_number(text: &str, offset: usize) -> usize {
+    text[..offset].matches('\n').count() + 1
+}
+
+/// The paragraph that opens a fragment's upgrade section.
+struct Opening {
+    /// Its lines, as 0-based indices into the body's.
+    lines: Range<usize>,
+
+    /// The number of its first line in the file.
+    line: usize,
+
+    /// The token it starts with.
+    marker: &'static str,
+}
+
+/// The entry and the upgrade section of a fragment's `body`, whose first line
+/// is line `first_line` of the file.
+fn body(body: &str, first_line: usize) -> Result<(String, Option<Upgrade>), FragmentError> {
+    if body.trim().is_empty() {
+        return Err(FragmentError::EmptyBody);
+    }
+
+    let lines: Vec<&str> = body.lines().collect();
+    let Some(opening) = opening(body, &lines, first_line)? else {
+        return Ok((body.trim().to_owned(), None));
+    };
+    let (entry, upgrade) = upgrade(&lines, opening)?;
+
+    Ok((entry, Some(upgrade)))
+}
+
+/// The paragraph opening the upgrade section of `body`, split into `lines`, if
+/// it has one.
+///
+/// Every line starting with a token has to open a paragraph, and only one may.
+fn opening(
+    body: &str,
+    lines: &[&str],
+    first_line: usize,
+) -> Result<Option<Opening>, FragmentError> {
+    let marked = marked_lines(lines);
+    if marked.is_empty() {
+        return Ok(None);
+    }
+
+    let blocks = Blocks::read(body);
+    let mut opening = None;
+    for (index, marker) in marked {
+        let line = first_line + index;
+        if blocks.in_code(index) {
+            return Err(FragmentError::MarkerInCodeBlock { line, marker });
+        }
+        let Some(paragraph) = blocks.paragraph_at(index) else {
+            return Err(FragmentError::MarkerOutsideParagraph { line, marker });
+        };
+        if opening.is_some() {
+            return Err(FragmentError::SecondUpgradeSection { line });
+        }
+        opening = Some(Opening {
+            lines: paragraph,
+            line,
+            marker,
+        });
+    }
+
+    Ok(opening)
+}
+
+/// The entry before `opening` in `lines`, and the upgrade section it opens.
+fn upgrade(lines: &[&str], opening: Opening) -> Result<(String, Upgrade), FragmentError> {
+    let Opening {
+        lines: paragraph,
+        line,
+        marker,
+    } = opening;
+
+    let entry = joined(lines.get(..paragraph.start).unwrap_or_default());
+    if entry.is_empty() {
+        return Err(FragmentError::EmptyEntry { line, marker });
+    }
+
+    let title = title(lines.get(paragraph.clone()).unwrap_or_default(), marker);
+    if title.is_empty() {
+        return Err(FragmentError::EmptyUpgradeTitle { line, marker });
+    }
+
+    let body = joined(lines.get(paragraph.end..).unwrap_or_default());
+    if body.is_empty() {
+        return Err(FragmentError::EmptyUpgradeBody { line });
+    }
+
+    Ok((entry, Upgrade { title, body }))
+}
+
+/// `lines` as one block of Markdown, without the blank lines around it.
+fn joined(lines: &[&str]) -> String {
+    lines.join("\n").trim().to_owned()
+}
+
+/// The title the paragraph on `lines` gives an upgrade section: the paragraph
+/// after its `marker`, its lines joined into one.
+fn title(lines: &[&str], marker: &str) -> String {
+    let mut parts = vec![];
+    for (index, line) in lines.iter().enumerate() {
+        let line = if index == 0 {
+            line.strip_prefix(marker).unwrap_or(line)
+        } else {
+            line
+        };
+        let line = line.trim();
+        if !line.is_empty() {
+            parts.push(line);
+        }
+    }
+
+    parts.join(" ")
+}
+
+/// Every line in `lines` that starts with an upgrade section's token, as its
+/// 0-based index and the token.
+fn marked_lines(lines: &[&str]) -> Vec<(usize, &'static str)> {
+    lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            MARKERS
+                .into_iter()
+                .find(|marker| line.starts_with(marker))
+                .map(|marker| (index, marker))
+        })
+        .collect()
+}
+
+/// Where a body's paragraphs and code blocks sit, as ranges of 0-based line
+/// indices.
+struct Blocks {
+    /// The paragraphs at the top level of the body, outside any list or quote.
+    paragraphs: Vec<Range<usize>>,
+
+    /// The code blocks, fenced or indented, wherever they sit.
+    code: Vec<Range<usize>>,
+}
+
+impl Blocks {
+    fn read(body: &str) -> Self {
+        let arena = Arena::new();
+        let root = parse_document(&arena, body, &options());
+
+        let paragraphs = root
+            .children()
+            .filter_map(|node| {
+                let data = node.data();
+                matches!(data.value, NodeValue::Paragraph).then(|| indices(&data.sourcepos))
+            })
+            .collect();
+        let code = root
+            .descendants()
+            .filter_map(|node| {
+                let data = node.data();
+                matches!(data.value, NodeValue::CodeBlock(_)).then(|| indices(&data.sourcepos))
+            })
+            .collect();
+
+        Self { paragraphs, code }
+    }
+
+    /// Whether the line at `index` is inside a code block.
+    fn in_code(&self, index: usize) -> bool {
+        self.code.iter().any(|block| block.contains(&index))
+    }
+
+    /// The lines of the paragraph starting at `index`, if one does.
+    fn paragraph_at(&self, index: usize) -> Option<Range<usize>> {
+        self.paragraphs
+            .iter()
+            .find(|paragraph| paragraph.start == index)
+            .cloned()
+    }
+}
+
+/// The 0-based indices of the lines a block spans, from comrak's 1-based line
+/// numbers.
+fn indices(sourcepos: &Sourcepos) -> Range<usize> {
+    sourcepos.start.line.saturating_sub(1)..sourcepos.end.line
+}
+
+/// Parse options that read a body as GitHub renders it, tables included: a
+/// table can take a line that would otherwise start a paragraph.
+fn options() -> Options<'static> {
+    Options {
+        extension: Extension {
+            table: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+#[cfg(test)]
+#[path = "fragment_tests.rs"]
+mod tests;

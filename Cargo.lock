@@ -587,6 +587,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "changelog"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "clap",
+ "comrak",
+ "indoc",
+ "semver",
+ "serde",
+ "serde-saphyr",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
