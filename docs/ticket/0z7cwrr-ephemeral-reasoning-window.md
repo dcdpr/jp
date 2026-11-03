@@ -1,10 +1,9 @@
 # Ephemeral Reasoning Window
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-10-08
-- **Implements**: 120
+- **Label**: tracking-rfd=120
 - **Label**: type=tracking
 
 Tracking ticket for [RFD 120].

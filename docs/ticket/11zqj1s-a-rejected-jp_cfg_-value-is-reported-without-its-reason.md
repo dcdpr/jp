@@ -1,7 +1,6 @@
 # A rejected `JP_CFG_*` value is reported without its reason
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-10-13
 - **Label**: package=jp_cli
@@ -33,8 +32,8 @@ carries the reason as its source.
 
 ## Cause
 
-`load_base_partial` (`crates/jp_cli/src/lib.rs:1145`) and
-`load_user_global_partial` (`crates/jp_cli/src/lib.rs:1154`) turn the
+`load_base_partial` (`crates/jp_cli/src/lib.rs:1022`) and
+`load_user_global_partial` (`crates/jp_cli/src/lib.rs:1031`) turn the
 `load_envs` error into `Error::CliConfig(error.to_string())`, which keeps the
 outer message and drops the source.
 
