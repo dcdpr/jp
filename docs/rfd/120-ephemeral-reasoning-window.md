@@ -75,9 +75,11 @@ As new rows complete, the oldest scroll out of the window.
 When anything persistent is about to render (message text, a tool call, the end
 of the turn, a stream retry), the window and its status row are erased.
 No reasoning is left on screen.
-The one exception is a resize: a terminal shrunk below the window's height while
-the window is drawn pushes its top rows into scrollback, where the erase cannot
-reach them ([RFD 091]).
+Resizing the terminal while the window is drawn is the exception (see
+[Drawbacks](#drawbacks)): narrowing a terminal that reflows its contents can
+leave parts of the window on screen, and making any terminal shorter than the
+window pushes the window's top rows into scrollback, where the erase cannot
+reach them.
 An interrupt menu erases the window when it opens, like any prompt.
 Reasoning that resumes after the user picks *continue*, or after a tool call,
 opens a fresh, empty window.
@@ -289,11 +291,17 @@ The renderer maps `rows` onto the printer's `OutputLines` with the existing
   each of those disables status regions.
   A user who set a window to keep scrollback clean gets the reasoning back in
   scrollback whenever they debug with `-v`.
-- **Resize truncates instead of re-wrapping.** Rows are wrapped once, when
-  rendered.
-  If the terminal narrows mid-stream, the region truncates rows to the new width
-  ([RFD 091]'s every-row-fits invariant).
-  Inline reasoning is hard-wrapped the same way and does not reflow either.
+- **Narrowing the terminal can leave parts of the window behind.** Rows are
+  wrapped once, when rendered, and a redraw after the terminal narrows truncates
+  them to the new width ([RFD 091]'s every-row-fits invariant).
+  A terminal that reflows its contents on resize, as Ghostty does, also re-wraps
+  the rows already on screen, shading included.
+  The window then spans more rows than the region walks back to erase, so each
+  redraw while the terminal narrows leaves part of the last frame on screen.
+  The manual check in phase 3 reproduced this, and the tool and MCP startup
+  windows share it.
+  Inline reasoning is hard-wrapped the same way, but nothing erases it, so a
+  reflow only re-wraps it.
   A terminal shrunk below the window's height can also leave the window's top
   rows in scrollback, because the erase cannot reach rows the viewport has lost
   ([RFD 091]).
@@ -354,8 +362,9 @@ proposed on those merits.
   Paragraph prose completes a row once per `wrap_width` columns (80 by default);
   code blocks and lists can complete rows faster.
   A burst of pushes raises one refresh per worker wakeup (`LineSink::push`).
-  Whether that repaint rate flickers depends on the terminal and the token rate,
-  and has to be checked on a real terminal.
+  Whether that repaint rate flickers depends on the terminal and the token rate.
+  Checked on a real terminal in phase 3 (Ghostty, with Anthropic's reasoning
+  stream), the window does not flicker.
 - **The window after an interrupt.** The flush that runs before the interrupt
   menu opens releases the window, so reasoning after *continue* starts in an
   empty window and the rows the user was reading when they pressed Ctrl-C are
