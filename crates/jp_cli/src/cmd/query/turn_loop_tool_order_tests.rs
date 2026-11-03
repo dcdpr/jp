@@ -752,7 +752,7 @@ async fn press_ctrl_c_in_tool_phase(
 /// answered.
 #[tokio::test]
 async fn approvals_follow_the_order_the_calls_were_sent_in() {
-    timeout(Duration::from_secs(10), async {
+    Box::pin(timeout(Duration::from_secs(10), async {
         let config = asking_tools(&["tool_a", "tool_b"]);
         let (transcript, responses) = run_calls(
             &config,
@@ -779,7 +779,7 @@ async fn approvals_follow_the_order_the_calls_were_sent_in() {
                 result: Ok("result".into()),
             },
         ]);
-    })
+    }))
     .await
     .unwrap();
 }
@@ -788,7 +788,7 @@ async fn approvals_follow_the_order_the_calls_were_sent_in() {
 /// tool without asking again, and that call is still announced.
 #[tokio::test]
 async fn a_remembered_yes_runs_a_later_call_to_the_same_tool_without_asking() {
-    timeout(Duration::from_secs(10), async {
+    Box::pin(timeout(Duration::from_secs(10), async {
         let config = asking_tools(&["tool_a"]);
         let (transcript, responses) = run_calls(
             &config,
@@ -814,7 +814,7 @@ async fn a_remembered_yes_runs_a_later_call_to_the_same_tool_without_asking() {
                 result: Ok("result".into()),
             },
         ]);
-    })
+    }))
     .await
     .unwrap();
 }
@@ -824,7 +824,7 @@ async fn a_remembered_yes_runs_a_later_call_to_the_same_tool_without_asking() {
 /// never run.
 #[tokio::test]
 async fn a_remembered_no_skips_a_later_call_to_the_same_tool_without_showing_it() {
-    timeout(Duration::from_secs(10), async {
+    Box::pin(timeout(Duration::from_secs(10), async {
         let config = asking_tools(&["tool_a"]);
         let (transcript, responses) = run_calls(
             &config,
@@ -850,7 +850,7 @@ async fn a_remembered_no_skips_a_later_call_to_the_same_tool_without_showing_it(
                 result: Ok("Tool skipped by user (remembered).".into()),
             },
         ]);
-    })
+    }))
     .await
     .unwrap();
 }
@@ -861,7 +861,7 @@ async fn a_remembered_no_skips_a_later_call_to_the_same_tool_without_showing_it(
 /// With nothing on screen, the text after it is not spaced from it either.
 #[tokio::test]
 async fn a_call_settled_while_preparing_is_not_asked_about() {
-    timeout(Duration::from_secs(10), async {
+    Box::pin(timeout(Duration::from_secs(10), async {
         let config = described_tool(&json!({"run": "ask"}));
         let runs = Arc::new(AtomicUsize::new(0));
         let source = StagedExecutor::source({
@@ -890,7 +890,7 @@ async fn a_call_settled_while_preparing_is_not_asked_about() {
             ),
         }]);
         assert_eq!(runs.load(Ordering::SeqCst), 0);
-    })
+    }))
     .await
     .unwrap();
 }
@@ -900,7 +900,7 @@ async fn a_call_settled_while_preparing_is_not_asked_about() {
 /// and never runs.
 #[tokio::test]
 async fn a_remembered_no_hides_a_later_calls_description() {
-    timeout(Duration::from_secs(10), async {
+    Box::pin(timeout(Duration::from_secs(10), async {
         let config = described_tool(&json!({"run": "ask"}));
         let runs = Arc::new(AtomicUsize::new(0));
         let source = StagedExecutor::source({
@@ -935,7 +935,7 @@ async fn a_remembered_no_hides_a_later_calls_description() {
         ]);
         assert_eq!(turn.inquiries, vec![]);
         assert_eq!(runs.load(Ordering::SeqCst), 0);
-    })
+    }))
     .await
     .unwrap();
 }
@@ -944,7 +944,7 @@ async fn a_remembered_no_hides_a_later_calls_description() {
 /// prepared then, and shown, and asked about, once the earlier one is answered.
 #[tokio::test]
 async fn a_later_call_is_prepared_while_an_earlier_one_is_being_approved() {
-    timeout(Duration::from_secs(20), async {
+    Box::pin(timeout(Duration::from_secs(20), async {
         let tmp = tempdir().unwrap();
         let marker = tmp.path().join("prepared-call-2");
         let config = described_tool(&json!({"run": "ask"}));
@@ -997,7 +997,7 @@ async fn a_later_call_is_prepared_while_an_earlier_one_is_being_approved() {
             },
         ]);
         assert_eq!(runs.load(Ordering::SeqCst), 2);
-    })
+    }))
     .await
     .unwrap();
 }
@@ -1007,7 +1007,7 @@ async fn a_later_call_is_prepared_while_an_earlier_one_is_being_approved() {
 /// describes it with its own answer.
 #[tokio::test]
 async fn formatter_questions_to_the_assistant_are_answered_for_each_call() {
-    timeout(Duration::from_secs(20), async {
+    Box::pin(timeout(Duration::from_secs(20), async {
         let config = described_tool(&json!({
             "run": "ask",
             "questions": {"confirm": {"target": "assistant"}},
@@ -1054,7 +1054,7 @@ async fn formatter_questions_to_the_assistant_are_answered_for_each_call() {
             InquiryResponse::answered(InquiryId::new("call_2.confirm.1"), json!(true)),
         ]);
         assert_eq!(runs.load(Ordering::SeqCst), 2);
-    })
+    }))
     .await
     .unwrap();
 }
@@ -1160,7 +1160,7 @@ async fn a_restart_while_a_call_is_being_prepared_prepares_it_again() {
 /// rather than dropped as an unanswered request.
 #[tokio::test]
 async fn a_retried_response_withdraws_an_open_formatter_question() {
-    timeout(Duration::from_secs(10), async {
+    Box::pin(timeout(Duration::from_secs(10), async {
         let mut config = described_tool(&json!({
             "run": "allow",
             "questions": {"confirm": {"target": "assistant"}},
@@ -1199,7 +1199,7 @@ async fn a_retried_response_withdraws_an_open_formatter_question() {
             3,
             "the failed response was requested again"
         );
-    })
+    }))
     .await
     .unwrap();
 }

@@ -282,7 +282,7 @@ async fn assert_agent_restart(
     error: fn() -> StreamError,
     max_retries: u32,
 ) -> String {
-    timeout(Duration::from_secs(10), async {
+    Box::pin(timeout(Duration::from_secs(10), async {
         let temp = tempdir().unwrap();
         let root = temp.path();
         let mut config = AppConfig::new_test();
@@ -312,7 +312,7 @@ async fn assert_agent_restart(
         assert_eq!(output.lock().as_str(), "Finished.\n\nContinued.\n\n");
         owner.shutdown().await.unwrap();
         chrome.lock().as_str().to_owned()
-    }).await.unwrap()
+    })).await.unwrap()
 }
 
 /// Submits a tool call the way Claude Code does, then fails its only stream
@@ -374,7 +374,7 @@ impl Provider for UnrecordedCallProvider {
 /// outcome is unknown, the timeout ends the turn instead.
 #[tokio::test]
 async fn agent_idle_timeout_with_an_unrecorded_tool_result_ends_the_turn() {
-    timeout(Duration::from_secs(10), async {
+    Box::pin(timeout(Duration::from_secs(10), async {
         let temp = tempdir().unwrap();
         let root = temp.path();
         let mut config = AppConfig::new_test();
@@ -408,7 +408,7 @@ async fn agent_idle_timeout_with_an_unrecorded_tool_result_ends_the_turn() {
         let requests = lock.events().iter().filter_map(|event| event.event.as_tool_call_request()).map(|call| call.id.clone()).collect::<Vec<_>>();
         assert_eq!(requests, vec!["agent-call"]);
         owner.shutdown().await.unwrap();
-    }).await.unwrap();
+    })).await.unwrap();
 }
 
 #[tokio::test]
