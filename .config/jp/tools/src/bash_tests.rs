@@ -419,6 +419,7 @@ fn an_absolute_mount_is_refused() {
 
 /// A symlink pointing out of the workspace resolves outside it, and no
 /// `external` rule approves that target.
+#[cfg(unix)]
 #[test]
 fn a_mount_resolving_outside_the_workspace_is_refused() {
     let dir = workspace();

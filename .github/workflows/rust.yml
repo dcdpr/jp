@@ -103,6 +103,10 @@ jobs:
     needs: changes
     runs-on: ${{ matrix.os }}
     strategy:
+      # One failing task must not cancel the others. A cancelled job on `main`
+      # never saves its cache, so every pull request starts that task cold, and
+      # on a pull request each cancellation hides a failure until the next push.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest]
         task: [lint, fmt, fmt-comments, fmt-markdown, typecheck-js, test, docs, coverage, deny, insta, shear, vet, qual]
@@ -120,6 +124,12 @@ jobs:
             # `test` job still builds and tests everything on every PR, and
             # `main` covers the full workspace on Windows too.
             scope: ${{ github.ref == 'refs/heads/main' && 'workspace' || 'jp-only' }}
+          # Expanding macros makes `shear` compile every crate, one after the
+          # other, which makes it the slowest job of a pull request run. `main`
+          # keeps the expansion, so a dependency used only inside a macro is
+          # still checked after every merge.
+          - task: shear
+            scope: ${{ github.ref == 'refs/heads/main' && 'expand' || 'source' }}
     name: ${{ matrix.task }}${{ matrix.name_suffix }}
     # A run without a target cache falls back to a full build. Cap it so a
     # pathological run doesn't burn an hour of Windows minutes unnoticed.

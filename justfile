@@ -2422,9 +2422,14 @@ _insta-ci-setup: (_install "cargo-nextest@" + nextest_version + " cargo-insta@" 
 # that opted out would never run, and CI would stay green over it. The flag also
 # promotes unlinked files, empty files, unused optional dependencies, and the
 # redundant-ignore reports to failures.
+#
+# `SCOPE` selects how deeply sources are read: `source` checks the code as
+# written, `expand` expands macros first, so a dependency used only inside a
+# macro's output counts as used. Expanding compiles every crate. An
+# unrecognised scope expands.
 [group('ci')]
-shear-ci: (_install "cargo-expand@" + expand_version)
-    @just shear --expand --deny-warnings
+shear-ci SCOPE="expand": (_install "cargo-expand@" + expand_version)
+    @just shear {{ if SCOPE == "source" { "" } else { "--expand" } }} --deny-warnings
 
 # Verify supply-chain audits on CI.
 [group('ci')]
