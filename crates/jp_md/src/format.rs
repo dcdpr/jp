@@ -17,6 +17,7 @@ use two_face::syntax;
 use crate::{
     references,
     render::{self, HrOptions, RenderOptions},
+    style::MarkdownStyleSheet,
     table::TableOptions,
     theme,
 };
@@ -118,6 +119,9 @@ pub struct Formatter {
     /// When set, inline code uses this color instead of the theme's background.
     /// Stored as a pre-resolved `(sgr_param, full_escape)` pair.
     inline_code_bg: Option<(String, String)>,
+
+    /// Per-element style overrides.
+    style_sheet: MarkdownStyleSheet,
 }
 
 impl fmt::Debug for Formatter {
@@ -130,6 +134,7 @@ impl fmt::Debug for Formatter {
             .field("hr_style", &self.hr_style)
             .field("terminal_width", &self.terminal_width)
             .field("inline_code_bg", &self.inline_code_bg)
+            .field("style_sheet", &self.style_sheet)
             .finish()
     }
 }
@@ -152,6 +157,7 @@ impl Formatter {
             hr_style: HrStyle::default(),
             terminal_width: None,
             inline_code_bg: None,
+            style_sheet: MarkdownStyleSheet::default(),
         }
     }
 
@@ -168,6 +174,7 @@ impl Formatter {
             hr_style: HrStyle::default(),
             terminal_width: None,
             inline_code_bg: None,
+            style_sheet: MarkdownStyleSheet::default(),
         }
     }
 
@@ -224,6 +231,13 @@ impl Formatter {
             let escape = format!("\x1b[{p}m");
             (p, escape)
         });
+        self
+    }
+
+    /// Set the markdown element override stylesheet.
+    #[must_use]
+    pub const fn style_sheet(mut self, sheet: MarkdownStyleSheet) -> Self {
+        self.style_sheet = sheet;
         self
     }
 
@@ -297,6 +311,7 @@ impl Formatter {
             theme: &self.theme,
             default_background: options.default_background.as_ref(),
             inline_code_bg: self.inline_code_bg.as_ref(),
+            style_sheet: &self.style_sheet,
             indent: options.indent,
         };
 
@@ -344,6 +359,7 @@ impl Formatter {
                 superscript: true,
                 underline: true,
                 subscript: true,
+                math_dollars: true,
                 greentext: false,
                 ..Default::default()
             },

@@ -5,6 +5,7 @@
 - **Date**: 2026-10-06
 - **Label**: domain=mcp
 - **Label**: package=jp_mcp
+- **Label**: relevant-rfd=128
 - **Label**: type=bug
 
 With `fan_out = { concurrency = 1 }`, the operations of one call are meant to
