@@ -1,13 +1,13 @@
 {
   "version": 2,
-  "quality_score": 0.7235770153659836,
-  "iosp_score": 0.9190693809721645,
-  "violations": 974,
-  "total": 16482,
-  "complexity_warnings": 191,
-  "magic_number_warnings": 252,
+  "quality_score": 0.7224904913638246,
+  "iosp_score": 0.9190511735921042,
+  "violations": 976,
+  "total": 16508,
+  "complexity_warnings": 193,
+  "magic_number_warnings": 266,
   "nesting_depth_warnings": 30,
-  "function_length_warnings": 486,
+  "function_length_warnings": 487,
   "unsafe_warnings": 74,
   "error_handling_warnings": 202,
   "duplicate_groups": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 51,
   "structural_coupling_warnings": 10,
-  "total_findings": 3105,
+  "total_findings": 3124,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -1371,9 +1371,19 @@
       "line": 104
     },
     {
+      "name": "PartialElementStyleConfig::assign",
+      "file": "crates/jp_config/src/style/markdown.rs",
+      "line": 154
+    },
+    {
+      "name": "PartialElementsConfig::assign",
+      "file": "crates/jp_config/src/style/markdown.rs",
+      "line": 203
+    },
+    {
       "name": "PartialMarkdownConfig::assign",
       "file": "crates/jp_config/src/style/markdown.rs",
-      "line": 103
+      "line": 247
     },
     {
       "name": "PartialReasoningConfig::assign",
@@ -2748,12 +2758,12 @@
     {
       "name": "compaction_detail_item",
       "file": "crates/jp_cli/src/format.rs",
-      "line": 134
+      "line": 135
     },
     {
       "name": "compaction_policy_label",
       "file": "crates/jp_cli/src/format.rs",
-      "line": 172
+      "line": 173
     },
     {
       "name": "Compact::collect",
@@ -4163,37 +4173,37 @@
     {
       "name": "Formatter::render_terminal",
       "file": "crates/jp_md/src/format.rs",
-      "line": 277
+      "line": 291
     },
     {
       "name": "Formatter::render_code_line",
       "file": "crates/jp_md/src/format.rs",
-      "line": 381
+      "line": 397
     },
     {
       "name": "apply_line_background",
       "file": "crates/jp_md/src/format.rs",
-      "line": 499
+      "line": 515
     },
     {
       "name": "background_survives",
       "file": "crates/jp_md/src/format.rs",
-      "line": 559
+      "line": 575
     },
     {
       "name": "TerminalFormatter<'a,'w>::format_item",
       "file": "crates/jp_md/src/render.rs",
-      "line": 346
+      "line": 340
     },
     {
       "name": "TerminalFormatter<'a,'w>::format_code_block",
       "file": "crates/jp_md/src/render.rs",
-      "line": 427
+      "line": 421
     },
     {
       "name": "highlight_code_block",
       "file": "crates/jp_md/src/render.rs",
-      "line": 976
+      "line": 1031
     },
     {
       "name": "restore",
@@ -4283,7 +4293,7 @@
     {
       "name": "last_inline_ground_state",
       "file": "crates/jp_md/src/buffer.rs",
-      "line": 1727
+      "line": 1728
     },
     {
       "name": "TerminalWriter<'w>::new",
