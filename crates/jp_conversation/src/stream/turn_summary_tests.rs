@@ -277,7 +277,32 @@ fn clearing_a_summary_removes_it_from_the_named_turn() {
 }
 
 #[test]
-fn popping_or_trimming_an_event_clears_the_shortened_turns_summary() {
+fn popping_an_event_clears_the_shortened_turns_summary() {
+    let mut stream = ConversationStream::new_test();
+    stream.extend_entries([
+        entry("turn001", event(summarized("Set up the project"))),
+        entry("chat001", event(ChatRequest::from("first question"))),
+        entry("reply01", event(ChatResponse::message("first answer"))),
+        entry("turn002", event(summarized("Switch retries to backoff"))),
+        entry("chat002", event(ChatRequest::from("add retries"))),
+        entry("reply02", event(ChatResponse::message("retrying"))),
+        entry(
+            "chat003",
+            event(ChatRequest::from("use exponential backoff")),
+        ),
+    ]);
+
+    assert!(stream.pop().is_some());
+    assert_eq!(summaries(&stream), [
+        Some("Set up the project".to_owned()),
+        None,
+    ]);
+}
+
+/// Trimming removes the whole last turn, summary and all, so the turn before it
+/// is untouched and keeps its summary.
+#[test]
+fn trimming_the_last_turn_keeps_the_summary_of_the_turn_before_it() {
     let mut stream = ConversationStream::new_test();
     stream.extend_entries([
         entry("turn001", event(summarized("Set up the project"))),
@@ -293,12 +318,9 @@ fn popping_or_trimming_an_event_clears_the_shortened_turns_summary() {
         entry("reply03", event(ChatResponse::message("done"))),
     ]);
 
-    let trimmed = stream.trim_chat_request();
-    assert!(trimmed.is_some());
-    assert_eq!(summaries(&stream), [
-        Some("Set up the project".to_owned()),
-        None,
-    ]);
+    let trimmed = stream.trim_last_turn();
+    assert_eq!(trimmed.map(|r| r.content), Some("add retries".to_owned()));
+    assert_eq!(summaries(&stream), [Some("Set up the project".to_owned())]);
 }
 
 #[test]
