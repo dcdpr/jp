@@ -151,7 +151,7 @@ fn create(
     };
     let text = pinned.as_ref().map_or(text, |(text, _)| text.as_str());
 
-    let (id, path) = store::create(dir, title, text)?;
+    let (id, path) = store::create(dir, &ctx.paths.formatting, title, text)?;
     let mut output = Output::from(format!("Created {} ({id})\n", ctx.paths.show(&path)));
     if let Some((_, report)) = pinned {
         output.extend(pin_report(report));
@@ -490,7 +490,7 @@ pub(crate) fn archive(
     if let Some(target) = &target {
         document.set("Superseded by", target).map_err(no_block)?;
     }
-    store::write(&page.path, &document.render())?;
+    ctx.paths.write(&page.path, &document.render())?;
 
     if wiki.order.remove(id) {
         wiki.order.write(&ctx.paths.wiki)?;
@@ -570,7 +570,7 @@ pub(crate) fn pin_page(ctx: &Context<'_>, id: PageId) -> Result<Output, String> 
     );
     if text != page.source {
         ctx.access.check(Capability::Update, &page.path)?;
-        store::write(&page.path, &text)?;
+        ctx.paths.write(&page.path, &text)?;
     }
 
     let shown = ctx.paths.show(&page.path);
@@ -633,8 +633,9 @@ pub(crate) fn from_ticket(ctx: &Context<'_>, from: &FromTicket<'_>) -> Result<Ou
 
     let marker = moved_marker(ticket);
     if let Some(page) = wiki.pages.iter().find(|page| page.source.contains(&marker)) {
-        let closed = ticket::store::promote(tickets, ticket, &page.id.to_string())
-            .map_err(|error| error.to_string())?;
+        let closed =
+            ticket::store::promote(tickets, &ctx.paths.formatting, ticket, &page.id.to_string())
+                .map_err(|error| error.to_string())?;
         return Ok(format!(
             "{ticket} already moved to {}; linking it.\n{}: promoted to {}, closed as Done\n",
             ctx.paths.show(&page.path),
@@ -686,7 +687,7 @@ pub(crate) fn from_ticket(ctx: &Context<'_>, from: &FromTicket<'_>) -> Result<Ou
         ));
     }
 
-    let closed = ticket::store::promote(tickets, ticket, &id.to_string())
+    let closed = ticket::store::promote(tickets, &ctx.paths.formatting, ticket, &id.to_string())
         .map_err(|error| error.to_string())?;
     output.text.push_str(&format!(
         "{}: promoted to {id}, closed as Done\n",

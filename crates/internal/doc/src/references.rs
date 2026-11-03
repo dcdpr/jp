@@ -11,6 +11,8 @@ use std::{fs, io};
 use camino::{Utf8Path, Utf8PathBuf};
 use ignore::WalkBuilder;
 
+use crate::format::Formatting;
+
 /// One substitution over a document's text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rule {
@@ -152,12 +154,17 @@ pub fn markdown_files(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>, String> {
 
 /// Rewrite `file` with `rules`, returning whether it changed.
 ///
-/// A file that isn't text is left alone.
+/// A file the rules change is written through `formatting`; one they leave
+/// alone isn't written at all, and a file that isn't text is left alone too.
 ///
 /// # Errors
 ///
 /// Returns an error naming a file that can't be read or written.
-pub fn rewrite_file(file: &Utf8Path, rules: &[Rule]) -> Result<bool, String> {
+pub fn rewrite_file(
+    file: &Utf8Path,
+    rules: &[Rule],
+    formatting: &Formatting,
+) -> Result<bool, String> {
     let source = match fs::read_to_string(file) {
         Ok(source) => source,
         Err(error) if error.kind() == io::ErrorKind::InvalidData => return Ok(false),
@@ -169,7 +176,9 @@ pub fn rewrite_file(file: &Utf8Path, rules: &[Rule]) -> Result<bool, String> {
         return Ok(false);
     }
 
-    fs::write(file, rewritten).map_err(|error| format!("{file}: {error}"))?;
+    formatting
+        .write(file, &rewritten)
+        .map_err(|error| format!("{file}: {error}"))?;
 
     Ok(true)
 }

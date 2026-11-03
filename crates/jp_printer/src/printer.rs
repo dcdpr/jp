@@ -20,8 +20,8 @@ use tracing::{debug, error};
 use crate::{
     ansi::AnsiStripper,
     region::{
-        RegionCommand, RegionStack, RegionStyle, StatusRegion, SuspendGuard, TerminalCapability,
-        WindowBuffer, next_region_id,
+        OutputLines, RegionCommand, RegionStack, RegionStyle, StatusRegion, SuspendGuard,
+        TerminalCapability, WindowBuffer, next_region_id,
     },
     typewriter::VisibleCharsIterator,
 };
@@ -284,7 +284,7 @@ impl Printer {
     /// stderr.
     #[must_use]
     pub fn status_region(&self, style: RegionStyle) -> StatusRegion {
-        if !self.chrome_repaints() || !self.terminal.permits_regions(self.format) {
+        if !self.regions_render() {
             return StatusRegion::inert();
         }
 
@@ -301,6 +301,26 @@ impl Printer {
         }));
 
         StatusRegion::new(id, self.tx.clone(), buffer, refresh)
+    }
+
+    /// How many window rows a region claimed with `output` would show at the
+    /// terminal's current size.
+    ///
+    /// Zero wherever [`Self::status_region`] hands out an inert handle, when
+    /// the terminal's height is unknown, and when the terminal is too short to
+    /// fit a row above the status row.
+    #[must_use]
+    pub fn window_rows(&self, output: OutputLines) -> usize {
+        if !self.regions_render() {
+            return 0;
+        }
+
+        output.rows(self.terminal.live_size().1)
+    }
+
+    /// Whether a claimed status region renders at all.
+    const fn regions_render(&self) -> bool {
+        self.chrome_repaints() && self.terminal.permits_regions(self.format)
     }
 
     /// Hand the terminal to a writer outside the printer until the returned

@@ -11,7 +11,7 @@ use std::fs;
 use super::capitalized;
 use crate::{
     Output,
-    paths::{self, Paths},
+    paths::Paths,
     priority::{PRIORITY_FILE, Priority},
 };
 
@@ -46,7 +46,7 @@ pub(crate) fn init(paths: &Paths, categories: &[String]) -> Result<Output, Strin
         if path.exists() {
             continue;
         }
-        paths::create(&path, &template(category))?;
+        paths.create(&path, &template(category))?;
         output
             .text
             .push_str(&format!("Wrote {}\n", paths.show(&path)));
@@ -54,7 +54,7 @@ pub(crate) fn init(paths: &Paths, categories: &[String]) -> Result<Output, Strin
 
     let board = paths.rfds.join(PRIORITY_FILE);
     if !board.exists() {
-        paths::create(&board, &Priority::default().render())?;
+        paths.create(&board, &Priority::default().render())?;
         output
             .text
             .push_str(&format!("Wrote {}\n", paths.show(&board)));

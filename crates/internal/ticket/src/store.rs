@@ -7,11 +7,14 @@
 //!
 //! Allocation is `doc::files`'s: the time component counts from the directory's
 //! own [`Epoch`], which the first ticket in an empty directory writes.
+//!
+//! Every function that writes a ticket takes the workspace's [`Formatting`],
+//! and writes the ticket formatted when the workspace formats tickets.
 
 use std::{fmt, fs, io};
 
 use camino::{Utf8Path, Utf8PathBuf};
-use doc::files;
+use doc::{files, format::Formatting};
 use jp_label::Clash;
 
 use crate::{
@@ -280,6 +283,7 @@ pub struct Entry {
 /// than overwriting the winner's ticket.
 pub fn create(
     dir: &Utf8Path,
+    formatting: &Formatting,
     vocabulary: &Vocabulary,
     new: &NewTicket<'_>,
 ) -> Result<(TicketId, Utf8PathBuf)> {
@@ -290,6 +294,7 @@ pub fn create(
 
     Ok(files::create(
         dir,
+        formatting,
         &files::slug(new.title),
         &render::ticket(new),
     )?)
@@ -302,7 +307,12 @@ pub fn create(
 /// link already there.
 /// Closing is held to the rules of the parent relation, so a parent with open
 /// children is refused before anything is written.
-pub fn promote(dir: &Utf8Path, id: TicketId, rfd: &str) -> Result<Utf8PathBuf> {
+pub fn promote(
+    dir: &Utf8Path,
+    formatting: &Formatting,
+    id: TicketId,
+    rfd: &str,
+) -> Result<Utf8PathBuf> {
     let path = locate(dir, id)?;
     let source = fs::read_to_string(&path)?;
     // Read leniently, as the writes below are: a ticket whose header doesn't
@@ -316,7 +326,7 @@ pub fn promote(dir: &Utf8Path, id: TicketId, rfd: &str) -> Result<Utf8PathBuf> {
         render::set_metadata(&source, "Promoted to", rfd).ok_or(ParseError::MissingMetadata)?;
     let updated = render::set_metadata(&updated, "Status", &Status::Done.to_string())
         .ok_or(ParseError::MissingMetadata)?;
-    fs::write(&path, updated)?;
+    formatting.write(&path, &updated)?;
 
     Ok(path)
 }
@@ -346,6 +356,7 @@ pub struct Edited {
 /// call finishes the move.
 pub fn edit(
     dir: &Utf8Path,
+    formatting: &Formatting,
     id: TicketId,
     title: Option<&str>,
     description: Option<&str>,
@@ -361,7 +372,7 @@ pub fn edit(
         &ticket.comments,
     )
     .ok_or(ParseError::MissingMetadata)?;
-    fs::write(&from, updated)?;
+    formatting.write(&from, &updated)?;
 
     let to = match title {
         Some(title) => dir.join(format!("{}{}.md", id.file_prefix(), files::slug(title))),
@@ -404,12 +415,18 @@ pub fn rename_to_title(dir: &Utf8Path, id: TicketId) -> Result<Edited> {
 /// Set one metadata field on a ticket.
 ///
 /// The field is created if the ticket doesn't carry it yet.
-pub fn set_field(dir: &Utf8Path, id: TicketId, key: &str, value: &str) -> Result<Utf8PathBuf> {
+pub fn set_field(
+    dir: &Utf8Path,
+    formatting: &Formatting,
+    id: TicketId,
+    key: &str,
+    value: &str,
+) -> Result<Utf8PathBuf> {
     let path = locate(dir, id)?;
     let source = fs::read_to_string(&path)?;
 
     let updated = render::set_metadata(&source, key, value).ok_or(ParseError::MissingMetadata)?;
-    fs::write(&path, updated)?;
+    formatting.write(&path, &updated)?;
 
     Ok(path)
 }
@@ -443,6 +460,7 @@ pub struct Relabeled {
 /// disk, leaves the tickets before it written.
 pub fn relabel(
     dir: &Utf8Path,
+    formatting: &Formatting,
     vocabulary: &Vocabulary,
     ids: &[TicketId],
     change: impl Fn(&Labels) -> Vec<String>,
@@ -516,7 +534,7 @@ pub fn relabel(
     let mut done = vec![];
     for (ticket, updated) in planned {
         if let Some(updated) = updated {
-            fs::write(&ticket.path, updated)?;
+            formatting.write(&ticket.path, &updated)?;
         }
         done.push(ticket);
     }
@@ -660,6 +678,7 @@ pub fn delete(dir: &Utf8Path, id: TicketId) -> Result<Utf8PathBuf> {
 /// `re` is the position of the comment being replied to.
 pub fn append_comment(
     dir: &Utf8Path,
+    formatting: &Formatting,
     id: TicketId,
     from: &str,
     date: &str,
@@ -686,7 +705,7 @@ pub fn append_comment(
         re,
         body: body.to_owned(),
     };
-    fs::write(&path, render::append_comment(&source, &comment))?;
+    formatting.write(&path, &render::append_comment(&source, &comment))?;
 
     Ok(count + 1)
 }
@@ -722,7 +741,12 @@ pub fn imported(dir: &Utf8Path, number: u64) -> Result<Option<Entry>> {
 /// done here is never undone from there.
 /// `vocabulary` holds a new ticket's labels to the keys it lets one ticket
 /// carry, as [`create`] does.
-pub fn import(dir: &Utf8Path, vocabulary: &Vocabulary, upstream: &Import<'_>) -> Result<Imported> {
+pub fn import(
+    dir: &Utf8Path,
+    formatting: &Formatting,
+    vocabulary: &Vocabulary,
+    upstream: &Import<'_>,
+) -> Result<Imported> {
     let marker = upstream.marker();
     let (title, description, comments) = escaped(upstream);
 
@@ -733,7 +757,7 @@ pub fn import(dir: &Utf8Path, vocabulary: &Vocabulary, upstream: &Import<'_>) ->
     } else {
         // The repository owns the metadata block, so the labels are the
         // importer's, not upstream's.
-        let (id, path) = create(dir, vocabulary, &NewTicket {
+        let (id, path) = create(dir, formatting, vocabulary, &NewTicket {
             title: &title,
             authors: upstream.authors,
             date: upstream.date,
@@ -747,7 +771,7 @@ pub fn import(dir: &Utf8Path, vocabulary: &Vocabulary, upstream: &Import<'_>) ->
         let source = fs::read_to_string(&path)?;
         let linked =
             render::set_metadata(&source, "GitHub", &marker).ok_or(ParseError::MissingMetadata)?;
-        fs::write(&path, linked)?;
+        formatting.write(&path, &linked)?;
 
         (id, path, true)
     };
@@ -755,7 +779,7 @@ pub fn import(dir: &Utf8Path, vocabulary: &Vocabulary, upstream: &Import<'_>) ->
     let source = fs::read_to_string(&path)?;
     let updated = render::replace_content(&source, &title, &description, &comments)
         .ok_or(ParseError::MissingMetadata)?;
-    fs::write(&path, updated)?;
+    formatting.write(&path, &updated)?;
 
     Ok(Imported {
         id,
@@ -766,8 +790,12 @@ pub fn import(dir: &Utf8Path, vocabulary: &Vocabulary, upstream: &Import<'_>) ->
 }
 
 /// Mark a ticket as `Done`, returning its path and the status it held before.
-pub fn close(dir: &Utf8Path, id: TicketId) -> Result<(Utf8PathBuf, Status)> {
-    set_status(dir, id, Status::Done)
+pub fn close(
+    dir: &Utf8Path,
+    formatting: &Formatting,
+    id: TicketId,
+) -> Result<(Utf8PathBuf, Status)> {
+    set_status(dir, formatting, id, Status::Done)
 }
 
 /// Move a ticket to the column `status` names, returning its path and the
@@ -777,8 +805,13 @@ pub fn close(dir: &Utf8Path, id: TicketId) -> Result<(Utf8PathBuf, Status)> {
 /// doesn't rank there sorts below those it does.
 /// The move is held to the rules of the parent relation, as [`relate`] holds
 /// it.
-pub fn set_status(dir: &Utf8Path, id: TicketId, status: Status) -> Result<(Utf8PathBuf, Status)> {
-    let related = relate(dir, id, Some(status), None)?;
+pub fn set_status(
+    dir: &Utf8Path,
+    formatting: &Formatting,
+    id: TicketId,
+    status: Status,
+) -> Result<(Utf8PathBuf, Status)> {
+    let related = relate(dir, formatting, id, Some(status), None)?;
 
     Ok((related.path, related.previous_status))
 }
@@ -789,10 +822,11 @@ pub fn set_status(dir: &Utf8Path, id: TicketId, status: Status) -> Result<(Utf8P
 /// Held to the rules of the parent relation, as [`relate`] holds it.
 pub fn set_parent(
     dir: &Utf8Path,
+    formatting: &Formatting,
     id: TicketId,
     parent: Option<TicketId>,
 ) -> Result<(Utf8PathBuf, Option<TicketId>)> {
-    let related = relate(dir, id, None, Some(parent))?;
+    let related = relate(dir, formatting, id, None, Some(parent))?;
 
     Ok((related.path, related.previous_parent))
 }
@@ -813,6 +847,7 @@ pub struct Related {
 /// once is judged by where it ends up rather than by the step between.
 pub fn relate(
     dir: &Utf8Path,
+    formatting: &Formatting,
     id: TicketId,
     status: Option<Status>,
     parent: Option<Option<TicketId>>,
@@ -848,7 +883,7 @@ pub fn relate(
             None => render::remove_metadata(&updated, PARENT_KEY),
         };
     }
-    fs::write(&related.path, updated)?;
+    formatting.write(&related.path, &updated)?;
 
     Ok(related)
 }

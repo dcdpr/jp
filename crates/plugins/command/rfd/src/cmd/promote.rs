@@ -9,16 +9,11 @@
 //! - Implemented drops the `Requires` links in both directions: a dependency
 //!   that is built has nothing left to gate.
 //!
-//! The promoted file is reflowed with `comfort` the way CI's markdown check
-//! lays it out.
+//! Every file written is laid out the way the workspace formats its kind.
 
 use std::{collections::BTreeSet, fs, sync::LazyLock};
 
 use camino::Utf8Path;
-use comfort::{
-    DEFAULT_MAX_WIDTH,
-    format::{FormatOptions, format_markdown_with},
-};
 use doc::references::{self, Rule, markdown_files};
 use regex::Regex;
 
@@ -101,7 +96,7 @@ fn to_discussion(
 
     document.set_heading_id(&number.to_string());
     set_status(&mut document, "Discussion", file)?;
-    paths::create(&new_file, &lift_links(&document.render()))?;
+    paths.create(&new_file, &lift_links(&document.render()))?;
     fs::remove_file(file).map_err(|error| format!("{file}: {error}"))?;
 
     if let Some(board) = board.as_mut()
@@ -119,7 +114,7 @@ fn to_discussion(
     let required = promoted.uncite("Required by", is_draft);
     let extended = promoted.uncite("Extended by", is_draft);
     if required || extended {
-        paths::write(&new_file, &promoted.render())?;
+        paths.write(&new_file, &promoted.render())?;
     }
 
     backfill(paths, number, &new_name, &promoted, &mut output)?;
@@ -134,7 +129,6 @@ fn to_discussion(
         ));
     }
 
-    reflow(&new_file)?;
     Ok(output)
 }
 
@@ -240,7 +234,7 @@ fn rewrite_references(
     for dir in [paths.rfds.clone(), paths.drafts(), paths.tickets.clone()] {
         let rules = draft_rules(paths, &dir, draft, number, old_stem, new_name);
         for file in markdown_files(&dir)? {
-            if references::rewrite_file(&file, &rules)? {
+            if references::rewrite_file(&file, &rules, &paths.formatting)? {
                 output.text.push_str(&format!(
                     "  updated {draft} -> {number} references in {}\n",
                     paths.show(&file)
@@ -326,7 +320,7 @@ fn backfill(
             let mut document = Document::parse(&paths::read(&target)?);
             match document.cite(inverse, &number.to_string(), &link) {
                 Ok(true) => {
-                    paths::write(&target, &document.render())?;
+                    paths.write(&target, &document.render())?;
                     output.text.push_str(&format!(
                         "  backfilled {inverse}: RFD {number} into {}\n",
                         paths.show(&target)
@@ -353,8 +347,7 @@ fn to_accepted(paths: &Paths, file: &Utf8Path, mut document: Document) -> Result
     ])?;
 
     set_status(&mut document, "Accepted", file)?;
-    paths::write(file, &document.render())?;
-    reflow(file)?;
+    paths.write(file, &document.render())?;
 
     Ok(format!("{}: Discussion -> Accepted\n", paths.show(file)).into())
 }
@@ -376,7 +369,7 @@ fn to_implemented(
     set_status(&mut document, "Implemented", file)?;
     document.remove("Requires");
     document.remove("Required by");
-    paths::write(file, &document.render())?;
+    paths.write(file, &document.render())?;
 
     let mut output = Output::default();
     for cited in requires {
@@ -385,7 +378,7 @@ fn to_implemented(
         };
         let mut target_document = Document::parse(&paths::read(&target)?);
         if target_document.uncite("Required by", |id| id == this) {
-            paths::write(&target, &target_document.render())?;
+            paths.write(&target, &target_document.render())?;
             output.text.push_str(&format!(
                 "  stripped Required by: RFD {this} from {}\n",
                 paths.show(&target)
@@ -404,7 +397,7 @@ fn to_implemented(
         }
         let mut dependent = Document::parse(&paths::read(&other)?);
         if dependent.uncite("Requires", |id| id == this) {
-            paths::write(&other, &dependent.render())?;
+            paths.write(&other, &dependent.render())?;
             output.text.push_str(&format!(
                 "  stripped Requires: RFD {this} from {}\n",
                 paths.show(&other)
@@ -422,7 +415,6 @@ fn to_implemented(
         .text
         .push_str(&format!("{}: Accepted -> Implemented\n", paths.show(file)));
 
-    reflow(file)?;
     Ok(output)
 }
 
@@ -475,24 +467,6 @@ fn set_status(document: &mut Document, status: &str, file: &Utf8Path) -> Result<
     document
         .set("Status", status)
         .map_err(|NoMetadata| format!("{file} has no metadata block to set the status in."))
-}
-
-/// Lay the promoted file out the way CI's markdown check does: semantic line
-/// breaks, canonical markdown, and reference-style links collected at the end.
-fn reflow(file: &Utf8Path) -> Result<(), String> {
-    let source = paths::read(file)?;
-    let formatted = format_markdown_with(&source, &FormatOptions {
-        max_width: DEFAULT_MAX_WIDTH,
-        canonical: true,
-        reference_links: true,
-        prune_reference_links: false,
-    });
-
-    if formatted != source {
-        paths::write(file, &formatted)?;
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

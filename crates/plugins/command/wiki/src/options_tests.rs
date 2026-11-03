@@ -1,3 +1,5 @@
+use camino_tempfile::Utf8TempDir;
+use comfort::format::FormatOptions;
 use serde_json::json;
 
 use super::*;
@@ -51,6 +53,33 @@ fn the_document_directories_come_from_their_plugins() {
     assert_eq!(paths.rfds, "/w/design");
     assert_eq!(paths.tickets, "/abs/tickets");
     assert_eq!(paths.docs(), "/w/docs");
+}
+
+/// Pages, RFDs, and tickets each follow their own plugin's `format_on_write`,
+/// since a command here writes into all three.
+#[test]
+fn each_kind_of_document_is_formatted_as_its_plugin_says() {
+    let root = Utf8TempDir::new().unwrap();
+    let config = json!({ "plugins": { "command": {
+        "wiki": { "options": { "format_on_write": true } },
+        "ticket": { "options": { "format_on_write": true } },
+    } } });
+
+    let paths = Paths::new(root.path(), &config, &Options::default()).unwrap();
+
+    assert_eq!(
+        paths.formatting,
+        Formatting::new(
+            FormatOptions {
+                max_width: 80,
+                ..FormatOptions::default()
+            },
+            vec![
+                root.path().join("docs/wiki"),
+                root.path().join("docs/ticket")
+            ],
+        )
+    );
 }
 
 #[test]

@@ -11,6 +11,7 @@ use std::{
 };
 
 use camino::Utf8Path;
+use doc::format::Formatting;
 use jp_plugin::message::{
     ComposeMode, ComposeOption, ComposeRequest, EditFilesRequest, HostToPlugin, PluginToHost,
 };
@@ -95,6 +96,7 @@ impl<R: BufRead, W: Write> Editing for Host<'_, R, W> {
 pub(crate) fn through_host(
     version: u32,
     dir: &Utf8Path,
+    formatting: &Formatting,
     id: TicketId,
     options: &Options,
     stdin: &mut impl BufRead,
@@ -107,7 +109,7 @@ pub(crate) fn through_host(
         ));
     }
 
-    in_editor(dir, id, options, &mut Host { stdin, stdout })
+    in_editor(dir, formatting, id, options, &mut Host { stdin, stdout })
 }
 
 /// Open ticket `id` in the user's editor until what comes back is a ticket the
@@ -118,9 +120,11 @@ pub(crate) fn through_host(
 /// refuses, is offered back to the editor; an edit given up on, or abandoned in
 /// the editor, is undone, and so is one the command fails on before it is
 /// accepted.
+/// An accepted edit is laid out the way `formatting` writes tickets.
 /// A changed title moves the file to the name it produces, as `rename` does.
 pub(crate) fn in_editor(
     dir: &Utf8Path,
+    formatting: &Formatting,
     id: TicketId,
     options: &Options,
     editing: &mut impl Editing,
@@ -139,6 +143,14 @@ pub(crate) fn in_editor(
             });
         }
     };
+
+    // The editor wrote the file; formatting rewrites it only when the
+    // workspace formats tickets.
+    if formatting.formats(&path) {
+        formatting
+            .write(&path, &edited)
+            .map_err(|error| format!("failed to write {path}: {error}"))?;
+    }
 
     // Only a changed title moves the file, as with `rename`: a name that
     // already disagreed with the heading is left the way it was found.

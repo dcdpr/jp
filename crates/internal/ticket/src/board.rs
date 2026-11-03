@@ -27,6 +27,7 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use doc::format::Formatting;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -257,12 +258,13 @@ pub struct Moved {
 /// and the order file is neither read nor written.
 pub fn move_to(
     dir: &Utf8Path,
+    formatting: &Formatting,
     id: TicketId,
     status: Status,
     at: Option<(Place, TicketId)>,
 ) -> Result<Moved, Error> {
     let Some((place, other)) = at else {
-        let (path, previous) = store::set_status(dir, id, status)?;
+        let (path, previous) = store::set_status(dir, formatting, id, status)?;
         return Ok(Moved { path, previous });
     };
 
@@ -282,7 +284,7 @@ pub fn move_to(
     }
 
     let mut order = read(dir)?;
-    let (path, previous) = store::set_status(dir, id, status)?;
+    let (path, previous) = store::set_status(dir, formatting, id, status)?;
 
     // The column as it stands once `id` has joined it.
     let column: Vec<TicketId> = entries

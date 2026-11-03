@@ -1,6 +1,7 @@
 use jp_config::{
     AppConfig, PartialAppConfig, Schema,
     schema::{BooleanType, StructType},
+    style::window_rows::{RowCount, WindowRows},
 };
 use serde_json::json;
 
@@ -877,6 +878,30 @@ fn partial_config_strips_unknown_preserves_known() {
 
     let config = deserialize_partial_config(value);
     assert_eq!(config.style.code.color, Some(true));
+}
+
+/// `--cfg style.reasoning.window.rows=8` stores the row count as a tagged
+/// object, which reloading the conversation has to read back unchanged.
+#[test]
+fn a_stored_reasoning_window_survives_a_reload() {
+    let value = json!({
+        "style": {
+            "reasoning": {
+                "window": {
+                    "rows": { "fixed": { "rows": 8 } },
+                    "timer": false
+                }
+            }
+        }
+    });
+
+    let config = deserialize_partial_config(value);
+
+    assert_eq!(
+        config.style.reasoning.window.rows,
+        Some(WindowRows::Fixed(RowCount { rows: 8 }))
+    );
+    assert_eq!(config.style.reasoning.window.timer, Some(false));
 }
 
 #[test]

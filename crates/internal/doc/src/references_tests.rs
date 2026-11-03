@@ -1,4 +1,5 @@
 use camino_tempfile::Utf8TempDir;
+use comfort::format::FormatOptions;
 
 use super::*;
 
@@ -123,9 +124,49 @@ fn rewrite_file_writes_only_what_changed() {
     fs::write(&unchanged, "nothing here\n").unwrap();
     let rules = [citation("D05", "117")];
 
-    assert_eq!(rewrite_file(&changed, &rules), Ok(true));
-    assert_eq!(rewrite_file(&unchanged, &rules), Ok(false));
+    assert_eq!(
+        rewrite_file(&changed, &rules, &Formatting::default()),
+        Ok(true)
+    );
+    assert_eq!(
+        rewrite_file(&unchanged, &rules, &Formatting::default()),
+        Ok(false)
+    );
     assert_eq!(fs::read_to_string(&changed).unwrap(), "RFD 117\n");
+}
+
+#[test]
+fn rewrite_file_formats_a_file_it_changes_and_no_other() {
+    let dir = Utf8TempDir::new().unwrap();
+    let changed = dir.path().join("a.md");
+    let unchanged = dir.path().join("b.md");
+    fs::write(&changed, "See RFD D05. It is long.\n").unwrap();
+    fs::write(&unchanged, "Nothing here. Unformatted.\n").unwrap();
+    let formatting = Formatting::new(
+        FormatOptions {
+            max_width: 80,
+            ..FormatOptions::default()
+        },
+        vec![dir.path().to_path_buf()],
+    );
+
+    assert_eq!(
+        rewrite_file(&changed, &[citation("D05", "117")], &formatting),
+        Ok(true)
+    );
+    assert_eq!(
+        rewrite_file(&unchanged, &[citation("D05", "117")], &formatting),
+        Ok(false)
+    );
+
+    assert_eq!(
+        fs::read_to_string(&changed).unwrap(),
+        "See RFD 117.\nIt is long.\n"
+    );
+    assert_eq!(
+        fs::read_to_string(&unchanged).unwrap(),
+        "Nothing here. Unformatted.\n"
+    );
 }
 
 #[test]

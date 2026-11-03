@@ -1,6 +1,7 @@
 use std::{fs, process::Command};
 
 use camino_tempfile::Utf8TempDir;
+use doc::format::Formatting;
 use indoc::indoc;
 use jp_tool::FsRule;
 
@@ -64,6 +65,7 @@ fn paths(root: &Utf8Path) -> Paths {
         wiki: root.join("docs/wiki"),
         rfds: root.join("docs/rfd"),
         tickets: root.join("docs/ticket"),
+        formatting: Formatting::default(),
     }
 }
 

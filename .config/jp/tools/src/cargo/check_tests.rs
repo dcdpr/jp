@@ -294,9 +294,6 @@ fn package_scope_is_passed_through_to_both_tools() {
         .args(&[
             "--check",
             "--list-changed",
-            "--format-markdown",
-            "--reference-links",
-            "--prune-reference-links",
             "--language",
             "rust",
             "--package",

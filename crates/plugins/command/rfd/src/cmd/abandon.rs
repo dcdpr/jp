@@ -44,7 +44,7 @@ pub(crate) fn abandon(paths: &Paths, id: RfdId, reason: &str) -> Result<Output, 
         .set("Status", "Abandoned")
         .map_err(|NoMetadata| format!("{} has no metadata block.", paths.show(&file)))?;
     document.insert_before_sections(&notice(reason));
-    paths::write(&file, &document.render())?;
+    paths.write(&file, &document.render())?;
 
     if let Some(board) = board.as_mut()
         && board.remove(&[&id.to_string()])
