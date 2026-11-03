@@ -8,6 +8,10 @@ and how many of its checklist items are checked when its description holds a
 checklist. Pass `description` or `comments` to add those; the result names
 anything it left out.
 
+A ticket filed under a parent names it. The parent's description is the context
+its children share, so read it with `parent_description` before working on one
+of them. A parent lists its children with their statuses and how many are done.
+
 Comments are numbered so a reply can name the comment it answers
 (`ticket_comment` takes that number as `re`). The whole discussion comes back in
 one call — there is no pagination, because a ticket that needs it should have
@@ -24,7 +28,16 @@ Read the whole ticket before replying to it:
 ```json
 {"id": "T-02wt0kx", "description": true, "comments": true}
 ```
+
+Read a ticket and the brief it shares with its siblings before starting on it:
+```json
+{"id": "T-02wt0kx", "description": true, "parent_description": true}
+```
 """
+
+# Reads are independent and have no side effects, so several run at once and a
+# missing ticket says nothing about the next.
+fan_out = true
 
 [conversation.tools.ticket_show.style]
 parameters = "function_call"
@@ -45,3 +58,8 @@ summary = "Add the ticket's description."
 type = "boolean"
 required = false
 summary = "Add the discussion, each comment numbered for replies."
+
+[conversation.tools.ticket_show.parameters.parent_description]
+type = "boolean"
+required = false
+summary = "Add the description of the ticket's parent: the context it shares with its siblings."

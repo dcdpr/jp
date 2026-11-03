@@ -48,6 +48,8 @@ export function parseTicket(content, filename, known = new Map()) {
         labels: readLabels(meta),
         promotedTo: meta.get('Promoted to'),
         github: meta.get('GitHub'),
+        // The ticket this one sits under, as `T-0a1b2c3`.
+        parent: meta.get('Parent') ?? null,
         comments: countComments(content),
         checklist: readChecklist(content),
         // Cross-kind links, resolved in the browser against both sets.
@@ -200,6 +202,42 @@ export function findSharedLabels(tickets, vocabulary) {
         `Keep each on one ticket by taking it off the others ` +
         `(\`jp ticket label rm --id <id> key=value\`), or drop \`unique\` from the key in ` +
         `\`plugins.command.ticket.options.labels\`.`
+}
+
+// Tickets breaking a rule of the parent relation: one naming a parent that
+// isn't a ticket, or one that sits under a parent of its own, and a Done
+// parent with open children.
+//
+// `jp ticket` refuses each as a write; this catches a ticket edited by hand.
+export function findBrokenParents(tickets) {
+    const byId = new Map(tickets.map(ticket => [ticket.id, ticket]))
+    const problems = []
+    for (const ticket of tickets) {
+        if (ticket.parent) {
+            const parent = byId.get(ticket.parent)
+            if (ticket.parent === ticket.id) {
+                problems.push(`  ${ticket.id}: is its own parent`)
+            } else if (!parent) {
+                problems.push(`  ${ticket.id}: names ${ticket.parent} as its parent, which is not a ticket`)
+            } else if (parent.parent) {
+                problems.push(`  ${ticket.id}: sits under ${parent.id}, which sits under ${parent.parent}`)
+            }
+        }
+
+        if (ticket.status === 'Done') {
+            const open = tickets
+                .filter(child => child.parent === ticket.id && child.id !== ticket.id && child.status !== 'Done')
+                .map(child => child.id)
+            if (open.length > 0) problems.push(`  ${ticket.id}: is Done with open children ${open.join(', ')}`)
+        }
+    }
+
+    if (problems.length === 0) return null
+
+    return `Tickets break the rules of the parent relation:\n${problems.join('\n')}\n\n` +
+        `A ticket sits under one that exists and sits under nothing, and a parent closes ` +
+        `once its children have. \`jp ticket check\` says the same, and \`jp ticket edit ` +
+        `--parent\` and \`--status\` fix it.`
 }
 
 // A key's bounds in words, as the count they ask for.
@@ -413,6 +451,8 @@ export function loadTickets(settings = readSettings()) {
     if (miscounted) throw new Error(miscounted)
     const shared = findSharedLabels(tickets, vocabulary)
     if (shared) throw new Error(shared)
+    const broken = findBrokenParents(tickets)
+    if (broken) throw new Error(broken)
 
     return tickets
 }

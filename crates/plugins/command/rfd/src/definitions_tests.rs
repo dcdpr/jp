@@ -79,6 +79,25 @@ fn routed(files: &[(String, toml::Value)]) -> Vec<(String, String, toml::Value)>
     routed
 }
 
+/// Only `show` batches several calls in one: the other tools change an RFD's
+/// lifecycle or relations, each a decision made one at a time, and `list`
+/// filters already.
+/// JP's own definitions say the same as the ones `tools init` writes.
+#[test]
+fn only_show_batches() {
+    for files in [templates(), read_definitions(&jp_definitions())] {
+        let batching: Vec<(String, toml::Value)> = routed(&files)
+            .into_iter()
+            .filter_map(|(name, _, tool)| Some((name, tool.get("fan_out")?.clone())))
+            .collect();
+
+        assert_eq!(batching, vec![(
+            "show".to_owned(),
+            toml::Value::Boolean(true)
+        )]);
+    }
+}
+
 /// Every tool that takes a category declares the parameter `sync` writes the
 /// accepted values into.
 fn assert_category_tools_declare_the_parameter(routed: &[(String, String, toml::Value)]) {

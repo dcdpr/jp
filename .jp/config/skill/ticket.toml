@@ -8,15 +8,16 @@ help you with this:
 
 - ticket_list: List tickets in board order, Todo first and the top of each \
 column first, with status, labels, checklist progress, and comment count. \
-Filter by status, label, or text the ticket mentions; a long listing comes a \
-page at a time.
-- ticket_show: Read one ticket's metadata; ask for its description or its \
-comments, numbered for replies, when you need them.
-- ticket_create: File a new ticket, at status Todo.
+Filter by status, label, text the ticket mentions, or the parent it sits \
+under; a long listing comes a page at a time.
+- ticket_show: Read one ticket's metadata, its checklist progress, its parent, \
+and its children; ask for its description, its comments, numbered for \
+replies, or its parent's description when you need them.
+- ticket_create: File a new ticket, at status Todo, optionally under a parent.
 - ticket_comment: Append a comment to a ticket's discussion, optionally \
 replying to an earlier one.
-- ticket_edit: Change a ticket's title, description, status, labels, or \
-checklist, any of them in one call. Status `done` closes it.
+- ticket_edit: Change a ticket's title, description, status, labels, \
+checklist, or parent, any of them in one call. Status `done` closes it.
 
 Labels classify tickets: `type` says what kind of work a ticket is (`bug`, \
 `feature`, `task`, ...), and every ticket carries exactly one; the other keys \
@@ -36,11 +37,27 @@ implemented policy question is an RFD. A ticket whose discussion turns into a \
 disagreement about approach should be promoted to an RFD draft rather than \
 settled in its comments.
 
+A ticket can sit under one other ticket, its parent. When work splits into \
+several items that share one goal, such as the proposals an investigation \
+produced:
+
+1. Write the findings themselves, when they are long, as a wiki Snapshot page.
+2. File the parent, labelled `type=tracking`: a short brief of what the \
+children share, a link to the page, and what finishes the group.
+3. File every child with `parent` set, in one `ticket_create` call. Keep each \
+child's description to what is its own, and leave the shared context in the \
+parent rather than repeating it.
+
+Before starting on a child, read its parent's brief with `ticket_show`'s \
+`parent_description`. A parent can't sit under another, and it closes only \
+once its children are all `done`; nothing closes it on their behalf.
+
 A ticket's description can hold a checklist: its steps or acceptance \
 criteria as markdown task items, `- [ ] item`, one per line. An item is a step \
 inside the ticket's work, done in the same change and needing no discussion of \
 its own; work that could be picked up, merged, or argued about on its own is a \
-ticket of its own, and leaves the checklist when it is filed. Only the \
+ticket of its own, filed under this one as its parent, and leaves the \
+checklist when it is filed. Only the \
 description holds the checklist, since the tools only ever append comments, so \
 move an item someone proposes in a comment into the description.
 

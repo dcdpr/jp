@@ -19,10 +19,14 @@ import { encodeLabels } from './theme/label-groups.mjs'
 //   and its summary, authors, and date move to the end of the page, in small
 //   print, where they are there to look up without standing between the title
 //   and the text. Its parent is left to the trail above the title, which
-//   `WikiCrumbs.vue` draws. A page with no text of its own lists the pages
+//   `DocCrumbs.vue` draws. A page with no text of its own lists the pages
 //   under it in its place.
 // - An RFD or ticket keeps one line of status badge, category, date, and
 //   authors, and leaves its summary to the index pages.
+// - A ticket's header ends with the tickets filed under it, which
+//   `<TicketChildren />` lists, and shows nothing for one without children.
+//   Its own parent is shown above the title by `DocCrumbs.vue`, as a wiki
+//   page's is.
 //
 // Every other field, such as `Superseded by` or `Extended by`, gets a short
 // line of its own under the title and keeps its links.
@@ -244,7 +248,7 @@ export function metadataHeader(tokens, Token, { kind } = {}) {
             if (item.text) labels.push(unescape(item.text))
         } else if (wiki && WIKI_FOOTER.includes(key)) {
             if (!ending.has(key) && item.children.length > 0) ending.set(key, item)
-        } else if (wiki && key === 'parent') {
+        } else if ((wiki || kind === 'ticket') && key === 'parent') {
             // Shown as the trail above the title.
         } else if (key === 'summary') {
             // Shown by the index pages, not on the page.
@@ -268,6 +272,7 @@ export function metadataHeader(tokens, Token, { kind } = {}) {
         header.unshift(html(Token, '<div class="doc-meta">\n'))
         header.push(html(Token, '</div>\n'))
     }
+    if (kind === 'ticket') header.push(html(Token, '<TicketChildren />\n'))
 
     const empty = block.end + 1 === tokens.length
 

@@ -24,23 +24,3 @@ export function childrenOf(entries, id) {
 export function topPages(entries) {
     return inOrder(entries, entry => entry.depth === 0)
 }
-
-// The pages above the page `id`, the top one first: its parent, that page's
-// parent, and so on. Empty for a top page, or one not in `entries`.
-//
-// Stops at a parent that isn't a page, and at one already passed, so parents
-// that loop still give a finite trail.
-export function ancestorsOf(entries, id) {
-    const byId = new Map(entries.map(entry => [entry.id, entry]))
-    const seen = new Set([id])
-    const trail = []
-
-    let parent = byId.get(id)?.parent
-    while (parent && !seen.has(parent) && byId.has(parent)) {
-        seen.add(parent)
-        trail.unshift(byId.get(parent))
-        parent = byId.get(parent).parent
-    }
-
-    return trail
-}

@@ -193,6 +193,36 @@ test('an RFD keeps its status line and other fields, but not its summary', () =>
     )
 })
 
+// The parent goes to the trail above the title, as a wiki page's does, and the
+// tickets under this one are listed below the header.
+test('a ticket keeps its status line, leaves its parent out, and lists its children', () => {
+    const tokens = [
+        ...title('Bound tool output'),
+        ...list(
+            item('Status', 'Todo'),
+            item('Authors', 'jp'),
+            item('Date', '2026-11-02'),
+            item('Label', 'type=task'),
+            item('Parent', 'T-02wt0kx'),
+        ),
+    ]
+
+    metadataHeader(tokens, Token, { kind: 'ticket' })
+
+    assert.equal(
+        shown(tokens),
+        '<h1>Bound tool output <a href="#top">&#8203;</a></h1>\n' +
+            '<div class="doc-meta">\n' +
+            '<p class="doc-meta-line">' +
+            '<span class="doc-badge doc-badge--todo">Todo</span>' +
+            '<span class="doc-meta-date">2026-11-02</span>' +
+            '<span class="doc-meta-authors">jp</span></p>\n' +
+            '<DocLabels kind="ticket" labels="type%3Dtask" />\n' +
+            '</div>\n' +
+            '<TicketChildren />\n',
+    )
+})
+
 // A list that isn't a metadata block, or one after a section's heading, is the
 // page's own text.
 test('a list that is not the metadata block is left as written', () => {
