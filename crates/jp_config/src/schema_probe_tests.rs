@@ -3,14 +3,17 @@ use std::collections::BTreeSet;
 use schematic::{
     Schema,
     schema::{
-        ArrayType, BooleanType, EnumType, LiteralValue, ObjectType, SchemaField, StringType,
-        StructType, UnionType,
+        ArrayType, BooleanType, EnumType, FloatType, IntegerType, LiteralValue, ObjectType,
+        SchemaField, StringType, StructType, UnionType,
     },
 };
 use serde_json::json;
 
-use super::{Probe, SENTINEL, closed_vocabulary, probes, rejections};
-use crate::{AppConfig, PartialAppConfig};
+use super::{Probe, SENTINEL, closed_vocabulary, number_probes, probes, rejections};
+use crate::{
+    AppConfig, PartialAppConfig,
+    assignment::{AssignKeyValue as _, KvAssignment},
+};
 
 #[test]
 fn writes_an_enum_value_at_its_field() {
@@ -226,6 +229,140 @@ fn the_walk_reaches_the_config_it_describes() {
         assert!(
             paths.contains(expected),
             "{expected} is missing from the probe walk"
+        );
+    }
+}
+
+#[test]
+fn writes_a_number_at_an_integer_field() {
+    let schema = Schema::structure(StructType::new([(
+        "count".to_owned(),
+        Schema::integer(IntegerType::default()),
+    )]));
+
+    assert_eq!(number_probes(&schema), vec![Probe {
+        path: "count".to_owned(),
+        value: "1".to_owned(),
+        document: json!({ "count": 1 }),
+    }]);
+}
+
+/// A file may write `temperature = 1`, so an integer is a float field's value
+/// as much as a fraction is.
+#[test]
+fn writes_an_integer_and_a_fraction_at_a_float_field() {
+    let schema = Schema::structure(StructType::new([(
+        "temperature".to_owned(),
+        Schema::float(FloatType::default()),
+    )]));
+
+    let documents: Vec<_> = number_probes(&schema)
+        .into_iter()
+        .map(|p| p.document)
+        .collect();
+
+    assert_eq!(documents, [
+        json!({ "temperature": 1 }),
+        json!({ "temperature": 0.5 })
+    ]);
+}
+
+#[test]
+fn writes_a_number_through_an_optional_struct() {
+    let limits = Schema::structure(StructType::new([(
+        "lines".to_owned(),
+        Schema::integer(IntegerType::default()),
+    )]));
+
+    let schema = Schema::structure(StructType::new([(
+        "limits".to_owned(),
+        Schema::union(UnionType::new_any([limits, Schema::null()])),
+    )]));
+
+    let paths: Vec<_> = number_probes(&schema).into_iter().map(|p| p.path).collect();
+
+    assert_eq!(paths, ["limits.lines"]);
+}
+
+/// A struct written in place of a scalar is a table form of that value, not a
+/// block of fields a key can name.
+#[test]
+fn does_not_enter_a_table_form_of_a_scalar() {
+    let table = Schema::structure(StructType::new([(
+        "lines".to_owned(),
+        Schema::integer(IntegerType::default()),
+    )]));
+
+    let schema = Schema::structure(StructType::new([(
+        "results".to_owned(),
+        Schema::union(UnionType::new_any([
+            Schema::string(StringType::default()),
+            table,
+        ])),
+    )]));
+
+    assert_eq!(number_probes(&schema), vec![]);
+}
+
+/// Every number the schema says a field accepts has to be assignable in JSON
+/// form.
+///
+/// A config file reaches a number field through `Deserialize`.
+/// `--cfg key:=1`, a `--cfg '{...}'` object and `JP_CFG_KEY=:1` reach it
+/// through the field's `assign` arm instead, and only this test holds that arm
+/// to the schema.
+/// A failure means the arm rejects a number the field accepts everywhere else.
+#[test]
+fn every_number_the_schema_advertises_is_assignable() {
+    let schema = AppConfig::schema();
+    let mut failures = Vec::new();
+
+    for probe in number_probes(&schema) {
+        let mut forms = vec![("object", KvAssignment::root_json(probe.document.clone()))];
+
+        // An array item is only reachable by index once the array holds one, so
+        // a path through one is assigned in the object form alone.
+        if !probe.path.contains('[') {
+            let kv = KvAssignment::try_from_cli(format!("{}:", probe.path), &probe.value)
+                .expect("a probe value is valid JSON");
+            forms.push(("key", kv));
+        }
+
+        for (form, kv) in forms {
+            if let Err(error) = PartialAppConfig::empty().assign(kv) {
+                failures.push(format!(
+                    "{} = {} ({form} form)\n    error: {error:?}",
+                    probe.path, probe.value
+                ));
+            }
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "{} number assignment(s) the schema advertises are rejected:\n\n{}",
+        failures.len(),
+        failures.join("\n\n")
+    );
+}
+
+/// The number walk has to reach the config too, including the fields only an
+/// array item or a map entry holds.
+#[test]
+fn the_number_walk_reaches_the_config_it_describes() {
+    let schema = AppConfig::schema();
+    let paths: BTreeSet<_> = number_probes(&schema).into_iter().map(|p| p.path).collect();
+
+    for expected in [
+        "assistant.model.parameters.max_tokens",
+        "assistant.model.parameters.temperature",
+        "conversation.compaction.rules[0].keep_first",
+        "conversation.tools.probe.fan_out.concurrency",
+        "style.markdown.wrap_width",
+    ] {
+        assert!(
+            paths.contains(expected),
+            "{expected} is missing from the number walk"
         );
     }
 }
