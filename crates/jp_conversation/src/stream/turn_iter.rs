@@ -67,8 +67,8 @@ impl<'a> Turn<'a> {
     /// first [`ChatRequest`].
     ///
     /// Collapses whitespace to single spaces and truncates to
-    /// [`MAX_SUMMARY_CHARS`] characters. Returns `None` if the turn has no
-    /// non-empty `ChatRequest`.
+    /// [`MAX_SUMMARY_CHARS`] characters.
+    /// Returns `None` if the turn has no non-empty `ChatRequest`.
     ///
     /// [`ChatRequest`]: crate::event::ChatRequest
     /// [`MAX_SUMMARY_CHARS`]: crate::event::MAX_SUMMARY_CHARS

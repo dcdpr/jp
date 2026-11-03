@@ -167,14 +167,19 @@ fn fallback_summary_uses_the_first_non_empty_request_line() {
         entry("turn001", event(TurnStart::default())),
         entry(
             "chat001",
-            event(ChatRequest::from("\n   \n  Fix   the\tretry test  \nIt fails on CI.")),
+            event(ChatRequest::from(
+                "\n   \n  Fix   the\tretry test  \nIt fails on CI.",
+            )),
         ),
         entry("reply01", event(ChatResponse::message("Looking."))),
         entry("chat002", event(ChatRequest::from("Also update the docs."))),
     ]);
 
     let turn = stream.iter_turns().next().unwrap();
-    assert_eq!(turn.fallback_summary().as_deref(), Some("Fix the retry test"));
+    assert_eq!(
+        turn.fallback_summary().as_deref(),
+        Some("Fix the retry test")
+    );
 }
 
 #[test]
@@ -189,17 +194,17 @@ fn fallback_summary_truncates_at_72_characters() {
 
     let turns: Vec<_> = stream.iter_turns().collect();
     assert_eq!(turns[0].fallback_summary(), Some("é".repeat(72)));
-    assert_eq!(turns[1].fallback_summary(), Some(format!("{}…", "y".repeat(71))));
+    assert_eq!(
+        turns[1].fallback_summary(),
+        Some(format!("{}…", "y".repeat(71)))
+    );
 }
 
 #[test]
 fn setting_a_summary_stores_it_on_the_named_turn() {
     let mut stream = fixture();
 
-    let updated = stream.set_turn_summary(
-        &EventId::fixed("turn002"),
-        "Answer the second question",
-    );
+    let updated = stream.set_turn_summary(&EventId::fixed("turn002"), "Answer the second question");
 
     assert!(updated);
     assert_eq!(summaries(&stream), [
@@ -213,7 +218,10 @@ fn setting_a_summary_normalizes_whitespace_and_rejects_blank_input() {
     let mut stream = fixture();
 
     assert!(!stream.set_turn_summary(&EventId::fixed("turn002"), "   \n\t  "));
-    assert_eq!(summaries(&stream), [Some("Set up the project".to_owned()), None]);
+    assert_eq!(summaries(&stream), [
+        Some("Set up the project".to_owned()),
+        None
+    ]);
 
     assert!(stream.set_turn_summary(
         &EventId::fixed("turn002"),
@@ -278,7 +286,10 @@ fn popping_or_trimming_an_event_clears_the_shortened_turns_summary() {
         entry("turn002", event(summarized("Switch retries to backoff"))),
         entry("chat002", event(ChatRequest::from("add retries"))),
         entry("reply02", event(ChatResponse::message("retrying"))),
-        entry("chat003", event(ChatRequest::from("use exponential backoff"))),
+        entry(
+            "chat003",
+            event(ChatRequest::from("use exponential backoff")),
+        ),
         entry("reply03", event(ChatResponse::message("done"))),
     ]);
 
@@ -293,10 +304,7 @@ fn popping_or_trimming_an_event_clears_the_shortened_turns_summary() {
 #[test]
 fn a_summary_stays_with_its_turn_when_earlier_turns_are_dropped() {
     let mut stream = fixture();
-    assert!(stream.set_turn_summary(
-        &EventId::fixed("turn002"),
-        "Answer the second question",
-    ));
+    assert!(stream.set_turn_summary(&EventId::fixed("turn002"), "Answer the second question",));
 
     stream.retain_last_turns(1);
 

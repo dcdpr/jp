@@ -16,23 +16,25 @@ use crate::{
 pub struct TurnSummaryGenerateConfig {
     /// Whether to automatically generate turn summaries in the background.
     ///
-    /// Defaults to `true`. When enabled, each `jp query` summarizes up to
-    /// `batch_size` earlier completed turns that do not yet have a summary.
+    /// Defaults to `true`.
+    /// When enabled, each `jp query` summarizes up to `batch_size` earlier
+    /// completed turns that do not yet have a summary.
     #[setting(default = true)]
     pub auto: bool,
 
     /// Maximum number of unsummarized turns to process in a single query.
     ///
-    /// Defaults to `5`. Set to `0` to disable background turn summarization.
+    /// Defaults to `5`.
+    /// Set to `0` to disable background turn summarization.
     #[setting(default = 5)]
     pub batch_size: usize,
 
     /// Model configuration specific to turn summary generation.
     ///
     /// If unset, falls back to `conversation.title.generate.model`, then to
-    /// `assistant.model.id` with default parameters. If `parameters.reasoning`
-    /// is unset on the resolved model, reasoning defaults to `low` effort with
-    /// `exclude = true`.
+    /// `assistant.model.id` with default parameters.
+    /// If `parameters.reasoning` is unset on the resolved model, reasoning
+    /// defaults to `low` effort with `exclude = true`.
     #[setting(nested)]
     pub model: Option<ModelConfig>,
 }

@@ -292,7 +292,8 @@ fn a_long_message_in_a_transcript_is_truncated_to_head_and_tail() {
     assert_eq!(
         built[0].text(),
         format!(
-            "<turn id=\"turn001\">\n<user>\n{}\n[…]\n{}\n</user>\n<assistant>\nDone.\n</assistant>\n</turn>",
+            "<turn id=\"turn001\">\n<user>\n{}\n[…]\n{}\n</user>\n<assistant>\nDone.\n</\
+             assistant>\n</turn>",
             "a".repeat(half),
             "z".repeat(half)
         )
@@ -440,8 +441,14 @@ async fn generate_summarizes_each_turn_it_sends() {
         "turn002": "Ask the second question",
     }}));
 
-    let summaries =
-        summarize(&provider, None, events.clone(), &["turn001", "turn002"], BATCH_SIZE).await;
+    let summaries = summarize(
+        &provider,
+        None,
+        events.clone(),
+        &["turn001", "turn002"],
+        BATCH_SIZE,
+    )
+    .await;
 
     let built = transcripts(&events, &[id("turn001"), id("turn002")]);
     assert_eq!(summaries, [

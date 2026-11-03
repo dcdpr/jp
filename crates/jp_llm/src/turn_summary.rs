@@ -1,14 +1,16 @@
 //! Turn summary generation.
 //!
 //! [`generate`] requests single-line summaries for up to `batch_size` completed
-//! turns and returns the validated results. [`resolve_model`] selects the model
-//! and reasoning parameters for the request.
+//! turns and returns the validated results.
+//! [`resolve_model`] selects the model and reasoning parameters for the
+//! request.
 //!
 //! Each turn is formatted as an XML [`TurnTranscript`] containing user
 //! requests, tool call names and outcomes, and assistant responses (omitting
-//! reasoning and raw tool payloads). [`TurnTranscript::fingerprint`] hashes the
-//! rendered transcript and entry IDs so callers can verify that a turn was not
-//! modified while the summary request was in flight.
+//! reasoning and raw tool payloads).
+//! [`TurnTranscript::fingerprint`] hashes the rendered transcript and entry IDs
+//! so callers can verify that a turn was not modified while the summary request
+//! was in flight.
 
 use std::{
     borrow::Cow,
@@ -120,13 +122,15 @@ impl TurnTranscript {
 /// produced it.
 ///
 /// Used to detect whether a turn's summarized content or event identity changed
-/// between task spawn and persistence. Not stable across processes or releases.
+/// between task spawn and persistence.
+/// Not stable across processes or releases.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TurnFingerprint(u64);
 
 /// Resolve the model configuration for turn summary generation.
 ///
 /// Follows the fallback chain:
+///
 /// 1. `conversation.turn_summary.generate.model`
 /// 2. `conversation.title.generate.model`
 /// 3. `assistant.model.id` with default parameters
@@ -251,12 +255,14 @@ pub async fn generate(
         .collect())
 }
 
-/// Build [`TurnTranscript`]s for the turns matching `turn_ids`, in stream order.
+/// Build [`TurnTranscript`]s for the turns matching `turn_ids`, in stream
+/// order.
 ///
-/// Reads raw turn events directly from `events`, ignoring compaction overlays so
-/// turns covered by a compaction summary are still transcribed from their own
-/// events. Reasoning events and tool arguments/payloads are omitted, and long
-/// messages are truncated to [`MAX_MESSAGE_CHARS`].
+/// Reads raw turn events directly from `events`, ignoring compaction overlays
+/// so turns covered by a compaction summary are still transcribed from their
+/// own events.
+/// Reasoning events and tool arguments/payloads are omitted, and long messages
+/// are truncated to [`MAX_MESSAGE_CHARS`].
 ///
 /// Unknown `EventId`s and turns without provider-visible content are skipped.
 #[must_use]
@@ -505,8 +511,8 @@ pub fn summary_instructions() -> Vec<SectionConfig> {
 /// {"summaries": {"k3m9x2a": "Add retry backoff"}}
 /// ```
 ///
-/// Returns entries for IDs in `turn_ids` in the order of `turn_ids`. Blank or
-/// non-string values and unrequested keys are ignored.
+/// Returns entries for IDs in `turn_ids` in the order of `turn_ids`.
+/// Blank or non-string values and unrequested keys are ignored.
 #[must_use]
 pub fn extract_summaries(data: &Value, turn_ids: &[EventId]) -> Vec<(EventId, String)> {
     let Some(summaries) = data.get("summaries").and_then(Value::as_object) else {

@@ -1616,10 +1616,11 @@ struct ArrivedTitle {
 /// released the conversation lock.
 ///
 /// Acquiring a conversation lock requires `&Workspace`, which is owned by the
-/// message loop. A late title that finds the conversation locked is parked in
-/// `waiting` and written when that turn calls [`Self::release`]. Late turn
-/// summaries that find the conversation locked are dropped, since the active
-/// turn's own summary request covers the same turns.
+/// message loop.
+/// A late title that finds the conversation locked is parked in `waiting` and
+/// written when that turn calls [`Self::release`].
+/// Late turn summaries that find the conversation locked are dropped, since the
+/// active turn's own summary request covers the same turns.
 #[derive(Clone)]
 struct LateWrites {
     waiting: Arc<Mutex<HashMap<ConversationId, String>>>,

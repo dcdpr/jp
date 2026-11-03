@@ -39,8 +39,9 @@ pub struct TurnStart {
 /// [`MAX_SUMMARY_CHARS`] characters.
 ///
 /// Consecutive whitespace characters (including newlines) are collapsed to a
-/// single space. Strings longer than [`MAX_SUMMARY_CHARS`] are truncated and
-/// end with `…`. Returns `None` if `text` contains only whitespace.
+/// single space.
+/// Strings longer than [`MAX_SUMMARY_CHARS`] are truncated and end with `…`.
+/// Returns `None` if `text` contains only whitespace.
 #[must_use]
 pub fn format_turn_summary(text: &str) -> Option<String> {
     let line = text.split_whitespace().collect::<Vec<_>>().join(" ");

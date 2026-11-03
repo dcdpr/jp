@@ -1334,15 +1334,17 @@ impl ConversationStream {
         result
     }
 
-    /// Normalize and store `summary` on the [`TurnStart`] entry with
-    /// `event_id == *turn_id`, replacing any existing summary.
+    /// Normalize and store `summary` on the [`TurnStart`] entry with `event_id
+    /// == *turn_id`, replacing any existing summary.
     ///
     /// Whitespace is collapsed to a single line and truncated to
-    /// [`MAX_SUMMARY_CHARS`](crate::event::MAX_SUMMARY_CHARS) characters via
-    /// [`format_turn_summary`](crate::event::format_turn_summary).
+    /// [`MAX_SUMMARY_CHARS`] characters via [`format_turn_summary`].
     ///
     /// Returns `false` without modifying the stream if `summary` is blank or
     /// `turn_id` does not match a `TurnStart` entry.
+    ///
+    /// [`MAX_SUMMARY_CHARS`]: crate::event::MAX_SUMMARY_CHARS
+    /// [`format_turn_summary`]: crate::event::format_turn_summary
     pub fn set_turn_summary(&mut self, turn_id: &EventId, summary: impl AsRef<str>) -> bool {
         let Some(summary) = crate::event::format_turn_summary(summary.as_ref()) else {
             return false;
@@ -1355,7 +1357,8 @@ impl ConversationStream {
         true
     }
 
-    /// Clear the summary on the [`TurnStart`] entry with `event_id == *turn_id`.
+    /// Clear the summary on the [`TurnStart`] entry with `event_id ==
+    /// *turn_id`.
     ///
     /// Returns `false` if `turn_id` does not match a `TurnStart` entry.
     pub fn clear_turn_summary(&mut self, turn_id: &EventId) -> bool {
@@ -1369,20 +1372,21 @@ impl ConversationStream {
 
     /// Clear the summary on the last [`TurnStart`] in the stream, if any.
     fn clear_last_turn_summary(&mut self) {
-        if let Some(turn_start) = self
-            .events
-            .iter_mut()
-            .rev()
-            .find_map(|entry| match &mut entry.payload {
-                EventPayload::Event(event) => event.as_turn_start_mut(),
-                _ => None,
-            })
+        if let Some(turn_start) =
+            self.events
+                .iter_mut()
+                .rev()
+                .find_map(|entry| match &mut entry.payload {
+                    EventPayload::Event(event) => event.as_turn_start_mut(),
+                    _ => None,
+                })
         {
             turn_start.summary = None;
         }
     }
 
-    /// Mutable reference to the [`TurnStart`] entry with `event_id == *turn_id`.
+    /// Mutable reference to the [`TurnStart`] entry with `event_id ==
+    /// *turn_id`.
     fn turn_start_mut(&mut self, turn_id: &EventId) -> Option<&mut TurnStart> {
         let entry = self.events.iter_mut().find(|e| e.event_id == *turn_id)?;
         let EventPayload::Event(event) = &mut entry.payload else {

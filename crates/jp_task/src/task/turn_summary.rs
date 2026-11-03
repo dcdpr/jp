@@ -22,9 +22,9 @@ use crate::Task;
 /// Background task that generates summaries for completed turns lacking one.
 ///
 /// [`Task::run`] queries the configured summary model against a snapshot of the
-/// conversation stream taken before the active turn starts. [`Task::sync`]
-/// persists each returned summary on its `TurnStart` entry if the turn still
-/// has no summary and its transcript fingerprint is unchanged.
+/// conversation stream taken before the active turn starts.
+/// [`Task::sync`] persists each returned summary on its `TurnStart` entry if
+/// the turn still has no summary and its transcript fingerprint is unchanged.
 pub struct TurnSummaryTask {
     conversation_id: ConversationId,
     provider: Arc<dyn Provider>,
@@ -35,8 +35,8 @@ pub struct TurnSummaryTask {
 impl TurnSummaryTask {
     /// Construct a summary task for unsummarized turns in `events`.
     ///
-    /// Returns `Ok(None)` without initializing a provider if `batch_size` is `0`
-    /// or every turn in `events` already has a summary.
+    /// Returns `Ok(None)` without initializing a provider if `batch_size` is
+    /// `0` or every turn in `events` already has a summary.
     ///
     /// # Errors
     ///
@@ -96,7 +96,8 @@ impl TurnSummaryTask {
 
     /// Run the summary request directly and return the generated summaries.
     ///
-    /// Used by callers that manage conversation locking outside [`TaskHandler`].
+    /// Used by callers that manage conversation locking outside
+    /// [`TaskHandler`].
     ///
     /// # Errors
     ///
