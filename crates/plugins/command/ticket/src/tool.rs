@@ -30,6 +30,7 @@ use serde_json::{Map, Value};
 use ticket::{
     Comment, Labels, NewTicket, Selector, Status, Ticket, TicketId, Vocabulary,
     board::{self, Order},
+    checklist::{self, Marked},
     parse, render, store,
 };
 
@@ -523,19 +524,23 @@ fn preview_comment(
     Ok(preview(&format!("{heading}\n\n{}", render::comment(&comment))).into())
 }
 
-/// Change any of a ticket's title, description, status, labels, and parent in
-/// one call, leaving the rest as it is.
+/// Change any of a ticket's title, description, status, labels, checklist, and
+/// parent in one call, leaving the rest as it is.
 ///
 /// Labels are added and removed rather than replaced, so a call can't drop one
 /// it doesn't name: `remove_labels` first, where a bare key takes every label
 /// under it, then `add_labels`.
+/// Checklist items are named by their text in `check` and `uncheck`, and only
+/// their checkboxes change.
 /// `parent` takes a ticket id, or `none` to take the parent away.
 ///
-/// Every argument is checked before anything is written, where the status and
-/// the parent leave the ticket included.
+/// Every argument is checked before anything is written, the checklist items
+/// named and where the status and the parent leave the ticket included.
 /// The labels, which the vocabulary can still refuse, are written first, so a
 /// refused call changes nothing; the status and the parent together, judged by
 /// where they leave the ticket; the title last, since it moves the file.
+/// Closing a ticket whose checklist has unchecked items is allowed, and warned
+/// about.
 fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     let id = match args.id()? {
         Ok(id) => id,
@@ -558,16 +563,24 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
         .optional::<Vec<String>>("remove_labels")?
         .unwrap_or_default();
     let relabels = !add.is_empty() || !remove.is_empty();
+    let check = args.optional::<Vec<String>>("check")?.unwrap_or_default();
+    let uncheck = args.optional::<Vec<String>>("uncheck")?.unwrap_or_default();
+    let marks = !check.is_empty() || !uncheck.is_empty();
     let parent = match parent_change(args)? {
         Ok(parent) => parent,
         Err(refusal) => return refuse(refusal),
     };
 
-    if title.is_none() && description.is_none() && status.is_none() && parent.is_none() && !relabels
+    if title.is_none()
+        && description.is_none()
+        && status.is_none()
+        && parent.is_none()
+        && !relabels
+        && !marks
     {
         return refuse(
-            "Name what to change: `title`, `description`, `status`, `parent`, `add_labels`, or \
-             `remove_labels`.",
+            "Name what to change: `title`, `description`, `status`, `parent`, `check`, `uncheck`, \
+             `add_labels`, or `remove_labels`.",
         );
     }
     if let Err(error) = Labels::from_tokens(&remove) {
@@ -588,11 +601,11 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
         return refuse("`description` must not be empty.");
     }
 
-    match store::locate_ticket(&tickets.dir, id) {
-        Ok(_) => {}
+    let path = match store::locate_ticket(&tickets.dir, id) {
+        Ok(path) => path,
         Err(store::Error::NoSuchTicket(_)) => return refuse(format!("No {id}.")),
         Err(other) => return Err(other.into()),
-    }
+    };
     if status.is_some() || parent.is_some() {
         match store::check_relate(&tickets.dir, id, status, parent) {
             Ok(()) => {}
@@ -600,6 +613,12 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
             Err(other) => return Err(other.into()),
         }
     }
+
+    let closes = status == Some(Status::Done);
+    let content = match settle_content(&path, description.as_deref(), &check, &uncheck, closes)? {
+        Ok(content) => content,
+        Err(refusal) => return refuse(refusal),
+    };
 
     let mut changed = vec![];
     if relabels {
@@ -612,28 +631,15 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
         let related = store::relate(&tickets.dir, &tickets.formatting, id, status, parent)?;
         changed.extend(describe_related(&related, status, parent));
     }
-    if title.is_some() || description.is_some() {
-        let store::Edited { from, to } = store::edit(
-            &tickets.dir,
-            &tickets.formatting,
-            id,
-            title.as_deref().map(str::trim),
-            description.as_deref(),
-        )?;
-        if description.is_some() {
-            changed.push("description replaced".to_owned());
-        }
-        if title.is_some() {
-            changed.push(if from == to {
-                format!("title changed, still at {}", tickets.relative(&to))
-            } else {
-                format!(
-                    "title changed, moved {} -> {}",
-                    tickets.relative(&from),
-                    tickets.relative(&to)
-                )
-            });
-        }
+    changed.extend(write_content(
+        tickets,
+        id,
+        title.as_deref(),
+        &content,
+        description.is_some(),
+    )?);
+    if let Some(warning) = content.left.as_deref().and_then(unchecked_on_close) {
+        changed.push(format!("warning: {warning}"));
     }
 
     let mut text = format!("Edited {id}:\n");
@@ -642,6 +648,173 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
     }
 
     Ok(text.into())
+}
+
+/// What an `edit` call does to a ticket's description, settled before anything
+/// is written.
+struct Content {
+    /// The checklist items `check` and `uncheck` named, and the description
+    /// they leave.
+    marked: Option<Marked>,
+
+    /// The description to write, or `None` when it stays as it is, which it
+    /// does when every item named is in place already.
+    rewritten: Option<String>,
+
+    /// The description the call leaves the ticket with, when the call closes it
+    /// and the checklist has to be judged.
+    left: Option<String>,
+}
+
+/// Settle what `edit` does to the description of the ticket at `path`: write
+/// the `description` it was given, or check and uncheck the items `check` and
+/// `uncheck` name.
+///
+/// The ticket is read only when its checklist is needed: to mark items, or
+/// because the call `closes` it.
+/// The inner error is the refusal, for the assistant: a description and items
+/// to mark both given, or an item named wrongly.
+fn settle_content(
+    path: &Utf8Path,
+    description: Option<&str>,
+    check: &[String],
+    uncheck: &[String],
+    closes: bool,
+) -> Result<Result<Content, String>, Error> {
+    let marks = !check.is_empty() || !uncheck.is_empty();
+    if description.is_some() && marks {
+        return Ok(Err("Pass `description` or `check` and `uncheck`, not \
+                       both: check the items in the new description itself."
+            .to_owned()));
+    }
+    let current = if marks || closes {
+        Some(parse::document(&fs::read_to_string(path)?)?)
+    } else {
+        None
+    };
+    let marked = match current.as_ref().filter(|_| marks) {
+        Some(ticket) => match checklist::mark(&ticket.description, check, uncheck) {
+            Ok(marked) => Some(marked),
+            Err(refused) => return Ok(Err(refused.to_string())),
+        },
+        None => None,
+    };
+
+    // Nothing is written when every item named is in place already, so a
+    // hand-edited file isn't reflowed for a call that changes nothing in it.
+    let rewritten = description.map(ToOwned::to_owned).or_else(|| {
+        marked
+            .as_ref()
+            .filter(|marked| marked.changes.iter().any(|change| change.changed))
+            .map(|marked| marked.description.clone())
+    });
+    let left = if closes {
+        description
+            .map(ToOwned::to_owned)
+            .or_else(|| marked.as_ref().map(|marked| marked.description.clone()))
+            .or_else(|| current.map(|ticket| ticket.description))
+    } else {
+        None
+    };
+
+    Ok(Ok(Content {
+        marked,
+        rewritten,
+        left,
+    }))
+}
+
+/// Write the title and the description `edit` settled on, returning what
+/// changed, in words.
+///
+/// `replaced` is whether the call gave a description of its own, rather than
+/// checklist items to mark.
+fn write_content(
+    tickets: &Tickets<'_>,
+    id: TicketId,
+    title: Option<&str>,
+    content: &Content,
+    replaced: bool,
+) -> Result<Vec<String>, Error> {
+    let edited = if title.is_some() || content.rewritten.is_some() {
+        Some(store::edit(
+            &tickets.dir,
+            &tickets.formatting,
+            id,
+            title.map(str::trim),
+            content.rewritten.as_deref(),
+        )?)
+    } else {
+        None
+    };
+
+    let mut changed = vec![];
+    if replaced {
+        changed.push("description replaced".to_owned());
+    }
+    if let Some(marked) = &content.marked {
+        changed.extend(describe_marked(marked));
+    }
+    if let (Some(_), Some(store::Edited { from, to })) = (title, &edited) {
+        changed.push(if from == to {
+            format!("title changed, still at {}", tickets.relative(to))
+        } else {
+            format!(
+                "title changed, moved {} -> {}",
+                tickets.relative(from),
+                tickets.relative(to)
+            )
+        });
+    }
+
+    Ok(changed)
+}
+
+/// What `edit` says about the checklist items it was asked to check and
+/// uncheck: a line per item, then the checklist's progress.
+fn describe_marked(marked: &Marked) -> Vec<String> {
+    let mut lines: Vec<String> = marked
+        .changes
+        .iter()
+        .map(|change| {
+            let state = if change.checked {
+                "checked"
+            } else {
+                "unchecked"
+            };
+            let already = if change.changed { "" } else { "already " };
+
+            format!("{already}{state}: {}", change.text)
+        })
+        .collect();
+    lines.push(format!("checklist: {}", marked.progress));
+
+    lines
+}
+
+/// What closing a ticket whose description is `description` leaves unchecked,
+/// as a warning, or `None` when every item is checked.
+///
+/// Closing isn't refused: the items are the ticket's own, and whoever closes it
+/// decides what is left of them.
+pub(crate) fn unchecked_on_close(description: &str) -> Option<String> {
+    let items = checklist::items(description);
+    let open: Vec<String> = items
+        .iter()
+        .filter(|item| !item.checked)
+        .map(|item| format!("{:?}", item.text))
+        .collect();
+    if open.is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "closed with {} of {} checklist items unchecked: {}. Check the ones that are done, and \
+         remove the rest with a comment saying why.",
+        open.len(),
+        items.len(),
+        open.join(", ")
+    ))
 }
 
 /// Read `edit`'s `parent` argument: `None` when it is absent, `Some(None)` for
@@ -983,9 +1156,12 @@ fn render_list(
         } else {
             format!(" [{}]", ticket.metadata.labels)
         };
+        let checklist = ticket
+            .checklist()
+            .map_or_else(String::new, |progress| format!(" ({progress})"));
 
         out.push_str(&format!(
-            "{id:<9} {status:<12} {}{labels}{comments}\n",
+            "{id:<9} {status:<12} {}{labels}{checklist}{comments}\n",
             ticket.title
         ));
     }
@@ -1071,6 +1247,9 @@ fn render_ticket(
             "- **Parent**: {}\n",
             describe_parent(family.entries, parent)
         ));
+    }
+    if let Some(progress) = ticket.checklist() {
+        out.push_str(&format!("- **Checklist**: {progress}\n"));
     }
 
     if parts.description && !ticket.description.is_empty() {

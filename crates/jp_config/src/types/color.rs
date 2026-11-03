@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 /// Accepts both integer and string representations:
 ///
 /// - `236` or `"236"` → ANSI 256-color index
+/// - `"yellow"` or `"bright_yellow"` → standard named ANSI color (indices
+///   0–15)
 /// - `"#504945"` → 24-bit RGB
 ///
 /// # Examples
@@ -17,6 +19,9 @@ use serde::{Deserialize, Serialize};
 /// ```toml
 /// # ANSI 256-color
 /// background = 236
+///
+/// # Named ANSI color
+/// fg = "yellow"
 ///
 /// # Hex RGB
 /// background = "#504945"
@@ -54,21 +59,48 @@ impl Schematic for Color {
 
 /// Error when parsing a [`Color`] from a string.
 #[derive(Debug, thiserror::Error)]
-#[error("invalid color: {0:?} (expected a number 0-255 or #RRGGBB)")]
+#[error("invalid color: {0:?} (expected a number 0-255, #RRGGBB, or a named ANSI color)")]
 pub struct ColorParseError(String);
 
 impl FromStr for Color {
     type Err = ColorParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.strip_prefix('#').map_or_else(
-            || {
-                s.parse::<u8>()
-                    .map(Self::Ansi256)
-                    .map_err(|_| ColorParseError(s.to_owned()))
-            },
-            |hex| parse_hex_rgb(hex).ok_or_else(|| ColorParseError(s.to_owned())),
-        )
+        if let Some(hex) = s.strip_prefix('#') {
+            return parse_hex_rgb(hex).ok_or_else(|| ColorParseError(s.to_owned()));
+        }
+
+        if let Some(index) = parse_named_ansi(s) {
+            return Ok(Self::Ansi256(index));
+        }
+
+        s.parse::<u8>()
+            .map(Self::Ansi256)
+            .map_err(|_| ColorParseError(s.to_owned()))
+    }
+}
+
+/// Parse a standard named ANSI color (case-insensitive) into its palette index
+/// (`0`–`15`).
+fn parse_named_ansi(s: &str) -> Option<u8> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "black" => Some(0),
+        "red" => Some(1),
+        "green" => Some(2),
+        "yellow" => Some(3),
+        "blue" => Some(4),
+        "magenta" => Some(5),
+        "cyan" => Some(6),
+        "white" => Some(7),
+        "bright_black" | "bright-black" | "gray" | "grey" => Some(8),
+        "bright_red" | "bright-red" => Some(9),
+        "bright_green" | "bright-green" => Some(10),
+        "bright_yellow" | "bright-yellow" => Some(11),
+        "bright_blue" | "bright-blue" => Some(12),
+        "bright_magenta" | "bright-magenta" => Some(13),
+        "bright_cyan" | "bright-cyan" => Some(14),
+        "bright_white" | "bright-white" => Some(15),
+        _ => None,
     }
 }
 
@@ -106,7 +138,10 @@ impl<'de> Deserialize<'de> for Color {
             type Value = Color;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("an integer 0-255 or a hex color string like \"#504945\"")
+                formatter.write_str(
+                    "an integer 0-255, a hex color string like \"#504945\", or a named ANSI color \
+                     like \"yellow\"",
+                )
             }
 
             fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {

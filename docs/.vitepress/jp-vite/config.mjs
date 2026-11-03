@@ -8,6 +8,7 @@ import { redirectServer, writeRedirects } from './redirects.mjs'
 import { knownDocuments, linkMentions, relativeHref } from './references.mjs'
 import { readSettings } from './settings.mjs'
 import { slugify } from './slugify.mjs'
+import { renderTaskLists } from './tasklist.mjs'
 import { wikiSidebar } from './wiki.mjs'
 
 // What the RFD, ticket, and wiki pages need from the VitePress configuration.
@@ -59,6 +60,11 @@ export function withJpVite(config = {}) {
                 embedSections(md)
                 rewriteRepositoryLinks(md, settings)
                 linkDocumentMentions(md)
+                // After the embeds, so an embedded checklist renders too. See
+                // `./tasklist.mjs`.
+                md.core.ruler.push('jp_vite_task_lists', (state) => {
+                    renderTaskLists(state.tokens, state.Token)
+                })
                 // Last, so the header keeps the links the rules above made.
                 compactMetadata(md)
             }, markdown.config),
