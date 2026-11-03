@@ -38,7 +38,7 @@ use crate::{
     git, init,
     options::Options,
     print_to, read_message, send,
-    settings::{Settings, snapshot, source_dir},
+    settings::{Settings, below, snapshot, source_dir},
     shown, site,
     sync::{self, Change},
 };
@@ -355,7 +355,10 @@ pub(crate) fn unready(root: &Utf8Path, site_dir: &Utf8Path) -> Option<String> {
 
     let paths: Vec<_> = missing
         .iter()
-        .map(|template| shown(root, &site_dir.join(template.path)).to_string())
+        .map(|template| {
+            let path = site_dir.join(template.path);
+            below(root, &path).unwrap_or_else(|| path.to_string())
+        })
         .collect();
     let verb = if paths.len() == 1 { "is" } else { "are" };
 
