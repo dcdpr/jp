@@ -11,6 +11,7 @@ use crate::{
     fill::{FillDefaults, fill_opt},
     model::{ModelConfig, PartialModelConfig},
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
+    style::window_rows::WindowRows,
     types::color::Color,
 };
 
@@ -27,6 +28,12 @@ pub struct ReasoningConfig {
     /// - `progress`: Show "reasoning..." with animated dots.
     /// - `timer`: Show a running timer while reasoning.
     /// - `<number>`: Show the first N characters of the reasoning content.
+    ///
+    /// `full`, `summary`, and `<number>` print the reasoning into the
+    /// transcript, unless `window.rows` is set: then it streams into a window
+    /// at the bottom of the terminal that is erased once the assistant stops
+    /// reasoning.
+    /// The other modes show no reasoning, so `window` has no effect on them.
     #[setting(default)]
     pub display: ReasoningDisplayConfig,
 
@@ -63,6 +70,13 @@ pub struct ReasoningConfig {
     /// background.
     #[setting(default = true)]
     pub extend_across_tool_calls: bool,
+
+    /// Show reasoning in a window at the bottom of the terminal while the
+    /// assistant reasons, and erase it once reasoning ends.
+    ///
+    /// Off until `rows` is set.
+    #[setting(nested)]
+    pub window: ReasoningWindowConfig,
 }
 
 /// The default reasoning background color.
@@ -81,6 +95,7 @@ impl AssignKeyValue for PartialReasoningConfig {
                 self.extend_across_tool_calls = kv.try_some_bool()?;
             }
             _ if kv.p("summary_model") => self.summary_model.assign(kv)?,
+            _ if kv.p("window") => self.window.assign(kv)?,
             _ => return missing_key(&kv),
         }
 
@@ -98,6 +113,7 @@ impl PartialConfigDelta for PartialReasoningConfig {
                 self.extend_across_tool_calls.as_ref(),
                 next.extend_across_tool_calls,
             ),
+            window: self.window.delta(next.window),
         }
     }
 
@@ -115,6 +131,7 @@ impl PartialConfigDelta for PartialReasoningConfig {
                 self.extend_across_tool_calls.as_ref(),
                 next.extend_across_tool_calls,
             ),
+            window: self.window.delta(next.window),
         }
     }
 }
@@ -128,6 +145,7 @@ impl FillDefaults for PartialReasoningConfig {
             extend_across_tool_calls: self
                 .extend_across_tool_calls
                 .or(defaults.extend_across_tool_calls),
+            window: self.window.fill_from(defaults.window),
         }
     }
 }
@@ -144,6 +162,96 @@ impl ToPartial for ReasoningConfig {
                 &self.extend_across_tool_calls,
                 defaults.extend_across_tool_calls,
             ),
+            window: self.window.to_partial(),
+        }
+    }
+}
+
+/// A window at the bottom of the terminal that shows the assistant's reasoning
+/// while it reasons.
+///
+/// The window holds the most recent rows of reasoning, with a status row below
+/// them unless `timer` is off, and is erased once the assistant stops
+/// reasoning.
+/// The reasoning is still recorded in the conversation.
+/// `jp conversation print --style full` shows it afterwards.
+///
+/// ```toml
+/// [style.reasoning.window]
+/// rows = 8
+/// ```
+#[derive(Debug, Clone, PartialEq, Config)]
+#[config(rename_all = "snake_case")]
+pub struct ReasoningWindowConfig {
+    /// Rows of reasoning the window shows.
+    ///
+    /// - `false` or `0`: no window; reasoning is shown as
+    ///   `style.reasoning.display` says.
+    ///   This is the default.
+    /// - `true`: size the window from the terminal height (a tenth of it).
+    /// - `N`: show exactly `N` rows, still bounded by the terminal height.
+    ///
+    /// The window shows what `style.reasoning.display` renders: all of the
+    /// reasoning with `full`, the first N characters with a number, and the
+    /// summary with `summary`.
+    /// `hidden`, `static`, `progress`, and `timer` show no reasoning, so the
+    /// window has no effect with them.
+    ///
+    /// Where the window cannot be shown, for example when stdout is redirected
+    /// to a file, when logs are printed to stderr with `-v`, or on a terminal
+    /// too short to fit a row, reasoning is shown as `style.reasoning.display`
+    /// says, as if no window were set.
+    #[setting(default = "off")]
+    pub rows: WindowRows,
+
+    /// Show a status row below the window with how long the assistant has been
+    /// reasoning.
+    ///
+    /// Defaults to `true`, which shows `⏱ Reasoning… 4.1s`.
+    /// Set to `false` to show the rows of reasoning alone.
+    /// Has no effect without a window.
+    #[setting(default = true)]
+    pub timer: bool,
+}
+
+impl AssignKeyValue for PartialReasoningWindowConfig {
+    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => kv.try_merge_object(self)?,
+            "rows" => self.rows = kv.try_some_bool_number_or_from_str()?,
+            "timer" => self.timer = kv.try_some_bool()?,
+            _ => return missing_key(&kv),
+        }
+
+        Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialReasoningWindowConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            rows: delta_opt(self.rows.as_ref(), next.rows),
+            timer: delta_opt(self.timer.as_ref(), next.timer),
+        }
+    }
+}
+
+impl FillDefaults for PartialReasoningWindowConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            rows: self.rows.or(defaults.rows),
+            timer: self.timer.or(defaults.timer),
+        }
+    }
+}
+
+impl ToPartial for ReasoningWindowConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            rows: partial_opt(&self.rows, defaults.rows),
+            timer: partial_opt(&self.timer, defaults.timer),
         }
     }
 }
@@ -208,3 +316,7 @@ impl fmt::Display for TruncateChars {
         write!(f, "{}", self.characters)
     }
 }
+
+#[cfg(test)]
+#[path = "reasoning_tests.rs"]
+mod tests;
