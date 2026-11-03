@@ -22,7 +22,10 @@ use uuid::Uuid;
 use crate::{
     error::Result,
     model::ModelDetails,
-    provider::anthropic::{BetaFeatures, CONTINUE_MESSAGE, create_request},
+    provider::{
+        CONTINUE_MESSAGE,
+        anthropic::{BetaFeatures, create_request},
+    },
     query::ChatQuery,
 };
 

@@ -1,7 +1,6 @@
 # Configured sampling parameters never reach most providers
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-22
 - **Label**: domain=llm

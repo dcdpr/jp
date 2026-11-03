@@ -10,6 +10,7 @@
 //! details describe the state the answer acts on and no other process can
 //! change that state while the question is open.
 
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use crossterm::style::Stylize as _;
 use inquire::InquireError;
 use jp_conversation::ConversationId;
@@ -19,6 +20,7 @@ use jp_term::sanitize::strip_controls;
 use jp_workspace::ConversationLock;
 
 use crate::{
+    cli::CommandArgs,
     cmd::Error as CmdError,
     ctx::Ctx,
     error::Result,
@@ -31,20 +33,41 @@ use crate::{
 /// `--yes`, `-y`) skips it.
 /// With neither flag, [`Self::preference`] returns `None` and the command
 /// applies its own default.
-#[derive(Debug, Clone, Copy, Default, clap::Args)]
+#[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct ConfirmFlag {
-    /// Prompt for confirmation before each change.
-    #[arg(long, overrides_with = "no_confirm")]
+    /// `--confirm`.
     confirm: bool,
 
-    /// Skip confirmation prompts.
-    #[arg(
-        long = "no-confirm",
-        visible_alias = "yes",
-        short = 'y',
-        overrides_with = "confirm"
-    )]
+    /// `--no-confirm`, `--yes`, or `-y`.
     no_confirm: bool,
+}
+
+impl CommandArgs for ConfirmFlag {
+    fn augment(cmd: Command) -> Command {
+        cmd.arg(
+            Arg::new("confirm")
+                .long("confirm")
+                .action(ArgAction::SetTrue)
+                .overrides_with("no_confirm")
+                .help("Prompt for confirmation before each change"),
+        )
+        .arg(
+            Arg::new("no_confirm")
+                .short('y')
+                .long("no-confirm")
+                .visible_alias("yes")
+                .action(ArgAction::SetTrue)
+                .overrides_with("confirm")
+                .help("Skip confirmation prompts"),
+        )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> std::result::Result<Self, clap::Error> {
+        Ok(Self {
+            confirm: matches.get_flag("confirm"),
+            no_confirm: matches.get_flag("no_confirm"),
+        })
+    }
 }
 
 impl ConfirmFlag {
@@ -71,7 +94,7 @@ impl ConfirmFlag {
 /// `inquire` reads Ctrl-C as a keypress in raw mode rather than letting the
 /// signal through, so JP reports the status the shell would otherwise have set
 /// itself.
-const INTERRUPTED_EXIT_STATUS: u8 = 130;
+pub(crate) const INTERRUPTED_EXIT_STATUS: u8 = 130;
 
 /// A conversation-mutating action that asks before it proceeds.
 ///

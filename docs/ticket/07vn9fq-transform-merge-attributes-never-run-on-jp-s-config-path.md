@@ -1,7 +1,6 @@
 # `transform` merge attributes never run on JP's config path
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-24
 - **Label**: package=jp_config

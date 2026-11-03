@@ -115,7 +115,11 @@ expression: v
       "reasoning": {
         "display": "full",
         "background": 236,
-        "extend_across_tool_calls": true
+        "extend_across_tool_calls": true,
+        "window": {
+          "rows": "off",
+          "timer": true
+        }
       },
       "streaming": {
         "progress": {

@@ -1,3 +1,4 @@
+use clap::{ArgMatches, Command};
 use jp_attachment_agentic_shepherd as _;
 use jp_attachment_bear_note as _;
 use jp_attachment_cmd_output as _;
@@ -16,6 +17,7 @@ use url::Url;
 use super::Output;
 use crate::{
     IntoPartialAppConfig,
+    cli::{CommandArgs, subcommand_of, unread_subcommand},
     ctx::Ctx,
     error::{Error, Result},
 };
@@ -25,10 +27,49 @@ mod ls;
 mod print;
 mod rm;
 
-#[derive(Debug, clap::Args)]
+/// `jp attachment`.
+#[derive(Debug)]
 pub(crate) struct Attachment {
-    #[command(subcommand)]
     command: Commands,
+}
+
+impl CommandArgs for Attachment {
+    fn augment(cmd: Command) -> Command {
+        cmd.subcommand_required(true)
+            .arg_required_else_help(true)
+            .subcommand(
+                add::Add::augment(Command::new("add"))
+                    .about("Add attachment to context")
+                    .alias("a"),
+            )
+            .subcommand(
+                rm::Rm::augment(Command::new("rm"))
+                    .about("Remove attachment from context")
+                    .alias("r"),
+            )
+            .subcommand(
+                ls::Ls::augment(Command::new("ls"))
+                    .about("List attachments in context")
+                    .alias("l"),
+            )
+            .subcommand(
+                print::Print::augment(Command::new("print"))
+                    .about("Preview how an attachment will render for the LLM")
+                    .alias("p"),
+            )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> std::result::Result<Self, clap::Error> {
+        let command = match subcommand_of(matches)? {
+            ("add", sub) => Commands::Add(add::Add::from_matches(sub)?),
+            ("rm", sub) => Commands::Remove(rm::Rm::from_matches(sub)?),
+            ("ls", sub) => Commands::List(ls::Ls::from_matches(sub)?),
+            ("print", sub) => Commands::Print(print::Print::from_matches(sub)?),
+            (name, _) => return Err(unread_subcommand(name)),
+        };
+
+        Ok(Self { command })
+    }
 }
 
 impl Attachment {
@@ -57,22 +98,11 @@ impl IntoPartialAppConfig for Attachment {
     }
 }
 
-#[derive(Debug, clap::Subcommand)]
+#[derive(Debug)]
 enum Commands {
-    /// Add attachment to context.
-    #[command(name = "add", alias = "a")]
     Add(add::Add),
-
-    /// Remove attachment from context
-    #[command(name = "rm", alias = "r")]
     Remove(rm::Rm),
-
-    /// List attachments in context.
-    #[command(name = "ls", alias = "l")]
     List(ls::Ls),
-
-    /// Preview how an attachment will render for the LLM.
-    #[command(name = "print", alias = "p")]
     Print(print::Print),
 }
 

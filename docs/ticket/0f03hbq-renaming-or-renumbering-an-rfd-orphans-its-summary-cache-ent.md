@@ -1,7 +1,6 @@
 # Renaming or renumbering an RFD orphans its summary-cache entry
 
 - **Status**: Done
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-07
 - **Label**: domain=tooling

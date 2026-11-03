@@ -1,7 +1,6 @@
 # Shutdown waits for an open prompt to be answered
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-10-01
 - **Label**: client=cli

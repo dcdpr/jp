@@ -265,6 +265,59 @@ fn a_configured_root_needs_the_capabilities_it_was_asked_for() {
     assert!(error.contains("Access denied"), "got: {error}");
 }
 
+/// A program run in a directory the workspace lies inside can rewrite the
+/// workspace, so a mount grants it read access there at most, however the
+/// directory is named.
+#[cfg(unix)]
+#[test]
+fn a_root_holding_the_workspace_is_refused_write_access_through_an_alias() {
+    use std::os::unix::fs::symlink;
+
+    let w = tempdir().unwrap();
+    let w_canonical = w.path().canonicalize_utf8().unwrap();
+    let monorepo = package_dir(&w_canonical, "releases/v1");
+    let root = monorepo.join("packages/jp");
+    fs::create_dir_all(&root).unwrap();
+    symlink(&monorepo, w_canonical.join("current")).unwrap();
+    symlink(&w_canonical, root.join("up")).unwrap();
+
+    let mount = FsRule::new("up")
+        .with_external(true)
+        .with_approved_target(Some(w_canonical))
+        .with_read(true)
+        .with_write(true);
+    let exclusion = mount.workspace_exclusion(&root).unwrap();
+    let policy = AccessPolicy {
+        fs: vec![
+            FsRule::new("").with_read(true).with_write(true),
+            mount,
+            exclusion,
+        ],
+        ..AccessPolicy::default()
+    };
+
+    assert!(
+        resolve_root(
+            &root,
+            Some("up/current"),
+            Some(&policy),
+            READS,
+            &CARGO_MANIFEST
+        )
+        .is_ok()
+    );
+    assert_eq!(
+        resolve_root(
+            &root,
+            Some("up/current"),
+            Some(&policy),
+            &[Capability::Read, Capability::Update],
+            &CARGO_MANIFEST,
+        ),
+        Err("Access denied: cannot update 'up/current': it contains the workspace.".to_owned())
+    );
+}
+
 /// The invocation root predates this option, so a restrictive policy must not
 /// revoke access the `root` option never handed out.
 #[test]

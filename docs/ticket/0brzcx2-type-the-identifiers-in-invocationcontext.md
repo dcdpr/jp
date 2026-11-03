@@ -1,9 +1,9 @@
 # Type the identifiers in InvocationContext
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-01
+- **Label**: type=task
 
 `jp_llm::tool::InvocationContext` carries both identifiers as bare strings:
 

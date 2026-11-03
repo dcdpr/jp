@@ -1,19 +1,43 @@
 use std::collections::BTreeMap;
 
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use jp_config::{AppConfig, PartialAppConfig};
 use schematic::PartialConfig as _;
 
-use crate::{Ctx, cmd::Output};
+use crate::{Ctx, cli::CommandArgs, cmd::Output};
 
-#[derive(Debug, clap::Args)]
+/// `jp config show`.
+#[derive(Debug)]
 pub(crate) struct Show {
-    /// Show the default configurations.
-    #[arg(long)]
+    /// Print the default configuration instead.
     defaults: bool,
 
-    /// List available syntax highlighting themes.
-    #[arg(long)]
+    /// List the syntax highlighting themes instead.
     themes: bool,
+}
+
+impl CommandArgs for Show {
+    fn augment(cmd: Command) -> Command {
+        cmd.arg(
+            Arg::new("defaults")
+                .long("defaults")
+                .action(ArgAction::SetTrue)
+                .help("Show the default configurations"),
+        )
+        .arg(
+            Arg::new("themes")
+                .long("themes")
+                .action(ArgAction::SetTrue)
+                .help("List available syntax highlighting themes"),
+        )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            defaults: matches.get_flag("defaults"),
+            themes: matches.get_flag("themes"),
+        })
+    }
 }
 
 impl Show {

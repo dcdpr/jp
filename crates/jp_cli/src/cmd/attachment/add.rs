@@ -1,19 +1,46 @@
+use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use jp_config::PartialAppConfig;
 use jp_workspace::Workspace;
 
 use super::validate_attachment;
-use crate::{IntoPartialAppConfig, cmd::Output, ctx::Ctx, parser::AttachmentUrlOrPath};
+use crate::{
+    IntoPartialAppConfig,
+    cli::{CommandArgs, many},
+    cmd::Output,
+    ctx::Ctx,
+    parser::AttachmentUrlOrPath,
+};
 
-#[derive(Debug, clap::Args)]
-#[command(arg_required_else_help(true))]
+/// `jp attachment add`, and its hidden shorthand `jp aa`.
+#[derive(Debug)]
 pub(crate) struct Add {
-    /// One or more attachments to add to the context.
-    ///
-    /// If the attachment is pointing to a file, then a file attachment is
-    /// added, otherwise the attachment type can be added as a prefix.
-    ///
-    /// For example, to add a `summary` attachment, use `summary://<path>`.
+    /// The attachments to add to the context.
     attachments: Vec<AttachmentUrlOrPath>,
+}
+
+impl CommandArgs for Add {
+    fn augment(cmd: Command) -> Command {
+        cmd.arg_required_else_help(true).arg(
+            Arg::new("attachments")
+                .action(ArgAction::Append)
+                .num_args(1..)
+                .value_name("ATTACHMENTS")
+                .value_parser(value_parser!(AttachmentUrlOrPath))
+                .help("One or more attachments to add to the context")
+                .long_help(
+                    "One or more attachments to add to the context.\n\nIf the attachment is \
+                     pointing to a file, then a file attachment is added, otherwise the \
+                     attachment type can be added as a prefix.\n\nFor example, to add a `summary` \
+                     attachment, use `summary://<path>`.",
+                ),
+        )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            attachments: many(matches, "attachments"),
+        })
+    }
 }
 
 impl Add {

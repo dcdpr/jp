@@ -1,10 +1,9 @@
 # Tool Access Grants
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-10
-- **Implements**: 076
+- **Label**: tracking-rfd=076
 - **Label**: type=tracking
 
 Tracking ticket for [RFD 076].

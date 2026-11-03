@@ -1,7 +1,6 @@
 # jp-tools silently ignores unknown tool options
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-18
 - **Label**: domain=tooling

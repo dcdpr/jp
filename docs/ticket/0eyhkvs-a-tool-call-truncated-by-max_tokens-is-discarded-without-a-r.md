@@ -1,7 +1,6 @@
 # A tool call truncated by max_tokens is discarded without a record
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-07
 - **Label**: domain=llm

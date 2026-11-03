@@ -24,6 +24,7 @@ use tokio::runtime::Runtime;
 use super::*;
 use crate::{
     Globals,
+    cli::parse_args,
     cmd::{compact_flag::CompactFlag, conversation_id::PositionalIds},
 };
 
@@ -68,17 +69,7 @@ fn assert_forked_stream_matches(source: &ConversationStream, fork: &Conversation
 /// Going through clap keeps these cases pinned to the real flag surface rather
 /// than to the struct's private fields.
 fn selection(args: &[&str]) -> TurnSelection {
-    #[derive(clap::Parser)]
-    struct TestCli {
-        #[command(flatten)]
-        selection: TurnSelection,
-    }
-
-    let mut argv = vec!["fork"];
-    argv.extend_from_slice(args);
-    clap::Parser::try_parse_from(argv)
-        .map(|cli: TestCli| cli.selection)
-        .unwrap()
+    parse_args(args).unwrap()
 }
 
 /// A stream of `count` turns, each holding one request, two minutes apart

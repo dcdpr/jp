@@ -1,7 +1,6 @@
 # A failing `--mount` leaves earlier mounts' symlinks behind
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-14
 - **Label**: client=cli

@@ -1,7 +1,6 @@
 # A malformed `.jp/.id` silently reassigns the workspace ID
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-19
 - **Label**: package=jp_workspace

@@ -1,7 +1,6 @@
 # A piped query opens the editor under --no-interactive
 
 - **Status**: Done
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-18
 - **Label**: client=cli

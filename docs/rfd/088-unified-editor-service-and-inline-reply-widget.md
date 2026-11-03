@@ -901,5 +901,5 @@ Reviewable independently after Phase 3.
 [RFD 080]: 080-editor-as-a-config-source.md
 [RFD 092]: 092-predictable-and-responsive-interrupt-escalation.md
 [RFD 093]: 093-inline-first-query-composition.md
-[cmd-cfg]: ../architecture/ubiquitous-language.md#commandconfig
+[cmd-cfg]: ../wiki/00dxybd-ubiquitous-language.md#commandconfig
 [reedline]: https://crates.io/crates/reedline

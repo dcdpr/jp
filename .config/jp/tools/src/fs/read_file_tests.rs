@@ -133,6 +133,57 @@ async fn reads_through_approved_external_mount() {
     );
 }
 
+/// A mount of the workspace's parent does not give its files a second path.
+#[cfg(unix)]
+#[tokio::test]
+async fn refuses_a_workspace_file_named_through_an_ancestor_mount() {
+    use std::os::unix::fs::symlink;
+
+    use jp_tool::{AccessPolicy, FsRule};
+
+    let parent = tempdir().unwrap();
+    let parent_canonical = parent.path().canonicalize_utf8().unwrap();
+    let root = parent_canonical.join("ws");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("lib.rs"), "workspace contents\n").unwrap();
+    symlink(&parent_canonical, root.join("up")).unwrap();
+
+    let ctx = Context {
+        root,
+        action: Action::Run,
+        access: Some(AccessPolicy {
+            fs: vec![
+                FsRule::new("").with_read(true),
+                FsRule::new("up")
+                    .with_external(true)
+                    .with_approved_target(Some(parent_canonical))
+                    .with_read(true),
+            ],
+            ..AccessPolicy::default()
+        }),
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+
+    let result = fs_read_file(
+        &ctx,
+        &Gitignore::empty(),
+        "up/ws/lib.rs".to_owned(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let Outcome::Error { message, .. } = result else {
+        panic!("expected a refusal, got {result:?}");
+    };
+    assert_eq!(
+        message,
+        "Path 'up/ws/lib.rs' reaches the workspace through mount 'up'. Use 'lib.rs' instead."
+    );
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn read_through_internal_symlink_respects_deny_rule() {

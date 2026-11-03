@@ -1,0 +1,37 @@
+[conversation.tools.rfd_require]
+source = "plugin.command.rfd.require"
+summary = "Record that one RFD can't be accepted or implemented before another."
+description = """
+`id` requires `target`: `id` gets `Requires: RFD <target>`, and `target` gets
+`Required by: RFD <id>`.
+
+`id` can't be accepted before `target` is, and not implemented before `target`
+is. A link that would close a loop through `Requires` and `Extends` is refused,
+and so is a target `id` already extends, since extending implies depending. A
+published RFD can't require a draft. A draft can require a published RFD; the
+published one gets its back-link when the draft is promoted.
+"""
+
+examples = """
+RFD 116 can't be accepted before RFD 072:
+```json
+{"id": "116", "target": "072"}
+```
+"""
+
+run = "ask"
+
+[conversation.tools.rfd_require.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.rfd_require.parameters.id]
+type = "string"
+required = true
+summary = "The RFD that depends on the other."
+
+[conversation.tools.rfd_require.parameters.target]
+type = "string"
+required = true
+summary = "The RFD it depends on."

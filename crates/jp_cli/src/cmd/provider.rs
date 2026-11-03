@@ -22,6 +22,7 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
+use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use comfy_table::{Cell, Row};
 use crossterm::style::{Color, Stylize as _};
 use jp_config::{
@@ -47,128 +48,305 @@ use tokio::{
 const LOGIN_TIMEOUT: Duration = Duration::from_mins(5);
 
 use crate::{
+    cli::{CommandArgs, required, subcommand_of, unread_subcommand},
     cmd::{Error, Output},
     error::error_chain,
     output::print_table,
 };
 
 /// `jp provider` subcommand group.
-#[derive(Debug, clap::Args)]
+#[derive(Debug)]
 pub(crate) struct Provider {
-    #[command(subcommand)]
     command: ProviderCmd,
 }
 
-#[derive(Debug, clap::Subcommand)]
+impl CommandArgs for Provider {
+    fn augment(cmd: Command) -> Command {
+        cmd.subcommand_required(true)
+            .arg_required_else_help(true)
+            .subcommand(
+                Llm::augment(Command::new("llm"))
+                    .about("Model providers: the services that answer a query"),
+            )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        let command = match subcommand_of(matches)? {
+            ("llm", sub) => ProviderCmd::Llm(Llm::from_matches(sub)?),
+            (name, _) => return Err(unread_subcommand(name)),
+        };
+
+        Ok(Self { command })
+    }
+}
+
+#[derive(Debug)]
 enum ProviderCmd {
-    /// Model providers: the services that answer a query.
     Llm(Llm),
 }
 
 /// `jp provider llm` subcommand group.
-#[derive(Debug, clap::Args)]
+#[derive(Debug)]
 struct Llm {
-    #[command(subcommand)]
     command: LlmCmd,
 }
 
-#[derive(Debug, clap::Subcommand)]
+impl CommandArgs for Llm {
+    fn augment(cmd: Command) -> Command {
+        cmd.subcommand_required(true)
+            .arg_required_else_help(true)
+            .subcommand(
+                Auth::augment(Command::new("auth"))
+                    .about("Manage the credentials a model provider is reached with"),
+            )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        let command = match subcommand_of(matches)? {
+            ("auth", sub) => LlmCmd::Auth(Auth::from_matches(sub)?),
+            (name, _) => return Err(unread_subcommand(name)),
+        };
+
+        Ok(Self { command })
+    }
+}
+
+#[derive(Debug)]
 enum LlmCmd {
-    /// Manage the credentials a model provider is reached with.
     Auth(Auth),
 }
 
-#[derive(Debug, clap::Args)]
+/// `jp provider llm auth` subcommand group.
+#[derive(Debug)]
 struct Auth {
-    #[command(subcommand)]
     command: AuthCmd,
 }
 
-#[derive(Debug, clap::Subcommand)]
+impl CommandArgs for Auth {
+    fn augment(cmd: Command) -> Command {
+        cmd.subcommand_required(true)
+            .arg_required_else_help(true)
+            .subcommand(
+                Login::augment(Command::new("login"))
+                    .about("Log in to a provider and register a named subscription")
+                    .long_about(
+                        "Log in to a provider and register a named subscription.\n\nAnthropic \
+                         uses Claude Code's sign-in with an isolated configuration directory. JP \
+                         registers the login without copying its tokens.",
+                    ),
+            )
+            .subcommand(
+                List::augment(Command::new("list"))
+                    .about("List named subscriptions, API keys, and their state")
+                    .visible_alias("ls"),
+            )
+            .subcommand(
+                Logout::augment(Command::new("logout"))
+                    .about("Log out of a named subscription and remove its registration"),
+            )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        let command = match subcommand_of(matches)? {
+            ("login", sub) => AuthCmd::Login(Login::from_matches(sub)?),
+            ("list", sub) => AuthCmd::List(List::from_matches(sub)?),
+            ("logout", sub) => AuthCmd::Logout(Logout::from_matches(sub)?),
+            (name, _) => return Err(unread_subcommand(name)),
+        };
+
+        Ok(Self { command })
+    }
+}
+
+#[derive(Debug)]
 enum AuthCmd {
-    /// Log in to a provider and register a named subscription.
-    ///
-    /// Anthropic uses Claude Code's sign-in with an isolated configuration
-    /// directory.
-    /// JP registers the login without copying its tokens.
     Login(Login),
-
-    /// List named subscriptions, API keys, and their state.
-    #[command(visible_alias = "ls")]
     List(List),
-
-    /// Log out of a named subscription and remove its registration.
     Logout(Logout),
 }
 
-#[derive(Debug, clap::Args)]
+/// `jp provider llm auth login`.
+#[derive(Debug)]
 struct Login {
-    /// The provider to log in to, e.g. `anthropic`.
+    /// The provider to log in to.
     target: AuthTarget,
 
-    /// The name to store the credential under, selected from an `auth` chain as
-    /// `subscription:<name>`.
-    ///
-    /// The kind keywords `api_key`, `api`, `subscription`, `sub`, and `profile`
-    /// are reserved for new credentials.
-    #[arg(long, default_value = "default")]
+    /// The name to store the credential under.
     name: String,
 
-    /// Sign in by entering a code on the provider's website, instead of
-    /// capturing a browser redirect on localhost.
-    ///
-    /// Use this on a machine whose browser cannot reach back to it, or where
-    /// the callback port is unavailable.
-    #[arg(long, conflicts_with_all = ["setup_token", "import_codex"])]
+    /// Sign in with a code entered on the provider's website.
     device_auth: bool,
 
-    /// Copy the credential the Codex CLI already holds, instead of signing in.
-    ///
-    /// Reads `$CODEX_HOME/auth.json` (`~/.codex/auth.json` by default).
-    /// The credential is copied, not moved: refreshing it through JP rotates
-    /// the refresh token, which ends the Codex CLI's own session.
-    #[arg(long, conflicts_with_all = ["setup_token", "device_auth"])]
+    /// Copy the credential the Codex CLI already holds.
     import_codex: bool,
 
-    /// Store a long-lived setup token read from the first line of stdin,
-    /// instead of running the browser login.
-    ///
-    /// Run the provider's token command, then paste the value it prints at JP's
-    /// prompt; the prompt names the command and the token's shape.
-    /// A token command that runs interactively cannot be the source of a pipe,
-    /// since a pipeline's stages all start at once; piping from a
-    /// non-interactive source (a clipboard tool, a file) works.
-    #[arg(long)]
+    /// Store a setup token read from the first line of stdin.
     setup_token: bool,
 
-    /// Opt in to direct Anthropic subscription tokens and their account-policy
-    /// risk.
-    /// Requires `--setup-token`.
-    /// Queries also require `subscription_flow=direct`.
-    #[arg(long, requires = "setup_token", conflicts_with = "config_dir")]
+    /// Opt in to direct Anthropic subscription tokens.
     direct: bool,
 
-    /// Use an existing runtime login directory instead of allocating one.
-    /// Must be absolute.
-    /// Existing registrations retain their original directory.
-    /// For Anthropic, the default is `<JP user data dir>/data/claude/<name>`.
-    #[arg(long, conflicts_with_all = ["setup_token", "device_auth", "import_codex"])]
+    /// An existing runtime login directory to use.
     config_dir: Option<Utf8PathBuf>,
 }
 
-#[derive(Debug, clap::Args)]
+impl CommandArgs for Login {
+    fn augment(cmd: Command) -> Command {
+        cmd.arg(target_arg().help("The provider to log in to, e.g. `anthropic`"))
+            .arg(
+                Arg::new("name")
+                    .long("name")
+                    .value_name("NAME")
+                    .default_value("default")
+                    .help(
+                        "The name to store the credential under, selected from an `auth` chain as \
+                         `subscription:<name>`",
+                    )
+                    .long_help(
+                        "The name to store the credential under, selected from an `auth` chain as \
+                         `subscription:<name>`.\n\nThe kind keywords `api_key`, `api`, \
+                         `subscription`, `sub`, and `profile` are reserved for new credentials.",
+                    ),
+            )
+            .arg(
+                Arg::new("device_auth")
+                    .long("device-auth")
+                    .action(ArgAction::SetTrue)
+                    .conflicts_with_all(["setup_token", "import_codex"])
+                    .help(
+                        "Sign in by entering a code on the provider's website, instead of \
+                         capturing a browser redirect on localhost",
+                    )
+                    .long_help(
+                        "Sign in by entering a code on the provider's website, instead of \
+                         capturing a browser redirect on localhost.\n\nUse this on a machine \
+                         whose browser cannot reach back to it, or where the callback port is \
+                         unavailable.",
+                    ),
+            )
+            .arg(
+                Arg::new("import_codex")
+                    .long("import-codex")
+                    .action(ArgAction::SetTrue)
+                    .conflicts_with_all(["setup_token", "device_auth"])
+                    .help("Copy the credential the Codex CLI already holds, instead of signing in")
+                    .long_help(
+                        "Copy the credential the Codex CLI already holds, instead of signing \
+                         in.\n\nReads `$CODEX_HOME/auth.json` (`~/.codex/auth.json` by default). \
+                         The credential is copied, not moved: refreshing it through JP rotates \
+                         the refresh token, which ends the Codex CLI's own session.",
+                    ),
+            )
+            .arg(
+                Arg::new("setup_token")
+                    .long("setup-token")
+                    .action(ArgAction::SetTrue)
+                    .help(
+                        "Store a long-lived setup token read from the first line of stdin, \
+                         instead of running the browser login",
+                    )
+                    .long_help(
+                        "Store a long-lived setup token read from the first line of stdin, \
+                         instead of running the browser login.\n\nRun the provider's token \
+                         command, then paste the value it prints at JP's prompt; the prompt names \
+                         the command and the token's shape. A token command that runs \
+                         interactively cannot be the source of a pipe, since a pipeline's stages \
+                         all start at once; piping from a non-interactive source (a clipboard \
+                         tool, a file) works.",
+                    ),
+            )
+            .arg(
+                Arg::new("direct")
+                    .long("direct")
+                    .action(ArgAction::SetTrue)
+                    .requires("setup_token")
+                    .conflicts_with("config_dir")
+                    .help(
+                        "Opt in to direct Anthropic subscription tokens and their account-policy \
+                         risk. Requires `--setup-token`. Queries also require \
+                         `subscription_flow=direct`",
+                    ),
+            )
+            .arg(
+                Arg::new("config_dir")
+                    .long("config-dir")
+                    .value_name("CONFIG_DIR")
+                    .value_parser(value_parser!(Utf8PathBuf))
+                    .conflicts_with_all(["setup_token", "device_auth", "import_codex"])
+                    .help(
+                        "Use an existing runtime login directory instead of allocating one. Must \
+                         be absolute. Existing registrations retain their original directory. For \
+                         Anthropic, the default is `<JP user data dir>/data/claude/<name>`",
+                    ),
+            )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            target: required(matches, "target")?,
+            name: required(matches, "name")?,
+            device_auth: matches.get_flag("device_auth"),
+            import_codex: matches.get_flag("import_codex"),
+            setup_token: matches.get_flag("setup_token"),
+            direct: matches.get_flag("direct"),
+            config_dir: matches.get_one("config_dir").cloned(),
+        })
+    }
+}
+
+/// `jp provider llm auth list`.
+#[derive(Debug)]
 struct List {}
 
-#[derive(Debug, clap::Args)]
+impl CommandArgs for List {
+    fn augment(cmd: Command) -> Command {
+        cmd
+    }
+
+    fn from_matches(_: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {})
+    }
+}
+
+/// `jp provider llm auth logout`.
+#[derive(Debug)]
 struct Logout {
-    /// The provider to log out of, e.g. `anthropic`.
+    /// The provider to log out of.
     target: AuthTarget,
 
-    /// The name of the credential to remove.
-    ///
-    /// When omitted, removes the sole stored credential.
-    #[arg(long)]
+    /// The name of the credential to remove, or the sole stored one.
     name: Option<String>,
+}
+
+impl CommandArgs for Logout {
+    fn augment(cmd: Command) -> Command {
+        cmd.arg(target_arg().help("The provider to log out of, e.g. `anthropic`"))
+            .arg(
+                Arg::new("name")
+                    .long("name")
+                    .value_name("NAME")
+                    .help("The name of the credential to remove")
+                    .long_help(
+                        "The name of the credential to remove.\n\nWhen omitted, removes the sole \
+                         stored credential.",
+                    ),
+            )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            target: required(matches, "target")?,
+            name: matches.get_one("name").cloned(),
+        })
+    }
+}
+
+/// The required positional `TARGET`, naming a provider with stored credentials.
+fn target_arg() -> Arg {
+    Arg::new("target")
+        .required(true)
+        .value_name("TARGET")
+        .value_parser(value_parser!(AuthTarget))
 }
 
 /// A model provider that supports stored credentials.

@@ -1,7 +1,6 @@
 # `jp_term` measures display width two ways
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-08
 - **Label**: package=jp_term

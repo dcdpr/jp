@@ -1,11 +1,11 @@
 # A query editor config retry reverts the draft on disk
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: client=cli
 - **Label**: package=jp_cli
+- **Label**: type=bug
 
 When the "Active Configuration" block in `QUERY_MESSAGE.md` fails to parse, `jp
 query` reopens the editor on the user's text with the error annotated.

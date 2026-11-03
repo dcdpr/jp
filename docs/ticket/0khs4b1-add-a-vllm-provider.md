@@ -1,7 +1,6 @@
 # Add a vLLM provider
 
 - **Status**: Done
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-09-16
 - **Label**: domain=llm

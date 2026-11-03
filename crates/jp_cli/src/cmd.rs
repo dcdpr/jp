@@ -14,55 +14,169 @@ pub(crate) mod time;
 pub(crate) mod turn_selection;
 pub(crate) mod workspace;
 
-use std::{fmt, num::NonZeroU8};
+use std::{fmt, iter, num::NonZeroU8};
 
+use clap::{ArgMatches, Command, error::ErrorKind, value_parser};
 use jp_config::PartialAppConfig;
 use jp_workspace::Workspace;
 use serde_json::Value;
 pub(crate) use target::ConversationLoadRequest;
 
 use super::cmd::conversation_id::format_target_help;
-use crate::{Ctx, bootstrap::WorkspaceRequirement, ctx::IntoPartialAppConfig};
+use crate::{
+    Ctx, Spelling,
+    bootstrap::WorkspaceRequirement,
+    cli::{
+        CommandArgs,
+        flag::{ArgPrompts, Parsed, SettleError, Settled, Stage},
+    },
+    ctx::IntoPartialAppConfig,
+};
 
-#[derive(Debug, clap::Subcommand)]
-#[command(disable_help_subcommand = true, allow_external_subcommands = true)]
-pub(crate) enum Commands {
-    /// Initialize a new workspace.
+/// A `jp` subcommand and its arguments, decided as far as `S` says.
+#[derive(Debug)]
+pub(crate) enum Commands<S: Stage = Settled> {
     Init(init::Init),
-
-    /// Configuration management.
-    #[command(visible_alias = "cfg")]
     Config(config::Config),
-
-    /// Query the assistant.
-    #[command(visible_alias = "q")]
-    Query(query::Query),
-
-    /// Manage attachments.
-    #[command(visible_alias = "a", alias = "attachments")]
+    Query(query::Query<S>),
     Attachment(attachment::Attachment),
-
-    // TODO: Remove once we have proper customizable "command aliases".
-    #[command(name = "aa", hide = true)]
     AttachmentAdd(attachment::add::Add),
-
-    /// Manage conversations.
-    #[command(visible_alias = "c", alias = "conversations")]
     Conversation(conversation::Conversation),
-
-    /// Manage plugins.
     Plugin(plugin::PluginManagement),
-
-    /// Manage workspaces.
-    #[command(visible_alias = "w", alias = "workspaces")]
     Workspace(workspace::Workspace),
-
-    /// Manage provider credentials.
     Provider(provider::Provider),
 
-    /// External plugin subcommand (`jp-<name>` on $PATH or registry).
-    #[command(external_subcommand)]
+    /// A command a plugin provides (`jp-<name>` on `$PATH` or in the registry):
+    /// its name, then its arguments.
     External(Vec<String>),
+}
+
+/// A subcommand named `name`, declaring the arguments of `T` and described in
+/// help by `about`.
+fn mounted<T: CommandArgs>(name: &'static str, about: Option<&'static str>) -> Command {
+    T::augment(Command::new(name)).about(about)
+}
+
+impl Commands<Parsed> {
+    /// Mount every subcommand on `cmd`.
+    ///
+    /// Any other first word names a plugin's command.
+    pub(crate) fn augment(cmd: Command) -> Command {
+        cmd.disable_help_subcommand(true)
+            .allow_external_subcommands(true)
+            .external_subcommand_value_parser(value_parser!(String))
+            .subcommand(mounted::<init::Init>(
+                "init",
+                Some("Initialize a new workspace"),
+            ))
+            .subcommand(
+                mounted::<config::Config>("config", Some("Configuration management"))
+                    .visible_alias("cfg"),
+            )
+            .subcommand(
+                query::Query::augment(Command::new("query"))
+                    .about("Query the assistant")
+                    .visible_alias("q"),
+            )
+            .subcommand(
+                mounted::<attachment::Attachment>("attachment", Some("Manage attachments"))
+                    .visible_alias("a")
+                    .alias("attachments"),
+            )
+            // TODO: Remove once we have proper customizable "command aliases".
+            .subcommand(mounted::<attachment::add::Add>("aa", None).hide(true))
+            .subcommand(
+                mounted::<conversation::Conversation>("conversation", Some("Manage conversations"))
+                    .visible_alias("c")
+                    .alias("conversations"),
+            )
+            .subcommand(mounted::<plugin::PluginManagement>(
+                "plugin",
+                Some("Manage plugins"),
+            ))
+            .subcommand(
+                mounted::<workspace::Workspace>("workspace", Some("Manage workspaces"))
+                    .visible_alias("w")
+                    .alias("workspaces"),
+            )
+            .subcommand(mounted::<provider::Provider>(
+                "provider",
+                Some("Manage provider credentials"),
+            ))
+    }
+
+    /// Read the subcommand `matches` names, and its arguments.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a subcommand's arguments cannot be read, or when
+    /// no subcommand was given.
+    pub(crate) fn from_matches(
+        matches: &ArgMatches,
+        spelling: &Spelling,
+    ) -> Result<Self, clap::Error> {
+        let Some((name, sub)) = matches.subcommand() else {
+            return Err(clap::Error::raw(
+                ErrorKind::MissingSubcommand,
+                "A subcommand is required but one was not provided.\n",
+            ));
+        };
+
+        Ok(match name {
+            "init" => Self::Init(init::Init::from_matches(sub)?),
+            "config" => Self::Config(config::Config::from_matches(sub)?),
+            "query" => Self::Query(query::Query::from_matches(sub, spelling)?),
+            "attachment" => Self::Attachment(attachment::Attachment::from_matches(sub)?),
+            "aa" => Self::AttachmentAdd(attachment::add::Add::from_matches(sub)?),
+            "conversation" => Self::Conversation(conversation::Conversation::from_matches(sub)?),
+            "plugin" => Self::Plugin(plugin::PluginManagement::from_matches(sub)?),
+            "workspace" => Self::Workspace(workspace::Workspace::from_matches(sub)?),
+            "provider" => Self::Provider(provider::Provider::from_matches(sub)?),
+
+            // Only a plugin's command carries the unnamed argument that clap
+            // collects everything after an unknown subcommand into. Without
+            // it, the name is one `augment` mounts and this match forgot.
+            name => {
+                let Ok(args) = sub.try_get_many::<String>("") else {
+                    return Err(clap::Error::raw(
+                        ErrorKind::InvalidSubcommand,
+                        format!("`{name}` is a built-in command `jp` cannot read\n"),
+                    ));
+                };
+
+                let args = args.into_iter().flatten().cloned();
+                Self::External(iter::once(name.to_owned()).chain(args).collect())
+            }
+        })
+    }
+
+    /// Decide the arguments whose meaning depends on `config`, the
+    /// configuration the command runs with before its own flags apply.
+    ///
+    /// `prompts` answers when an argument's meaning needs the user's
+    /// confirmation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when an argument needs confirming and is refused.
+    pub(crate) fn settle(
+        self,
+        config: &PartialAppConfig,
+        prompts: &ArgPrompts,
+    ) -> Result<Commands, SettleError> {
+        Ok(match self {
+            Self::Query(args) => Commands::Query(args.settle(config, prompts)?),
+            Self::Init(args) => Commands::Init(args),
+            Self::Config(args) => Commands::Config(args),
+            Self::Attachment(args) => Commands::Attachment(args),
+            Self::AttachmentAdd(args) => Commands::AttachmentAdd(args),
+            Self::Conversation(args) => Commands::Conversation(args),
+            Self::Plugin(args) => Commands::Plugin(args),
+            Self::Workspace(args) => Commands::Workspace(args),
+            Self::Provider(args) => Commands::Provider(args),
+            Self::External(args) => Commands::External(args),
+        })
+    }
 }
 
 impl Commands {
@@ -100,7 +214,9 @@ impl Commands {
             }
         }
     }
+}
 
+impl<S: Stage> Commands<S> {
     /// Declare what conversations this command needs and whether any should
     /// participate in the config loading pipeline.
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
@@ -137,6 +253,32 @@ impl Commands {
             | Commands::Attachment(_)
             | Commands::AttachmentAdd(_)
             | Commands::External(_) => WorkspaceRequirement::Load,
+        }
+    }
+
+    /// The conversation's own configuration layer, and the paths it explicitly
+    /// clears, for a command that reads one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the conversation's configuration cannot be read.
+    pub(crate) fn apply_conversation_config(
+        &self,
+        workspace: &Workspace,
+        partial: PartialAppConfig,
+        handle: &jp_workspace::ConversationHandle,
+    ) -> Result<(PartialAppConfig, Vec<String>), SettleError> {
+        match self {
+            Commands::Query(_) => query::conversation_config(workspace, partial, handle),
+            Commands::Config(_)
+            | Commands::Attachment(_)
+            | Commands::AttachmentAdd(_)
+            | Commands::Conversation(_)
+            | Commands::Init(_)
+            | Commands::Plugin(_)
+            | Commands::Provider(_)
+            | Commands::Workspace(_)
+            | Commands::External(_) => Ok((partial, Vec::new())),
         }
     }
 
@@ -195,29 +337,6 @@ impl IntoPartialAppConfig for Commands {
             | Commands::Provider(_)
             | Commands::Workspace(_)
             | Commands::External(_) => Ok(partial),
-        }
-    }
-
-    fn apply_conversation_config(
-        &self,
-        workspace: &Workspace,
-        partial: PartialAppConfig,
-        merged_config: Option<&PartialAppConfig>,
-        handle: &jp_workspace::ConversationHandle,
-    ) -> Result<(PartialAppConfig, Vec<String>), Box<dyn std::error::Error + Send + Sync>> {
-        match self {
-            Commands::Query(args) => {
-                args.apply_conversation_config(workspace, partial, merged_config, handle)
-            }
-            Commands::Config(_)
-            | Commands::Attachment(_)
-            | Commands::AttachmentAdd(_)
-            | Commands::Conversation(_)
-            | Commands::Init(_)
-            | Commands::Plugin(_)
-            | Commands::Provider(_)
-            | Commands::Workspace(_)
-            | Commands::External(_) => Ok((partial, Vec::new())),
         }
     }
 }

@@ -1,12 +1,12 @@
 # Let a long-running plugin re-read the workspace configuration
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-10-01
 - **Label**: domain=plugins
 - **Label**: package=jp_cli
 - **Label**: package=jp_plugin
+- **Label**: type=feature
 
 A plugin gets the resolved configuration once, in `init`, and `read_config`
 answers from that same value for the plugin's whole lifetime: `run_plugin`

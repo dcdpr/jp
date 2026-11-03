@@ -10,6 +10,7 @@ doc-valid-idents = [
     "OpenAI",
     "OpenRouter",
     "SQLite",
+    "VitePress",
 
     # Append Clippy's own list of valid identifiers.
     "..",

@@ -1,7 +1,6 @@
 # Decode strict-tool omissions through references and composed schemas
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-11
 - **Label**: domain=llm

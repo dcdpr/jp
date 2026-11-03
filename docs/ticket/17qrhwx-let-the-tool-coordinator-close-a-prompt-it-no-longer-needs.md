@@ -1,7 +1,6 @@
 # Let the tool coordinator close a prompt it no longer needs
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-10-24
 - **Label**: client=cli

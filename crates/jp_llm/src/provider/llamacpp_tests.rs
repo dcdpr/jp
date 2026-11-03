@@ -113,11 +113,11 @@ fn create_request_asks_the_template_to_skip_thinking_when_reasoning_is_off() {
 
     assert_eq!(
         request_body(Some(PartialReasoningConfig::Off))["chat_template_kwargs"],
-        serde_json::json!({ "enable_thinking": false })
+        serde_json::json!({ "enable_thinking": false, "thinking": false })
     );
     assert_eq!(
         request_body(Some(PartialReasoningConfig::Auto))["chat_template_kwargs"],
-        serde_json::json!({ "enable_thinking": true })
+        serde_json::json!({ "enable_thinking": true, "thinking": true })
     );
 }
 

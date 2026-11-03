@@ -1,7 +1,6 @@
 # jp config set reports success for a clear it never records
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-16
 - **Label**: client=cli

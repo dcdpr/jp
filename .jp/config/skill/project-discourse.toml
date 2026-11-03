@@ -10,5 +10,5 @@ and understanding the context of the project. The following tools help you with 
 """
 
 [conversation.tools]
-github_issues = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
-github_pulls = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+github_issues = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+github_pulls = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }

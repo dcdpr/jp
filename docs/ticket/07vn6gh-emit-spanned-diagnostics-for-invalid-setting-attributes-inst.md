@@ -1,7 +1,6 @@
 # Emit spanned diagnostics for invalid `#[setting]` attributes instead of panicking
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-24
 - **Label**: package=schematic

@@ -325,6 +325,74 @@ fn a_full_window_drops_its_oldest_line() {
     }
 }
 
+/// A window-only region with a three-row window, on a terminal tall enough to
+/// allow it.
+fn window_only_stack() -> (RegionStack, RegionId, Vec<u8>) {
+    let mut stack = RegionStack::new();
+    let mut out = Vec::new();
+    let style = RegionStyle::window_only(Duration::ZERO, Duration::from_millis(50))
+        .with_output(OutputLines::Rows(3));
+
+    let terminal = TerminalCapability::interactive(None).with_rows(Some(40));
+    stack.claim_test(1, style, terminal, &mut out);
+
+    (stack, 1, out)
+}
+
+#[test]
+fn a_window_only_region_draws_nothing_while_its_window_is_empty() {
+    let (mut stack, _id, mut out) = window_only_stack();
+
+    stack.redraw(&mut out);
+
+    assert_eq!(String::from_utf8(out).unwrap(), "");
+}
+
+#[test]
+fn a_window_only_region_draws_its_window_rows_alone() {
+    let (mut stack, id, mut out) = window_only_stack();
+
+    stack.push(id, Arc::from("reasoning"), "one");
+    stack.push(id, Arc::from("reasoning"), "two");
+    stack.redraw(&mut out);
+
+    // The last window row is the last row drawn: there is no status row below
+    // it.
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "\n\x1b[1A\r\x1b[Kone\n\r\x1b[Ktwo"
+    );
+}
+
+#[test]
+fn a_window_only_region_left_with_no_rows_erases_the_rows_it_drew() {
+    let (mut stack, id, mut out) = window_only_stack();
+    stack.push(id, Arc::from("reasoning"), "one");
+    stack.push(id, Arc::from("reasoning"), "two");
+    stack.redraw(&mut out);
+    out.clear();
+
+    // A terminal two rows tall has no room for a window row, so the next frame
+    // has nothing in it; the rows already on screen still have to go.
+    stack.entries[0].terminal = TerminalCapability::interactive(None).with_rows(Some(2));
+    stack.redraw(&mut out);
+
+    assert_eq!(String::from_utf8(out).unwrap(), "\r\x1b[K\x1b[1A\r\x1b[K");
+}
+
+#[test]
+fn releasing_a_window_only_region_erases_every_row_it_drew() {
+    let (mut stack, id, mut out) = window_only_stack();
+    stack.push(id, Arc::from("reasoning"), "one");
+    stack.push(id, Arc::from("reasoning"), "two");
+    stack.redraw(&mut out);
+    out.clear();
+
+    stack.release(id, &mut out);
+
+    assert_eq!(String::from_utf8(out).unwrap(), "\r\x1b[K\x1b[1A\r\x1b[K");
+}
+
 #[test]
 fn one_source_renders_verbatim() {
     let (mut stack, id, mut out) = windowed_stack(40);

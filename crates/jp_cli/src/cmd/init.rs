@@ -1,6 +1,7 @@
 use std::{env, fs, io, str::FromStr as _};
 
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
+use clap::{Arg, ArgMatches, Command, value_parser};
 use clean_path::Clean as _;
 use crossterm::style::Stylize as _;
 use duct::cmd;
@@ -16,13 +17,30 @@ use jp_storage::backend::FsStorageBackend;
 use jp_workspace::{DEFAULT_STORAGE_DIR, Workspace};
 use schematic::ConfigEnum as _;
 
-use crate::{cmd::Output, ctx::IntoPartialAppConfig};
+use crate::{cli::CommandArgs, cmd::Output, ctx::IntoPartialAppConfig};
 
-#[derive(Debug, clap::Args)]
+/// `jp init`.
+#[derive(Debug)]
 pub(crate) struct Init {
-    /// Path to initialize the workspace at.
-    /// Defaults to the current directory.
+    /// Path to initialize the workspace at, or the current directory.
     path: Option<Utf8PathBuf>,
+}
+
+impl CommandArgs for Init {
+    fn augment(cmd: Command) -> Command {
+        cmd.arg(
+            Arg::new("path")
+                .value_name("PATH")
+                .value_parser(value_parser!(Utf8PathBuf))
+                .help("Path to initialize the workspace at. Defaults to the current directory"),
+        )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            path: matches.get_one("path").cloned(),
+        })
+    }
 }
 
 impl Init {

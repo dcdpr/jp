@@ -2,6 +2,7 @@ use chrono::{TimeZone as _, Utc};
 use jp_conversation::{ConversationEvent, ConversationStream, RangeBound, event::ChatRequest};
 
 use super::*;
+use crate::cli::parse_args;
 
 /// A stream with `count` turns, one minute apart, starting at 2020-01-01
 /// 00:00:00 UTC.
@@ -273,15 +274,7 @@ fn turn_pos_displays_as_written() {
 
 /// Parse a selection from CLI arguments.
 fn parse(args: &[&str]) -> Result<TurnSelection, clap::Error> {
-    #[derive(clap::Parser)]
-    struct TestCli {
-        #[command(flatten)]
-        selection: TurnSelection,
-    }
-
-    let mut argv = vec!["test"];
-    argv.extend_from_slice(args);
-    clap::Parser::try_parse_from(argv).map(|cli: TestCli| cli.selection)
+    parse_args(args)
 }
 
 #[test]
@@ -731,18 +724,7 @@ fn check_turn_range_rejects_endpoints_past_the_conversation() {
 /// `--turns` is accepted as a plural spelling of `--turn`.
 #[test]
 fn the_turns_alias_parses_the_same_value_as_turn() {
-    #[derive(clap::Parser)]
-    struct TestCli {
-        #[command(flatten)]
-        range: TurnSelection,
-    }
-
-    let parse = |flag: &str| {
-        <TestCli as clap::Parser>::try_parse_from(["x", flag, "2..4"])
-            .unwrap()
-            .range
-            .turn
-    };
+    let parse = |flag: &str| parse(&[flag, "2..4"]).unwrap().turn;
 
     assert_eq!(parse("--turn"), parse("--turns"));
     assert_eq!(

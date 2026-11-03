@@ -35,6 +35,10 @@ use update::cargo_update;
 /// the tail is noise.
 const MAX_DIAGNOSTIC_BYTES: usize = 32_000;
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "reads the shared options, then one arm per subcommand"
+)]
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     // Opt-in to cargo's checksum-based freshness checks (see
     // rust-lang/cargo#14136). Requires nightly cargo, so it defaults to off
@@ -132,6 +136,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
                 profile.as_deref(),
                 t.opt("package")?,
                 checksum_freshness,
+                t.option_or("wiki_check", false),
             )
             .await
         }

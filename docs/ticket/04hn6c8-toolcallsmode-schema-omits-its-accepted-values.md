@@ -1,7 +1,6 @@
 # `ToolCallsMode` schema omits its accepted values
 
 - **Status**: Done
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-18
 - **Label**: package=jp_config

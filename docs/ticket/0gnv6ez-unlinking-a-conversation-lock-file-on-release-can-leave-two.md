@@ -1,7 +1,6 @@
 # Unlinking a conversation lock file on release can leave two holders
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-10
 - **Label**: domain=storage

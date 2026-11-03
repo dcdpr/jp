@@ -1,0 +1,35 @@
+[conversation.tools.rfd_abandon]
+source = "plugin.command.rfd.abandon"
+summary = "Set an RFD aside, keeping the document and the reason."
+description = """
+The RFD is marked Abandoned and opens with a notice giving the reason, above its
+first section; the rest of the document stays as it was. It leaves the priority
+board.
+
+Nothing that depended on it changes. The result names the RFDs that required it,
+for someone to decide what they depend on now. An Implemented, Superseded, or
+already Abandoned RFD can't be abandoned.
+"""
+
+examples = """
+```json
+{"id": "042", "reason": "Solved differently, by RFD 043."}
+```
+"""
+
+run = "ask"
+
+[conversation.tools.rfd_abandon.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.rfd_abandon.parameters.id]
+type = "string"
+required = true
+summary = "The RFD: a number such as `42` or `042`, or a draft id such as `D05`."
+
+[conversation.tools.rfd_abandon.parameters.reason]
+type = "string"
+required = true
+summary = "Why it was set aside, and what was carried forward and where, if anything."

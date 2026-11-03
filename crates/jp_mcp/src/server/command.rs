@@ -35,6 +35,12 @@ use tracing::{debug, error, info, trace, warn};
 
 use super::{Answers, StderrSink};
 
+/// The protocol that added tool calls.
+///
+/// A plugin built before it ignores the `tool` in `init`, finds no command to
+/// run, and exits without an outcome.
+const TOOL_CALL_PROTOCOL: u32 = 12;
+
 /// The `init` fields every plugin a turn runs is told, whichever tool it
 /// answers.
 #[derive(Debug, Clone)]
@@ -315,7 +321,7 @@ pub(super) fn parse_plugin_output(stdout: &str) -> Result<Value, String> {
         Some(_) => Err("answered the tool call, then exited without sending `exit`".to_owned()),
         None => Err(format!(
             "exited without answering the tool call; it may predate `jp` protocol \
-             {PROTOCOL_VERSION}"
+             {TOOL_CALL_PROTOCOL}"
         )),
     }
 }

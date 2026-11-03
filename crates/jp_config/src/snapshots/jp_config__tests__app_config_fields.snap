@@ -26,6 +26,8 @@ expression: "AppConfig::fields()"
     "style.reasoning.background",
     "style.reasoning.display",
     "style.reasoning.extend_across_tool_calls",
+    "style.reasoning.window.rows",
+    "style.reasoning.window.timer",
     "style.reasoning.summary_model.id",
     "style.reasoning.summary_model.parameters.max_tokens",
     "style.reasoning.summary_model.parameters",

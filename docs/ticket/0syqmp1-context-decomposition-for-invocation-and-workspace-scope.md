@@ -1,10 +1,9 @@
 # Context Decomposition for Invocation and Workspace Scope
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-28
-- **Implements**: 113
+- **Label**: tracking-rfd=113
 - **Label**: type=tracking
 
 Tracking ticket for [RFD 113].
@@ -26,7 +25,7 @@ Tracking ticket for [RFD 113].
   the shell.
   Depends on Phase 1; each command group is independently mergeable.
 - **Record the inventory and enact the placements it forces**: Documents the
-  application/frontend capability split under `docs/architecture/`, consolidates
+  application/frontend capability split under `docs/wiki/`, consolidates
   query-draft handling into the storage layer (one path resolution shared by CLI
   and FFI, preserving both conflict policies), and removes `cfg` from
   `PluginToHost::Query` and `list_configs` from the protocol surface (still

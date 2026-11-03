@@ -1,7 +1,6 @@
 # `jp c use ?a --grep` reports no matches for archived conversations
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-05
 - **Label**: client=cli

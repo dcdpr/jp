@@ -1,12 +1,11 @@
 # The access policy never reaches a custom argument formatter
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-04
-- **Implements**: 076
 - **Label**: package=jp_cli
 - **Label**: package=jp_tool
+- **Label**: relevant-rfd=076
 - **Label**: type=bug
 
 A local tool with `style.parameters = "<command>"` runs that command with a

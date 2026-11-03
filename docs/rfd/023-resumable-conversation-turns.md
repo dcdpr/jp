@@ -648,7 +648,7 @@ Depends on Phase 1.
 - [Indexing and Counting Conventions] — why fork's range bounds resolve to
   whole turns and never slice one.
 
-[Indexing and Counting Conventions]: ../architecture/indexing-conventions.md
+[Indexing and Counting Conventions]: ../wiki/00dxyba-indexing-and-counting-conventions.md
 [RFD 005]: 005-first-class-inquiry-events.md
 [RFD 009]: 009-stateful-tool-protocol.md
 [RFD 020]: 020-parallel-conversations.md

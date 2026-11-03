@@ -22,11 +22,11 @@ and `git_unstage` to undo if needed.
 """
 
 [conversation.tools]
-git_add_intent = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-git_list_patches = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "full" }
-git_stage_patch = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-git_stage_patch_lines = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-git_unstage = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+git_add_intent = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+git_list_patches = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "full" }
+git_stage_patch = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+git_stage_patch_lines = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+git_unstage = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
 
 [[assistant.instructions]]
 title = "Git Staging: Surgical Precision"

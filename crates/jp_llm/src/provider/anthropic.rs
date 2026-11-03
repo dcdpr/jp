@@ -42,7 +42,7 @@ use serde_json::{Map, Value, json};
 use tracing::{debug, info, trace, warn};
 
 use self::resolve::Route;
-use super::{Provider, output_schema_is_open, trace_to_tmpfile};
+use super::{CONTINUE_MESSAGE, Provider, output_schema_is_open, trace_to_tmpfile};
 use crate::{
     credential::Credential,
     error::{
@@ -121,15 +121,6 @@ const SUPPORTED_STRING_FORMATS: &[&str] = &[
     "ipv6",
     "uuid",
 ];
-
-/// Synthetic user message injected when the conversation ends with an assistant
-/// message and the model does not support assistant prefill.
-///
-/// This replaces the prefill technique (where an assistant message as the last
-/// event causes the model to continue from that point) for models that require
-/// conversations to end with a user message.
-const CONTINUE_MESSAGE: &str = "Continue your response exactly from where you left off. Do not \
-                                repeat content you already produced.";
 
 /// Default minimum overlap for merge point detection during chaining.
 const CHAIN_MIN_OVERLAP: usize = 5;

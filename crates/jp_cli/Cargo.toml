@@ -59,6 +59,7 @@ clap = { workspace = true, features = [
     "usage",
     "wrap_help",
 ] }
+clap_lex = { workspace = true }
 clean-path = { workspace = true }
 comfy-table = { workspace = true, features = ["tty", "custom_styling"] }
 comrak = { workspace = true }
@@ -125,6 +126,9 @@ chrono = { workspace = true }
 
 [dev-dependencies]
 jp_process = { workspace = true, features = ["mock"] }
+# A terminal model, so the reasoning window is asserted against what a
+# terminal shows rather than the bytes it was sent.
+jp_pty = { workspace = true }
 
 assert_matches = { workspace = true }
 camino-tempfile = { workspace = true }

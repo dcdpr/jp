@@ -1,12 +1,12 @@
 [conversation.tools.ticket_create]
 enable = false
-source = "local"
-format = "unattended"
-command = "just serve-tools {{context}} {{tool}}"
+source = "plugin.command.ticket.create"
+format = "allow"
 summary = "File a work item as a ticket under docs/ticket/."
 description = """
-Create a ticket: a bug, a feature, or a chore, recorded as a markdown file in
-the repository and tracked on the board.
+Create a ticket: a work item recorded as a markdown file in the repository and
+tracked on the board. Its labels say what kind of work it is and which part of
+the system it lands in.
 
 Write a ticket when the work is clear enough to start, and an RFD when it needs
 a design first. The signal is whether there is a decision to argue about: "the
@@ -18,19 +18,30 @@ The ticket opens at status `Todo`, draws a collision-resistant id, and is
 attributed to you (`jp`). The title becomes the filename slug, so
 keep it short and specific: at most 60 characters, or the tool asks you for a
 shorter one before it files anything.
+
+Work that splits into several items sharing one goal is filed as a parent and
+its children: the parent holds the shared context and tracks the group, and
+each child names it as its `parent`. Write what the children share once, in the
+parent's description, rather than repeating it in each. File the children in
+one call.
 """
 
 examples = """
 File a bug with a description:
 ```json
-{"kind": "bug", "title": "Tool call header misaligned", "body": "The header \
-renders one column left of the body when the terminal is narrower than 80 \
-columns.", "labels": ["client=cli", "package=jp_printer"]}
+{"title": "Tool call header misaligned", "body": "The header renders one \
+column left of the body when the terminal is narrower than 80 columns.", \
+"labels": ["type=bug", "client=cli", "package=jp_printer"]}
 ```
 
-File a chore with no description:
+File a task with no description:
 ```json
-{"kind": "chore", "title": "Bump the deny list"}
+{"title": "Bump the deny list", "labels": ["type=task"]}
+```
+
+File a task under a parent:
+```json
+{"title": "Bound tool output", "labels": ["type=task"], "parent": "T-02wt0kx"}
 ```
 """
 
@@ -39,16 +50,15 @@ File a chore with no description:
 # wrote the title, so the assistant shortens it.
 questions.shorter_title.target = "assistant"
 
+# Several tickets filed in one call, such as the children of a new parent, are
+# created one at a time in the order written, so their ids, and the order they
+# sit in on the board, follow it. One that fails says nothing about the next.
+fan_out = { concurrency = 1 }
+
 [conversation.tools.ticket_create.style]
-parameters = "just serve-tools {{context}} {{tool}}"
+parameters = "tool"
 inline_results = "full"
 results_file_link = "off"
-
-[conversation.tools.ticket_create.parameters.kind]
-type = "string"
-required = true
-enum = ["bug", "feature", "chore"]
-summary = "What kind of work the ticket describes."
 
 [conversation.tools.ticket_create.parameters.title]
 type = "string"
@@ -60,38 +70,40 @@ type = "string"
 required = false
 summary = "The description, as markdown. Omit for a ticket whose title says everything."
 
-[conversation.tools.ticket_create.parameters.implements]
+[conversation.tools.ticket_create.parameters.parent]
 type = "string"
 required = false
-summary = "The RFD this work comes from, e.g. `045`."
+summary = "The ticket to file this one under, such as `T-02wt0kx`."
 description = """
-Set this when the work comes from an accepted RFD, whether the ticket covers the
-whole implementation or one phase of it.
-
-The RFD's *tracking* ticket carries this field together with the label
-`type=tracking`, and that one ticket is what the RFD priority board reports as
-in development. An RFD has at most one, filed by `just rfd-track`, so name
-`type=tracking` here only when the RFD has none.
+The parent tracks a group of related tickets and holds what they share. It has
+to exist, can't itself sit under a parent, and can't be Done.
 """
 
+# Not marked required here: `jp ticket tools sync` marks it when the board
+# requires a label, and a value set here would compete with that one.
 [conversation.tools.ticket_create.parameters.labels]
 type = "array"
-required = false
-summary = "The areas of the system this ticket touches, as `key=value`."
+summary = "What kind of work this is and where it lands, as `key=value` labels."
 description = """
-Labels group tickets by area, orthogonally to `kind`: `kind` says what type of
-work it is, a label says what part of the system it lands in. Apply every label
-that fits, or none when nothing does.
+Labels classify a ticket: `type` says what kind of work it is, and the others
+say which part of the system it lands in. Give it exactly one `type`, which
+every ticket carries, and every other label that fits.
 
 Each label is a `key=value` pair. A key may be named more than once, which is
 how a ticket spanning two crates says so: `["package=jp_cli",
 "package=jp_config"]`.
 
-The set is closed and defined in `docs/ticket/.labels.json`. A label outside it
-is refused, and the refusal names the ones you can use.
+A ticket whose work belongs to an RFD names it: `relevant-rfd=091`, once per
+RFD. An RFD's tracking ticket names it with `tracking-rfd=091` instead, and an
+RFD has at most one; `rfd_show` says whether it has one and which labels it
+takes.
+
+The labels are defined in the workspace configuration. A label outside them is
+refused, and the refusal names the ones you can use.
 """
 
-# The accepted values live in `labels.toml`, generated from
-# `docs/ticket/.labels.json` by `just ticket-labels-sync`.
+# The accepted values live in `synced.toml`, generated from
+# `plugins.command.ticket.options.labels` by
+# `jp ticket tools sync .jp/mcp/tools/ticket`.
 [conversation.tools.ticket_create.parameters.labels.items]
 type = "string"

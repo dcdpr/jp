@@ -1,7 +1,6 @@
 # Record per-response token usage as a conversation event
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-09-18
 - **Label**: domain=conversation

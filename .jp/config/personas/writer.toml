@@ -7,8 +7,8 @@ extends = [
 ]
 
 [conversation.tools]
-'*'.run = "unattended"
-github_pr_diff = { enable = true, run = "unattended" }
+'*'.run = "allow"
+github_pr_diff = { enable = true, run = "allow" }
 
 [conversation]
 attachments = [

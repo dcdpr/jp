@@ -198,10 +198,10 @@ these tools exist to reach.\
 """
 
 [conversation.tools]
-debug_app_launch = { enable = true, run = "unattended" }
-debug_app_snapshot = { enable = true, run = "unattended" }
-debug_app_screenshot = { enable = true, run = "unattended" }
-debug_app_pixels = { enable = true, run = "unattended" }
-debug_app_drive = { enable = true, run = "unattended" }
-debug_app_profile = { enable = true, run = "unattended" }
-debug_app_quit = { enable = true, run = "unattended" }
+debug_app_launch = { enable = true, run = "allow" }
+debug_app_snapshot = { enable = true, run = "allow" }
+debug_app_screenshot = { enable = true, run = "allow" }
+debug_app_pixels = { enable = true, run = "allow" }
+debug_app_drive = { enable = true, run = "allow" }
+debug_app_profile = { enable = true, run = "allow" }
+debug_app_quit = { enable = true, run = "allow" }

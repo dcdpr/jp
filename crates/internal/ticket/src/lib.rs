@@ -7,9 +7,9 @@
 //! # Tool call header misaligned
 //!
 //! - **Status**: Todo
-//! - **Kind**: Bug
 //! - **Authors**: John Doe
 //! - **Date**: 2026-08-05
+//! - **Label**: type=bug
 //!
 //! The header renders one column left of the body below 80 columns.
 //!
@@ -30,16 +30,23 @@
 //! separator, the metadata, and the body, leaving everything above untouched.
 //!
 //! [`id`] defines the identifier, [`parse`] reads a document, [`render`] writes
-//! one, [`store`] holds the file operations (id allocation, create, comment,
-//! close, list, import), and [`import`] carries the rules for content that
-//! comes from upstream.
+//! one, [`store`] holds the file operations (create, comment, close, list,
+//! import), [`board`] holds the order within each column of the board, and
+//! [`import`] carries the rules for content that comes from upstream.
+//! The id format, the [`epoch`] a directory's ids count time from, and id
+//! allocation are the `doc` crate's.
 //!
-//! Labels are `key=value` annotations from [`jp_label`]; the board's vocabulary
-//! lives in `.labels.json` next to the ticket files and is read by
-//! [`store::vocabulary`].
+//! Labels are `key=value` annotations from [`jp_label`], and are how a board
+//! classifies its tickets: what kind of work a ticket is, which part of the
+//! system it touches.
+//! The board's vocabulary is the caller's to read, from wherever it keeps its
+//! configuration, and a label write takes it as a [`Vocabulary`].
 //!
 //! The id is in the filename and nowhere else, so renaming a ticket is a rename
 //! and there is no second copy to keep in step.
+//!
+//! A ticket can sit under another, its parent, by naming it in a `Parent`
+//! field; [`parent`] holds the rules that relation keeps.
 //!
 //! The format is specified in `docs/rfd/100-in-repo-ticket-tracking.md`.
 
@@ -47,23 +54,27 @@ use std::{fmt, str::FromStr};
 
 use serde::Serialize;
 
+pub mod board;
+pub mod check;
 pub mod id;
 pub mod import;
+pub mod parent;
 pub mod parse;
 pub mod render;
 pub mod store;
 
+pub use doc::epoch::{self, Epoch};
 pub use id::TicketId;
-pub use jp_label::{Labels, Selector, Vocabulary};
-
-/// The vocabulary file, inside the ticket directory.
-pub const LABELS_FILE: &str = ".labels.json";
+pub use jp_label::{Labels, Selector, Unique, Vocabulary};
 
 /// The metadata key one label is written under.
 ///
 /// Singular, and repeated once per `key=value` pair, so no line grows with the
 /// number of labels a ticket carries.
 pub const LABEL_KEY: &str = "Label";
+
+/// The metadata key a ticket names its parent under.
+pub const PARENT_KEY: &str = "Parent";
 
 /// Where a ticket sits on the board.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -105,40 +116,6 @@ impl FromStr for Status {
     }
 }
 
-/// What kind of work a ticket describes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub enum Kind {
-    Bug,
-    Feature,
-    Chore,
-}
-
-impl fmt::Display for Kind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Bug => "Bug",
-            Self::Feature => "Feature",
-            Self::Chore => "Chore",
-        })
-    }
-}
-
-impl FromStr for Kind {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "bug" => Ok(Self::Bug),
-            "feature" => Ok(Self::Feature),
-            "chore" => Ok(Self::Chore),
-            _ => Err(ParseError::InvalidValue {
-                field: "Kind",
-                value: s.to_owned(),
-            }),
-        }
-    }
-}
-
 /// A ticket's metadata block.
 ///
 /// The repository owns every field here: a GitHub import replaces the title,
@@ -146,7 +123,6 @@ impl FromStr for Kind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Metadata {
     pub status: Status,
-    pub kind: Kind,
     /// The labels the ticket carries.
     ///
     /// Read as written, without checking them against the vocabulary: a
@@ -155,25 +131,26 @@ pub struct Metadata {
     pub labels: Labels,
     pub authors: String,
     pub date: String,
-    pub blocked_by: Option<String>,
-    pub implements: Option<String>,
     pub promoted_to: Option<String>,
     pub github: Option<String>,
+    /// The ticket this one sits under.
+    ///
+    /// The child names its parent and the parent names nothing, so a parent's
+    /// children are found by reading the other tickets.
+    pub parent: Option<TicketId>,
 }
 
 /// The parts of a ticket that are settled when it is filed.
 ///
-/// A struct rather than a run of positional arguments: five of these are
+/// A struct rather than a run of positional arguments: four of these are
 /// strings, and at a call site nothing would catch two of them being swapped.
 pub struct NewTicket<'a> {
-    pub kind: Kind,
     pub title: &'a str,
     pub authors: &'a str,
     pub date: &'a str,
-    /// The RFD this work comes from, if any.
-    pub implements: Option<&'a str>,
     pub labels: &'a Labels,
     pub description: &'a str,
+    pub parent: Option<TicketId>,
 }
 
 /// One comment on a ticket.
@@ -203,6 +180,23 @@ pub struct Ticket {
     pub comments: Vec<Comment>,
 }
 
+impl Ticket {
+    /// Whether `query` appears in the title, the description, or a comment,
+    /// ignoring case.
+    ///
+    /// The metadata block is not searched: labels and status have filters of
+    /// their own.
+    #[must_use]
+    pub fn mentions(&self, query: &str) -> bool {
+        let query = query.to_lowercase();
+        let contains = |text: &str| text.to_lowercase().contains(&query);
+
+        contains(&self.title)
+            || contains(&self.description)
+            || self.comments.iter().any(|comment| contains(&comment.body))
+    }
+}
+
 /// A document that doesn't hold a well-formed ticket.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
@@ -214,8 +208,6 @@ pub enum ParseError {
     MissingField(&'static str),
     /// A metadata field holds a value the format doesn't define.
     InvalidValue { field: &'static str, value: String },
-    /// A string that isn't a ticket id.
-    Id(String),
 }
 
 impl fmt::Display for ParseError {
@@ -229,7 +221,6 @@ impl fmt::Display for ParseError {
             Self::InvalidValue { field, value } => {
                 write!(f, "`{value}` is not a valid `{field}` value.")
             }
-            Self::Id(value) => write!(f, "`{value}` is not a ticket id (try T-02wt0kx)."),
         }
     }
 }

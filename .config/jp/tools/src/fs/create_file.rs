@@ -5,10 +5,10 @@ use std::{
 
 use crossterm::style::Stylize;
 use jp_md::format::Formatter;
-use jp_tool::{Capability, Outcome, Question};
+use jp_tool::{Capability, EntryKind, Outcome, Question};
 use serde_json::{Map, Value};
 
-use super::utils::{EntryKind, authorize, resolve_workspace_entry};
+use super::utils::{authorize, resolve_workspace_entry};
 use crate::{
     Context,
     util::{ToolResult, error, fail},

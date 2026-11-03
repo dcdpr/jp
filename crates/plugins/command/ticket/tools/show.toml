@@ -1,0 +1,64 @@
+[conversation.tools.ticket_show]
+source = "plugin.command.ticket.show"
+summary = "Read one ticket's metadata, and its description and discussion when asked."
+description = """
+Print a ticket's metadata: its title, path, status, labels, authors, and date.
+Pass `description` or `comments` to add those; the result names anything it
+left out.
+
+A ticket filed under a parent names it. The parent's description is the context
+its children share, so read it with `parent_description` before working on one
+of them. A parent lists its children with their statuses and how many are done.
+
+Comments are numbered so a reply can name the comment it answers
+(`ticket_comment` takes that number as `re`). The whole discussion comes back in
+one call; there is no pagination.
+"""
+
+examples = """
+Check a ticket's status and labels:
+```json
+{"id": "T-02wt0kx"}
+```
+
+Read the whole ticket before replying to it:
+```json
+{"id": "T-02wt0kx", "description": true, "comments": true}
+```
+
+Read a ticket and the brief it shares with its siblings before starting on it:
+```json
+{"id": "T-02wt0kx", "description": true, "parent_description": true}
+```
+"""
+
+run = "allow"
+
+# Reads are independent and have no side effects, so several run at once and a
+# missing ticket says nothing about the next.
+fan_out = true
+
+[conversation.tools.ticket_show.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.ticket_show.parameters.id]
+type = "string"
+required = true
+summary = "The ticket to read: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`."
+
+[conversation.tools.ticket_show.parameters.description]
+type = "boolean"
+required = false
+summary = "Add the ticket's description."
+
+[conversation.tools.ticket_show.parameters.comments]
+type = "boolean"
+required = false
+summary = "Add the discussion, each comment numbered for replies."
+
+[conversation.tools.ticket_show.parameters.parent_description]
+type = "boolean"
+required = false
+summary = "Add the description of the ticket's parent: the context it shares with its siblings."

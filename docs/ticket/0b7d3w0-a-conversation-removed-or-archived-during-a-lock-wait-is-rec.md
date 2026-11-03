@@ -1,7 +1,6 @@
 # A conversation removed or archived during a lock wait is recreated by the waiting writer
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-31
 - **Label**: domain=conversation

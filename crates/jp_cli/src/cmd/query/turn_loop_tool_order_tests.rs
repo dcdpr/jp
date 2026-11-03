@@ -1063,7 +1063,7 @@ async fn formatter_questions_to_the_assistant_are_answered_for_each_call() {
 /// the prompt to close: it would otherwise land on a terminal the prompt owns.
 #[tokio::test]
 async fn text_streamed_during_an_approval_prompt_waits_for_it_to_close() {
-    timeout(Duration::from_secs(20), async {
+    Box::pin(timeout(Duration::from_secs(20), async {
         let tmp = tempdir().unwrap();
         let marker = tmp.path().join("prepared-call-2");
         let config = described_tool(&json!({"run": "ask"}));
@@ -1104,7 +1104,7 @@ async fn text_streamed_during_an_approval_prompt_waits_for_it_to_close() {
         );
         assert_eq!(turn.out, "Meanwhile, one more.\n\nDone.\n\n");
         assert_eq!(runs.load(Ordering::SeqCst), 2);
-    })
+    }))
     .await
     .unwrap();
 }
@@ -1113,7 +1113,7 @@ async fn text_streamed_during_an_approval_prompt_waits_for_it_to_close() {
 /// and takes the call from the start again.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_restart_while_a_call_is_being_prepared_prepares_it_again() {
-    timeout(Duration::from_secs(10), async {
+    Box::pin(timeout(Duration::from_secs(10), async {
         let config = described_tool(&json!({"run": "allow"}));
         let runs = Arc::new(AtomicUsize::new(0));
         let stalled = Arc::new(Notify::new());
@@ -1150,7 +1150,7 @@ async fn a_restart_while_a_call_is_being_prepared_prepares_it_again() {
             2,
             "the turn continued after the restarted call"
         );
-    })
+    }))
     .await
     .unwrap();
 }
@@ -1209,7 +1209,7 @@ async fn a_retried_response_withdraws_an_open_formatter_question() {
 /// and nothing runs.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stop_while_the_assistant_answers_a_formatters_question_cancels_it() {
-    timeout(Duration::from_secs(10), async {
+    Box::pin(timeout(Duration::from_secs(10), async {
         let config = described_tool(&json!({
             "run": "allow",
             "questions": {"confirm": {"target": "assistant"}},
@@ -1253,7 +1253,7 @@ async fn a_stop_while_the_assistant_answers_a_formatters_question_cancels_it() {
             2,
             "a stopped turn sends no follow-up"
         );
-    })
+    }))
     .await
     .unwrap();
 }

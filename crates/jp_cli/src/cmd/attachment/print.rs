@@ -1,11 +1,36 @@
-use super::register_attachment;
-use crate::{cmd::Output, ctx::Ctx, parser::AttachmentUrlOrPath};
+use clap::{Arg, ArgMatches, Command, value_parser};
 
-#[derive(Debug, clap::Args)]
-#[command(arg_required_else_help(true))]
+use super::register_attachment;
+use crate::{
+    cli::{CommandArgs, required},
+    cmd::Output,
+    ctx::Ctx,
+    parser::AttachmentUrlOrPath,
+};
+
+/// `jp attachment print`.
+#[derive(Debug)]
 pub(crate) struct Print {
     /// The attachment URL to preview.
     attachment: AttachmentUrlOrPath,
+}
+
+impl CommandArgs for Print {
+    fn augment(cmd: Command) -> Command {
+        cmd.arg_required_else_help(true).arg(
+            Arg::new("attachment")
+                .required(true)
+                .value_name("ATTACHMENT")
+                .value_parser(value_parser!(AttachmentUrlOrPath))
+                .help("The attachment URL to preview"),
+        )
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            attachment: required(matches, "attachment")?,
+        })
+    }
 }
 
 impl Print {

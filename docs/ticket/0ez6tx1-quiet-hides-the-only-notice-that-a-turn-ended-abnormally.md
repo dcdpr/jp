@@ -1,7 +1,6 @@
 # `--quiet` hides the only notice that a turn ended abnormally
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-07
 - **Label**: client=cli

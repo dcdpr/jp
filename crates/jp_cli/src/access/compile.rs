@@ -4,6 +4,8 @@
 //! Compilation canonicalizes each `fs` rule path, runs the approval lifecycle
 //! for `external` rules, and bakes the approved canonical target into the
 //! compiled [`FsRule`].
+//! An approved target that contains the workspace gets a deny-all rule where
+//! the workspace reappears inside it (see [`FsRule::workspace_exclusion`]).
 //! `env` rules are validated for pattern syntax and carried through as-is.
 //! The cooperative checker and the OS sandbox both consume the resulting
 //! policy.
@@ -118,9 +120,10 @@ pub fn compile_fs(
 
         match approve(&lexical_str, &canonical) {
             ApprovalDecision::Approved => {
-                compiled
-                    .rules
-                    .push(build_rule(rule, lexical, Some(canonical)));
+                let compiled_rule = build_rule(rule, lexical, Some(canonical));
+                let exclusion = compiled_rule.workspace_exclusion(&root_canonical);
+                compiled.rules.push(compiled_rule);
+                compiled.rules.extend(exclusion);
             }
             ApprovalDecision::Rejected => {
                 compiled.warnings.push(format!(

@@ -1,7 +1,6 @@
 # Enforce resolved tool argument constraints before every dispatch
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-21
 - **Label**: domain=llm

@@ -1,6 +1,6 @@
 [conversation.tools.rust_crates_search]
 enable = false
-run = "unattended"
+run = "allow"
 
 source = "mcp.bookworm.crates_search"
 summary = "Search crates.io for crates matching a query."

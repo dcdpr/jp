@@ -273,6 +273,38 @@ fn external_rule_approved_bakes_target() {
     assert!(compiled_rule.update());
 }
 
+/// `--mount w=../..` from `<tmp>/a/b`: the mount reaches everything under
+/// `<tmp>` except the workspace.
+#[cfg(unix)]
+#[test]
+fn external_rule_containing_the_workspace_excludes_it() {
+    use std::os::unix::fs::symlink;
+
+    let grand = camino_tempfile::tempdir().unwrap();
+    let grand_canonical = grand.path().canonicalize_utf8().unwrap();
+    let root = grand_canonical.join("a/b");
+    std::fs::create_dir_all(&root).unwrap();
+    symlink(&grand_canonical, root.join("w")).unwrap();
+
+    let mut external_rule = rule("w");
+    external_rule.external = Some(true);
+    external_rule.write = Some(true);
+    let config = fs_config(vec![rule("."), external_rule]);
+
+    let compiled = compile_fs(&config, &root, |_, _| ApprovalDecision::Approved).unwrap();
+
+    assert_eq!(compiled.rules, [
+        FsRule::new("").with_read(true),
+        FsRule::new("w")
+            .with_external(true)
+            .with_approved_target(Some(grand_canonical))
+            .with_read(true)
+            .with_write(true),
+        FsRule::new("w/a/b"),
+    ]);
+    assert!(compiled.warnings.is_empty());
+}
+
 #[cfg(unix)]
 #[test]
 fn external_rule_rejected_is_dropped_with_warning() {

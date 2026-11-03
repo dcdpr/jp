@@ -9,26 +9,38 @@
 //! Markdown structure inside doc comments — reference link definitions, block
 //! quotes, lists, code blocks, headings, tables — is preserved verbatim; only
 //! paragraph contents are reflowed.
+//!
+//! The library formats text: [`format`] holds the entry points, and [`config`]
+//! reads the style a `.comfort.toml` file sets.
+//! The `cli` feature, on by default, adds what the `comfort` and
+//! `cargo-comfort` binaries need on top: argument parsing, the workspace walk,
+//! and `--check` diffs.
+//!
+//! [`format`]: crate::format
 
+#[cfg(feature = "cli")]
 pub mod cli;
+pub mod config;
 pub mod extract;
 pub mod format;
+#[cfg(feature = "cli")]
 pub mod run;
 pub mod sentence;
+#[cfg(feature = "cli")]
 pub mod walk;
 
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
 
-use std::{
-    ffi::OsString,
-    path::{Path, PathBuf},
-    process::ExitCode,
-};
+use std::path::PathBuf;
+#[cfg(feature = "cli")]
+use std::{ffi::OsString, path::Path, process::ExitCode};
 
+#[cfg(feature = "cli")]
 use clap::Parser;
 
+#[cfg(feature = "cli")]
 use crate::cli::{Cli, Invocation};
 
 /// Default maximum line width for wrapped doc-comment content.
@@ -40,6 +52,7 @@ pub const DEFAULT_MAX_WIDTH: usize = 80;
 ///
 /// `eprintln!` is otherwise denied by the workspace lints — allowing it here
 /// keeps fatal-error reporting in one place.
+#[cfg(feature = "cli")]
 #[allow(clippy::print_stderr)]
 #[must_use]
 pub fn cli_main() -> ExitCode {
@@ -62,6 +75,7 @@ pub fn cli_main() -> ExitCode {
 /// (`cargo-comfort`).
 /// For the cargo case, cargo passes the subcommand name (`comfort`) as
 /// `args[1]`, which we strip before handing args to clap.
+#[cfg(feature = "cli")]
 fn parse_invocation(mut raw: Vec<OsString>) -> (Invocation, Vec<OsString>) {
     let Some(bin) = raw
         .first()
@@ -90,13 +104,15 @@ pub enum Error {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 
+    #[cfg(feature = "cli")]
     #[error("cargo metadata: {0}")]
     CargoMetadata(#[from] cargo_metadata::Error),
 
+    #[cfg(feature = "cli")]
     #[error("walk: {0}")]
     Walk(#[from] ignore::Error),
 
-    /// Failed to read a source file.
+    /// Failed to read a source or configuration file.
     /// Carries the path so the user knows which file failed when walking many
     /// at once.
     #[error("failed to read {path}: {source}")]
@@ -106,7 +122,16 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    /// A `.comfort.toml` that doesn't hold a valid configuration.
+    #[error("invalid configuration in {path}: {source}")]
+    Config {
+        path: PathBuf,
+        #[source]
+        source: toml::de::Error,
+    },
+
     /// Failed to write a reformatted file back to disk.
+    #[cfg(feature = "cli")]
     #[error("failed to write {path}: {source}")]
     WriteFile {
         path: PathBuf,
@@ -116,11 +141,13 @@ pub enum Error {
 
     /// One of the names passed to `-p`/`--package` or `--exclude` doesn't match
     /// any workspace package.
+    #[cfg(feature = "cli")]
     #[error("unknown package: {0}")]
     UnknownPackage(String),
 
     /// Reported in `--check` mode when at least one file would be reformatted.
     /// Carries the count of files that differ.
+    #[cfg(feature = "cli")]
     #[error("{0} file(s) would be reformatted")]
     CheckFailed(usize),
 }

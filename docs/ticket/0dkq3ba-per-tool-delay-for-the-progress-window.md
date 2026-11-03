@@ -1,9 +1,9 @@
 # Per-tool delay for the progress window
 
 - **Status**: Todo
-- **Kind**: Enhancement
 - **Authors**: jp
 - **Date**: 2026-09-07
+- **Label**: type=enhancement
 
 `style.tool_call.progress.delay_secs` is one value for the whole execution
 batch, so every running tool joins the window at the same moment.

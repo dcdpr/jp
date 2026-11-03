@@ -860,7 +860,7 @@ Can be iterated on independently.
 - [interminai] — prior art for PTY-based tool interaction, validates the
   approach.
 
-[Query Stream Pipeline]: ../architecture/query-stream-pipeline.md
+[Query Stream Pipeline]: ../wiki/00dxyb6-query-stream-pipeline-architecture.md
 [RFD 010]: 010-pty-infrastructure-and-interactive-tool-sdk.md
 [RFD 011]: 011-system-notification-queue.md
 [RFD 028]: 028-structured-inquiry-system-for-tool-questions.md

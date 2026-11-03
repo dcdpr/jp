@@ -1,7 +1,6 @@
 # Replace duplicated full provider catalogs with focused mapping fixtures
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-21
 - **Label**: domain=llm

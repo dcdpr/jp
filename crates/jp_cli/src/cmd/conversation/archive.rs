@@ -1,8 +1,10 @@
+use clap::{Arg, ArgMatches, Command, value_parser};
 use crossterm::style::Stylize as _;
 use jp_conversation::{Conversation, ConversationId};
 use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
+    cli::CommandArgs,
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
@@ -34,31 +36,53 @@ use crate::{
 /// Archived conversations are hidden from listings and pickers.
 /// Use `jp c ls --archived` to list them, `jp c unarchive` to restore them, or
 /// `jp c use archived` to unarchive and activate.
-#[derive(Debug, clap::Args)]
+#[derive(Debug)]
 pub(crate) struct Archive {
-    #[command(flatten)]
     target: PositionalIds<true, true>,
 
     /// Archive all conversations created in a `[--created-since,
     /// --created-before)` range.
-    #[command(flatten)]
     range: CreationRange,
 
     /// Archive all conversations inactive since a given time.
-    ///
-    /// Accepts the same formats as `--created-since`.
-    /// Filters on `last_activated_at` (when the conversation was last used)
-    /// rather than its creation date, which makes this distinct from the
-    /// `--created-since`/`--created-before` range.
-    #[arg(long, conflicts_with = "id")]
     inactive_since: Option<TimeThreshold>,
 
     /// Confirmation prompting: `--confirm`, `--no-confirm`, or `--yes`.
     ///
     /// Without a flag, prompts only for pinned or active conversations, or when
     /// archiving more than one conversation at once.
-    #[command(flatten)]
     confirm: ConfirmFlag,
+}
+
+impl CommandArgs for Archive {
+    fn augment(cmd: Command) -> Command {
+        let cmd = PositionalIds::<true, true>::augment(cmd);
+        let cmd = CreationRange::<true>::augment(cmd).arg(
+            Arg::new("inactive_since")
+                .long("inactive-since")
+                .value_name("INACTIVE_SINCE")
+                .value_parser(value_parser!(TimeThreshold))
+                .conflicts_with("id")
+                .help("Archive all conversations inactive since a given time")
+                .long_help(
+                    "Archive all conversations inactive since a given time.\n\nAccepts the same \
+                     formats as `--created-since`. Filters on `last_activated_at` (when the \
+                     conversation was last used) rather than its creation date, which makes this \
+                     distinct from the `--created-since`/`--created-before` range.",
+                ),
+        );
+
+        ConfirmFlag::augment(cmd)
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            target: PositionalIds::from_matches(matches)?,
+            range: CreationRange::from_matches(matches)?,
+            inactive_since: matches.get_one("inactive_since").copied(),
+            confirm: ConfirmFlag::from_matches(matches)?,
+        })
+    }
 }
 
 impl Archive {

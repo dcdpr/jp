@@ -1,7 +1,6 @@
 # Relative conversation dates never refresh while a window stays open
 
 - **Status**: Todo
-- **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-20
 - **Label**: client=macos

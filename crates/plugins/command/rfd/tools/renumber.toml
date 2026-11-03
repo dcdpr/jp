@@ -1,0 +1,49 @@
+[conversation.tools.rfd_renumber]
+source = "plugin.command.rfd.renumber"
+summary = "Move an RFD to another id in its id space."
+description = """
+A draft moves to another draft slot, and a published RFD to another permanent
+number; publishing a draft is `rfd_promote`'s job. The file keeps its slug, and
+the references to it in the RFDs, the drafts, and the tickets are rewritten,
+along with its place on the priority board. Mentions elsewhere in the workspace
+are reported, not rewritten.
+
+When two files share an id after a merge, name the one to move by its file
+name. Mentions of the shared id outside that file are then left alone, since
+they could mean either document. Renumbering a published RFD changes its site
+URL.
+"""
+
+examples = """
+The next free draft slot:
+```json
+{"id": "D24"}
+```
+
+A given number, when the next one is taken on another branch:
+```json
+{"id": "095", "new": "097"}
+```
+
+One of two files sharing an id:
+```json
+{"id": "D24-tool-limits.md"}
+```
+"""
+
+run = "ask"
+
+[conversation.tools.rfd_renumber.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.rfd_renumber.parameters.id]
+type = "string"
+required = true
+summary = "The RFD: its id, or its file name to pick one of two files sharing an id."
+
+[conversation.tools.rfd_renumber.parameters.new]
+type = "string"
+required = false
+summary = "The new id, in the same id space. The next free one when left out."

@@ -4,8 +4,9 @@
 //! outside Rust sources — RFDs, tickets, READMEs, the docs site.
 //! Doc comments inside `.rs` files are `cargo_format`'s territory.
 //!
-//! The `comfort` flags match the `fmt-markdown-ci` recipe in the justfile, so a
-//! file this tool leaves alone is a file CI accepts.
+//! `comfort` reads its style from `.comfort.toml`, as the `fmt-markdown-ci`
+//! recipe in the justfile does, so a file this tool leaves alone is a file CI
+//! accepts.
 
 use std::collections::BTreeSet;
 
@@ -61,14 +62,7 @@ fn markdown_format_impl<R: ProcessRunner>(
         },
     };
 
-    let mut args = vec![
-        "--list-changed",
-        "--format-markdown",
-        "--reference-links",
-        "--prune-reference-links",
-        "--language",
-        "markdown",
-    ];
+    let mut args = vec!["--list-changed", "--language", "markdown"];
     if selected.is_empty() {
         args.push("--workspace");
     } else {

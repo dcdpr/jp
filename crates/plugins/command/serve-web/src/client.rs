@@ -406,7 +406,11 @@ impl PluginClient {
 
     /// Send an exit message to the host.
     pub fn send_exit(&self, code: u8) {
-        drop(self.send(&PluginToHost::Exit(ExitMessage { code, reason: None })));
+        drop(self.send(&PluginToHost::Exit(ExitMessage {
+            code,
+            reason: None,
+            expected: false,
+        })));
     }
 
     fn next_id(&self) -> String {
@@ -539,9 +543,12 @@ fn reader_loop(reader: impl BufRead, inner: &Inner, shutdown_tx: &watch::Sender<
                 let _ = shutdown_tx.send(true);
             }
 
-            // `Composed` answers a `Compose` request, which this plugin never
-            // sends: it serves HTTP and has no prompts to raise.
-            HostToPlugin::Init(_) | HostToPlugin::Describe | HostToPlugin::Composed(_) => {
+            // `Composed` and `Edited` answer `compose` and `edit_files`, which
+            // this plugin never sends: it serves HTTP and has no terminal to use.
+            HostToPlugin::Init(_)
+            | HostToPlugin::Describe
+            | HostToPlugin::Composed(_)
+            | HostToPlugin::Edited(_) => {
                 warn!("Unexpected message after startup");
             }
 

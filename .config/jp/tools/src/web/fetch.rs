@@ -15,6 +15,7 @@ mod browser;
 mod html;
 mod markdown;
 mod options;
+mod pdf;
 
 use options::{Strategy, WebFetchOptions};
 
@@ -54,6 +55,13 @@ pub(crate) async fn web_fetch(
     // than silently failing.
     if let Some(redirect) = github_issue_or_pr_redirect(&url) {
         return error(redirect);
+    }
+
+    // A PDF has no markdown twin to probe for, and a headless browser treats it
+    // as a download and prints nothing, so PDF URLs always take the plain
+    // fetch, which converts them.
+    if pdf::has_pdf_path(&url) {
+        return html::fetch(&url, list_sections, sections).await;
     }
 
     let options = match WebFetchOptions::parse(options) {
@@ -102,7 +110,6 @@ pub(super) fn is_binary(content_type: &str) -> bool {
         || ct.starts_with("audio/")
         || ct.starts_with("video/")
         || ct.starts_with("application/octet-stream")
-        || ct.starts_with("application/pdf")
         || ct.starts_with("application/zip")
 }
 

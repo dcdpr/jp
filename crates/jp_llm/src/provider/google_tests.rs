@@ -206,6 +206,36 @@ fn test_map_model_gemini_3_8_flash() {
     assert_eq!(details.structured_output, Some(true));
 }
 
+#[test]
+fn test_map_model_gemini_4_argon() {
+    let model = types::Model {
+        base_model_id: "gemini-4-argon".to_owned(),
+        display_name: "Gemini 4 Argon".to_owned(),
+        input_token_limit: 1_048_576,
+        output_token_limit: 65_536,
+        thinking: true,
+        ..Default::default()
+    };
+
+    let details = map_model(model);
+
+    assert_eq!(details.id, (PROVIDER, "gemini-4-argon").try_into().unwrap());
+    assert_eq!(details.display_name, Some("Gemini 4 Argon".to_owned()));
+    assert_eq!(details.context_window, Some(1_048_576));
+    assert_eq!(details.max_output_tokens, Some(65_536));
+    assert_eq!(
+        details.reasoning,
+        Some(ReasoningDetails::leveled(false, true, true, true, false, false).always_on())
+    );
+    assert_eq!(
+        details.knowledge_cutoff,
+        Some(NaiveDate::from_ymd_opt(2026, 3, 1).unwrap())
+    );
+    assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+    assert_eq!(details.structured_output, Some(true));
+    assert_eq!(details.prefill, None);
+}
+
 /// A model whose ladder is unknown still honours the caller's effort.
 /// Dropping it would make `-r high` silently do nothing on any thinking model
 /// newer than this binary, which is most of Gemini's current catalog.
@@ -388,6 +418,127 @@ fn test_apply_thinking_support_keeps_table_when_thinking() {
     assert_eq!(apply_thinking_support(None, true), None);
 }
 
+/// The role and text of every part in `contents`, in order.
+///
+/// Non-text parts are reported as `None`.
+fn content_texts(contents: &[types::Content]) -> Vec<(Option<types::Role>, Vec<Option<String>>)> {
+    contents
+        .iter()
+        .map(|content| {
+            let texts = content
+                .parts
+                .iter()
+                .map(|part| match &part.data {
+                    types::ContentData::Text(text) => Some(text.clone()),
+                    _ => None,
+                })
+                .collect();
+
+            (content.role, texts)
+        })
+        .collect()
+}
+
+/// A conversation ending in partial assistant output, as a retry or an
+/// interrupt commits it.
+fn partial_response_query() -> ChatQuery {
+    let mut events = ConversationStream::new_test();
+    events.start_turn(ChatRequest::from("Tell me about X"));
+    events
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::reasoning("Thinking about X"))
+        .add_chat_response(ChatResponse::message("X is a topic that was first"))
+        .build()
+        .unwrap();
+
+    ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    }
+}
+
+/// Gemini rejects a request ending with a model turn ("Requests ending with a
+/// model turn are not supported."), which is the shape a retry produces after
+/// committing partial output.
+/// A model with unknown prefill support gets the synthetic continue message, so
+/// the request ends with a user turn.
+#[test]
+fn test_continue_appended_when_request_ends_with_model_turn() {
+    let model = ModelDetails::empty((PROVIDER, "gemini-future-99").try_into().unwrap());
+    assert_eq!(model.prefill, None, "fixture must have unknown prefill");
+
+    let (request, _) = create_request(&model, partial_response_query()).unwrap();
+
+    assert_eq!(content_texts(&request.contents), vec![
+        (Some(types::Role::User), vec![Some(
+            "Tell me about X".to_owned()
+        )]),
+        (Some(types::Role::Model), vec![
+            Some("Thinking about X".to_owned()),
+            Some("X is a topic that was first".to_owned()),
+        ]),
+        (Some(types::Role::User), vec![Some(
+            "Continue your response exactly from where you left off. Do not repeat content you \
+             already produced."
+                .to_owned()
+        )]),
+    ]);
+}
+
+/// A model known to accept prefill continues from its own trailing turn, so no
+/// message is added.
+#[test]
+fn test_trailing_model_turn_kept_when_prefill_supported() {
+    let mut model = ModelDetails::empty((PROVIDER, "gemini-future-99").try_into().unwrap());
+    model.prefill = Some(true);
+
+    let (request, _) = create_request(&model, partial_response_query()).unwrap();
+
+    assert_eq!(content_texts(&request.contents), vec![
+        (Some(types::Role::User), vec![Some(
+            "Tell me about X".to_owned()
+        )]),
+        (Some(types::Role::Model), vec![
+            Some("Thinking about X".to_owned()),
+            Some("X is a topic that was first".to_owned()),
+        ]),
+    ]);
+}
+
+/// A request already ending with a user turn is sent unchanged.
+#[test]
+fn test_no_continue_when_request_ends_with_user_turn() {
+    let model = ModelDetails::empty((PROVIDER, "gemini-future-99").try_into().unwrap());
+
+    let mut events = ConversationStream::new_test();
+    events.start_turn(ChatRequest::from("Tell me about X"));
+    let query = ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+
+    let (request, _) = create_request(&model, query).unwrap();
+
+    assert_eq!(content_texts(&request.contents), vec![(
+        Some(types::Role::User),
+        vec![Some("Tell me about X".to_owned())]
+    )]);
+}
+
 /// Records a live request for a Gemini model absent from the built-in table,
 /// with an explicit effort.
 ///
@@ -419,6 +570,221 @@ async fn test_unknown_model_inferred_thinking_level()
         .event(ChatRequest::from("What is 2 + 2?"));
 
     run_test(PROVIDER, function_name!(), Some(request)).await
+}
+
+/// Gemini can end a response with a part holding no text and only a thought
+/// signature.
+/// The signature is part of the model's turn and has to reach the next request.
+mod trailing_thought_signature {
+    use gemini_client_rs::types;
+    use indexmap::IndexMap;
+    use jp_conversation::{ConversationEvent, ConversationStream, event::ChatRequest};
+    use serde_json::{Value, json};
+
+    use crate::{
+        event::Event,
+        event_builder::EventBuilder,
+        provider::google::{THOUGHT_SIGNATURE_KEY, convert_events, map_response},
+    };
+
+    fn chunk(parts: &Value, finish_reason: Option<&str>) -> types::GenerateContentResponse {
+        serde_json::from_value(json!({
+            "candidates": [{
+                "content": { "parts": parts, "role": "model" },
+                "finishReason": finish_reason,
+                "index": 0,
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 10,
+                "totalTokenCount": 20,
+                "promptTokensDetails": [],
+                "cacheTokensDetails": [],
+                "candidatesTokensDetails": [],
+                "toolUsePromptTokensDetails": [],
+            },
+        }))
+        .expect("valid response chunk")
+    }
+
+    /// Map the chunks the way a live stream does, and commit the events the way
+    /// the turn coordinator does.
+    fn commit(chunks: Vec<types::GenerateContentResponse>) -> Vec<ConversationEvent> {
+        let mut state = IndexMap::new();
+        let mut builder = EventBuilder::new();
+        let mut committed = vec![];
+
+        for chunk in chunks {
+            for event in map_response(chunk, &mut state, false).expect("mappable chunk") {
+                match event {
+                    Event::Part {
+                        index,
+                        part,
+                        metadata,
+                    } => builder.handle_part(index, part, metadata),
+                    Event::Flush { index, metadata } => {
+                        committed.extend(builder.handle_flush(index, metadata));
+                    }
+                    Event::Finished(_) => committed.extend(builder.drain()),
+                    _ => {}
+                }
+            }
+        }
+
+        committed
+    }
+
+    fn signatures(events: &[ConversationEvent]) -> Vec<&str> {
+        events
+            .iter()
+            .filter_map(|e| e.metadata.get(THOUGHT_SIGNATURE_KEY))
+            .filter_map(Value::as_str)
+            .collect()
+    }
+
+    /// The shape Gemini sent when it stopped without answering: reasoning, a
+    /// message holding only a newline, then the signature on an empty part.
+    #[test]
+    fn signature_after_a_blank_message_is_kept_and_resent() {
+        let committed = commit(vec![
+            chunk(
+                &json!([{ "thought": true, "text": "Refining the plan." }]),
+                None,
+            ),
+            chunk(&json!([{ "text": "\n" }]), None),
+            chunk(
+                &json!([{ "text": "", "thoughtSignature": "SIG" }]),
+                Some("STOP"),
+            ),
+        ]);
+
+        assert_eq!(signatures(&committed), ["SIG"]);
+
+        let mut events = ConversationStream::new_test();
+        events.start_turn(ChatRequest::from("plan it"));
+        events.extend(committed);
+        events.start_turn(ChatRequest::from("continue"));
+
+        let contents = convert_events(events);
+        let model = &contents[1];
+        assert_eq!(model.role, Some(types::Role::Model));
+
+        // Resent as Google sent it: a non-thought part with no text.
+        let last = model.parts.last().expect("model parts");
+        assert!(!last.thought);
+        assert!(matches!(&last.data, types::ContentData::Text(text) if text.is_empty()));
+        assert_eq!(last.thought_signature.as_deref(), Some("SIG"));
+    }
+
+    /// A non-thought signed part directly after reasoning keeps its own part:
+    /// moving the signature onto the thought part would cross the boundary
+    /// Google drew between them.
+    #[test]
+    fn signature_after_reasoning_keeps_its_non_thought_part() {
+        let committed = commit(vec![
+            chunk(
+                &json!([{ "thought": true, "text": "Refining the plan." }]),
+                None,
+            ),
+            chunk(
+                &json!([{ "text": "", "thoughtSignature": "SIG" }]),
+                Some("STOP"),
+            ),
+        ]);
+
+        let mut events = ConversationStream::new_test();
+        events.start_turn(ChatRequest::from("plan it"));
+        events.extend(committed);
+        events.start_turn(ChatRequest::from("continue"));
+
+        let contents = convert_events(events);
+        let model = &contents[1];
+        assert_eq!(model.role, Some(types::Role::Model));
+        assert_eq!(model.parts.len(), 2);
+
+        let reasoning = &model.parts[0];
+        assert!(reasoning.thought);
+        assert!(
+            matches!(&reasoning.data, types::ContentData::Text(text) if text == "Refining the plan.")
+        );
+        assert_eq!(reasoning.thought_signature, None);
+
+        let signed = &model.parts[1];
+        assert!(!signed.thought);
+        assert!(matches!(&signed.data, types::ContentData::Text(text) if text.is_empty()));
+        assert_eq!(signed.thought_signature.as_deref(), Some("SIG"));
+    }
+
+    /// An empty thought part ends the reasoning it streams in, so its signature
+    /// joins that reasoning, the way it would arrive unstreamed.
+    #[test]
+    fn thought_signature_after_reasoning_joins_the_reasoning() {
+        let committed = commit(vec![
+            chunk(
+                &json!([{ "thought": true, "text": "Refining the plan." }]),
+                None,
+            ),
+            chunk(
+                &json!([{ "thought": true, "text": "", "thoughtSignature": "SIG" }]),
+                Some("STOP"),
+            ),
+        ]);
+
+        let mut events = ConversationStream::new_test();
+        events.start_turn(ChatRequest::from("plan it"));
+        events.extend(committed);
+        events.start_turn(ChatRequest::from("continue"));
+
+        let contents = convert_events(events);
+        let model = &contents[1];
+        assert_eq!(model.parts.len(), 1);
+
+        let reasoning = &model.parts[0];
+        assert!(reasoning.thought);
+        assert!(
+            matches!(&reasoning.data, types::ContentData::Text(text) if text == "Refining the plan.")
+        );
+        assert_eq!(reasoning.thought_signature.as_deref(), Some("SIG"));
+    }
+
+    /// A signature arriving while an answer is still open belongs to that
+    /// answer; it does not become an event of its own.
+    #[test]
+    fn signature_after_an_answer_attaches_to_the_answer() {
+        let committed = commit(vec![
+            chunk(
+                &json!([{ "thought": true, "text": "Refining the plan." }]),
+                None,
+            ),
+            chunk(&json!([{ "text": "Here is the plan." }]), None),
+            chunk(
+                &json!([{ "text": "", "thoughtSignature": "SIG" }]),
+                Some("STOP"),
+            ),
+        ]);
+
+        assert_eq!(committed.len(), 2);
+        let answer = committed[1]
+            .as_chat_response()
+            .and_then(|r| r.as_message())
+            .expect("answer message");
+        assert_eq!(answer, "Here is the plan.");
+        assert_eq!(
+            committed[1].metadata.get(THOUGHT_SIGNATURE_KEY),
+            Some(&json!("SIG"))
+        );
+    }
+
+    /// Empty parts without a signature carry nothing and stay skipped.
+    #[test]
+    fn empty_part_without_signature_commits_nothing() {
+        let committed = commit(vec![
+            chunk(&json!([{ "text": "Here is the plan." }]), None),
+            chunk(&json!([{ "text": "" }]), Some("STOP")),
+        ]);
+
+        assert_eq!(committed.len(), 1);
+        assert!(signatures(&committed).is_empty());
+    }
 }
 
 mod thought_signature_recovery {

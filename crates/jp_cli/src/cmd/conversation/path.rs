@@ -1,29 +1,61 @@
 use camino::Utf8PathBuf;
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use jp_conversation::ConversationId;
 use jp_storage::backend::FsStorageBackend;
 use jp_workspace::ConversationHandle;
 
 use crate::{
+    cli::CommandArgs,
     cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
     ctx::Ctx,
 };
 
-#[derive(Debug, clap::Args)]
+/// `jp conversation path`.
+#[derive(Debug)]
 pub(crate) struct Path {
-    #[command(flatten)]
     target: PositionalIds<true, true>,
 
     /// Print the path to `events.json`.
-    #[arg(long)]
     events: bool,
 
     /// Print the path to `metadata.json`.
-    #[arg(long)]
     metadata: bool,
 
     /// Print the path to `base_config.json`.
-    #[arg(long)]
     base_config: bool,
+}
+
+impl CommandArgs for Path {
+    fn augment(cmd: Command) -> Command {
+        let flag = |id: &'static str, long: &'static str, help: &'static str| {
+            Arg::new(id)
+                .long(long)
+                .action(ArgAction::SetTrue)
+                .help(help)
+        };
+
+        PositionalIds::<true, true>::augment(cmd)
+            .arg(flag("events", "events", "Print the path to `events.json`"))
+            .arg(flag(
+                "metadata",
+                "metadata",
+                "Print the path to `metadata.json`",
+            ))
+            .arg(flag(
+                "base_config",
+                "base-config",
+                "Print the path to `base_config.json`",
+            ))
+    }
+
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            target: PositionalIds::from_matches(matches)?,
+            events: matches.get_flag("events"),
+            metadata: matches.get_flag("metadata"),
+            base_config: matches.get_flag("base_config"),
+        })
+    }
 }
 
 impl Path {

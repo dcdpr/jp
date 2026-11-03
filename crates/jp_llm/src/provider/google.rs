@@ -25,7 +25,7 @@ use jp_tool::ToolDefinition;
 use serde_json::{Map, Value};
 use tracing::{debug, trace, warn};
 
-use super::{EventStream, Provider, trace_to_tmpfile};
+use super::{CONTINUE_MESSAGE, EventStream, Provider, trace_to_tmpfile};
 use crate::{
     StreamErrorKind,
     error::{
@@ -38,9 +38,24 @@ use crate::{
         catalog::{Catalog, Entry},
     },
     query::ChatQuery,
+    stream::with_response_keepalive,
 };
 
 static PROVIDER: ProviderId = ProviderId::Google;
+
+/// How often to inject a synthetic keep-alive while a response is silent.
+///
+/// Stays below the enforced minimum `stream_idle_timeout_secs` (10s) so the
+/// heartbeat always lands before the idle window elapses.
+const RESPONSE_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
+
+/// How long a response may stay silent before keep-alives stop.
+///
+/// Gemini sends a function call as one part once its arguments are complete, so
+/// a model writing a large call is silent for as long as the writing takes.
+/// This bounds that wait; a connection that died mid-response is detected this
+/// long plus one idle window after its last part.
+const RESPONSE_KEEPALIVE_ALLOWANCE: Duration = Duration::from_mins(5);
 
 const THOUGHT_SIGNATURE_KEY: &str = "google_thought_signature";
 const THOUGHT_SIGNATURE_DUMMY_VALUE: &str = "skip_thought_signature_validator";
@@ -88,7 +103,11 @@ impl Provider for Google {
             "Request payload."
         );
 
-        Ok(call(client, request, slug, 0, structured))
+        Ok(with_response_keepalive(
+            call(client, request, slug, 0, structured),
+            RESPONSE_KEEPALIVE_INTERVAL,
+            RESPONSE_KEEPALIVE_ALLOWANCE,
+        ))
     }
 }
 
@@ -431,6 +450,27 @@ fn create_request(
     }
     contents.extend(convert_events(events));
 
+    // A retry or interrupt that committed partial output leaves the request
+    // ending with a model turn, which Gemini rejects with "Requests ending with
+    // a model turn are not supported." Unless the model is known to continue
+    // from it, end with a user turn asking it to pick up where it stopped.
+    if contents
+        .last()
+        .is_some_and(|c| c.role == Some(types::Role::Model))
+        && !model.supports_prefill()
+    {
+        debug!("Appending synthetic continue message (model does not support prefill).");
+        contents.push(types::Content {
+            parts: vec![types::ContentPart {
+                data: types::ContentData::Text(CONTINUE_MESSAGE.to_owned()),
+                thought: false,
+                metadata: None,
+                thought_signature: None,
+            }],
+            role: Some(types::Role::User),
+        });
+    }
+
     // Set structured output config on GenerationConfig when a schema is present.
     // We use `_responseJsonSchema` (the JSON Schema field) rather than
     // `responseSchema` (the OpenAPI Schema field) so that standard JSON
@@ -540,6 +580,24 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
     let id = |name: &str| ModelIdConfig::try_from((PROVIDER, name)).unwrap();
 
     Catalog::new(vec![
+        Entry {
+            aliases: &[],
+            value: ModelDetails {
+                id: id("gemini-4-argon"),
+                display_name: None,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: Some(
+                    ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
+                ),
+                knowledge_cutoff: Some(date(2026, 3, 1)),
+                deprecated: Some(ModelDeprecation::Active),
+                structured_output: Some(true),
+                prefill: None,
+                subscription: None,
+                features: vec![],
+            },
+        },
         Entry {
             aliases: &[
                 "gemini-3.1-pro-preview",
@@ -729,6 +787,10 @@ impl ContentMode {
 struct CandidateState {
     current_virtual_index: usize,
     last_mode: Option<ContentMode>,
+
+    /// Whether the message at the current index holds non-whitespace text.
+    /// A message without it is never committed.
+    has_visible_text: bool,
 }
 
 impl CandidateState {
@@ -736,7 +798,53 @@ impl CandidateState {
         Self {
             current_virtual_index: base_index * 1000,
             last_mode: None,
+            has_visible_text: false,
         }
+    }
+
+    /// Events carrying a thought signature that arrived on a part with no text.
+    ///
+    /// Google requires a signature to go back inside the part it arrived on.
+    /// Streaming splits one part into chunks, so the signature joins the open
+    /// content only when the empty part is the same kind: a thought part joins
+    /// the open reasoning, and a non-thought part joins the open message when
+    /// that message will be committed.
+    /// Otherwise the part becomes an empty reasoning item of its own, since
+    /// reasoning is committed whatever its content; the next request sends it
+    /// back as a non-thought part.
+    fn signature_events(
+        &mut self,
+        signature: String,
+        thought: bool,
+        is_structured: bool,
+    ) -> Vec<Event> {
+        let index = self.current_virtual_index;
+        let joined = match self.last_mode {
+            Some(ContentMode::Reasoning) if thought => Some(Event::reasoning(index, "")),
+            Some(ContentMode::Message) if !thought && self.has_visible_text && is_structured => {
+                Some(Event::structured(index, ""))
+            }
+            Some(ContentMode::Message) if !thought && self.has_visible_text => {
+                Some(Event::message(index, ""))
+            }
+            _ => None,
+        };
+        if let Some(event) = joined {
+            return vec![event.with_metadata_field(THOUGHT_SIGNATURE_KEY, signature)];
+        }
+
+        let mut events = vec![];
+        if self.last_mode.is_some() {
+            events.push(Event::flush(index));
+            self.current_virtual_index += 1;
+        }
+        self.last_mode = Some(ContentMode::Reasoning);
+        self.has_visible_text = false;
+        events.push(
+            Event::reasoning(self.current_virtual_index, "")
+                .with_metadata_field(THOUGHT_SIGNATURE_KEY, signature),
+        );
+        events
     }
 }
 
@@ -789,8 +897,12 @@ fn map_candidate(
 
         // Google sometimes sends empty text parts (e.g. the final chunk of a
         // thinking+tool_use response with finishReason: STOP). Skip them before
-        // mode transition logic to avoid spurious flushes.
+        // mode transition logic to avoid spurious flushes. The part can still
+        // carry the response's thought signature, which the next request needs.
         if matches!(&data, types::ContentData::Text(text) if text.is_empty()) {
+            if let Some(signature) = thought_signature {
+                events.extend(state.signature_events(signature, thought, is_structured));
+            }
             continue;
         }
 
@@ -815,10 +927,16 @@ fn map_candidate(
             events.push(Event::flush(state.current_virtual_index));
 
             state.current_virtual_index += 1;
+            state.has_visible_text = false;
         }
 
         // Store the current mode for the next iteration.
         state.last_mode = Some(mode);
+        if mode == ContentMode::Message
+            && matches!(&data, types::ContentData::Text(text) if !text.trim().is_empty())
+        {
+            state.has_visible_text = true;
+        }
 
         let index = state.current_virtual_index;
         let mut event = match data {
@@ -1126,12 +1244,17 @@ fn convert_events(events: ConversationStream) -> Vec<types::Content> {
                     types::ContentData::Text(request.content).into(),
                 ),
                 EventKind::ChatResponse(response) => {
-                    let thought = response.is_reasoning();
+                    let is_reasoning = response.is_reasoning();
                     let text = match response {
                         ChatResponse::Message { message } => message,
                         ChatResponse::Reasoning { reasoning } => reasoning,
                         ChatResponse::Structured { data } => data.to_string(),
                     };
+                    // Reasoning with no text exists only to carry a signature
+                    // Google sent on a non-thought part with no text. Resend it
+                    // as that part.
+                    let thought = is_reasoning
+                        && !(text.is_empty() && metadata.contains_key(THOUGHT_SIGNATURE_KEY));
                     (types::Role::Model, types::ContentPart {
                         thought,
                         data: types::ContentData::Text(text),

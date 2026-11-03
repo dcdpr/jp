@@ -370,6 +370,6 @@ Depends on Phase 1.
 - [Indexing and Counting Conventions] — the turn-range selector the range flags
   were renamed to make room for
 
-[Indexing and Counting Conventions]: ../architecture/indexing-conventions.md
+[Indexing and Counting Conventions]: ../wiki/00dxyba-indexing-and-counting-conventions.md
 [RFD 052]: 052-workspace-data-store-sanitization.md
 [RFD 073]: 073-layered-storage-backend-for-workspaces.md

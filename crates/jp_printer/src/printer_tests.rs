@@ -671,6 +671,56 @@ fn regions_are_inert_while_logs_go_to_stderr() {
 }
 
 #[test]
+fn window_rows_follow_the_terminal_height() {
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer =
+        printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24)));
+
+    assert_eq!(printer.window_rows(OutputLines::Rows(8)), 8);
+    // Two rows stay free of the window: the status row, and one of context.
+    assert_eq!(printer.window_rows(OutputLines::Rows(40)), 22);
+    assert_eq!(printer.window_rows(OutputLines::Auto), 2);
+    assert_eq!(printer.window_rows(OutputLines::Off), 0);
+}
+
+#[test]
+fn an_automatic_window_has_no_rows_below_ten_terminal_rows() {
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer =
+        printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(9)));
+
+    assert_eq!(printer.window_rows(OutputLines::Auto), 0);
+}
+
+#[test]
+fn a_terminal_of_unknown_height_has_no_window_rows() {
+    let (printer, _out, _err) = region_printer();
+
+    assert_eq!(printer.window_rows(OutputLines::Rows(8)), 0);
+}
+
+/// Every printer that hands out an inert region has no window rows either.
+#[test]
+fn window_rows_are_zero_where_regions_cannot_render() {
+    let terminal = TerminalCapability::interactive(Some(80)).with_rows(Some(24));
+
+    let (piped, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    assert_eq!(piped.window_rows(OutputLines::Rows(8)), 0);
+
+    let (plain, _out, _err) = Printer::memory(OutputFormat::Text);
+    let plain = plain.with_terminal(terminal);
+    assert_eq!(plain.window_rows(OutputLines::Rows(8)), 0);
+
+    let (logging, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let logging = logging.with_terminal(terminal).with_stderr_logging(true);
+    assert_eq!(logging.window_rows(OutputLines::Rows(8)), 0);
+
+    let (quiet, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let quiet = quiet.with_terminal(terminal).with_chrome(Chrome::Silenced);
+    assert_eq!(quiet.window_rows(OutputLines::Rows(8)), 0);
+}
+
+#[test]
 fn dropping_the_handle_erases_the_row() {
     let (printer, _out, err) = region_printer();
 

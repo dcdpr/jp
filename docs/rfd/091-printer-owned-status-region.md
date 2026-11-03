@@ -5,6 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-03
 - **Extends**: [RFD 048]
+- **Extended by**: [RFD 120]
 - **Summary**: Consolidates nine ephemeral terminal indicators into a
   printer-owned status region primitive, showing live child-process output with
   multi-row windows and standardized chrome lifecycle.
@@ -679,7 +680,7 @@ The two blocks whose subject is a child process gain one key:
 ```toml
 [style.mcp_startup]
 delay_secs = 4
-stderr_rows = true   # false | true | N
+stderr_rows = true # false | true | N
 ```
 
 - `false` or `0` — no output window.
@@ -718,13 +719,13 @@ So the window has two gates, and both must allow a line through:
 
 ```toml
 [style.tool_call.progress]
-stderr_rows = "auto"        # is there a window, and how tall
+stderr_rows = "auto" # is there a window, and how tall
 
 [conversation.tools.'*'.style]
-print_stderr = true         # does this tool feed it
+print_stderr = true # does this tool feed it
 
 [conversation.tools.cargo_test.style]
-print_stderr = false        # … this one does not
+print_stderr = false # … this one does not
 ```
 
 This is the shape `style.tool_call.show` and
@@ -1094,6 +1095,7 @@ contracts commits to.
 [RFD 092]: 092-predictable-and-responsive-interrupt-escalation.md
 [RFD 095]: 095-reasoning-region-shading-across-tool-calls.md
 [RFD 096]: 096-terminal-output-sanitization-for-untrusted-content.md
+[RFD 120]: 120-ephemeral-reasoning-window.md
 [Tesler]: https://en.wikipedia.org/wiki/Law_of_conservation_of_complexity
 [`ErrChannel`]: https://github.com/dcdpr/jp/blob/main/crates/jp_printer/src/printer.rs
 [`InlineResults`]: https://github.com/dcdpr/jp/blob/main/crates/jp_config/src/conversation/tool/style.rs

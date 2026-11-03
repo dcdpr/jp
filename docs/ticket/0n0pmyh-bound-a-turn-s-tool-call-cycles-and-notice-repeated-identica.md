@@ -1,7 +1,6 @@
 # Bound a turn's tool-call cycles and notice repeated identical calls
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-09-18
 - **Label**: domain=conversation

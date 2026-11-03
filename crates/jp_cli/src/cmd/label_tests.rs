@@ -1,11 +1,8 @@
-use clap::Parser as _;
-
 use super::*;
 
-#[derive(Debug, clap::Parser)]
-struct Filtering {
-    #[arg(long = "label")]
-    labels: Vec<LabelSelector>,
+/// The selectors in `raw`, each the value of one `--label`.
+fn filter(raw: &[&str]) -> Result<Vec<LabelSelector>, String> {
+    raw.iter().map(|raw| raw.parse::<LabelSelector>()).collect()
 }
 
 /// Parse operands the way `add` and `set` do, with aliases accepted.
@@ -343,9 +340,7 @@ fn adding_a_value_the_key_already_holds_reports_both_sides_the_same() {
 
 #[test]
 fn selectors_and_together() {
-    let filter = Filtering::try_parse_from(["jp", "--label=team=platform", "--label=draft"])
-        .unwrap()
-        .labels;
+    let filter = filter(&["team=platform", "draft"]).unwrap();
 
     let matching = Labels::from_iter([("team", ["platform"]), ("draft", [""])]);
     assert!(matches(&matching, &filter));
@@ -362,12 +357,8 @@ fn selectors_and_together() {
 /// of them finds the conversation, and naming two requires both.
 #[test]
 fn a_selector_matches_any_value_the_key_holds() {
-    let one = Filtering::try_parse_from(["jp", "--label=crate=jp_llm"])
-        .unwrap()
-        .labels;
-    let both = Filtering::try_parse_from(["jp", "--label=crate=jp_llm", "--label=crate=jp_cli"])
-        .unwrap()
-        .labels;
+    let one = filter(&["crate=jp_llm"]).unwrap();
+    let both = filter(&["crate=jp_llm", "crate=jp_cli"]).unwrap();
 
     let labels = Labels::from_iter([("crate", ["jp_config", "jp_llm"])]);
     assert!(matches(&labels, &one));
@@ -384,8 +375,7 @@ fn an_empty_filter_matches_everything() {
 /// the `:` character.
 #[test]
 fn alias_syntax_is_rejected_in_filters() {
-    let error = Filtering::try_parse_from(["jp", "--label=:branch"]).unwrap_err();
-    let error = error.to_string();
+    let error = filter(&[":branch"]).unwrap_err();
     assert!(error.contains("cannot be used as a filter"), "got: {error}");
     assert!(error.contains("--label=branch=VALUE"), "got: {error}");
 }

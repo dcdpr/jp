@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, TimeZone as _, Utc};
-use clap::Parser as _;
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, Labels};
 use jp_printer::{OutputFormat, Printer};
@@ -9,18 +8,10 @@ use jp_workspace::{ConversationLock, LockResult, Workspace};
 use tokio::runtime::Runtime;
 
 use super::*;
-use crate::{Globals, bootstrap::ExecutionContext};
-
-#[derive(Debug, clap::Parser)]
-struct TestCli {
-    #[command(flatten)]
-    confirm: ConfirmFlag,
-}
+use crate::{Globals, bootstrap::ExecutionContext, cli::parse_args};
 
 fn preference(args: &[&str]) -> Option<bool> {
-    let mut argv = vec!["test"];
-    argv.extend_from_slice(args);
-    TestCli::try_parse_from(argv).unwrap().confirm.preference()
+    parse_args::<ConfirmFlag>(args).unwrap().preference()
 }
 
 #[test]

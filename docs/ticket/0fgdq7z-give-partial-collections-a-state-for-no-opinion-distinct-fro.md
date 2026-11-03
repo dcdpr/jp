@@ -1,9 +1,9 @@
 # Give partial collections a state for "no opinion" distinct from "empty"
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-08
+- **Label**: type=task
 
 `MergeableVec::Vec([])` and `MergeableMap::Map({})` mean both "this layer says
 nothing about the field" and "this field is empty".
