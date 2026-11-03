@@ -1,0 +1,67 @@
+[
+  {
+    "case": "each bullet marker, unchecked and checked in either case",
+    "description": "Intro.\n\n- [ ] Dash\n* [x] Star\n+ [X] Plus",
+    "items": [
+      [false, "Dash"],
+      [true, "Star"],
+      [true, "Plus"]
+    ]
+  },
+  {
+    "case": "ordered items with either delimiter",
+    "description": "1. [ ] First\n2) [x] Second",
+    "items": [
+      [false, "First"],
+      [true, "Second"]
+    ]
+  },
+  {
+    "case": "nested items count, however deep",
+    "description": "- [ ] Parent\n  - [x] Child\n      - [ ] Grandchild",
+    "items": [
+      [false, "Parent"],
+      [true, "Child"],
+      [false, "Grandchild"]
+    ]
+  },
+  {
+    "case": "the text keeps its inline markdown and loses surrounding space",
+    "description": "- [ ]   **Add the types**: with `serde` support.  ",
+    "items": [
+      [false, "**Add the types**: with `serde` support."]
+    ]
+  },
+  {
+    "case": "a tab may separate the parts",
+    "description": "-\t[ ]\tTabbed",
+    "items": [
+      [false, "Tabbed"]
+    ]
+  },
+  {
+    "case": "items inside fenced code blocks don't count",
+    "description": "```markdown\n- [ ] In backticks\n```\n\n~~~\n- [x] In tildes\n~~~\n\n- [ ] Outside",
+    "items": [
+      [false, "Outside"]
+    ]
+  },
+  {
+    "case": "plain list items and near misses don't count",
+    "description": "- **Phase**: plain\n- [] no space\n-[ ] no gap\n- [ ]no gap after\n- [ ]\n- [y] other mark\n[ ] no marker\n> - [ ] quoted\n1234567890. [ ] too many digits",
+    "items": []
+  },
+  {
+    "case": "CRLF line endings",
+    "description": "- [ ] One\r\n- [x] Two\r\n",
+    "items": [
+      [false, "One"],
+      [true, "Two"]
+    ]
+  },
+  {
+    "case": "no list at all",
+    "description": "Just prose.",
+    "items": []
+  }
+]

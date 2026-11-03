@@ -877,7 +877,8 @@ fn track_reads_the_plan_through_the_host() {
         "{ticket}"
     );
     assert!(
-        ticket.ends_with("## Implementation plan\n\n- **Order things**: Keeps them in order.\n"),
+        ticket
+            .ends_with("## Implementation plan\n\n- [ ] **Order things**: Keeps them in order.\n"),
         "{ticket}"
     );
 }
@@ -979,7 +980,7 @@ fn promoting_to_accepted_offers_the_tracking_ticket() {
     assert!(
         tracking_ticket(&root)
             .unwrap()
-            .contains("- **Order things**: Keeps them in order.")
+            .contains("- [ ] **Order things**: Keeps them in order.")
     );
 }
 

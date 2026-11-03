@@ -1,20 +1,20 @@
 {
   "version": 2,
-  "quality_score": 0.7234352716678598,
-  "iosp_score": 0.9191569934963365,
+  "quality_score": 0.7238065270386521,
+  "iosp_score": 0.9194553805774278,
   "violations": 982,
-  "total": 16632,
-  "complexity_warnings": 194,
-  "magic_number_warnings": 265,
+  "total": 16684,
+  "complexity_warnings": 196,
+  "magic_number_warnings": 267,
   "nesting_depth_warnings": 30,
-  "function_length_warnings": 486,
+  "function_length_warnings": 488,
   "unsafe_warnings": 74,
   "error_handling_warnings": 202,
   "duplicate_groups": 0,
   "dead_code_warnings": 0,
   "dead_type_warnings": 0,
   "fragment_groups": 0,
-  "boilerplate_warnings": 309,
+  "boilerplate_warnings": 311,
   "srp_struct_warnings": 49,
   "srp_module_warnings": 256,
   "wildcard_import_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 51,
   "structural_coupling_warnings": 10,
-  "total_findings": 3135,
+  "total_findings": 3143,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -893,107 +893,107 @@
     {
       "name": "handle_command",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 642
+      "line": 668
     },
     {
       "name": "compose_missing",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 777
+      "line": 803
     },
     {
       "name": "with_show_alias",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1161
+      "line": 1178
     },
     {
       "name": "execute",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1460
+      "line": 1477
     },
     {
       "name": "show_board",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1680
+      "line": 1711
     },
     {
       "name": "board_row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1730
+      "line": 1761
     },
     {
       "name": "import_all",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1779
+      "line": 1818
     },
     {
       "name": "label",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1965
+      "line": 2004
     },
     {
       "name": "label_refusal",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2017
+      "line": 2056
     },
     {
       "name": "list_labels",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2041
+      "line": 2080
     },
     {
       "name": "check",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2141
+      "line": 2180
     },
     {
       "name": "describe_vocabulary",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2211
+      "line": 2250
     },
     {
       "name": "show",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2341
+      "line": 2420
     },
     {
       "name": "list",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2433
+      "line": 2516
     },
     {
       "name": "row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2492
+      "line": 2576
     },
     {
       "name": "read_message",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2576
+      "line": 2664
     },
     {
       "name": "answer",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 79
+      "line": 80
     },
     {
       "name": "create",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 294
+      "line": 295
     },
     {
       "name": "list",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 782
+      "line": 955
     },
     {
       "name": "quote",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 935
+      "line": 1108
     },
     {
       "name": "render_list",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 963
+      "line": 1136
     },
     {
       "name": "project_turns",

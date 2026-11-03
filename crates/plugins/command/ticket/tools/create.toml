@@ -9,6 +9,10 @@ the system it lands in.
 Write a ticket when the work is clear enough to start, and a design document
 when it needs a decision first.
 
+Write the steps or acceptance criteria of the work as a checklist in the body,
+one `- [ ] item` per line: `ticket_edit` checks the items off as they land, and
+`ticket_show` and `ticket_list` count them.
+
 The ticket opens at status `Todo`, draws a collision-resistant id, and is
 attributed to you. The title becomes the filename slug, so keep it short and
 specific: at most 60 characters, or the tool asks you for a shorter one before
