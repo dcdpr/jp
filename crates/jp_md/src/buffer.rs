@@ -1721,9 +1721,10 @@ fn is_setext_underline(line: &str) -> bool {
 /// The scan is deliberately one-sided — it pushes on every *potential* opener
 /// and pops only on a confident match — so it may over-hold (return a smaller
 /// offset, costing a little latency) but never under-holds.
-/// The enabled extensions are tracked: `` ` `` (code), `*` `_` `~` `^`
-/// (emphasis / strikethrough / sub- and superscript), `[` `]` (links / images,
-/// with `](`, `][` and end-of-buffer lookahead), and `<` (autolink / raw HTML).
+/// The enabled extensions are tracked: `` ` `` (code), `$` (dollar math), `*`
+/// `_` `~` `^` (emphasis / strikethrough / sub- and superscript), `[` `]`
+/// (links / images, with `](`, `][` and end-of-buffer lookahead), and `<`
+/// (autolink / raw HTML).
 fn last_inline_ground_state(s: &str, limit: usize) -> usize {
     let bytes = s.as_bytes();
     let limit = limit.min(bytes.len());
@@ -1758,11 +1759,23 @@ fn last_inline_ground_state(s: &str, limit: usize) -> usize {
         }
 
         match b {
+            b'\\' => {
+                i += if bytes.get(i + 1).is_some_and(u8::is_ascii_punctuation) {
+                    2
+                } else {
+                    1
+                };
+            }
             b'`' => {
                 let run = ascii_run(bytes, i, b'`', limit);
                 code_span = Some(run);
                 i += run;
             }
+            b'$' => match scan_math_span(bytes, i, limit) {
+                MathScan::Literal(len) => i += len,
+                MathScan::Closed(end) => i = end,
+                MathScan::Incomplete => break,
+            },
             // Hold a `<` only when it could begin an autolink or HTML tag; a
             // literal `<` (e.g. "a < b") is left as content.
             b'<' => {
@@ -1813,19 +1826,7 @@ fn last_inline_ground_state(s: &str, limit: usize) -> usize {
             }
             b'*' | b'_' | b'~' | b'^' => {
                 let run = ascii_run(bytes, i, b, limit);
-                let prev = i.checked_sub(1).map(|p| bytes[p]);
-                let next = bytes.get(i + run).copied();
-                // `_` cannot open or close intra-word, so "foo_bar" is literal;
-                // the others may.
-                let open_ok = b != b'_' || prev.is_none_or(|p| !p.is_ascii_alphanumeric());
-                let close_ok = b != b'_' || next.is_none_or(|n| !n.is_ascii_alphanumeric());
-                let can_open = open_ok && next.is_none_or(|n| !n.is_ascii_whitespace());
-                let can_close = close_ok && prev.is_some_and(|p| !p.is_ascii_whitespace());
-                if can_close && stack.last() == Some(&b) {
-                    stack.pop();
-                } else if can_open {
-                    stack.push(b);
-                }
+                update_emphasis_stack(&mut stack, bytes, i, b, run);
                 i += run;
             }
             _ => i += char_width(s, i),
@@ -1837,6 +1838,114 @@ fn last_inline_ground_state(s: &str, limit: usize) -> usize {
     }
 
     last_ground
+}
+
+/// Update `stack` for an emphasis/strikethrough/sub- or superscript delimiter
+/// run at `bytes[i..i + run]`.
+fn update_emphasis_stack(stack: &mut Vec<u8>, bytes: &[u8], i: usize, b: u8, run: usize) {
+    let prev = i.checked_sub(1).map(|p| bytes[p]);
+    let next = bytes.get(i + run).copied();
+    // `_` cannot open or close intra-word, so "foo_bar" is literal; the others may.
+    let open_ok = b != b'_' || prev.is_none_or(|p| !p.is_ascii_alphanumeric());
+    let close_ok = b != b'_' || next.is_none_or(|n| !n.is_ascii_alphanumeric());
+    let can_open = open_ok && next.is_none_or(|n| !n.is_ascii_whitespace());
+    let can_close = close_ok && prev.is_some_and(|p| !p.is_ascii_whitespace());
+    if can_close && stack.last() == Some(&b) {
+        stack.pop();
+    } else if can_open {
+        stack.push(b);
+    }
+}
+
+/// Outcome of scanning a `$` run starting at `start` within `bytes[..limit]`.
+enum MathScan {
+    /// Not a valid math opener (e.g. `$$$`, ` $  `, or aborted by space before
+    /// the next `$` or a digit after it); advance past `usize` bytes as plain
+    /// text.
+    Literal(usize),
+
+    /// A complete math span ending at the given byte offset (`<= limit`).
+    Closed(usize),
+
+    /// An open or buffer-edge-ambiguous math span that may still close when
+    /// more bytes arrive.
+    Incomplete,
+}
+
+/// Scan a potential `$..$` or `$$..$$` math span starting at `start`, mirroring
+/// comrak's `handle_dollars` / `scan_to_closing_dollar` rules.
+fn scan_math_span(bytes: &[u8], start: usize, limit: usize) -> MathScan {
+    let opendollars = ascii_run(bytes, start, b'$', limit);
+    if start + opendollars == limit {
+        return MathScan::Incomplete;
+    }
+
+    if opendollars > 2 {
+        return MathScan::Literal(opendollars);
+    }
+
+    if opendollars == 1 {
+        if bytes[start + 1].is_ascii_whitespace() {
+            return MathScan::Literal(1);
+        }
+
+        let mut pos = start + 1;
+        while pos < limit {
+            while pos < limit && bytes[pos] != b'$' {
+                pos += 1;
+            }
+            if pos >= limit {
+                return MathScan::Incomplete;
+            }
+
+            let prev = bytes[pos - 1];
+            if prev == b'\\' {
+                pos += 1;
+                continue;
+            }
+            if prev.is_ascii_whitespace() {
+                return MathScan::Literal(1);
+            }
+
+            let end = pos + 1;
+            if end >= bytes.len() {
+                return MathScan::Incomplete;
+            }
+            if bytes[end].is_ascii_digit() {
+                return MathScan::Literal(1);
+            }
+            return MathScan::Closed(end);
+        }
+
+        return MathScan::Incomplete;
+    }
+
+    // `opendollars == 2` (`$$..$$` display math).
+    let mut pos = start + 2;
+    while pos < limit {
+        while pos < limit && bytes[pos] != b'$' {
+            pos += 1;
+        }
+        if pos >= limit {
+            return MathScan::Incomplete;
+        }
+
+        let close_run = ascii_run(bytes, pos, b'$', limit);
+        if close_run >= 2 {
+            let end = pos + 2;
+            return if end - start >= 5 {
+                MathScan::Closed(end)
+            } else {
+                MathScan::Literal(2)
+            };
+        }
+        if pos + 1 == limit {
+            return MathScan::Incomplete;
+        }
+        pos += 1;
+    }
+
+    MathScan::Incomplete
 }
 
 /// Count consecutive `ch` bytes in `bytes[start..limit]`.

@@ -222,6 +222,9 @@ copy_link = "off"
 [style.reasoning]
 display = "full"
 
+[style.markdown.elements.math]
+fg = "yellow"
+
 [conversation.tools.'*']
 run = "ask"
 
