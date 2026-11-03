@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.668723699317107,
-  "iosp_score": 0.8202350348879912,
+  "quality_score": 0.6695560193291795,
+  "iosp_score": 0.8206959706959707,
   "violations": 979,
-  "total": 7539,
+  "total": 7556,
   "complexity_warnings": 0,
   "magic_number_warnings": 0,
   "nesting_depth_warnings": 0,
@@ -898,117 +898,117 @@
     {
       "name": "handle_command",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 633
+      "line": 659
     },
     {
       "name": "compose_missing",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 754
+      "line": 780
     },
     {
       "name": "with_show_alias",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1138
+      "line": 1155
     },
     {
       "name": "show_board",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1632
+      "line": 1667
     },
     {
       "name": "board_row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1682
+      "line": 1717
     },
     {
       "name": "import_all",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1731
+      "line": 1774
     },
     {
       "name": "label",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1909
+      "line": 1952
     },
     {
       "name": "label_refusal",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1960
+      "line": 2003
     },
     {
       "name": "list_labels",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1984
+      "line": 2027
     },
     {
       "name": "check",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2084
+      "line": 2127
     },
     {
       "name": "describe_vocabulary",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2154
+      "line": 2197
     },
     {
       "name": "show",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2281
+      "line": 2369
     },
     {
       "name": "list",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2373
+      "line": 2465
     },
     {
       "name": "row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2432
+      "line": 2525
     },
     {
       "name": "read_message",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2516
+      "line": 2613
     },
     {
       "name": "answer",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 82
+      "line": 83
     },
     {
       "name": "create",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 290
+      "line": 291
     },
     {
       "name": "comment",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 442
+      "line": 443
     },
     {
-      "name": "edit",
+      "name": "write_content",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 531
+      "line": 724
     },
     {
       "name": "list",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 768
+      "line": 944
     },
     {
       "name": "reflow",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 923
+      "line": 1099
     },
     {
       "name": "quote",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 943
+      "line": 1119
     },
     {
       "name": "render_list",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 971
+      "line": 1147
     },
     {
       "name": "project_turns",

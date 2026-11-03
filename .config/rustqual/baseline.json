@@ -1,20 +1,20 @@
 {
   "version": 2,
-  "quality_score": 0.7235770153659836,
-  "iosp_score": 0.9190693809721645,
+  "quality_score": 0.7239513629150283,
+  "iosp_score": 0.9193708609271524,
   "violations": 974,
-  "total": 16482,
-  "complexity_warnings": 191,
-  "magic_number_warnings": 252,
+  "total": 16534,
+  "complexity_warnings": 193,
+  "magic_number_warnings": 254,
   "nesting_depth_warnings": 30,
-  "function_length_warnings": 486,
+  "function_length_warnings": 488,
   "unsafe_warnings": 74,
   "error_handling_warnings": 202,
   "duplicate_groups": 0,
   "dead_code_warnings": 0,
   "dead_type_warnings": 0,
   "fragment_groups": 0,
-  "boilerplate_warnings": 308,
+  "boilerplate_warnings": 310,
   "srp_struct_warnings": 49,
   "srp_module_warnings": 254,
   "wildcard_import_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 51,
   "structural_coupling_warnings": 10,
-  "total_findings": 3105,
+  "total_findings": 3113,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -898,117 +898,117 @@
     {
       "name": "handle_command",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 633
+      "line": 659
     },
     {
       "name": "compose_missing",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 754
+      "line": 780
     },
     {
       "name": "with_show_alias",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1138
+      "line": 1155
     },
     {
       "name": "show_board",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1632
+      "line": 1667
     },
     {
       "name": "board_row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1682
+      "line": 1717
     },
     {
       "name": "import_all",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1731
+      "line": 1774
     },
     {
       "name": "label",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1909
+      "line": 1952
     },
     {
       "name": "label_refusal",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1960
+      "line": 2003
     },
     {
       "name": "list_labels",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1984
+      "line": 2027
     },
     {
       "name": "check",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2084
+      "line": 2127
     },
     {
       "name": "describe_vocabulary",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2154
+      "line": 2197
     },
     {
       "name": "show",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2281
+      "line": 2369
     },
     {
       "name": "list",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2373
+      "line": 2465
     },
     {
       "name": "row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2432
+      "line": 2525
     },
     {
       "name": "read_message",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2516
+      "line": 2613
     },
     {
       "name": "answer",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 82
+      "line": 83
     },
     {
       "name": "create",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 290
+      "line": 291
     },
     {
       "name": "comment",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 442
+      "line": 443
     },
     {
-      "name": "edit",
+      "name": "write_content",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 531
+      "line": 724
     },
     {
       "name": "list",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 768
+      "line": 944
     },
     {
       "name": "reflow",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 923
+      "line": 1099
     },
     {
       "name": "quote",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 943
+      "line": 1119
     },
     {
       "name": "render_list",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 971
+      "line": 1147
     },
     {
       "name": "project_turns",
