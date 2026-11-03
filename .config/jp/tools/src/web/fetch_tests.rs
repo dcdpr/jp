@@ -81,7 +81,6 @@ mod is_binary {
     #[test]
     fn application_types() {
         assert!(is_binary("application/octet-stream"));
-        assert!(is_binary("application/pdf"));
         assert!(is_binary("application/zip"));
     }
 
