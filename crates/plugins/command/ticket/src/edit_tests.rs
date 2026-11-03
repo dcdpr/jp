@@ -98,6 +98,7 @@ fn write_ticket(dir: &Utf8TempDir) -> (Utf8PathBuf, String) {
         date: "2026-08-05",
         labels: &Labels::default(),
         description: "Something is wrong.",
+        parent: None,
     });
     fs::write(&path, &source).unwrap();
 
@@ -350,6 +351,7 @@ fn a_label_another_ticket_holds_goes_back_to_the_editor() {
             date: "2026-08-05",
             labels: &held,
             description: "",
+            parent: None,
         }),
     )
     .unwrap();

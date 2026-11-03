@@ -101,6 +101,42 @@ fn routed(files: &[(String, toml::Value)]) -> Vec<(String, String, toml::Value)>
     routed
 }
 
+/// How each tool in `files` batches several calls in one, by the name the
+/// plugin knows it by: its `fan_out`, or `None` when it has none.
+fn fan_out(files: &[(String, toml::Value)]) -> Vec<(String, Option<toml::Value>)> {
+    routed(files)
+        .into_iter()
+        .map(|(name, _, tool)| (name, tool.get("fan_out").cloned()))
+        .collect()
+}
+
+/// A `fan_out` value, written as a definition writes it.
+fn fan_out_value(text: &str) -> Option<toml::Value> {
+    toml::from_str::<toml::Value>(&format!("fan_out = {text}"))
+        .unwrap()
+        .get("fan_out")
+        .cloned()
+}
+
+/// Reads batch freely; writes batch one at a time, in the order written, since
+/// two writes to one ticket would race for its file.
+/// `list` filters already, so it doesn't batch.
+/// JP's own definitions say the same as the ones `tools init` writes.
+#[test]
+fn tools_batch_as_far_as_they_safely_can() {
+    let one_at_a_time = fan_out_value("{ concurrency = 1 }");
+    let expected = vec![
+        ("comment".to_owned(), one_at_a_time.clone()),
+        ("create".to_owned(), one_at_a_time.clone()),
+        ("edit".to_owned(), one_at_a_time),
+        ("list".to_owned(), None),
+        ("show".to_owned(), fan_out_value("true")),
+    ];
+
+    assert_eq!(fan_out(&templates()), expected);
+    assert_eq!(fan_out(&read_definitions(&jp_definitions())), expected);
+}
+
 fn enum_values(tool: &toml::Value, parameter: &str) -> Vec<String> {
     tool["parameters"][parameter]["enum"]
         .as_array()

@@ -62,7 +62,7 @@ const root = computed(() => {
 const crumbs = computed(() =>
     trail.value.map(e => documentAt(e.path)).filter(Boolean))
 
-// A wiki page shows where it sits in the wiki instead; see `WikiCrumbs.vue`.
+// A wiki page shows where it sits in the wiki instead; see `DocCrumbs.vue`.
 // It still joins the trail, so a ticket reached from it leads back to it.
 const visible = computed(() => {
     const entry = documentAt(route.path)
