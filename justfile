@@ -2379,6 +2379,14 @@ test-ci SCOPE="workspace": (_install "cargo-nextest@" + nextest_version) _instal
 site-ci:
     cargo test --locked -p jp-vite
 
+# Check the changelog fragments on CI, released ones included.
+#
+# Builds the `changelog` crate alone: a fragment's types are fixed, so checking
+# reads no configuration and needs no `jp`.
+[group('ci')]
+changelog-ci: _install_ci_matchers
+    cargo run {{quiet_flag}} --locked --package changelog -- check changelog.d
+
 # Generate documentation on CI.
 [group('ci')]
 docs-ci: _install_ci_matchers
