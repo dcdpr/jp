@@ -416,13 +416,11 @@ export function checkSummaries(dir, files) {
 // `D\d\d` token in a published RFD is either a stale promotion artefact (an
 // RFD that was promoted from DNN to NNN without its internal references being
 // rewritten) or an accidental cross-link to a draft — in any context,
-// including code blocks. The only RFD that may mention `D\d\d` is the one
-// describing the lifecycle and its numbering, RFD 001: files in `allowlist` are
-// skipped entirely.
-export function findStrayDraftRefs(dir, files, allowlist) {
+// including code blocks. A published RFD that documents the numbering writes
+// the `DNN` placeholder rather than a concrete id.
+export function findStrayDraftRefs(dir, files) {
     const strays = []
     for (const f of files) {
-        if (allowlist.has(f)) continue
         const content = readFileSync(resolve(dir, f), 'utf-8')
         const lines = content.split('\n')
         const hits = []
@@ -444,8 +442,8 @@ export function findStrayDraftRefs(dir, files, allowlist) {
     return `DNN-style references found in published RFDs:\n` +
         report + '\n\n' +
         `Drafts are not published; published RFDs must not reference ` +
-        `them. Only RFD 001, the process document, may describe the DNN ` +
-        `numbering convention.`
+        `them. To describe the draft numbering itself, write the \`DNN\` ` +
+        `placeholder instead of a concrete id.`
 }
 
 // CommonMark link labels are case-insensitive and collapse internal
