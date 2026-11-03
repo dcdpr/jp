@@ -227,6 +227,34 @@ fn write_ticket_as(dir: &Utf8TempDir, id: &str, title: &str) -> TicketId {
     id
 }
 
+/// A description holding a checklist of three items, one of them checked.
+const CHECKLIST: &str = "Acceptance criteria:\n\n- [x] Keep tools declared after a result\n- [ ] \
+                         Cover a second tool call\n- [ ] Cover parallel calls";
+
+/// File a ticket under [`FIXED_ID`] whose description is [`CHECKLIST`].
+fn write_checklist_ticket(dir: &Utf8TempDir) -> TicketId {
+    let id = write_ticket(dir, "Exercise recorded tool rounds");
+    store::edit(
+        &tickets(dir).dir,
+        &Formatting::default(),
+        id,
+        None,
+        Some(CHECKLIST),
+    )
+    .unwrap();
+
+    id
+}
+
+/// The description of the ticket under [`FIXED_ID`], as it is on disk now.
+fn description(dir: &Utf8TempDir) -> String {
+    let path = store::locate_ticket(&tickets(dir).dir, FIXED_ID.parse().unwrap()).unwrap();
+
+    parse::document(&fs::read_to_string(path).unwrap())
+        .unwrap()
+        .description
+}
+
 /// Ids are generated, so tests follow the ones that were handed out.
 fn ids(dir: &Utf8TempDir) -> Vec<TicketId> {
     store::list(&dir.path().join(store::DEFAULT_DIR))
@@ -1071,8 +1099,8 @@ fn edit_needs_something_to_change() {
     let dir = Utf8TempDir::new().unwrap();
     write_ticket(&dir, "Wrapping is wrong");
 
-    let nothing = "Name what to change: `title`, `description`, `status`, `parent`, `add_labels`, \
-                   or `remove_labels`.";
+    let nothing = "Name what to change: `title`, `description`, `status`, `parent`, `check`, \
+                   `uncheck`, `add_labels`, or `remove_labels`.";
 
     assert_eq!(
         error_message(run_tool(&dir, "edit", json!({ "id": FIXED_ID }))),
@@ -2219,5 +2247,198 @@ fn an_unreadable_access_policy_refuses_the_call() {
     assert!(
         message.starts_with("The access policy for this call can't be read: "),
         "{message}"
+    );
+}
+
+/// An item is named by part of its text, and only its checkbox changes: the
+/// assistant sends a few words rather than the whole description back.
+#[test]
+fn edit_checks_and_unchecks_checklist_items_by_their_text() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_checklist_ticket(&dir);
+
+    let out = content(run_tool(
+        &dir,
+        "edit",
+        json!({
+            "id": FIXED_ID,
+            "check": ["second tool call", "parallel"],
+            "uncheck": ["tools declared"]
+        }),
+    ));
+
+    assert_eq!(
+        out,
+        "Edited T-02wt0kx:\n- checked: Cover a second tool call\n- checked: Cover parallel \
+         calls\n- unchecked: Keep tools declared after a result\n- checklist: 2 of 3 checked\n"
+    );
+    assert_eq!(
+        description(&dir),
+        "Acceptance criteria:\n\n- [ ] Keep tools declared after a result\n- [x] Cover a second \
+         tool call\n- [x] Cover parallel calls"
+    );
+}
+
+/// Checking an item that is checked already lands the same way twice.
+#[test]
+fn checking_a_checked_item_says_so() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_checklist_ticket(&dir);
+
+    let out = content(run_tool(
+        &dir,
+        "edit",
+        json!({ "id": FIXED_ID, "check": ["tools declared"] }),
+    ));
+
+    assert_eq!(
+        out,
+        "Edited T-02wt0kx:\n- already checked: Keep tools declared after a result\n- checklist: 1 \
+         of 3 checked\n"
+    );
+    assert_eq!(description(&dir), CHECKLIST);
+}
+
+/// A name matching no item lists the items, so the next call can name one.
+#[test]
+fn an_unknown_checklist_item_is_refused_with_the_items() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_checklist_ticket(&dir);
+
+    let message = error_message(run_tool(
+        &dir,
+        "edit",
+        json!({ "id": FIXED_ID, "check": ["reasoning"] }),
+    ));
+
+    assert_eq!(
+        message,
+        "No checklist item contains `reasoning`.\nThe checklist items are:\n- [x] Keep tools \
+         declared after a result\n- [ ] Cover a second tool call\n- [ ] Cover parallel calls"
+    );
+}
+
+/// A checklist refusal stops the whole call, labels and status included, as a
+/// label refusal does.
+#[test]
+fn a_refused_checklist_item_changes_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_checklist_ticket(&dir);
+    let path = store::locate_ticket(&tickets(&dir).dir, id).unwrap();
+    let before = fs::read_to_string(&path).unwrap();
+
+    let message = error_message(run_tool(
+        &dir,
+        "edit",
+        json!({
+            "id": FIXED_ID,
+            "status": "done",
+            "add_labels": ["client=cli"],
+            "check": ["Cover"]
+        }),
+    ));
+
+    assert_eq!(
+        message,
+        "`Cover` matches more than one checklist item: \"Cover a second tool call\", \"Cover \
+         parallel calls\". Name more of the one you mean."
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
+}
+
+/// Rewriting the description and checking items in it are two answers to one
+/// question, so a call can't ask for both.
+#[test]
+fn edit_refuses_a_description_and_a_checklist_change_together() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_checklist_ticket(&dir);
+
+    assert_eq!(
+        error_message(run_tool(
+            &dir,
+            "edit",
+            json!({ "id": FIXED_ID, "description": "New.", "check": ["parallel"] })
+        )),
+        "Pass `description` or `check` and `uncheck`, not both: check the items in the new \
+         description itself."
+    );
+}
+
+/// Closing with items unchecked is allowed, since whoever closes a ticket
+/// decides what is left of it, but it is said, with what to do about them.
+#[test]
+fn closing_with_unchecked_items_warns() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_checklist_ticket(&dir);
+
+    let out = content(run_tool(
+        &dir,
+        "edit",
+        json!({ "id": FIXED_ID, "status": "done" }),
+    ));
+
+    assert_eq!(
+        out,
+        "Edited T-02wt0kx:\n- status: Todo -> Done\n- warning: closed with 2 of 3 checklist items \
+         unchecked: \"Cover a second tool call\", \"Cover parallel calls\". Check the ones that \
+         are done, and remove the rest with a comment saying why.\n"
+    );
+}
+
+/// The warning reads the checklist as the call leaves it, so checking the last
+/// items and closing in one call says nothing more.
+#[test]
+fn closing_while_checking_the_last_items_does_not_warn() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_checklist_ticket(&dir);
+
+    let out = content(run_tool(
+        &dir,
+        "edit",
+        json!({ "id": FIXED_ID, "status": "done", "check": ["second", "parallel"] }),
+    ));
+
+    assert_eq!(
+        out,
+        "Edited T-02wt0kx:\n- status: Todo -> Done\n- checked: Cover a second tool call\n- \
+         checked: Cover parallel calls\n- checklist: 3 of 3 checked\n"
+    );
+}
+
+#[test]
+fn show_counts_the_checklist() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_checklist_ticket(&dir);
+
+    let out = content(run_tool(&dir, "show", json!({ "id": FIXED_ID })));
+
+    assert_eq!(
+        out,
+        r"```markdown
+# T-02wt0kx: Exercise recorded tool rounds
+
+- **Path**: docs/ticket/02wt0kx-slug.md
+- **Status**: Todo
+- **Authors**: jp
+- **Date**: 2026-08-05
+- **Checklist**: 1 of 3 checked
+
+Not shown: the description (`description: true`).
+```"
+    );
+}
+
+#[test]
+fn list_counts_the_checklist() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_checklist_ticket(&dir);
+    write_ticket_as(&dir, "T-02wt0kz", "No checklist here");
+
+    let out = content(run_tool(&dir, "list", json!({})));
+
+    assert_eq!(
+        out,
+        "T-02wt0kx Todo         Exercise recorded tool rounds (1 of 3 checked)\nT-02wt0kz Todo         \
+         No checklist here\n"
     );
 }

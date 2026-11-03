@@ -281,7 +281,7 @@ fn metadata(fields: Vec<Field>) -> Result<Metadata, ParseError> {
 
 /// Tracks fenced code block state while walking a document line by line.
 #[derive(Default)]
-struct Fences {
+pub(crate) struct Fences {
     open: Option<(char, usize)>,
 }
 
@@ -290,7 +290,7 @@ impl Fences {
     ///
     /// The opening and closing fences count as inside, so a `-----` sitting
     /// between them is never read as a comment boundary.
-    fn consume(&mut self, line: &str) -> bool {
+    pub(crate) fn consume(&mut self, line: &str) -> bool {
         let Some((char_, count, has_info)) = fence(line) else {
             return self.open.is_some();
         };

@@ -216,8 +216,13 @@ onBeforeUnmount(() => {
                     :filter="filter"
                     :pick="toggle"
                 />
-                <div v-if="ticket.comments" class="ticket-meta">
-                    {{ ticket.comments }} {{ ticket.comments === 1 ? 'comment' : 'comments' }}
+                <div v-if="ticket.comments || ticket.checklist" class="ticket-meta">
+                    <span v-if="ticket.checklist">
+                        {{ ticket.checklist.checked }} of {{ ticket.checklist.count }} checked
+                    </span>
+                    <span v-if="ticket.comments">
+                        {{ ticket.comments }} {{ ticket.comments === 1 ? 'comment' : 'comments' }}
+                    </span>
                 </div>
             </article>
         </div>
@@ -301,6 +306,8 @@ onBeforeUnmount(() => {
     font-weight: 500;
 }
 .ticket-meta {
+    display: flex;
+    gap: 0.75rem;
     margin-top: 0.25rem;
     font-size: 0.75rem;
     color: var(--vp-c-text-3);

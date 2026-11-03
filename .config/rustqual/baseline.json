@@ -1,20 +1,20 @@
 {
   "version": 2,
-  "quality_score": 0.7244183707570205,
-  "iosp_score": 0.9191419141914191,
-  "violations": 980,
-  "total": 16601,
-  "complexity_warnings": 192,
-  "magic_number_warnings": 251,
+  "quality_score": 0.7238065270386521,
+  "iosp_score": 0.9194553805774278,
+  "violations": 982,
+  "total": 16684,
+  "complexity_warnings": 196,
+  "magic_number_warnings": 267,
   "nesting_depth_warnings": 30,
-  "function_length_warnings": 485,
+  "function_length_warnings": 488,
   "unsafe_warnings": 74,
   "error_handling_warnings": 202,
   "duplicate_groups": 0,
   "dead_code_warnings": 0,
   "dead_type_warnings": 0,
   "fragment_groups": 0,
-  "boilerplate_warnings": 309,
+  "boilerplate_warnings": 311,
   "srp_struct_warnings": 49,
   "srp_module_warnings": 256,
   "wildcard_import_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 51,
   "structural_coupling_warnings": 10,
-  "total_findings": 3116,
+  "total_findings": 3143,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -793,12 +793,12 @@
     {
       "name": "start",
       "file": "crates/plugins/command/vite/src/serve.rs",
-      "line": 291
+      "line": 288
     },
     {
       "name": "ask_revision",
       "file": "crates/plugins/command/vite/src/serve.rs",
-      "line": 430
+      "line": 460
     },
     {
       "name": "handle_command",
@@ -893,107 +893,107 @@
     {
       "name": "handle_command",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 642
+      "line": 668
     },
     {
       "name": "compose_missing",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 777
+      "line": 803
     },
     {
       "name": "with_show_alias",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1161
+      "line": 1178
     },
     {
       "name": "execute",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1460
+      "line": 1477
     },
     {
       "name": "show_board",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1680
+      "line": 1711
     },
     {
       "name": "board_row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1730
+      "line": 1761
     },
     {
       "name": "import_all",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1779
+      "line": 1818
     },
     {
       "name": "label",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1965
+      "line": 2004
     },
     {
       "name": "label_refusal",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2017
+      "line": 2056
     },
     {
       "name": "list_labels",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2041
+      "line": 2080
     },
     {
       "name": "check",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2141
+      "line": 2180
     },
     {
       "name": "describe_vocabulary",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2211
+      "line": 2250
     },
     {
       "name": "show",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2341
+      "line": 2420
     },
     {
       "name": "list",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2433
+      "line": 2516
     },
     {
       "name": "row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2492
+      "line": 2576
     },
     {
       "name": "read_message",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2576
+      "line": 2664
     },
     {
       "name": "answer",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 79
+      "line": 80
     },
     {
       "name": "create",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 294
+      "line": 295
     },
     {
       "name": "list",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 782
+      "line": 955
     },
     {
       "name": "quote",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 935
+      "line": 1108
     },
     {
       "name": "render_list",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 963
+      "line": 1136
     },
     {
       "name": "project_turns",
@@ -1356,9 +1356,19 @@
       "line": 104
     },
     {
+      "name": "PartialElementStyleConfig::assign",
+      "file": "crates/jp_config/src/style/markdown.rs",
+      "line": 154
+    },
+    {
+      "name": "PartialElementsConfig::assign",
+      "file": "crates/jp_config/src/style/markdown.rs",
+      "line": 203
+    },
+    {
       "name": "PartialMarkdownConfig::assign",
       "file": "crates/jp_config/src/style/markdown.rs",
-      "line": 103
+      "line": 247
     },
     {
       "name": "PartialReasoningConfig::assign",
@@ -2298,7 +2308,7 @@
     {
       "name": "cli_main",
       "file": "crates/contrib/comfort/src/lib.rs",
-      "line": 56
+      "line": 58
     },
     {
       "name": "run",
@@ -2753,12 +2763,12 @@
     {
       "name": "compaction_detail_item",
       "file": "crates/jp_cli/src/format.rs",
-      "line": 134
+      "line": 135
     },
     {
       "name": "compaction_policy_label",
       "file": "crates/jp_cli/src/format.rs",
-      "line": 172
+      "line": 173
     },
     {
       "name": "Compact::collect",
@@ -4193,37 +4203,37 @@
     {
       "name": "Formatter::render_terminal",
       "file": "crates/jp_md/src/format.rs",
-      "line": 277
+      "line": 291
     },
     {
       "name": "Formatter::render_code_line",
       "file": "crates/jp_md/src/format.rs",
-      "line": 381
+      "line": 397
     },
     {
       "name": "apply_line_background",
       "file": "crates/jp_md/src/format.rs",
-      "line": 499
+      "line": 515
     },
     {
       "name": "background_survives",
       "file": "crates/jp_md/src/format.rs",
-      "line": 559
+      "line": 575
     },
     {
       "name": "TerminalFormatter<'a,'w>::format_item",
       "file": "crates/jp_md/src/render.rs",
-      "line": 346
+      "line": 340
     },
     {
       "name": "TerminalFormatter<'a,'w>::format_code_block",
       "file": "crates/jp_md/src/render.rs",
-      "line": 427
+      "line": 421
     },
     {
       "name": "highlight_code_block",
       "file": "crates/jp_md/src/render.rs",
-      "line": 976
+      "line": 1031
     },
     {
       "name": "restore",
@@ -4313,7 +4323,7 @@
     {
       "name": "last_inline_ground_state",
       "file": "crates/jp_md/src/buffer.rs",
-      "line": 1727
+      "line": 1728
     },
     {
       "name": "TerminalWriter<'w>::new",

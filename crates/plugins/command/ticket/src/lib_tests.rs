@@ -1020,6 +1020,8 @@ fn edit_rewrites_the_description_and_keeps_the_title() {
         body: Some("A new description.".to_owned()),
         status: None,
         labels: vec![],
+        check: vec![],
+        uncheck: vec![],
     })
     .unwrap();
 
@@ -1044,6 +1046,8 @@ fn edit_changes_the_title_and_the_labels_at_once() {
         body: None,
         status: None,
         labels: vec!["client=cli".to_owned()],
+        check: vec![],
+        uncheck: vec![],
     })
     .unwrap();
 
@@ -1068,6 +1072,8 @@ fn edit_reports_the_labels_it_removes() {
         body: None,
         status: None,
         labels: owned(&["client=cli"]),
+        check: vec![],
+        uncheck: vec![],
     })
     .unwrap();
 
@@ -1094,6 +1100,8 @@ fn edit_refuses_a_label_before_changing_anything() {
         body: None,
         status: None,
         labels: vec!["client=windows".to_owned()],
+        check: vec![],
+        uncheck: vec![],
     })
     .unwrap_err();
 
@@ -2225,6 +2233,8 @@ fn listing_narrows_on_a_query() {
         body: Some("The WRAP width ignores the gutter.".to_owned()),
         status: None,
         labels: vec![],
+        check: vec![],
+        uncheck: vec![],
     })
     .unwrap();
     let listing = |query: &str| {
@@ -3043,4 +3053,225 @@ fn warnings_are_printed_on_stderr() {
             .any(|message| matches!(message, PluginToHost::Log(_))),
         "{messages:?}"
     );
+}
+
+/// Write a ticket under `02wt0kx` at `status`, whose description is a checklist
+/// of three items, the first one checked.
+fn write_checklist_ticket(dir: &Utf8Path, status: Status) -> TicketId {
+    let id = write_ticket(dir, "02wt0kx", "Exercise recorded tool rounds", status);
+    store::edit(
+        dir,
+        &Formatting::default(),
+        id,
+        None,
+        Some("- [x] Keep tools declared\n- [ ] Cover a second call\n- [ ] Cover parallel calls"),
+    )
+    .unwrap();
+
+    id
+}
+
+#[test]
+fn edit_takes_items_to_check_and_uncheck() {
+    let args = parse(&[
+        "edit",
+        "T-02wt0kx",
+        "--check",
+        "second call",
+        "--check",
+        "parallel",
+        "--uncheck",
+        "declared",
+    ])
+    .unwrap();
+
+    match args.command {
+        Command::Edit { check, uncheck, .. } => {
+            assert_eq!(check, ["second call", "parallel"]);
+            assert_eq!(uncheck, ["declared"]);
+        }
+        other => panic!("expected edit, got {other:?}"),
+    }
+}
+
+/// A new description and items to check in the old one ask two different things
+/// of the same text.
+#[test]
+fn edit_refuses_a_body_and_items_to_check_together() {
+    let error = parse(&["edit", "T-02wt0kx", "--body", "New.", "--check", "x"]).unwrap_err();
+
+    assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
+fn edit_checks_items_and_reports_the_checklist() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_checklist_ticket(dir.path(), Status::Todo);
+    let path = dir.path().join("02wt0kx-slug.md");
+
+    let edited = run_command(&dir, Command::Edit {
+        id: Some(id),
+        title: None,
+        body: None,
+        status: None,
+        labels: vec![],
+        parent: None,
+        check: owned(&["second call", "declared"]),
+        uncheck: vec![],
+    })
+    .unwrap();
+
+    assert_eq!(
+        edited.text,
+        format!(
+            "Edited {path}\nChecked: Cover a second call\nAlready checked: Keep tools \
+             declared\nChecklist: 2 of 3 checked\n"
+        )
+    );
+    let ticket = ticket::parse::document(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(
+        ticket.description,
+        "- [x] Keep tools declared\n- [x] Cover a second call\n- [ ] Cover parallel calls"
+    );
+}
+
+/// A name matching no item is refused before anything is written, the status
+/// included.
+#[test]
+fn edit_refuses_an_unknown_item_before_changing_anything() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_checklist_ticket(dir.path(), Status::Todo);
+    let path = dir.path().join("02wt0kx-slug.md");
+    let before = std::fs::read_to_string(&path).unwrap();
+
+    let error = run_command(&dir, Command::Edit {
+        id: Some(id),
+        title: None,
+        body: None,
+        status: Some(Status::Done),
+        labels: vec![],
+        parent: None,
+        check: owned(&["reasoning"]),
+        uncheck: vec![],
+    })
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        "No checklist item contains `reasoning`.\nThe checklist items are:\n- [x] Keep tools \
+         declared\n- [ ] Cover a second call\n- [ ] Cover parallel calls"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+}
+
+/// Closing isn't refused, but the items left unchecked are named, by `close`
+/// and by `status` alike.
+#[test]
+fn closing_with_unchecked_items_warns() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_checklist_ticket(dir.path(), Status::Todo);
+    let warning = "closed with 2 of 3 checklist items unchecked: \"Cover a second call\", \"Cover \
+                   parallel calls\". Check the ones that are done, and remove the rest with a \
+                   comment saying why.";
+
+    let closed = run_command(&dir, Command::Close { id: Some(id) }).unwrap();
+    assert_eq!(closed.warnings, [warning]);
+
+    let again = run_command(&dir, Command::Status {
+        id,
+        status: Status::Done,
+        before: None,
+        after: None,
+    })
+    .unwrap();
+    assert_eq!(again.warnings, [warning]);
+
+    let reopened = run_command(&dir, Command::Status {
+        id,
+        status: Status::Todo,
+        before: None,
+        after: None,
+    })
+    .unwrap();
+    assert!(reopened.warnings.is_empty(), "{:?}", reopened.warnings);
+}
+
+/// `edit --status done` judges the checklist the edit leaves, so checking the
+/// last items while closing says nothing more.
+#[test]
+fn edit_closing_with_the_last_items_checked_does_not_warn() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_checklist_ticket(dir.path(), Status::Todo);
+
+    let edit = |check: &[&str]| {
+        run_command(&dir, Command::Edit {
+            id: Some(id),
+            title: None,
+            body: None,
+            status: Some(Status::Done),
+            labels: vec![],
+            parent: None,
+            check: owned(check),
+            uncheck: vec![],
+        })
+        .unwrap()
+    };
+
+    assert_eq!(edit(&["second"]).warnings.len(), 1);
+    assert!(edit(&["parallel"]).warnings.is_empty());
+}
+
+#[test]
+fn show_list_and_board_count_the_checklist() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_checklist_ticket(dir.path(), Status::Todo);
+    let path = dir.path().join("02wt0kx-slug.md");
+
+    let shown = run_command(&dir, Command::Show { id: Some(id) }).unwrap();
+    assert_eq!(
+        shown.text,
+        format!(
+            "# T-02wt0kx: Exercise recorded tool rounds\n\n- **Path**: {path}\n- **Status**: \
+             Todo\n- **Checklist**: 1 of 3 checked\n\n- [x] Keep tools declared\n- [ ] Cover a \
+             second call\n- [ ] Cover parallel calls\n"
+        )
+    );
+
+    let listed = run_command(&dir, Command::List {
+        status: None,
+        labels: vec![],
+        query: None,
+        under: None,
+    })
+    .unwrap();
+    assert_eq!(
+        listed.text,
+        "T-02wt0kx Todo         Exercise recorded tool rounds (1 of 3 checked)\n"
+    );
+
+    let board = run_command(&dir, Command::Board).unwrap();
+    assert_eq!(
+        board.text,
+        "Todo (1)\nT-02wt0kx Exercise recorded tool rounds (1 of 3 checked)\n\nIn Progress \
+         (0)\n\nDone (0)\n"
+    );
+}
+
+#[test]
+fn list_json_counts_the_checklist() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_checklist_ticket(dir.path(), Status::Todo);
+    write_ticket(dir.path(), "02wt0kz", "No checklist", Status::Todo);
+
+    let out = run_json(&dir, Command::List {
+        status: None,
+        labels: vec![],
+        query: None,
+        under: None,
+    })
+    .unwrap();
+
+    let rows: serde_json::Value = serde_json::from_str(&out.text).unwrap();
+    assert_eq!(rows[0]["checklist"], json!({ "checked": 1, "count": 3 }));
+    assert!(rows[1].get("checklist").is_none(), "{}", rows[1]);
 }
