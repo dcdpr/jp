@@ -27,7 +27,7 @@ mod document;
 pub mod fragment;
 pub mod highlight;
 
-pub use directory::{CheckError, Problem, ProblemKind, Report, check};
+pub use directory::{CheckError, Problem, ProblemKind, Report, check, reserved_for};
 pub use document::FrontmatterError;
-pub use fragment::{Fragment, FragmentError, Type, Upgrade};
+pub use fragment::{Fragment, FragmentError, Type, UnknownType, Upgrade};
 pub use highlight::{Highlight, HighlightError};

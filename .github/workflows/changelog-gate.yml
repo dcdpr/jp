@@ -68,7 +68,7 @@ jobs:
 
           status=0
           if [ "${#fragments[@]}" -eq 0 ]; then
-            echo "::error title=No changelog fragment::Add a fragment to changelog.d/, as changelog.d/README.md describes, or add the no-changelog label when users won't notice the change."
+            echo "::error title=No changelog fragment::Add a fragment with \`jp release add\`, or add the no-changelog label when users won't notice the change."
             status=1
           else
             printf 'Adds %s\n' "${fragments[@]}"

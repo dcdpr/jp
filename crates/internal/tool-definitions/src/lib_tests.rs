@@ -10,7 +10,15 @@ use super::*;
 const NOTES: Definitions = Definitions {
     plugin: "notes",
     files: &[("create.toml", "# create\n"), ("list.toml", "# list\n")],
-    offers: "categories",
+    offers: Some("categories"),
+};
+
+/// A plugin `memos` serving `add`, whose definition mirrors nothing from the
+/// configuration.
+const MEMOS: Definitions = Definitions {
+    plugin: "memos",
+    files: &[("add.toml", "# add\n")],
+    offers: None,
 };
 
 const SYNCED_NOTES: &str = "#\n# Mirrors the categories.\n";
@@ -95,6 +103,39 @@ fn init_writes_one_file_per_definition() {
             target.join("list.toml")
         )
     );
+}
+
+/// A plugin with nothing to mirror has no `tools sync` to point at.
+#[test]
+fn init_names_no_sync_for_definitions_that_mirror_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let text = MEMOS.init(dir.path(), false).unwrap();
+
+    assert_eq!(
+        text,
+        format!(
+            "Wrote {}\nLoad the directory from the workspace configuration for the tools to \
+             appear.\n",
+            dir.path().join("add.toml")
+        )
+    );
+}
+
+#[test]
+fn sync_refuses_definitions_that_mirror_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let error = MEMOS
+        .sync(dir.path(), &json!({}), "", |_| vec![], false)
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        "`jp memos` has no `tools sync`: its tool definitions mirror nothing from the \
+         configuration."
+    );
+    assert!(!dir.path().join(SYNCED_FILE).exists());
 }
 
 #[test]

@@ -22,7 +22,7 @@
 //!
 //! Paragraphs and code blocks are read as GitHub renders Markdown.
 
-use std::{fmt, num::NonZeroU64, ops::Range};
+use std::{fmt, num::NonZeroU64, ops::Range, str::FromStr};
 
 use comrak::{
     Arena, Options,
@@ -55,6 +55,84 @@ pub enum Type {
     /// A user-visible performance improvement.
     Performance,
 }
+
+impl Type {
+    /// Every type, in the order release notes show them.
+    pub const ALL: [Self; 7] = [
+        Self::Added,
+        Self::Changed,
+        Self::Deprecated,
+        Self::Removed,
+        Self::Fixed,
+        Self::Security,
+        Self::Performance,
+    ];
+
+    /// The id a fragment's frontmatter names the type by, such as `added`.
+    #[must_use]
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Added => "added",
+            Self::Changed => "changed",
+            Self::Deprecated => "deprecated",
+            Self::Removed => "removed",
+            Self::Fixed => "fixed",
+            Self::Security => "security",
+            Self::Performance => "performance",
+        }
+    }
+
+    /// What the type is used for, in one sentence.
+    #[must_use]
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::Added => "A new capability the user can now reach.",
+            Self::Changed => "A change to existing behavior.",
+            Self::Deprecated => "Something still working but slated for removal.",
+            Self::Removed => "Something taken away.",
+            Self::Fixed => "A bug fix the user would notice.",
+            Self::Security => "A fix with security relevance.",
+            Self::Performance => "A user-visible performance improvement.",
+        }
+    }
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.id())
+    }
+}
+
+impl FromStr for Type {
+    type Err = UnknownType;
+
+    /// Read a type from its id, written as the frontmatter writes it.
+    fn from_str(id: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|type_| type_.id() == id)
+            .ok_or_else(|| UnknownType(id.to_owned()))
+    }
+}
+
+/// A string that is none of the seven type ids.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownType(pub String);
+
+impl fmt::Display for UnknownType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ids: Vec<&str> = Type::ALL.iter().map(|type_| type_.id()).collect();
+
+        write!(
+            f,
+            "`{}` is not a changelog type; use one of: {}",
+            self.0,
+            ids.join(", ")
+        )
+    }
+}
+
+impl std::error::Error for UnknownType {}
 
 /// A fragment, as [`parse`] reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]

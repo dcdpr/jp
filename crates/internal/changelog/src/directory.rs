@@ -324,10 +324,22 @@ fn misnamed(name: &str, format: Format) -> Option<ProblemKind> {
         });
     };
 
+    reservation(slug).map(|(slug, reserved_for)| ProblemKind::Reserved { slug, reserved_for })
+}
+
+/// What `slug` is reserved for, when it is one of the slugs no fragment or
+/// highlight can have, in any letter case.
+#[must_use]
+pub fn reserved_for(slug: &str) -> Option<&'static str> {
+    reservation(slug).map(|(_, reserved_for)| reserved_for)
+}
+
+/// The reserved slug `slug` spells, and what it is reserved for, if it spells
+/// one.
+fn reservation(slug: &str) -> Option<(&'static str, &'static str)> {
     RESERVED
         .into_iter()
         .find(|(reserved, _)| slug.eq_ignore_ascii_case(reserved))
-        .map(|(slug, reserved_for)| ProblemKind::Reserved { slug, reserved_for })
 }
 
 /// Whether `name` names a release's directory: a semantic version, such as

@@ -1664,7 +1664,7 @@ rfd-triage NNN *ARGS: _install-jp _install-rfd
 # `rfd/<id>/implement` and attaches them.
 [group('rfd')]
 [positional-arguments]
-rfd-implement NNN *ARGS: _install-jp _install-rfd
+rfd-implement NNN *ARGS: _install-jp _install-rfd _install-release
     #!/usr/bin/env sh
     set -eu
 
@@ -2596,6 +2596,19 @@ _install-wiki *args:
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path crates/plugins/command/wiki --debug {{args}}
+
+# Build and install the `jp-release` command plugin that backs `jp release`.
+#
+# The plugin is not in the published registry, so `jp` picks it up from `$PATH`
+# (`plugins.command.release.run` in `.jp/config.toml` approves it).
+_install-release *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -z "${JP_INSTALL:-}" ] && command -v jp-release >/dev/null 2>&1; then
+        echo "Skipping jp-release rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
+        exit 0
+    fi
+    cargo install {{quiet_flag}} --locked --path crates/plugins/command/release --debug {{args}}
 
 # Install the four plugins the site needs, from this checkout.
 #

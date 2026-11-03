@@ -39,6 +39,50 @@ fn each_of_the_seven_ids_names_its_type() {
 }
 
 #[test]
+fn each_type_reads_back_from_its_id() {
+    let ids: Vec<&str> = Type::ALL.iter().map(|type_| type_.id()).collect();
+
+    assert_eq!(ids, [
+        "added",
+        "changed",
+        "deprecated",
+        "removed",
+        "fixed",
+        "security",
+        "performance"
+    ]);
+    for type_ in Type::ALL {
+        assert_eq!(type_.id().parse::<Type>(), Ok(type_));
+        assert_eq!(type_.to_string(), type_.id());
+    }
+}
+
+#[test]
+fn a_type_says_what_it_is_used_for() {
+    assert_eq!(
+        Type::Added.description(),
+        "A new capability the user can now reach."
+    );
+    assert_eq!(
+        Type::Performance.description(),
+        "A user-visible performance improvement."
+    );
+}
+
+#[test]
+fn an_unknown_id_names_the_seven() {
+    let error = "feat".parse::<Type>().unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "`feat` is not a changelog type; use one of: added, changed, deprecated, removed, fixed, \
+         security, performance"
+    );
+    // Written as the ids are, as in the frontmatter.
+    assert!("Added".parse::<Type>().is_err());
+}
+
+#[test]
 fn a_type_is_one_of_the_seven_ids_as_written() {
     let error = parse("---\ntype: Added\n---\nEntry.\n").unwrap_err();
 
