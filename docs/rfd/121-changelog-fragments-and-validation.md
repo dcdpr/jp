@@ -1,6 +1,6 @@
 # RFD 121: Changelog Fragments and Validation
 
-- **Status**: Discussion
+- **Status**: Accepted
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-01
@@ -121,6 +121,13 @@ When a pull request title follows Conventional Commits, JP's CI uses the commit
 type as a hint for the `no-changelog` label and requires an upgrade section when
 the title includes `!` (see [CI validation](#ci-validation)).
 
+Two slugs are reserved in any letter case: `overview`, which names a release's
+introduction ([Released fragments](#released-fragments)), and `readme`, which
+names the directory's documentation.
+The check ignores case because case-insensitive filesystems treat `README.md`
+and `readme.md` as the same file.
+Fragments and highlight notes cannot use either slug.
+
 #### Breaking changes
 
 When a change requires users to take action on upgrade, its fragment includes an
@@ -160,6 +167,14 @@ A breaking-change fragment has three required, non-empty parts:
   helpful.
 
 A fragment may contain at most one upgrade section.
+A line starting with either marker anywhere else, such as inside a code block or
+partway through a paragraph, is a format error rather than text.
+This keeps the gate's plain-text search for the marker consistent with the
+parser ([CI validation](#ci-validation)): if the search finds a marker, the
+fragment either has an upgrade section or fails validation.
+To show the marker in an example, start the line with something else, such as
+indentation or inline code.
+
 Placing the upgrade section in the Markdown body rather than in YAML frontmatter
 lets authors write ordinary Markdown that renders, wraps, and formats alongside
 the rest of the file.
@@ -321,8 +336,9 @@ local checkout.
 each type's description from the table above as a hint), reads the entry body
 from the composer, and derives the filename slug from the body unless `--slug`
 is specified.
-It validates the entry with the same check as `jp release check` before writing
-the file.
+It refuses a reserved slug ([Changelog fragment](#changelog-fragment)), and
+validates the entry with the same check as `jp release check` before writing the
+file.
 
 `add` is also exposed as a plugin tool, configured in JP like `ticket_create`:
 
@@ -390,7 +406,7 @@ JP's CI enforces three rules:
    Pull requests limited to those edits must carry `no-changelog`.
    The rule checks only for a newly added top-level fragment or the label;
    whether a change is user-facing is decided when applying the label (see the
-   auto-apply workflow below), not computed by the gate.
+   auto-apply step below), not computed by the gate.
 
 3. **Breaking change**: a pull request targeting `main` whose title marks a
    breaking change with `!` (for example, `feat(cli)!: ...`) fails unless at
@@ -412,6 +428,9 @@ instead of vanishing during release assembly.
 This rejects other file extensions (`.txt`, `.markdown`), a misspelled
 `overview.md`, non-version subdirectories, deeper directory nesting, or stray
 files under `highlights/`.
+A fragment or highlight note with a reserved slug ([Changelog
+fragment](#changelog-fragment)) is also an error, so a top-level `overview.md`
+never reaches a release as its introduction.
 
 CI runs these rules as two separate checks because they have opposite triggering
 requirements.
@@ -426,24 +445,32 @@ the configured `fragments_dir`.
 Like other matrix tasks, `changelog-ci` runs on pushes to `main` and on pull
 requests touching `changelog.d/**` or `crates/internal/changelog/**` (so parser
 changes revalidate existing files).
+The path filter skips the task's steps, not its job, so the job reports a status
+on every pull request.
+JP configures it as a required status check as well ([Repository
+settings](#repository-settings)), so a fragment that fails validation cannot
+merge, which the gate relies on.
 
 **The changelog gate** enforces the presence and breaking-change rules and is
 configured in branch protection as a required status check on `main`.
 It runs on every pull request without path filters: a required check that is
 skipped never reports a status, blocking the merge indefinitely.
-For the same reason, it cannot live in the `rust.yml` matrix (which skips tasks
-whose paths did not change), and it must also re-run whenever a pull request's
-labels or title change.
+It cannot live in the `rust.yml` matrix because it must re-run whenever a pull
+request's labels or title change.
 GitHub Actions cannot filter `labeled`, `unlabeled`, and `edited` events by
 changed paths, so adding those triggers to `rust.yml` would re-run (and, off
 `main`, cancel) the entire test matrix on every label event.
 Instead, the gate runs in its own lightweight workflow triggered on `opened`,
 `synchronize`, `reopened`, `labeled`, `unlabeled`, and `edited`, with a
 dedicated concurrency group.
-It requires no Rust toolchain: it reads labels and the title from the pull
-request event payload, checks for added top-level fragments with `git diff
+It requires no Rust toolchain.
+It reads the title from the pull request event payload and the labels from the
+REST API at run time, so a re-run sees the current labels rather than those in
+the triggering event.
+It checks for added top-level fragments (excluding `README.md`) with `git diff
 --diff-filter=A` against the base branch, and checks added fragments for the
-`BREAKING CHANGE:` marker with `grep`.
+`BREAKING CHANGE:` marker with `grep`, which the format rule keeps consistent
+with the parser ([Breaking changes](#breaking-changes)).
 Label and title edits re-run only this workflow, completing in seconds.
 
 Because GitHub's pull request check list shows only a job's name and status, the
@@ -459,35 +486,38 @@ Pull requests opened by `jp release` to cut a release or backport a change ([RFD
 the `no-changelog` label that `jp release` attaches to them.
 Release branches receive commits directly from `jp release`, never via pull
 requests, and have no `changelog.d/` directory, so neither check runs on them.
-On fork pull requests, the gate needs only read access to the event payload to
-inspect labels (the separate auto-apply workflow below is fork-limited).
+Fork pull requests work the same way, since reading labels needs no write
+access.
+Only the auto-apply step below needs write access, and it skips pull requests
+from forks, where a maintainer applies the label manually.
 
-A separate, best-effort workflow sets `no-changelog` automatically as an
-overridable default:
+A best-effort step in the gate, run before the gate evaluates, sets
+`no-changelog` automatically as an overridable default:
 
-- When a pull request opens, the workflow applies `no-changelog` if the
-  Conventional Commit type in the title is non-user-facing (`build`, `ci`,
-  `docs`, `refactor`, `test`), or if the diff touches only non-shipping paths
+- When a pull request opens, the step applies `no-changelog` if the Conventional
+  Commit type in the title is non-user-facing (`build`, `ci`, `docs`,
+  `refactor`, `test`), or if the diff touches only non-shipping paths
   (documentation, CI, internal tooling).
   It never auto-applies the label for user-facing commit types (`feat`,
   `enhance`, `fix`, `perf`).
   If the title has no Conventional Commit prefix, or uses a type outside both
   lists (such as `chore`, which is used in practice despite being absent from
-  the documented taxonomy), the workflow falls back to path classification
-  alone.
-- Manual changes always take precedence: once a human adds or removes
-  `no-changelog`, the workflow does not override that choice.
+  the documented taxonomy), the step falls back to path classification alone.
+- Manual changes always take precedence: the step acts only when a pull request
+  opens, so once a human adds or removes `no-changelog`, that choice is final.
+
+The auto-apply logic is a step in the gate rather than a separate workflow
+because a label added with a workflow's token does not trigger other workflows:
+a separate workflow would label the pull request while the gate, which ran when
+the pull request opened, stayed red.
 
 The gate intentionally reads the `no-changelog` label rather than the pull
 request title because commit types are an imperfect predictor of user impact.
-Using the label keeps that judgment human-overridable and allows the auto-apply
-workflow to be added or adjusted independently of the gate.
-(Auto-apply requires `pull-requests: write` permission, which is unavailable to
-fork pull requests without `pull_request_target`; on fork pull requests, a
-maintainer applies the label manually.)
+Using the label keeps that judgment human-overridable, and the gate works
+without the auto-apply step.
 
-The gate, the `no-changelog` label, and the auto-apply workflow are specific to
-JP's GitHub repository and are not part of the plugin.
+The gate, the `no-changelog` label, and the auto-apply step are specific to JP's
+GitHub repository and are not part of the plugin.
 Workspaces without CI or on other forges can use `jp release` without them.
 
 ## Drawbacks
@@ -497,7 +527,7 @@ Workspaces without CI or on other forges can use `jp release` without them.
   This is an intentional cost, but adds friction that did not exist before.
 - **A changelog decision on every pull request.** Because the gate is a required
   status check, even a one-line chore requires the `no-changelog` label before
-  merging, until the auto-apply workflow handles it automatically.
+  merging, until the auto-apply step handles it automatically.
 - **Two formats to learn.** Mitigated because most pull requests only need a
   terse changelog fragment; highlight notes are rare and reserved for notable
   features.
@@ -601,14 +631,16 @@ write fragments by hand as soon as it lands, before the plugin exists.
 
 ### Repository settings
 
-A repository administrator applies two settings once Phase 1 has merged (these
+A repository administrator applies three settings once Phase 1 has merged (these
 cannot be changed in a pull request):
 
 - Create the `no-changelog` GitHub label.
 - Configure `Changelog fragment or no-changelog label` as a required status
   check on `main`.
+- Configure the `changelog` task of the `rust` workflow as a required status
+  check on `main`, so a fragment that fails format validation cannot merge.
 
-Until then, the gate reports status on pull requests without blocking merges.
+Until then, both checks report status on pull requests without blocking merges.
 
 ### Phase 2: Highlight note format
 
@@ -626,12 +658,12 @@ Depends on Phase 1.
 
 ### Phase 4: Label auto-apply (optional)
 
-Add the best-effort workflow that applies `no-changelog` by default when pull
+Add the gate's best-effort step that applies `no-changelog` by default when pull
 requests open.
 This phase is optional polish; the gate works with manually applied labels
 without it.
 
-The workflow uses a default path classification, documented in
+The step uses a default path classification, documented in
 `changelog.d/README.md` and overridable by a human on any pull request:
 
 - **Shipping** (requires a fragment by default): `crates/jp_*/**`,
