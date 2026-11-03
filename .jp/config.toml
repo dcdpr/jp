@@ -200,9 +200,10 @@ google = "flash"
 gemini = "flash"
 
 # dcd models
-zai = "cerebras/zai-glm-4.7"
-dcd = "glm"
+dcd = "ds"
 glm = "vllm/glm-5.3"
+ds = "vllm/deepseek-v4.1-flash"
+qwen = "vllm/Qwen/Qwen3.8-27B-FP8"
 
 [providers.llm.vllm]
 api_key_env = ["DCD_API_KEY", "VLLM_API_KEY"]

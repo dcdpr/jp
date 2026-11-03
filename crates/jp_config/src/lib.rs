@@ -663,6 +663,12 @@ impl AppConfig {
             })?;
         }
 
+        if let Some(ref mut model) = self.conversation.turn_summary.generate.model {
+            model.id.resolve_in_place(aliases).map_err(|e| {
+                Error::Custom(format!("conversation.turn_summary.generate.model.id: {e}").into())
+            })?;
+        }
+
         for rule in &mut self.conversation.compaction.rules {
             if let Some(summary) = rule.summary.as_mut()
                 && let Some(model) = summary.model.as_mut()
@@ -807,6 +813,10 @@ impl PartialAppConfig {
         if let Some(ref mut model) = self.conversation.title.generate.model {
             model.id.resolve_in_place(aliases);
         }
+
+        if let Some(ref mut model) = self.conversation.turn_summary.generate.model {
+            model.id.resolve_in_place(aliases);
+        }
     }
 
     /// Return a partial configuration with required fields populated for
@@ -824,6 +834,7 @@ impl PartialAppConfig {
 
         let mut partial = Self::empty();
         partial.conversation.title.generate.auto = Some(false);
+        partial.conversation.turn_summary.generate.auto = Some(false);
         partial.conversation.tools.defaults.run = Some(RunMode::Ask);
         partial.assistant.model.id = PartialModelIdConfig {
             provider: Some(ProviderId::Anthropic),

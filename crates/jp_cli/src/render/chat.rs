@@ -71,8 +71,8 @@ use jp_term::{
 };
 use tracing::warn;
 
-use crate::format::sanitize_mode;
 use super::tool::output_lines;
+use crate::format::sanitize_mode;
 
 /// The kind of content last pushed into the renderer.
 ///

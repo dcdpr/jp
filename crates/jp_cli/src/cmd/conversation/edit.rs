@@ -113,7 +113,11 @@ impl CommandArgs for Edit {
                 file("events", 'e', "events", "Open `events.json` in `$EDITOR`").long_help(
                     "Open `events.json` in `$EDITOR`.\n\nEach entry carries an `event_id` \
                      identifying it. Keep it when you edit an entry's content, and drop it when \
-                     you add one: a missing, empty, or duplicated ID is replaced on the next load.",
+                     you add one: a missing, empty, or duplicated ID is replaced on the next \
+                     load.\n\nA `turn_start` entry can also carry a `summary` of its turn. Remove \
+                     it when you change the turn's content: a stored summary is never rewritten, \
+                     and a turn without one is summarized again by a later `jp query` while \
+                     `conversation.turn_summary.generate.auto` is on.",
                 ),
             )
             .arg(file(
