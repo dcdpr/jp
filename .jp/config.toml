@@ -180,11 +180,13 @@ run = "allow"
 repository = "https://github.com/dcdpr/jp"
 branch = "main"
 
-# `jp release` keeps the changelog fragments the release notes are built from,
-# in `changelog.d/`. It is served the same way, installed with
-# `just _install-release`, and its fragments directory is left at its default.
+# `jp release` writes and checks the changelog fragments the release notes are
+# built from. It is served the same way, installed with `just _install-release`.
 [plugins.command.release]
 run = "allow"
+
+[plugins.command.release.options]
+fragments_dir = "changelog.d"
 
 [providers.llm.aliases]
 # Anthropic aliases
