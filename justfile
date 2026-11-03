@@ -2368,11 +2368,11 @@ typecheck-js-ci: typecheck-js
 #
 # `SCOPE` selects the crates to test: `workspace` covers every member, `jp-only`
 # skips the crates listed in `non_jp_excludes`. An unrecognised scope tests the
-# full workspace.
+# full workspace. `ARGS` are passed on to `cargo nextest run`.
 [group('ci')]
-test-ci SCOPE="workspace": (_install "cargo-nextest@" + nextest_version) _install_ci_matchers
+test-ci SCOPE="workspace" *ARGS: (_install "cargo-nextest@" + nextest_version) _install_ci_matchers
     # No target selection, matching `just test`; see the reasoning there.
-    cargo nextest run --locked --cargo-profile=nextest --status-level=slow --failure-output=immediate-final --workspace --no-fail-fast {{ if SCOPE == "jp-only" { non_jp_excludes } else { "" } }}
+    cargo nextest run --locked --cargo-profile=nextest --status-level=slow --failure-output=immediate-final --workspace --no-fail-fast {{ if SCOPE == "jp-only" { non_jp_excludes } else { "" } }} {{ARGS}}
 
 # Check on CI that the site's own files are the ones `jp vite sync` writes from
 # this checkout and its configuration.

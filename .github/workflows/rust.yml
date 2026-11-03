@@ -130,6 +130,9 @@ jobs:
             # `test` job still builds and tests everything on every PR, and
             # `main` covers the full workspace on Windows too.
             scope: ${{ github.ref == 'refs/heads/main' && 'workspace' || 'jp-only' }}
+            # Record which crates the build waits on, to judge whether more
+            # cores would shorten it. The report is uploaded as an artifact.
+            ci_args: --timings=html
           # Expanding macros makes `shear` compile every crate, one after the
           # other, which makes it the slowest job of a pull request run. `main`
           # keeps the expansion, so a dependency used only inside a macro is
@@ -240,7 +243,14 @@ jobs:
       - if: ${{ steps.task.outputs.run == 'true' && matrix.task == 'typecheck-js' }}
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       - if: ${{ steps.task.outputs.run == 'true' }}
-        run: just ${{ matrix.task }}-ci ${{ matrix.scope }}
+        run: just ${{ matrix.task }}-ci ${{ matrix.scope }} ${{ matrix.ci_args }}
+      # Uploaded when tests fail too: the report covers the build, which runs
+      # before any test does.
+      - if: ${{ !cancelled() && steps.task.outputs.run == 'true' && contains(matrix.ci_args, '--timings') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cargo-timings${{ matrix.cache_suffix }}
+          path: target/cargo-timings/
       - if: ${{ matrix.task == 'coverage' && steps.task.outputs.run == 'true' }}
         uses: coverallsapp/github-action@648a8eb78e6d50909eff900e4ec85cab4524a45b # v2
         with:
