@@ -175,15 +175,8 @@ fn comfort_check<R: ProcessRunner>(
     package: Option<&str>,
     runner: &R,
 ) -> Result<ComfortCheck, std::io::Error> {
-    let mut comfort_args = vec![
-        "--check",
-        "--list-changed",
-        "--format-markdown",
-        "--reference-links",
-        "--prune-reference-links",
-        "--language",
-        "rust",
-    ];
+    // The style comes from `.comfort.toml` at `root`, which comfort runs in.
+    let mut comfort_args = vec!["--check", "--list-changed", "--language", "rust"];
     if let Some(pkg) = package {
         comfort_args.push("--package");
         comfort_args.push(pkg);

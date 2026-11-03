@@ -268,6 +268,7 @@ fn move_to_places_the_ticket_next_to_its_neighbour() {
 
     let moved = move_to(
         dir.path(),
+        &Formatting::default(),
         id("02wt0k1"),
         Status::InProgress,
         Some((Place::After, id("02wt0k2"))),
@@ -297,6 +298,7 @@ fn move_to_refuses_a_neighbour_outside_the_column_and_changes_nothing() {
 
     let error = move_to(
         dir.path(),
+        &Formatting::default(),
         id("02wt0k1"),
         Status::InProgress,
         Some((Place::Before, id("02wt0k2"))),
@@ -323,6 +325,7 @@ fn move_to_refuses_an_unreadable_order_file_before_moving() {
 
     let error = move_to(
         dir.path(),
+        &Formatting::default(),
         id("02wt0k1"),
         Status::Done,
         Some((Place::After, id("02wt0k2"))),
@@ -343,7 +346,14 @@ fn move_to_without_a_neighbour_changes_only_the_status() {
     let dir = Utf8TempDir::new().unwrap();
     write_ticket(&dir, "02wt0k1", Status::Todo);
 
-    let moved = move_to(dir.path(), id("02wt0k1"), Status::Done, None).unwrap();
+    let moved = move_to(
+        dir.path(),
+        &Formatting::default(),
+        id("02wt0k1"),
+        Status::Done,
+        None,
+    )
+    .unwrap();
 
     assert_eq!(moved.previous, Status::Todo);
     assert_eq!(status_on_disk(&dir, "02wt0k1"), Status::Done);
@@ -357,6 +367,7 @@ fn move_to_refuses_a_ticket_placed_next_to_itself() {
 
     let error = move_to(
         dir.path(),
+        &Formatting::default(),
         id("02wt0k1"),
         Status::Done,
         Some((Place::Before, id("02wt0k1"))),

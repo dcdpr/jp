@@ -25,6 +25,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::{
     epoch::{EPOCH_FILE, Epoch, EpochError},
+    format::Formatting,
     id::{Id, Kind, MAX_BUCKET, TAIL_SPACE},
 };
 
@@ -353,6 +354,9 @@ pub fn allocate_in<K: Kind>(dir: &Utf8Path, mut bucket: u32) -> Result<Id<K>, Er
 /// Write `contents` into a new file in `dir`, named for a freshly allocated id
 /// and `slug`, returning the id and the path.
 ///
+/// `formatting` lays `contents` out as the workspace formats documents in
+/// `dir`.
+///
 /// The id comes from the current bucket of the directory's epoch, which the
 /// first document in an empty directory writes.
 /// An id sitting in a *future* bucket is ignored rather than continued from:
@@ -369,6 +373,7 @@ pub fn allocate_in<K: Kind>(dir: &Utf8Path, mut bucket: u32) -> Result<Id<K>, Er
 /// errors of [`establish_epoch`] and [`allocate_in`].
 pub fn create<K: Kind>(
     dir: &Utf8Path,
+    formatting: &Formatting,
     slug: &str,
     contents: &str,
 ) -> Result<(Id<K>, Utf8PathBuf), Error<K>> {
@@ -384,7 +389,7 @@ pub fn create<K: Kind>(
             .open(&path)
         {
             Ok(mut file) => {
-                file.write_all(contents.as_bytes())?;
+                file.write_all(formatting.apply(&path, contents).as_bytes())?;
 
                 return Ok((id, path));
             }

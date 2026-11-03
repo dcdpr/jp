@@ -42,7 +42,7 @@ jp_test = { path = "crates/jp_test" }
 jp_tool = { path = "crates/jp_tool" }
 jp_workspace = { path = "crates/jp_workspace" }
 
-comfort = { path = "crates/contrib/comfort" }
+comfort = { path = "crates/contrib/comfort", default-features = false }
 async-anthropic = { path = "crates/contrib/async-anthropic" }
 doc = { path = "crates/internal/doc" }
 grizzly = { path = "crates/contrib/grizzly", default-features = false }

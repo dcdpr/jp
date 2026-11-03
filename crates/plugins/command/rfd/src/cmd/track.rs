@@ -162,7 +162,7 @@ pub(crate) fn track(
         .ok_or_else(|| format!("No heading found in {shown}; cannot title the ticket."))?;
     let plan = phases(id, read_plan(&request)?, &mut report);
 
-    let (ticket, path) = store::create(&paths.tickets, vocabulary, &NewTicket {
+    let (ticket, path) = store::create(&paths.tickets, &paths.formatting, vocabulary, &NewTicket {
         title: &title,
         authors: &filer.author,
         date: &filer.date,
@@ -207,8 +207,13 @@ pub(crate) fn start(
     read_plan: &mut ReadPlan<'_>,
 ) -> Result<Output, String> {
     let tracked = track(paths, vocabulary, links, id, filer, read_plan)?;
-    let (path, previous) = store::set_status(&paths.tickets, tracked.ticket, Status::InProgress)
-        .map_err(|error| error.to_string())?;
+    let (path, previous) = store::set_status(
+        &paths.tickets,
+        &paths.formatting,
+        tracked.ticket,
+        Status::InProgress,
+    )
+    .map_err(|error| error.to_string())?;
 
     let mut output = tracked.report;
     output.text = moved(paths, &path, previous, Status::InProgress);
@@ -234,8 +239,9 @@ pub(crate) fn stop(paths: &Paths, links: &Links, id: RfdId) -> Result<Output, St
         return Ok(output);
     };
 
-    let (path, previous) = store::set_status(&paths.tickets, ticket, Status::Todo)
-        .map_err(|error| error.to_string())?;
+    let (path, previous) =
+        store::set_status(&paths.tickets, &paths.formatting, ticket, Status::Todo)
+            .map_err(|error| error.to_string())?;
     output.text = moved(paths, &path, previous, Status::Todo);
 
     Ok(output)
@@ -360,8 +366,14 @@ fn fill(
     let description = current
         .description
         .replacen(PENDING, &plan_section(phases), 1);
-    let edited = store::edit(&paths.tickets, ticket, None, Some(&description))
-        .map_err(|error| error.to_string())?;
+    let edited = store::edit(
+        &paths.tickets,
+        &paths.formatting,
+        ticket,
+        None,
+        Some(&description),
+    )
+    .map_err(|error| error.to_string())?;
     report.notes.push(format!(
         "Read the Implementation Plan of RFD {id} into {} ({ticket}).",
         paths.show(&edited.to)
