@@ -10,8 +10,8 @@
 //!
 //! `track` files the ticket, or finds the one already filed.
 //! The plan is read out of the document by a model, since the phases differ per
-//! RFD; when it isn't read, the marker [`PENDING`] stands in for it and the
-//! next `track` reads it again.
+//! RFD, and written as a checklist, one item per phase; when it isn't read, the
+//! marker [`PENDING`] stands in for it and the next `track` reads it again.
 //! Only the marker is ever replaced: the rest of the description is the
 //! project's to edit.
 
@@ -415,12 +415,14 @@ fn description(id: RfdId, link: &str, phases: Option<&[Phase]>) -> String {
     text.trim_end().to_owned()
 }
 
-/// The plan as a tracking ticket lists it: a heading, then one item per phase.
+/// The plan as a tracking ticket lists it: a heading, then one unchecked
+/// checklist item per phase, which the ticket's tooling checks off as the
+/// phases land.
 fn plan_section(phases: &[Phase]) -> String {
     let mut text = String::from("## Implementation plan\n\n");
     for phase in phases {
         text.push_str(&format!(
-            "- **{}**: {}\n",
+            "- [ ] **{}**: {}\n",
             one_line(&phase.title),
             one_line(&phase.summary)
         ));

@@ -32,6 +32,7 @@ pub mod format;
 pub mod heading;
 mod references;
 mod render;
+pub mod style;
 mod table;
 pub mod theme;
 mod writer;

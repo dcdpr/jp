@@ -312,6 +312,12 @@ Ok(
                         "gruvbox-dark",
                     ),
                     hr_style: None,
+                    elements: PartialElementsConfig {
+                        math: PartialElementStyleConfig {
+                            fg: None,
+                            bg: None,
+                        },
+                    },
                 },
                 mcp_startup: PartialMcpStartupConfig {
                     show: Some(

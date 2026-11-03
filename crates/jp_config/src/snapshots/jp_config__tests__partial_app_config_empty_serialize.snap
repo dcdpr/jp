@@ -148,6 +148,12 @@ PartialAppConfig {
             table_continuation_edge: None,
             theme: None,
             hr_style: None,
+            elements: PartialElementsConfig {
+                math: PartialElementStyleConfig {
+                    fg: None,
+                    bg: None,
+                },
+            },
         },
         mcp_startup: PartialMcpStartupConfig {
             show: None,

@@ -303,3 +303,15 @@
 .vp-doc .jp-embed--lines div[class*='language-'] {
     margin: 0.5rem 0 0.25rem;
 }
+
+/* ── Checklists ───────────────────────────────────────────────────────── */
+
+/* A task-list item shows its checkbox where the bullet would be. See
+   `../tasklist.mjs`. */
+.vp-doc .task-list-item {
+    list-style: none;
+}
+.vp-doc .task-list-item-checkbox {
+    margin: 0 0.4rem 0 -1.4rem;
+    vertical-align: middle;
+}
