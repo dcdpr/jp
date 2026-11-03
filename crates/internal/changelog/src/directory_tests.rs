@@ -313,6 +313,19 @@ fn a_missing_fragments_directory_is_an_error_rather_than_an_empty_one() {
 }
 
 #[test]
+fn the_reserved_slugs_say_what_they_are_reserved_for_in_any_letter_case() {
+    assert_eq!(
+        reserved_for("Overview"),
+        Some("a release's introduction, `overview.md` in the release's directory")
+    );
+    assert_eq!(
+        reserved_for("readme"),
+        Some("the fragments directory's documentation, `README.md` at its top level")
+    );
+    assert_eq!(reserved_for("overview-of-tools"), None);
+}
+
+#[test]
 fn only_a_semantic_version_names_a_release() {
     assert!(is_version("0.3.0"));
     assert!(is_version("1.0.0-rc.1"));

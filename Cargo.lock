@@ -2175,6 +2175,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "jp-release"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "changelog",
+ "clap",
+ "comfort",
+ "indoc",
+ "jp_md",
+ "jp_plugin",
+ "jp_tool",
+ "serde",
+ "serde_json",
+ "strip-ansi-escapes",
+ "toml",
+ "tool-definitions",
+]
+
+[[package]]
 name = "jp-rfd"
 version = "0.1.0"
 dependencies = [

@@ -170,6 +170,12 @@ run = "allow"
 repository = "https://github.com/dcdpr/jp"
 branch = "main"
 
+# `jp release` keeps the changelog fragments the release notes are built from,
+# in `changelog.d/`. It is served the same way, installed with
+# `just _install-release`, and its fragments directory is left at its default.
+[plugins.command.release]
+run = "allow"
+
 [providers.llm.aliases]
 # Anthropic aliases
 anthropic = "anthropic/claude-sonnet-5-5"

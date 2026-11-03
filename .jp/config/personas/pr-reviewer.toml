@@ -175,6 +175,12 @@ items = [
     """\
     **Scope creep**: Is the PR doing one thing, or three? Suggest splitting if it's three.\
     """,
+    """\
+    **Changelog**: Does each fragment the PR adds under `changelog.d/` tell users what changed \
+    for them, rather than describe the code? Does a change users will notice come without a \
+    fragment, or one that requires them to act without an upgrade section? \
+    `changelog.d/README.md` describes the format.\
+    """,
 ]
 
 [[assistant.instructions]]

@@ -5,7 +5,9 @@ directory: a short entry that tells them what changed.
 A feature worth more than a line also gets a highlight, a few paragraphs of the
 release notes that tell its story.
 Release notes are built from these files rather than from commit messages, so
-write for someone using JP, not for someone reading its code.
+write for someone using the software, not for someone reading its code.
+`jp release add` writes either one, and `jp release check` checks every file
+here.
 The formats are specified in [RFD 121].
 
 ## Writing a fragment
@@ -38,8 +40,8 @@ The `type` says what the change means for users, and is one of:
 | `security`    | A fix with security relevance.                  |
 | `performance` | A user-visible performance improvement.         |
 
-It is not the conventional-commit type of the pull request's title: an internal
-`feat` changes nothing users see, and a `refactor` can change what they see.
+It is not a conventional-commit type: an internal `feat` changes nothing users
+see, and a `refactor` can change what they see.
 
 A pull request that makes several user-visible changes adds a fragment for each.
 A follow-up to an earlier change adds a fragment of its own, saying what it
@@ -138,14 +140,8 @@ and `change_requests` replaces those credits, as in a fragment.
 
 A pull request that changes nothing users see adds no fragment.
 That covers most build, CI, documentation, refactoring, and test work.
-
-JP's CI requires a fragment in every pull request into `main`, unless it carries
-the `no-changelog` label.
-Give a pull request that label when users won't notice its change, or when it
-only corrects a fragment's wording.
-A pull request whose title marks a breaking change with `!`, such as
-`feat(cli)!: ...`, also needs an upgrade section in a fragment it adds.
-The label covers that too, for a break users never see.
+A project whose CI asks every pull request for a fragment also says how to mark
+one that needs none, such as with a label.
 
 ## Released fragments
 
@@ -168,13 +164,9 @@ Released fragments and highlights stay here; correct one like any other file.
 
 ## Checking
 
-Every file here is checked against these rules, released ones included.
+`jp release check` checks every file here against these rules, released ones
+included.
 Anything else, such as another extension, a stray directory, or a README in
 `highlights/`, is an error.
-Run the check with:
 
-```sh
-cargo run --package changelog -- check
-```
-
-[RFD 121]: ../docs/rfd/121-changelog-fragments-and-validation.md
+[RFD 121]: https://jp.computer/rfd/121-changelog-fragments-and-validation
