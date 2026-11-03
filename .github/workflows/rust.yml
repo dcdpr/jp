@@ -125,11 +125,22 @@ jobs:
             # costs about 12s more than downloading the crates again, so this
             # job skips rust-cache and lets sccache carry compilation.
             rust_cache: "false"
-            # Windows pays a steep per-file cost to unpack, compile and link, so
-            # PR runs cover only the crates that make up `jp` itself. The Linux
-            # `test` job still builds and tests everything on every PR, and
-            # `main` covers the full workspace on Windows too.
-            scope: ${{ github.ref == 'refs/heads/main' && 'workspace' || 'jp-only' }}
+            # The Windows build keeps all four cores busy, and each workspace
+            # test binary is an executable sccache cannot cache, so the only
+            # way to shorten it is to build fewer of them. PR runs test only the
+            # crates the change can affect, against the merge commit's base,
+            # its first parent. The Linux `test` job still builds and tests
+            # everything on every PR, and `main` covers the full workspace on
+            # Windows too.
+            recipe: ${{ github.ref == 'refs/heads/main' && 'test-ci' || 'test-affected-ci' }}
+            scope: ${{ github.ref == 'refs/heads/main' && 'workspace' || 'HEAD^1' }}
+            fetch_depth: 2
+            # Cargo unifies dependency features across the crates selected for
+            # a build, so testing a subset would compile shared dependencies
+            # with fewer features than `main`'s full build, and miss every
+            # sccache entry it wrote. Unifying across the whole workspace keeps
+            # the builds identical.
+            feature_unification: workspace
             # Record which crates the build waits on, to judge whether more
             # cores would shorten it. The report is uploaded as an artifact.
             ci_args: --timings
@@ -188,6 +199,8 @@ jobs:
           fi
       - if: ${{ steps.task.outputs.run == 'true' }}
         uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
+        with:
+          fetch-depth: ${{ matrix.fetch_depth || 1 }}
       - if: ${{ steps.task.outputs.run == 'true' }}
         uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         id: restore-cache
@@ -229,6 +242,13 @@ jobs:
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+      # Set for `main` and pull request runs alike: sccache hashes every
+      # `CARGO_*` variable into its keys, so both must see the same ones.
+      - if: ${{ steps.task.outputs.run == 'true' && matrix.feature_unification }}
+        shell: bash
+        run: |
+          echo "CARGO_UNSTABLE_FEATURE_UNIFICATION=true" >> "$GITHUB_ENV"
+          echo "CARGO_RESOLVER_FEATURE_UNIFICATION=${{ matrix.feature_unification }}" >> "$GITHUB_ENV"
       # `rust-cache` strips `~/.cargo/registry/src` before saving, and the
       # Windows job restores no registry at all, so the first cargo invocation
       # of the job extracts every `.crate` archive, downloading them first on
@@ -243,7 +263,7 @@ jobs:
       - if: ${{ steps.task.outputs.run == 'true' && matrix.task == 'typecheck-js' }}
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       - if: ${{ steps.task.outputs.run == 'true' }}
-        run: just ${{ matrix.task }}-ci ${{ matrix.scope }} ${{ matrix.ci_args }}
+        run: just ${{ matrix.recipe || format('{0}-ci', matrix.task) }} ${{ matrix.scope }} ${{ matrix.ci_args }}
       # Uploaded when tests fail too: the report covers the build, which runs
       # before any test does.
       - if: ${{ !cancelled() && steps.task.outputs.run == 'true' && contains(matrix.ci_args, '--timings') }}

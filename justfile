@@ -2241,6 +2241,23 @@ lint-ci: (_rustup_component "clippy") _install_ci_matchers
         exit 1
     fi
 
+    # `affected-crates` assumes only crates under `crates/plugins/command/` and
+    # `.config/jp/tools` read files outside their own directory, and tests them
+    # whenever `docs/` or `.jp/` changes. A crate elsewhere that climbs out of
+    # `CARGO_MANIFEST_DIR` would go untested on Windows pull requests that
+    # change only what it reads. This catches the idiom every reader uses today,
+    # a string literal climbing two or more levels; reaching the same files
+    # another way slips past it.
+    escaping=$(grep -rlE --include='*.rs' '"(\.\./){2,}' crates .config/jp/tools \
+        | grep -vE '^(crates/plugins/command/|\.config/jp/tools/)' \
+        | while IFS= read -r file; do grep -l 'CARGO_MANIFEST_DIR' "$file" || true; done)
+    if [ -n "$escaping" ]; then
+        echo "$escaping" | sed 's/^/error: reads outside its crate: /' >&2
+        echo "error: \`just affected-crates\` only expects that of command plugins and" >&2
+        echo "error: tools. Move the test there, or teach \`affected-crates\` about it." >&2
+        exit 1
+    fi
+
     cargo clippy --locked --workspace --all-targets --all-features --no-deps --profile=lint -- --deny warnings
 
     # `--all-features` and the workspace build both turn `jp_mcp/server` on,
@@ -2367,12 +2384,114 @@ typecheck-js-ci: typecheck-js
 # Test the code on CI.
 #
 # `SCOPE` selects the crates to test: `workspace` covers every member, `jp-only`
-# skips the crates listed in `non_jp_excludes`. An unrecognised scope tests the
-# full workspace. `ARGS` are passed on to `cargo nextest run`.
+# skips the crates listed in `non_jp_excludes`, and `packages` tests only the
+# crates named with `-p` in `ARGS`. An unrecognised scope tests the full
+# workspace. `ARGS` are passed on to `cargo nextest run`.
 [group('ci')]
 test-ci SCOPE="workspace" *ARGS: (_install "cargo-nextest@" + nextest_version) _install_ci_matchers
     # No target selection, matching `just test`; see the reasoning there.
-    cargo nextest run --locked --cargo-profile=nextest --status-level=slow --failure-output=immediate-final --workspace --no-fail-fast {{ if SCOPE == "jp-only" { non_jp_excludes } else { "" } }} {{ARGS}}
+    cargo nextest run --locked --cargo-profile=nextest --status-level=slow --failure-output=immediate-final {{ if SCOPE == "packages" { "--no-tests=warn" } else { "--workspace" } }} --no-fail-fast {{ if SCOPE == "jp-only" { non_jp_excludes } else { "" } }} {{ARGS}}
+
+# Test on CI only the crates a change since `BASE` can affect.
+#
+# Selects them with `affected-crates`, drops those in `non_jp_excludes`, and
+# runs `test-ci` on the rest. Falls back to `test-ci jp-only` when the change
+# reaches beyond single crates, and tests nothing when it affects none of the
+# crates tested here. `ARGS` are passed on to `cargo nextest run`.
+[group('ci')]
+[script("bash")]
+test-affected-ci BASE *ARGS:
+    set -euo pipefail
+
+    crates=$(just affected-crates "{{BASE}}")
+    if [ "$crates" = all ]; then
+        echo "The change reaches beyond single crates; testing every crate."
+        exec just test-ci jp-only {{ARGS}}
+    fi
+
+    excluded=" {{non_jp_excludes}} "
+    selection=()
+    names=()
+    for crate in $crates; do
+        case "$excluded" in *" $crate "*) continue ;; esac
+        selection+=(-p "$crate")
+        names+=("$crate")
+    done
+
+    if [ ${#selection[@]} -eq 0 ]; then
+        echo "The change affects none of the crates tested here."
+        exit 0
+    fi
+
+    echo "Testing the affected crates: ${names[*]}"
+    exec just test-ci packages {{ARGS}} "${selection[@]}"
+
+# Workspace crates a change since `BASE` can affect, one name per line: the
+# crates whose files it touches, and every crate depending on one of those,
+# directly or not.
+#
+# Prints `all` when the change touches a file that can change how every crate
+# builds or is tested: a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`,
+# `.gitattributes`, the insta config, this justfile, or the Rust workflow.
+#
+# Only crates under `crates/plugins/command/` and `.config/jp/tools` may read
+# files outside their own directory; `lint-ci` fails when another crate does. A
+# change under `docs/` or `.jp/`, or to the site files every command plugin
+# embeds, selects all of them, so a new plugin is covered without being listed.
+#
+# A file outside every crate in a known inert place (the rustqual baselines,
+# supply-chain audits, other workflows, the macOS app, `deny.toml`,
+# `.clippy.toml`) affects none. Any other file outside every crate prints
+# `all`, so a path nobody thought about errs towards testing too much. Only
+# committed changes count.
+[group('ci')]
+[script("bash")]
+affected-crates BASE="origin/main":
+    set -euo pipefail
+
+    meta=$(mktemp)
+    trap 'rm -f "$meta"' EXIT
+    cargo metadata --locked --format-version 1 > "$meta"
+
+    # Paths in the metadata use backslashes on Windows; `git diff` never does.
+    git diff --name-only "{{BASE}}...HEAD" | jq -Rrn --slurpfile meta "$meta" '
+        $meta[0] as $m
+        | ($m.workspace_root | gsub("\\\\"; "/")) as $root
+        | $m.workspace_members as $members
+        | [$m.packages[]
+            | select(.id as $id | $members | index($id))
+            | {id, name,
+               dir: (.manifest_path | gsub("\\\\"; "/") | ltrimstr($root + "/") | rtrimstr("/Cargo.toml"))}
+          ] as $pkgs
+        | ([$m.resolve.nodes[]
+            | select(.id as $id | $members | index($id))
+            | .id as $dependent
+            | .deps[]
+            | select(.pkg as $p | $members | index($p))
+            | {dep: .pkg, dependent: $dependent}]
+           | group_by(.dep)
+           | map({key: .[0].dep, value: map(.dependent)})
+           | from_entries) as $rdeps
+        | def owner($f): [$pkgs[] | select(.dir as $d | $f == $d or ($f | startswith($d + "/")))]
+                         | max_by(.dir | length) // null;
+          def grow: . as $s
+                    | ([$s[], ($s[] | $rdeps[.] // [] | .[])] | unique) as $n
+                    | if ($n | length) == ($s | length) then $s else ($n | grow) end;
+          [$pkgs[] | select(.dir | test("^crates/plugins/command/|^\\.config/jp/tools$")) | .id] as $readers
+        | "(^|/)Cargo\\.(toml|lock)$|^(rust-toolchain\\.toml|\\.gitattributes|\\.config/insta\\.yaml|justfile|\\.github/workflows/rust\\.yml)$" as $global
+        | "^(docs|\\.jp)/|^crates/plugins/command/vite/site/" as $read
+        | "^(\\.config/(rustqual|supply-chain)/|\\.github/|apps/|deny\\.toml$|\\.clippy\\.toml$)" as $inert
+        | [inputs | select(length > 0)] as $files
+        | if any($files[]; test($global))
+             or any($files[]; owner(.) == null and (test($read) or test($inert) | not))
+          then "all"
+          else ([$files[] | owner(.).id // empty]
+                + (if any($files[]; test($read)) then $readers else [] end)
+                | unique | grow
+                | map(. as $id | $pkgs[] | select(.id == $id) | .name)
+                | sort[])
+          end
+    '
 
 # Check on CI that the site's own files are the ones `jp vite sync` writes from
 # this checkout and its configuration.
