@@ -128,9 +128,6 @@ fn with_package_argument_is_passed_through_to_both_tools() {
         .expect("comfort")
         .args(&[
             "--list-changed",
-            "--format-markdown",
-            "--reference-links",
-            "--prune-reference-links",
             "--language",
             "rust",
             "--package",
@@ -150,15 +147,7 @@ fn without_package_uses_workspace_scope_on_both_tools() {
         .args(&["fmt", "--all", "--", "--color=never", "--files-with-diff"])
         .returns_success("")
         .expect("comfort")
-        .args(&[
-            "--list-changed",
-            "--format-markdown",
-            "--reference-links",
-            "--prune-reference-links",
-            "--language",
-            "rust",
-            "--workspace",
-        ])
+        .args(&["--list-changed", "--language", "rust", "--workspace"])
         .returns_success("");
 
     let result = cargo_format_impl(&ctx.root, "-W warnings", None, &runner).unwrap();

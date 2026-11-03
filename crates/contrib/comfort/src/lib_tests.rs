@@ -1843,6 +1843,7 @@ fn read_file_error_carries_the_path() {
     assert!(msg.contains("denied"), "missing source: {msg}");
 }
 
+#[cfg(feature = "cli")]
 #[test]
 fn write_file_error_carries_the_path() {
     let err = Error::WriteFile {

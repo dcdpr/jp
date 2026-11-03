@@ -89,7 +89,7 @@ pub(crate) fn renumber(
     let new_file = dir.join(&new_name);
     let mut document = Document::parse(&paths::read(&file)?);
     document.set_heading_id(&new.to_string());
-    paths::create(&new_file, &document.render())?;
+    paths.create(&new_file, &document.render())?;
     fs::remove_file(&file).map_err(|error| format!("{file}: {error}"))?;
 
     // A board entry holds an id, so with the id shared there is no telling
@@ -193,10 +193,10 @@ fn rewrite_references(
                 rules.extend(by_id.iter().cloned());
             }
 
-            let mut changed = references::rewrite_file(&file, &rules)?;
+            let mut changed = references::rewrite_file(&file, &rules, &paths.formatting)?;
             if unique && dir == paths.tickets {
-                changed |= links.relink(&file, old, new)?;
-                changed |= repromote(&file, old, new)?;
+                changed |= links.relink(&file, old, new, &paths.formatting)?;
+                changed |= repromote(paths, &file, old, new)?;
             }
 
             if changed {
@@ -217,7 +217,7 @@ fn rewrite_references(
 ///
 /// Only the metadata block is read and written, so a bare number in the
 /// ticket's prose stays as written.
-fn repromote(path: &Utf8Path, old: RfdId, new: RfdId) -> Result<bool, String> {
+fn repromote(paths: &Paths, path: &Utf8Path, old: RfdId, new: RfdId) -> Result<bool, String> {
     let source = paths::read(path)?;
     let lines: Vec<&str> = source.lines().collect();
     let promoted = Header::of(&lines).field("Promoted to");
@@ -228,7 +228,7 @@ fn repromote(path: &Utf8Path, old: RfdId, new: RfdId) -> Result<bool, String> {
     let Some(updated) = render::set_metadata(&source, "Promoted to", &new.to_string()) else {
         return Ok(false);
     };
-    paths::write(path, &updated)?;
+    paths.write(path, &updated)?;
 
     Ok(true)
 }

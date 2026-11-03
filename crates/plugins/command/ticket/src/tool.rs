@@ -17,14 +17,11 @@
 //! runs: the directory has to be inside the workspace, and the policy has to
 //! grant what the tool does there.
 
-use std::{collections::HashMap, fs, io, path::MAIN_SEPARATOR};
+use std::{collections::HashMap, fs, path::MAIN_SEPARATOR};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{Local, SecondsFormat, Utc};
-use comfort::{
-    DEFAULT_MAX_WIDTH,
-    format::{FormatOptions, format_markdown_with},
-};
+use doc::format::Formatting;
 use jp_md::format::Formatter;
 use jp_plugin::message::{InitMessage, ToolAction, ToolCall};
 use jp_tool::{AccessPolicy, Action, Capability, Context, FsAccessError, Outcome, Question};
@@ -36,7 +33,7 @@ use ticket::{
     parse, render, store,
 };
 
-use crate::{label, options::Options};
+use crate::{PLUGIN, label, options::Options};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -151,6 +148,9 @@ struct Tickets<'a> {
 
     /// The plugin's settings, which hold the board's label vocabulary.
     options: &'a Options,
+
+    /// How tickets are laid out as they are written.
+    formatting: Formatting,
 }
 
 impl<'a> Tickets<'a> {
@@ -193,11 +193,15 @@ impl<'a> Tickets<'a> {
             })?;
         }
 
+        let dir = root.join(relative);
+        let formatting = Formatting::configure(root, &init.config, &[(PLUGIN, &dir)])?;
+
         Ok(Self {
             root,
-            dir: root.join(relative),
+            dir,
             author: &options.assistant,
             options,
+            formatting,
         })
     }
 
@@ -344,8 +348,7 @@ fn create(tickets: &Tickets<'_>, args: &Arguments<'_>, call: &ToolCall, preview:
         return Ok(preview_create(&new).into());
     }
 
-    let (id, path) = store::create(&tickets.dir, &vocabulary, &new)?;
-    reflow(&path)?;
+    let (id, path) = store::create(&tickets.dir, &tickets.formatting, &vocabulary, &new)?;
 
     Ok(match parent {
         Some(parent) => format!("Created {id} under {parent} at {}", tickets.relative(&path)),
@@ -456,11 +459,16 @@ fn comment(tickets: &Tickets<'_>, args: &Arguments<'_>, preview: bool) -> Answer
         return preview_comment(tickets, id, re, &body, &date);
     }
 
-    match store::append_comment(&tickets.dir, id, tickets.author, &date, re, body.trim()) {
-        Ok(position) => {
-            reflow(&store::locate_ticket(&tickets.dir, id)?)?;
-            Ok(format!("Added {id}#{position}").into())
-        }
+    match store::append_comment(
+        &tickets.dir,
+        &tickets.formatting,
+        id,
+        tickets.author,
+        &date,
+        re,
+        body.trim(),
+    ) {
+        Ok(position) => Ok(format!("Added {id}#{position}").into()),
         Err(store::Error::NoSuchTicket(_) | store::Error::NoSuchComment { .. }) => refuse(format!(
             "No {id}, or no comment #{} on it.",
             re.unwrap_or(0)
@@ -601,18 +609,18 @@ fn edit(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
         }
     }
     if status.is_some() || parent.is_some() {
-        let related = store::relate(&tickets.dir, id, status, parent)?;
+        let related = store::relate(&tickets.dir, &tickets.formatting, id, status, parent)?;
         changed.extend(describe_related(&related, status, parent));
     }
     if title.is_some() || description.is_some() {
         let store::Edited { from, to } = store::edit(
             &tickets.dir,
+            &tickets.formatting,
             id,
             title.as_deref().map(str::trim),
             description.as_deref(),
         )?;
         if description.is_some() {
-            reflow(&to)?;
             changed.push("description replaced".to_owned());
         }
         if title.is_some() {
@@ -693,11 +701,17 @@ fn edit_labels(
     remove: &[String],
 ) -> Result<Result<String, String>, Error> {
     let vocabulary = tickets.options.vocabulary()?;
-    let relabeled = store::relabel(&tickets.dir, &vocabulary, &[id], |current| {
-        let mut tokens = label::remove(current, remove);
-        tokens.extend(add.iter().cloned());
-        tokens
-    });
+    let relabeled = store::relabel(
+        &tickets.dir,
+        &tickets.formatting,
+        &vocabulary,
+        &[id],
+        |current| {
+            let mut tokens = label::remove(current, remove);
+            tokens.extend(add.iter().cloned());
+            tokens
+        },
+    );
 
     match relabeled {
         Ok(relabeled) => Ok(Ok(relabeled.first().map_or_else(String::new, |ticket| {
@@ -912,28 +926,6 @@ fn in_board_order<'a>(
     }
 
     laid_out
-}
-
-/// Lay out a markdown file the way `comfort` does.
-///
-/// A body arrives as the model wrote it, one long line per paragraph, and the
-/// repository's markdown carries semantic line breaks.
-/// The options mirror the `fmt-markdown-ci` recipe in JP's justfile, so a
-/// ticket written here is one that recipe accepts as it stands.
-fn reflow(path: &Utf8Path) -> io::Result<()> {
-    let source = fs::read_to_string(path)?;
-    let formatted = format_markdown_with(&source, &FormatOptions {
-        max_width: DEFAULT_MAX_WIDTH,
-        canonical: true,
-        reference_links: true,
-        prune_reference_links: true,
-    });
-
-    if formatted == source {
-        return Ok(());
-    }
-
-    fs::write(path, formatted)
 }
 
 /// Prefix every line of `document` with a markdown blockquote marker.

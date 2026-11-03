@@ -18,7 +18,6 @@ version.workspace = true
 # `$PATH`.
 
 [dependencies]
-comfort = { workspace = true }
 doc = { workspace = true }
 jp_label = { workspace = true }
 jp_plugin = { workspace = true }
@@ -39,6 +38,8 @@ serde_json = { workspace = true, features = ["std"] }
 site-revision = { workspace = true }
 
 [dev-dependencies]
+# The style a test formats RFDs in.
+comfort = { workspace = true }
 # Checks that the configuration `track` asks its plan query to run under names
 # keys `jp` knows.
 jp_config = { workspace = true }

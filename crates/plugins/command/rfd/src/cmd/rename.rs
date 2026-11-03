@@ -51,7 +51,7 @@ pub(crate) fn rename(
             paths.show(&file)
         ));
     }
-    paths::write(&file, &document.render())?;
+    paths.write(&file, &document.render())?;
 
     let mut output = Output::default();
     if new_file == file {
@@ -70,7 +70,7 @@ pub(crate) fn rename(
     }];
     let mut updated = 0;
     for other in linking.iter().flat_map(|dir| references::walk(dir)) {
-        if references::rewrite_file(&other, &rules)? {
+        if references::rewrite_file(&other, &rules, &paths.formatting)? {
             output.text.push_str(&format!(
                 "  updated link targets in {}\n",
                 paths.show(&other)

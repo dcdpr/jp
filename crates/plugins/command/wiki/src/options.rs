@@ -13,6 +13,9 @@
 //! values = ["conversation", "llm"]
 //! ```
 //!
+//! `format_on_write = true` lays every page out in the style of the workspace's
+//! `.comfort.toml` as it is written; it is off by default.
+//!
 //! Every option is optional.
 //! Keys this plugin doesn't read are ignored, so a configuration written for a
 //! newer `jp-wiki` still loads.
@@ -24,7 +27,10 @@
 use std::path::MAIN_SEPARATOR;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use doc::repository::{is_web_address, web_address};
+use doc::{
+    format::Formatting,
+    repository::{is_web_address, web_address},
+};
 use jp_label::{Vocabulary, validate_key};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -172,6 +178,10 @@ pub(crate) struct Paths {
 
     /// The ticket directory, as `jp ticket` is configured to use it.
     pub tickets: Utf8PathBuf,
+
+    /// How a page, an RFD, or a ticket is laid out as [`Paths::write`] writes
+    /// it: each kind as its own plugin's `format_on_write` says.
+    pub formatting: Formatting,
 }
 
 impl Paths {
@@ -186,12 +196,30 @@ impl Paths {
             }
         };
 
+        let wiki = resolve(&options.dir);
+        let rfds = resolve(&directory(config, "rfd", DEFAULT_RFD_DIR)?);
+        let tickets = resolve(&directory(config, "ticket", ticket::store::DEFAULT_DIR)?);
+        let formatting = Formatting::configure(root, config, &[
+            ("wiki", &wiki),
+            ("rfd", &rfds),
+            ("ticket", &tickets),
+        ])?;
+
         Ok(Self {
             root: root.to_path_buf(),
-            wiki: resolve(&options.dir),
-            rfds: resolve(&directory(config, "rfd", DEFAULT_RFD_DIR)?),
-            tickets: resolve(&directory(config, "ticket", ticket::store::DEFAULT_DIR)?),
+            wiki,
+            rfds,
+            tickets,
+            formatting,
         })
+    }
+
+    /// Write a file, laid out as the workspace formats its kind, with an error
+    /// naming it.
+    pub(crate) fn write(&self, path: &Utf8Path, text: &str) -> Result<(), String> {
+        self.formatting
+            .write(path, text)
+            .map_err(|error| format!("{path}: {error}"))
     }
 
     /// The documentation tree the wiki directory sits in, which a page's

@@ -165,7 +165,7 @@ fn relink_points_the_links_at_the_new_id() {
 
     assert!(
         Links::default()
-            .relink(&path, id("095"), id("042"))
+            .relink(&path, id("095"), id("042"), &Formatting::default())
             .unwrap()
     );
 
@@ -193,8 +193,16 @@ fn relink_leaves_a_file_naming_another_rfd_alone() {
     fs::write(&index, "# Tickets\n\n<TicketIndex />\n").unwrap();
 
     let links = Links::default();
-    assert!(!links.relink(&ticket_path, id("095"), id("042")).unwrap());
-    assert!(!links.relink(&index, id("095"), id("042")).unwrap());
+    assert!(
+        !links
+            .relink(&ticket_path, id("095"), id("042"), &Formatting::default())
+            .unwrap()
+    );
+    assert!(
+        !links
+            .relink(&index, id("095"), id("042"), &Formatting::default())
+            .unwrap()
+    );
 
     assert_eq!(fs::read_to_string(&ticket_path).unwrap(), text);
 }

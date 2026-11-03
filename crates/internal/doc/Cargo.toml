@@ -13,17 +13,19 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+comfort = { workspace = true }
+
 camino = { workspace = true }
 chrono = { workspace = true }
 comrak = { workspace = true }
 ignore = { workspace = true }
 serde = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }
 unicode-normalization = { workspace = true }
 
 [dev-dependencies]
 camino-tempfile = { workspace = true }
 indoc = { workspace = true }
-serde_json = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true
