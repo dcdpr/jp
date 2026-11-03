@@ -318,10 +318,15 @@ run = "allow"
 
 [plugins.command.release.options]
 fragments_dir = "changelog.d"
+format_on_write = true
 ```
 
 `fragments_dir` is optional and defaults to `changelog.d`, relative to the
 workspace root.
+`format_on_write` is optional and defaults to `false`.
+When enabled, every file the plugin writes is formatted according to the
+workspace's `.comfort.toml`, matching how the [RFD 116] plugins format their
+documents.
 Setting `run = "allow"` permits the plugin to run without prompting for approval
 ([RFD 077]), which avoids repeated prompts when rebuilding the plugin from the
 local checkout.
@@ -337,8 +342,8 @@ each type's description from the table above as a hint), reads the entry body
 from the composer, and derives the filename slug from the body unless `--slug`
 is specified.
 It refuses a reserved slug ([Changelog fragment](#changelog-fragment)), and
-validates the entry with the same check as `jp release check` before writing the
-file.
+validates the entry, as formatted, with the same check as `jp release check`
+before writing the file.
 
 `add` is also exposed as a plugin tool, configured in JP like `ticket_create`:
 

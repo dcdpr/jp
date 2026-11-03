@@ -117,6 +117,20 @@ fn read(root: &Utf8TempDir, path: &str) -> String {
     fs::read_to_string(root.path().join(path)).unwrap()
 }
 
+/// Run `jp release` with `args` in the workspace at `root`, as Jane Doe, with
+/// `format_on_write` set to `format_on_write`.
+fn formatting(root: &Utf8Path, args: &[&str], format_on_write: &Value) -> Vec<PluginToHost> {
+    let mut message = init_message(root, args);
+    message.config = json!({
+        "user": { "name": "Jane Doe" },
+        "plugins": { "command": { "release": { "options": {
+            "format_on_write": format_on_write
+        } } } }
+    });
+
+    session(&HostToPlugin::Init(Box::new(message)), &[])
+}
+
 #[test]
 fn the_command_line_is_well_formed() {
     Args::command().debug_assert();
@@ -164,6 +178,24 @@ fn init_leaves_what_is_there() {
     assert_eq!(
         printed(&messages),
         "changelog.d/ already has its `highlights/` and its README.\n"
+    );
+}
+
+#[test]
+fn init_lays_the_readme_out_in_the_workspaces_style() {
+    let root = Utf8TempDir::new().unwrap();
+    // No width to wrap at, so each sentence takes one line.
+    fs::write(root.path().join(".comfort.toml"), "max_width = 0\n").unwrap();
+
+    formatting(root.path(), &["init"], &json!(true));
+
+    let readme = read(&root, "changelog.d/README.md");
+    assert!(
+        readme.contains(
+            "\nEach pull request that changes something users notice adds a fragment to this \
+             directory: a short entry that tells them what changed.\n"
+        ),
+        "{readme}"
     );
 }
 
@@ -225,6 +257,51 @@ fn add_writes_a_fragment_from_its_flags() {
         ---
         Crashes are fixed.
     "});
+}
+
+#[test]
+fn add_lays_the_fragment_out_in_the_workspaces_style() {
+    let root = workspace();
+    fs::write(root.path().join(".comfort.toml"), "max_width = 80\n").unwrap();
+
+    let messages = formatting(
+        root.path(),
+        &[
+            "add",
+            "--type",
+            "fixed",
+            "--slug",
+            "retry",
+            "--body",
+            "Retries wait. They give up after three attempts.",
+        ],
+        &json!(true),
+    );
+
+    assert_eq!(printed(&messages), "Wrote changelog.d/retry.md\n");
+    assert_eq!(read(&root, "changelog.d/retry.md"), indoc! {"
+        ---
+        type: fixed
+        ---
+        Retries wait.
+        They give up after three attempts.
+    "});
+}
+
+/// A setting the plugin can't read fails every command, not only the ones that
+/// write.
+#[test]
+fn a_format_on_write_that_is_not_true_or_false_fails_the_command() {
+    let root = workspace();
+
+    let messages = formatting(root.path(), &["check"], &json!("yes"));
+
+    let exit = exit(&messages);
+    assert_eq!(exit.code, 1);
+    assert_eq!(
+        exit.reason.as_deref(),
+        Some("`plugins.command.release.options.format_on_write` must be `true` or `false`.")
+    );
 }
 
 #[test]

@@ -5,6 +5,10 @@
 //! fragments_dir = "changelog.d"
 //! ```
 //!
+//! `format_on_write = true` lays every fragment, highlight, and README the
+//! plugin writes out in the style of the workspace's `.comfort.toml`; it is off
+//! by default.
+//!
 //! Every option is optional.
 //! Keys this plugin doesn't read are ignored, so a configuration written for a
 //! newer `jp-release` still loads.

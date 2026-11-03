@@ -72,9 +72,9 @@ fn answer(init: &InitMessage, call: &ToolCall, options: &Options) -> Answer {
     let body = args.required::<String>("body")?;
     let slug = args.optional::<String>("slug")?;
 
-    let fragments = Fragments {
-        root,
-        dir: root.join(&relative),
+    let fragments = match Fragments::new(root, root.join(&relative), &init.config) {
+        Ok(fragments) => fragments,
+        Err(refusal) => return refuse(refusal),
     };
     // Planned before the action split, so a preview fails too: an unattended
     // preview that errors fails the call ahead of the approval prompt, which
