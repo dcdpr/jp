@@ -95,7 +95,7 @@ test('a label on several tickets names them all', () => {
 
     assert.equal(
         findSharedLabels(tickets, OPEN),
-        'Labels the board lets one ticket carry are on several:\n'
+        'The following label can only be added to a single ticket on the board:\n'
             + '  rfd=abc: T-02wt0k1, T-02wt0k2\n'
             + '  focus: T-02wt0k1, T-02wt0k3\n'
             + '  owner: T-02wt0k1, T-02wt0k2\n\n'

@@ -196,7 +196,7 @@ export function findSharedLabels(tickets, vocabulary) {
     if (shared.length === 0) return null
 
     const report = shared.map(({ name, ids }) => `  ${name}: ${ids.join(', ')}`).join('\n')
-    return `Labels the board lets one ticket carry are on several:\n${report}\n\n` +
+    return `The following label can only be added to a single ticket on the board:\n${report}\n\n` +
         `Keep each on one ticket by taking it off the others ` +
         `(\`jp ticket label rm --id <id> key=value\`), or drop \`unique\` from the key in ` +
         `\`plugins.command.ticket.options.labels\`.`
