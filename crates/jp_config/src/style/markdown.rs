@@ -5,9 +5,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_opt},
+    delta::{PartialConfigDelta, delta_opt, delta_opt_at, path},
     fill::FillDefaults,
     partial::{ToPartial, partial_opt, partial_opts},
+    types::color::Color,
 };
 
 /// Controls how horizontal rules (`---`) are rendered in terminal output.
@@ -97,10 +98,153 @@ pub struct MarkdownConfig {
     ///   `wrap_width`.
     #[setting(default)]
     pub hr_style: HrStyle,
+
+    /// Per-element visual style overrides.
+    ///
+    /// Configures foreground and background colors for individual markdown
+    /// elements such as `$..$` math spans.
+    ///
+    /// ```toml
+    /// [style.markdown.elements.math]
+    /// fg = "yellow"
+    /// ```
+    #[setting(nested)]
+    pub elements: ElementsConfig,
+}
+
+/// Per-element visual style overrides for rendered markdown.
+///
+/// ```toml
+/// [style.markdown.elements.math]
+/// fg = "yellow"
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Config)]
+#[config(rename_all = "snake_case")]
+pub struct ElementsConfig {
+    /// Style for inline and display math spans (`$..$`, `$$..$$`).
+    ///
+    /// When both `fg` and `bg` are unset, math spans are rendered with no
+    /// additional color.
+    #[setting(nested)]
+    pub math: ElementStyleConfig,
+}
+
+/// Visual style overrides for a markdown element.
+#[derive(Debug, Clone, PartialEq, Eq, Config)]
+#[config(rename_all = "snake_case")]
+pub struct ElementStyleConfig {
+    /// Foreground color for the element.
+    ///
+    /// When unset, the surrounding foreground color is kept.
+    /// Accepts an ANSI 256-color index (e.g. `220`), a named ANSI color (e.g.
+    /// `"yellow"` or `"bright_yellow"`), or a hex RGB string (e.g.
+    /// `"#fabd2f"`).
+    pub fg: Option<Color>,
+
+    /// Background color for the element.
+    ///
+    /// When unset, the surrounding background color is kept.
+    /// Accepts an ANSI 256-color index (e.g. `236`), a named ANSI color (e.g.
+    /// `"yellow"` or `"bright_yellow"`), or a hex RGB string (e.g.
+    /// `"#3c3836"`).
+    pub bg: Option<Color>,
+}
+
+impl AssignKeyValue for PartialElementStyleConfig {
+    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => kv.try_merge_object(self)?,
+            "fg" => self.fg = kv.try_some_number_or_from_str()?,
+            "bg" => self.bg = kv.try_some_number_or_from_str()?,
+            _ => return missing_key(&kv),
+        }
+
+        Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialElementStyleConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            fg: delta_opt(self.fg.as_ref(), next.fg),
+            bg: delta_opt(self.bg.as_ref(), next.bg),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            fg: delta_opt_at(&path(prefix, "fg"), self.fg.as_ref(), next.fg, unsets),
+            bg: delta_opt_at(&path(prefix, "bg"), self.bg.as_ref(), next.bg, unsets),
+        }
+    }
+}
+
+impl FillDefaults for PartialElementStyleConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            fg: self.fg.or(defaults.fg),
+            bg: self.bg.or(defaults.bg),
+        }
+    }
+}
+
+impl ToPartial for ElementStyleConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            fg: delta_opt(defaults.fg.as_ref(), self.fg),
+            bg: delta_opt(defaults.bg.as_ref(), self.bg),
+        }
+    }
+}
+
+impl AssignKeyValue for PartialElementsConfig {
+    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => kv.try_merge_object(self)?,
+            _ if kv.p("math") => self.math.assign(kv)?,
+            _ => return missing_key(&kv),
+        }
+
+        Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialElementsConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            math: self.math.delta(next.math),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            math: self
+                .math
+                .delta_with_unsets(next.math, &path(prefix, "math"), unsets),
+        }
+    }
+}
+
+impl FillDefaults for PartialElementsConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            math: self.math.fill_from(defaults.math),
+        }
+    }
+}
+
+impl ToPartial for ElementsConfig {
+    fn to_partial(&self) -> Self::Partial {
+        Self::Partial {
+            math: self.math.to_partial(),
+        }
+    }
 }
 
 impl AssignKeyValue for PartialMarkdownConfig {
-    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             "wrap_width" => self.wrap_width = kv.try_some_from_str()?,
@@ -112,6 +256,7 @@ impl AssignKeyValue for PartialMarkdownConfig {
             }
             "theme" => self.theme = kv.try_some_from_str()?,
             "hr_style" => self.hr_style = kv.try_some_from_str()?,
+            _ if kv.p("elements") => self.elements.assign(kv)?,
             _ => return missing_key(&kv),
         }
 
@@ -133,6 +278,28 @@ impl PartialConfigDelta for PartialMarkdownConfig {
             ),
             theme: delta_opt(self.theme.as_ref(), next.theme),
             hr_style: delta_opt(self.hr_style.as_ref(), next.hr_style),
+            elements: self.elements.delta(next.elements),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            wrap_width: delta_opt(self.wrap_width.as_ref(), next.wrap_width),
+            table_max_column_width: delta_opt(
+                self.table_max_column_width.as_ref(),
+                next.table_max_column_width,
+            ),
+            table_continuation_edge: delta_opt(
+                self.table_continuation_edge.as_ref(),
+                next.table_continuation_edge,
+            ),
+            theme: delta_opt(self.theme.as_ref(), next.theme),
+            hr_style: delta_opt(self.hr_style.as_ref(), next.hr_style),
+            elements: self.elements.delta_with_unsets(
+                next.elements,
+                &path(prefix, "elements"),
+                unsets,
+            ),
         }
     }
 }
@@ -149,6 +316,7 @@ impl FillDefaults for PartialMarkdownConfig {
                 .or(defaults.table_continuation_edge),
             theme: self.theme.or(defaults.theme),
             hr_style: self.hr_style.or(defaults.hr_style),
+            elements: self.elements.fill_from(defaults.elements),
         }
     }
 }
@@ -169,6 +337,7 @@ impl ToPartial for MarkdownConfig {
             ),
             theme: partial_opts(self.theme.as_ref(), defaults.theme),
             hr_style: partial_opt(&self.hr_style, defaults.hr_style),
+            elements: self.elements.to_partial(),
         }
     }
 }

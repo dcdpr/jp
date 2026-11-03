@@ -3,8 +3,9 @@ pub(crate) mod datetime;
 pub(crate) mod workspace;
 
 use indexmap::IndexSet;
-use jp_config::types::color::Color;
+use jp_config::{style::markdown::MarkdownConfig, types::color::Color};
 use jp_conversation::{ByteSize, Compaction, Labels, ToolCallPolicy};
+use jp_md::style::{Color as MdColor, MarkdownStyleSheet, Style as MdStyle};
 use jp_term::table::DetailItem;
 use serde_json::json;
 use url::Url;
@@ -216,6 +217,25 @@ pub(crate) fn color_to_bg_param(color: Color) -> String {
     match color {
         Color::Ansi256(n) => format!("48;5;{n}"),
         Color::Rgb { r, g, b } => format!("48;2;{r};{g};{b}"),
+    }
+}
+
+/// Convert a [`Color`] into a [`jp_md::style::Color`].
+pub(crate) const fn to_md_color(color: Color) -> MdColor {
+    match color {
+        Color::Ansi256(n) => MdColor::Ansi256(n),
+        Color::Rgb { r, g, b } => MdColor::Rgb { r, g, b },
+    }
+}
+
+/// Build a [`MarkdownStyleSheet`] from the markdown style configuration.
+pub(crate) fn markdown_style_sheet(markdown: &MarkdownConfig) -> MarkdownStyleSheet {
+    let math = &markdown.elements.math;
+    MarkdownStyleSheet {
+        math: MdStyle {
+            fg: math.fg.map(to_md_color),
+            bg: math.bg.map(to_md_color),
+        },
     }
 }
 

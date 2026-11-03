@@ -31,7 +31,7 @@ use comrak::{
     Node,
     nodes::{
         ListDelimType, ListType, NodeCodeBlock, NodeHeading, NodeHtmlBlock, NodeLink, NodeList,
-        NodeTaskItem, NodeValue,
+        NodeMath, NodeTaskItem, NodeValue,
     },
 };
 use jp_term::{
@@ -45,6 +45,7 @@ use syntect::highlighting::Theme;
 
 use crate::{
     format::{HrStyle, SYNTAXES},
+    style::MarkdownStyleSheet,
     table,
     writer::TerminalWriter,
 };
@@ -91,6 +92,9 @@ pub struct RenderOptions<'a> {
 
     /// Override background for inline code spans, if configured.
     pub inline_code_bg: Option<&'a (String, String)>,
+
+    /// Per-element style overrides.
+    pub style_sheet: &'a MarkdownStyleSheet,
 
     /// Visual indent (in spaces) applied to wrap-routed content.
     pub indent: usize,
@@ -248,17 +252,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             NodeValue::FrontMatter(ref literal) if entering => {
                 self.writer.output(literal, false)?;
             }
-            NodeValue::Math(ref math) if entering => {
-                let delim = if math.dollar_math {
-                    if math.display_math { "$$" } else { "$" }
-                } else {
-                    "$`"
-                };
-                let end_delim = if delim == "$`" { "`$" } else { delim };
-                self.writer.output(delim, false)?;
-                self.writer.output(&math.literal, false)?;
-                self.writer.output(end_delim, false)?;
-            }
+            NodeValue::Math(ref math) => self.format_math(math, entering)?,
             NodeValue::FootnoteDefinition(ref nfd) if entering => {
                 self.writer.output(&format!("[^{}]: ", nfd.name), false)?;
             }
@@ -639,12 +633,73 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
 
             let spaces = tail.bytes().take_while(|&b| b == b' ').count();
             let (run, tail) = tail.split_at(spaces);
-            self.writer.output(run, spaces == 1)?;
+            self.writer
+                .output(run, spaces == 1 && !self.writer.begin_line)?;
             rest = tail;
         }
 
         if !rest.is_empty() {
             self.writer.output(rest, false)?;
+        }
+
+        Ok(())
+    }
+
+    /// Format a math span (`$..$`, `$$..$$`, or ``$`..`$``).
+    fn format_math(&mut self, math: &NodeMath, entering: bool) -> fmt::Result {
+        if !entering {
+            return Ok(());
+        }
+
+        let delim = if math.dollar_math {
+            if math.display_math { "$$" } else { "$" }
+        } else {
+            "$`"
+        };
+        let end_delim = if delim == "$`" { "`$" } else { delim };
+
+        let style = self.options.style_sheet.math;
+        let saved_foreground = self.writer.attrs.foreground.clone();
+        let saved_background = self.writer.attrs.background.clone();
+
+        if let Some(fg) = style.fg {
+            let param = fg.fg_param();
+            let esc = format!("\x1b[{param}m");
+            self.writer.attrs.foreground = Some(param);
+            self.writer.write_escape(&esc)?;
+        }
+
+        if let Some(bg) = style.bg {
+            let param = bg.bg_param();
+            let esc = format!("\x1b[{param}m");
+            self.writer.attrs.background = Some(param);
+            self.writer.write_escape(&esc)?;
+        }
+
+        self.writer.output(delim, false)?;
+        self.write_code_literal(&math.literal)?;
+        self.writer.output(end_delim, false)?;
+
+        if style.fg.is_some() {
+            if let Some(param) = saved_foreground {
+                let esc = format!("\x1b[{param}m");
+                self.writer.attrs.foreground = Some(param);
+                self.writer.write_escape(&esc)?;
+            } else {
+                self.writer.attrs.foreground = None;
+                self.writer.write_escape(FG_END)?;
+            }
+        }
+
+        if style.bg.is_some() {
+            if let Some(param) = saved_background {
+                let esc = format!("\x1b[{param}m");
+                self.writer.attrs.background = Some(param);
+                self.writer.write_escape(&esc)?;
+            } else {
+                self.writer.attrs.background = None;
+                self.writer.write_escape(BG_END)?;
+            }
         }
 
         Ok(())
