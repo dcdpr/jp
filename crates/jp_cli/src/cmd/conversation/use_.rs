@@ -2,6 +2,7 @@ use clap::{Arg, ArgMatches, Command};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_workspace::{ConversationHandle, LockResult};
+use rayon::prelude::*;
 use tracing::{debug, warn};
 
 use crate::{
@@ -242,10 +243,14 @@ impl Use {
             .filter(|id| self.range.matches(*id))
             .collect();
 
-        // 3. Grep filter.
+        // 3. Grep filter. The search reads events without loading the stream,
+        // so a match can still be one that activation will fail to load.
         let final_ids = match &self.grep {
-            Some(pattern) => search::filter_ids(ctx, &ranged, pattern)
-                .map_err(|e| format!("invalid pattern: {e}"))?,
+            Some(pattern) => {
+                let matches = search::filter_ids(ctx, &ranged, pattern)
+                    .map_err(|e| format!("invalid pattern: {e}"))?;
+                loadable(ctx, matches)
+            }
             None => ranged,
         };
 
@@ -328,6 +333,21 @@ fn source_ids(
                 && (!sub_filter.session || session_ids.contains(id))
         })
         .map(|(id, _)| *id)
+        .collect()
+}
+
+/// The conversations among `ids` whose stream loads, in their original order.
+///
+/// Activating a conversation loads its stream, so one that fails to load cannot
+/// be activated.
+/// The workspace logs each failure.
+fn loadable(ctx: &Ctx, ids: Vec<ConversationId>) -> Vec<ConversationId> {
+    ids.into_par_iter()
+        .filter(|id| {
+            ctx.workspace
+                .acquire_conversation(id)
+                .is_ok_and(|handle| ctx.workspace.events(&handle).is_ok())
+        })
         .collect()
 }
 

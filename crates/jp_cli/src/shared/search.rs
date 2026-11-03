@@ -509,7 +509,9 @@ fn id_matches(ctx: &Ctx, id: ConversationId, matcher: &Matcher) -> bool {
         return true;
     }
 
-    let events = match ctx.workspace.events(&handle) {
+    // Not `events`: that loads and builds the conversation's config, which a
+    // search never reads, and keeps every searched stream in memory.
+    let events = match ctx.workspace.read_events(&handle) {
         Ok(events) => events,
         Err(error) => {
             warn!(%id, %error, "Failed to load conversation events");
@@ -517,7 +519,7 @@ fn id_matches(ctx: &Ctx, id: ConversationId, matcher: &Matcher) -> bool {
         }
     };
 
-    for event in events.iter_events_by_turn() {
+    for event in &events {
         for line in event_lines(&event.kind) {
             if matcher.is_match(&line) {
                 return true;

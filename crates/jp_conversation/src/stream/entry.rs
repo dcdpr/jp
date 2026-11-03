@@ -155,12 +155,18 @@ impl Serialize for EventPayload {
     }
 }
 
-// Dispatching on `type` avoids the allocations from trying each untagged
-// variant. Base64 content is decoded only for known conversation events.
 impl<'de> Deserialize<'de> for EventPayload {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = Value::deserialize(deserializer)?;
+        let value = Value::deserialize(deserializer)?;
+        Self::from_value(value).map_err(D::Error::custom)
+    }
+}
 
+// Dispatching on `type` avoids the allocations from trying each untagged
+// variant. Base64 content is decoded only for known conversation events.
+impl EventPayload {
+    /// Read a stored payload from its JSON object, without its `event_id`.
+    pub(super) fn from_value(mut value: Value) -> Result<Self, serde_json::Error> {
         let tag = value
             .get("type")
             .and_then(Value::as_str)
@@ -169,19 +175,15 @@ impl<'de> Deserialize<'de> for EventPayload {
         if tag == "config_delta" {
             return config_delta::deserialize(&value)
                 .map(Self::ConfigDelta)
-                .map_err(D::Error::custom);
+                .map_err(serde_json::Error::custom);
         }
 
         if tag == "compaction" {
-            return serde_json::from_value(value)
-                .map(Self::Compaction)
-                .map_err(D::Error::custom);
+            return serde_json::from_value(value).map(Self::Compaction);
         }
 
         if tag == "event_overlay" {
-            return serde_json::from_value(value)
-                .map(Self::Overlay)
-                .map_err(D::Error::custom);
+            return serde_json::from_value(value).map(Self::Overlay);
         }
 
         // Conversations are an append-only log a newer `jp` may have written.
@@ -234,9 +236,34 @@ impl<'de> Deserialize<'de> for EventPayload {
         // Decode base64-encoded storage fields before deserializing.
         decode_event_value(&mut value);
 
-        serde_json::from_value(value)
-            .map(|e| Self::Event(Box::new(e)))
-            .map_err(D::Error::custom)
+        serde_json::from_value(value).map(|e| Self::Event(Box::new(e)))
+    }
+
+    /// Read a stored payload's conversation event, if it holds one.
+    ///
+    /// Config deltas, compactions, and patch overlays are recognized by their
+    /// `type` tag and skipped without being parsed.
+    /// Entries this build cannot read are skipped too, as [`Self::from_value`]
+    /// preserves them rather than failing.
+    pub(super) fn event_from_value(
+        value: Value,
+    ) -> Result<Option<ConversationEvent>, serde_json::Error> {
+        let tag = value
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+
+        if matches!(tag, "config_delta" | "compaction" | "event_overlay") {
+            return Ok(None);
+        }
+
+        Ok(match Self::from_value(value)? {
+            Self::Event(event) => Some(*event),
+            Self::ConfigDelta(_)
+            | Self::Compaction(_)
+            | Self::Overlay(_)
+            | Self::Unknown { .. } => None,
+        })
     }
 }
 

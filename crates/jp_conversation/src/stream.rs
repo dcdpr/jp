@@ -20,6 +20,7 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use jp_config::{AppConfig, FillDefaults as _, PartialAppConfig, PartialConfig as _};
+use serde::de::Error as _;
 use serde_json::{Map, Value};
 use tracing::warn;
 
@@ -1617,6 +1618,38 @@ impl ConversationStream {
             duplicated_event_ids,
             created_at: Utc::now(),
         })
+    }
+
+    /// Read the conversation events from a stored events array, without
+    /// building a stream or resolving any config.
+    ///
+    /// Config deltas, compactions, and patch overlays are skipped without being
+    /// parsed, and entries this build cannot read are skipped as they are when
+    /// a stream is loaded.
+    /// Entry IDs are ignored.
+    /// Both the current events array and the legacy one that leads with the
+    /// base config are accepted.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an entry is not a JSON object, or if a conversation
+    /// event fails to deserialize.
+    pub fn events_from_parts(events: Vec<Value>) -> Result<Vec<ConversationEvent>, StreamError> {
+        let mut out = Vec::with_capacity(events.len());
+        for mut value in events {
+            let Some(object) = value.as_object_mut() else {
+                return Err(StreamError::Json(serde_json::Error::custom(
+                    "stream entry must be a JSON object",
+                )));
+            };
+            object.shift_remove("event_id");
+
+            if let Some(event) = EventPayload::event_from_value(value).map_err(StreamError::Json)? {
+                out.push(event);
+            }
+        }
+
+        Ok(out)
     }
 
     /// The IDs this load found on more than one entry.
