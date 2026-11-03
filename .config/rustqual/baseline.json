@@ -1,11 +1,11 @@
 {
   "version": 2,
-  "quality_score": 0.7229863990305296,
-  "iosp_score": 0.9186774651415213,
-  "violations": 974,
-  "total": 16405,
-  "complexity_warnings": 187,
-  "magic_number_warnings": 252,
+  "quality_score": 0.7234530951973718,
+  "iosp_score": 0.9185437619483002,
+  "violations": 980,
+  "total": 16472,
+  "complexity_warnings": 188,
+  "magic_number_warnings": 251,
   "nesting_depth_warnings": 30,
   "function_length_warnings": 482,
   "unsafe_warnings": 74,
@@ -14,7 +14,7 @@
   "dead_code_warnings": 0,
   "dead_type_warnings": 0,
   "fragment_groups": 0,
-  "boilerplate_warnings": 306,
+  "boilerplate_warnings": 305,
   "srp_struct_warnings": 49,
   "srp_module_warnings": 254,
   "wildcard_import_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 51,
   "structural_coupling_warnings": 10,
-  "total_findings": 3095,
+  "total_findings": 3100,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -188,57 +188,57 @@
     {
       "name": "TerminalCapability::detect",
       "file": "crates/jp_printer/src/region.rs",
-      "line": 135
+      "line": 137
     },
     {
       "name": "WindowBuffer::push",
       "file": "crates/jp_printer/src/region.rs",
-      "line": 538
+      "line": 559
     },
     {
       "name": "RegionEntry::rows",
       "file": "crates/jp_printer/src/region.rs",
-      "line": 753
+      "line": 775
     },
     {
       "name": "RegionStack::release",
       "file": "crates/jp_printer/src/region.rs",
-      "line": 978
+      "line": 1002
     },
     {
       "name": "RegionStack::resume",
       "file": "crates/jp_printer/src/region.rs",
-      "line": 1038
+      "line": 1062
     },
     {
       "name": "RegionStack::erase",
       "file": "crates/jp_printer/src/region.rs",
-      "line": 1061
+      "line": 1085
     },
     {
       "name": "RegionStack::redraw",
       "file": "crates/jp_printer/src/region.rs",
-      "line": 1087
+      "line": 1111
     },
     {
       "name": "RegionStack::redraw_if_top",
       "file": "crates/jp_printer/src/region.rs",
-      "line": 1166
+      "line": 1197
     },
     {
       "name": "filter_line",
       "file": "crates/jp_printer/src/region.rs",
-      "line": 1210
+      "line": 1241
     },
     {
       "name": "visible_sgr",
       "file": "crates/jp_printer/src/region.rs",
-      "line": 1245
+      "line": 1276
     },
     {
       "name": "truncate_row",
       "file": "crates/jp_printer/src/region.rs",
-      "line": 1330
+      "line": 1361
     },
     {
       "name": "main",
@@ -253,52 +253,52 @@
     {
       "name": "Printer::error_println",
       "file": "crates/jp_printer/src/printer.rs",
-      "line": 472
+      "line": 492
     },
     {
       "name": "Printer::send_error",
       "file": "crates/jp_printer/src/printer.rs",
-      "line": 491
+      "line": 511
     },
     {
       "name": "Printer::track_pending",
       "file": "crates/jp_printer/src/printer.rs",
-      "line": 736
+      "line": 756
     },
     {
       "name": "Printer::send",
       "file": "crates/jp_printer/src/printer.rs",
-      "line": 799
+      "line": 819
     },
     {
       "name": "Worker<O,E>::run",
       "file": "crates/jp_printer/src/printer.rs",
-      "line": 1171
+      "line": 1191
     },
     {
       "name": "Worker<O,E>::process_task_instant",
       "file": "crates/jp_printer/src/printer.rs",
-      "line": 1292
+      "line": 1312
     },
     {
       "name": "Worker<O,E>::process_task",
       "file": "crates/jp_printer/src/printer.rs",
-      "line": 1341
+      "line": 1361
     },
     {
       "name": "Worker<O,E>::write_task",
       "file": "crates/jp_printer/src/printer.rs",
-      "line": 1357
+      "line": 1377
     },
     {
       "name": "Sink<W>::new",
       "file": "crates/jp_printer/src/printer.rs",
-      "line": 1446
+      "line": 1466
     },
     {
       "name": "DelayControl::effective_delay",
       "file": "crates/jp_printer/src/printer.rs",
-      "line": 1758
+      "line": 1778
     },
     {
       "name": "Content::fmt",
@@ -823,12 +823,12 @@
     {
       "name": "Options::read",
       "file": "crates/plugins/command/vite/src/options.rs",
-      "line": 95
+      "line": 105
     },
     {
       "name": "categories",
       "file": "crates/plugins/command/vite/src/options.rs",
-      "line": 320
+      "line": 344
     },
     {
       "name": "prefix",
@@ -1378,7 +1378,12 @@
     {
       "name": "PartialReasoningConfig::assign",
       "file": "crates/jp_config/src/style/reasoning.rs",
-      "line": 75
+      "line": 89
+    },
+    {
+      "name": "PartialReasoningWindowConfig::assign",
+      "file": "crates/jp_config/src/style/reasoning.rs",
+      "line": 218
     },
     {
       "name": "PartialUserConfig::assign",
@@ -3801,34 +3806,59 @@
       "line": 678
     },
     {
+      "name": "TurnView::reconfigure",
+      "file": "crates/jp_cli/src/render/turn_view.rs",
+      "line": 332
+    },
+    {
+      "name": "ChatRenderer::new",
+      "file": "crates/jp_cli/src/render/chat.rs",
+      "line": 249
+    },
+    {
       "name": "ChatRenderer::render_reasoning",
       "file": "crates/jp_cli/src/render/chat.rs",
-      "line": 340
+      "line": 435
+    },
+    {
+      "name": "ChatRenderer::enter_reasoning",
+      "file": "crates/jp_cli/src/render/chat.rs",
+      "line": 542
+    },
+    {
+      "name": "ChatRenderer::open_window",
+      "file": "crates/jp_cli/src/render/chat.rs",
+      "line": 564
+    },
+    {
+      "name": "ChatRenderer::claim_reasoning_region",
+      "file": "crates/jp_cli/src/render/chat.rs",
+      "line": 609
     },
     {
       "name": "ChatRenderer::handle_event",
       "file": "crates/jp_cli/src/render/chat.rs",
-      "line": 480
+      "line": 711
     },
     {
       "name": "ChatRenderer::drain_buffer",
       "file": "crates/jp_cli/src/render/chat.rs",
-      "line": 769
+      "line": 1028
     },
     {
       "name": "ChatRenderer::enter_tool_call",
       "file": "crates/jp_cli/src/render/chat.rs",
-      "line": 926
+      "line": 1195
     },
     {
       "name": "build_role_header_line",
       "file": "crates/jp_cli/src/render/chat.rs",
-      "line": 1016
+      "line": 1298
     },
     {
       "name": "indent_lines",
       "file": "crates/jp_cli/src/render/chat.rs",
-      "line": 1062
+      "line": 1344
     },
     {
       "name": "Matcher::find_spans",
