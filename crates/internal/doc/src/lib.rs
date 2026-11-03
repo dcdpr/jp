@@ -13,11 +13,16 @@
 //! - [`heading`] reads a document's headings and the anchors the site gives
 //!   them.
 //! - [`repository`] reads the web address links into the repository point at.
+//! - [`format`] formats a document as it is written, when the workspace turns
+//!   that on for its kind.
 //!
 //! See `docs/rfd/127-in-repo-project-wiki.md`.
+//!
+//! [`format`]: crate::format
 
 pub mod epoch;
 pub mod files;
+pub mod format;
 pub mod heading;
 pub mod id;
 pub mod metadata;

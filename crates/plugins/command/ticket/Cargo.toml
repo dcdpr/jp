@@ -18,7 +18,7 @@ version.workspace = true
 # `$PATH`.
 
 [dependencies]
-comfort = { workspace = true }
+doc = { workspace = true }
 jp_github = { workspace = true }
 jp_md = { workspace = true }
 jp_plugin = { workspace = true }
@@ -39,6 +39,9 @@ tokio = { workspace = true }
 site-revision = { workspace = true }
 
 [dev-dependencies]
+# The style a test formats tickets in.
+comfort = { workspace = true }
+
 camino-tempfile = { workspace = true }
 strip-ansi-escapes = { workspace = true }
 toml = { workspace = true, features = ["parse", "serde"] }

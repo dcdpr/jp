@@ -31,7 +31,7 @@ use jp_config::{
     },
     interrupt::ToolInterruptAction,
     model::id::{self, ProviderId},
-    style::stderr_rows::{RowCount, StderrRows},
+    style::window_rows::{RowCount, WindowRows},
 };
 use jp_conversation::{
     Conversation, ConversationEvent,
@@ -5858,7 +5858,7 @@ fn talking_tool_config(names: &[&str]) -> AppConfig {
     config.style.tool_call.progress.show = true;
     config.style.tool_call.progress.delay_secs = 0;
     config.style.tool_call.progress.interval_ms = 10;
-    config.style.tool_call.progress.stderr_rows = StderrRows::Fixed(RowCount { rows: 2 });
+    config.style.tool_call.progress.stderr_rows = WindowRows::Fixed(RowCount { rows: 2 });
     config.conversation.tools.defaults.run = RunMode::Allow;
 
     for name in names {

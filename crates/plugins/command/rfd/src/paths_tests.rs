@@ -1,4 +1,5 @@
 use camino_tempfile::Utf8TempDir;
+use serde_json::json;
 
 use super::*;
 
@@ -53,10 +54,52 @@ fn links_are_looked_for_in_the_ticket_directory_outside_the_docs_tree() {
 fn create_refuses_a_file_that_exists() {
     let dir = Utf8TempDir::new().unwrap();
     let path = dir.path().join("a.md");
+    let paths = Paths::new(dir.path(), Utf8Path::new("rfd"), Utf8Path::new("ticket"));
 
-    create(&path, "first\n").unwrap();
-    let error = create(&path, "second\n").unwrap_err();
+    paths.create(&path, "first\n").unwrap();
+    let error = paths.create(&path, "second\n").unwrap_err();
 
     assert_eq!(error, format!("{path} already exists."));
     assert_eq!(read(&path).unwrap(), "first\n");
+}
+
+/// The RFDs, the tickets, and the wiki pages each follow their own plugin's
+/// `format_on_write`: a command here rewrites links in all three.
+#[test]
+fn writes_format_the_kinds_the_workspace_formats() {
+    let root = Utf8TempDir::new().unwrap();
+    for dir in ["docs/rfd", "docs/ticket", "docs/wiki"] {
+        fs::create_dir_all(root.path().join(dir)).unwrap();
+    }
+    let config = json!({ "plugins": { "command": {
+        "rfd": { "options": { "format_on_write": true } },
+        "wiki": { "options": { "format_on_write": true } },
+    } } });
+    let paths = Paths::new(
+        root.path(),
+        Utf8Path::new("docs/rfd"),
+        Utf8Path::new("docs/ticket"),
+    )
+    .formatted(&config)
+    .unwrap();
+    let text = "First sentence. Second sentence.\n";
+
+    for file in [
+        "docs/rfd/042-x.md",
+        "docs/ticket/02wt0kx-x.md",
+        "docs/wiki/0a1b2c3-x.md",
+    ] {
+        paths.write(&root.path().join(file), text).unwrap();
+    }
+
+    let read = |file: &str| read(&root.path().join(file)).unwrap();
+    assert_eq!(
+        read("docs/rfd/042-x.md"),
+        "First sentence.\nSecond sentence.\n"
+    );
+    assert_eq!(read("docs/ticket/02wt0kx-x.md"), text);
+    assert_eq!(
+        read("docs/wiki/0a1b2c3-x.md"),
+        "First sentence.\nSecond sentence.\n"
+    );
 }

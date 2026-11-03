@@ -2,7 +2,7 @@
 enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "Fetch the contents of a web page over HTTP(S)."
+summary = "Fetch the contents of a web page or PDF over HTTP(S)."
 
 examples = """
 ```json
@@ -17,7 +17,15 @@ examples = """
 ```json
 {"url": "https://claude.ai/share/3a83612x", "headless": true}
 ```
+```json
+{"url": "https://www.rfc-editor.org/rfc/rfc9562.pdf", "sections": ["57-uuid-version-7", "page-3"]}
+```
 """
+
+# PDFs are converted with poppler (`pdftotext` and `pdftohtml`), which must be
+# on PATH. A URL ending in `.pdf`, a `application/pdf` response, or an
+# `application/octet-stream` response whose body starts like a PDF all take this
+# path; `headless` is ignored for `.pdf` URLs.
 
 # Fetch strategy configuration.
 #
@@ -66,9 +74,10 @@ return a compact listing of all anchored sections on the page (headings and defi
 """
 description = """\
 Each entry includes the section's anchor ID, level, title, and a short content preview. Use the \
-anchor IDs with the `sections` parameter to fetch specific sections. Works for both HTML and \
-markdown sources; HTML also surfaces AsciiDoctor-style `<dt>` glossary terms (e.g. git's \
-manpages).\
+anchor IDs with the `sections` parameter to fetch specific sections. Works for HTML, markdown, and \
+PDF sources; HTML also surfaces AsciiDoctor-style `<dt>` glossary terms (e.g. git's manpages). \
+For a PDF, sections are its bookmarks, or one per page if it has none, and the listing ends with \
+the page count.\
 """
 
 [conversation.tools.web_fetch.parameters.headless]
@@ -94,5 +103,8 @@ description = """\
 Only the content under those anchors will be returned, significantly reducing output size. Use \
 `list_sections` first to discover available IDs. For headings, IDs are consistent across markdown \
 and HTML fetches (GitHub-style heading slugs); for HTML definition-list terms the ID is whatever \
-the page exposes (typically a permalink anchor).\
+the page exposes (typically a permalink anchor). Sections are returned in the order requested. \
+On HTML pages and PDFs, an ID the page doesn't have is an error. For a PDF, `page-N` and \
+`pages-N-M` select pages; a large PDF fetched whole is cut short and followed by its section \
+listing, so fetch what you need by section or page instead.\
 """
