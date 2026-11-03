@@ -1,18 +1,14 @@
 //! Turn summary generation.
 //!
-//! [`generate`] is the entry point: it asks a model for a one-line summary of
-//! each of a conversation's turns, at most `batch_size` of them per request,
-//! and returns the summaries that came back.
-//! [`resolve_model`] picks the model that request runs on.
+//! [`generate`] requests single-line summaries for up to `batch_size` completed
+//! turns and returns the validated results. [`resolve_model`] selects the model
+//! and reasoning parameters for the request.
 //!
-//! A turn reaches the model as a [`TurnTranscript`]: its events with reasoning
-//! left out and tool calls reduced to their name and outcome, tagged with the
-//! ID of the turn's `TurnStart` so an answer can name the turn it describes.
-//! [`TurnTranscript::fingerprint`] identifies what the model read, so a caller
-//! storing a summary later can check that the turn has not changed since.
-//!
-//! [`mechanical_turn_summary`] is what to show for a turn with no stored
-//! summary.
+//! Each turn is formatted as an XML [`TurnTranscript`] containing user
+//! requests, tool call names and outcomes, and assistant responses (omitting
+//! reasoning and raw tool payloads). [`TurnTranscript::fingerprint`] hashes the
+//! rendered transcript and entry IDs so callers can verify that a turn was not
+//! modified while the summary request was in flight.
 
 use std::{
     borrow::Cow,
@@ -33,10 +29,10 @@ use jp_config::{
         parameters::{CustomReasoningConfig, ParametersConfig, ReasoningEffort},
     },
 };
+pub use jp_conversation::event::MAX_SUMMARY_CHARS;
 use jp_conversation::{
-    Compaction, ConversationEvent, ConversationStream, EventId, EventKind, ReasoningPolicy,
-    ToolCallPolicy, Turn,
-    event::{ChatRequest, ChatResponse},
+    ConversationEvent, ConversationStream, EventId, EventKind, Turn,
+    event::{ChatRequest, ChatResponse, format_turn_summary},
     stream::EventInTurn,
     thread::ThreadBuilder,
 };
@@ -55,117 +51,88 @@ use crate::{
     window,
 };
 
-/// The most characters a turn summary holds.
+/// Maximum number of characters kept from a single request or response message
+/// in a [`TurnTranscript`].
 ///
-/// The model is asked for at most 60; a longer answer is cut to this, as is the
-/// request line [`mechanical_turn_summary`] shows in a summary's place.
-pub const MAX_SUMMARY_CHARS: usize = 72;
+/// Messages exceeding this limit keep their first and last halves separated by
+/// `\n[…]\n` so that turns containing large pasted logs or long documents can
+/// still be summarized within a small model's context window.
+pub const MAX_MESSAGE_CHARS: usize = 4_000;
 
-/// Opens the request, ahead of the transcripts.
 const REQUEST_PREAMBLE: &str = "Summarize each of these conversation turns.";
 
-/// A request for LLM-generated turn summaries.
+/// Parameters for a turn summary generation request.
 #[derive(Debug)]
 pub struct TurnSummaryRequest {
-    /// The conversation the turns belong to.
+    /// Conversation stream containing the candidate turns.
     pub events: ConversationStream,
 
-    /// The turns to summarize, each named by the ID of its `TurnStart`.
-    ///
-    /// An ID that names no turn in `events` is skipped.
+    /// `TurnStart` event IDs of the candidate turns to summarize.
     pub turn_ids: Vec<EventId>,
 
-    /// The model the request runs on, with the parameters it runs under.
-    ///
-    /// These parameters are the only ones the request carries: none are
-    /// inherited from the conversation.
-    /// See [`resolve_model`].
+    /// Resolved model and parameters for the summary request.
     pub model: ModelConfig,
 
-    /// The most turns the request summarizes.
+    /// Maximum number of turns to summarize in a single request.
     pub batch_size: usize,
 
-    /// Output byte ceiling for the request, from
-    /// `assistant.request.max_response_bytes`.
-    /// A runaway response is cut off past this and surfaced as a non-retryable
-    /// error rather than regenerated.
-    /// `None` leaves the response unbounded.
+    /// Optional byte ceiling on the provider response.
     pub max_response_bytes: Option<u64>,
 
-    /// Where the provider's notices go, such as a switch to another credential.
+    /// Sink for provider notices (such as credential fallback).
     pub notices: NoticeSink,
 }
 
-/// A summary the model wrote for one turn.
+/// Summary generated for a single turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GeneratedTurnSummary {
-    /// The ID of the turn's `TurnStart`.
     pub turn_id: EventId,
-
-    /// One line of at most [`MAX_SUMMARY_CHARS`] characters.
     pub summary: String,
-
-    /// The fingerprint of the transcript the model read for this turn.
     pub fingerprint: TurnFingerprint,
 }
 
-/// One turn as the summary model reads it.
-///
-/// Built by [`transcripts`].
+/// Stripped XML transcript of a single turn for the summary prompt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnTranscript {
-    /// The ID of the turn's `TurnStart`.
     turn_id: EventId,
-
-    /// The markup the request carries for this turn.
     text: String,
-
-    /// See [`TurnFingerprint`].
     fingerprint: TurnFingerprint,
 }
 
 impl TurnTranscript {
-    /// The ID of the turn's `TurnStart`.
     #[must_use]
     pub const fn turn_id(&self) -> &EventId {
         &self.turn_id
     }
 
-    /// The markup the request carries for this turn.
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
-    /// Identifies what the model reads for this turn.
     #[must_use]
     pub const fn fingerprint(&self) -> TurnFingerprint {
         self.fingerprint
     }
 }
 
-/// Identifies the transcript of one turn.
+/// In-memory hash of a [`TurnTranscript`] and the event IDs of the entries that
+/// produced it.
 ///
-/// Two fingerprints of a turn are equal when its transcript reads the same and
-/// was built from entries with the same IDs.
-/// Editing what a transcript leaves out, such as reasoning or tool output, does
-/// not change it.
-///
-/// Only comparable within one process: the hash is not stable across releases,
-/// so a fingerprint must not be stored.
+/// Used to detect whether a turn's summarized content or event identity changed
+/// between task spawn and persistence. Not stable across processes or releases.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TurnFingerprint(u64);
 
-/// Resolve the model that turn summaries are generated with.
+/// Resolve the model configuration for turn summary generation.
 ///
-/// `conversation.turn_summary.generate.model` is used when configured, then
-/// `conversation.title.generate.model`, and otherwise the assistant model's ID
-/// with default parameters, so a summary request never inherits the
-/// conversation's own parameters.
+/// Follows the fallback chain:
+/// 1. `conversation.turn_summary.generate.model`
+/// 2. `conversation.title.generate.model`
+/// 3. `assistant.model.id` with default parameters
 ///
-/// Reasoning defaults to low effort with the trace excluded: a summary is one
-/// factual line, and deep reasoning on every turn rarely earns its cost.
-/// An explicit reasoning setting on the chosen model is preserved.
+/// If `parameters.reasoning` is unset on the selected model, it defaults to
+/// [`ReasoningEffort::Low`] with `exclude = true`.
 #[must_use]
 pub fn resolve_model(config: &AppConfig) -> ModelConfig {
     let conversation = &config.conversation;
@@ -194,27 +161,16 @@ pub fn resolve_model(config: &AppConfig) -> ModelConfig {
     model
 }
 
-/// Generate one-line summaries for the turns `request` names.
+/// Generate single-line summaries for candidate turns in `request`.
 ///
-/// Every turn goes into the request whole or not at all.
-/// A turn whose transcript alone does not fit the budget that
-/// `details.context_window` leaves is skipped; the rest are taken newest first
-/// until `request.batch_size` are taken or the next one would not fit.
-/// When the window is unknown, only the batch size bounds the request.
-/// No request is made when no turn is taken.
-///
-/// The request runs with prompt caching off: the turns it carries are
-/// summarized once, so a cache entry written for it would never be read.
-///
-/// Returns at most one summary per turn sent, in the order the model gave them.
-/// A summary naming a turn that was not sent is discarded, as is a blank one,
-/// so a turn the model passed over is absent from the result.
+/// Candidate turns are rendered into [`TurnTranscript`]s and packed newest
+/// first up to `request.batch_size` and the context window budget of `details`.
+/// Prompt caching is disabled because each batch of turns is summarized once.
 ///
 /// # Errors
 ///
-/// Returns an error if the conversation's config deltas do not merge into a
-/// valid config, the thread cannot be built, or the provider request fails
-/// after exhausting its retries.
+/// Returns an error if the conversation configuration fails to resolve, the
+/// query thread cannot be built, or the provider request fails after retries.
 pub async fn generate(
     provider: &dyn Provider,
     details: &ModelDetails,
@@ -230,36 +186,28 @@ pub async fn generate(
     } = request;
 
     let sections = summary_instructions();
-
-    // The request carries no system prompt and no attachments, so the
-    // instruction sections and the preamble are the only fixed overhead.
     let budget = details.context_window.map(|context_window| {
         let overhead =
             window::estimate_overhead_chars(None, &sections, &[], &[]) + REQUEST_PREAMBLE.len();
         window::budget_chars(context_window, overhead)
     });
 
-    // The conversation's settings carry over, but the model is replaced whole:
-    // a config delta cannot unset a parameter the conversation's model set and
-    // the summary model leaves unset.
-    let mut config = events.config()?;
-    config.assistant.model = model;
-    config.assistant.request.cache = CachePolicy::Off;
-
-    let packed = pack(strip(events, &turn_ids), batch_size, budget);
+    let packed = pack(transcripts(&events, &turn_ids), batch_size, budget);
     if packed.is_empty() {
-        debug!("No turn to summarize fits a request.");
+        debug!("No turn transcripts fit the summary request.");
         return Ok(vec![]);
     }
 
     let sent: Vec<EventId> = packed.iter().map(|t| t.turn_id.clone()).collect();
     debug!(turns = sent.len(), "Requesting turn summaries.");
 
-    // A fresh stream has its own creation time, which providers derive a
-    // session and prompt cache identity from. The request shares no prefix
-    // with the conversation, so it gains nothing from the conversation's
-    // identity, and under it would compete for the cache the conversation
-    // reads from.
+    let mut config = events.config()?;
+    config.assistant.model = model;
+    config.assistant.request.cache = CachePolicy::Off;
+
+    // Construct a standalone stream with a fresh `created_at` timestamp so the
+    // summary request does not share prompt-cache identity with the main
+    // conversation.
     let mut thread_events = ConversationStream::new(Arc::new(config));
     thread_events.start_turn(ChatRequest {
         content: request_text(&packed),
@@ -274,9 +222,6 @@ pub async fn generate(
             .build()?,
         tools: vec![],
         tool_choice: ToolChoice::default(),
-        // A summary is stored as describing its turn, so a request the provider
-        // quietly shortened would yield summaries of turns the model never read
-        // in full.
         truncation: Truncation::Forbidden,
     };
 
@@ -284,7 +229,7 @@ pub async fn generate(
     let response = collect_with_retry(provider, details, query, &retry, &notices).await?;
 
     let Some(data) = event_builder::structured_data(response) else {
-        debug!("The turn summary response carried no structured data.");
+        debug!("Turn summary response contained no structured data.");
         return Ok(vec![]);
     };
 
@@ -306,70 +251,41 @@ pub async fn generate(
         .collect())
 }
 
-/// Build the transcripts of the turns `turn_ids` names, in stream order.
+/// Build [`TurnTranscript`]s for the turns matching `turn_ids`, in stream order.
 ///
-/// Each turn is read from its own events: the conversation's compaction
-/// overlays are ignored, so a turn a stored summary stands in for is still
-/// transcribed from what it holds.
-/// Reasoning is left out, tool call arguments are dropped, and tool output is
-/// reduced to a status line: the `ReasoningPolicy::Strip` and
-/// `ToolCallPolicy::Strip` compaction policies, applied to the whole turn.
+/// Reads raw turn events directly from `events`, ignoring compaction overlays so
+/// turns covered by a compaction summary are still transcribed from their own
+/// events. Reasoning events and tool arguments/payloads are omitted, and long
+/// messages are truncated to [`MAX_MESSAGE_CHARS`].
 ///
-/// An ID that names no `TurnStart` in `events` is skipped, as is a turn with
-/// nothing left to show.
+/// Unknown `EventId`s and turns without provider-visible content are skipped.
 #[must_use]
 pub fn transcripts(events: &ConversationStream, turn_ids: &[EventId]) -> Vec<TurnTranscript> {
-    strip(events.clone(), turn_ids)
-}
-
-/// [`transcripts`], for a caller that can give up its stream.
-fn strip(mut events: ConversationStream, turn_ids: &[EventId]) -> Vec<TurnTranscript> {
     let wanted: HashSet<&EventId> = turn_ids.iter().collect();
-    let keep: HashSet<usize> = events
-        .iter_events_by_turn()
-        .filter(|entry| entry.is_turn_start() && wanted.contains(entry.event_id))
-        .map(|entry| entry.turn)
-        .collect();
-
-    if keep.is_empty() {
+    if wanted.is_empty() {
         return vec![];
     }
 
-    // A summary compaction replaces its turns with a synthetic one under a new
-    // ID, which would have the model summarize a turn it never saw. Patch
-    // overlays stay: they only rewrite metadata, which a transcript does not
-    // carry.
-    events.remove_compactions();
-    events.retain_turns(|turn| keep.contains(&turn));
+    let mut turns: Vec<Vec<EventInTurn<'_>>> = vec![];
+    let mut keep_current = false;
 
-    let last_turn = events.turn_count().saturating_sub(1);
-    events.add_compaction(
-        Compaction::new(0, last_turn)
-            .with_reasoning(ReasoningPolicy::Strip)
-            .with_tool_calls(ToolCallPolicy::Strip {
-                request: true,
-                response: true,
-            }),
-    );
-    events.apply_projection();
-
-    let mut turns: Vec<(usize, Vec<EventInTurn<'_>>)> = vec![];
     for entry in events.iter_events_by_turn() {
-        match turns.last_mut() {
-            Some((turn, entries)) if *turn == entry.turn => entries.push(entry),
-            _ => turns.push((entry.turn, vec![entry])),
+        if entry.is_turn_start() {
+            keep_current = wanted.contains(entry.event_id);
+            if keep_current {
+                turns.push(vec![entry]);
+            }
+        } else if keep_current && let Some(turn) = turns.last_mut() {
+            turn.push(entry);
         }
     }
 
     turns
         .iter()
-        .filter_map(|(_, entries)| transcribe(entries))
+        .filter_map(|entries| transcribe(entries))
         .collect()
 }
 
-/// Render one turn from its projected entries, the first of which opens it.
-///
-/// Returns `None` when the turn has nothing a provider would see.
 fn transcribe(entries: &[EventInTurn<'_>]) -> Option<TurnTranscript> {
     let (turn_start, rest) = entries.split_first()?;
     if !turn_start.is_turn_start() {
@@ -402,24 +318,20 @@ fn transcribe(entries: &[EventInTurn<'_>]) -> Option<TurnTranscript> {
     })
 }
 
-/// Append the markup for one event, returning whether it wrote any.
 fn render_event(out: &mut String, event: &ConversationEvent) -> bool {
     match &event.kind {
-        EventKind::ChatRequest(request) => push_element(out, "user", "", &request.content),
+        EventKind::ChatRequest(request) => {
+            push_element(out, "user", "", &truncate_message(&request.content));
+        }
         EventKind::ChatResponse(ChatResponse::Message { message }) => {
-            push_element(out, "assistant", "", message);
+            push_element(out, "assistant", "", &truncate_message(message));
         }
         EventKind::ChatResponse(ChatResponse::Structured { data }) => {
-            push_element(out, "assistant", "", &data.to_string());
+            push_element(out, "assistant", "", &truncate_message(&data.to_string()));
         }
         EventKind::ToolCallRequest(request) => {
             let name = format!(" name=\"{}\"", escape(request.name.as_str()));
-            let arguments = if request.arguments.is_empty() {
-                String::new()
-            } else {
-                Value::Object(request.arguments.clone()).to_string()
-            };
-            push_element(out, "tool_call", &name, &arguments);
+            push_element(out, "tool_call", &name, "");
         }
         EventKind::ToolCallResponse(response) => {
             let tag = if response.result.is_ok() {
@@ -427,10 +339,8 @@ fn render_event(out: &mut String, event: &ConversationEvent) -> bool {
             } else {
                 "tool_error"
             };
-            push_element(out, tag, "", response.content());
+            push_element(out, tag, "", "");
         }
-        // Projection has already dropped reasoning; turn markers and inquiries
-        // never reach a provider.
         EventKind::ChatResponse(ChatResponse::Reasoning { .. })
         | EventKind::TurnStart(_)
         | EventKind::InquiryRequest(_)
@@ -440,8 +350,18 @@ fn render_event(out: &mut String, event: &ConversationEvent) -> bool {
     true
 }
 
-/// Append `<tag attributes>`, `content` and `</tag>` on lines of their own, or
-/// `<tag attributes/>` when `content` is blank.
+fn truncate_message(text: &str) -> Cow<'_, str> {
+    let count = text.chars().count();
+    if count <= MAX_MESSAGE_CHARS {
+        return Cow::Borrowed(text);
+    }
+
+    let half = MAX_MESSAGE_CHARS / 2;
+    let head: String = text.chars().take(half).collect();
+    let tail: String = text.chars().skip(count - half).collect();
+    Cow::Owned(format!("{}\n[…]\n{}", head.trim_end(), tail.trim_start()))
+}
+
 fn push_element(out: &mut String, tag: &str, attributes: &str, content: &str) {
     let content = content.trim();
     if content.is_empty() {
@@ -456,27 +376,24 @@ fn push_element(out: &mut String, tag: &str, attributes: &str, content: &str) {
     );
 }
 
-/// Wrap `content` in CDATA when it holds characters that would read as markup.
-///
-/// A `]]>` inside it is split across two sections, since it would otherwise
-/// close the first one early.
 fn cdata_if_needed(content: &str) -> Cow<'_, str> {
     if !content.contains(['<', '>', '&']) {
         return Cow::Borrowed(content);
     }
 
+    // Split any embedded `]]>` across two adjacent CDATA sections so it cannot
+    // terminate the outer CDATA block early.
     Cow::Owned(format!(
         "<![CDATA[\n{}\n]]>",
         content.replace("]]>", "]]]]><![CDATA[>")
     ))
 }
 
-/// Choose the transcripts one request carries, returned in stream order.
+/// Pack transcripts newest-first up to `batch_size` and `budget`, returning the
+/// selected turns in stream order.
 ///
-/// A transcript longer than `budget` on its own is left out.
-/// The rest are taken newest first, whole, until `batch_size` are taken or the
-/// next one would push the total past `budget`.
-/// A `budget` of `None` bounds nothing.
+/// Any single transcript exceeding `budget` on its own is skipped so older
+/// turns behind it can still be packed.
 fn pack(
     transcripts: Vec<TurnTranscript>,
     batch_size: usize,
@@ -496,7 +413,7 @@ fn pack(
             debug!(
                 turn_id = %transcript.turn_id,
                 chars,
-                "Turn is too large to summarize; leaving it out."
+                "Turn transcript exceeds context budget; skipping."
             );
             continue;
         }
@@ -513,7 +430,6 @@ fn pack(
     packed
 }
 
-/// The text of the request: what to do, then each transcript.
 fn request_text(transcripts: &[TurnTranscript]) -> String {
     let mut text = REQUEST_PREAMBLE.to_owned();
     for transcript in transcripts {
@@ -524,15 +440,26 @@ fn request_text(transcripts: &[TurnTranscript]) -> String {
     text
 }
 
-/// JSON schema for the turn summary structured output.
+/// JSON schema for turn summary structured output.
 ///
-/// Requires a `summaries` array with one `{ turn_id, summary }` entry per turn
-/// in `turn_ids`, each `turn_id` one of those IDs.
+/// Requires a `summaries` object with one string property per ID in `turn_ids`.
 #[must_use]
 #[allow(clippy::missing_panics_doc)]
 pub fn summary_schema(turn_ids: &[EventId]) -> Map<String, Value> {
-    let count = turn_ids.len();
-    let ids: Vec<String> = turn_ids.iter().map(ToString::to_string).collect();
+    let required: Vec<String> = turn_ids.iter().map(ToString::to_string).collect();
+    let properties: Map<String, Value> = required
+        .iter()
+        .map(|id| {
+            (
+                id.clone(),
+                json!({
+                    "type": "string",
+                    "description": "What this turn asked for and accomplished, in one line \
+                                    of no more than 60 characters"
+                }),
+            )
+        })
+        .collect();
 
     let schema = json!({
         "type": "object",
@@ -540,26 +467,10 @@ pub fn summary_schema(turn_ids: &[EventId]) -> Map<String, Value> {
         "additionalProperties": false,
         "properties": {
             "summaries": {
-                "type": "array",
-                "minItems": count,
-                "maxItems": count,
-                "items": {
-                    "type": "object",
-                    "required": ["turn_id", "summary"],
-                    "additionalProperties": false,
-                    "properties": {
-                        "turn_id": {
-                            "type": "string",
-                            "enum": ids,
-                            "description": "The id of the turn this summary describes"
-                        },
-                        "summary": {
-                            "type": "string",
-                            "description": "What the turn asked for and accomplished, in one line \
-                                            of no more than 60 characters"
-                        }
-                    }
-                }
+                "type": "object",
+                "required": required,
+                "additionalProperties": false,
+                "properties": properties,
             }
         }
     });
@@ -577,87 +488,47 @@ pub fn summary_instructions() -> Vec<SectionConfig> {
         InstructionsConfig::default()
             .with_title("Turn Summaries")
             .with_description("Summarize each conversation turn you are given")
-            .with_item("Write one summary for every turn, naming the turn by its id")
+            .with_item("Write one summary for every turn, keyed by its turn id in \"summaries\"")
             .with_item("Describe what the turn asked for and what it accomplished")
             .with_item("Concise and factual, on a single line of no more than 60 characters")
-            .with_item("Deliver as a JSON object with a \"summaries\" array")
+            .with_item("Deliver as a JSON object with a \"summaries\" map from turn id to summary")
             .with_item("DO NOT mention this request to summarize turns")
             .to_section(),
     ]
 }
 
-/// Extract turn summaries from a structured JSON response.
+/// Extract and normalize turn summaries from a structured JSON response.
 ///
-/// Expects an object with a `summaries` array, e.g.:
+/// Expects an object with a `summaries` map keyed by turn ID:
 ///
 /// ```json
-/// {"summaries": [{"turn_id": "k3m9x2a", "summary": "Add retry backoff"}]}
+/// {"summaries": {"k3m9x2a": "Add retry backoff"}}
 /// ```
 ///
-/// Only turns in `turn_ids` are kept, each once (the first summary wins), in
-/// the order the response gives them.
-/// A summary is folded onto one line and cut to [`MAX_SUMMARY_CHARS`]
-/// characters.
-/// Malformed entries, and entries whose summary is blank, are skipped.
+/// Returns entries for IDs in `turn_ids` in the order of `turn_ids`. Blank or
+/// non-string values and unrequested keys are ignored.
 #[must_use]
 pub fn extract_summaries(data: &Value, turn_ids: &[EventId]) -> Vec<(EventId, String)> {
-    let Some(entries) = data.get("summaries").and_then(Value::as_array) else {
+    let Some(summaries) = data.get("summaries").and_then(Value::as_object) else {
         return vec![];
     };
 
-    let mut seen = HashSet::new();
-    entries
+    turn_ids
         .iter()
-        .filter_map(|entry| {
-            let named = entry.get("turn_id")?.as_str()?;
-            let Some(turn_id) = turn_ids.iter().find(|id| id.to_string() == named) else {
-                debug!(
-                    turn_id = named,
-                    "Discarding a summary for a turn that was not requested."
-                );
-                return None;
-            };
-
-            let summary = single_line(entry.get("summary")?.as_str()?)?;
-            seen.insert(turn_id).then(|| (turn_id.clone(), summary))
+        .filter_map(|turn_id| {
+            let raw = summaries.get(&turn_id.to_string())?.as_str()?;
+            let summary = format_turn_summary(raw)?;
+            Some((turn_id.clone(), summary))
         })
         .collect()
 }
 
-/// What to show for a turn with no stored summary.
+/// Fallback summary for a turn without a stored LLM summary.
 ///
-/// The first non-empty line of the turn's first `ChatRequest`, with runs of
-/// whitespace folded to one space, cut to [`MAX_SUMMARY_CHARS`] characters.
-/// A line that was cut ends in `…`.
-/// `None` when the turn has no request, or its first request is blank.
+/// Delegates to [`Turn::fallback_summary`].
 #[must_use]
 pub fn mechanical_turn_summary(turn: &Turn<'_>) -> Option<String> {
-    let request = turn.iter().find_map(|event| event.as_chat_request())?;
-    let line = request
-        .content
-        .lines()
-        .find(|line| !line.trim().is_empty())?;
-
-    single_line(line)
-}
-
-/// Fold `text` onto one line of at most [`MAX_SUMMARY_CHARS`] characters.
-///
-/// Runs of whitespace, newlines among them, become one space.
-/// A line that was cut ends in `…`.
-/// Returns `None` when nothing but whitespace is left.
-fn single_line(text: &str) -> Option<String> {
-    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if line.is_empty() {
-        return None;
-    }
-
-    if line.chars().count() <= MAX_SUMMARY_CHARS {
-        return Some(line);
-    }
-
-    let cut: String = line.chars().take(MAX_SUMMARY_CHARS - 1).collect();
-    Some(format!("{}…", cut.trim_end()))
+    turn.fallback_summary()
 }
 
 #[cfg(test)]

@@ -308,6 +308,10 @@ impl ConversationStream {
         preserved.reverse();
         self.events.append(&mut preserved);
 
+        if request.is_some() {
+            self.clear_last_turn_summary();
+        }
+
         request
     }
 
@@ -772,13 +776,19 @@ impl ConversationStream {
 
         let internal = self.events.remove(pos);
         let event_id = internal.event_id.clone();
-        internal
+        let popped = internal
             .into_event()
             .map(|event| ConversationEventWithConfig {
                 event_id,
                 event,
                 config,
-            })
+            });
+
+        if popped.as_ref().is_some_and(|p| !p.event.is_turn_start()) {
+            self.clear_last_turn_summary();
+        }
+
+        popped
     }
 
     /// Returns the last turn-scoped [`ConversationEvent`] in the stream,
@@ -1324,17 +1334,19 @@ impl ConversationStream {
         result
     }
 
-    /// Store `summary` on the [`TurnStart`] entry whose ID is `turn_id`,
-    /// replacing any summary it already holds.
+    /// Normalize and store `summary` on the [`TurnStart`] entry with
+    /// `event_id == *turn_id`, replacing any existing summary.
     ///
-    /// Returns `false`, leaving the stream unchanged, when `turn_id` does not
-    /// name a `TurnStart` in this stream: the turn has been removed, the ID
-    /// names another kind of entry, or this stream's load found the ID on more
-    /// than one entry (see [`Self::duplicated_event_ids`]).
+    /// Whitespace is collapsed to a single line and truncated to
+    /// [`MAX_SUMMARY_CHARS`](crate::event::MAX_SUMMARY_CHARS) characters via
+    /// [`format_turn_summary`](crate::event::format_turn_summary).
     ///
-    /// The text is stored verbatim; keeping it to a single line is up to the
-    /// caller.
-    pub fn set_turn_summary(&mut self, turn_id: &EventId, summary: String) -> bool {
+    /// Returns `false` without modifying the stream if `summary` is blank or
+    /// `turn_id` does not match a `TurnStart` entry.
+    pub fn set_turn_summary(&mut self, turn_id: &EventId, summary: impl AsRef<str>) -> bool {
+        let Some(summary) = crate::event::format_turn_summary(summary.as_ref()) else {
+            return false;
+        };
         let Some(turn_start) = self.turn_start_mut(turn_id) else {
             return false;
         };
@@ -1343,11 +1355,9 @@ impl ConversationStream {
         true
     }
 
-    /// Remove the summary from the [`TurnStart`] entry whose ID is `turn_id`.
+    /// Clear the summary on the [`TurnStart`] entry with `event_id == *turn_id`.
     ///
-    /// For a turn whose content changed, so its summary no longer describes it.
-    /// Returns `false`, leaving the stream unchanged, in the same cases as
-    /// [`Self::set_turn_summary`].
+    /// Returns `false` if `turn_id` does not match a `TurnStart` entry.
     pub fn clear_turn_summary(&mut self, turn_id: &EventId) -> bool {
         let Some(turn_start) = self.turn_start_mut(turn_id) else {
             return false;
@@ -1357,24 +1367,28 @@ impl ConversationStream {
         true
     }
 
-    /// The [`TurnStart`] entry whose ID is `turn_id`.
-    ///
-    /// `None` when no entry has that ID, the entry is not a `TurnStart`, or
-    /// this stream's load found the ID on more than one entry.
-    fn turn_start_mut(&mut self, turn_id: &EventId) -> Option<&mut TurnStart> {
-        if self.duplicated_event_ids.contains(turn_id) {
-            return None;
+    /// Clear the summary on the last [`TurnStart`] in the stream, if any.
+    fn clear_last_turn_summary(&mut self) {
+        if let Some(turn_start) = self
+            .events
+            .iter_mut()
+            .rev()
+            .find_map(|entry| match &mut entry.payload {
+                EventPayload::Event(event) => event.as_turn_start_mut(),
+                _ => None,
+            })
+        {
+            turn_start.summary = None;
         }
+    }
 
+    /// Mutable reference to the [`TurnStart`] entry with `event_id == *turn_id`.
+    fn turn_start_mut(&mut self, turn_id: &EventId) -> Option<&mut TurnStart> {
         let entry = self.events.iter_mut().find(|e| e.event_id == *turn_id)?;
         let EventPayload::Event(event) = &mut entry.payload else {
             return None;
         };
-        let EventKind::TurnStart(turn_start) = &mut event.kind else {
-            return None;
-        };
-
-        Some(turn_start)
+        event.as_turn_start_mut()
     }
 
     /// Retain only the last `n` turns, dropping earlier ones.

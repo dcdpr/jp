@@ -91,11 +91,12 @@ A consumer can rely on:
 
 - `Turn::id()` and `Turn::summary()` to read a turn's identity and its stored
   summary.
-- `mechanical_turn_summary(&Turn)` as the display fallback when no summary is
+- `Turn::fallback_summary()` (also re-exported as
+  `mechanical_turn_summary(&Turn)`) as the display fallback when no summary is
   stored: the first non-empty line of the turn's first `ChatRequest`, collapsed
   to a single line and truncated to 72 characters.
-- `ConversationStream::set_turn_summary` to persist a summary it generated
-  itself.
+- `ConversationStream::set_turn_summary` to normalize and persist a summary it
+  generated itself.
 
 A consumer that rewrites the stream, such as an editor that reconstructs events
 from files, must:
@@ -197,29 +198,40 @@ None of those constraints apply to `TurnStart`:
 
 #### Stream and Turn API
 
-`Turn<'a>` (in `jp_conversation::stream::turn_iter`) gains two accessors:
+`Turn<'a>` (in `jp_conversation::stream::turn_iter`) gains three accessors:
 
 ```rust
 impl<'a> Turn<'a> {
     /// The `EventId` of this turn's leading `TurnStart` event, if present.
     #[must_use]
-    pub fn id(&self) -> Option<&EventId>;
+    pub fn id(&self) -> Option<&'a EventId>;
 
     /// The single-line summary on this turn's leading `TurnStart`, if present.
     #[must_use]
-    pub fn summary(&self) -> Option<&str>;
+    pub fn summary(&self) -> Option<&'a str>;
+
+    /// Fallback summary derived from the first non-empty line of the turn's
+    /// first `ChatRequest`.
+    #[must_use]
+    pub fn fallback_summary(&self) -> Option<String>;
 }
 ```
 
-`ConversationStream` gains a targeted setter that addresses the turn by its
-`TurnStart` `EventId` rather than by positional turn index:
+`ConversationStream` gains targeted setters that address the turn by its
+`TurnStart` `EventId` rather than by positional turn index, and clears the
+trailing turn's summary when `pop` or `trim_chat_request` removes events from
+it:
 
 ```rust
 impl ConversationStream {
-    /// Set the summary on the `TurnStart` entry with `event_id == *turn_id`.
+    /// Normalize and store `summary` on the `TurnStart` entry with
+    /// `event_id == *turn_id`.
     ///
-    /// Returns `true` if a matching `TurnStart` was found and updated.
-    pub fn set_turn_summary(&mut self, turn_id: &EventId, summary: String) -> bool;
+    /// Returns `true` if a non-blank summary was stored on a matching `TurnStart`.
+    pub fn set_turn_summary(&mut self, turn_id: &EventId, summary: impl AsRef<str>) -> bool;
+
+    /// Clear the summary on the `TurnStart` entry with `event_id == *turn_id`.
+    pub fn clear_turn_summary(&mut self, turn_id: &EventId) -> bool;
 }
 ```
 
@@ -250,42 +262,32 @@ This happens in two ways:
   responsibility: removing the `summary` key from a turn's `turn_start` entry
   after changing that turn's content makes catch-up regenerate it.
 
-### What is Summarized: Mechanically Stripped Full Turns
+### What is Summarized: Bounded Turn Transcripts
 
 To produce an accurate summary, the summarizer needs the complete turn: the
 user's `ChatRequest`, the tools that were called and whether they succeeded, and
 the assistant's `ChatResponse::Message`.
 
 However, raw coding turns routinely contain tens of kilobytes of tool output
-(file reads, grep matches, diffs) and long `ChatResponse::Reasoning` blocks.
+(file reads, grep matches, diffs), long `ChatResponse::Reasoning` blocks, or
+large pasted logs in `ChatRequest`.
 Sending raw turns to a small local model overflows its context window or causes
 multi-second prompt-evaluation latency.
 
-Before sending candidate turns to the summary model, they are copied into a
-fresh `ConversationStream` holding only those turns, without the conversation's
-own compaction or patch overlays.
-The existing mechanical compaction policies from [RFD 064] are applied to that
-stream as a single overlay and projected:
+Candidate turns are transcribed directly from raw events in `ConversationStream`
+(ignoring compaction overlays so turns inside a compaction summary are still
+read from their own events) into compact XML `<turn id="...">` blocks:
 
-- `ReasoningPolicy::Strip`: omits all `ChatResponse::Reasoning` events.
-- `ToolCallPolicy::Strip { request: true, response: true }`: replaces tool
-  request arguments with compact summaries and tool response payloads with
-  single-line status markers (`[compacted] fs_modify_file: success`).
+- `ChatResponse::Reasoning`, `TurnStart`, and inquiry events are omitted.
+- `ToolCallRequest` is rendered as `<tool_call name="..."/>` (arguments
+  omitted), and `ToolCallResponse` is rendered as `<tool_result/>` or
+  `<tool_error/>`.
+- `ChatRequest` and `ChatResponse` messages longer than `MAX_MESSAGE_CHARS`
+  (4,000 characters) are truncated to their first and last halves separated by
+  `[…]`.
 
 This shrinks a 50k-token coding turn down to a few hundred tokens while keeping
 the user prompt, every tool name and outcome, and the assistant's final answer.
-
-Leaving the conversation's overlays behind matters: a candidate turn inside an
-existing summary compaction would otherwise be replaced by a synthetic turn with
-an ephemeral ID, and the model would be asked to label a turn it never saw.
-Mechanical stripping keeps every retained entry's ID, so each projected turn
-still carries the `event_id` of its raw `TurnStart`.
-
-Stripping does not bound `ChatRequest` or `ChatResponse::Message`.
-A pasted compiler log or a long final answer survives it, so a single stripped
-turn can still exceed a small model's context window.
-[Run (Background)](#run-background) fits the request at turn granularity for
-that reason.
 
 ### When Summarization Runs: Lagged Background Catch-Up
 
@@ -348,29 +350,22 @@ spawn (before `setup.flush()` and `inputs.run()`):
    Chain](#model-resolution-chain)) and its context window.
 
 2. Build each candidate's stripped transcript (see [What is
-   Summarized](#what-is-summarized-mechanically-stripped-full-turns)) and
-   estimate its size with `jp_llm::window::estimate_chars`.
+   Summarized](#what-is-summarized-bounded-turn-transcripts)).
 
-3. Exclude candidates whose stripped transcript alone exceeds the request
-   budget.
-   They cost a size estimate and no request, and keep the mechanical display
-   fallback.
+3. Exclude candidates whose transcript alone exceeds the request budget.
 
 4. Pack the remaining candidates whole, newest first, until either `batch_size`
    turns or the budget is reached.
    A turn is either in the request entirely or not at all.
 
-5. Request structured JSON output for exactly the packed turns, each tagged with
-   its `TurnStart` `event_id`:
+5. Request structured JSON output with a `summaries` object keyed by each packed
+   turn's `TurnStart` `event_id`:
 
    ```json
    {
-     "summaries": [
-       {
-         "turn_id": "k3m9x2a",
-         "summary": "Add retry backoff to stream handler"
-       }
-     ]
+     "summaries": {
+       "k3m9x2a": "Add retry backoff to stream handler"
+     }
    }
    ```
 

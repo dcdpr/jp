@@ -5,7 +5,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use jp_config::{AppConfig, model::ModelConfig};
+use jp_config::AppConfig;
 use jp_conversation::{ConversationId, ConversationStream, EventId};
 use jp_llm::{
     Provider,
@@ -19,59 +19,29 @@ use tracing::{debug, trace, warn};
 
 use crate::Task;
 
-/// Summarizes the turns of a conversation that have no summary yet.
+/// Background task that generates summaries for completed turns lacking one.
 ///
-/// [`run`] asks the summary model about the turns as they were when the task
-/// was created.
-/// [`sync`] stores each summary on its turn's `TurnStart`, unless the turn
-/// changed in the meantime or was given a summary some other way.
-/// A turn left without one is offered again by the next task.
-///
-/// [`run`]: Task::run
-/// [`sync`]: Task::sync
+/// [`Task::run`] queries the configured summary model against a snapshot of the
+/// conversation stream taken before the active turn starts. [`Task::sync`]
+/// persists each returned summary on its `TurnStart` entry if the turn still
+/// has no summary and its transcript fingerprint is unchanged.
 pub struct TurnSummaryTask {
-    /// The conversation the turns belong to.
     conversation_id: ConversationId,
-
-    /// The conversation as it was when the task was created.
-    events: ConversationStream,
-
-    /// The turns to summarize, each named by the ID of its `TurnStart`.
-    turn_ids: Vec<EventId>,
-
-    /// The model the summaries are generated with.
-    model: ModelConfig,
-
-    /// The provider serving `model`.
     provider: Arc<dyn Provider>,
-
-    /// The most turns one task summarizes.
-    batch_size: usize,
-
-    /// Output ceiling for the summary request, from
-    /// `assistant.request.max_response_bytes`.
-    /// `None` leaves the response unbounded.
-    max_response_bytes: Option<u64>,
-
-    /// Where the summary request's provider notices go, such as a switch onto
-    /// another credential.
-    notices: NoticeSink,
-
-    /// The summaries the model returned, filled in by `run`.
+    request: Option<TurnSummaryRequest>,
     summaries: Vec<GeneratedTurnSummary>,
 }
 
 impl TurnSummaryTask {
-    /// Prepare a task for the turns in `events` that have no summary.
+    /// Construct a summary task for unsummarized turns in `events`.
     ///
-    /// Returns `None` when every turn already has one, or when
-    /// `conversation.turn_summary.generate.batch_size` is `0`, without setting
-    /// up the summary model's provider.
+    /// Returns `Ok(None)` without initializing a provider if `batch_size` is `0`
+    /// or every turn in `events` already has a summary.
     ///
     /// # Errors
     ///
-    /// Returns an error when the summary model's provider cannot be set up,
-    /// such as when its API key environment variable is unset.
+    /// Returns an error if the summary model's provider cannot be initialized
+    /// (for example, when its API key environment variable is unset).
     pub fn new(
         conversation_id: ConversationId,
         events: &ConversationStream,
@@ -85,62 +55,52 @@ impl TurnSummaryTask {
         }
 
         let model = turn_summary::resolve_model(config);
-
-        // Set up here rather than in `run`, so a misconfigured provider fails
-        // before the query commits to waiting for the task at teardown.
         let provider = provider::get_provider(model.id.resolved().provider, &config.providers.llm)?;
 
         Ok(Some(Self {
             conversation_id,
-            events: events.clone(),
-            turn_ids,
-            model,
             provider: Arc::from(provider),
-            batch_size,
-            max_response_bytes: config.assistant.request.max_response_bytes.bytes(),
-            notices,
+            request: Some(TurnSummaryRequest {
+                events: events.clone(),
+                turn_ids,
+                model,
+                batch_size,
+                max_response_bytes: config.assistant.request.max_response_bytes.bytes(),
+                notices,
+            }),
             summaries: vec![],
         }))
     }
 
-    /// Ask the summary model about the task's turns, keeping what it returns.
     async fn summarize(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let Some(request) = self.request.take() else {
+            return Ok(());
+        };
+
         trace!(
             conversation_id = %self.conversation_id,
-            candidates = self.turn_ids.len(),
+            candidates = request.turn_ids.len(),
             "Summarizing turns."
         );
 
         let details = self
             .provider
-            .model_details(&self.model.id.resolved().name)
+            .model_details(&request.model.id.resolved().name)
             .await?;
 
-        self.summaries =
-            turn_summary::generate(self.provider.as_ref(), &details, TurnSummaryRequest {
-                events: self.events.clone(),
-                turn_ids: self.turn_ids.clone(),
-                model: self.model.clone(),
-                batch_size: self.batch_size,
-                max_response_bytes: self.max_response_bytes,
-                notices: self.notices.clone(),
-            })
-            .await?;
+        self.summaries = turn_summary::generate(self.provider.as_ref(), &details, request).await?;
 
         trace!(summaries = self.summaries.len(), "Received turn summaries.");
         Ok(())
     }
 
-    /// Ask the summary model about the task's turns and return what it wrote.
+    /// Run the summary request directly and return the generated summaries.
     ///
-    /// For a caller that runs the request itself rather than through a
-    /// [`TaskHandler`], and stores the result when it can lock the
-    /// conversation.
+    /// Used by callers that manage conversation locking outside [`TaskHandler`].
     ///
     /// # Errors
     ///
-    /// Returns an error when the summary model cannot be reached or answers
-    /// with something other than summaries.
+    /// Returns an error if the summary model request fails.
     ///
     /// [`TaskHandler`]: crate::TaskHandler
     pub async fn generate(mut self) -> Result<TurnSummaries, Box<dyn Error + Send + Sync>> {
@@ -153,23 +113,18 @@ impl TurnSummaryTask {
     }
 }
 
-/// Summaries the model wrote for a conversation's turns, not yet stored.
+/// Generated turn summaries awaiting persistence.
 ///
-/// Storing keeps a summary only while its turn reads as it did when the model
-/// read it, and still has no summary.
+/// When stored, each summary is written only if its turn still has no summary
+/// and its transcript fingerprint has not changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnSummaries {
-    /// The conversation the turns belong to.
     pub conversation_id: ConversationId,
-
-    /// One summary per turn the model described.
     pub summaries: Vec<GeneratedTurnSummary>,
 }
 
 impl TurnSummaries {
-    /// Store the summaries through a lock already held on their conversation.
-    ///
-    /// Summaries offered to a lock on any other conversation are dropped.
+    /// Persist the summaries through an existing lock on their conversation.
     pub fn store(self, lock: &ConversationLock) {
         let Self {
             conversation_id,
@@ -210,16 +165,15 @@ impl TurnSummaries {
         }
     }
 
-    /// Lock the summaries' conversation and store them through that lock.
+    /// Acquire a non-blocking lock on the conversation in `workspace` and
+    /// persist the summaries.
     ///
-    /// Taking the lock reloads the conversation, so the summaries are checked
-    /// against edits made since their turns were read.
-    /// Does nothing when the conversation is gone or locked elsewhere: its
-    /// turns keep no summary, and the next query asks for them again.
+    /// If the conversation was removed or is locked by another process, the
+    /// summaries are skipped and will be regenerated on a subsequent query.
     ///
     /// # Errors
     ///
-    /// Returns an error when the conversation cannot be locked.
+    /// Returns an error if locking the conversation fails.
     pub fn store_in(self, workspace: &Workspace) -> Result<(), Box<dyn Error + Send + Sync>> {
         let conversation_id = self.conversation_id;
         if self.summaries.is_empty() {
@@ -227,7 +181,7 @@ impl TurnSummaries {
         }
 
         let Ok(handle) = workspace.acquire_conversation(&conversation_id) else {
-            debug!(%conversation_id, "Conversation is gone; dropping its turn summaries.");
+            debug!(%conversation_id, "Conversation removed; dropping turn summaries.");
             return Ok(());
         };
 
@@ -281,7 +235,6 @@ impl Task for TurnSummaryTask {
             ..
         } = *self;
 
-        // The query's lock has been released by the time task sync runs.
         TurnSummaries {
             conversation_id,
             summaries,
@@ -290,8 +243,8 @@ impl Task for TurnSummaryTask {
     }
 }
 
-/// The IDs of the `TurnStart` entries in `events` that carry no summary, in
-/// stream order.
+/// Return the `EventId`s of `TurnStart` entries in `events` that have no
+/// summary, in stream order.
 fn unsummarized_turns(events: &ConversationStream) -> Vec<EventId> {
     events
         .iter_events_by_turn()
@@ -304,12 +257,8 @@ fn unsummarized_turns(events: &ConversationStream) -> Vec<EventId> {
         .collect()
 }
 
-/// Keep the summaries whose turn reads as it did when the model read it, and
-/// still has no summary.
-///
-/// A turn edited or removed since then would be described by a summary of
-/// content it no longer holds.
-/// A turn given a summary since then keeps that one.
+/// Retain only summaries whose target turn still has no summary and still
+/// matches its [`TurnFingerprint`].
 fn still_current(
     events: &ConversationStream,
     summaries: Vec<GeneratedTurnSummary>,
@@ -328,7 +277,7 @@ fn still_current(
             if fingerprints.get(&summary.turn_id) != Some(&summary.fingerprint) {
                 debug!(
                     turn_id = %summary.turn_id,
-                    "Turn changed or was removed since it was read; dropping its summary."
+                    "Turn changed or was removed; dropping generated summary."
                 );
                 return false;
             }
@@ -336,7 +285,7 @@ fn still_current(
             if !unsummarized.contains(&summary.turn_id) {
                 debug!(
                     turn_id = %summary.turn_id,
-                    "Turn was given a summary since it was read; keeping that one."
+                    "Turn already has a summary; keeping existing summary."
                 );
                 return false;
             }

@@ -14,38 +14,25 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct TurnSummaryGenerateConfig {
-    /// Whether to generate turn summaries with the LLM.
+    /// Whether to automatically generate turn summaries in the background.
     ///
-    /// Defaults to `true`.
-    /// When enabled, a `jp query` that finds earlier turns without a summary
-    /// summarizes up to `batch_size` of them in one background request, which
-    /// runs alongside the new turn.
-    /// A turn is therefore summarized during the query after it, so the latest
-    /// turn has no summary until the next `jp query`.
+    /// Defaults to `true`. When enabled, each `jp query` summarizes up to
+    /// `batch_size` earlier completed turns that do not yet have a summary.
     #[setting(default = true)]
     pub auto: bool,
 
-    /// Maximum number of turns summarized in one `jp query`.
+    /// Maximum number of unsummarized turns to process in a single query.
     ///
-    /// Defaults to `5`.
-    /// A conversation with many turns lacking a summary, such as one started
-    /// before turn summaries existed, catches up over several queries instead
-    /// of in one large request.
+    /// Defaults to `5`. Set to `0` to disable background turn summarization.
     #[setting(default = 5)]
     pub batch_size: usize,
 
-    /// Model used to summarize turns.
+    /// Model configuration specific to turn summary generation.
     ///
     /// If unset, falls back to `conversation.title.generate.model`, then to
-    /// `assistant.model.id` with default parameters.
-    /// A fast or local model suits this: the request runs in the background,
-    /// but a slow one can delay `jp query` from exiting.
-    /// Tool output and reasoning are left out of the request, so a small
-    /// context window fits most turns; a turn that still does not fit is not
-    /// summarized.
-    ///
-    /// If the model's `parameters.reasoning` is unset, reasoning runs at low
-    /// effort with `exclude = true`.
+    /// `assistant.model.id` with default parameters. If `parameters.reasoning`
+    /// is unset on the resolved model, reasoning defaults to `low` effort with
+    /// `exclude = true`.
     #[setting(nested)]
     pub model: Option<ModelConfig>,
 }

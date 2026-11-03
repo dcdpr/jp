@@ -1648,7 +1648,6 @@ fn a_late_title_does_not_replace_a_chosen_one() {
     );
 }
 
-/// A workspace whose one conversation holds a finished turn with no summary.
 fn workspace_with_a_turn() -> (Workspace, ConversationId, Utf8TempDir) {
     let (ws, id, tmp) = workspace_with_conversation();
     let handle = ws.acquire_conversation(&id).unwrap();
@@ -1659,7 +1658,6 @@ fn workspace_with_a_turn() -> (Workspace, ConversationId, Utf8TempDir) {
     (ws, id, tmp)
 }
 
-/// What the summary model returns for every turn of the conversation.
 fn summarized(ws: &Workspace, id: ConversationId) -> TurnSummaries {
     let handle = ws.acquire_conversation(&id).unwrap();
     let events = ws.events(&handle).unwrap().clone();
@@ -1681,17 +1679,15 @@ fn summarized(ws: &Workspace, id: ConversationId) -> TurnSummaries {
     }
 }
 
-/// Lock the conversation for a turn, as a delegated query does.
 fn lock_for_turn(ws: &Workspace, id: ConversationId) -> ConversationLock {
     let handle = ws.acquire_conversation(&id).unwrap();
     let LockResult::Acquired(lock) = ws.lock_conversation(handle, None).unwrap() else {
-        panic!("the conversation is free");
+        panic!("conversation is unlocked");
     };
 
     lock
 }
 
-/// Each turn's summary, read back from storage.
 fn stored_summaries(ws: &Workspace, id: ConversationId) -> Vec<Option<String>> {
     lock_for_turn(ws, id).with_events(|events| {
         events
@@ -1701,8 +1697,6 @@ fn stored_summaries(ws: &Workspace, id: ConversationId) -> Vec<Option<String>> {
     })
 }
 
-/// Summaries that are ready by the time a turn ends are written through the
-/// lock the turn still holds, and nothing is handed on.
 #[tokio::test]
 async fn a_turn_stores_ready_summaries_through_its_lock() {
     let (ws, id, _tmp) = workspace_with_a_turn();
@@ -1721,16 +1715,13 @@ async fn a_turn_stores_ready_summaries_through_its_lock() {
     assert_eq!(stored_summaries(&ws, id), [Some(
         "Answer a question".to_owned()
     )]);
-    assert!(arrivals.try_recv().is_err(), "nothing is handed on");
+    assert!(arrivals.try_recv().is_err());
 }
 
-/// Summaries still being generated when a turn ends are handed on rather than
-/// waited for, and reach the message loop once they are ready.
-///
-/// Waiting would keep the conversation locked, and the client's next message
-/// would be refused as already-locked for as long as the summary model took.
 #[tokio::test]
 async fn a_turn_does_not_wait_for_its_summaries() {
+    const SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
+
     let (ws, id, _tmp) = workspace_with_a_turn();
     let summaries = summarized(&ws, id);
     let (late, mut arrivals) = LateWrites::new();
@@ -1743,24 +1734,21 @@ async fn a_turn_does_not_wait_for_its_summaries() {
     });
 
     tokio::time::timeout(
-        Duration::from_secs(5),
+        SETTLE_TIMEOUT,
         settle_summaries(Some(generating), &turn, &late),
     )
     .await
-    .expect("the turn must not wait on its summaries");
+    .expect("settle_summaries must not wait on in-flight summaries");
     drop(turn);
     assert_eq!(stored_summaries(&ws, id), [None]);
 
     finish.send(()).unwrap();
     let Some(Arrival::Summaries(arrived)) = arrivals.recv().await else {
-        panic!("the summaries reach the message loop");
+        panic!("summaries should arrive on the channel");
     };
     assert_eq!(arrived, summarized(&ws, id));
 }
 
-/// Summaries that reach the message loop are stored while the conversation is
-/// free, and dropped while another turn holds it rather than held for that
-/// turn: its own summary request covers the same turns.
 #[test]
 fn late_summaries_are_stored_only_while_the_conversation_is_free() {
     let (ws, id, _tmp) = workspace_with_a_turn();

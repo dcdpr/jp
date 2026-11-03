@@ -637,11 +637,8 @@ impl Query {
             }
         }
 
-        // Summarize earlier turns that have no summary yet. The request runs
-        // beside this turn instead of after it, so a turn is summarized during
-        // the query that follows it.
-        //
-        // As with titles, a misconfigured summary model skips the summaries
+        // Spawn background summarization for earlier completed turns that do
+        // not yet have a summary. A misconfigured summary model logs a warning
         // rather than failing the query.
         if cfg.conversation.turn_summary.generate.auto && ctx.term.args.persist {
             match TurnSummaryTask::new(cid, &stream, &cfg, notice_sink(&ctx.printer)) {
@@ -2721,29 +2718,11 @@ pub(crate) struct PendingStreamTrim {
 impl PendingStreamTrim {
     /// Apply the deferred removals to the stream.
     pub(crate) fn apply(self, stream: &mut ConversationStream) {
-        let mut trimmed = false;
         if self.replay_turn {
-            trimmed |= stream.trim_chat_request().is_some();
+            drop(stream.trim_chat_request());
         }
         if self.pop_request {
-            trimmed |= stream.pop_if(ConversationEvent::is_chat_request).is_some();
-        }
-
-        // A trim takes a request and everything after it. When that request
-        // was a reply to an interrupt, its turn stays, and its summary
-        // describes what was taken ([RFD 126]). Until the empty-turn check
-        // below, the trimmed turn is the stream's last; a turn the trim emptied
-        // is removed there, summary and all.
-        //
-        // [RFD 126]: https://jp.computer/rfd/126
-        if trimmed
-            && let Some(turn_id) = stream
-                .iter_events_by_turn()
-                .filter(|event| event.is_turn_start())
-                .last()
-                .map(|event| event.event_id.clone())
-        {
-            stream.clear_turn_summary(&turn_id);
+            drop(stream.pop_if(ConversationEvent::is_chat_request));
         }
 
         // Both trims strip a turn's request but leave the [`TurnStart`] that

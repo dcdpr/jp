@@ -3270,7 +3270,6 @@ fn pending_trim_replay_removes_an_unreadable_chat_response_with_its_turn() {
     assert_eq!(turn_start_count(&stream), 2);
 }
 
-/// Each turn's stored summary, in turn order.
 fn turn_summaries(stream: &ConversationStream) -> Vec<Option<String>> {
     stream
         .iter_turns()
@@ -3278,7 +3277,6 @@ fn turn_summaries(stream: &ConversationStream) -> Vec<Option<String>> {
         .collect()
 }
 
-/// Store a summary on each of the stream's turns, in turn order.
 fn summarize_turns(stream: &mut ConversationStream, summaries: &[&str]) {
     let turn_ids: Vec<_> = stream
         .iter_turns()
@@ -3286,13 +3284,10 @@ fn summarize_turns(stream: &mut ConversationStream, summaries: &[&str]) {
         .collect();
 
     for (turn_id, summary) in turn_ids.iter().zip(summaries) {
-        assert!(stream.set_turn_summary(turn_id, (*summary).to_owned()));
+        assert!(stream.set_turn_summary(turn_id, *summary));
     }
 }
 
-/// `--replay` replays a turn's last request.
-/// When that is a reply to an interrupt, the turn keeps its opening request but
-/// loses the reply and the answer after it, which its summary describes.
 #[test]
 fn pending_trim_replay_clears_the_summary_of_a_turn_it_shortens() {
     let mut stream = ConversationStream::new_test();
@@ -3327,8 +3322,6 @@ fn pending_trim_replay_clears_the_summary_of_a_turn_it_shortens() {
     ]);
 }
 
-/// A replay that empties its turn removes the turn, summary and all, and leaves
-/// the summary of the turn before it alone.
 #[test]
 fn pending_trim_replay_of_a_whole_turn_keeps_the_summary_before_it() {
     let mut stream = ConversationStream::new_test();
@@ -3357,9 +3350,6 @@ fn pending_trim_replay_of_a_whole_turn_keeps_the_summary_before_it() {
     )]);
 }
 
-/// Bare `--no-edit` resends a trailing request as a turn of its own.
-/// When that request is a reply to an interrupt, the turn it came from is
-/// shortened.
 #[test]
 fn pending_trim_pop_request_clears_the_summary_of_a_turn_it_shortens() {
     let mut stream = ConversationStream::new_test();

@@ -1,5 +1,4 @@
-//! Turn summary settings: loaded from a config file, assigned with `--cfg`, and
-//! recorded in a conversation's config deltas.
+//! Tests for `TurnSummaryConfig` and `TurnSummaryGenerateConfig`.
 
 use indexmap::IndexMap;
 use indoc::indoc;
@@ -12,21 +11,14 @@ use crate::{
     util,
 };
 
-/// Resolve the test baseline with `toml` layered on top, as a config file is.
 fn resolve_with(toml: &str) -> AppConfig {
     let mut partial = PartialAppConfig::new_test();
     partial.merge(&(), toml::from_str(toml).unwrap()).unwrap();
     util::build(partial).unwrap()
 }
 
-// ---------------------------------------------------------------------------
-// Loading
-// ---------------------------------------------------------------------------
-
 #[test]
 fn an_unconfigured_section_takes_its_defaults() {
-    // The test baseline turns generation off; clearing that leaves the section
-    // as a user's config starts it.
     let mut partial = PartialAppConfig::new_test();
     partial
         .unset("conversation.turn_summary.generate.auto")
@@ -68,10 +60,6 @@ fn a_config_file_sets_every_key() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// `--cfg` assignment
-// ---------------------------------------------------------------------------
-
 #[test]
 fn every_key_is_assignable_by_path() {
     let mut partial = PartialAppConfig::empty();
@@ -100,8 +88,6 @@ fn every_key_is_assignable_by_path() {
 
 #[test]
 fn the_section_is_assignable_as_one_json_object() {
-    // The object form hands each value over as JSON, so `batch_size` arrives as
-    // a number rather than as the string `--cfg key=value` gives.
     let mut partial = PartialAppConfig::empty();
 
     partial
@@ -130,10 +116,6 @@ fn a_batch_size_that_is_not_a_count_is_rejected() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Conversation config deltas
-// ---------------------------------------------------------------------------
-
 #[test]
 fn a_delta_records_only_the_key_that_changed() {
     let prev = resolve_with("").to_partial();
@@ -156,8 +138,6 @@ fn a_delta_records_only_the_key_that_changed() {
 
 #[test]
 fn clearing_the_model_is_recorded_as_an_unset() {
-    // Merging keeps the previous value when the next layer has none, so a
-    // model that went away survives the fold unless the delta reports it.
     let prev = resolve_with(indoc! {r#"
         [conversation.turn_summary.generate.model]
         id = "ollama/llama3.2:3b"
@@ -170,8 +150,6 @@ fn clearing_the_model_is_recorded_as_an_unset() {
 
     assert_eq!(unsets, ["conversation.turn_summary.generate.model"]);
 
-    // Fold the way a conversation stream does: clear what was reported, then
-    // merge.
     let mut folded = prev;
     folded
         .unset("conversation.turn_summary.generate.model")
@@ -186,7 +164,6 @@ fn clearing_the_model_is_recorded_as_an_unset() {
 
 #[test]
 fn a_resolved_section_round_trips_through_its_partial() {
-    // A conversation stores its config as this partial and rebuilds it on load.
     let config = resolve_with(indoc! {r#"
         [conversation.turn_summary.generate]
         auto = false
@@ -203,10 +180,6 @@ fn a_resolved_section_round_trips_through_its_partial() {
         config.conversation.turn_summary
     );
 }
-
-// ---------------------------------------------------------------------------
-// Model aliases
-// ---------------------------------------------------------------------------
 
 #[test]
 fn a_model_alias_resolves_when_the_config_is_built() {
@@ -235,8 +208,6 @@ fn a_model_alias_resolves_when_the_config_is_built() {
 
 #[test]
 fn a_model_alias_resolves_before_a_partial_is_stored() {
-    // Partials stored as conversation config deltas hold concrete model IDs, so
-    // redefining an alias later does not change an existing conversation.
     let aliases = IndexMap::from([(
         "fast".to_owned(),
         "ollama/llama3.2:3b"

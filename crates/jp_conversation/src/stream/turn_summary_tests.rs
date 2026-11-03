@@ -1,5 +1,5 @@
-//! Turn summaries: stored on a turn's `TurnStart` entry, read through `Turn`,
-//! and written by the entry ID of that `TurnStart`.
+//! Tests for `TurnStart::summary`, `Turn` summary accessors, and
+//! `ConversationStream` summary mutations.
 
 use chrono::{DateTime, Utc};
 use jp_config::PartialAppConfig;
@@ -11,7 +11,6 @@ use crate::{
     event::{ChatRequest, ChatResponse, TurnStart},
 };
 
-/// A stream entry with a known ID, for assertions that name one.
 fn entry(id: &str, event: ConversationEvent) -> InternalEvent {
     InternalEvent {
         event_id: EventId::fixed(id),
@@ -19,21 +18,18 @@ fn entry(id: &str, event: ConversationEvent) -> InternalEvent {
     }
 }
 
-/// An event at the epoch, so a timestamp never varies between runs.
 fn event(kind: impl Into<ConversationEvent>) -> ConversationEvent {
     let mut event = kind.into();
     event.timestamp = DateTime::<Utc>::UNIX_EPOCH;
     event
 }
 
-/// A turn marker carrying `summary`.
 fn summarized(summary: &str) -> TurnStart {
     TurnStart {
         summary: Some(summary.to_owned()),
     }
 }
 
-/// Two turns with known IDs, of which only the first has a summary.
 fn fixture() -> ConversationStream {
     let mut stream = ConversationStream::new_test();
     stream.extend_entries([
@@ -46,17 +42,12 @@ fn fixture() -> ConversationStream {
     stream
 }
 
-/// Each turn's summary, in turn order.
 fn summaries(stream: &ConversationStream) -> Vec<Option<String>> {
     stream
         .iter_turns()
         .map(|turn| turn.summary().map(str::to_owned))
         .collect()
 }
-
-// ---------------------------------------------------------------------------
-// Storage shape
-// ---------------------------------------------------------------------------
 
 #[test]
 fn a_summary_is_stored_on_the_turn_start_entry() {
@@ -73,9 +64,7 @@ fn a_summary_is_stored_on_the_turn_start_entry() {
 }
 
 #[test]
-fn a_turn_start_without_a_summary_is_stored_without_the_key() {
-    // The bytes a turn marker was stored as before it could carry a summary, so
-    // a conversation that never gets one is unchanged on disk.
+fn a_turn_start_without_a_summary_omits_the_summary_key() {
     let stored = to_string(&entry("k3m9x2a", event(TurnStart::default()))).unwrap();
 
     assert_eq!(
@@ -101,9 +90,7 @@ fn a_stored_summary_reads_back_onto_the_turn_start() {
 }
 
 #[test]
-fn a_legacy_turn_start_reads_as_having_no_summary() {
-    // Two generations of files written before turns carried summaries: the
-    // first turn marker predates entry IDs as well, the second does not.
+fn a_legacy_turn_start_deserializes_with_no_summary() {
     let (base_config, _) = ConversationStream::new_test().to_parts().unwrap();
     let stream = ConversationStream::from_parts(
         base_config,
@@ -133,10 +120,6 @@ fn a_summary_survives_a_save_and_reload() {
     ]);
 }
 
-// ---------------------------------------------------------------------------
-// Reading through `Turn`
-// ---------------------------------------------------------------------------
-
 #[test]
 fn a_turn_reports_the_id_of_its_turn_start() {
     let stream = fixture();
@@ -162,8 +145,6 @@ fn a_turn_reports_the_summary_on_its_turn_start() {
 
 #[test]
 fn an_implicit_leading_turn_has_no_id_or_summary() {
-    // Events before the first `TurnStart` form a turn of their own, with no
-    // marker to take an ID or a summary from.
     let mut stream = ConversationStream::new_test();
     stream.extend_entries([
         entry("chat000", event(ChatRequest::from("orphan"))),
@@ -179,9 +160,37 @@ fn an_implicit_leading_turn_has_no_id_or_summary() {
     assert_eq!(turns[1].summary(), Some("Set up the project"));
 }
 
-// ---------------------------------------------------------------------------
-// Writing by ID
-// ---------------------------------------------------------------------------
+#[test]
+fn fallback_summary_uses_the_first_non_empty_request_line() {
+    let mut stream = ConversationStream::new_test();
+    stream.extend_entries([
+        entry("turn001", event(TurnStart::default())),
+        entry(
+            "chat001",
+            event(ChatRequest::from("\n   \n  Fix   the\tretry test  \nIt fails on CI.")),
+        ),
+        entry("reply01", event(ChatResponse::message("Looking."))),
+        entry("chat002", event(ChatRequest::from("Also update the docs."))),
+    ]);
+
+    let turn = stream.iter_turns().next().unwrap();
+    assert_eq!(turn.fallback_summary().as_deref(), Some("Fix the retry test"));
+}
+
+#[test]
+fn fallback_summary_truncates_at_72_characters() {
+    let mut stream = ConversationStream::new_test();
+    stream.extend_entries([
+        entry("turn001", event(TurnStart::default())),
+        entry("chat001", event(ChatRequest::from("é".repeat(72)))),
+        entry("turn002", event(TurnStart::default())),
+        entry("chat002", event(ChatRequest::from("y".repeat(100)))),
+    ]);
+
+    let turns: Vec<_> = stream.iter_turns().collect();
+    assert_eq!(turns[0].fallback_summary(), Some("é".repeat(72)));
+    assert_eq!(turns[1].fallback_summary(), Some(format!("{}…", "y".repeat(71))));
+}
 
 #[test]
 fn setting_a_summary_stores_it_on_the_named_turn() {
@@ -189,7 +198,7 @@ fn setting_a_summary_stores_it_on_the_named_turn() {
 
     let updated = stream.set_turn_summary(
         &EventId::fixed("turn002"),
-        "Answer the second question".to_owned(),
+        "Answer the second question",
     );
 
     assert!(updated);
@@ -200,11 +209,27 @@ fn setting_a_summary_stores_it_on_the_named_turn() {
 }
 
 #[test]
-fn setting_a_summary_replaces_the_one_already_stored() {
+fn setting_a_summary_normalizes_whitespace_and_rejects_blank_input() {
     let mut stream = fixture();
 
-    let updated =
-        stream.set_turn_summary(&EventId::fixed("turn001"), "Scaffold the crate".to_owned());
+    assert!(!stream.set_turn_summary(&EventId::fixed("turn002"), "   \n\t  "));
+    assert_eq!(summaries(&stream), [Some("Set up the project".to_owned()), None]);
+
+    assert!(stream.set_turn_summary(
+        &EventId::fixed("turn002"),
+        "  Answer\n  the second\tquestion  ",
+    ));
+    assert_eq!(summaries(&stream), [
+        Some("Set up the project".to_owned()),
+        Some("Answer the second question".to_owned()),
+    ]);
+}
+
+#[test]
+fn setting_a_summary_replaces_the_existing_summary() {
+    let mut stream = fixture();
+
+    let updated = stream.set_turn_summary(&EventId::fixed("turn001"), "Scaffold the crate");
 
     assert!(updated);
     assert_eq!(summaries(&stream), [
@@ -214,82 +239,55 @@ fn setting_a_summary_replaces_the_one_already_stored() {
 }
 
 #[test]
-fn setting_a_summary_for_an_unknown_id_changes_nothing() {
+fn setting_a_summary_for_an_unknown_or_non_turn_start_id_returns_false() {
     let mut stream = fixture();
 
-    let updated = stream.set_turn_summary(&EventId::fixed("missing"), "Lost".to_owned());
-
-    assert!(!updated);
+    assert!(!stream.set_turn_summary(&EventId::fixed("missing"), "Lost"));
+    assert!(!stream.set_turn_summary(&EventId::fixed("chat002"), "Wrong entry"));
     assert_eq!(stream, fixture());
 }
 
 #[test]
-fn setting_a_summary_on_an_entry_that_is_not_a_turn_start_changes_nothing() {
-    // The request's ID names an entry inside the turn, not the marker that
-    // holds the turn's summary.
-    let mut stream = fixture();
-
-    let updated = stream.set_turn_summary(&EventId::fixed("chat002"), "Wrong entry".to_owned());
-
-    assert!(!updated);
-    assert_eq!(stream, fixture());
-}
-
-#[test]
-fn setting_a_summary_for_a_removed_turn_changes_nothing() {
-    // A summary generated for a turn that was dropped in the meantime has
-    // nowhere to go.
+fn setting_a_summary_for_a_removed_turn_returns_false() {
     let mut stream = fixture();
     stream.retain_turns(|index| index == 1);
 
-    let updated =
-        stream.set_turn_summary(&EventId::fixed("turn001"), "Set up the project".to_owned());
+    let updated = stream.set_turn_summary(&EventId::fixed("turn001"), "Set up the project");
 
     assert!(!updated);
     assert_eq!(summaries(&stream), [None]);
 }
 
 #[test]
-fn setting_a_summary_for_an_id_the_load_found_twice_changes_nothing() {
-    // Two turn markers shared one ID in the file. Repair left it on the first,
-    // but a summary generated for that ID cannot say which turn it describes.
-    let (base_config, _) = ConversationStream::new_test().to_parts().unwrap();
-    let mut stream = ConversationStream::from_parts(
-        base_config,
-        vec![
-            json!({"event_id": "turn001", "type": "turn_start", "timestamp": "1970-01-01 00:00:00.0"}),
-            json!({"event_id": "chat001", "type": "chat_request", "timestamp": "1970-01-01 00:00:00.0", "content": "first question"}),
-            json!({"event_id": "turn001", "type": "turn_start", "timestamp": "1970-01-01 00:00:00.0"}),
-            json!({"event_id": "chat002", "type": "chat_request", "timestamp": "1970-01-01 00:00:00.0", "content": "second question"}),
-        ],
-        &PartialAppConfig::empty(),
-    )
-    .unwrap();
-
-    let updated = stream.set_turn_summary(&EventId::fixed("turn001"), "Ambiguous".to_owned());
-
-    assert!(!updated);
-    assert_eq!(summaries(&stream), [None, None]);
-}
-
-#[test]
 fn clearing_a_summary_removes_it_from_the_named_turn() {
     let mut stream = fixture();
 
-    let updated = stream.clear_turn_summary(&EventId::fixed("turn001"));
-
-    assert!(updated);
+    assert!(stream.clear_turn_summary(&EventId::fixed("turn001")));
     assert_eq!(summaries(&stream), [None, None]);
+
+    assert!(!stream.clear_turn_summary(&EventId::fixed("missing")));
 }
 
 #[test]
-fn clearing_a_summary_for_an_unknown_id_changes_nothing() {
-    let mut stream = fixture();
+fn popping_or_trimming_an_event_clears_the_shortened_turns_summary() {
+    let mut stream = ConversationStream::new_test();
+    stream.extend_entries([
+        entry("turn001", event(summarized("Set up the project"))),
+        entry("chat001", event(ChatRequest::from("first question"))),
+        entry("reply01", event(ChatResponse::message("first answer"))),
+        entry("turn002", event(summarized("Switch retries to backoff"))),
+        entry("chat002", event(ChatRequest::from("add retries"))),
+        entry("reply02", event(ChatResponse::message("retrying"))),
+        entry("chat003", event(ChatRequest::from("use exponential backoff"))),
+        entry("reply03", event(ChatResponse::message("done"))),
+    ]);
 
-    let updated = stream.clear_turn_summary(&EventId::fixed("missing"));
-
-    assert!(!updated);
-    assert_eq!(stream, fixture());
+    let trimmed = stream.trim_chat_request();
+    assert!(trimmed.is_some());
+    assert_eq!(summaries(&stream), [
+        Some("Set up the project".to_owned()),
+        None,
+    ]);
 }
 
 #[test]
@@ -297,7 +295,7 @@ fn a_summary_stays_with_its_turn_when_earlier_turns_are_dropped() {
     let mut stream = fixture();
     assert!(stream.set_turn_summary(
         &EventId::fixed("turn002"),
-        "Answer the second question".to_owned(),
+        "Answer the second question",
     ));
 
     stream.retain_last_turns(1);

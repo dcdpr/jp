@@ -529,5 +529,5 @@ See [RFD-031].
 [RFD-031]: ../rfd/031-durable-conversation-storage-with-workspace-projection.md
 [RFD-064]: ../rfd/064-non-destructive-conversation-compaction.md
 [RFD-087]: ../rfd/087-session-scoped-active-workspace.md
-[Turn Summary]: ./ubiquitous-language/conversation.md#turn-summary
+[Turn Summary]: 00dxybc-conversation.md#turn-summary
 [`shlex::split`]: https://docs.rs/shlex
