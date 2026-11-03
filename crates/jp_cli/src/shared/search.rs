@@ -517,8 +517,8 @@ fn id_matches(ctx: &Ctx, id: ConversationId, matcher: &Matcher) -> bool {
         }
     };
 
-    for event in events.iter() {
-        for line in event_lines(&event.event.kind) {
+    for event in events.iter_events_by_turn() {
+        for line in event_lines(&event.kind) {
             if matcher.is_match(&line) {
                 return true;
             }

@@ -15,11 +15,13 @@ use doc::files;
 use jp_label::Clash;
 
 use crate::{
-    Comment, Epoch, LABEL_KEY, Labels, NewTicket, ParseError, Status, Ticket, TicketId, Vocabulary,
+    Comment, Epoch, LABEL_KEY, Labels, NewTicket, PARENT_KEY, ParseError, Status, Ticket, TicketId,
+    Vocabulary,
     check::{self, Directory, Problem, Report, TicketFile},
     epoch::{EPOCH_FILE, EpochError},
     id::TicketKind,
     import::{Import, escaped, github_marker},
+    parent::{self, Member, Refusal},
     parse, render,
 };
 
@@ -95,6 +97,8 @@ pub enum Error {
         other_status: Status,
         status: Status,
     },
+    /// A write the parent relation's rules refuse.
+    Parent(Refusal),
     /// The filesystem said no.
     Io(io::Error),
 }
@@ -187,6 +191,7 @@ impl fmt::Display for Error {
                 "{other} is {other_status}, not {status}; a ticket is placed next to one in the \
                  column it moves to."
             ),
+            Self::Parent(refusal) => refusal.fmt(f),
             Self::Io(error) => error.fmt(f),
         }
     }
@@ -206,6 +211,7 @@ impl std::error::Error for Error {
             Self::Parse(error) | Self::Malformed { error, .. } => Some(error),
             Self::MalformedEpoch { error, .. } => Some(error),
             Self::Rejected(error) => Some(error),
+            Self::Parent(refusal) => Some(refusal),
             Self::Io(error) => Some(error),
             _ => None,
         }
@@ -221,6 +227,12 @@ impl From<ParseError> for Error {
 impl From<jp_label::Rejected> for Error {
     fn from(error: jp_label::Rejected) -> Self {
         Self::Rejected(error)
+    }
+}
+
+impl From<Refusal> for Error {
+    fn from(refusal: Refusal) -> Self {
+        Self::Parent(refusal)
     }
 }
 
@@ -261,6 +273,7 @@ pub struct Entry {
 ///
 /// `new.labels` are resolved already; `vocabulary` holds them to the keys it
 /// lets one ticket carry, which only the board can check.
+/// `new.parent` is held to the rules of the parent relation.
 ///
 /// Creating the file exclusively is what claims the id: two processes drawing
 /// in the same bucket can land on one tail, and the loser draws again rather
@@ -271,6 +284,9 @@ pub fn create(
     new: &NewTicket<'_>,
 ) -> Result<(TicketId, Utf8PathBuf)> {
     check_unique(dir, vocabulary, new.labels, None)?;
+    if new.parent.is_some() {
+        check_relations(dir, None, Status::Todo, new.parent)?;
+    }
 
     Ok(files::create(
         dir,
@@ -284,9 +300,17 @@ pub fn create(
 /// The work item is finished; the work moved.
 /// Writing the link before the status means a retry after a failure finds the
 /// link already there.
+/// Closing is held to the rules of the parent relation, so a parent with open
+/// children is refused before anything is written.
 pub fn promote(dir: &Utf8Path, id: TicketId, rfd: &str) -> Result<Utf8PathBuf> {
     let path = locate(dir, id)?;
     let source = fs::read_to_string(&path)?;
+    // Read leniently, as the writes below are: a ticket whose header doesn't
+    // parse still has children to wait on.
+    let parent = parse::document(&source)
+        .ok()
+        .and_then(|ticket| ticket.metadata.parent);
+    check_relations(dir, Some(id), Status::Done, parent)?;
 
     let updated =
         render::set_metadata(&source, "Promoted to", rfd).ok_or(ParseError::MissingMetadata)?;
@@ -621,8 +645,11 @@ fn clashes_with<'a>(
 /// is removed outright so nothing reads it as true.
 /// Its id is not retired: a later creation in the same time bucket can draw it
 /// again.
+/// A ticket with children is refused, so none is left naming a parent that
+/// isn't there.
 pub fn delete(dir: &Utf8Path, id: TicketId) -> Result<Utf8PathBuf> {
     let path = locate(dir, id)?;
+    parent::check_delete(&members(dir)?, id)?;
     fs::remove_file(&path)?;
 
     Ok(path)
@@ -712,6 +739,7 @@ pub fn import(dir: &Utf8Path, vocabulary: &Vocabulary, upstream: &Import<'_>) ->
             date: upstream.date,
             labels: upstream.labels,
             description: "",
+            parent: None,
         })?;
 
         // Record the link before writing content, so a failure halfway leaves a
@@ -747,20 +775,143 @@ pub fn close(dir: &Utf8Path, id: TicketId) -> Result<(Utf8PathBuf, Status)> {
 ///
 /// Its place within the new column is the board's: a ticket the board file
 /// doesn't rank there sorts below those it does.
+/// The move is held to the rules of the parent relation, as [`relate`] holds
+/// it.
 pub fn set_status(dir: &Utf8Path, id: TicketId, status: Status) -> Result<(Utf8PathBuf, Status)> {
+    let related = relate(dir, id, Some(status), None)?;
+
+    Ok((related.path, related.previous_status))
+}
+
+/// Put a ticket under `parent`, or under nothing, returning its path and the
+/// parent it had before.
+///
+/// Held to the rules of the parent relation, as [`relate`] holds it.
+pub fn set_parent(
+    dir: &Utf8Path,
+    id: TicketId,
+    parent: Option<TicketId>,
+) -> Result<(Utf8PathBuf, Option<TicketId>)> {
+    let related = relate(dir, id, None, Some(parent))?;
+
+    Ok((related.path, related.previous_parent))
+}
+
+/// What [`relate`] changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Related {
+    pub path: Utf8PathBuf,
+    pub previous_status: Status,
+    pub previous_parent: Option<TicketId>,
+}
+
+/// Change a ticket's status, its parent, or both, in one write.
+///
+/// `None` leaves that part as it is; `Some(None)` takes the parent away.
+/// The ticket's state after the change is held to the rules of the parent
+/// relation before anything is written, so moving a ticket and its parent at
+/// once is judged by where it ends up rather than by the step between.
+pub fn relate(
+    dir: &Utf8Path,
+    id: TicketId,
+    status: Option<Status>,
+    parent: Option<Option<TicketId>>,
+) -> Result<Related> {
     let path = locate(dir, id)?;
     let source = fs::read_to_string(&path)?;
-    let previous = parse::document(&source)?.metadata.status;
+    let metadata = parse::document(&source)?.metadata;
+    let next_status = status.unwrap_or(metadata.status);
+    let next_parent = parent.unwrap_or(metadata.parent);
 
-    if previous != status {
-        // The status line is required, and `parse::document` above rejected any
-        // ticket that lacks one.
-        let updated = render::set_metadata(&source, "Status", &status.to_string())
-            .ok_or(ParseError::MissingField("Status"))?;
-        fs::write(&path, updated)?;
+    let related = Related {
+        path,
+        previous_status: metadata.status,
+        previous_parent: metadata.parent,
+    };
+    if next_status == metadata.status && next_parent == metadata.parent {
+        return Ok(related);
     }
 
-    Ok((path, previous))
+    check_relations(dir, Some(id), next_status, next_parent)?;
+
+    let mut updated = source;
+    if next_status != metadata.status {
+        // The status line is required, and `parse::document` above rejected any
+        // ticket that lacks one.
+        updated = render::set_metadata(&updated, "Status", &next_status.to_string())
+            .ok_or(ParseError::MissingField("Status"))?;
+    }
+    if next_parent != metadata.parent {
+        updated = match next_parent {
+            Some(parent) => render::set_metadata(&updated, PARENT_KEY, &parent.to_string())
+                .ok_or(ParseError::MissingMetadata)?,
+            None => render::remove_metadata(&updated, PARENT_KEY),
+        };
+    }
+    fs::write(&related.path, updated)?;
+
+    Ok(related)
+}
+
+/// Check what [`relate`] would do, without writing anything.
+///
+/// For a caller about to make several writes, [`relate`] among them, so it can
+/// refuse before the first rather than after it.
+///
+/// # Errors
+///
+/// Returns [`Error::Parent`] with the rule the change breaks, or an error
+/// reading the ticket or the directory.
+pub fn check_relate(
+    dir: &Utf8Path,
+    id: TicketId,
+    status: Option<Status>,
+    parent: Option<Option<TicketId>>,
+) -> Result<()> {
+    let metadata = parse::document(&fs::read_to_string(locate(dir, id)?)?)?.metadata;
+    let next_status = status.unwrap_or(metadata.status);
+    let next_parent = parent.unwrap_or(metadata.parent);
+    if next_status == metadata.status && next_parent == metadata.parent {
+        return Ok(());
+    }
+
+    check_relations(dir, Some(id), next_status, next_parent)
+}
+
+/// Hold the ticket `id`, at `status` and under `parent`, to the rules of the
+/// parent relation against the rest of `dir`, without writing anything.
+///
+/// `id` is `None` for a ticket not filed yet.
+/// For a caller about to make several writes, so it can refuse before the first
+/// rather than after it.
+///
+/// # Errors
+///
+/// Returns [`Error::Parent`] with the rule the change breaks, or an error
+/// reading the directory.
+pub fn check_relations(
+    dir: &Utf8Path,
+    id: Option<TicketId>,
+    status: Status,
+    parent: Option<TicketId>,
+) -> Result<()> {
+    Ok(parent::check(&members(dir)?, id, status, parent)?)
+}
+
+/// The tickets in `dir` that parse, as the parent relation's rules see them.
+///
+/// One that doesn't parse can't be placed, and `check` reports it as malformed.
+/// Two files claiming one id are both read rather than refused: the write
+/// asking is to one ticket, which `locate` has already told apart.
+fn members(dir: &Utf8Path) -> Result<Vec<Member>> {
+    let mut members = vec![];
+    for (id, path) in files::list::<TicketKind>(dir)? {
+        if let Ok(ticket) = parse::document(&fs::read_to_string(&path)?) {
+            members.push(Member::of(id, &ticket));
+        }
+    }
+
+    Ok(members)
 }
 
 /// Read every ticket in `dir`, ordered by id.

@@ -193,6 +193,93 @@ fn files_claiming_one_id_are_reported_together() {
     ]);
 }
 
+/// `file` with its status set to `status` and its parent to `parent`.
+fn related(mut file: TicketFile, status: &str, parent: &str) -> TicketFile {
+    file.source = file.source.replace(
+        "- **Status**: Todo\n",
+        &format!("- **Status**: {status}\n- **Parent**: {parent}\n"),
+    );
+    file
+}
+
+#[test]
+fn a_child_under_a_missing_or_nested_parent_is_reported() {
+    let directory = Directory {
+        legacy: vec![],
+        tickets: vec![
+            ticket("T-0aaaaaa", &["type=bug"]),
+            related(ticket("T-0bbbbbb", &["type=bug"]), "Todo", "T-0aaaaaa"),
+            related(ticket("T-0cccccc", &["type=bug"]), "Todo", "T-0bbbbbb"),
+            related(ticket("T-0dddddd", &["type=bug"]), "Todo", "T-0zzzzzz"),
+        ],
+    };
+
+    assert_eq!(messages(&report(&directory, &vocabulary())), vec![
+        "T-0cccccc: T-0bbbbbb sits under T-0aaaaaa, and a ticket under a parent can't be a parent \
+         itself. File under T-0aaaaaa instead."
+            .to_owned(),
+        "T-0dddddd names T-0zzzzzz as its parent, and there is no ticket T-0zzzzzz.".to_owned(),
+    ]);
+}
+
+#[test]
+fn a_done_parent_with_open_children_is_reported() {
+    let mut parent = ticket("T-0aaaaaa", &["type=task"]);
+    parent.source = parent.source.replace("Todo", "Done");
+
+    let directory = Directory {
+        legacy: vec![],
+        tickets: vec![
+            parent,
+            related(ticket("T-0bbbbbb", &["type=bug"]), "Todo", "T-0aaaaaa"),
+            related(ticket("T-0cccccc", &["type=bug"]), "Done", "T-0aaaaaa"),
+        ],
+    };
+
+    assert_eq!(messages(&report(&directory, &vocabulary())), vec![
+        "T-0aaaaaa has open children: T-0bbbbbb. Close them, or move them out from under \
+         T-0aaaaaa, first."
+            .to_owned(),
+    ]);
+}
+
+#[test]
+fn a_child_of_a_malformed_parent_is_not_reported_as_orphaned() {
+    let mut broken = ticket("T-0aaaaaa", &["type=bug"]);
+    broken.source = broken.source.replace("- **Status**: Todo\n", "");
+
+    let directory = Directory {
+        legacy: vec![],
+        tickets: vec![
+            broken,
+            related(ticket("T-0bbbbbb", &["type=bug"]), "Todo", "T-0aaaaaa"),
+        ],
+    };
+
+    assert_eq!(messages(&report(&directory, &vocabulary())), vec![
+        "/t/0aaaaaa-a.md is not a well-formed ticket: Ticket is missing the `Status` field."
+            .to_owned(),
+    ]);
+}
+
+#[test]
+fn a_parent_that_is_not_a_ticket_id_makes_the_ticket_malformed() {
+    let directory = Directory {
+        legacy: vec![],
+        tickets: vec![related(
+            ticket("T-0aaaaaa", &["type=bug"]),
+            "Todo",
+            "the other one",
+        )],
+    };
+
+    assert_eq!(messages(&report(&directory, &vocabulary())), vec![
+        "/t/0aaaaaa-a.md is not a well-formed ticket: `the other one` is not a valid `Parent` \
+         value."
+            .to_owned(),
+    ]);
+}
+
 #[test]
 fn problems_come_file_wide_first_then_by_ticket_then_shared() {
     let directory = Directory {

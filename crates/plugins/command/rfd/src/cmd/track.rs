@@ -168,6 +168,7 @@ pub(crate) fn track(
         date: &filer.date,
         labels: &labels,
         description: &description(id, &link, plan.as_deref()),
+        parent: None,
     })
     .map_err(|error| error.to_string())?;
     report.notes.push(format!(

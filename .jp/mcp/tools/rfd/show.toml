@@ -23,6 +23,10 @@ A draft, with its sections:
 ```
 """
 
+# Reads are independent and have no side effects, so several run at once and a
+# missing RFD says nothing about the next.
+fan_out = true
+
 [conversation.tools.rfd_show.style]
 parameters = "function_call"
 inline_results = "full"

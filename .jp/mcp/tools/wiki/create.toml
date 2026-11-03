@@ -47,6 +47,11 @@ much each provider's prompt cache saved on JP's own conversations.", "body": \
 
 run = "ask"
 
+# Several pages written in one call, such as the pages under a new hub, are
+# created one at a time in the order written: each takes its place among its
+# siblings in the wiki's order file, which they all write.
+fan_out = { concurrency = 1 }
+
 [conversation.tools.wiki_create.style]
 parameters = "function_call"
 inline_results = "full"

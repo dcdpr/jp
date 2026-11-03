@@ -2,7 +2,7 @@
 import { useRoute } from 'vitepress'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
-import WikiCrumbs from './WikiCrumbs.vue'
+import DocCrumbs from './DocCrumbs.vue'
 import { isDev } from './board.mjs'
 import { documentAt } from './documents.mjs'
 
@@ -120,7 +120,7 @@ watch(() => route.path, () => {
 
 <template>
     <div v-if="page" class="wiki-editor-bar">
-        <WikiCrumbs :id="page.label" />
+        <DocCrumbs kind="wiki" always />
         <button v-if="active" class="wiki-editor-open" type="button" :disabled="busy" @click="open(null, page.title)">
             Edit page
         </button>
@@ -159,6 +159,10 @@ watch(() => route.path, () => {
 }
 .wiki-editor-open {
     flex-shrink: 0;
+}
+/* The bar keeps the space below; the crumbs share its line with the button. */
+.wiki-editor-bar .doc-crumbs {
+    margin-bottom: 0;
 }
 .wiki-editor-open,
 .wiki-edit-section {

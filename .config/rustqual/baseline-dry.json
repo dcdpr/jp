@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.667074969439618,
-  "iosp_score": 0.8191000918273645,
+  "quality_score": 0.6679941786348774,
+  "iosp_score": 0.8196631270596851,
   "violations": 985,
-  "total": 7536,
+  "total": 7560,
   "complexity_warnings": 0,
   "magic_number_warnings": 0,
   "nesting_depth_warnings": 0,
@@ -11,7 +11,7 @@
   "unsafe_warnings": 0,
   "error_handling_warnings": 0,
   "duplicate_groups": 52,
-  "dead_code_warnings": 242,
+  "dead_code_warnings": 243,
   "dead_type_warnings": 28,
   "fragment_groups": 80,
   "boilerplate_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 0,
   "structural_coupling_warnings": 0,
-  "total_findings": 1438,
+  "total_findings": 1439,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -898,77 +898,77 @@
     {
       "name": "handle_command",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 577
+      "line": 633
     },
     {
       "name": "compose_missing",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 698
+      "line": 754
     },
     {
       "name": "with_show_alias",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1064
+      "line": 1138
     },
     {
       "name": "show_board",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1552
+      "line": 1632
     },
     {
       "name": "board_row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1602
+      "line": 1682
     },
     {
       "name": "import_all",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1651
+      "line": 1731
     },
     {
       "name": "label",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1829
+      "line": 1909
     },
     {
       "name": "label_refusal",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1880
+      "line": 1960
     },
     {
       "name": "list_labels",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 1904
+      "line": 1984
     },
     {
       "name": "check",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2002
+      "line": 2084
     },
     {
       "name": "describe_vocabulary",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2072
+      "line": 2154
     },
     {
       "name": "show",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2184
+      "line": 2281
     },
     {
       "name": "list",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2250
+      "line": 2373
     },
     {
       "name": "row",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2306
+      "line": 2432
     },
     {
       "name": "read_message",
       "file": "crates/plugins/command/ticket/src/lib.rs",
-      "line": 2390
+      "line": 2516
     },
     {
       "name": "answer",
@@ -983,32 +983,32 @@
     {
       "name": "comment",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 425
+      "line": 442
     },
     {
       "name": "edit",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 511
+      "line": 531
     },
     {
       "name": "list",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 680
+      "line": 768
     },
     {
       "name": "reflow",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 790
+      "line": 923
     },
     {
       "name": "quote",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 810
+      "line": 943
     },
     {
       "name": "render_list",
       "file": "crates/plugins/command/ticket/src/tool.rs",
-      "line": 838
+      "line": 971
     },
     {
       "name": "project_turns",
@@ -1753,12 +1753,12 @@
     {
       "name": "report",
       "file": "crates/internal/ticket/src/check.rs",
-      "line": 131
+      "line": 151
     },
     {
       "name": "relabel",
       "file": "crates/internal/ticket/src/store.rs",
-      "line": 420
+      "line": 444
     },
     {
       "name": "escape",
