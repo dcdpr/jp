@@ -1,6 +1,6 @@
 [conversation.tools.rfd_rename]
 enable = false
-run = "ask"
+run = "allow"
 source = "plugin.command.rfd.rename"
 summary = "Give an RFD a new title, moving its file to match."
 description = """

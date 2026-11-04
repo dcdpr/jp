@@ -1,6 +1,6 @@
 [conversation.tools.rfd_draft]
 enable = false
-run = "ask"
+run = "allow"
 source = "plugin.command.rfd.draft"
 summary = "Create an RFD draft from its category's template."
 description = """

@@ -50,7 +50,7 @@ Retitle it and change a label:
 ```
 """
 
-run = "ask"
+run = "allow"
 
 # Several edits in one call are made one at a time in the order written: two
 # sections of one page, or two moves in the wiki's order file, must not race.

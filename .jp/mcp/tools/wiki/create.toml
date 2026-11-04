@@ -45,7 +45,7 @@ much each provider's prompt cache saved on JP's own conversations.", "body": \
 ```
 """
 
-run = "ask"
+run = "allow"
 
 # Several pages written in one call, such as the pages under a new hub, are
 # created one at a time in the order written: each takes its place among its
