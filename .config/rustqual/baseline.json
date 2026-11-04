@@ -1,13 +1,13 @@
 {
   "version": 2,
-  "quality_score": 0.7279744445410776,
-  "iosp_score": 0.9204309656823624,
-  "violations": 997,
-  "total": 17151,
+  "quality_score": 0.7583285655012288,
+  "iosp_score": 0.9203476886606085,
+  "violations": 1008,
+  "total": 17309,
   "complexity_warnings": 198,
   "magic_number_warnings": 267,
   "nesting_depth_warnings": 30,
-  "function_length_warnings": 493,
+  "function_length_warnings": 309,
   "unsafe_warnings": 74,
   "error_handling_warnings": 203,
   "duplicate_groups": 0,
@@ -16,7 +16,7 @@
   "fragment_groups": 0,
   "boilerplate_warnings": 315,
   "srp_struct_warnings": 50,
-  "srp_module_warnings": 262,
+  "srp_module_warnings": 46,
   "wildcard_import_warnings": 0,
   "sdp_violations": 0,
   "coupling_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 51,
   "structural_coupling_warnings": 10,
-  "total_findings": 3181,
+  "total_findings": 2792,
   "violation_details": [
     {
       "name": "ConversationStream::config_unsets",
@@ -1749,6 +1749,61 @@
       "name": "migrate_legacy_symlink",
       "file": "crates/jp_workspace/src/roots.rs",
       "line": 149
+    },
+    {
+      "name": "Pattern::deserialize",
+      "file": "crates/internal/qual/src/policy.rs",
+      "line": 45
+    },
+    {
+      "name": "Policy::parse",
+      "file": "crates/internal/qual/src/policy.rs",
+      "line": 120
+    },
+    {
+      "name": "render",
+      "file": "crates/internal/qual/src/render.rs",
+      "line": 178
+    },
+    {
+      "name": "markdown",
+      "file": "crates/internal/qual/src/render.rs",
+      "line": 279
+    },
+    {
+      "name": "github",
+      "file": "crates/internal/qual/src/render.rs",
+      "line": 323
+    },
+    {
+      "name": "Workspace::guidance",
+      "file": "crates/internal/qual/src/run.rs",
+      "line": 189
+    },
+    {
+      "name": "Workspace::analyze",
+      "file": "crates/internal/qual/src/run.rs",
+      "line": 208
+    },
+    {
+      "name": "Workspace::analyze_base",
+      "file": "crates/internal/qual/src/run.rs",
+      "line": 256
+    },
+    {
+      "name": "locate",
+      "file": "crates/internal/qual/src/run.rs",
+      "line": 315
+    },
+    {
+      "name": "Renames::from_name_status",
+      "file": "crates/internal/qual/src/diff.rs",
+      "line": 27
+    },
+    {
+      "name": "verdict",
+      "file": "crates/internal/qual/src/diff.rs",
+      "line": 123
     },
     {
       "name": "run",

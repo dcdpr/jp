@@ -1,7 +1,6 @@
 # Enforce JP conventions with clippy config and dylint
 
 - **Status**: Todo
-- **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-11-04
 - **Label**: domain=tooling
