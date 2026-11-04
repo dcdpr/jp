@@ -89,6 +89,12 @@ export function withLabelFilter(search, filter) {
     return query ? `?${query}` : ''
 }
 
+// Return a `?label=<term>` query string. As an `href`, a query-only URL
+// resolves against the current page.
+export function labelQuery(term) {
+    return withLabelFilter('', { all: [term], any: [] })
+}
+
 // The query string a link uses to show the tickets carrying any of `labels`.
 export function anyLabelQuery(labels) {
     const params = new URLSearchParams()

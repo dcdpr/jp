@@ -233,7 +233,6 @@ async function archive(page) {
     id-field="num"
     :filters="AREAS"
     filter-field="area"
-    label-kind="wiki"
     label-noun="Pages"
 >
     <!-- Icons, not labels: two words per row costs more width than a phone has

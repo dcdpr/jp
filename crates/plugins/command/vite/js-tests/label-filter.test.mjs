@@ -5,6 +5,7 @@ import {
     anyLabelQuery,
     describeLabelFilter,
     hasLabelTerm,
+    labelQuery,
     matchesLabelFilter,
     parseLabelFilter,
     toggleLabelTerm,
@@ -81,6 +82,13 @@ test('a filter written into a query reads back, and keeps what else it holds', (
     assert.deepEqual(parseLabelFilter(query), filter)
     assert.equal(withLabelFilter('?search=turn&label=old', null), '?search=turn')
     assert.equal(withLabelFilter('?label=old', null), '')
+})
+
+test('a link to the documents carrying one label is only a query string', () => {
+    const query = labelQuery('type=bug')
+
+    assert.equal(query, '?label=type%3Dbug')
+    assert.deepEqual(parseLabelFilter(query), { all: ['type=bug'], any: [] })
 })
 
 test('a link to the tickets carrying any of some labels reads back as that filter', () => {

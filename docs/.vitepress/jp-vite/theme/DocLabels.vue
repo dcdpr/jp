@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 
 import settings from '../settings.json'
-import { hasLabelTerm } from './label-filter.mjs'
+import { hasLabelTerm, labelQuery } from './label-filter.mjs'
 import { decodeLabels, groupLabels, labelHref } from './label-groups.mjs'
 
 // A document's labels, wherever the site shows them: in a page's header, a
@@ -10,11 +10,16 @@ import { decodeLabels, groupLabels, labelHref } from './label-groups.mjs'
 // mcp`. The key leads to the documents carrying any value under it, and each
 // value to those carrying that label.
 //
-// Without `pick`, each part is a link to the listing of `kind` narrowed to it:
-// the ticket board, or the wiki's list of every page. A listing passes `pick`
-// to narrow itself in place instead, and `filter`, its current label filter,
-// to show which parts are active. The links stay, so a part can still be
-// opened in a new tab.
+// Without `pick`, each key and value links to the default listing for `kind`
+// (the ticket board or the wiki index) filtered by that term. Inside a
+// listing, the caller passes `pick` to toggle the filter in place and `filter`
+// to highlight active terms. Each link then points to `?label=<term>` on the
+// current page so modified clicks still open the filtered view in a new tab.
+//
+// VitePress's router intercepts same-site `<a>` clicks at the document level
+// before the element's `@click` handler runs. Setting `target="_self"` when
+// `pick` is provided makes the router ignore the link so `@click` can filter
+// in place.
 
 const props = defineProps({
     // An array, or the attribute value `encodeLabels` writes: a page's header
@@ -36,15 +41,19 @@ const groups = computed(() => {
 })
 
 function href(term) {
+    if (props.pick) return labelQuery(term)
+
     return labelHref(settings, props.kind, term)
 }
 
-// A kind with no listing narrowed by label, such as an RFD, leaves its labels
-// as text unless a listing picks them.
+// Render labels as plain text when `pick` is unset and `kind` has no
+// label-filtered listing (e.g. RFDs).
 const inert = computed(() => !props.pick && !href(''))
 
 function click(event, term) {
-    if (!props.pick) return
+    // Let modified clicks (Cmd, Ctrl, Shift, Alt) fall through to the browser
+    // so they open in a new tab or window.
+    if (!props.pick || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     event.preventDefault()
     props.pick(term)
 }
@@ -55,6 +64,7 @@ function click(event, term) {
         <span v-for="group in groups" :key="group.key" class="doc-label">
             <a
                 :href="href(group.key)"
+                :target="pick ? '_self' : null"
                 :class="['doc-label-term', 'doc-label-key', { active: hasLabelTerm(filter, group.key) }]"
                 :title="`Any ${group.key}`"
                 @click="click($event, group.key)"
@@ -62,6 +72,7 @@ function click(event, term) {
             <template v-for="(part, at) in group.values" :key="part.value">
                 {{ ' ' }}<a
                     :href="href(part.term)"
+                    :target="pick ? '_self' : null"
                     :class="['doc-label-term', { active: hasLabelTerm(filter, part.term) }]"
                     :title="part.term"
                     @click="click($event, part.term)"

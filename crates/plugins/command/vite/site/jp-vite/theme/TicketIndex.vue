@@ -178,7 +178,6 @@ async function remove(ticket) {
     :filters="[]"
     :show-summary="false"
     :show-authors="true"
-    label-kind="ticket"
     label-noun="Tickets"
 >
     <!-- Icons, not labels: two words per row costs more width than a phone has
