@@ -1,0 +1,66 @@
+name: link mentions
+# Turn unlinked RFD, ticket, and wiki mentions (`RFD 018`, `T-005zd00`, `W-0a1b2c3`)
+# in issue and pull request descriptions into links to jp.computer.
+# See `.github/link-mentions.sh`.
+#
+# Edits made with `GITHUB_TOKEN` do not trigger new workflow runs, avoiding
+# an infinite loop.
+on:
+  issues:
+    types: [opened, edited]
+  # Use `pull_request_target` so the job gets a write token even for fork PRs.
+  # This is safe because the job never checks out or executes code from the PR.
+  pull_request_target:
+    types: [opened, edited]
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+# Cancel any in-flight run when the same issue or PR is edited again.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  link:
+    # Only rewrite descriptions authored by repository owners, members, or collaborators.
+    if: >-
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+      github.event.issue.author_association || github.event.pull_request.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      # Always check out the scripts from the default branch, ignoring PR changes.
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github/link-mentions.sh
+            .github/link-mentions-test.sh
+          sparse-checkout-cone-mode: false
+      - run: bash .github/link-mentions-test.sh
+      - name: Link mentions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENDPOINT: repos/${{ github.repository }}/${{ github.event.pull_request && 'pulls' || 'issues' }}/${{ github.event.issue.number || github.event.pull_request.number }}
+        # Pass the description through files and `gh api` rather than `${{ ... }}`
+        # interpolation to prevent shell injection from untrusted description text.
+        run: |
+          gh api "$ENDPOINT" | jq -j '.body // ""' > before.md
+          bash .github/link-mentions.sh < before.md > after.md
+          if cmp -s before.md after.md; then
+            echo "Nothing to link."
+            exit 0
+          fi
+
+          # GitHub's API has no conditional PATCH for issue/PR bodies. Re-fetch the
+          # description before writing to avoid overwriting a concurrent edit; the
+          # workflow run triggered by that edit will link the updated text.
+          gh api "$ENDPOINT" | jq -j '.body // ""' > now.md
+          if ! cmp -s before.md now.md; then
+            echo "The description changed meanwhile; leaving it to the run that edit started."
+            exit 0
+          fi
+
+          jq -Rs '{body: .}' < after.md | gh api --method PATCH "$ENDPOINT" --input - > /dev/null
+          echo "Linked."
