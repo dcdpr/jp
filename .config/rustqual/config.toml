@@ -23,13 +23,34 @@
 [duplicates]
 enabled = false
 
-# rustqual judges test code by production thresholds unless told otherwise.
-# Several test functions here are deliberately long and self-contained, so
-# `LONG_FN` and `SRP_MODULE` fire on files that are working as intended. Left
-# unset so the baseline records the real numbers; raise these if the findings
-# turn out to obscure genuine regressions rather than merely sit in the
-# baseline.
+# rustqual's default of 300 is its own house style, not JP's. Only code lines
+# count: blank lines, `//`, `///` and block comments don't, and counting stops
+# at the first `#[cfg(test)]` in the file. `SRP-002` also fires on the
+# independent-cluster cohesion check, so raising the length alone doesn't take
+# it to zero. Decided in T-0yh5m6r.
+[srp]
+file_length = 800
+
+# `.expect()` counts as an error-handling finding (`A20`), the same as
+# `.unwrap()`, `panic!` and `unreachable!`. A deliberate `.expect()` with a
+# documented `# Panics` section takes a `qual:allow` with a reason, so each one
+# is visible in review. If those markers ever approach `max_suppression_ratio`
+# (5%), raise the ratio rather than allowing `.expect()` wholesale. Decided in
+# T-0yh5m6r.
+[complexity]
+allow_expect = false
+
+# Thresholds for test code: `*_tests.rs` files, which rustqual recognizes through
+# their `#[cfg(test)] #[path = "…"] mod tests;` declaration, and `tests/`
+# directories. JP's tests are self-contained by design, so they run long.
 #
-# [tests]
-# max_function_lines = 150
-# file_length        = 800
+# - `file_length`: no limit. Set far beyond any real file, since rustqual has no
+#   switch to turn the check off for tests alone.
+# - `max_function_lines`: 150, against 60 for production code. Of the 185 test
+#   functions over 60 lines on 2026-10-07, 14 are over 150. The limit is a
+#   starting point; individual cases are decided as they come up.
+#
+# Decided in T-0yh5m6r.
+[tests]
+file_length        = 1_000_000
+max_function_lines = 150
