@@ -109,8 +109,9 @@ pub(crate) struct Host<'a> {
     /// Answers a question routed to an assistant instead of the user.
     pub inquiry_backend: &'a Arc<dyn InquiryBackend>,
 
-    /// The conversation each inquiry is recorded on.
-    pub conv: &'a ConversationMut,
+    /// The conversation each inquiry is recorded on, and written to disk when a
+    /// question waits on the user.
+    pub conv: &'a mut ConversationMut,
 
     /// What the user asked to remember for the turn, and the inquiry counter.
     pub turn_state: &'a mut TurnState,
@@ -1852,6 +1853,14 @@ impl ToolCoordinator {
         );
 
         if host.interactive && target.is_user() {
+            // On disk before the prompt shows, so a reader outside this
+            // process can tell the turn is waiting on the user: an unanswered
+            // request in a conversation whose lock is held.
+            // A failed write is not fatal; the phase-end flush retries.
+            if let Err(error) = host.conv.flush() {
+                warn!(%error, "Failed to persist a question before asking it.");
+            }
+
             let call = &mut batch.calls[index];
             call.wait = Wait::Answer;
             call.question = Some(OpenQuestion {

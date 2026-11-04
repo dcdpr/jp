@@ -453,7 +453,7 @@ async fn drive(
     prompts: Arc<dyn PromptBackend>,
     inquiries: Arc<dyn InquiryBackend>,
     turn_state: &mut TurnState,
-    conv: &ConversationMut,
+    conv: &mut ConversationMut,
     printer: &Arc<Printer>,
 ) -> ExecutionResult {
     let style = jp_config::AppConfig::new_test().style;
@@ -605,7 +605,7 @@ async fn an_edit_at_the_approval_prompt_draws_the_call_again() {
         Arc::new(prompts),
         Arc::new(MockInquiryBackend::new(HashMap::new())),
         &mut turn_state,
-        &lock.as_mut(),
+        &mut lock.as_mut(),
         &printer,
     )
     .await;
@@ -697,7 +697,7 @@ async fn a_fanned_out_call_asks_about_each_operation_and_records_once() {
     );
     let printer = Arc::new(Printer::sink());
     let (_workspace, lock) = test_lock();
-    let conv = lock.as_mut();
+    let mut conv = lock.as_mut();
     let mut turn_state = TurnState::default();
 
     let result = drive(
@@ -711,7 +711,7 @@ async fn a_fanned_out_call_asks_about_each_operation_and_records_once() {
         Arc::new(MockPromptBackend::new().with_inline_responses(['y', 'y'])),
         Arc::new(MockInquiryBackend::new(HashMap::new())),
         &mut turn_state,
-        &conv,
+        &mut conv,
         &printer,
     )
     .await;
@@ -858,7 +858,7 @@ async fn a_lost_connection_settles_every_call_without_asking() {
         Arc::new(MockPromptBackend::new()),
         Arc::new(MockInquiryBackend::new(HashMap::new())),
         &mut turn_state,
-        &lock.as_mut(),
+        &mut lock.as_mut(),
         &printer,
     )
     .await;
@@ -941,7 +941,7 @@ async fn a_lost_connection_waits_for_an_open_prompt() {
     let mut coordinator = ToolCoordinator::new(tools, Box::new(source));
     let printer = Arc::new(Printer::sink());
     let (_workspace, lock) = test_lock();
-    let conv = lock.as_mut();
+    let mut conv = lock.as_mut();
     let mut turn_state = TurnState::default();
 
     let driving = drive(
@@ -961,7 +961,7 @@ async fn a_lost_connection_waits_for_an_open_prompt() {
         prompts.clone(),
         Arc::new(MockInquiryBackend::new(HashMap::new())),
         &mut turn_state,
-        &conv,
+        &mut conv,
         &printer,
     );
     tokio::pin!(driving);
@@ -1032,7 +1032,7 @@ async fn described_twice(
 ) -> HashMap<String, String> {
     let printer = Arc::new(Printer::sink());
     let (_workspace, lock) = test_lock();
-    let conv = lock.as_mut();
+    let mut conv = lock.as_mut();
     for _ in 0..2 {
         drive(
             coordinator,
@@ -1040,7 +1040,7 @@ async fn described_twice(
             Arc::new(MockPromptBackend::new()),
             Arc::new(MockInquiryBackend::new(HashMap::new())),
             &mut TurnState::default(),
-            &conv,
+            &mut conv,
             &printer,
         )
         .await;
@@ -1298,7 +1298,7 @@ async fn remembered_denial_does_not_run_http_argument_formatter() {
         Arc::new(MockPromptBackend::new()),
         Arc::new(MockInquiryBackend::new(HashMap::new())),
         &mut state,
-        &lock.as_mut(),
+        &mut lock.as_mut(),
         &printer,
     )
     .await;
@@ -1430,7 +1430,7 @@ async fn a_remembered_no_stops_a_later_calls_formatter() {
             Arc::new(HeldPromptBackend::new(answers)),
             Arc::new(MockInquiryBackend::new(HashMap::new())),
             &mut TurnState::default(),
-            &lock.as_mut(),
+            &mut lock.as_mut(),
             &printer,
         ),
     )
@@ -1500,7 +1500,7 @@ async fn decide_with_assistant(
     // The assistant is asked from the conversation as it stands, so the turn
     // holding the call has to exist.
     let (_workspace, lock) = test_lock();
-    let conv = lock.as_mut();
+    let mut conv = lock.as_mut();
     conv.update_events(|events| {
         events.start_turn(ChatRequest::from("Run it."));
         events
@@ -1517,7 +1517,7 @@ async fn decide_with_assistant(
         Arc::new(MockPromptBackend::new()),
         Arc::new(MockInquiryBackend::new(answers)),
         &mut TurnState::default(),
-        &conv,
+        &mut conv,
         &printer,
     )
     .await;
@@ -1817,7 +1817,7 @@ async fn a_remembered_no_while_a_later_call_asks(
     // The assistant is asked from the conversation as it stands, so the turn
     // holding the calls has to exist.
     let (_workspace, lock) = test_lock();
-    let conv = lock.as_mut();
+    let mut conv = lock.as_mut();
     conv.update_events(|events| {
         events.start_turn(ChatRequest::from("Run them."));
         let mut turn = events.current_turn_mut();
@@ -1844,7 +1844,7 @@ async fn a_remembered_no_while_a_later_call_asks(
     let mut host = Host {
         prompter: &prompter,
         inquiry_backend: &inquiry_backend,
-        conv: &conv,
+        conv: &mut conv,
         turn_state: &mut turn_state,
         renderer: &mut renderer,
         printer: &printer,
@@ -1865,7 +1865,7 @@ async fn a_remembered_no_while_a_later_call_asks(
         })
     };
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while !asked(&conv) {
+        while !asked(host.conv) {
             let event = coordinator.next_event().await;
             coordinator.handle(event, &mut host);
         }
