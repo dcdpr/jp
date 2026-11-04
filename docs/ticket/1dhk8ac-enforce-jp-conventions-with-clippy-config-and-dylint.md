@@ -62,8 +62,8 @@ Candidates for JP:
 ## Costs
 
 - The lint crate builds on the workspace's own nightly, never a second one.
-  `exodus_lints` pins `nightly-2026-10-01` and JP `nightly-2026-03-26`, so
-  this depends on T-1dhs4hp moving JP forward.
+  `exodus_lints` pins `nightly-2026-10-01` and JP `nightly-2026-03-26`, so this
+  depends on T-1dhs4hp moving JP forward.
   It adds `rustc-dev` to the toolchain's components.
 - `clippy_utils` is released for one exact nightly, and rustc's internal API
   changes between nightlies.

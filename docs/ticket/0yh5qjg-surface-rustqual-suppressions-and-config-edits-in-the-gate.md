@@ -12,10 +12,9 @@ Make both visible wherever the gate reports.
 
 This is a rustqual feature, not a `qual` one.
 It goes into the vendored rustqual (T-1dhk659) once its follow-up has folded
-`qual` in, so it works in any workspace that compares against a base
-revision.
-As with every rustqual change, nothing JP-specific: the config files watched
-are the ones the run reads, not a hard-coded `.config/rustqual/`.
+`qual` in, so it works in any workspace that compares against a base revision.
+As with every rustqual change, nothing JP-specific: the config files watched are
+the ones the run reads, not a hard-coded `.config/rustqual/`.
 
 ## Behaviour, when comparing against a base revision
 

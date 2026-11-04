@@ -12,9 +12,9 @@ pushing.
 It runs the same gate binary CI runs, so it gives the same verdict and the same
 messages: `qual diff` from T-0yh5frr today, rustqual's own command once
 T-1dhk659's follow-up folds `qual` into it.
-Run the binary and read its JSON output rather than linking `qual` as a
-library: `qual` is going away, and the binary call survives the move with a
-changed command line.
+Run the binary and read its JSON output rather than linking `qual` as a library:
+`qual` is going away, and the binary call survives the move with a changed
+command line.
 
 ## Behaviour
 
@@ -38,5 +38,5 @@ changed command line.
 Follow `check_tests.rs`: cover clean, findings and failure with
 `MockProcessRunner`, plus the case where clippy fails and the qual step is
 skipped.
-Pin the JSON the step reads in a fixture, so a change to the gate's output
-shape fails a test here.
+Pin the JSON the step reads in a fixture, so a change to the gate's output shape
+fails a test here.
