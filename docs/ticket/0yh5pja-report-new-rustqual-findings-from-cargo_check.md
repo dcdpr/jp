@@ -9,8 +9,12 @@
 Make the `cargo_check` tool (`.config/jp/tools/src/cargo/check.rs`) report the
 rustqual findings that CI would fail on, so an assistant can find out before
 pushing.
-It uses the `qual` crate from T-0yh5frr as a library, so it gives the same
-verdict and the same messages as CI.
+It runs the same gate binary CI runs, so it gives the same verdict and the same
+messages: `qual diff` from T-0yh5frr today, rustqual's own command once
+T-1dhk659's follow-up folds `qual` into it.
+Run the binary and read its JSON output rather than linking `qual` as a
+library: `qual` is going away, and the binary call survives the move with a
+changed command line.
 
 ## Behaviour
 
@@ -20,7 +24,7 @@ verdict and the same messages as CI.
   noise.
 - The head is the working tree, including uncommitted changes.
   The base is `merge-base(HEAD, origin/main)`, falling back to `main` when
-  there's no remote, and its report is cached by `qual`.
+  there's no remote, and the gate caches its report.
 - The `package` parameter filters which findings are *reported*, not what is
   analysed.
   Dead-code and duplicate detection need the whole workspace.
@@ -34,3 +38,5 @@ verdict and the same messages as CI.
 Follow `check_tests.rs`: cover clean, findings and failure with
 `MockProcessRunner`, plus the case where clippy fails and the qual step is
 skipped.
+Pin the JSON the step reads in a fixture, so a change to the gate's output
+shape fails a test here.

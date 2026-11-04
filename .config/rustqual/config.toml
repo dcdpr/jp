@@ -7,8 +7,7 @@
 #
 # rustqual's DRY dimension is all-or-nothing. Turning off `[duplicates]`
 # disables DRY-002 (dead code) and DRY-006 (dead types) along with DRY-003
-# (repeated fragments) — verified, not assumed: the dead-code count goes 256 to
-# 0 on this workspace when the section is disabled.
+# (repeated fragments)
 #
 # DRY-003 fires ~2038 times inside `*_tests.rs`, on the repeated setup blocks
 # that make each `#[test]` self-contained. That shape is deliberate here (see

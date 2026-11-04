@@ -39,3 +39,19 @@ newer release has fixed.
    call only std methods and do arithmetic.
    Confirm with `--verbose` that a method name matched a project function before
    filing.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-04T09:44:53Z
+
+T-1dhk659 vendors rustqual into `crates/contrib/rustqual`, so these become "fix
+here, offer upstream" rather than "file and wait".
+Items 2 (`--compare` misses new findings), 3 (dimensions that can't be disabled)
+and 4 (DRY is all-or-nothing) are covered by its follow-up, which folds `qual`'s
+per-finding diff and per-rule switches into rustqual.
+Item 5 (`ai-json` lacks rule ID and metric values) is a small change once it's
+in-tree.
+Items 1 and 6 still need reproducing.

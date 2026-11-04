@@ -15,6 +15,11 @@ It depends on:
   a rule JP exempts;
 - T-0yh8q2s, the per-rule guidance files the prompt includes.
 
+`qual report` and `qual diff` become rustqual commands once T-1dhk659's
+follow-up folds `qual` into rustqual.
+If this mission is built before then, call them through one place in the
+mission's hooks, so the switch is a one-line change.
+
 ## One run, one rule
 
 A run targets a single rule, passed to the mission as `--rule <ID>`, and works
@@ -70,5 +75,5 @@ shows what remains.
 - Each run's branch holds commits for one rule.
   Open PRs from it grouped by crate, so a single review covers one rule in one
   crate.
-- Once a rule reaches zero on `main`, add it to the `enforced` list in a small
-  follow-up PR.
+- Once a rule reaches zero on `main`, add it to the `enforced` list
+  (`.config/rustqual/qual.toml` today) in a small follow-up PR.
