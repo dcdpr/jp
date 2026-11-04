@@ -243,11 +243,14 @@ fn an_invalid_policy_is_an_error() {
 
 /// Answers a full `diff` run: the base has a magic number in `run`, and the
 /// working tree adds dead code in `unused`.
+///
+/// `main` forked from the working tree at `0123abcd`; only that commit can be
+/// checked out as the base.
 fn diff_responder(root: Utf8PathBuf) -> MockProcessRunner {
     MockProcessRunner::responding(move |spec| {
         let args: Vec<&str> = spec.args.iter().map(String::as_str).collect();
         match (spec.program.as_str(), args.as_slice()) {
-            ("git", ["rev-parse", ..]) => ok("0123abcd\n"),
+            ("git", ["merge-base", "HEAD", "main"]) => ok("0123abcd\n"),
             ("git", ["worktree", "add", "--detach", tree, "0123abcd"]) => {
                 write_lib(Utf8Path::new(tree));
                 ok("")
@@ -318,7 +321,7 @@ fn diff_removes_the_base_worktree_when_its_analysis_fails() {
     let runner = MockProcessRunner::responding(move |spec| {
         let args: Vec<&str> = spec.args.iter().map(String::as_str).collect();
         match (spec.program.as_str(), args.as_slice()) {
-            ("git", ["rev-parse", ..]) => ok("0123abcd\n"),
+            ("git", ["merge-base", ..]) => ok("0123abcd\n"),
             ("git", ["worktree", "add", "--detach", tree, _]) => {
                 write_lib(Utf8Path::new(tree));
                 ok("")
@@ -344,8 +347,8 @@ fn diff_rejects_a_base_that_is_not_a_commit() {
     let (_dir, workspace) = workspace();
     let runner = MockProcessRunner::builder()
         .expect("git")
-        .args(&["rev-parse", "--verify", "--quiet", "nope^{commit}"])
-        .returns_error("");
+        .args(&["merge-base", "HEAD", "nope"])
+        .returns_error("fatal: Not a valid object name nope");
 
     let error = workspace.diff(&runner, "nope").unwrap_err();
 

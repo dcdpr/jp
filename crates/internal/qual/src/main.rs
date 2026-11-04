@@ -32,12 +32,14 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Print what the working tree adds to a base revision, and every finding
-    /// of an enforced rule.
+    /// Print what the working tree adds since it forked from a base revision,
+    /// and every finding of an enforced rule.
     ///
     /// Exits 1 when there is any.
     Diff {
         /// The revision to compare against.
+        /// The working tree is compared with its merge base with this revision,
+        /// so commits made on it after the fork don't count.
         #[arg(long)]
         base: String,
 

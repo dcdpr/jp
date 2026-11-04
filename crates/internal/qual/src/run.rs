@@ -143,7 +143,12 @@ impl Workspace {
         Ok(report)
     }
 
-    /// Compare the working tree against the commit `base` names.
+    /// Compare the working tree against the commit it forked from `base` at.
+    ///
+    /// That is the merge base of `HEAD` and `base`, so commits `base` gained
+    /// after the fork aren't counted against the working tree, the way `git
+    /// diff base...HEAD` leaves them out.
+    /// When `base` is an ancestor of `HEAD`, the merge base is `base` itself.
     ///
     /// The base is analysed in a temporary worktree, with the working tree's
     /// rustqual configs, so a config change shows up on both sides rather than
@@ -153,19 +158,14 @@ impl Workspace {
     ///
     /// # Errors
     ///
-    /// Returns an error when `base` isn't a commit, git or rustqual fails, or
-    /// any step of [`report`] does, for either tree.
+    /// Returns an error when `base` isn't a commit or shares no history with
+    /// `HEAD`, git or rustqual fails, or any step of [`report`] does, for
+    /// either tree.
     ///
     /// [`report`]: Self::report
     pub fn diff(&self, runner: &dyn ProcessRunner, base: &str) -> Result<Verdict, Error> {
         let policy = self.policy()?;
-        let commit = format!("{base}^{{commit}}");
-        let sha = run(
-            runner,
-            "git",
-            &["rev-parse", "--verify", "--quiet", &commit],
-            &self.root,
-        )?;
+        let sha = run(runner, "git", &["merge-base", "HEAD", base], &self.root)?;
         let sha = sha.trim();
 
         let base_report = self.analyze_base(runner, sha, &policy)?;
