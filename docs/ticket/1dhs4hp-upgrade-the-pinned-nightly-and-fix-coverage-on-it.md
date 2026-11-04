@@ -1,7 +1,6 @@
 # Upgrade the pinned nightly and fix coverage on it
 
 - **Status**: Todo
-- **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-11-04
 - **Label**: domain=tooling
