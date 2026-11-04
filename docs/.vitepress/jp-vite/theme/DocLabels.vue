@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 
 import settings from '../settings.json'
-import { hasLabelTerm } from './label-filter.mjs'
+import { hasLabelTerm, labelQuery } from './label-filter.mjs'
 import { decodeLabels, groupLabels, labelHref } from './label-groups.mjs'
 
 // A document's labels, wherever the site shows them: in a page's header, a
@@ -13,8 +13,13 @@ import { decodeLabels, groupLabels, labelHref } from './label-groups.mjs'
 // Without `pick`, each part is a link to the listing of `kind` narrowed to it:
 // the ticket board, or the wiki's list of every page. A listing passes `pick`
 // to narrow itself in place instead, and `filter`, its current label filter,
-// to show which parts are active. The links stay, so a part can still be
-// opened in a new tab.
+// to show which parts are active. Each part then links to the page it is on,
+// narrowed to that part alone, so it can still be opened in a new tab.
+//
+// VitePress's router handles a click on a same-site link before any handler on
+// the link runs, and would follow the link before `pick` could narrow the
+// listing. It leaves a link with a `target` alone, so a part a listing picks
+// carries `target="_self"`.
 
 const props = defineProps({
     // An array, or the attribute value `encodeLabels` writes: a page's header
@@ -36,6 +41,8 @@ const groups = computed(() => {
 })
 
 function href(term) {
+    if (props.pick) return labelQuery(term)
+
     return labelHref(settings, props.kind, term)
 }
 
@@ -44,7 +51,9 @@ function href(term) {
 const inert = computed(() => !props.pick && !href(''))
 
 function click(event, term) {
-    if (!props.pick) return
+    // A modified click opens the link in a new tab or window, as the browser
+    // would.
+    if (!props.pick || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     event.preventDefault()
     props.pick(term)
 }
@@ -55,6 +64,7 @@ function click(event, term) {
         <span v-for="group in groups" :key="group.key" class="doc-label">
             <a
                 :href="href(group.key)"
+                :target="pick ? '_self' : null"
                 :class="['doc-label-term', 'doc-label-key', { active: hasLabelTerm(filter, group.key) }]"
                 :title="`Any ${group.key}`"
                 @click="click($event, group.key)"
@@ -62,6 +72,7 @@ function click(event, term) {
             <template v-for="(part, at) in group.values" :key="part.value">
                 {{ ' ' }}<a
                     :href="href(part.term)"
+                    :target="pick ? '_self' : null"
                     :class="['doc-label-term', { active: hasLabelTerm(filter, part.term) }]"
                     :title="part.term"
                     @click="click($event, part.term)"

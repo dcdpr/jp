@@ -212,7 +212,6 @@ onBeforeUnmount(() => {
                 <DocLabels
                     v-if="ticket.labels?.length"
                     :labels="ticket.labels"
-                    kind="ticket"
                     :filter="filter"
                     :pick="toggle"
                 />

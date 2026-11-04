@@ -89,6 +89,12 @@ export function withLabelFilter(search, filter) {
     return query ? `?${query}` : ''
 }
 
+// The query string a link uses to show the documents carrying `term`. A link
+// made of only a query string leads to the page it is on.
+export function labelQuery(term) {
+    return withLabelFilter('', { all: [term], any: [] })
+}
+
 // The query string a link uses to show the tickets carrying any of `labels`.
 export function anyLabelQuery(labels) {
     const params = new URLSearchParams()
