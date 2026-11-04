@@ -1,0 +1,61 @@
+name: merge-label
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+permissions:
+  statuses: write
+  pull-requests: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+env:
+  # One label per line.
+  REQUIRED_LABELS: |
+    merge-when-green
+  BLOCKING_LABELS: ""
+jobs:
+  report:
+    name: merge-label-gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report the merge-when-green status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR")
+          sha=$(jq -r '.head.sha' <<<"$pr")
+          labels=$(jq -r '.labels[].name' <<<"$pr")
+
+          has_label() { grep -Fxq -- "$1" <<<"$labels"; }
+
+          state=success
+          description="Ready to merge"
+
+          while IFS= read -r label; do
+            [ -z "$label" ] && continue
+            if ! has_label "$label"; then
+              state=pending
+              description="Waiting for label: $label"
+              break
+            fi
+          done <<<"$REQUIRED_LABELS"
+
+          if [ "$state" = success ]; then
+            while IFS= read -r label; do
+              [ -z "$label" ] && continue
+              if has_label "$label"; then
+                state=pending
+                description="Blocked by label: $label"
+                break
+              fi
+            done <<<"$BLOCKING_LABELS"
+          fi
+
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$sha" \
+            -f state="$state" \
+            -f context=merge-when-green \
+            -f description="$description" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
