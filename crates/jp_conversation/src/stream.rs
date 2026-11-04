@@ -1069,6 +1069,25 @@ impl ConversationStream {
     /// [`InquiryRequest`]: crate::event::InquiryRequest
     /// [`InquiryResponse`]: crate::event::InquiryResponse
     fn remove_orphaned_inquiry_requests(&mut self) {
+        let unanswered = self.unanswered_inquiry_requests();
+
+        let mut position = 0;
+        self.events.retain(|_| {
+            let keep = !unanswered.contains(&position);
+            position += 1;
+            keep
+        });
+    }
+
+    /// The positions in the stream of the [`InquiryRequest`]s no
+    /// [`InquiryResponse`] in the same turn answers.
+    ///
+    /// Pairs within a turn, and by order when an ID repeats in one: each
+    /// response answers the earliest request with its ID that is still open.
+    ///
+    /// [`InquiryRequest`]: crate::event::InquiryRequest
+    /// [`InquiryResponse`]: crate::event::InquiryResponse
+    fn unanswered_inquiry_requests(&self) -> HashSet<usize> {
         let mut response_counts: HashMap<(usize, InquiryId), usize> = HashMap::new();
         let mut turn = 0;
         for event in self.events.iter().filter_map(InternalEvent::as_event) {
@@ -1082,25 +1101,59 @@ impl ConversationStream {
         }
 
         let mut turn = 0;
-        self.events.retain(|event| {
+        let mut unanswered = HashSet::new();
+        for (position, event) in self.events.iter().enumerate() {
             let Some(event) = event.as_event() else {
-                return true;
+                continue;
             };
             if event.is_turn_start() {
                 turn += 1;
-                return true;
+                continue;
             }
             let Some(request) = event.as_inquiry_request() else {
-                return true;
+                continue;
             };
             match response_counts.get_mut(&(turn, request.id.clone())) {
-                Some(remaining) if *remaining > 0 => {
-                    *remaining -= 1;
-                    true
+                Some(remaining) if *remaining > 0 => *remaining -= 1,
+                _ => {
+                    unanswered.insert(position);
                 }
-                _ => false,
             }
-        });
+        }
+
+        unanswered
+    }
+
+    /// The questions asked in the last turn that have no answer yet, oldest
+    /// first.
+    ///
+    /// A question and its answer pair within their turn, the way
+    /// [`Self::sanitize`] pairs them.
+    /// Questions left open in earlier turns are not included: a turn that ended
+    /// cannot take their answers any more.
+    #[must_use]
+    pub fn pending_inquiries(&self) -> Vec<&ConversationEvent> {
+        let last_turn = self
+            .events
+            .iter()
+            .rposition(|event| {
+                event
+                    .as_event()
+                    .is_some_and(ConversationEvent::is_turn_start)
+            })
+            .unwrap_or(0);
+
+        let mut unanswered: Vec<usize> = self
+            .unanswered_inquiry_requests()
+            .into_iter()
+            .filter(|position| *position >= last_turn)
+            .collect();
+        unanswered.sort_unstable();
+
+        unanswered
+            .into_iter()
+            .filter_map(|position| self.events[position].as_event())
+            .collect()
     }
 
     /// Ensures the stream has exactly one leading [`TurnStart`] and that all
