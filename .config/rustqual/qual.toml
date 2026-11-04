@@ -1,0 +1,31 @@
+# Rule policy for `qual`, the crate that compares rustqual findings between a
+# base revision and the tree being measured (`crates/internal/qual`).
+#
+# A rule pattern is a rule ID as rustqual's SARIF output names it (`CX-001`,
+# `DRY-002`, `iosp/violation`), or a prefix followed by `*`.
+
+# Rules that never gate and are left out of every report.
+#
+# IOSP is here because rustqual has no switch to turn it off: 862 violations,
+# 6.2% of functions, over the 5% `max_suppression_ratio`, so suppressing them
+# one by one is not an option either.
+exempt = ["iosp/violation"]
+
+# Rules with no findings left on `main`. Any finding of an enforced rule fails,
+# whether or not it is new. Rules are only ever added to this list.
+enforced = []
+
+# The rustqual passes, and the rules each is read for. A rule is read from the
+# first pass whose `rules` match it, and dropped from the others: the DRY pass
+# also reports IOSP and MAGIC_NUMBER, which it cannot disable, and orphaned
+# suppressions for the dimensions it does disable. See `dry.toml`.
+
+[[pass]]
+name = "dry"
+config = "dry.toml"
+rules = ["DRY-*"]
+
+[[pass]]
+name = "main"
+config = "config.toml"
+rules = ["*"]

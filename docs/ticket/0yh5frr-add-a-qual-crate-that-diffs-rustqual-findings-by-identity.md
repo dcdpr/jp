@@ -1,6 +1,6 @@
 # Add a qual crate that diffs rustqual findings by identity
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-10-06
 - **Label**: domain=tooling
