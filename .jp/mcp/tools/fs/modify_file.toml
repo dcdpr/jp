@@ -72,6 +72,7 @@ Mix literal and regex patterns in one call via the per-pattern `regex` flag:
 
 # questions.apply_changes.target = "assistant"
 questions.apply_changes.answer = true
+questions.broad_replacement.answer = true
 
 [conversation.tools.fs_modify_file.style]
 parameters = "just serve-tools {{context}} {{tool}}"
