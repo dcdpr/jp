@@ -1012,7 +1012,7 @@ assistant's own question to a sub-agent.
 
 [#311]: https://github.com/dcdpr/jp/issues/311
 [RFD 005]: 005-first-class-inquiry-events.md
-[RFD 018]: 018-typed-prompt-routing-enum.md
+[RFD 018]: 018-prompts-as-inquiry-events.md
 [RFD 019]: 019-non-interactive-mode.md
 [RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
 [RFD 034]: 034-inquiry-specific-assistant-configuration.md

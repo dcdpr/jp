@@ -338,7 +338,7 @@ as `has_client`), and Phase 1.
 - ssh `BatchMode` — precedent for "fail on prompt" policy.
 
 [RFD 009]: 009-stateful-tool-protocol.md
-[RFD 018]: 018-typed-prompt-routing-enum.md
+[RFD 018]: 018-prompts-as-inquiry-events.md
 [RFD 019]: 019-non-interactive-mode.md
 [RFD 027]: 027-client-server-query-architecture.md
 [RFD 048]: 048-four-channel-output-model.md

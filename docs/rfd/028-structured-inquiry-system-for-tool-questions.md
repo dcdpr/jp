@@ -320,5 +320,5 @@ Depends on Phase 4.
 
 [RFD 005]: 005-first-class-inquiry-events.md
 [RFD 009]: 009-stateful-tool-protocol.md
-[RFD 018]: 018-typed-prompt-routing-enum.md
+[RFD 018]: 018-prompts-as-inquiry-events.md
 [RFD 034]: 034-inquiry-specific-assistant-configuration.md
