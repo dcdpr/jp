@@ -1,130 +1,135 @@
 # Loop harness
 
-`run.sh` runs `jp` unattended against this worktree, one turn after another, on
-behalf of a mission.
-It owns everything that is not specific to the work:
+`run.sh` runs `jp` unattended in a loop for a named mission.
+The harness handles the loop mechanics shared across missions:
 
-- the wall-clock deadline (`--hours`, `--until`) and the iteration limit;
-- conversation rotation by commits, events or consecutive failures;
-- rate-limit detection, capacity probes and waiting for the window to reopen;
-- network-stall detection and backoff;
+- wall-clock deadline (`--hours`, `--until`) and iteration limit;
+- conversation rotation by commit count, event count, or consecutive failures;
+- rate-limit detection, capacity probing, and waiting for quota recovery;
+- network-stall detection and retry backoff;
 - per-turn timeouts and interrupt handling;
-- the commit probe, and refusing to run on `main` or with a staged index;
-- facts measured from git after each turn: commits made, dirty files, gate
-  result;
+- preflight checks (verifying unattended git commits, refusing to run on `main`,
+  `master`, or detached `HEAD`, and rejecting a dirty staging index);
+- post-turn git checks (commits created, dirty files, gate result);
 - `RUNLOG.md`, with per-run log and snapshot directories.
 
 <!-- end list -->
 
 ```sh
 .config/loop/run.sh bug-hunt --iterations 1 --hours 1      # smoke test
-.config/loop/run.sh bug-hunt --hours 10                    # the real thing
+.config/loop/run.sh bug-hunt --hours 10                    # full run
 ```
 
 The first argument names a directory under `missions/`.
-`--help` lists the options.
+Run `run.sh --help` to list all options.
+
+The run exits 0 when `next-target` has no targets left, or when it reaches its
+deadline or iteration limit after a turn that succeeded and passed the gate.
+It exits 1 when it stops on a failed turn or gate, or aborts early, and 130
+when interrupted.
 
 ## Missions
 
-A mission is a directory holding:
+A mission directory contains:
 
-- **`mission.sh`** (required), sourced by the harness after its defaults and
-  before the command line is parsed.
-  It sets any of the settings below and defines the prompt functions.
+- **`mission.sh`** (required), sourced by the harness after setting defaults and
+  before parsing command-line flags.
+  It configures the variables below and defines the prompt functions.
 - **`gate`** (optional, executable), run from the worktree root after every
   turn.
-  Exit status 0 passes; anything else fails.
-  Its combined output is kept in the run's directory as `iter-NNN.gate.log` and,
-  on failure, handed to `repair_prompt`.
-  Without one, the gate is reported as skipped.
+  Exit status 0 passes; any non-zero status fails.
+  Combined stdout and stderr is saved in the run directory as
+  `iter-NNN.gate.log` and passed to `repair_prompt` on failure.
+  If `gate` is omitted, the gate result is recorded as `skipped`.
 - **`next-target`** (optional, executable), run from the worktree root before
-  every turn except a repair.
-  Its output is added to the prompt.
-  Empty output means no targets remain and ends the run; a non-zero exit stops
-  it.
-  Without one, the assistant picks its own target.
+  every non-repair turn.
+  Its output is appended to the prompt.
+  Empty output indicates that no targets remain and ends the run; a non-zero
+  exit status aborts the run.
+  If `next-target` is omitted, the assistant selects its own target.
 
 ### Settings
 
-| Variable                  | Default | Meaning                                                 |
-| ------------------------- | ------- | ------------------------------------------------------- |
-| `MODEL`                   | none    | Model for every turn and capacity probe. Required.      |
-| `JP_CFG`                  | `()`    | `--cfg` flags for every turn: persona, skills.          |
-| `COMPACT`                 | empty   | `--compact` spec for every turn; empty passes none.     |
-| `ROTATE_COMMITS`          | `10`    | New conversation after this many commits.               |
-| `ROTATE_EVENTS`           | `40`    | ...or this many conversation events.                    |
-| `ROTATE_FAILURES`         | `2`     | ...or this many consecutive failed turns.               |
-| `SNAPSHOT_FILES`          | `()`    | State files snapshotted before each turn.               |
-| `GATE_LABEL`              | `gate`  | How the gate's result is named in the facts.            |
-| `DISCARD_ON_GATE_FAILURE` | `0`     | `1` resets the branch when an iteration fails the gate. |
+| Variable                  | Default | Meaning                                                                   |
+| ------------------------- | ------- | ------------------------------------------------------------------------- |
+| `MODEL`                   | none    | Model used for every turn and capacity probe (required).                  |
+| `JP_CFG`                  | `()`    | `--cfg` flags passed to every turn (persona, skills).                     |
+| `COMPACT`                 | empty   | `--compact` spec passed to every turn; omitted when empty.                |
+| `ROTATE_COMMITS`          | `10`    | Start a new conversation after this many commits.                         |
+| `ROTATE_EVENTS`           | `40`    | Start a new conversation after this many conversation events.             |
+| `ROTATE_FAILURES`         | `2`     | Start a new conversation after this many consecutive failed turns.        |
+| `SNAPSHOT_FILES`          | `()`    | Files under `state/` copied into the run's `snapshots/` before each turn. |
+| `GATE_LABEL`              | `gate`  | Label for the gate result in the post-turn summary.                       |
+| `DISCARD_ON_GATE_FAILURE` | `0`     | Set to `1` to reset the branch and working tree when the gate fails.      |
 
-Any other harness default (`HOURS`, `TURN_TIMEOUT`, `MAX_FAILURES`, ...) can be
-overridden the same way.
+`mission.sh` may also override any other harness default (`HOURS`,
+`TURN_TIMEOUT`, `MAX_FAILURES`, and so on).
 
 ### Prompt functions
 
-`mission_prompt`, `handover_prompt`, `continue_prompt` and `repair_prompt` are
-required; each prints its part of the prompt to stdout.
-`handover_prompt` and `continue_prompt` receive the last iteration's facts as
-`$1`; `repair_prompt` receives the gate's output.
-`target_prompt`, receiving the `next-target` output, is optional.
-`init_state`, optional, runs once per run after the state directory exists, to
-seed files such as a ledger.
+`mission_prompt`, `handover_prompt`, `continue_prompt`, and `repair_prompt` are
+required; each writes its section of the prompt to stdout.
+`handover_prompt` and `continue_prompt` receive the previous iteration's git
+summary as `$1`; `repair_prompt` receives the gate output as `$1`.
+`target_prompt` is optional and receives the `next-target` output as `$1`.
+`init_state` is optional and runs once per run after the state directory is
+created, to initialize files such as `LEDGER.md`.
 
-`fill` reads a template on stdin and replaces `@RUN_ID@`, `@BASELINE@` and
-`@STATE@` with the run's values.
+The harness provides `fill`, which reads a template from stdin and replaces
+`@RUN_ID@`, `@BASELINE@`, and `@STATE@` with the current run's values.
 
 ### Environment
 
-`gate` and `next-target` see `LOOP_MISSION`, `LOOP_MISSION_DIR`, `LOOP_ROOT`,
-`LOOP_STATE`, `LOOP_RUN_ID`, `LOOP_RUN_DIR`, `LOOP_BASELINE`, and, per
-iteration, `LOOP_ITERATION` and `LOOP_ITERATION_BASE` (the commit the iteration
-started from).
+`gate` and `next-target` receive `LOOP_MISSION`, `LOOP_MISSION_DIR`,
+`LOOP_ROOT`, `LOOP_STATE`, `LOOP_RUN_ID`, `LOOP_RUN_DIR`, `LOOP_BASELINE`, and
+the per-iteration variables `LOOP_ITERATION` and `LOOP_ITERATION_BASE` (the
+`HEAD` commit at the start of the iteration).
 
 ## Discarding an iteration
 
-With `DISCARD_ON_GATE_FAILURE=1`, an iteration that fails the gate is undone:
-the harness resets its own branch and the tree to `LOOP_ITERATION_BASE` and
-deletes the files the iteration created.
-The mission's `state/` directory is left as it is.
-Untracked files that existed before the iteration are left alone.
-Such a mission refuses to start with unstaged changes, since the reset would
-take them too.
-The assistant itself is never told to rewrite history; only the harness does.
+With `DISCARD_ON_GATE_FAILURE=1`, the harness discards any iteration that fails
+the gate: it resets the branch and working tree to `LOOP_ITERATION_BASE` and
+removes any untracked files created during that iteration.
+The mission's `state/` directory and any untracked files that existed before the
+iteration are preserved.
+When `DISCARD_ON_GATE_FAILURE=1` is set, the harness refuses to start if the
+working tree has unstaged changes, because a reset would overwrite them.
+Only the harness resets the branch; the assistant is never instructed to rewrite
+git history.
 
 ## State
 
-Everything a run writes lives in the mission's `state/` directory:
+All files written during a run live in the mission's `state/` directory:
 
 ```text
 missions/<name>/state/
-  LEDGER.md               # whatever the mission keeps across runs
+  LEDGER.md               # persistent state shared across runs
   runs/<run id>/
-    RUNLOG.md             # facts measured from git, one entry per iteration
-    iter-NNN.prompt       # the prompt each turn was sent
-    iter-NNN.log          # the turn's output
-    iter-NNN.gate.log     # the gate's output
-    probe-NNN.log         # capacity probes
-    snapshots/            # SNAPSHOT_FILES, copied before each turn
+    RUNLOG.md             # per-iteration git summary
+    iter-NNN.prompt       # prompt sent to the turn
+    iter-NNN.log          # turn output
+    iter-NNN.gate.log     # gate output
+    probe-NNN.log         # capacity probe output
+    snapshots/            # SNAPSHOT_FILES copied before each turn
 ```
 
-Every `jp` invocation in a run uses its own session,
-`JP_SESSION=loop-<name>-<run id>`, so the run's conversations never become the
-active conversation of the terminal it was started from.
+Every `jp` invocation in a run uses a dedicated session,
+`JP_SESSION=loop-<name>-<run id>`, so unattended turns never change the active
+conversation of the terminal that started the run.
 
-The run id is the start time in UTC, to the second.
-A run refuses to start if its directory already exists, so no run writes over an
-earlier one.
+The run ID is the UTC start timestamp (`YYYYMMDDTHHMMSSZ`).
+A run refuses to start if its directory already exists, so runs never overwrite
+earlier logs.
 
-The state directory is not ignored by git.
-The harness leaves it out of everything it asks git about the work: the dirty
-file count, the unstaged-changes check, and discarding an iteration.
-The assistant is told never to stage it; committing it is up to a maintainer.
+The `state/` directory is not listed in `.gitignore`.
+The harness excludes `state/` from git status checks (counting dirty files,
+checking for unstaged changes, and resetting failed iterations).
+Prompts instruct the assistant never to stage `state/`; a maintainer decides
+whether to commit it.
 
 ## Why `.config/`
 
-`.config/` holds the repository's development tooling that is not part of the
-Cargo workspace: the `jp-tools` binary, the rustqual and supply-chain config.
-`.ignore` already exposes it to JP's `fs_*` tools, so an assistant can read the
-harness and its missions, and it keeps scripts out of `crates/` and out of
-`.jp/`, which JP reads as workspace configuration.
+`.config/` holds repository development tooling outside the Cargo workspace,
+alongside `jp-tools`, `rustqual`, and `supply-chain`.
+Because `.ignore` whitelists `.config/`, JP's `fs_*` tools can read the harness
+and mission files while keeping the scripts separate from `crates/` and `.jp/`.

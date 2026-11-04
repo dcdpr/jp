@@ -7,13 +7,13 @@
 - **Label**: domain=tooling
 - **Label**: type=pre-rfd
 
-The loop harness from T-0yh5hqj (`.config/loop/`) runs `jp` unattended on behalf
-of a mission, but it lives in this repository as a bash script.
-The same idea is useful in other JP workspaces.
-Investigate shipping it as a command plugin, alongside `jp-ticket`, `jp-rfd`,
-`jp-wiki`, `jp-vite` and `jp-serve-web`.
+The loop harness from T-0yh5hqj (`.config/loop/`) runs `jp` unattended for a
+mission, but it lives in this repository as a bash script.
+Other JP workspaces need the same workflow.
+Investigate shipping it as a command plugin alongside `jp-ticket`, `jp-rfd`,
+`jp-wiki`, `jp-vite`, and `jp-serve-web`.
 
-An illustrative workflow:
+Example workflow:
 
 ```sh
 cd /path/to/workspace
@@ -22,26 +22,50 @@ jp mission new <name>      # interactive, manual, or assistant-generated
 jp mission run <name>
 ```
 
-Start this after the bash harness has run for real with bug-hunt and the
-rustqual mission (T-0yh5sy9), so the design follows what those runs needed.
+Start this investigation after running the bash harness on `bug-hunt` and the
+`rustqual` mission (T-0yh5sy9), so the design reflects actual usage.
 The outcome is an RFD draft.
 
 ## Questions for the RFD
 
-- **Mission format.** Sourced bash, as the harness uses today, or declarative
-  TOML (settings, prompt templates) with executables for `gate` and
-  `next-target`.
+- **Mission format.** Whether missions are defined as sourced bash scripts (like
+  `.config/loop/`) or as declarative TOML files (settings and prompt templates)
+  paired with `gate` and `next-target` executables.
   A declarative format is easier for `jp mission new` to generate and validate.
-- **State location.** The harness keeps state in the mission's own `state/`
-  directory, committed by a maintainer.
-  Other workspaces may want it user-local or ignored instead.
-- **Session and conversation handling.** The harness sets `JP_SESSION` per run
-  so its conversations don't take over the terminal's session.
-  A plugin can do this through JP directly instead of an environment variable.
+- **State location.** The bash harness stores state in the mission's `state/`
+  directory for a maintainer to commit.
+  Other workspaces may prefer user-local or gitignored state.
+- **Session and conversation handling.** The bash harness sets `JP_SESSION` per
+  run so unattended turns do not change the caller terminal's active
+  conversation.
+  Determine how a command plugin should isolate its session directly.
 - **Relation to existing RFDs.** RFD 051 (sub-agent workflows), RFD 107
-  (background task infrastructure), and RFD 019 and 049 (non-interactive mode)
-  cover nearby ground.
-  Decide whether a mission builds on them or sits beside them.
-- **What carries over from bash.** Rate-limit probing, stall detection and
-  rotation exist because of how `jp` reports failures to a shell script.
-  Some may be better solved inside JP than reimplemented in the plugin.
+  (background task infrastructure), and RFD 019 and RFD 049 (non-interactive
+  mode) address related problems.
+  Determine whether `jp-mission` builds on those designs or operates
+  independently.
+- **What belongs in core JP versus the plugin.** Rate-limit probing,
+  stream-stall detection, and conversation rotation in `run.sh` work around CLI
+  exit statuses and log output.
+  Determine which of these belong in core `jp` rather than in the plugin.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-05T11:23:23Z
+
+Gaps in the bash harness for the plugin to close, from the review of PR #1286:
+
+- **Supervised child processes.** `run.sh` runs the gate, `next-target` and the
+  capacity probe in the foreground with no timeout.
+  A `cargo check` blocked on a build lock (for example one held by a `cargo` a
+  killed turn left behind) keeps the run alive past its deadline, and a `kill`
+  of the harness waits until the child exits.
+  Run each as a supervised process, with a timeout capped at the remaining
+  budget and process-group cleanup on interrupt.
+- **Tests for the shutdown and discard paths.** A stub `jp` and a gate that
+  blocks would cover interrupt handling, the exit status, and discarding an
+  iteration.
+  The bash harness has none.

@@ -1,13 +1,10 @@
-# Bug hunt: find, fix, test and commit bugs, one per commit.
+# Bug hunt: find, fix, test, and commit bugs, one per commit.
 #
-# Sourced by .config/loop/run.sh. The assistant's durable memory is
-# `state/LEDGER.md`, shared by every run; each run's own record is under
-# `state/runs/`.
+# Sourced by `.config/loop/run.sh`. Cross-run state is stored in
+# `state/LEDGER.md`, and per-run logs and snapshots live under `state/runs/`.
 #
 #   .config/loop/run.sh bug-hunt --iterations 1 --hours 1      # smoke test
-#   .config/loop/run.sh bug-hunt --hours 10                    # the real thing
-
-# ── settings ────────────────────────────────────────────────────────────────
+#   .config/loop/run.sh bug-hunt --hours 10                    # full run
 
 MODEL=astra
 ROTATE_COMMITS=10
@@ -21,10 +18,8 @@ JP_CFG=(
 SNAPSHOT_FILES=(LEDGER.md)
 GATE_LABEL='`cargo check --workspace --all-targets`'
 
-# A failed gate is handed to the next turn to repair, not thrown away.
+# Keep failed iterations so the next turn can repair the build.
 DISCARD_ON_GATE_FAILURE=0
-
-# ── state ───────────────────────────────────────────────────────────────────
 
 init_state() {
     if [[ -f $STATE/LEDGER.md ]]; then
@@ -33,96 +28,93 @@ init_state() {
     cat > "$STATE/LEDGER.md" <<'EOF'
 # Bug hunt ledger
 
-Durable memory for unattended bug hunts. Every conversation reads this file
-once, at its start. It is the only thing that survives a conversation rotation.
+Durable memory for unattended bug hunts. Every conversation reads this file at
+startup. It is the only state that persists across conversation rotations.
 
 **Append only.** Never delete or rewrite an earlier entry. A later entry may
-correct an earlier one, but say so explicitly rather than editing the original.
+correct an earlier one, but state the correction explicitly rather than editing
+the original entry.
 
-Record three kinds of thing:
+Record three types of entries:
 
-- **Swept** — a crate or module audited, and what the audit concluded. This is
-  what stops the next session reading `jp_config` for the third time.
-- **Fixed** — a bug fixed, with the commit subject and the test that now covers
-  it.
-- **Rejected** — something that looked like a bug and was not, with the reason.
-  As valuable as a fix: it stops the next session chasing it.
+- **Swept**: a crate or module audited, and what the audit concluded, so later
+  sessions do not re-audit the same code.
+- **Fixed**: a bug fixed, including the commit subject and the regression test
+  covering it.
+- **Rejected**: a suspected bug that turned out not to be one, and why, so later
+  sessions do not investigate it again.
 
 ---
 EOF
 }
 
-# ── prompts ─────────────────────────────────────────────────────────────────
-#
-# Quoted heredocs throughout, so backticks and `$` in the prose stay literal.
-# `fill` substitutes @RUN_ID@, @BASELINE@ and @STATE@; anything else dynamic is
-# printed around the heredocs.
+# Prompts use quoted heredocs so backticks and `$` remain literal.
+# `fill` substitutes @RUN_ID@, @BASELINE@, and @STATE@.
 
 mission_prompt() {
     fill <<'EOF'
 You are hunting bugs in this repository, unattended. Nobody is watching, and
-nobody will answer a question. Work in small, complete, committed steps.
+nobody will answer questions. Work in small, complete, committed steps.
 
-Read `@STATE@/LEDGER.md` now, before anything else, with `fs_read_file`. It
-is the memory of every session that ran before this one: what was swept, what
-was fixed, what was examined and ruled out. Do not repeat work it already
-records.
+Read `@STATE@/LEDGER.md` first with `fs_read_file`. It records the work of
+earlier sessions: what was swept, what was fixed, and what was examined and
+ruled out. Do not repeat work already recorded there.
 Then run `git_log` to see what has been committed since `@BASELINE@`.
 
-Your ledger entries belong under a heading naming this run, `@RUN_ID@`,
-so a later reader can tell which session concluded what. Earlier runs
-used their own numbering; continue past it rather than reusing it.
+Place your ledger entries under a heading for this run (`@RUN_ID@`) so later
+sessions can see which run recorded each entry. Do not reuse entry numbers from
+earlier runs.
 
-Then work this loop, one bug at a time:
+Work this loop, one bug at a time:
 
 1. **Pick one target.** Prefer an open bug ticket: run `ticket_list` with kind
-   `bug` and status `todo`, and take one you can reproduce, fix, and test in a
-   single sitting. When no ticket fits, audit a crate the ledger has not swept
-   yet, and say which one you chose and why.
-2. **Reproduce it with a failing test first.** A fix without a test that would
-   have caught the bug is not finished. If a test is genuinely impractical,
-   write down why in the ledger.
-3. **Fix it.** Run `cargo_check`, then `cargo_test` on the affected package,
-   then `cargo_format`.
-4. **Write it down** in `@STATE@/LEDGER.md`, appended to the end of the file:
-   what you swept, what you fixed, what you rejected and why.
-5. **Stage exactly this one fix** with the git staging tools, then commit it
-   with `git_commit`.
+   `bug` and status `todo`, and pick one you can reproduce, fix, and test in a
+   single turn. When no ticket fits, audit a crate that has not been swept in
+   the ledger yet, and state which crate you chose and why.
+2. **Reproduce the bug with a failing test first.** A fix without a regression
+   test is incomplete. If a test is genuinely impractical, explain why in the
+   ledger.
+3. **Fix the bug.** Run `cargo_check`, then `cargo_test` on the affected
+   package, then `cargo_format`.
+4. **Record the outcome** at the end of `@STATE@/LEDGER.md`: what you swept,
+   what you fixed, or what you rejected and why.
+5. **Stage only this fix** with the git staging tools, then commit it with
+   `git_commit`.
 
 Hard rules:
 
-- One bug per commit. Never bundle two fixes into one commit.
-- Never stage or commit anything under `@STATE@/`. It is the harness's
-  record, and a maintainer commits it, not you.
-- Never rewrite history: no reset, no amend, no rebase, no force. Only add
-  commits.
+- One bug per commit. Never bundle multiple fixes into one commit.
+- Never stage or commit anything under `@STATE@/`. The harness owns that
+  directory, and a maintainer commits it separately.
+- Never rewrite git history: no reset, no amend, no rebase, no force-push. Only
+  add new commits.
 - If `cargo check` fails on code you did not touch, an earlier session left the
-  tree broken. Repair that first, commit the repair, and say so.
-- If you find a bug you cannot fix safely, file it with `ticket_create` and move
-  on. A well-written ticket is a good outcome, not a failure.
-- Leave the tree compiling at the end of every commit.
+  working tree broken. Repair the build first, commit the repair on its own, and
+  record it in the ledger.
+- If you find a bug you cannot fix safely, file a ticket with `ticket_create`
+  and move on.
+- Leave the workspace compiling at the end of every commit.
 
-Start now. Say which target you picked and why, then work it.
+Start now. State which target you picked and why, then work it.
 EOF
 }
 
-# What a rotated-in conversation cannot read anywhere else. The ledger carries
-# what was learned; this carries the state of the tree it is inheriting.
+# Context appended to `mission_prompt` when rotating to a new conversation.
 handover_prompt() {
     cat <<'EOF'
 
 ---
 
-The conversation that ran before this one has been rotated out. Where it left
-the working tree, measured from git rather than reported by it:
+The previous conversation was rotated out. Status of the working tree after the
+last turn (measured from git):
 
 EOF
     printf '%s\n' "$1"
     cat <<'EOF'
 
-Anything uncommitted is work somebody else started and did not finish. Read it
-before deciding what to do with it, then either finish and commit it or revert
-it. Do not leave it sitting there while you start something new.
+Any uncommitted changes are unfinished work from the previous conversation.
+Inspect the diff first, then either finish and commit those changes or revert
+them before starting a new target.
 EOF
 }
 
@@ -130,33 +122,33 @@ continue_prompt() {
     cat <<'EOF'
 Continue with the next bug.
 
-Facts from the last iteration, measured from git rather than reported:
+Status after the last iteration (measured from git):
 
 EOF
     printf '%s\n' "$1"
     cat <<'EOF'
 
-Pick the next target and work it the same way: failing test, fix, ledger entry,
-narrow stage, one commit. If nothing in the ledger's unswept list appeals, audit
-a crate nobody has covered yet and name it.
+Pick the next target and follow the same steps: failing test, fix, ledger entry,
+narrow stage, one commit. If no open ticket or unswept item in the ledger fits,
+audit a crate that has not been swept yet and name it.
 EOF
 }
 
-# `$1` is the gate's full output, which the run's logs keep. The turn gets only
-# the compiler's error lines, or the tail when there are none to pick out.
+# Pass only compiler error lines (or the last 30 lines if none match) to keep
+# the prompt concise; full gate output is saved in `iter-NNN.gate.log`.
 repair_prompt() {
     local errors
-    # `grep` exits 1 when it matches nothing, which `set -e` would treat as
-    # fatal inside an assignment.
+    # `grep` exits 1 when nothing matches; `|| true` prevents `set -e` from
+    # aborting the script.
     errors=$(printf '%s\n' "$1" | grep -E 'error(\[E[0-9]+\])?:' | head -30 || true)
     if [[ -z $errors ]]; then
         errors=$(printf '%s\n' "$1" | tail -30)
     fi
 
     cat <<'EOF'
-Stop. Repair the build before anything else.
+Stop. Repair the build before doing anything else.
 
-`cargo check --workspace --all-targets` fails on the current working tree:
+`cargo check --workspace --all-targets` failed on the current working tree:
 
 ```
 EOF
@@ -164,8 +156,8 @@ EOF
     fill <<'EOF'
 ```
 
-Fix this first. Do not pick up new work, and do not commit anything unrelated to
-the repair. When the workspace compiles again, commit the repair on its own, and
-record in `@STATE@/LEDGER.md` what was broken and what fixed it.
+Fix this build failure first. Do not start new work, and do not commit anything
+unrelated to the repair. Once the workspace compiles, commit the repair on its
+own and record what was broken and how you fixed it in `@STATE@/LEDGER.md`.
 EOF
 }

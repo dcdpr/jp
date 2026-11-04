@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Passes when the whole workspace, tests included, still compiles.
+# Verify that the workspace and all targets compile.
 
 set -euo pipefail
 
