@@ -10,16 +10,16 @@ import { decodeLabels, groupLabels, labelHref } from './label-groups.mjs'
 // mcp`. The key leads to the documents carrying any value under it, and each
 // value to those carrying that label.
 //
-// Without `pick`, each part is a link to the listing of `kind` narrowed to it:
-// the ticket board, or the wiki's list of every page. A listing passes `pick`
-// to narrow itself in place instead, and `filter`, its current label filter,
-// to show which parts are active. Each part then links to the page it is on,
-// narrowed to that part alone, so it can still be opened in a new tab.
+// Without `pick`, each key and value links to the default listing for `kind`
+// (the ticket board or the wiki index) filtered by that term. Inside a
+// listing, the caller passes `pick` to toggle the filter in place and `filter`
+// to highlight active terms. Each link then points to `?label=<term>` on the
+// current page so modified clicks still open the filtered view in a new tab.
 //
-// VitePress's router handles a click on a same-site link before any handler on
-// the link runs, and would follow the link before `pick` could narrow the
-// listing. It leaves a link with a `target` alone, so a part a listing picks
-// carries `target="_self"`.
+// VitePress's router intercepts same-site `<a>` clicks at the document level
+// before the element's `@click` handler runs. Setting `target="_self"` when
+// `pick` is provided makes the router ignore the link so `@click` can filter
+// in place.
 
 const props = defineProps({
     // An array, or the attribute value `encodeLabels` writes: a page's header
@@ -46,13 +46,13 @@ function href(term) {
     return labelHref(settings, props.kind, term)
 }
 
-// A kind with no listing narrowed by label, such as an RFD, leaves its labels
-// as text unless a listing picks them.
+// Render labels as plain text when `pick` is unset and `kind` has no
+// label-filtered listing (e.g. RFDs).
 const inert = computed(() => !props.pick && !href(''))
 
 function click(event, term) {
-    // A modified click opens the link in a new tab or window, as the browser
-    // would.
+    // Let modified clicks (Cmd, Ctrl, Shift, Alt) fall through to the browser
+    // so they open in a new tab or window.
     if (!props.pick || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     event.preventDefault()
     props.pick(term)
