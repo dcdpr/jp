@@ -1,0 +1,33 @@
+[package]
+description = "A terminal dashboard of the worktrees, JP runs, and pull requests in flight."
+name = "dash"
+
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+jp_config = { workspace = true }
+jp_conversation = { workspace = true }
+jp_storage = { workspace = true }
+jp_workspace = { workspace = true }
+
+camino = { workspace = true }
+chrono = { workspace = true }
+crossterm = { workspace = true, features = ["events"] }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+thiserror = { workspace = true }
+unicode-width = { workspace = true }
+
+[dev-dependencies]
+camino-tempfile = { workspace = true }
+
+[lints]
+workspace = true
