@@ -1,6 +1,6 @@
 [conversation.tools.rfd_supersede]
 enable = false
-run = "ask"
+run = "allow"
 source = "plugin.command.rfd.supersede"
 summary = "Record that one RFD replaces another."
 description = """

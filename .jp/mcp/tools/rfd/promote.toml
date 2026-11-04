@@ -1,6 +1,6 @@
 [conversation.tools.rfd_promote]
 enable = false
-run = "ask"
+run = "allow"
 source = "local"
 # `just rfd-promote` runs `jp rfd promote`, then archives the review and triage
 # conversations JP's own workflow titles after a draft it publishes.

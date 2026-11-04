@@ -1,6 +1,6 @@
 [conversation.tools.rfd_extend]
 enable = false
-run = "ask"
+run = "allow"
 source = "plugin.command.rfd.extend"
 summary = "Record that one RFD builds on another's design."
 description = """
