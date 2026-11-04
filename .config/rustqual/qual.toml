@@ -13,6 +13,11 @@ exempt = ["iosp/violation"]
 
 # Rules with no findings left on `main`. Any finding of an enforced rule fails,
 # whether or not it is new. Rules are only ever added to this list.
+#
+# `CX-006` (`unsafe`) joins once every existing site carries an audited
+# `qual:allow(unsafe) reason: "…"`, so from then on an unmarked `unsafe`
+# fails wherever it appears. Those markers don't count toward
+# `max_suppression_ratio`. Decided in T-0yh5m6r.
 enforced = []
 
 # The rustqual passes, and the rules each is read for. A rule is read from the
