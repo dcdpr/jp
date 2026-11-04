@@ -1,38 +1,35 @@
 name: link mentions
-# Link the RFDs, tickets, and wiki pages an issue or pull request description
-# names without linking (`RFD 018`, `T-005zd00`, `W-0a1b2c3`) to their short
-# links on jp.computer. See `.github/link-mentions.sh`.
+# Turn unlinked RFD, ticket, and wiki mentions (`RFD 018`, `T-005zd00`, `W-0a1b2c3`)
+# in issue and pull request descriptions into links to jp.computer.
+# See `.github/link-mentions.sh`.
 #
-# An edit made with the job's token starts no workflow run, so the edit this
-# makes doesn't run it again.
+# Edits made with `GITHUB_TOKEN` do not trigger new workflow runs, avoiding
+# an infinite loop.
 on:
   issues:
     types: [opened, edited]
-  # Not `pull_request`, which gives a pull request from a fork a read-only
-  # token. This job never checks out or runs a pull request's code, which is
-  # what makes `pull_request_target` safe here.
+  # Use `pull_request_target` so the job gets a write token even for fork PRs.
+  # This is safe because the job never checks out or executes code from the PR.
   pull_request_target:
     types: [opened, edited]
 permissions:
   contents: read
   issues: write
   pull-requests: write
-# An edit made while an earlier run is still going supersedes it.
+# Cancel any in-flight run when the same issue or PR is edited again.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number }}
   cancel-in-progress: true
 jobs:
   link:
-    # Only text written by someone with write access to the repository; anyone
-    # else's is left as they wrote it.
+    # Only rewrite descriptions authored by repository owners, members, or collaborators.
     if: >-
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
       github.event.issue.author_association || github.event.pull_request.author_association)
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      # The scripts as the default branch has them, whatever a pull request
-      # changes.
+      # Always check out the scripts from the default branch, ignoring PR changes.
       - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
         with:
           ref: ${{ github.event.repository.default_branch }}
@@ -41,14 +38,13 @@ jobs:
             .github/link-mentions.sh
             .github/link-mentions-test.sh
           sparse-checkout-cone-mode: false
-      # A broken script fails here, before it edits anything.
       - run: bash .github/link-mentions-test.sh
       - name: Link mentions
         env:
           GH_TOKEN: ${{ github.token }}
           ENDPOINT: repos/${{ github.repository }}/${{ github.event.pull_request && 'pulls' || 'issues' }}/${{ github.event.issue.number || github.event.pull_request.number }}
-        # The description only ever travels through files: interpolated into
-        # this script, its author could run commands with the job's token.
+        # Pass the description through files and `gh api` rather than `${{ ... }}`
+        # interpolation to prevent shell injection from untrusted description text.
         run: |
           gh api "$ENDPOINT" | jq -j '.body // ""' > before.md
           bash .github/link-mentions.sh < before.md > after.md
@@ -57,10 +53,9 @@ jobs:
             exit 0
           fi
 
-          # GitHub has no conditional write for a description, so an edit made
-          # since the first read would be overwritten. Reading again narrows
-          # that window to the moment between this read and the write; the run
-          # the edit started links it instead.
+          # GitHub's API has no conditional PATCH for issue/PR bodies. Re-fetch the
+          # description before writing to avoid overwriting a concurrent edit; the
+          # workflow run triggered by that edit will link the updated text.
           gh api "$ENDPOINT" | jq -j '.body // ""' > now.md
           if ! cmp -s before.md now.md; then
             echo "The description changed meanwhile; leaving it to the run that edit started."

@@ -2,8 +2,8 @@
 #
 # Tests for `link-mentions.sh`.
 #
-# Each case checks the exact output, and that running the script on that output
-# changes nothing: a description is linked again every time it is edited.
+# Each test verifies the expected output and checks idempotency by running
+# the filter a second time on its own output.
 #
 # Run: bash .github/link-mentions-test.sh
 
@@ -90,12 +90,12 @@ check 'CRLF line endings' \
     $'```\r\nRFD 018\r\n```\r\nRFD 018' \
     $'```\r\nRFD 018\r\n```\r\n[RFD 018](https://jp.computer/rfd-018)'
 
-# Prefixes are upper case and ids lower case, as `jp` writes them.
+# Prefixes must be uppercase and IDs lowercase.
 check 'text that names nothing' \
     'T-shirts, T-0123456789, xT-005zd00, docs/T-005zd00, RFD 0180, RFD D12, rfd 018, t-005zd00, w-0a1b2c3, T-005ZD00' \
     'T-shirts, T-0123456789, xT-005zd00, docs/T-005zd00, RFD 0180, RFD D12, rfd 018, t-005zd00, w-0a1b2c3, T-005ZD00'
 
-# Plain square brackets read like link text, so what is in them stays as it is.
+# Text inside plain square brackets is skipped along with markdown link text.
 check 'a mention in plain brackets' \
     '[see T-005zd00]' \
     '[see T-005zd00]'
