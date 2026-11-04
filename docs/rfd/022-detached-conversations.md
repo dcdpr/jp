@@ -480,7 +480,7 @@ Depends on Phase 3 and targets Unix initially.
 
 [RFD 005]: 005-first-class-inquiry-events.md
 [RFD 009]: 009-stateful-tool-protocol.md
-[RFD 018]: 018-typed-prompt-routing-enum.md
+[RFD 018]: 018-prompts-as-inquiry-events.md
 [RFD 019]: 019-non-interactive-mode.md
 [RFD 020]: 020-parallel-conversations.md
 [RFD 021]: 021-printer-live-redirection.md

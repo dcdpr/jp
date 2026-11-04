@@ -545,6 +545,11 @@ and result edits, preserving the streaming path's await-before-continue
 ordering.
 Independent of Phases 1 through 3; prerequisite for Phase 5.
 
+> [!TIP]
+> [RFD 018] turns every prompt into an inquiry event and makes the queue the
+> turn's unanswered inquiries, permission prompts included; its phase 2 covers
+> this phase.
+
 ### Phase 5: Ctrl-C inside prompts
 
 Separate ESC from Ctrl-C at all prompt call sites (`OperationCanceled` vs.
@@ -593,6 +598,7 @@ Independent of the other phases.
   remains out of scope.
 
 [#829]: https://github.com/dcdpr/jp/issues/829
+[RFD 018]: 018-prompts-as-inquiry-events.md
 [RFD 027]: 027-client-server-query-architecture.md
 [RFD 045]: 045-layered-interrupt-handler-stack.md
 [RFD 048]: 048-four-channel-output-model.md

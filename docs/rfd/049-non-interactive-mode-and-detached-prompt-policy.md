@@ -93,8 +93,9 @@ tool author's `exclusive = true`.
 
 ### Prompt Routing
 
-`route_prompt` ([RFD 018]) takes the detached policy and optional `exclusive`
-override to resolve the action when no client is attached:
+`route_prompt` dispatches on the `Prompt` from [RFD 018] and takes the detached
+policy and optional `exclusive` override to resolve the action when no client
+is attached:
 
 ```rust
 fn route_prompt(
@@ -324,7 +325,7 @@ availability for `has_client`), and Phase 1.
 
 - [RFD 048: Four-Channel Output Model][RFD 048]: defines `/dev/tty` as the
   prompt I/O channel, whose availability determines `has_client`.
-- [RFD 018: Typed Prompt Routing Enum][RFD 018]: defines the `Prompt` enum that
+- [RFD 018: Prompts as Inquiry Events][RFD 018]: defines the `Prompt` enum that
   `route_prompt` dispatches on.
 - [RFD 009: Stateful Tool Protocol][RFD 009]: defines the per-action permission
   model that interacts with the detached policy.
@@ -335,7 +336,7 @@ availability for `has_client`), and Phase 1.
 - `ssh` `BatchMode`: precedent for a "fail on prompt" policy.
 
 [RFD 009]: 009-stateful-tool-protocol.md
-[RFD 018]: 018-typed-prompt-routing-enum.md
+[RFD 018]: 018-prompts-as-inquiry-events.md
 [RFD 019]: 019-non-interactive-mode.md
 [RFD 027]: 027-client-server-query-architecture.md
 [RFD 048]: 048-four-channel-output-model.md
