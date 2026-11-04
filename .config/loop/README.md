@@ -34,8 +34,8 @@ A mission is a directory holding:
 - **`gate`** (optional, executable), run from the worktree root after every
   turn.
   Exit status 0 passes; anything else fails.
-  Its combined output is kept in the run's directory as `iter-NNN.gate.log`
-  and, on failure, handed to `repair_prompt`.
+  Its combined output is kept in the run's directory as `iter-NNN.gate.log` and,
+  on failure, handed to `repair_prompt`.
   Without one, the gate is reported as skipped.
 - **`next-target`** (optional, executable), run from the worktree root before
   every turn except a repair.
@@ -113,8 +113,8 @@ Every `jp` invocation in a run uses its own session,
 active conversation of the terminal it was started from.
 
 The run id is the start time in UTC, to the second.
-A run refuses to start if its directory already exists, so no run writes over
-an earlier one.
+A run refuses to start if its directory already exists, so no run writes over an
+earlier one.
 
 The state directory is not ignored by git.
 The harness leaves it out of everything it asks git about the work: the dirty
