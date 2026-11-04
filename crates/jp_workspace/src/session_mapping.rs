@@ -56,6 +56,23 @@ pub(crate) struct SessionHistoryEntry {
     pub activated_at: DateTime<Utc>,
 }
 
+/// What one session is working on, as a reader outside that session sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionOverview {
+    /// The session the mapping belongs to.
+    pub session: Session,
+
+    /// The live conversations the session has activated, most recently
+    /// activated first.
+    pub conversations: Vec<ConversationId>,
+
+    /// The session's active conversation, resolved the way the session itself
+    /// resolves it.
+    /// `None` when the session has none, including when its most recent live
+    /// conversation sits behind an archived one.
+    pub active: Option<ConversationId>,
+}
+
 impl SessionMapping {
     /// Create a new empty mapping for the given session.
     pub fn new(id: SessionId, source: SessionSource) -> Self {
@@ -211,6 +228,51 @@ impl Workspace {
                 self.resolvable_history(&mapping, |id| live.contains(id))
                     .first()
                     .copied()
+            })
+            .collect()
+    }
+
+    /// Every session mapping in the backing store, each with its live
+    /// conversations and its active one.
+    ///
+    /// Reads the store on every call rather than this workspace's index, so a
+    /// long-running reader sees sessions and conversations other processes
+    /// created since it opened the workspace.
+    /// A mapping that cannot be read or parsed is left out.
+    #[must_use]
+    pub fn session_overviews(&self) -> Vec<SessionOverview> {
+        let live: HashSet<_> = self
+            .loader
+            .load_conversation_ids(ConversationFilter::default())
+            .into_iter()
+            .collect();
+
+        let mut seen = HashSet::new();
+        self.sessions
+            .list_session_keys()
+            .into_iter()
+            .filter_map(|key| {
+                let value = self.sessions.load_session(&key).ok()??;
+                mapping_from_value(value, &key)
+            })
+            // A legacy bare-value file can sit next to its migrated
+            // counterpart until cleanup removes it.
+            .filter(|mapping| seen.insert(session_storage_key(&mapping.id, &mapping.source)))
+            .map(|mapping| SessionOverview {
+                conversations: mapping
+                    .history
+                    .iter()
+                    .map(|entry| entry.id)
+                    .filter(|id| live.contains(id))
+                    .collect(),
+                active: self
+                    .resolvable_history(&mapping, |id| live.contains(id))
+                    .first()
+                    .copied(),
+                session: Session {
+                    id: mapping.id,
+                    source: mapping.source,
+                },
             })
             .collect()
     }
