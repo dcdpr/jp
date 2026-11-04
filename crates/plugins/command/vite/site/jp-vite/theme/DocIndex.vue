@@ -28,8 +28,8 @@ const props = defineProps({
     filterField: { type: String, default: 'category' },
     // Whether entries carry a one-line summary worth toggling.
     showSummary: { type: Boolean, default: true },
-    // What the entries are called, for the line above a table narrowed to a
-    // label.
+    // Plural noun for the listed entries, shown in the active label-filter
+    // banner (e.g. "Tickets labelled ...").
     labelNoun: { type: String, default: 'Entries' },
 })
 

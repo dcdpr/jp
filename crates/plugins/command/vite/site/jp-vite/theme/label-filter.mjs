@@ -89,8 +89,8 @@ export function withLabelFilter(search, filter) {
     return query ? `?${query}` : ''
 }
 
-// The query string a link uses to show the documents carrying `term`. A link
-// made of only a query string leads to the page it is on.
+// Return a `?label=<term>` query string. As an `href`, a query-only URL
+// resolves against the current page.
 export function labelQuery(term) {
     return withLabelFilter('', { all: [term], any: [] })
 }

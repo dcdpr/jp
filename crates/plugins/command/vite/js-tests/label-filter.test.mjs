@@ -84,8 +84,6 @@ test('a filter written into a query reads back, and keeps what else it holds', (
     assert.equal(withLabelFilter('?label=old', null), '')
 })
 
-// A label a listing picks links to the page it is on, so the router never takes
-// the reader to another listing.
 test('a link to the documents carrying one label is only a query string', () => {
     const query = labelQuery('type=bug')
 
