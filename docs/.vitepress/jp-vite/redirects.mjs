@@ -1,20 +1,27 @@
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
+import { knownDocuments } from './references.mjs'
 import { readSettings } from './settings.mjs'
-import { PAGE } from './wiki.mjs'
 
 // Short links, and routes for pages that moved.
 //
-// - RFDs: `/rfd/101` lands on `/rfd/101-conversation-labels`. The number is the
-//   stable part of an RFD's identity — slugs change when a title is reworded —
-//   so the number-only form is the one worth pasting into a commit message or
-//   an issue.
-// - Wiki pages: `/wiki/W-0a1b2c3` and `/wiki/0a1b2c3` land on
-//   `/wiki/0a1b2c3-slug`, for the same reason.
+// An RFD, ticket, or wiki page is reached by its id as well as by its full
+// path. The slug in the full path changes when a title is reworded and the id
+// doesn't, so the short link is the one worth pasting into a commit message or
+// an issue:
+//
+// - RFDs: `/rfd/101` and `/rfd-101` land on `/rfd/101-conversation-labels`.
+// - Tickets: `/ticket/005zd00`, `/ticket/T-005zd00`, and `/T-005zd00` land on
+//   `/ticket/005zd00-slug`.
+// - Wiki pages: `/wiki/0a1b2c3`, `/wiki/W-0a1b2c3`, and `/W-0a1b2c3` land on
+//   `/wiki/0a1b2c3-slug`.
 // - Moved pages: each route in `plugins.command.vite.options.redirects` lands
 //   where it maps to, a route or a wiki page id, so a page renamed later
 //   doesn't break the redirect.
+//
+// The documents are the ones `knownDocuments` finds, the same the site links
+// names in prose to.
 //
 // Drafts get no short link: draft numbers are recycled once a draft is promoted
 // or dropped, so `/rfd/drafts/D38` would resolve to a different document
@@ -26,17 +33,6 @@ import { PAGE } from './wiki.mjs'
 // `cleanUrls` means a request for `/rfd/101` is answered with `rfd/101.html`,
 // the same way every other page on the site is served.
 
-const RFD = /^(\d{3})-.+\.md$/
-
-// The files of `dir`, sorted; none for a directory that isn't there.
-function filesOf(dir) {
-    try {
-        return readdirSync(dir).sort()
-    } catch {
-        return []
-    }
-}
-
 // Every redirect the site serves, as a map from the route asked for to the
 // route answered with. `srcDir` is the VitePress source directory.
 //
@@ -44,28 +40,10 @@ function filesOf(dir) {
 // would lead nowhere.
 export function siteRedirects(srcDir, settings = readSettings()) {
     const redirects = new Map()
+    const known = knownDocuments(settings, srcDir)
 
-    const rfds = settings.rfd?.route
-    if (rfds) {
-        for (const file of filesOf(resolve(srcDir, rfds))) {
-            const id = file.match(RFD)?.[1]
-            // `000` is the templates' shared id: several files, no one target.
-            if (!id || id === '000') continue
-            redirects.set(`/${rfds}/${id}`, `/${rfds}/${file.replace(/\.md$/, '')}`)
-        }
-    }
-
-    const wiki = settings.wiki?.route
-    const pages = new Map()
-    if (wiki) {
-        for (const file of filesOf(resolve(srcDir, wiki))) {
-            const id = file.match(PAGE)?.[1]
-            if (!id) continue
-            const target = `/${wiki}/${file.replace(/\.md$/, '')}`
-            pages.set(`W-${id}`, target)
-            redirects.set(`/${wiki}/${id}`, target)
-            redirects.set(`/${wiki}/W-${id}`, target)
-        }
+    for (const [label, file] of known) {
+        for (const from of shortLinks(label, settings)) redirects.set(from, routeOf(file))
     }
 
     for (const [from, to] of Object.entries(settings.redirects ?? {})) {
@@ -73,17 +51,43 @@ export function siteRedirects(srcDir, settings = readSettings()) {
             redirects.set(from, to)
             continue
         }
-        const target = pages.get(to)
-        if (!target) {
+        const file = known.get(to)
+        if (!file) {
             throw new Error(
                 `\`plugins.command.vite.options.redirects\` sends \`${from}\` to ${to}, and no ` +
                     `wiki page has that id.`,
             )
         }
-        redirects.set(from, target)
+        redirects.set(from, routeOf(file))
     }
 
     return redirects
+}
+
+// The routes that reach the document `knownDocuments` labels `label`: `042`,
+// `T-005zd00`, or `W-0a1b2c3`. A draft, labelled `D12`, has none.
+function shortLinks(label, settings) {
+    const [, prefix, id] = label.match(/^([TW])-(.+)$/) ?? []
+    if (prefix === 'T') {
+        const tickets = settings.ticket.route
+        return [`/${tickets}/${id}`, `/${tickets}/T-${id}`, `/T-${id}`]
+    }
+    if (prefix === 'W') {
+        const wiki = settings.wiki.route
+        return [`/${wiki}/${id}`, `/${wiki}/W-${id}`, `/W-${id}`]
+    }
+    if (/^\d{3}$/.test(label)) {
+        const rfds = settings.rfd.route
+        return [`/${rfds}/${label}`, `/${rfds}-${label}`]
+    }
+
+    return []
+}
+
+// The site route of a document file below the source directory:
+// `/rfd/101-conversation-labels` for `rfd/101-conversation-labels.md`.
+function routeOf(file) {
+    return `/${file.replace(/\.md$/, '')}`
 }
 
 // Where the stub for a redirect from `route` goes in the build output:
