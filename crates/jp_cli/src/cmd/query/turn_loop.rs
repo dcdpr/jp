@@ -19,10 +19,10 @@ use futures::{
 use indexmap::IndexMap;
 use jp_attachment::Attachment;
 use jp_config::{
-    AppConfig, PartialConfig, ToPartial as _,
+    AppConfig, PartialAppConfig, PartialConfig, ToPartial as _,
     assistant::{request::MaxResponseBytes, tool_choice::ToolChoice},
     conversation::tool::QuestionTarget,
-    model::id::ProviderId,
+    model::id::{PartialModelIdOrAliasConfig, ProviderId},
     style::streaming::StreamingConfig,
 };
 use jp_conversation::{
@@ -32,7 +32,7 @@ use jp_conversation::{
 use jp_inquire::prompt::PromptBackend;
 use jp_llm::{
     Error as LlmError, EventStream, Provider,
-    error::StreamError,
+    error::{StreamError, StreamErrorKind},
     event::{Event, EventPart, FinishReason, NoticeSink, ToolCallPart},
     model::ModelDetails,
     provider::get_provider,
@@ -280,6 +280,10 @@ async fn drive_turn(
     // the model is looked up has to reach the receiver this loop goes on to
     // read, not one that was dropped on the way.
 
+    // Owned, because a model the provider refuses can be swapped for one the
+    // user picks, for the rest of the turn.
+    let mut model = model.clone();
+
     let mut turn_state = TurnState::default();
     let mut stream_retry = StreamRetryState::new(cfg.assistant.request);
     let idle_timeout = match cfg.assistant.request.stream_idle_timeout_secs {
@@ -308,7 +312,7 @@ async fn drive_turn(
     turn_coordinator.set_tool_separator(tool_renderer.separator_flag());
     turn_coordinator.set_tool_drawn(tool_renderer.drawn_flag());
 
-    let inquiry_backend: Arc<dyn InquiryBackend> = build_inquiry_backend(
+    let mut inquiry_backend: Arc<dyn InquiryBackend> = build_inquiry_backend(
         cfg,
         tools.to_vec(),
         model.clone(),
@@ -442,14 +446,24 @@ async fn drive_turn(
                 let mut raw_stream = if let Some(stream) = continuation.take() {
                     stream
                 } else {
-                    let started = provider
-                        .start_query(model, query, QueryContext {
+                    let started = match provider
+                        .start_query(&model, query, QueryContext {
                             root: root.to_path_buf(),
                             mcp_endpoint: tool_coordinator.endpoint(),
                             invocation: Some(query_invocation.clone()),
                         })
                         .await
-                        .map_err(|e| map_llm_error(e, vec![]))?;
+                    {
+                        Ok(started) => started,
+                        Err(error) => {
+                            return Err(with_served_models(
+                                error.into(),
+                                provider.as_ref(),
+                                &model,
+                            )
+                            .await);
+                        }
+                    };
                     execution = started.execution;
                     tool_coordinator
                         .set_execution(execution)
@@ -662,7 +676,55 @@ async fn drive_turn(
                                             ResponseBoundary::Final,
                                         );
                                         conv.flush()?;
-                                        return Err(LlmError::Stream(e).into());
+                                        return Err(with_served_models(
+                                            LlmError::Stream(e).into(),
+                                            provider.as_ref(),
+                                            &model,
+                                        )
+                                        .await);
+                                    }
+
+                                    // A refused model is the same on every
+                                    // attempt, so rather than end the turn,
+                                    // offer the ones the provider serves.
+                                    if interactive
+                                        && e.kind == StreamErrorKind::UnknownModel
+                                        && let Some(picked) = pick_served_model(
+                                            provider.as_ref(),
+                                            &model,
+                                            prompt_backend.as_ref(),
+                                            &printer,
+                                        )
+                                        .await
+                                    {
+                                        info!(
+                                            from = %model.id,
+                                            to = %picked.id,
+                                            "Switching to a model the provider serves."
+                                        );
+
+                                        commit_partial_response(
+                                            &mut turn_coordinator,
+                                            &conv,
+                                            &printer,
+                                            ResponseBoundary::Continuation,
+                                        );
+                                        turn_coordinator.prepare_retry_continuation();
+                                        turn_coordinator.set_model_id(picked.id.to_string());
+                                        record_model(&mut conv, &picked);
+
+                                        model = picked;
+                                        inquiry_backend = build_inquiry_backend(
+                                            cfg,
+                                            tools.to_vec(),
+                                            model.clone(),
+                                            provider.clone(),
+                                            attachments.to_vec(),
+                                            notice_sink(&printer),
+                                        )
+                                        .await?;
+
+                                        break;
                                     }
 
                                     match handle_stream_error(
@@ -685,7 +747,12 @@ async fn drive_turn(
                                             if let Err(err) = conv.flush() {
                                                 warn!("Failed to persist before abort: {err}");
                                             }
-                                            return Err(error);
+                                            return Err(with_served_models(
+                                                error,
+                                                provider.as_ref(),
+                                                &model,
+                                            )
+                                            .await);
                                         }
                                         // A Ctrl-C cut the backoff wait short:
                                         // run the streaming interrupt flow with
@@ -1417,13 +1484,89 @@ fn flush_rendered_arguments(coordinator: &mut ToolCoordinator, conv: &mut Conver
     });
 }
 
-fn map_llm_error(error: jp_llm::Error, models: Vec<ModelDetails>) -> Error {
-    match error {
-        jp_llm::Error::UnknownModel(model) => Error::UnknownModel {
-            model,
-            available: models.into_iter().map(|v| v.id.name.to_string()).collect(),
-        },
-        _ => error.into(),
+/// Ask the user which of the provider's models to use in place of `model`,
+/// which the provider refused.
+///
+/// Returns `None` when the provider lists nothing else to offer, or the user
+/// dismissed the prompt.
+async fn pick_served_model(
+    provider: &dyn Provider,
+    model: &ModelDetails,
+    prompt_backend: &dyn PromptBackend,
+    printer: &Printer,
+) -> Option<ModelDetails> {
+    let served = match provider.models().await {
+        Ok(served) => served,
+        Err(error) => {
+            debug!(%error, "Could not list the provider's models.");
+            return None;
+        }
+    };
+
+    let candidates: Vec<ModelDetails> = served
+        .into_iter()
+        .filter(|served| served.id.name != model.id.name)
+        .collect();
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let options = candidates
+        .iter()
+        .map(|candidate| candidate.id.name.to_string())
+        .collect();
+    let message = format!(
+        "The `{}` provider does not serve `{}`. Continue with:",
+        model.id.provider, model.id.name
+    );
+    let mut writer = printer.prompt_writer();
+    let picked = prompt_backend
+        .select(&message, options, None, &mut writer)
+        .ok()?;
+
+    candidates.into_iter().nth(picked)
+}
+
+/// Record `model` as the conversation's model from here on, the way `-m` would.
+fn record_model(conv: &mut ConversationMut, model: &ModelDetails) {
+    let mut delta = PartialAppConfig::empty();
+    delta.assistant.model.id = PartialModelIdOrAliasConfig::Id(model.id.to_partial());
+
+    conv.update_events(|stream| stream.add_config_delta(delta));
+}
+
+/// Name the models the provider does serve, when `error` is it refusing
+/// `model`.
+///
+/// Any other error is returned unchanged.
+/// The listing is a second request; when it fails, the rejection is still
+/// reported, without alternatives.
+async fn with_served_models(error: Error, provider: &dyn Provider, model: &ModelDetails) -> Error {
+    let unknown_model = match &error {
+        Error::Llm(LlmError::UnknownModel(_)) => true,
+        Error::Llm(LlmError::Stream(error)) => error.kind == StreamErrorKind::UnknownModel,
+        _ => false,
+    };
+
+    if !unknown_model {
+        return error;
+    }
+
+    let available = match provider.models().await {
+        Ok(models) => models
+            .into_iter()
+            .map(|model| model.id.name.to_string())
+            .collect(),
+        Err(error) => {
+            debug!(%error, "Could not list the provider's models.");
+            vec![]
+        }
+    };
+
+    Error::UnknownModel {
+        model: model.id.name.to_string(),
+        available,
     }
 }
 

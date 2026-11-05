@@ -538,6 +538,12 @@ impl TurnCoordinator {
         self.view.enter_tool_call_region(chrome_visible)
     }
 
+    /// Name `model_id` on the assistant headers rendered from here on, when the
+    /// turn moves to another model.
+    pub fn set_model_id(&mut self, model_id: String) {
+        self.view.set_model_id(Some(model_id));
+    }
+
     /// Wire the view's tool-separator flag to the turn's `ToolRenderer` so
     /// visible assistant content can cancel a separator owed by a tool result.
     pub fn set_tool_separator(&mut self, flag: Arc<AtomicBool>) {

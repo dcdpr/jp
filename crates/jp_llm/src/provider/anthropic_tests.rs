@@ -519,6 +519,28 @@ fn api_error(error_type: &str, message: &str) -> async_anthropic::errors::ApiErr
     }
 }
 
+#[test]
+fn test_a_not_found_model_is_an_unknown_model() {
+    let error = StreamError::from(AnthropicError::Api(api_error(
+        "not_found_error",
+        "model: claude-nonexistent",
+    )));
+
+    assert_eq!(error.kind, StreamErrorKind::UnknownModel);
+    assert!(!error.is_retryable());
+}
+
+/// A wrong endpoint is also `not_found_error`, but it names no model.
+#[test]
+fn test_a_not_found_route_is_not_an_unknown_model() {
+    let error = StreamError::from(AnthropicError::Api(api_error(
+        "not_found_error",
+        "Not Found",
+    )));
+
+    assert_eq!(error.kind, StreamErrorKind::Other);
+}
+
 /// A spent usage window, ordinary throttling, and a rejected request
 /// fingerprint (Phase 1, measured: body `"Error"`) all arrive as `429
 /// rate_limit_error`.
