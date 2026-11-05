@@ -133,8 +133,11 @@ values = [
 [plugins.command.rfd]
 run = "allow"
 
-# RFDs are laid out in the style of `.comfort.toml` as they are written.
+# Drafts the assistant writes through the `rfd_draft` tool are attributed to
+# `jp`, and RFDs are laid out in the style of `.comfort.toml` as they are
+# written.
 [plugins.command.rfd.options]
+assistant = "jp"
 format_on_write = true
 
 # A tracking ticket carries `type=tracking` beside its `tracking-rfd` link, since

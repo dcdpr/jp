@@ -26,7 +26,7 @@ use serde_json::{Map, Value};
 use ticket::TicketId;
 
 use crate::{
-    Output, author,
+    Output,
     board::{self, Loaded},
     cmd::{self, draft::Draft},
     document::{self, Document},
@@ -95,7 +95,7 @@ fn answer(init: &InitMessage, call: &ToolCall, options: &Options) -> Answer {
     let result = match call.name.as_str() {
         "list" => list(&place, &args),
         "show" => show(&place, &args),
-        "draft" => draft(&place, &args, options, &init.config),
+        "draft" => draft(&place, &args, options),
         "promote" => promote(&place, &args),
         "extend" => relate(&place, &args, "target", cmd::relate::extend),
         "require" => relate(&place, &args, "target", cmd::relate::require),
@@ -431,8 +431,9 @@ fn fenced(text: &str) -> String {
     format!("{fence}markdown\n{text}\n{fence}")
 }
 
-/// Write a new draft, from a ticket when the call names one.
-fn draft(place: &Place<'_>, args: &Arguments<'_>, options: &Options, config: &Value) -> Reply {
+/// Write a new draft, from a ticket when the call names one, attributed to the
+/// `assistant` option.
+fn draft(place: &Place<'_>, args: &Arguments<'_>, options: &Options) -> Reply {
     let category = args.required::<String>("category")?;
     let ticket = args
         .optional::<String>("ticket")?
@@ -449,12 +450,11 @@ fn draft(place: &Place<'_>, args: &Arguments<'_>, options: &Options, config: &Va
         place.require(Dir::Tickets, &[Capability::Read, Capability::Update])?;
     }
 
-    let author = author::resolve(&place.paths.root, config)?;
     let date = today();
     let request = Draft {
         category: &category,
         title: &title,
-        author: &author,
+        author: &options.assistant,
         date: &date,
     };
 

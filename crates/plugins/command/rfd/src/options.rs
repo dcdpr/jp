@@ -4,6 +4,8 @@
 //! [plugins.command.rfd.options]
 //! dir = "docs/rfd"
 //! categories = ["design", "decision", "guide", "process"]
+//! # The author written on drafts created through a tool.
+//! assistant = "jp"
 //!
 //! # The label a ticket names the RFD it tracks under, and the labels a
 //! # tracking ticket is filed with besides it.
@@ -19,7 +21,8 @@
 //! `format_on_write = true` lays every RFD out in the style of the workspace's
 //! `.comfort.toml` as it is written; it is off by default.
 //!
-//! Every option is optional, and `tracking.labels` defaults to none.
+//! Every option is optional; `assistant` defaults to `assistant`, and
+//! `tracking.labels` to none.
 //! Keys this plugin doesn't read are ignored, so a configuration written for a
 //! newer `jp-rfd` still loads.
 //!
@@ -45,6 +48,10 @@ const DEFAULT_DIR: &str = "docs/rfd";
 /// The categories when `categories` isn't set.
 const DEFAULT_CATEGORIES: [&str; 4] = ["design", "decision", "guide", "process"];
 
+/// The author written on drafts created through a tool, when `assistant` isn't
+/// set.
+const DEFAULT_ASSISTANT: &str = "assistant";
+
 /// The settings every command and tool runs with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Options {
@@ -55,6 +62,9 @@ pub(crate) struct Options {
     /// The categories an RFD can carry, lowercase.
     pub categories: Vec<String>,
 
+    /// The author written on drafts created through a tool.
+    pub assistant: String,
+
     /// The label keys tickets name RFDs under.
     pub links: Links,
 }
@@ -64,6 +74,7 @@ impl Default for Options {
         Self {
             dir: Utf8PathBuf::from(DEFAULT_DIR),
             categories: DEFAULT_CATEGORIES.map(ToOwned::to_owned).to_vec(),
+            assistant: DEFAULT_ASSISTANT.to_owned(),
             links: Links::default(),
         }
     }
@@ -75,6 +86,7 @@ impl Default for Options {
 struct Raw {
     dir: Utf8PathBuf,
     categories: Vec<String>,
+    assistant: String,
     tracking: RawTracking,
     relevant: RawRelevant,
 }
@@ -86,6 +98,7 @@ impl Default for Raw {
         Self {
             dir: options.dir,
             categories: options.categories,
+            assistant: options.assistant,
             tracking: RawTracking::default(),
             relevant: RawRelevant::default(),
         }
@@ -164,9 +177,17 @@ impl Options {
             );
         }
 
+        let assistant = read.assistant.trim();
+        if assistant.is_empty() || assistant.chars().any(char::is_control) {
+            return Err(
+                "`plugins.command.rfd.options.assistant` must be a name on one line.".to_owned(),
+            );
+        }
+
         Ok(Self {
             dir: read.dir,
             categories,
+            assistant: assistant.to_owned(),
             links: links(read.tracking, read.relevant)?,
         })
     }

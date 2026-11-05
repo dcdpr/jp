@@ -22,6 +22,7 @@ fn every_option_has_a_default() {
                 "guide".to_owned(),
                 "process".to_owned(),
             ],
+            assistant: "assistant".to_owned(),
             links: Links::default(),
         })
     );
@@ -34,8 +35,22 @@ fn configured_options_replace_the_defaults() {
     assert_eq!(options, Options {
         dir: Utf8PathBuf::from("design"),
         categories: vec!["adr".to_owned(), "how-to".to_owned()],
+        assistant: "assistant".to_owned(),
         links: Links::default(),
     });
+}
+
+#[test]
+fn the_assistant_is_a_name_on_one_line() {
+    assert_eq!(
+        read(json!({ "assistant": " jp " })).unwrap().assistant,
+        "jp"
+    );
+    assert_eq!(
+        read(json!({ "assistant": "two\nlines" })),
+        Err("`plugins.command.rfd.options.assistant` must be a name on one line.".to_owned())
+    );
+    assert!(read(json!({ "assistant": "  " })).is_err());
 }
 
 /// A board names its link labels its own way, and says what else a tracking

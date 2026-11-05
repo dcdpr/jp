@@ -426,7 +426,8 @@ fn with_policy(name: &str, arguments: Value, rules: Vec<FsRule>) -> ToolCall {
     call
 }
 
-/// The configuration a draft takes its author from.
+/// A configuration naming a person, which a draft written through a tool is not
+/// attributed to.
 fn by_jane() -> Value {
     json!({ "user": { "name": "Jane Doe <jane@example.com>" } })
 }
@@ -445,20 +446,29 @@ fn draft_writes_a_draft() {
     let root = workspace();
     with_template(&root);
 
+    let options = Options {
+        assistant: "jp".to_owned(),
+        ..Options::default()
+    };
     let out = content(run(
         &init(&root, by_jane()),
         &call(
             "draft",
             json!({ "category": "design", "title": "Tool Limits" }),
         ),
-        &Options::default(),
+        &options,
     ));
 
     assert_eq!(out, "Created docs/rfd/drafts/D01-tool-limits.md\n");
     let draft = fs::read_to_string(root.path().join("docs/rfd/drafts/D01-tool-limits.md")).unwrap();
-    assert!(
-        draft.contains("- **Authors**: Jane Doe <jane@example.com>\n"),
-        "{draft}"
+    // The assistant wrote it, not the person `user.name` names.
+    assert_eq!(
+        draft,
+        format!(
+            "# RFD D01: Tool Limits\n\n- **Status**: Draft\n- **Category**: Design\n- \
+             **Authors**: jp\n- **Date**: {}\n\n## Summary\n\nWhat.\n",
+            today()
+        )
     );
 }
 

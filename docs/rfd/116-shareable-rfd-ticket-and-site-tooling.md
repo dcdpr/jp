@@ -113,6 +113,8 @@ run = "allow"
 [plugins.command.rfd.options]
 dir = "docs/rfd"
 categories = ["design", "decision", "guide", "process"]
+# The author written on drafts created through a tool.
+assistant = "jp"
 # The label a tracking ticket names its RFD under, and the labels it is filed
 # with besides.
 tracking.key = "tracking-rfd"
