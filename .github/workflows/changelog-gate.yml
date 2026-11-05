@@ -1,0 +1,95 @@
+name: changelog-gate
+on:
+  pull_request:
+    branches:
+      - main
+    # Besides the diff, the rules read the labels and the title, so a change to
+    # either reruns the gate. No path filter: a required check that never runs
+    # never reports, and blocks the merge for good.
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
+permissions:
+  contents: read
+  pull-requests: read
+# Its own group, so a label or title event reruns only this workflow, and a
+# label toggled twice keeps only the run that read the second.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  gate:
+    # The list of checks shows only a name and a status, so the name states the
+    # requirement.
+    name: Changelog fragment or no-changelog label
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
+        with:
+          # The merge commit and its first parent, the base it is compared to.
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Require a fragment or the no-changelog label
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          # Passed through the environment rather than written into the script:
+          # a title is whatever its author typed.
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+
+          # Read when the gate runs rather than from the event, so a rerun sees
+          # the labels the pull request carries now.
+          labels=$(gh api "repos/$REPOSITORY/pulls/$NUMBER" --jq '.labels[].name')
+          if grep -qxF 'no-changelog' <<< "$labels"; then
+            echo "The pull request carries the no-changelog label."
+            exit 0
+          fi
+
+          # Fragments the pull request adds at the top level of changelog.d/.
+          # Editing or moving a fragment corrects or files notes that already
+          # exist, a file in a release's directory is a released note, and a
+          # highlight in highlights/ adds no entry to the list of changes, so
+          # none of them counts. Through a file because the names are
+          # NUL-separated, which a shell variable cannot hold, and so a failing
+          # `git diff` stops the gate instead of reading as no fragments.
+          git diff --name-only --diff-filter=A --find-renames -z HEAD^1 HEAD -- changelog.d \
+            > "$RUNNER_TEMP/added"
+
+          fragments=()
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              changelog.d/README.md | changelog.d/*/*) ;;
+              changelog.d/*.md) fragments+=("$path") ;;
+            esac
+          done < "$RUNNER_TEMP/added"
+
+          status=0
+          if [ "${#fragments[@]}" -eq 0 ]; then
+            echo "::error title=No changelog fragment::Add a fragment with \`jp release add\`, or add the no-changelog label when users won't notice the change."
+            status=1
+          else
+            printf 'Adds %s\n' "${fragments[@]}"
+          fi
+
+          # A `!` before the colon, as in `feat(cli)!: ...`, marks a breaking
+          # change, which needs its section of the upgrade guide. Format
+          # validation fails a fragment whose marker opens no upgrade section,
+          # so finding the marker is enough here.
+          if grep -Eq '^[[:alpha:]]+(\([^)]*\))?!:' <<< "$TITLE"; then
+            upgrade=false
+            for path in "${fragments[@]}"; do
+              if grep -Eq '^(BREAKING CHANGE|BREAKING-CHANGE):' "$path"; then
+                upgrade=true
+              fi
+            done
+
+            if [ "$upgrade" = false ]; then
+              echo "::error title=No upgrade section::The title marks a breaking change with '!', so a fragment it adds needs an upgrade section: a paragraph starting with 'BREAKING CHANGE:'. Add one, or add the no-changelog label when the break is one users never see."
+              status=1
+            fi
+          fi
+
+          exit "$status"

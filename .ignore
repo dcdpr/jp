@@ -3,6 +3,8 @@
 !/*
 !apps/
 !apps/**
+!changelog.d/
+!changelog.d/**
 !crates/
 !crates/contrib/
 !crates/contrib/**

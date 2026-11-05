@@ -587,6 +587,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "changelog"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "clap",
+ "comrak",
+ "indoc",
+ "semver",
+ "serde",
+ "serde-saphyr",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2162,6 +2176,27 @@ version = "0.1.0"
 dependencies = [
  "jp_plugin",
  "serde_json",
+]
+
+[[package]]
+name = "jp-release"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "changelog",
+ "clap",
+ "comrak",
+ "doc",
+ "indoc",
+ "jp_md",
+ "jp_plugin",
+ "jp_tool",
+ "serde",
+ "serde_json",
+ "strip-ansi-escapes",
+ "toml",
+ "tool-definitions",
 ]
 
 [[package]]

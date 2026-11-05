@@ -28,6 +28,8 @@ In disagreements between code and docs, the code is authoritative.
   - [Terms](#terms)
     - [Attachment](#attachment)
     - [Background Task](#background-task)
+    - [Changelog Fragment](#changelog-fragment)
+    - [CommandConfig](#commandconfig)
     - [Checklist Item](#checklist-item)
     - [CommandConfig](#commandconfig)
     - [Compacted View](#compacted-view)
@@ -42,6 +44,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Event Overlay](#event-overlay)
     - [External Login](#external-login)
     - [Fan-Out](#fan-out)
+    - [Highlight](#highlight)
     - [InlineReply](#inlinereply)
     - [Inquiry](#inquiry)
     - [Invocation](#invocation)
@@ -87,6 +90,18 @@ A task is two-phase: `run` (off the main critical path, cancellable, accumulates
 state) and `sync` (with `&mut Workspace`, commits the accumulated state).
 The handler lives at `Ctx::task_handler` and is drained exactly once per `jp`
 invocation, at the end of `jp_cli::lib::run`.
+
+### Changelog Fragment
+
+One entry in a release's notes, recording one change users notice: a Markdown
+file in the fragments directory, `changelog.d/` by default, whose frontmatter
+names one of seven fixed types (`added`, `changed`, `deprecated`, `removed`,
+`fixed`, `security`, `performance`).
+A fragment for a change that requires users to act also carries its **upgrade
+section**: a paragraph starting with `BREAKING CHANGE:`, and the paragraphs
+after it.
+Parsed by `changelog::fragment`, and written by `jp release add`.
+See [RFD-121].
 
 ### Checklist Item
 
@@ -295,6 +310,16 @@ receives one operation per execution; configured by `FanOutConfig` in
 
 **Not the same as** a tool that takes several targets as one action, such as
 `fs_modify_file`, which applies them together and is approved as one.
+
+### Highlight
+
+An editorial section of a release's notes, for a feature worth more than its
+[Changelog Fragment](#changelog-fragment): a Markdown file in the fragments
+directory's `highlights/`, with a `title`, the `authors` to credit, and prose.
+A change with a highlight still has a fragment, since a highlight adds no entry
+to the list of changes.
+Parsed by `changelog::highlight`.
+See [RFD-121].
 
 ### InlineReply
 
@@ -591,5 +616,6 @@ See [RFD-031].
 [RFD-064]: ../rfd/064-non-destructive-conversation-compaction.md
 [RFD-087]: ../rfd/087-session-scoped-active-workspace.md
 [RFD-096]: ../rfd/096-terminal-output-sanitization-for-untrusted-content.md
+[RFD-121]: ../rfd/121-changelog-fragments-and-validation.md
 [Turn Summary]: 00dxybc-conversation.md#turn-summary
 [`shlex::split`]: https://docs.rs/shlex

@@ -3,7 +3,7 @@
 //! A plugin serving tools ships a starting definition for each: a TOML file
 //! declaring the tool under `conversation.tools`, its `source` naming the
 //! plugin.
-//! [`Definitions`] describes them, and runs the two commands every such plugin
+//! [`Definitions`] describes them, and runs the two commands such a plugin
 //! offers:
 //!
 //! - `jp <plugin> tools init PATH` writes the starting set into PATH, one file
@@ -14,6 +14,7 @@
 //!   vocabulary defines, into the schemas of the tools that take them.
 //!   It owns a file of its own, [`SYNCED_FILE`], and rewrites it whole, so
 //!   edits to the definitions survive it.
+//!   A plugin whose definitions mirror nothing has no `tools sync`.
 //!
 //! Tools are found by their `source`, not by their key, so a tool a project
 //! renames in its configuration gets what it takes under the name it has there.
@@ -45,7 +46,10 @@ pub struct Definitions {
 
     /// What `tools sync` writes into the definitions, as the two commands name
     /// it in what they print: `categories`, `labels`.
-    pub offers: &'static str,
+    ///
+    /// `None` for definitions that mirror nothing from the configuration, whose
+    /// plugin has no `tools sync`.
+    pub offers: Option<&'static str>,
 }
 
 /// A parameter of a tool that takes its values from the configuration.
@@ -177,11 +181,16 @@ impl Definitions {
             text.push_str(&format!("Wrote {path}\n"));
         }
 
-        text.push_str(&format!(
-            "Load the directory from the workspace configuration, then run `jp {} tools sync \
-             {dir}` to offer the {}.\n",
-            self.plugin, self.offers
-        ));
+        match self.offers {
+            Some(offers) => text.push_str(&format!(
+                "Load the directory from the workspace configuration, then run `jp {} tools sync \
+                 {dir}` to offer the {offers}.\n",
+                self.plugin
+            )),
+            None => text.push_str(
+                "Load the directory from the workspace configuration for the tools to appear.\n",
+            ),
+        }
 
         Ok(text)
     }
@@ -227,6 +236,8 @@ impl Definitions {
     /// parameter without a type, which leaves the tool out of every
     /// conversation.
     /// What was left out is named.
+    ///
+    /// Refuses definitions that mirror nothing, which have no synced file.
     pub fn sync<'a>(
         &self,
         dir: &Utf8Path,
@@ -234,6 +245,13 @@ impl Definitions {
         notes: &str,
         mirrors: impl Fn(&str) -> Vec<Mirror<'a>>,
     ) -> Result<String, String> {
+        let Some(offers) = self.offers else {
+            return Err(format!(
+                "`jp {}` has no `tools sync`: its tool definitions mirror nothing from the \
+                 configuration.",
+                self.plugin
+            ));
+        };
         if !dir.is_dir() {
             return Err(format!("{dir} is not a directory."));
         }
@@ -274,15 +292,11 @@ impl Definitions {
 
         let mut text = if covered.is_empty() {
             format!(
-                "Wrote {path}; no configured tool takes {} from `jp {}`.\n",
-                self.offers, self.plugin
+                "Wrote {path}; no configured tool takes {offers} from `jp {}`.\n",
+                self.plugin
             )
         } else {
-            format!(
-                "Wrote {path}, with {} for {}\n",
-                self.offers,
-                covered.join(", ")
-            )
+            format!("Wrote {path}, with {offers} for {}\n", covered.join(", "))
         };
         if !undeclared.is_empty() {
             text.push_str(&format!(

@@ -4,6 +4,9 @@
 # Files a plugin builds in and writes out, and the checked-in copies tests
 # compare against what it writes, byte for byte. Checked out with LF everywhere,
 # so a Windows checkout builds the same output and the same site revision.
+changelog.d/README.md text eol=lf
+crates/plugins/command/release/templates/** text eol=lf
+crates/plugins/command/release/tools/** text eol=lf
 crates/plugins/command/rfd/templates/** text eol=lf
 crates/plugins/command/rfd/tools/** text eol=lf
 crates/plugins/command/ticket/tools/** text eol=lf

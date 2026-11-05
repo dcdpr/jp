@@ -1,6 +1,6 @@
 # RFD 121: Changelog Fragments and Validation
 
-- **Status**: Discussion
+- **Status**: Accepted
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-01
@@ -125,6 +125,11 @@ JP keeps writing them.
 
 The filename is a descriptive slug (`enable-decomposition.md`), unique within
 its directory; it only avoids collisions.
+Two slugs are reserved in any letter case, since case-insensitive filesystems
+treat `README.md` and `readme.md` as one file: `overview`, which names a
+release's introduction ([Released fragments](#released-fragments)), and
+`readme`, which names the directory's documentation.
+A fragment or highlight cannot use either.
 
 #### Breaking changes
 
@@ -166,6 +171,13 @@ Such a fragment has three parts:
 `BREAKING-CHANGE:`, the Conventional Commits synonym, works as the marker too.
 All three parts must be non-empty, and a fragment has at most one upgrade
 section.
+A line that starts with either token anywhere else, inside a code block or
+partway through a paragraph, is a format error rather than text.
+That keeps the gate's plain search for the marker in step with the parser ([CI
+validation](#ci-validation)): if the search finds it, the fragment has an
+upgrade section or fails validation.
+To show the token in an example, start the line with something else, such as
+indentation or inline code.
 
 The upgrade section lives in the body rather than the frontmatter so it is
 ordinary Markdown: it renders, wraps, and goes through the same formatter as the
@@ -301,10 +313,14 @@ run = "allow"
 
 [plugins.command.release.options]
 fragments_dir = "changelog.d"
+format_on_write = true
 ```
 
 `fragments_dir` is optional and defaults to `changelog.d`, relative to the
 workspace root.
+`format_on_write` is optional and off by default; on, every file the plugin
+writes is laid out in the style of the workspace's `.comfort.toml`, as the
+documents of [RFD 116]'s plugins are.
 `run = "allow"` admits the plugin without asking ([RFD 077]), which a plugin
 rebuilt from the checkout needs.
 
@@ -316,9 +332,10 @@ rebuilt from the checkout needs.
 
 `add` offers the seven types as a picker, with each one's description from the
 table as its hint, takes the body from the composer, and derives the slug from
-the body unless `--slug` names one.
-It writes through the validation `check` runs, so an entry it writes always
-passes.
+the body unless `--slug` names one, and refuses a reserved slug ([Changelog
+fragment](#changelog-fragment)).
+It writes through the validation `check` runs, applied to the file as it is laid
+out, so an entry it writes always passes.
 
 `add` is also served as a plugin tool, configured in JP the way `ticket_create`
 is:
@@ -399,6 +416,9 @@ A fragment is exactly `<slug>.md` and a highlight exactly
 `highlights/<slug>.md`, either at the top level or in a released version's
 directory, which is named after a semantic version and also holds `overview.md`.
 `README.md` at the top level is ignored.
+A fragment or highlight with a reserved slug ([Changelog
+fragment](#changelog-fragment)) is an error, so an `overview.md` at the top
+level never reaches a release as its introduction.
 Everything else is a CI error rather than a silently ignored file, so it fails
 loudly instead of vanishing at assembly: another extension (`.txt`,
 `.markdown`), a misspelled `overview.md`, a directory that is not a version, a
@@ -416,24 +436,30 @@ The binary takes the fragments directory as an argument, defaulting to
 from configuration.
 The task is filter-scoped like the others, to `changelog.d/**` and the crate (so
 a parser change revalidates the corpus), and also runs on pushes to `main`.
+The filter skips the task's steps, not its job, so the job reports on every pull
+request, and JP makes it a required check too ([Repository
+settings](#repository-settings)): a fragment that fails validation cannot merge,
+which the gate relies on.
 
 **The changelog gate** runs presence and breaking change.
 JP's branch protection lists it as a required status check, so a red gate blocks
 the merge.
 It runs on every pull request with no path filter: a required check that does
 not run never reports, and a check that never reports blocks the merge forever.
-It cannot live in the `rust.yml` matrix for the same reason, since the matrix
-skips tasks whose paths did not change, and because it has to rerun when a label
+It is not a task in the `rust.yml` matrix because it has to rerun when a label
 or the title changes: GitHub cannot filter `labeled`, `unlabeled`, and `edited`
 events by what changed, and adding them to `rust.yml` would rerun (and, off
 `main`, cancel) the entire matrix on every label event.
 So the gate is its own small workflow, triggered on `opened`, `synchronize`,
 `reopened`, `labeled`, `unlabeled`, and `edited`, with its own concurrency
 group.
-It needs no Rust toolchain: the labels and the title come from the pull-request
-event payload, "does this pull request add a top-level fragment" is a `git diff
---diff-filter=A` against the base, and an upgrade section is a `grep` for its
-marker.
+It needs no Rust toolchain: the title comes from the event payload, and the
+labels from the REST API when the gate runs, so a rerun reads the labels as they
+are rather than as the event saw them.
+"Does this pull request add a top-level fragment" is a `git diff
+--diff-filter=A` against the base, leaving out `README.md`, and an upgrade
+section is a `grep` for its marker, which the format rule keeps in step with the
+parser ([Breaking changes](#breaking-changes)).
 Those events rerun only this workflow, in seconds.
 
 The gate tells a contributor what is wrong in two places, since GitHub shows a
@@ -449,12 +475,12 @@ The pull requests `jp release` opens to cut a release or pick into one ([RFD
 `no-changelog` label it gives them.
 Release branches receive commits only from `jp release`, never pull requests,
 and have no fragments, so neither check runs there.
-Fork pull requests are read-only here: the gate reads the label from the event
-payload and needs no label mutation to function (the auto-apply workflow below
-is a separate, fork-limited convenience).
+Fork pull requests work the same way: reading labels needs no write access.
+Only the auto-apply step below needs it, and it skips a pull request from a
+fork, where a maintainer applies the label.
 
-A separate, best-effort workflow keeps the label in sync as a default a human
-can override:
+A best-effort step in the gate, run before it evaluates, sets the label as a
+default a human can override:
 
 - On a pull request's opening it applies `no-changelog` when the conventional
   type in the title is non-user-facing (`build`, `ci`, `docs`, `refactor`,
@@ -465,19 +491,20 @@ can override:
   A title without a conventional type, or with one outside both lists (`chore`
   is in active use despite being absent from the documented taxonomy), falls
   through to path classification alone.
-- It never fights a manual change: once a human adds or removes the label, that
-  choice is final and the workflow does not undo it.
+- It never fights a manual change: it acts only when a pull request opens, so
+  once a human adds or removes the label, that choice is final.
   The automation is a default, not an authority.
+
+It is a step in the gate rather than a workflow of its own because a label added
+with a workflow's token starts no other workflow: a separate workflow would
+label the pull request while the gate, which ran when it opened, stayed red.
 
 The gate reads the label, not the title, on purpose: the conventional type is a
 lossy predictor of user impact.
 An internal `feat(tools)` is not user-facing; a `refactor(cli)` might change
 observable behavior.
-The label absorbs that judgment and stays human-overridable; the auto-apply is a
-convenience addable later without changing the gate.
-(Auto-apply needs `pull-requests: write`, unavailable to fork pull requests
-without `pull_request_target`; on a fork pull request a maintainer applies the
-label.)
+The label absorbs that judgment and stays human-overridable; the auto-apply step
+is a convenience the gate works without.
 
 The gate, the label, and the auto-apply are JP's GitHub integration, not part of
 the plugin.
@@ -490,7 +517,7 @@ simply has no gate.
   entry and reviewers check it reads well.
   This is the intended cost, but it is friction the project did not have before.
 - **A decision on every pull request.** The gate is required, so even a one-line
-  chore needs the label before it merges, until the auto-apply workflow sets it.
+  chore needs the label before it merges, until the auto-apply step sets it.
 - **Two formats to learn.** Mitigated: most pull requests only ever write the
   terse fragment; highlights are rare and reserved for notable features.
 - **Auto-apply label management is GitHub-specific and fork-limited.** It is
@@ -596,8 +623,10 @@ applies them once Phase 1 has merged:
 - Create the GitHub label `no-changelog`.
 - Make `Changelog fragment or no-changelog label` a required status check on
   `main`.
+- Make the `changelog` task of the `rust` workflow a required status check on
+  `main`, so a fragment that fails format validation cannot merge.
 
-Until then, the gate reports but does not block a merge.
+Until then, both checks report but do not block a merge.
 
 ### Phase 2: Highlight note format
 
@@ -615,7 +644,7 @@ Depends on Phase 1.
 
 ### Phase 4: Label auto-apply (optional)
 
-The best-effort workflow that sets `no-changelog` by default.
+The gate's best-effort step that sets `no-changelog` when a pull request opens.
 Optional polish; the gate works with manually-applied labels without it.
 
 The auto-apply uses a default path classification, documented in the fragments
