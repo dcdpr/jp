@@ -509,8 +509,8 @@ fn id_matches(ctx: &Ctx, id: ConversationId, matcher: &Matcher) -> bool {
         return true;
     }
 
-    // Not `events`: that loads and builds the conversation's config, which a
-    // search never reads, and keeps every searched stream in memory.
+    // Read raw events without resolving the conversation's config or caching
+    // the stream in the workspace.
     let events = match ctx.workspace.read_events(&handle) {
         Ok(events) => events,
         Err(error) => {

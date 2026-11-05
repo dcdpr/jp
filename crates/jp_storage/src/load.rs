@@ -205,11 +205,11 @@ impl Storage {
         }
     }
 
-    /// Load a conversation's events, without reading its config.
+    /// Load a conversation's events without reading its config.
     ///
-    /// Reads `events.json` from the copy [`Self::load_conversation_stream`]
-    /// would, and leaves `base_config.json` unread, so a conversation whose
-    /// stored config cannot be recovered still yields its events.
+    /// Reads `events.json` from the same conversation directory selected by
+    /// [`Self::load_conversation_stream`] without reading `base_config.json` or
+    /// parsing `config_delta` entries.
     pub fn load_conversation_events(&self, id: &ConversationId) -> Result<Vec<ConversationEvent>> {
         let conv_dir = self.stream_dir(id)?;
         let events = load_json(&conv_dir.join(EVENTS_FILE))?;
@@ -218,12 +218,11 @@ impl Storage {
             .map_err(|error| LoadError::new(conv_dir, LoadErrorInner::Stream(error)))
     }
 
-    /// The directory holding a conversation's stream, which must include an
-    /// `events.json`.
+    /// Resolve the directory containing a conversation's `events.json`.
     ///
-    /// The stream (`base_config.json` + `events.json`) is one unit, read from
-    /// whichever root has the newer combined mtime, with ties going to the
-    /// durable user-local copy.
+    /// The stream (`base_config.json` + `events.json`) is treated as one unit
+    /// and read from whichever storage root has the newer combined mtime, with
+    /// ties going to user storage.
     fn stream_dir(&self, id: &ConversationId) -> Result<Utf8PathBuf> {
         let workspace_dir = find_conversation_dir_path(&self.root, id);
         let user_dir = self

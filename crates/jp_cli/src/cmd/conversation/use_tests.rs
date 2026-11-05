@@ -302,8 +302,6 @@ fn filter_range_narrows_then_grep_matches() {
     );
 }
 
-/// A `--grep` match whose stream fails to load cannot be activated, so it is
-/// dropped, and the one loadable match is activated directly.
 #[test]
 fn filter_grep_drops_a_match_whose_stream_does_not_load() {
     let tmp = tempdir().unwrap();
@@ -328,8 +326,8 @@ fn filter_grep_drops_a_match_whose_stream_does_not_load() {
     let base_config = fs.conversation_base_config_path(&id_broken).unwrap();
     std::fs::write(base_config, "not valid json").unwrap();
 
-    // The filesystem backend keeps session mappings in user storage, which this
-    // fixture has none of, so activation is recorded in memory instead.
+    // `FsStorageBackend` stores session mappings in user storage, which is not
+    // configured in this fixture, so keep sessions in memory.
     let mut workspace = Workspace::in_memory(&root)
         .with_backend(Arc::new(fs))
         .with_sessions(Arc::new(InMemoryStorageBackend::new()));

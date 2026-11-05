@@ -97,12 +97,13 @@ pub trait LoadBackend: Send + Sync + Debug {
         fallback: &PartialAppConfig,
     ) -> std::result::Result<ConversationStream, LoadError>;
 
-    /// Load a single conversation's events, in stream order, without its
-    /// config.
+    /// Load a single conversation's events in stream order without resolving
+    /// its config.
     ///
-    /// Reads what [`Self::load_conversation_stream`] would, minus the stored
-    /// config and config deltas, which are never parsed; a conversation whose
-    /// stored config is unreadable still yields its events.
+    /// Selects the same storage root as [`Self::load_conversation_stream`], but
+    /// skips `base_config.json` and `config_delta` entries.
+    /// Conversations with a corrupt or unreadable stored config still return
+    /// their events.
     fn load_conversation_events(
         &self,
         id: &ConversationId,

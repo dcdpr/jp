@@ -1620,20 +1620,19 @@ impl ConversationStream {
         })
     }
 
-    /// Read the conversation events from a stored events array, without
-    /// building a stream or resolving any config.
+    /// Deserialize the [`ConversationEvent`]s from a stored `events.json` array
+    /// without building a [`ConversationStream`] or resolving its config.
     ///
-    /// Config deltas, compactions, and patch overlays are skipped without being
-    /// parsed, and entries this build cannot read are skipped as they are when
-    /// a stream is loaded.
-    /// Entry IDs are ignored.
-    /// Both the current events array and the legacy one that leads with the
-    /// base config are accepted.
+    /// Skips `config_delta` (including the leading base-config entry in legacy
+    /// streams), `compaction`, and `event_overlay` entries without parsing
+    /// them, as well as unrecognized event kinds and unknown `ChatResponse`
+    /// variants.
+    /// Entry `event_id`s are ignored.
     ///
     /// # Errors
     ///
-    /// Returns an error if an entry is not a JSON object, or if a conversation
-    /// event fails to deserialize.
+    /// Returns an error if an entry is not a JSON object or if a known
+    /// conversation event fails to deserialize.
     pub fn events_from_parts(events: Vec<Value>) -> Result<Vec<ConversationEvent>, StreamError> {
         let mut out = Vec::with_capacity(events.len());
         for mut value in events {

@@ -3231,8 +3231,6 @@ fn test_malformed_known_chat_response_fails_deserialization() {
     assert!(serde_json::from_value::<StoredEvent>(raw).is_err());
 }
 
-/// A stream holding one turn with a reply and a tool call round-trip, whose
-/// tool fields are base64-encoded on disk.
 fn stream_with_tool_round_trip() -> ConversationStream {
     let mut stream = ConversationStream::new_test();
     stream.start_turn(ChatRequest::from("read it"));
@@ -3252,7 +3250,6 @@ fn stream_with_tool_round_trip() -> ConversationStream {
     stream
 }
 
-/// The events a stream holds, without their config.
 fn bare_events(stream: &ConversationStream) -> Vec<ConversationEvent> {
     stream
         .iter_events_by_turn()
@@ -3277,7 +3274,6 @@ fn events_from_parts_skips_config_deltas_without_parsing_them() {
     let stream = stream_with_tool_round_trip();
     let (base_config, mut events) = stream.to_parts().unwrap();
 
-    // A delta this build cannot read, between the turn's events.
     events.insert(
         2,
         serde_json::json!({
@@ -3288,7 +3284,7 @@ fn events_from_parts_skips_config_deltas_without_parsing_them() {
         }),
     );
 
-    // Loading the stream parses every delta, and this one fails it.
+    // Full stream loading parses `config_delta` entries and rejects the unknown `op`.
     assert!(
         ConversationStream::from_parts(base_config, events.clone(), &PartialAppConfig::empty())
             .is_err()

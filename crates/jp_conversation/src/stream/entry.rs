@@ -165,7 +165,8 @@ impl<'de> Deserialize<'de> for EventPayload {
 // Dispatching on `type` avoids the allocations from trying each untagged
 // variant. Base64 content is decoded only for known conversation events.
 impl EventPayload {
-    /// Read a stored payload from its JSON object, without its `event_id`.
+    /// Deserialize a stored payload from a JSON object whose `event_id` has
+    /// been stripped.
     pub(super) fn from_value(mut value: Value) -> Result<Self, serde_json::Error> {
         let tag = value
             .get("type")
@@ -239,12 +240,12 @@ impl EventPayload {
         serde_json::from_value(value).map(|e| Self::Event(Box::new(e)))
     }
 
-    /// Read a stored payload's conversation event, if it holds one.
+    /// Deserialize a [`ConversationEvent`] from a stored payload JSON object,
+    /// returning `None` for non-event entries.
     ///
-    /// Config deltas, compactions, and patch overlays are recognized by their
-    /// `type` tag and skipped without being parsed.
-    /// Entries this build cannot read are skipped too, as [`Self::from_value`]
-    /// preserves them rather than failing.
+    /// Skips `config_delta`, `compaction`, and `event_overlay` entries by their
+    /// `type` tag without parsing them, and returns `None` for unrecognized
+    /// entries ([`Self::Unknown`]).
     pub(super) fn event_from_value(
         value: Value,
     ) -> Result<Option<ConversationEvent>, serde_json::Error> {
