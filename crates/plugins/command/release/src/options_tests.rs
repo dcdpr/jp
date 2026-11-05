@@ -26,7 +26,7 @@ fn the_fragments_directory_can_be_named() {
 /// know, still loads.
 #[test]
 fn settings_this_plugin_does_not_read_are_ignored() {
-    let options = read(json!({ "cadence": "2w" })).unwrap();
+    let options = read(json!({ "publish": true })).unwrap();
 
     assert_eq!(options, Options::default());
 }
@@ -151,6 +151,43 @@ fn change_request_labels_are_trimmed_and_listed_once() {
             "`plugins.command.release.options.change_request_labels` lists an empty label."
                 .to_owned()
         )
+    );
+}
+
+#[test]
+fn the_cadence_is_two_weeks_by_default() {
+    let options = read(json!({})).unwrap();
+
+    assert_eq!(options.cadence.to_string(), "2w");
+    assert_eq!(options.cadence.seconds(), 14 * 24 * 60 * 60);
+}
+
+#[test]
+fn the_cadence_is_a_duration_as_jp_query_tmp_takes_one() {
+    let day = 24 * 60 * 60;
+
+    for (text, seconds) in [
+        ("10d", 10 * day),
+        ("1week 3days", 10 * day),
+        (" 36h ", 36 * 60 * 60),
+    ] {
+        let options = read(json!({ "cadence": text })).unwrap();
+
+        assert_eq!(options.cadence.seconds(), seconds, "{text}");
+        assert_eq!(options.cadence.to_string(), text.trim());
+    }
+}
+
+#[test]
+fn a_cadence_that_is_not_a_duration_is_refused() {
+    let error = read(json!({ "cadence": "fortnightly" })).unwrap_err();
+
+    assert!(
+        error.starts_with(
+            "`plugins.command.release.options.cadence`: `fortnightly` is not a duration, such as \
+             `2w` or `10d`: "
+        ),
+        "{error}"
     );
 }
 

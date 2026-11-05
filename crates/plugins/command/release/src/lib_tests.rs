@@ -863,10 +863,12 @@ fn render_without_a_fragments_directory_says_how_to_make_one() {
 fn making_a_release_needs_a_git_repository() {
     let root = workspace();
 
-    for args in [&["cut"][..], &["finalize", "0.1.0"], &[
-        "pick",
-        "--continue",
-    ]] {
+    for args in [
+        &["cut"][..],
+        &["finalize", "0.1.0"],
+        &["pick", "--continue"],
+        &["due"],
+    ] {
         let messages = command(root.path(), args, &[]);
 
         let reason = exit(&messages).reason.clone().unwrap_or_default();
@@ -905,6 +907,62 @@ fn continue_without_a_stopped_pick_has_nothing_to_do() {
     assert_eq!(
         exit(&messages).reason.as_deref(),
         Some("No pick is stopped, so there is nothing to continue.")
+    );
+}
+
+#[test]
+fn due_says_whether_the_next_release_is_due_and_exits_1_when_it_is_not() {
+    let fixture = Fixture::new();
+
+    let messages = command(fixture.root(), &["due"], &[]);
+
+    assert_eq!(prints(&messages), [(
+        "content",
+        "plain",
+        "No release has been cut yet, so the first one is due.\n"
+    )]);
+    assert_eq!(exit(&messages).code, 0);
+
+    fixture.fragment("retry", "fixed", "Retried.");
+    fixture.commit("fix: Retry (#1)");
+    fixture.push();
+    let shell = fixture.shell();
+    let options = Options::default();
+    let pipeline = Pipeline::new(&shell, fixture.root(), &options, None).unwrap();
+    cut::cut(&pipeline, None).unwrap();
+
+    let messages = command(fixture.root(), &["due"], &[]);
+
+    assert_eq!(
+        printed(&messages),
+        "0.1.0 is in preparation, so the next release is due once it is finalized.\n"
+    );
+    // An answer, not a failure: `jp` reports no error for it.
+    let exit = exit(&messages);
+    assert_eq!(exit.code, 1);
+    assert!(exit.expected);
+    assert_eq!(exit.reason, None);
+}
+
+/// A script reads the answer from the JSON, and so can tell a release that
+/// isn't due from a `jp` that failed.
+#[test]
+fn due_prints_json_when_jp_prints_json() {
+    let fixture = Fixture::new();
+    let mut message = init_message(fixture.root(), &["due"]);
+    message.output_format = OutputFormat::Json;
+
+    let messages = session(&HostToPlugin::Init(Box::new(message)), &[]);
+
+    let [("content", "json", text)] = prints(&messages)[..] else {
+        panic!("expected one JSON print, got {messages:?}");
+    };
+    assert_eq!(
+        serde_json::from_str::<Value>(text).unwrap(),
+        json!({
+            "due": true,
+            "reason": "No release has been cut yet, so the first one is due."
+        })
     );
 }
 

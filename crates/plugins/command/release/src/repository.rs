@@ -142,8 +142,8 @@ impl<'a> Repository<'a> {
             };
 
             let range = format!("{MAIN_REF}..{tip}");
-            let log = self.git(&["log", "-z", "--format=%H%n%B", &range])?;
-            let (started, picked) = releases::parse_line(&log);
+            let log = self.git(&["log", "-z", "--format=%H%n%ct%n%B", &range])?;
+            let (started, picked) = releases::parse_line(&log)?;
             lines.insert(key, Line {
                 branch: branch.to_owned(),
                 tip: tip.to_owned(),
@@ -153,6 +153,28 @@ impl<'a> Repository<'a> {
         }
 
         Ok(Releases { tagged, lines })
+    }
+
+    /// When `origin`'s tag `tag` was made, in seconds since the Unix epoch: an
+    /// annotated tag's own time, or a lightweight tag's commit's.
+    ///
+    /// The error says the tag can't be fetched, or has no time.
+    pub(crate) fn tag_date(&self, tag: &str) -> Result<i64, String> {
+        // Into `FETCH_HEAD` alone, so no tag is written to the repository.
+        let reference = format!("refs/tags/{tag}");
+        self.git(&["fetch", "--quiet", "--no-tags", ORIGIN, &reference])?;
+
+        let kind = self.git(&["cat-file", "-t", "FETCH_HEAD"])?;
+        let date = if kind.trim() == "tag" {
+            releases::tagger_time(&self.git(&["cat-file", "tag", "FETCH_HEAD"])?)
+        } else {
+            self.git(&["log", "-1", "--format=%ct", "FETCH_HEAD"])?
+                .trim()
+                .parse()
+                .ok()
+        };
+
+        date.ok_or_else(|| format!("The tag {tag} on {ORIGIN} has no time git can read."))
     }
 
     /// The web address of `origin`, when it has one.

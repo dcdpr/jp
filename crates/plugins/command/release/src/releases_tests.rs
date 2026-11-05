@@ -1,16 +1,29 @@
 use super::*;
 
+/// 2026-10-01 at noon UTC, in seconds since the Unix epoch.
+const OCTOBER_1: i64 = 1_790_856_000;
+
+/// A day, in seconds.
+const DAY: i64 = 86_400;
+
 fn version(text: &str) -> Version {
     Version::parse(text).unwrap()
 }
 
-/// A release branch holding the releases `started`, oldest first, with nothing
-/// picked onto it.
+/// A release branch holding the releases `started`, oldest first, each started
+/// a day after the last from 2026-10-01, with nothing picked onto it.
 fn line(branch: &str, started: &[&str]) -> Line {
     Line {
         branch: branch.to_owned(),
         tip: "f".repeat(40),
-        started: started.iter().map(|text| version(text)).collect(),
+        started: started
+            .iter()
+            .zip(0..)
+            .map(|(text, day)| Started {
+                version: version(text),
+                at: OCTOBER_1 + day * DAY,
+            })
+            .collect(),
         picked: BTreeSet::new(),
     }
 }
@@ -61,18 +74,27 @@ fn tags_name_a_v_and_a_version_that_is_no_pre_release() {
 
 #[test]
 fn a_release_branch_says_what_it_started_and_what_was_picked_onto_it() {
-    // As `git log -z --format=%H%n%B` writes it, newest first.
+    // As `git log -z --format=%H%n%ct%n%B` writes it, newest first.
     let log = concat!(
-        "3333\nFix the help text\n\nSigned-off-by: Jane Doe <jane@example.com>\n",
+        "3333\n1792843200\nFix the help text\n\nSigned-off-by: Jane Doe <jane@example.com>\n",
         "(cherry picked from commit 9999)\n\0",
-        "2222\nStart release 0.3.1\n\nStarts-Release: 0.3.1\n\0",
-        "1111\nRetry idle turns\n\n(cherry picked from commit 8888)\n\0",
-        "0000\nStart release 0.3.0\n\nStarts-Release: 0.3.0\n",
+        "2222\n1792756800\nStart release 0.3.1\n\nStarts-Release: 0.3.1\n\0",
+        "1111\n1792670400\nRetry idle turns\n\n(cherry picked from commit 8888)\n\0",
+        "0000\n1792584000\nStart release 0.3.0\n\nStarts-Release: 0.3.0\n",
     );
 
-    let (started, picked) = parse_line(log);
+    let (started, picked) = parse_line(log).unwrap();
 
-    assert_eq!(started, [version("0.3.0"), version("0.3.1")]);
+    assert_eq!(started, [
+        Started {
+            version: version("0.3.0"),
+            at: 1_792_584_000,
+        },
+        Started {
+            version: version("0.3.1"),
+            at: 1_792_756_800,
+        },
+    ]);
     assert_eq!(
         picked,
         BTreeSet::from(["8888".to_owned(), "9999".to_owned()])
@@ -83,10 +105,18 @@ fn a_release_branch_says_what_it_started_and_what_was_picked_onto_it() {
 /// earlier doesn't start a release.
 #[test]
 fn only_the_last_paragraph_holds_trailers() {
-    let log =
-        "1111\nDocument the pipeline\n\nStarts-Release: 0.9.0 marks a start.\n\nSee the RFD.\n";
+    let log = "1111\n1792584000\nDocument the pipeline\n\nStarts-Release: 0.9.0 marks a \
+               start.\n\nSee the RFD.\n";
 
-    assert_eq!(parse_line(log), (vec![], BTreeSet::new()));
+    assert_eq!(parse_line(log), Ok((vec![], BTreeSet::new())));
+}
+
+#[test]
+fn a_commit_without_a_date_does_not_read_as_a_log() {
+    assert_eq!(
+        parse_line("1111\nStart release 0.3.0\n\nStarts-Release: 0.3.0\n"),
+        Err("The log of a release branch gives commit 1111 no date.".to_owned())
+    );
 }
 
 #[test]
@@ -94,9 +124,62 @@ fn the_start_message_carries_the_trailer_it_is_read_back_by() {
     let message = start_message(&version("0.3.0"));
 
     assert_eq!(message, "Start release 0.3.0\n\nStarts-Release: 0.3.0\n");
-    assert_eq!(parse_line(&format!("0000\n{message}")).0, [version(
-        "0.3.0"
-    )]);
+    assert_eq!(
+        parse_line(&format!("0000\n{OCTOBER_1}\n{message}"))
+            .unwrap()
+            .0,
+        [Started {
+            version: version("0.3.0"),
+            at: OCTOBER_1,
+        }]
+    );
+}
+
+#[test]
+fn a_tags_time_is_read_from_its_tagger_line() {
+    let tag = "object 4e1f0a2c9d8b7a6f5e4d3c2b1a0f9e8d7c6b5a49\ntype commit\ntag v0.1.0\ntagger \
+               Jane Doe <jane@example.com> 1792584000 +0200\n\nRelease 0.1.0\ntagger in the \
+               message 1 +0000\n";
+
+    assert_eq!(tagger_time(tag), Some(1_792_584_000));
+    // A tag made without a tagger, as some old tools did.
+    assert_eq!(
+        tagger_time("object 4e1f\ntype commit\ntag v0.1.0\n\nRelease 0.1.0\n"),
+        None
+    );
+}
+
+/// The newest minor or major release is the last one cut, whether a tag or a
+/// release branch says so, and a patch release never is one.
+#[test]
+fn the_newest_cut_is_the_newest_minor_or_major_release() {
+    assert_eq!(Releases::default().newest_cut(), None);
+    assert_eq!(
+        releases(&["0.1.0", "0.2.0", "0.2.1"], vec![]).newest_cut(),
+        Some(&version("0.2.0"))
+    );
+    assert_eq!(
+        releases(&["0.2.0"], vec![
+            line("release/0.2", &["0.2.0", "0.2.1"]),
+            line("release/0.3", &["0.3.0"]),
+        ])
+        .newest_cut(),
+        Some(&version("0.3.0"))
+    );
+}
+
+#[test]
+fn a_release_was_started_by_the_commit_on_its_branch_that_starts_it() {
+    let releases = releases(&["0.3.0"], vec![line("release/0.3", &["0.3.0", "0.3.1"])]);
+
+    assert_eq!(releases.started_at(&version("0.3.0")), Some(OCTOBER_1));
+    assert_eq!(
+        releases.started_at(&version("0.3.1")),
+        Some(OCTOBER_1 + DAY)
+    );
+    // Tagged by hand, or not started at all.
+    assert_eq!(releases.started_at(&version("0.2.0")), None);
+    assert_eq!(releases.started_at(&version("0.3.2")), None);
 }
 
 #[test]

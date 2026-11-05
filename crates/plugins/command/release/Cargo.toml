@@ -27,8 +27,10 @@ jp_tool = { workspace = true }
 tool-definitions = { workspace = true }
 
 camino = { workspace = true, features = ["serde1"] }
+chrono = { workspace = true }
 clap = { workspace = true, features = ["derive", "error-context", "help", "std", "usage"] }
 comrak = { workspace = true }
+humantime = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }

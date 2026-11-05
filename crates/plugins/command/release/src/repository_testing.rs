@@ -39,12 +39,7 @@ impl Fixture {
             home,
         };
 
-        fixture.git_in(fixture.origin.path(), &[
-            "init",
-            "--quiet",
-            "--bare",
-            "--initial-branch=main",
-        ]);
+        fixture.origin_git(&["init", "--quiet", "--bare", "--initial-branch=main"]);
         fixture.git(&["init", "--quiet", "--initial-branch=main"]);
         fixture.git(&["remote", "add", "origin", fixture.origin.path().as_str()]);
         fixture.write("changelog.d/README.md", "# Changelog fragments\n");
@@ -84,9 +79,26 @@ impl Fixture {
         .collect()
     }
 
+    /// The environment of [`Self::env`], making every commit and tag at `at`,
+    /// in seconds since the Unix epoch.
+    fn env_at(&self, at: i64) -> Vec<(String, String)> {
+        let date = format!("{at} +0000");
+        let mut env = self.env();
+        env.push(("GIT_AUTHOR_DATE".to_owned(), date.clone()));
+        env.push(("GIT_COMMITTER_DATE".to_owned(), date));
+
+        env
+    }
+
     /// The shell the code under test runs git and `bump` with.
     pub(crate) fn shell(&self) -> Shell {
         Shell::with_env(self.env())
+    }
+
+    /// The shell of [`Self::shell`], making every commit and tag at `at`, in
+    /// seconds since the Unix epoch.
+    pub(crate) fn shell_at(&self, at: i64) -> Shell {
+        Shell::with_env(self.env_at(at))
     }
 
     /// Write `contents` to `path`, below the workspace root.
@@ -125,7 +137,7 @@ impl Fixture {
     /// What `origin` holds at `revision`, such as `release/0.3:changelog.d`, or
     /// `None` when it holds nothing there.
     pub(crate) fn show(&self, revision: &str) -> Option<String> {
-        let output = self.command(self.origin(), &["show", revision]);
+        let output = Self::command(self.origin(), &["show", revision], &self.env());
 
         output
             .status
@@ -135,21 +147,27 @@ impl Fixture {
 
     /// The message of the commit `origin` has at `revision`.
     pub(crate) fn message(&self, revision: &str) -> String {
-        self.git_in(self.origin(), &["log", "-1", "--format=%B", revision])
+        self.origin_git(&["log", "-1", "--format=%B", revision])
     }
 
     /// Run git with `args` in the workspace root, and return what it printed.
     pub(crate) fn git(&self, args: &[&str]) -> String {
-        self.git_in(self.root(), args)
+        Self::git_in(self.root(), args, &self.env())
+    }
+
+    /// Run git with `args` in the workspace root, making every commit and tag
+    /// at `at`, in seconds since the Unix epoch, and return what it printed.
+    pub(crate) fn git_at(&self, at: i64, args: &[&str]) -> String {
+        Self::git_in(self.root(), args, &self.env_at(at))
     }
 
     /// Run git with `args` in `origin`, and return what it printed.
     pub(crate) fn origin_git(&self, args: &[&str]) -> String {
-        self.git_in(self.origin(), args)
+        Self::git_in(self.origin(), args, &self.env())
     }
 
-    fn git_in(&self, dir: &Utf8Path, args: &[&str]) -> String {
-        let output = self.command(dir, args);
+    fn git_in(dir: &Utf8Path, args: &[&str], env: &[(String, String)]) -> String {
+        let output = Self::command(dir, args, env);
         assert!(
             output.status.success(),
             "git {args:?}: {}",
@@ -159,11 +177,11 @@ impl Fixture {
         String::from_utf8(output.stdout).unwrap()
     }
 
-    fn command(&self, dir: &Utf8Path, args: &[&str]) -> Output {
+    fn command(dir: &Utf8Path, args: &[&str], env: &[(String, String)]) -> Output {
         Command::new("git")
             .current_dir(dir)
             .args(args)
-            .envs(self.env())
+            .envs(env.iter().map(|(key, value)| (key, value)))
             .output()
             .unwrap_or_else(|error| panic!("git {args:?}: {error}"))
     }

@@ -17,9 +17,10 @@
 //! laid out in the style of the workspace's `.comfort.toml` (`doc::format`).
 //!
 //! `cut`, `pick`, and `finalize` make releases on release branches, from what
-//! `origin` holds: `releases` decides what they may do, `repository` runs the
-//! git they need in worktrees of their own, and `change_request` opens the
-//! change requests that file a release's notes on `main`.
+//! `origin` holds, and `due` says when the next one should be cut: `releases`
+//! decides what they may do, `repository` runs the git they need in worktrees
+//! of their own, and `change_request` opens the change requests that file a
+//! release's notes on `main`.
 //!
 //! See: `docs/rfd/121-changelog-fragments-and-validation.md` and
 //! `docs/rfd/122-release-pipeline.md`
@@ -27,6 +28,7 @@
 mod change_request;
 mod cut;
 mod definitions;
+mod due;
 mod entry;
 mod finalize;
 mod options;
@@ -45,6 +47,7 @@ use std::{
     io::{BufRead, Write},
     iter,
     process::Command as Process,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -204,6 +207,14 @@ enum Command {
         version: Version,
     },
 
+    /// Exit 0 when the next release should be cut, and 1 when it shouldn't,
+    /// saying why either way.
+    ///
+    /// The next release is due once `cadence` has passed since the newest minor
+    /// or major release was cut, and that release has been finalized.
+    /// With `jp --format json`, prints `{"due": <bool>, "reason": <text>}`.
+    Due,
+
     /// Write the definition of the tool that offers `add` to the assistant.
     Tools {
         #[command(subcommand)]
@@ -247,7 +258,8 @@ pub(crate) struct Output {
     text: String,
 
     /// The exit code, for a command that reports a result by it: `check` exits
-    /// 1 when it finds a problem, after printing what it found.
+    /// 1 when it finds a problem, after printing what it found, and `due` when
+    /// no release is due, after printing why.
     code: u8,
 
     /// Whether `text` is JSON, which the host prints as such.
@@ -418,6 +430,7 @@ fn handle_command(
         Command::Finalize { version } => make_release(root, &options, |pipeline| {
             finalize::finalize(pipeline, &version)
         }),
+        Command::Due => due_release(root, &options, ctx.format),
         Command::Tools {
             command: ToolsCommand::Init { path, force },
         } => definitions::init(&resolve_dir(root, &path), force),
@@ -783,6 +796,31 @@ fn render_release(ctx: &Context<'_>, render: &Render) -> Result<Output, String> 
         text,
         note,
         code: 0,
+    })
+}
+
+/// Say whether the next release of the workspace at `root` is due, as text or,
+/// when the host prints JSON, as JSON, and exit 1 when it isn't.
+fn due_release(root: &Utf8Path, options: &Options, format: OutputFormat) -> Result<Output, String> {
+    let shell = Shell::new();
+    let pipeline = Pipeline::new(&shell, root, options, None)?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("The system clock is set before 1970: {error}."))?;
+    let due = due::due(&pipeline, i64::try_from(now.as_secs()).unwrap_or(i64::MAX))?;
+
+    let text = if format.is_json() {
+        serde_json::to_string(&due)
+            .map_err(|error| format!("failed to write the answer as JSON: {error}"))?
+    } else {
+        due.reason.clone()
+    };
+
+    Ok(Output {
+        text: text + "\n",
+        code: u8::from(!due.due),
+        json: format.is_json(),
+        note: None,
     })
 }
 

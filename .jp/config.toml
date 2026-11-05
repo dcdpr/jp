@@ -200,6 +200,9 @@ bump = "cargo set-version --package jp_cli {version}"
 # The change requests `cut` and `pick` open move fragments rather than add them,
 # which the changelog gate lets through with this label.
 change_request_labels = ["no-changelog"]
+# A release every two weeks while JP moves fast: `jp release due` says the next
+# one should be cut two weeks after the last.
+cadence = "2w"
 
 # The headings of the release notes' sections that read better than the type's
 # id; the other types keep theirs, capitalized.

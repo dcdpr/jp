@@ -6,6 +6,7 @@
 //! forge = "github"
 //! bump = "cargo set-version --package jp_cli {version}"
 //! change_request_labels = ["no-changelog"]
+//! cadence = "2w"
 //!
 //! [plugins.command.release.options.headings]
 //! added = "New features"
@@ -31,11 +32,15 @@
 //! `change_request_labels` lists the labels the change requests `jp release
 //! cut` and `jp release pick` open carry, none by default.
 //!
+//! `cadence` is how long after a minor or major release is cut the next one is
+//! due, which `jp release due` reports: a duration such as `2w`, `10d`, or
+//! `1week 3days`, two weeks by default.
+//!
 //! Every option is optional.
 //! Keys this plugin doesn't read are ignored, so a configuration written for a
 //! newer `jp-release` still loads.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt, time::Duration};
 
 use camino::Utf8PathBuf;
 use changelog::{Forge, Headings, Type, UnknownType};
@@ -48,6 +53,10 @@ const DEFAULT_FRAGMENTS_DIR: &str = "changelog.d";
 
 /// What `bump` writes where the new version goes.
 const VERSION: &str = "{version}";
+
+/// The cadence, when `cadence` isn't set, as configuration writes it and in
+/// seconds.
+const DEFAULT_CADENCE: (&str, u64) = ("2w", 14 * 24 * 60 * 60);
 
 /// The settings every command and tool runs with.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +77,9 @@ pub(crate) struct Options {
 
     /// The labels the change requests `cut` and `pick` open carry.
     pub change_request_labels: Vec<String>,
+
+    /// How long after a minor or major release is cut the next one is due.
+    pub cadence: Cadence,
 }
 
 impl Default for Options {
@@ -78,7 +90,58 @@ impl Default for Options {
             headings: Headings::default(),
             bump: None,
             change_request_labels: vec![],
+            cadence: Cadence::default(),
         }
+    }
+}
+
+/// The `cadence` option: a duration, kept as configuration writes it to show it
+/// the same way.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Cadence {
+    text: String,
+    duration: Duration,
+}
+
+impl Cadence {
+    /// Read `text`, a duration as `jp query --tmp` takes one, such as `2w`.
+    ///
+    /// The error says what is wrong with it.
+    fn parse(text: &str) -> Result<Self, String> {
+        let text = text.trim();
+        let duration = humantime::parse_duration(text).map_err(|error| {
+            format!(
+                "`plugins.command.release.options.cadence`: `{text}` is not a duration, such as \
+                 `2w` or `10d`: {error}."
+            )
+        })?;
+
+        Ok(Self {
+            text: text.to_owned(),
+            duration,
+        })
+    }
+
+    /// The cadence in whole seconds.
+    pub(crate) fn seconds(&self) -> i64 {
+        i64::try_from(self.duration.as_secs()).unwrap_or(i64::MAX)
+    }
+}
+
+impl Default for Cadence {
+    fn default() -> Self {
+        let (text, seconds) = DEFAULT_CADENCE;
+
+        Self {
+            text: text.to_owned(),
+            duration: Duration::from_secs(seconds),
+        }
+    }
+}
+
+impl fmt::Display for Cadence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.text)
     }
 }
 
@@ -133,6 +196,7 @@ struct Settings {
     headings: BTreeMap<String, String>,
     bump: Option<String>,
     change_request_labels: Vec<String>,
+    cadence: Option<String>,
 }
 
 impl Default for Settings {
@@ -143,6 +207,7 @@ impl Default for Settings {
             headings: BTreeMap::new(),
             bump: None,
             change_request_labels: vec![],
+            cadence: None,
         }
     }
 }
@@ -196,12 +261,20 @@ impl Options {
             }
         }
 
+        let cadence = settings
+            .cadence
+            .as_deref()
+            .map(Cadence::parse)
+            .transpose()?
+            .unwrap_or_default();
+
         Ok(Self {
             fragments_dir: settings.fragments_dir,
             forge,
             headings,
             bump,
             change_request_labels,
+            cadence,
         })
     }
 }

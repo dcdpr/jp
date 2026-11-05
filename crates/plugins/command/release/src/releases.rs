@@ -8,6 +8,7 @@
 //! and a commit picked from `main` ends its message with `(cherry picked from
 //! commit <hash>)`, as `git cherry-pick -x` writes it.
 //! A release is in preparation from the commit that starts it until its tag.
+//! A minor or major release is cut when the commit that starts it is made.
 //!
 //! Everything here reads what git printed and decides; the `repository` module
 //! runs git.
@@ -48,11 +49,21 @@ pub(crate) struct Line {
     /// The hash of its tip.
     pub tip: String,
 
-    /// The versions started on it, oldest first.
-    pub started: Vec<Version>,
+    /// The releases started on it, oldest first.
+    pub started: Vec<Started>,
 
     /// The hashes of the commits of `main` picked onto it.
     pub picked: BTreeSet<String>,
+}
+
+/// A release started on its release branch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Started {
+    pub version: Version,
+
+    /// When the commit that starts it was made, in seconds since the Unix
+    /// epoch.
+    pub at: i64,
 }
 
 /// Where `pick` puts its commits.
@@ -103,18 +114,27 @@ pub(crate) fn parse_tags(listing: &str) -> BTreeSet<Version> {
         .collect()
 }
 
-/// The versions started on a release branch, oldest first, and the commits of
-/// `main` picked onto it, read from `git log -z --format=%H%n%B` of the
+/// The releases started on a release branch, oldest first, and the commits of
+/// `main` picked onto it, read from `git log -z --format=%H%n%ct%n%B` of the
 /// branch's commits that are not on `main`, newest first.
-pub(crate) fn parse_line(log: &str) -> (Vec<Version>, BTreeSet<String>) {
+///
+/// The error names a commit the log gives no date.
+pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), String> {
     let mut started = vec![];
     let mut picked = BTreeSet::new();
 
     for record in log.split('\0') {
         let record = record.trim_start_matches('\n');
-        let Some((_, message)) = record.split_once('\n') else {
+        if record.is_empty() {
             continue;
-        };
+        }
+        let mut fields = record.splitn(3, '\n');
+        let commit = fields.next().unwrap_or_default();
+        let at = fields
+            .next()
+            .and_then(|at| at.trim().parse::<i64>().ok())
+            .ok_or_else(|| format!("The log of a release branch gives commit {commit} no date."))?;
+        let message = fields.next().unwrap_or_default();
 
         // Both trailers sit in the last paragraph, where git writes trailers.
         let trailers = message.trim_end().rsplit("\n\n").next().unwrap_or_default();
@@ -124,7 +144,7 @@ pub(crate) fn parse_line(log: &str) -> (Vec<Version>, BTreeSet<String>) {
                 .and_then(|rest| rest.strip_prefix(':'))
                 .and_then(|version| Version::parse(version.trim()).ok());
             if let Some(version) = version {
-                started.push(version);
+                started.push(Started { version, at });
             }
 
             let hash = line
@@ -137,12 +157,27 @@ pub(crate) fn parse_line(log: &str) -> (Vec<Version>, BTreeSet<String>) {
     }
     started.reverse();
 
-    (started, picked)
+    Ok((started, picked))
 }
 
 /// The message of the commit that starts release `version` on its branch.
 pub(crate) fn start_message(version: &Version) -> String {
     format!("Start release {version}\n\n{STARTS_RELEASE}: {version}\n")
+}
+
+/// When the tag object `text`, as `git cat-file tag` prints it, was made, in
+/// seconds since the Unix epoch: the time on its `tagger` line.
+pub(crate) fn tagger_time(text: &str) -> Option<i64> {
+    let tagger = text
+        .lines()
+        .take_while(|line| !line.is_empty())
+        .find_map(|line| line.strip_prefix("tagger "))?;
+
+    // `Name <email> 1792584000 +0200`: the time, then its time zone.
+    let mut fields = tagger.rsplit(' ');
+    fields.next()?;
+
+    fields.next()?.parse().ok()
 }
 
 /// Whether release `version` may ship a change that requires users to act: a
@@ -154,9 +189,28 @@ pub(crate) fn can_break(version: &Version) -> bool {
 impl Releases {
     /// The newest version a tag finalized or a release branch started.
     pub(crate) fn latest(&self) -> Option<&Version> {
-        let started = self.lines.values().flat_map(|line| &line.started);
+        self.tagged.iter().chain(self.started()).max()
+    }
 
-        self.tagged.iter().chain(started).max()
+    /// The newest minor or major release a tag finalized or a release branch
+    /// started: the last release cut.
+    pub(crate) fn newest_cut(&self) -> Option<&Version> {
+        self.tagged
+            .iter()
+            .chain(self.started())
+            .filter(|version| version.patch == 0)
+            .max()
+    }
+
+    /// When `version` was started on its release branch, in seconds since the
+    /// Unix epoch; `None` when no commit on the branch starts it, such as for a
+    /// release tagged by hand.
+    pub(crate) fn started_at(&self, version: &Version) -> Option<i64> {
+        self.line(version)?
+            .started
+            .iter()
+            .find(|started| started.version == *version)
+            .map(|started| started.at)
     }
 
     /// The release in preparation on `line`: the last one started on it, until
@@ -164,6 +218,7 @@ impl Releases {
     pub(crate) fn in_preparation<'a>(&self, line: &'a Line) -> Option<&'a Version> {
         line.started
             .last()
+            .map(|started| &started.version)
             .filter(|version| !self.tagged.contains(*version))
     }
 
@@ -310,10 +365,18 @@ impl Releases {
         let last = line
             .started
             .iter()
+            .map(|started| &started.version)
             .filter(|version| self.tagged.contains(*version))
             .max()?;
 
         Some(Version::new(last.major, last.minor, last.patch + 1))
+    }
+
+    /// Every version a release branch started.
+    fn started(&self) -> impl Iterator<Item = &Version> {
+        self.lines
+            .values()
+            .flat_map(|line| line.started.iter().map(|started| &started.version))
     }
 }
 

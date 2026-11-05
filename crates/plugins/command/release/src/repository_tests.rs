@@ -3,7 +3,10 @@ use std::collections::BTreeSet;
 use camino_tempfile::Utf8TempDir;
 
 use super::*;
-use crate::repository_testing::Fixture;
+use crate::{releases::Started, repository_testing::Fixture};
+
+/// 2026-10-01 at noon UTC, in seconds since the Unix epoch.
+const OCTOBER_1: i64 = 1_790_856_000;
 
 fn version(text: &str) -> Version {
     Version::parse(text).unwrap()
@@ -70,12 +73,21 @@ fn releases_are_read_from_origins_tags_and_release_branches() {
     repository.fetch().unwrap();
     let releases = repository.releases().unwrap();
 
+    // The commit that starts 0.3.0 is the one below the tip.
+    let started_at = fixture
+        .git(&["log", "-1", "--format=%ct", "release/0.3~1"])
+        .trim()
+        .parse()
+        .unwrap();
     assert_eq!(releases.tagged, BTreeSet::from([version("0.3.0")]));
     assert_eq!(releases.lines.len(), 1);
     assert_eq!(releases.lines[&(0, 3)], Line {
         branch: "release/0.3".to_owned(),
         tip,
-        started: vec![version("0.3.0")],
+        started: vec![Started {
+            version: version("0.3.0"),
+            at: started_at,
+        }],
         picked: BTreeSet::from([main.clone()]),
     });
     assert_eq!(repository.main(), Ok(main));
@@ -186,6 +198,47 @@ fn a_push_that_creates_a_branch_refuses_to_replace_one() {
         fixture.origin_git(&["rev-parse", "release/0.3"]).trim(),
         head
     );
+}
+
+/// A release tagged by hand, without a release branch, is dated by its tag,
+/// read from `origin` without writing a tag to the repository.
+#[test]
+fn a_tag_is_dated_by_its_tagger_or_else_by_its_commit() {
+    let fixture = Fixture::new();
+    fixture.git_at(OCTOBER_1, &[
+        "commit",
+        "--quiet",
+        "--allow-empty",
+        "--message",
+        "Ship it",
+    ]);
+    fixture.git_at(OCTOBER_1 + 3600, &[
+        "tag",
+        "--annotate",
+        "v0.1.0",
+        "--message",
+        "Release 0.1.0",
+    ]);
+    fixture.git(&["tag", "v0.2.0"]);
+    fixture.git(&["push", "--quiet", "origin", "v0.1.0", "v0.2.0"]);
+    fixture.git(&["tag", "--delete", "v0.1.0", "v0.2.0"]);
+    let shell = fixture.shell();
+    let repository = Repository::open(&shell, fixture.root()).unwrap();
+
+    assert_eq!(repository.tag_date("v0.1.0"), Ok(OCTOBER_1 + 3600));
+    assert_eq!(repository.tag_date("v0.2.0"), Ok(OCTOBER_1));
+    assert_eq!(fixture.git(&["tag", "--list"]), "");
+}
+
+#[test]
+fn a_tag_origin_does_not_have_cannot_be_dated() {
+    let fixture = Fixture::new();
+    let shell = fixture.shell();
+    let repository = Repository::open(&shell, fixture.root()).unwrap();
+
+    let error = repository.tag_date("v0.9.0").unwrap_err();
+
+    assert!(error.starts_with("`git fetch` failed: "), "{error}");
 }
 
 #[test]
