@@ -39,10 +39,15 @@ use jp_conversation::{
 use jp_credentials::CredentialStore;
 use jp_tool::{ToolDefinition, schema::has_unconstrained_node};
 use serde_json::{Map, Value, json};
+use tokio::time::timeout;
 use tracing::{debug, info, trace, warn};
 
 use self::resolve::Route;
-use super::{CONTINUE_MESSAGE, Provider, output_schema_is_open, trace_to_tmpfile};
+use super::{
+    CONTINUE_MESSAGE, Provider,
+    lookup::{self, MODEL_LOOKUP_TIMEOUT},
+    output_schema_is_open, trace_to_tmpfile,
+};
 use crate::{
     credential::Credential,
     error::{
@@ -453,10 +458,23 @@ impl Provider for Anthropic {
                 return Ok(model);
             }
             let (client, _) = self.client_for(&attempt.route)?;
-            match client.models().get(name).await {
-                Ok(model) => return map_model(model),
-                Err(error) => attempt = self.advance_or_fail(&attempt, error, name).await?,
-            }
+            let failure = match timeout(MODEL_LOOKUP_TIMEOUT, client.models().get(name)).await {
+                Ok(Ok(model)) => return map_model(model),
+
+                // A spent or refused credential would be refused by the request
+                // too, so the chain moves on here, and an exhausted chain fails.
+                Ok(Err(error)) if is_switchable(&error) => {
+                    attempt = self.advance_or_fail(&attempt, error, name).await?;
+                    continue;
+                }
+
+                Ok(Err(error)) => error.to_string(),
+                Err(_) => lookup::TIMED_OUT.to_owned(),
+            };
+
+            let details = table_details(name)?;
+            lookup::skipped(&details.id, &failure);
+            return Ok(details);
         }
     }
 
@@ -2586,6 +2604,39 @@ fn derive_features(capabilities: &types::ModelCapabilities) -> Vec<&'static str>
     }
 
     features
+}
+
+/// The details [`MODEL_OVERRIDES`] holds for `name`, for when the API reported
+/// nothing.
+///
+/// A model absent from the table gets empty details.
+fn table_details(name: &Name) -> Result<ModelDetails> {
+    let id = (PROVIDER, name.as_ref()).try_into()?;
+    let Some(overrides) = model_overrides(name.as_ref()) else {
+        return Ok(ModelDetails::empty(id));
+    };
+
+    let mut features = vec![];
+    if overrides.between_tools {
+        features.push(BETWEEN_TOOLS_THINKING);
+    }
+    if overrides.sampling {
+        features.push(SAMPLING_PARAMETERS);
+    }
+
+    Ok(ModelDetails {
+        id,
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: overrides.knowledge_cutoff,
+        deprecated: Some(overrides.deprecated.clone()),
+        structured_output: None,
+        prefill: Some(overrides.prefill),
+        subscription: None,
+        features,
+    })
 }
 
 fn map_model(model: types::Model) -> Result<ModelDetails> {
