@@ -5,6 +5,7 @@ pub mod google;
 pub mod anthropic;
 pub mod cerebras;
 pub mod llamacpp;
+pub(crate) mod lookup;
 pub mod mock;
 pub mod ollama;
 pub mod openai;

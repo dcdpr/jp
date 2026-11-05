@@ -25,7 +25,7 @@ use jp_tool::ToolDefinition;
 use serde_json::{Map, Value};
 use tracing::{debug, trace, warn};
 
-use super::{CONTINUE_MESSAGE, EventStream, Provider, trace_to_tmpfile};
+use super::{CONTINUE_MESSAGE, EventStream, Provider, lookup::find_listed, trace_to_tmpfile};
 use crate::{
     StreamErrorKind,
     error::{
@@ -70,12 +70,9 @@ impl Provider for Google {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
 
-        Ok(self
-            .models()
-            .await?
-            .into_iter()
-            .find(|m| m.id == id)
-            .unwrap_or(ModelDetails::empty(id)))
+        Ok(find_listed(&id, self.models())
+            .await
+            .unwrap_or_else(|| table_details(id)))
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>> {
@@ -546,6 +543,20 @@ fn map_model(model: types::Model) -> ModelDetails {
     // levels, so any ladder still comes from the catalog.
     details.reasoning = apply_thinking_support(details.reasoning, model.thinking);
 
+    details
+}
+
+/// The details [`MODEL_OVERRIDES`] holds for `id`, for when the API reported
+/// nothing.
+///
+/// A model absent from the table gets empty details.
+fn table_details(id: ModelIdConfig) -> ModelDetails {
+    let mut details = model_overrides(&id.name)
+        .cloned()
+        .unwrap_or_else(|| ModelDetails::empty(id.clone()));
+
+    // Reported under the id the caller named, which may be an alias.
+    details.id = id;
     details
 }
 
