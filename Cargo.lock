@@ -594,10 +594,12 @@ dependencies = [
  "camino-tempfile",
  "clap",
  "comrak",
+ "doc",
  "indoc",
  "semver",
  "serde",
  "serde-saphyr",
+ "serde_json",
 ]
 
 [[package]]

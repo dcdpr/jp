@@ -44,7 +44,8 @@ use crate::{
 /// What a change means for the people using the software.
 ///
 /// The ids are fixed, so a fragment means the same in every project.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+/// Types order as release notes show them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Type {
     /// A new capability the user can now reach.

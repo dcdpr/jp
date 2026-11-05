@@ -313,6 +313,103 @@ fn a_missing_fragments_directory_is_an_error_rather_than_an_empty_one() {
 }
 
 #[test]
+fn reading_the_unreleased_part_leaves_every_release_out() {
+    let dir = fragments_dir(&[
+        ("README.md", "# Changelog fragments\n"),
+        ("enable-explicit.md", FRAGMENT),
+        ("highlights/fan-out.md", HIGHLIGHT),
+        ("0.3.0/retry-idle-turns.md", FRAGMENT),
+        // Broken, and in a part this read doesn't touch.
+        ("0.3.0/highlights/plugin-tools.md", "Not a highlight.\n"),
+    ]);
+
+    let contents = read(dir.path(), &Part::Unreleased).unwrap();
+
+    let fragments: Vec<(&str, &str)> = contents
+        .fragments
+        .iter()
+        .map(|filed| (filed.slug.as_str(), filed.path.as_str()))
+        .collect();
+    assert_eq!(fragments, [("enable-explicit", "enable-explicit.md")]);
+    let highlights: Vec<(&str, &str)> = contents
+        .highlights
+        .iter()
+        .map(|filed| (filed.slug.as_str(), filed.path.as_str()))
+        .collect();
+    assert_eq!(highlights, [("fan-out", "highlights/fan-out.md")]);
+    assert_eq!(
+        contents.fragments[0].file,
+        fragment::parse(FRAGMENT).unwrap()
+    );
+}
+
+#[test]
+fn reading_a_release_returns_its_files_without_its_overview() {
+    let dir = fragments_dir(&[
+        ("enable-explicit.md", FRAGMENT),
+        (
+            "0.3.0/overview.md",
+            "JP 0.3.0 calls tools on many inputs.\n",
+        ),
+        ("0.3.0/retry-idle-turns.md", FRAGMENT),
+        ("0.3.0/highlights/plugin-tools.md", HIGHLIGHT),
+        ("0.4.0/later.md", FRAGMENT),
+    ]);
+
+    let contents = read(dir.path(), &Part::Release(Version::parse("0.3.0").unwrap())).unwrap();
+
+    let paths: Vec<&str> = contents
+        .fragments
+        .iter()
+        .map(|filed| filed.path.as_str())
+        .collect();
+    assert_eq!(paths, ["0.3.0/retry-idle-turns.md"]);
+    assert_eq!(contents.highlights[0].slug, "plugin-tools");
+    assert_eq!(
+        contents.highlights[0].path,
+        "0.3.0/highlights/plugin-tools.md"
+    );
+}
+
+#[test]
+fn reading_a_part_reports_every_problem_in_it() {
+    let dir = fragments_dir(&[
+        ("0.3.0/a.md", "type: fixed\n\nEntry.\n"),
+        ("0.3.0/notes.txt", "Remember the overview.\n"),
+        ("0.3.0/retry-idle-turns.md", FRAGMENT),
+    ]);
+
+    let Err(ReadError::Problems(found)) =
+        read(dir.path(), &Part::Release(Version::parse("0.3.0").unwrap()))
+    else {
+        panic!("expected the part's problems");
+    };
+
+    let report = Report {
+        problems: found,
+        ..Report::default()
+    };
+    assert_eq!(problems(&report, dir.path()), vec![
+        "0.3.0/a.md: no frontmatter: the first line has to be `---`",
+        "0.3.0/notes.txt: not a fragment, which is named `<slug>.md`; rename it, or move it out \
+         of the fragments directory",
+    ]);
+}
+
+#[test]
+fn reading_a_release_without_a_directory_says_so() {
+    let dir = fragments_dir(&[("0.3.0/retry-idle-turns.md", FRAGMENT)]);
+
+    let error = read(dir.path(), &Part::Release(Version::parse("0.4.0").unwrap())).unwrap_err();
+
+    assert!(matches!(error, ReadError::NoRelease { .. }), "{error:?}");
+    assert_eq!(
+        error.to_string(),
+        format!("{} has no release 0.4.0: no directory 0.4.0/", dir.path())
+    );
+}
+
+#[test]
 fn the_reserved_slugs_say_what_they_are_reserved_for_in_any_letter_case() {
     assert_eq!(
         reserved_for("Overview"),

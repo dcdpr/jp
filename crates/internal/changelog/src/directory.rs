@@ -20,21 +20,27 @@
 //! `readme`, in any letter case.
 //! Anything else is a [`Problem`] rather than a file left unread, so a stray
 //! file fails loudly instead of vanishing when a release is assembled.
+//!
+//! [`check`] holds the whole directory to these rules.
+//! [`read`] holds one [`Part`] of it to them, the top level or one release's
+//! directory, and returns each fragment and highlight in it, read into its
+//! format.
 
 use std::{fmt, fs, io};
 
 use camino::{Utf8Path, Utf8PathBuf};
+use semver::Version;
 
 use crate::{
-    fragment::{self, FragmentError},
-    highlight::{self, HighlightError},
+    fragment::{self, Fragment, FragmentError},
+    highlight::{self, Highlight, HighlightError},
 };
 
 /// The file at the top level that documents the directory.
 const README: &str = "README.md";
 
 /// The file in a release's directory that introduces the release.
-const OVERVIEW: &str = "overview.md";
+pub(crate) const OVERVIEW: &str = "overview.md";
 
 /// The directory, at the top level and in each release's directory, that holds
 /// highlights.
@@ -185,7 +191,7 @@ impl fmt::Display for ProblemKind {
     }
 }
 
-/// A file or directory [`check`] couldn't read.
+/// A file or directory [`check`] or [`read`] couldn't read.
 #[derive(Debug)]
 pub struct CheckError {
     pub path: Utf8PathBuf,
@@ -204,6 +210,75 @@ impl std::error::Error for CheckError {
     }
 }
 
+/// One part of a fragments directory, which [`read`] reads on its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Part {
+    /// The fragments and highlights at the top level, which no release has
+    /// taken yet.
+    Unreleased,
+
+    /// The directory of the release with this version.
+    Release(Version),
+}
+
+/// The fragments and highlights one [`Part`] of a fragments directory holds,
+/// each read into its format, in the order of their paths.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Contents {
+    pub fragments: Vec<Filed<Fragment>>,
+    pub highlights: Vec<Filed<Highlight>>,
+}
+
+/// A fragment or highlight, and where it is filed in the fragments directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Filed<T> {
+    /// The file's name, without `.md`.
+    pub slug: String,
+
+    /// The file's path below the fragments directory, with `/` between its
+    /// parts on every platform, such as `0.3.0/highlights/fan-out.md`.
+    pub path: String,
+
+    /// The file, read into its format.
+    pub file: T,
+}
+
+/// Why [`read`] couldn't return the contents of a part.
+#[derive(Debug)]
+pub enum ReadError {
+    /// The fragments directory has no directory for the release.
+    NoRelease { dir: Utf8PathBuf, version: Version },
+
+    /// A file or directory couldn't be read.
+    Unreadable(CheckError),
+
+    /// Paths in the part break the layout, or files in it their format.
+    Problems(Vec<Problem>),
+}
+
+impl fmt::Display for ReadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoRelease { dir, version } => {
+                write!(f, "{dir} has no release {version}: no directory {version}/")
+            }
+            Self::Unreadable(error) => write!(f, "{error}"),
+            Self::Problems(problems) => {
+                let lines: Vec<String> = problems.iter().map(ToString::to_string).collect();
+                f.write_str(&lines.join("\n"))
+            }
+        }
+    }
+}
+
+impl std::error::Error for ReadError {}
+
+impl From<CheckError> for ReadError {
+    fn from(error: CheckError) -> Self {
+        Self::Unreadable(error)
+    }
+}
+
 /// Check every path in the fragments directory `dir` against the layout, and
 /// every fragment and highlight against its format, released ones included.
 ///
@@ -216,52 +291,127 @@ impl std::error::Error for CheckError {
 /// included: a missing fragments directory is an error, not an empty one.
 pub fn check(dir: &Utf8Path) -> Result<Report, CheckError> {
     let mut report = Report::default();
-
-    for entry in entries(dir)? {
-        let path = dir.join(&entry.name);
-        if entry.is_dir {
-            if entry.name == HIGHLIGHTS {
-                check_highlights(&path, &mut report)?;
-            } else if is_version(&entry.name) {
-                check_release(&path, &mut report)?;
-            } else {
-                report.problem(&path, ProblemKind::NotARelease);
-            }
-        } else if entry.name != README {
-            check_file(&path, &entry.name, Format::Fragment, &mut report)?;
-        }
-    }
+    read_top_level(dir, true, &mut report, &mut Contents::default())?;
 
     Ok(report)
 }
 
-/// Check the release's directory `dir`.
-fn check_release(dir: &Utf8Path, report: &mut Report) -> Result<(), CheckError> {
+/// Read the fragments and highlights of `part` of the fragments directory
+/// `dir`, holding its paths to the layout and its files to their formats as
+/// [`check`] does.
+///
+/// [`Part::Unreleased`] reads the top level without entering any release's
+/// directory.
+///
+/// # Errors
+///
+/// Returns [`ReadError::NoRelease`] for a release without a directory, the
+/// first file or directory that can't be read, or every [`Problem`] in the
+/// part.
+pub fn read(dir: &Utf8Path, part: &Part) -> Result<Contents, ReadError> {
+    let mut report = Report::default();
+    let mut contents = Contents::default();
+
+    match part {
+        Part::Unreleased => read_top_level(dir, false, &mut report, &mut contents)?,
+        Part::Release(version) => {
+            let name = version.to_string();
+            let path = dir.join(&name);
+            if !path.is_dir() {
+                return Err(ReadError::NoRelease {
+                    dir: dir.to_owned(),
+                    version: version.clone(),
+                });
+            }
+            read_release(&path, &format!("{name}/"), &mut report, &mut contents)?;
+        }
+    }
+
+    if !report.problems.is_empty() {
+        return Err(ReadError::Problems(report.problems));
+    }
+
+    Ok(contents)
+}
+
+/// Read the top level of the fragments directory `dir`, and each release's
+/// directory in it when `releases` is set.
+fn read_top_level(
+    dir: &Utf8Path,
+    releases: bool,
+    report: &mut Report,
+    contents: &mut Contents,
+) -> Result<(), CheckError> {
     for entry in entries(dir)? {
         let path = dir.join(&entry.name);
         if entry.is_dir {
             if entry.name == HIGHLIGHTS {
-                check_highlights(&path, report)?;
-            } else {
-                report.problem(&path, ProblemKind::NestedInRelease);
+                read_highlights(&path, &format!("{HIGHLIGHTS}/"), report, contents)?;
+            } else if !is_version(&entry.name) {
+                report.problem(&path, ProblemKind::NotARelease);
+            } else if releases {
+                read_release(&path, &format!("{}/", entry.name), report, contents)?;
             }
-        } else if entry.name != OVERVIEW {
-            check_file(&path, &entry.name, Format::Fragment, report)?;
+        } else if entry.name != README {
+            read_file(&path, &entry.name, "", Format::Fragment, report, contents)?;
         }
     }
 
     Ok(())
 }
 
-/// Check the `highlights/` directory `dir`, at the top level or in a release's
+/// Read the release's directory `dir`, which is `below` in the fragments
 /// directory.
-fn check_highlights(dir: &Utf8Path, report: &mut Report) -> Result<(), CheckError> {
+fn read_release(
+    dir: &Utf8Path,
+    below: &str,
+    report: &mut Report,
+    contents: &mut Contents,
+) -> Result<(), CheckError> {
+    for entry in entries(dir)? {
+        let path = dir.join(&entry.name);
+        if entry.is_dir {
+            if entry.name == HIGHLIGHTS {
+                read_highlights(&path, &format!("{below}{HIGHLIGHTS}/"), report, contents)?;
+            } else {
+                report.problem(&path, ProblemKind::NestedInRelease);
+            }
+        } else if entry.name != OVERVIEW {
+            read_file(
+                &path,
+                &entry.name,
+                below,
+                Format::Fragment,
+                report,
+                contents,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Read the `highlights/` directory `dir`, at the top level or in a release's
+/// directory, which is `below` in the fragments directory.
+fn read_highlights(
+    dir: &Utf8Path,
+    below: &str,
+    report: &mut Report,
+    contents: &mut Contents,
+) -> Result<(), CheckError> {
     for entry in entries(dir)? {
         let path = dir.join(&entry.name);
         if entry.is_dir {
             report.problem(&path, ProblemKind::NestedInHighlights);
         } else {
-            check_file(&path, &entry.name, Format::Highlight, report)?;
+            read_file(
+                &path,
+                &entry.name,
+                below,
+                Format::Highlight,
+                report,
+                contents,
+            )?;
         }
     }
 
@@ -275,12 +425,16 @@ enum Format {
     Highlight,
 }
 
-/// Check the file at `path`, named `name`, against `format`.
-fn check_file(
+/// Read the file at `path`, named `name` and `below` in the fragments
+/// directory, as `format`, into `contents` when it follows the format and into
+/// `report` when it doesn't.
+fn read_file(
     path: &Utf8Path,
     name: &str,
+    below: &str,
     format: Format,
     report: &mut Report,
+    contents: &mut Contents,
 ) -> Result<(), CheckError> {
     if let Some(kind) = misnamed(name, format) {
         report.problem(path, kind);
@@ -300,16 +454,26 @@ fn check_file(
         return Ok(());
     };
 
-    let malformed = match format {
-        Format::Fragment => fragment::parse(&source)
-            .err()
-            .map(ProblemKind::MalformedFragment),
-        Format::Highlight => highlight::parse(&source)
-            .err()
-            .map(ProblemKind::MalformedHighlight),
-    };
-    if let Some(kind) = malformed {
-        report.problem(path, kind);
+    // `misnamed` refused a name without the extension.
+    let slug = name.strip_suffix(EXTENSION).unwrap_or(name).to_owned();
+    let filed = format!("{below}{name}");
+    match format {
+        Format::Fragment => match fragment::parse(&source) {
+            Ok(file) => contents.fragments.push(Filed {
+                slug,
+                path: filed,
+                file,
+            }),
+            Err(error) => report.problem(path, ProblemKind::MalformedFragment(error)),
+        },
+        Format::Highlight => match highlight::parse(&source) {
+            Ok(file) => contents.highlights.push(Filed {
+                slug,
+                path: filed,
+                file,
+            }),
+            Err(error) => report.problem(path, ProblemKind::MalformedHighlight(error)),
+        },
     }
 
     Ok(())
@@ -342,10 +506,22 @@ fn reservation(slug: &str) -> Option<(&'static str, &'static str)> {
         .find(|(reserved, _)| slug.eq_ignore_ascii_case(reserved))
 }
 
+/// Whether `path`, below the fragments directory with `/` between its parts, is
+/// a file at the top level or in its `highlights/`, where a fragment or
+/// highlight sits until a release takes it.
+pub(crate) fn is_unreleased(path: &str) -> bool {
+    let name = path
+        .strip_prefix(HIGHLIGHTS)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .unwrap_or(path);
+
+    !name.is_empty() && !name.contains('/')
+}
+
 /// Whether `name` names a release's directory: a semantic version, such as
 /// `0.3.0` or `1.0.0-rc.1`, with no `v` in front.
 fn is_version(name: &str) -> bool {
-    semver::Version::parse(name).is_ok()
+    Version::parse(name).is_ok()
 }
 
 /// One entry of a directory.

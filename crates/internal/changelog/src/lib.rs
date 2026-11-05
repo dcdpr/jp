@@ -13,22 +13,39 @@
 //! its format.
 //! [`check()`] holds a whole fragments directory to its layout, released files
 //! included, and every file in it to its format.
-//! The `changelog` binary runs [`check()`] for CI, through [`cli`].
+//!
+//! [`release::read`] builds a [`Release`] from a release's directory, or from
+//! the files no release has taken yet, crediting each file to the change
+//! requests that wrote it, which it reads from git's history.
+//! A release serializes to JSON, and [`markdown`] renders its release notes and
+//! upgrade guide.
+//!
+//! The `changelog` binary runs [`check()`] for CI, and renders releases,
+//! through [`cli`].
 //!
 //! The crate reads no configuration: whatever differs between projects, such as
 //! where the fragments directory is, arrives as an argument.
 //!
 //! The formats are specified in
-//! `docs/rfd/121-changelog-fragments-and-validation.md`.
+//! `docs/rfd/121-changelog-fragments-and-validation.md`, and releases in
+//! `docs/rfd/122-release-pipeline.md`.
 
 pub mod cli;
 pub mod directory;
 mod document;
+pub mod forge;
 pub mod fragment;
+mod git;
 pub mod highlight;
+mod history;
 mod links;
+pub mod markdown;
+pub mod release;
 
 pub use directory::{CheckError, Problem, ProblemKind, Report, check, reserved_for};
 pub use document::FrontmatterError;
+pub use forge::{Credit, CreditKind, Forge, UnknownForge};
 pub use fragment::{Fragment, FragmentError, Type, UnknownType, Upgrade};
+pub use git::GitError;
 pub use highlight::{Highlight, HighlightError};
+pub use release::{Headings, Release, ReleaseError};
