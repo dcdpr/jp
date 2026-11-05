@@ -7,7 +7,6 @@ cbindgen_version     := "0.29.4"
 deny_version         := "0.20.2"
 expand_version       := "1.0.126"
 insta_version        := "1.48.0"
-jilu_version         := "0.13.2"
 llvm_cov_version     := "0.8.7"
 nextest_version      := "0.9.143"
 rustqual_version     := "1.8.2"
@@ -37,7 +36,6 @@ alias i := install
 alias c := check
 alias t := test
 
-alias bc := build-changelog
 alias co := commit
 alias st := stage
 alias sc := stage-and-commit
@@ -555,11 +553,6 @@ git-merge REF="main" *ARGS: _install-jp _install-tools
     fi
 
     printf "\nReview the resolution, then 'git commit' to conclude the merge.\n" >&2
-
-# Generate changelog for the project.
-[group('build')]
-build-changelog: (_install "jilu@" + jilu_version)
-    @jilu
 
 # Build the static library and C header that the macOS app links against, and
 # stage both where the Xcode project expects them.
