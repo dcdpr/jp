@@ -11,6 +11,7 @@ when:
         }
       ],
       "stream": true,
+      "reasoning_effort": "none",
       "chat_template_kwargs": {
         "enable_thinking": false,
         "thinking": false
@@ -59,6 +60,7 @@ when:
         }
       ],
       "stream": true,
+      "reasoning_effort": "low",
       "chat_template_kwargs": {
         "enable_thinking": true,
         "thinking": true
@@ -154,6 +156,7 @@ when:
         }
       ],
       "stream": true,
+      "reasoning_effort": "none",
       "chat_template_kwargs": {
         "enable_thinking": false,
         "thinking": false
@@ -273,6 +276,7 @@ when:
         }
       ],
       "stream": true,
+      "reasoning_effort": "none",
       "chat_template_kwargs": {
         "enable_thinking": false,
         "thinking": false
@@ -352,6 +356,7 @@ when:
         }
       ],
       "stream": true,
+      "reasoning_effort": "low",
       "chat_template_kwargs": {
         "enable_thinking": true,
         "thinking": true

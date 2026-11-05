@@ -1,6 +1,6 @@
 use jp_config::{
     assistant::{sections::SectionConfig, tool_choice::ToolChoice},
-    model::parameters::PartialReasoningConfig,
+    model::parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort},
 };
 use jp_conversation::{
     ConversationEvent, ConversationStream,
@@ -8,7 +8,7 @@ use jp_conversation::{
     thread::Thread,
 };
 use jp_tool::{ToolDefinition, ToolDocs};
-use serde_json::{Map, json};
+use serde_json::{Map, Value, json};
 
 use super::*;
 use crate::query::Truncation;
@@ -41,6 +41,24 @@ fn query(events: ConversationStream, tools: Vec<ToolDefinition>) -> ChatQuery {
     }
 }
 
+/// The request body for a single "Hello" turn under `reasoning`.
+fn body_with_reasoning(reasoning: PartialReasoningConfig) -> Value {
+    let mut events = ConversationStream::new_test().with_turn("Hello");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(reasoning);
+    events.add_config_delta(delta);
+
+    let (body, ..) = create_request(&qwen_details(), query(events, vec![])).unwrap();
+    body
+}
+
+fn effort(effort: ReasoningEffort) -> PartialReasoningConfig {
+    PartialReasoningConfig::Custom(PartialCustomReasoningConfig {
+        effort: Some(effort),
+        exclude: None,
+    })
+}
+
 #[test]
 fn map_model_keeps_full_id_and_reads_max_model_len() {
     let details = map_model(&qwen_model()).unwrap();
@@ -52,7 +70,8 @@ fn map_model_keeps_full_id_and_reads_max_model_len() {
 
 #[test]
 fn create_request_plain_message() {
-    // Thinking is off because the test config carries no reasoning setting.
+    // The test config carries no reasoning setting, so nothing about thinking
+    // is sent and the chat template's own default applies.
     let events = ConversationStream::new_test().with_turn("Hello");
 
     let (body, is_structured, _) = create_request(&qwen_details(), query(events, vec![])).unwrap();
@@ -64,7 +83,6 @@ fn create_request_plain_message() {
             "model": "Qwen/Qwen3-8B",
             "messages": [{ "role": "user", "content": "Hello" }],
             "stream": true,
-            "chat_template_kwargs": { "enable_thinking": false, "thinking": false },
         })
     );
 }
@@ -119,7 +137,6 @@ fn create_request_forwards_sampling_parameters() {
             "model": "Qwen/Qwen3-8B",
             "messages": [{ "role": "user", "content": "Hello" }],
             "stream": true,
-            "chat_template_kwargs": { "enable_thinking": false, "thinking": false },
             "temperature": 0.5,
             "top_p": 0.75,
             "top_k": 20,
@@ -130,18 +147,68 @@ fn create_request_forwards_sampling_parameters() {
 
 #[test]
 fn create_request_asks_the_template_to_think_when_reasoning_is_on() {
-    let mut events = ConversationStream::new_test().with_turn("Hello");
-    let mut delta = jp_config::PartialAppConfig::empty();
-    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Auto);
-    events.add_config_delta(delta);
-
-    let (body, ..) = create_request(&qwen_details(), query(events, vec![])).unwrap();
+    let body = body_with_reasoning(PartialReasoningConfig::Auto);
 
     assert_eq!(
         body["chat_template_kwargs"],
         json!({ "enable_thinking": true, "thinking": true })
     );
+    // `auto` leaves the effort to the template rather than picking one.
+    assert!(body.get("reasoning_effort").is_none());
     assert!(body.get("reasoning_format").is_none());
+}
+
+#[test]
+fn create_request_off_disables_thinking() {
+    let body = body_with_reasoning(PartialReasoningConfig::Off);
+
+    assert_eq!(body["reasoning_effort"], json!("none"));
+    assert_eq!(
+        body["chat_template_kwargs"],
+        json!({ "enable_thinking": false, "thinking": false })
+    );
+}
+
+#[test]
+fn create_request_none_effort_disables_thinking() {
+    let body = body_with_reasoning(effort(ReasoningEffort::None));
+
+    assert_eq!(body["reasoning_effort"], json!("none"));
+    assert_eq!(
+        body["chat_template_kwargs"],
+        json!({ "enable_thinking": false, "thinking": false })
+    );
+}
+
+#[test]
+fn create_request_sends_the_effort_level() {
+    let body = body_with_reasoning(effort(ReasoningEffort::High));
+
+    assert_eq!(body["reasoning_effort"], json!("high"));
+    assert_eq!(
+        body["chat_template_kwargs"],
+        json!({ "enable_thinking": true, "thinking": true })
+    );
+}
+
+#[test]
+fn create_request_maps_xlow_to_minimal() {
+    // vLLM's effort vocabulary has no `xlow`; `minimal` is its lowest level.
+    let body = body_with_reasoning(effort(ReasoningEffort::Xlow));
+
+    assert_eq!(body["reasoning_effort"], json!("minimal"));
+}
+
+#[test]
+fn create_request_sends_a_token_effort_as_a_thinking_budget() {
+    let body = body_with_reasoning(effort(ReasoningEffort::Absolute(2048.into())));
+
+    assert_eq!(body["thinking_token_budget"], json!(2048));
+    assert!(body.get("reasoning_effort").is_none());
+    assert_eq!(
+        body["chat_template_kwargs"],
+        json!({ "enable_thinking": true, "thinking": true })
+    );
 }
 
 #[test]
