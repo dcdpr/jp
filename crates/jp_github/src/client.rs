@@ -25,12 +25,19 @@ pub(crate) struct Inner {
 
 pub struct OctocrabBuilder {
     token: Option<String>,
+    base_url: Option<String>,
 }
+
+/// Where GitHub.com serves its REST API.
+const GITHUB_API: &str = "https://api.github.com";
 
 impl Octocrab {
     #[must_use]
     pub fn builder() -> OctocrabBuilder {
-        OctocrabBuilder { token: None }
+        OctocrabBuilder {
+            token: None,
+            base_url: None,
+        }
     }
 
     #[must_use]
@@ -324,14 +331,35 @@ impl OctocrabBuilder {
         self
     }
 
+    /// Send requests to the REST API at `url` rather than GitHub.com's, such as
+    /// `https://github.example.com/api/v3` for a GitHub Enterprise Server.
+    ///
+    /// GraphQL requests go to the server's `/api/graphql` when `url` ends in
+    /// `/api/v3`, and to `<url>/graphql` otherwise.
+    #[must_use]
+    pub fn base_url(mut self, url: impl Into<String>) -> Self {
+        self.base_url = Some(url.into());
+        self
+    }
+
     pub fn build(self) -> Result<Octocrab> {
         let client = build_http_client(self.token.as_deref())?;
+        let api_base = self
+            .base_url
+            .as_deref()
+            .unwrap_or(GITHUB_API)
+            .trim_end_matches('/')
+            .to_owned();
+        let graphql_url = match api_base.strip_suffix("/api/v3") {
+            Some(server) => format!("{server}/api/graphql"),
+            None => format!("{api_base}/graphql"),
+        };
 
         Ok(Octocrab {
             inner: Arc::new(Inner {
                 client,
-                api_base: "https://api.github.com".to_owned(),
-                graphql_url: "https://api.github.com/graphql".to_owned(),
+                api_base,
+                graphql_url,
             }),
         })
     }

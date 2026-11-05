@@ -1025,3 +1025,132 @@ async fn graphql_surfaces_top_level_errors_as_error() {
     }
     mock.assert();
 }
+
+#[tokio::test]
+async fn pull_create_serializes_expected_payload() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/repos/acme/widgets/pulls")
+                .header("authorization", "Bearer test-token")
+                .json_body(json!({
+                    "title": "Cut release 0.3.0",
+                    "head": "release-cut/v0.3.0",
+                    "base": "main",
+                    "body": "Files the notes of 0.3.0."
+                }));
+            then.status(201).json_body(pull_json(1300));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), Some("test-token"));
+    let pull = client
+        .pulls("acme", "widgets")
+        .create("Cut release 0.3.0", "release-cut/v0.3.0", "main")
+        .body("Files the notes of 0.3.0.")
+        .send()
+        .await
+        .expect("create pull request");
+
+    assert_eq!(pull.number, 1300);
+    assert_eq!(
+        pull.html_url.map(String::from).as_deref(),
+        Some("https://github.com/acme/widgets/pull/1300")
+    );
+    mock.assert();
+}
+
+#[tokio::test]
+async fn pull_create_without_a_body_leaves_it_out() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/repos/acme/widgets/pulls")
+                .json_body(json!({
+                    "title": "Pick 4e1f0a2 into release 0.3.1",
+                    "head": "release-pick/v0.3.1-4e1f0a2",
+                    "base": "main"
+                }));
+            then.status(201).json_body(pull_json(1301));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let pull = client
+        .pulls("acme", "widgets")
+        .create(
+            "Pick 4e1f0a2 into release 0.3.1",
+            "release-pick/v0.3.1-4e1f0a2",
+            "main",
+        )
+        .send()
+        .await
+        .expect("create pull request");
+
+    assert_eq!(pull.number, 1301);
+    mock.assert();
+}
+
+#[tokio::test]
+async fn issue_add_labels_posts_the_labels_and_returns_every_label() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/repos/acme/widgets/issues/1300/labels")
+                .json_body(json!({ "labels": ["no-changelog"] }));
+            then.status(200).json_body(json!([
+                { "name": "release", "description": null },
+                { "name": "no-changelog", "description": "Changes users won't notice" }
+            ]));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let labels = client
+        .issues("acme", "widgets")
+        .add_labels(1300, &["no-changelog".to_owned()])
+        .await
+        .expect("add labels");
+
+    let names: Vec<&str> = labels.iter().map(|label| label.name.as_str()).collect();
+    assert_eq!(names, ["release", "no-changelog"]);
+    mock.assert();
+}
+
+/// A GitHub Enterprise Server takes REST requests below `/api/v3`, and GraphQL
+/// ones at `/api/graphql`.
+#[tokio::test]
+async fn a_base_url_sends_requests_to_another_server() {
+    let server = MockServer::start_async().await;
+    let rest = server
+        .mock_async(|when, then| {
+            when.method(GET).path("/api/v3/user");
+            then.status(200).json_body(json!({ "login": "alice" }));
+        })
+        .await;
+    let graphql = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/api/graphql");
+            then.status(200)
+                .json_body(json!({ "data": { "viewer": { "login": "alice" } } }));
+        })
+        .await;
+
+    let client = Octocrab::builder()
+        .base_url(format!("{}/api/v3/", server.base_url()))
+        .build()
+        .expect("client to build");
+
+    let user = client.current().user().await.expect("user request");
+    assert_eq!(user.login, "alice");
+    let viewer: Value = client
+        .graphql(&json!({ "query": "{ viewer { login } }" }))
+        .await
+        .expect("graphql request");
+    assert_eq!(viewer["data"]["viewer"]["login"], "alice");
+    rest.assert();
+    graphql.assert();
+}
