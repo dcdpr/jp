@@ -96,6 +96,26 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.1.5"
 
+[[audits.futures-channel]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.31 -> 0.3.34"
+
+[[audits.futures-io]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.31 -> 0.3.34"
+
+[[audits.futures-macro]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.32 -> 0.3.34"
+
+[[audits.futures-sink]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.32 -> 0.3.34"
+
 [[audits.getrandom]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
