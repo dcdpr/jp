@@ -1,4 +1,4 @@
-use chrono::TimeZone as _;
+use chrono::{TimeZone as _, Timelike as _};
 use jp_config::{
     PartialAppConfig, PartialConfig as _, PartialConfigDelta as _,
     conversation::tool::{PartialToolConfig, RunMode, ToolSource, access::FsRuleConfig},
@@ -1251,6 +1251,72 @@ fn test_sanitize_legacy_duplicate_ids_pair_by_order() {
         "the unpaired duplicate request should be removed"
     );
     assert_eq!(responses, 1);
+}
+
+/// A boolean question with `id`, asked at second `second`.
+fn question(id: &str, second: u32) -> ConversationEvent {
+    ConversationEvent::new(
+        InquiryRequest::new(
+            id,
+            InquirySource::tool("t"),
+            InquiryQuestion::boolean("proceed?".into()),
+        ),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, second).unwrap(),
+    )
+}
+
+/// An answer to question `id`, at second `second`.
+fn answer(id: &str, second: u32) -> ConversationEvent {
+    ConversationEvent::new(
+        InquiryResponse::boolean(id, true),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, second).unwrap(),
+    )
+}
+
+/// The seconds the stream's pending questions were asked at.
+fn pending_seconds(stream: &ConversationStream) -> Vec<u32> {
+    stream
+        .pending_inquiries()
+        .iter()
+        .map(|event| event.timestamp.second())
+        .collect()
+}
+
+#[test]
+fn test_pending_inquiries_are_the_last_turns_unanswered_questions() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("turn");
+    stream.push(question("call_1.confirm.1", 1));
+    stream.push(question("call_1.path.1", 2));
+    stream.push(question("call_2.confirm.1", 3));
+    stream.push(answer("call_1.path.1", 4));
+
+    assert_eq!(pending_seconds(&stream), [1, 3]);
+}
+
+#[test]
+fn test_pending_inquiries_leave_out_earlier_turns() {
+    // Turn 1 ended with its question unanswered; turn 2 answered its own.
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("turn 1");
+    stream.push(question("call_1.confirm", 1));
+    stream.start_turn("turn 2");
+    stream.push(question("call_1.confirm", 2));
+    stream.push(answer("call_1.confirm", 3));
+
+    assert!(stream.pending_inquiries().is_empty());
+}
+
+#[test]
+fn test_pending_inquiries_pair_a_repeated_id_by_order() {
+    // The answer closes the first ask, leaving the second open.
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("turn");
+    stream.push(question("call_1.confirm", 1));
+    stream.push(answer("call_1.confirm", 2));
+    stream.push(question("call_1.confirm", 3));
+
+    assert_eq!(pending_seconds(&stream), [3]);
 }
 
 #[test]

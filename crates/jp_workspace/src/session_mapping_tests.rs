@@ -420,6 +420,35 @@ fn all_active_conversation_ids_across_sessions() {
 }
 
 #[test]
+fn session_overviews_list_live_conversations_and_the_active_one() {
+    let (_tmp, ws, fs) = setup();
+    let fs = fs.unwrap();
+
+    let session = test_session();
+    let older = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    let newer = ConversationId::try_from(datetime!(2025-07-19 15:00:00 Z)).unwrap();
+    let gone = ConversationId::try_from(datetime!(2025-07-19 16:00:00 Z)).unwrap();
+
+    // `gone` was activated last but never persisted, so it is skipped both in
+    // the list and when resolving the active conversation.
+    fs.write_test_conversation(&older, &jp_conversation::Conversation::default());
+    fs.write_test_conversation(&newer, &jp_conversation::Conversation::default());
+    ws.record_session_activation(&session, older, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+    ws.record_session_activation(&session, newer, datetime!(2025-07-19 15:00:00 Z))
+        .unwrap();
+    ws.record_session_activation(&session, gone, datetime!(2025-07-19 16:00:00 Z))
+        .unwrap();
+
+    assert_eq!(ws.session_overviews(), vec![SessionOverview {
+        session: session.clone(),
+        conversations: vec![newer, older],
+        active: Some(newer),
+    }]);
+    assert_eq!(session.leader_pid(), Some(12345));
+}
+
+#[test]
 fn all_active_conversation_ids_empty_when_no_sessions() {
     let (_tmp, ws, _fs) = setup();
     assert!(ws.all_active_conversation_ids().is_empty());
