@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+      # Each release is tagged on its branch, so its tip shows the checks of the
+      # code a release ships.
+      - release/*
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
@@ -105,9 +108,13 @@ jobs:
           set_task shear "$source"
           set_task vet "$cargo|^\.config/supply-chain/|$workflow|$justfile"
           set_task qual "$source|^\.config/rustqual/"
-          # The parser's crate as well as the fragments, so a change to the
-          # rules is checked against every fragment already written.
-          set_task changelog "^changelog\.d/|^crates/internal/changelog/|$cargo|$workflow|$justfile"
+          case "$GITHUB_REF" in
+            # A release branch has no fragments: its notes live on `main`.
+            refs/heads/release/*) echo "changelog=false" >> "$GITHUB_OUTPUT" ;;
+            # The parser's crate as well as the fragments, so a change to the
+            # rules is checked against every fragment already written.
+            *) set_task changelog "^changelog\.d/|^crates/internal/changelog/|$cargo|$workflow|$justfile" ;;
+          esac
   rust:
     needs: changes
     runs-on: ${{ matrix.os }}
