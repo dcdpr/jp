@@ -291,6 +291,7 @@ fn a_fragments_directory_outside_the_workspace_is_refused() {
     let elsewhere = Utf8TempDir::new().unwrap();
     let options = Options {
         fragments_dir: elsewhere.path().to_path_buf(),
+        ..Options::default()
     };
 
     let message = error_message(run(

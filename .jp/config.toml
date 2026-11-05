@@ -186,10 +186,18 @@ branch = "main"
 run = "allow"
 
 # Fragments and highlights are laid out in the style of `.comfort.toml` as they
-# are written, so they pass `fmt-markdown-ci` as they land.
+# are written, so they pass `fmt-markdown-ci` as they land. Release notes credit
+# GitHub pull requests, linked at the address of git's `origin` remote.
 [plugins.command.release.options]
 fragments_dir = "changelog.d"
 format_on_write = true
+forge = "github"
+
+# The headings of the release notes' sections that read better than the type's
+# id; the other types keep theirs, capitalized.
+[plugins.command.release.options.headings]
+added = "New features"
+fixed = "Bug fixes"
 
 [providers.llm.aliases]
 # Anthropic aliases

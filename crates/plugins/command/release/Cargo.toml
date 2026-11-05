@@ -1,6 +1,6 @@
 [package]
 name = "jp-release"
-description = "Record what changes for users as changelog fragments and highlights."
+description = "Record what changes for users as changelog fragments and highlights, and render release notes from them."
 
 authors.workspace = true
 documentation.workspace = true

@@ -2,7 +2,7 @@ use std::env;
 
 use camino_tempfile::Utf8TempDir;
 use indoc::indoc;
-use jp_plugin::message::{ComposeResponse, OutputFormat, PathsInfo, WorkspaceInfo};
+use jp_plugin::message::{ComposeResponse, PathsInfo, WorkspaceInfo};
 use serde_json::{Map, json};
 
 use super::*;
@@ -115,6 +115,86 @@ fn requests(messages: &[PluginToHost]) -> Vec<&ComposeRequest> {
 
 fn read(root: &Utf8TempDir, path: &str) -> String {
     fs::read_to_string(root.path().join(path)).unwrap()
+}
+
+/// A workspace in a git repository on `main`, its fragments directory in place.
+///
+/// Git runs without the machine's configuration, so a signing setup or a hook
+/// can't change what a test commits.
+struct Repository {
+    root: Utf8TempDir,
+
+    /// Holds the empty file git reads as its global configuration.
+    home: Utf8TempDir,
+}
+
+impl Repository {
+    /// A repository whose `origin` is at `origin`.
+    fn new(origin: &str) -> Self {
+        let home = Utf8TempDir::new().unwrap();
+        fs::write(home.path().join("gitconfig"), "").unwrap();
+        let repository = Self {
+            root: workspace(),
+            home,
+        };
+
+        repository.git(&["init", "--quiet", "--initial-branch=main"]);
+        repository.git(&["remote", "add", "origin", origin]);
+
+        repository
+    }
+
+    fn path(&self) -> &Utf8Path {
+        self.root.path()
+    }
+
+    /// Write `contents` to `path`, below the workspace root.
+    fn write(&self, path: &str, contents: &str) {
+        let path = self.path().join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, contents).unwrap();
+    }
+
+    /// Commit every change in the work tree with `message`.
+    fn commit(&self, message: &str) {
+        self.git(&["add", "--all"]);
+        self.git(&["commit", "--quiet", "--message", message]);
+    }
+
+    fn git(&self, args: &[&str]) {
+        let output = Process::new("git")
+            .current_dir(self.path())
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", self.home.path().join("gitconfig"))
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_AUTHOR_NAME", "Tester")
+            .env("GIT_AUTHOR_EMAIL", "tester@example.com")
+            .env("GIT_COMMITTER_NAME", "Tester")
+            .env("GIT_COMMITTER_EMAIL", "tester@example.com")
+            .output()
+            .unwrap_or_else(|error| panic!("git {args:?}: {error}"));
+
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+/// Each print of the session, as its channel, its format, and its text.
+fn prints(messages: &[PluginToHost]) -> Vec<(&str, &str, &str)> {
+    messages
+        .iter()
+        .filter_map(|message| match message {
+            PluginToHost::Print(print) => Some((
+                print.channel.as_str(),
+                print.format.as_str(),
+                print.text.as_str(),
+            )),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Run `jp release` with `args` in the workspace at `root`, as Jane Doe, with
@@ -576,6 +656,205 @@ fn the_fragments_directory_can_be_configured() {
     assert_eq!(
         printed(&messages),
         "Created docs/changes/\nCreated docs/changes/highlights/\nWrote docs/changes/README.md\n"
+    );
+}
+
+#[test]
+fn render_prints_the_unreleased_fragments_as_release_notes() {
+    let repository = Repository::new("https://github.com/dcdpr/jp");
+    repository.write(
+        "changelog.d/retry-idle-turns.md",
+        "---\ntype: fixed\n---\nIdle turns are retried.\n",
+    );
+    repository.commit("fix(llm): Retry idle turns (#1207)");
+
+    let messages = command(repository.path(), &["render"], &[]);
+
+    assert_eq!(prints(&messages), [("content", "plain", indoc! {"
+        1 entry is unreleased: Fixed (1).
+
+        ## Changelog
+
+        ### Fixed
+
+        - Idle turns are retried.
+          ([#1207](https://github.com/dcdpr/jp/pull/1207))
+    "})]);
+    assert_eq!(exit(&messages).code, 0);
+}
+
+/// A self-hosted GitLab can't be told from its address, so the project names
+/// its forge.
+#[test]
+fn render_credits_the_configured_forge_under_the_configured_headings() {
+    let repository = Repository::new("git@git.example.com:group/project.git");
+    repository.write(
+        "changelog.d/retry-idle-turns.md",
+        "---\ntype: fixed\n---\nIdle turns are retried.\n",
+    );
+    repository.commit("Retry idle turns\n\nSee merge request group/project!42");
+    let mut message = init_message(repository.path(), &["render"]);
+    message.options = Map::from_iter([
+        ("forge".to_owned(), json!("gitlab")),
+        ("headings".to_owned(), json!({ "fixed": "Bug fixes" })),
+    ]);
+
+    let messages = session(&HostToPlugin::Init(Box::new(message)), &[]);
+
+    assert_eq!(printed(&messages), indoc! {"
+        1 entry is unreleased: Bug fixes (1).
+
+        ## Changelog
+
+        ### Bug fixes
+
+        - Idle turns are retried.
+          ([!42](https://git.example.com/group/project/-/merge_requests/42))
+    "});
+}
+
+#[test]
+fn render_prints_a_releases_upgrade_guide() {
+    let repository = Repository::new("https://github.com/dcdpr/jp");
+    repository.write("changelog.d/0.3.0/plugin-manifest-routing.md", indoc! {"
+            ---
+            type: changed
+            change_requests: [1216]
+            ---
+            JP finds a command plugin by its manifest.
+
+            BREAKING CHANGE: Command plugins are found by their manifest
+
+            Rebuild the plugin.
+        "});
+    repository.commit("chore(release): Cut 0.3.0 (#1250)");
+
+    let messages = command(
+        repository.path(),
+        &["render", "0.3.0", "--page", "upgrade"],
+        &[],
+    );
+
+    assert_eq!(printed(&messages), indoc! {"
+        ## Command plugins are found by their manifest
+
+        [#1216](https://github.com/dcdpr/jp/pull/1216)
+
+        Rebuild the plugin.
+    "});
+}
+
+/// An upgrade guide without sections is nothing to print, which a reader at a
+/// terminal is told on stderr.
+#[test]
+fn render_says_when_there_is_no_upgrade_guide() {
+    let repository = Repository::new("https://github.com/dcdpr/jp");
+    repository.write(
+        "changelog.d/0.3.0/retry-idle-turns.md",
+        "---\ntype: fixed\n---\nIdle turns are retried.\n",
+    );
+    repository.commit("chore(release): Cut 0.3.0 (#1250)");
+
+    let messages = command(
+        repository.path(),
+        &["render", "v0.3.0", "--page", "upgrade"],
+        &[],
+    );
+
+    assert_eq!(prints(&messages), [(
+        "chrome",
+        "plain",
+        "0.3.0 has no upgrade guide: none of its entries has an upgrade section.\n"
+    )]);
+    assert_eq!(exit(&messages).code, 0);
+}
+
+/// JSON is printed as JSON, so `jp` renders it as such, and it is the default
+/// when `jp` itself prints JSON.
+#[test]
+fn render_prints_json_when_asked_or_when_jp_prints_json() {
+    let repository = Repository::new("https://github.com/dcdpr/jp");
+    repository.write(
+        "changelog.d/retry-idle-turns.md",
+        "---\ntype: fixed\n---\nIdle turns are retried.\n",
+    );
+    repository.commit("fix(llm): Retry idle turns (#1207)");
+    let mut message = init_message(repository.path(), &["render"]);
+    message.output_format = OutputFormat::Json;
+
+    for messages in [
+        command(repository.path(), &["render", "--format", "json"], &[]),
+        session(&HostToPlugin::Init(Box::new(message)), &[]),
+    ] {
+        let [("content", "json", text)] = prints(&messages)[..] else {
+            panic!("expected one JSON print, got {messages:?}");
+        };
+        let release: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(release["version"], Value::Null);
+        assert_eq!(release["entries"][0]["credits"][0]["label"], "#1207");
+    }
+}
+
+#[test]
+fn render_refuses_a_flag_that_does_not_apply() {
+    let root = workspace();
+
+    let messages = command(
+        root.path(),
+        &["render", "--format", "json", "--page", "upgrade"],
+        &[],
+    );
+
+    let exit = exit(&messages);
+    assert_eq!(exit.code, 1);
+    assert_eq!(
+        exit.reason.as_deref(),
+        Some(
+            "`--page` names a Markdown document; JSON holds the whole release, so drop it or add \
+             `--format markdown`."
+        )
+    );
+}
+
+#[test]
+fn render_names_what_breaks_the_format_from_the_workspace_root() {
+    let root = workspace();
+    fs::create_dir(root.path().join("changelog.d/0.3.0")).unwrap();
+    fs::write(root.path().join("changelog.d/0.3.0/notes.txt"), "Notes.\n").unwrap();
+
+    let messages = command(root.path(), &["render", "0.3.0"], &[]);
+
+    assert_eq!(
+        exit(&messages).reason.as_deref(),
+        Some(
+            "Fix these first, which `jp release check` reports too:\nchangelog.d/0.3.0/notes.txt: \
+             not a fragment, which is named `<slug>.md`; rename it, or move it out of the \
+             fragments directory"
+        )
+    );
+}
+
+#[test]
+fn render_of_a_release_that_is_not_there_says_so() {
+    let root = workspace();
+
+    let messages = command(root.path(), &["render", "0.4.0"], &[]);
+
+    assert_eq!(
+        exit(&messages).reason.as_deref(),
+        Some("changelog.d has no release 0.4.0: no directory 0.4.0/")
+    );
+}
+
+#[test]
+fn render_without_a_fragments_directory_says_how_to_make_one() {
+    let root = Utf8TempDir::new().unwrap();
+
+    let messages = command(root.path(), &["render"], &[]);
+
+    assert_eq!(
+        exit(&messages).reason.as_deref(),
+        Some("There is no fragments directory at changelog.d; create it with `jp release init`.")
     );
 }
 

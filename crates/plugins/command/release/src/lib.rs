@@ -1,21 +1,23 @@
 //! `jp-release`: record what changes for users as changelog fragments and
-//! highlights.
+//! highlights, and render release notes from them.
 //!
 //! A command plugin providing `jp release` and its subcommands, and the tool
 //! the assistant reaches through `source = "plugin.command.release.add"`.
 //! An `init` carrying a tool call is answered by the `tool` module; any other
 //! runs the command its arguments name.
 //!
-//! The formats, and the check that holds a fragments directory to them, live in
-//! the `changelog` crate; this crate is the commands, their configuration, the
-//! composer, and the tool over it.
+//! The formats, the check that holds a fragments directory to them, and the
+//! release notes and upgrade guide rendered from them live in the `changelog`
+//! crate; this crate is the commands, their configuration, the composer, and
+//! the tool over it.
 //! `entry` writes a fragment or highlight, `options` reads the settings from
 //! `plugins.command.release.options`, and `definitions` writes the tool's
 //! definition.
 //! With `format_on_write` on, every file written in the fragments directory is
 //! laid out in the style of the workspace's `.comfort.toml` (`doc::format`).
 //!
-//! See: `docs/rfd/121-changelog-fragments-and-validation.md`
+//! See: `docs/rfd/121-changelog-fragments-and-validation.md` and
+//! `docs/rfd/122-release-pipeline.md`
 
 mod definitions;
 mod entry;
@@ -30,11 +32,16 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
-use changelog::{Type, UnknownType};
+use changelog::{
+    ReleaseError, Type, UnknownType,
+    cli::{Format, Render, View},
+    directory::ReadError,
+    release,
+};
 use clap::{CommandFactory, Parser, Subcommand};
 use jp_plugin::message::{
     ComposeMode, ComposeOption, ComposeRequest, DescribeResponse, ExitMessage, HostToPlugin,
-    InitMessage, PluginToHost, PrintMessage, ToolCall, ToolOutcomeMessage,
+    InitMessage, OutputFormat, PluginToHost, PrintMessage, ToolCall, ToolOutcomeMessage,
 };
 use serde_json::Value;
 
@@ -66,7 +73,8 @@ const HIGHLIGHT_HELP: &str =
 #[command(
     name = "jp release",
     version,
-    about = "Record what changes for users as changelog fragments and highlights."
+    about = "Record what changes for users as changelog fragments and highlights, and render \
+             release notes from them."
 )]
 struct Args {
     #[command(subcommand)]
@@ -120,6 +128,17 @@ enum Command {
     /// exit 1 when one breaks a rule.
     Check,
 
+    /// Print a release's notes or upgrade guide, or the fragments no release
+    /// has taken yet.
+    ///
+    /// Each fragment and highlight is credited to the change requests that
+    /// wrote it, read from git's history, so a shallow clone is refused.
+    /// `--format` defaults to `json` when `jp` prints JSON.
+    Render {
+        #[command(flatten)]
+        render: Render,
+    },
+
     /// Write the definition of the tool that offers `add` to the assistant.
     Tools {
         #[command(subcommand)]
@@ -165,11 +184,21 @@ pub(crate) struct Output {
     /// The exit code, for a command that reports a result by it: `check` exits
     /// 1 when it finds a problem, after printing what it found.
     code: u8,
+
+    /// Whether `text` is JSON, which the host prints as such.
+    json: bool,
+
+    /// What to tell the user beside the output, on stderr, such as why there is
+    /// none.
+    note: Option<String>,
 }
 
 impl From<String> for Output {
     fn from(text: String) -> Self {
-        Self { text, code: 0 }
+        Self {
+            text,
+            ..Self::default()
+        }
     }
 }
 
@@ -181,6 +210,12 @@ struct Context<'a> {
     /// The configuration the host resolved, which names who a highlight is
     /// credited to by default.
     config: &'a Value,
+
+    options: &'a Options,
+
+    /// How the host prints, which decides the format `render` prints in by
+    /// default.
+    format: OutputFormat,
 }
 
 /// Serve one plugin session: read the host's first message and answer it.
@@ -218,7 +253,7 @@ const REQUIRED_PROTOCOL: u32 = 12;
 /// `protocol` has to match `REQUIRED_PROTOCOL`.
 pub static MANIFEST: &str = jp_plugin::manifest!(
     protocol: 12,
-    description: "Record what changes for users as changelog fragments",
+    description: "Record what changes for users as changelog fragments, and render release notes",
     command: ["release"],
 );
 
@@ -276,6 +311,8 @@ fn handle_command(
     let ctx = Context {
         fragments,
         config: &init.config,
+        options: &options,
+        format: init.output_format,
     };
 
     let result = match args.command {
@@ -301,6 +338,7 @@ fn handle_command(
             stdout,
         ),
         Command::Check => check(&ctx),
+        Command::Render { render } => render_release(&ctx, &render),
         Command::Tools {
             command: ToolsCommand::Init { path, force },
         } => definitions::init(&resolve_dir(root, &path), force),
@@ -308,8 +346,12 @@ fn handle_command(
 
     match result {
         Ok(output) => {
+            if let Some(note) = &output.note {
+                send_print(stdout, note, "chrome", "plain")?;
+            }
             if !output.text.is_empty() {
-                print(stdout, &output.text)?;
+                let format = if output.json { "json" } else { "plain" };
+                send_print(stdout, &output.text, "content", format)?;
             }
             send_result(stdout, output.code)
         }
@@ -609,12 +651,7 @@ fn identity(root: &Utf8Path, config: &Value) -> Option<String> {
 /// Paths are shown relative to the workspace root.
 fn check(ctx: &Context<'_>) -> Result<Output, String> {
     let fragments = &ctx.fragments;
-    if !fragments.dir.is_dir() {
-        return Err(format!(
-            "There is no fragments directory at {}; create it with `jp release init`.",
-            fragments.show(&fragments.dir)
-        ));
-    }
+    existing(fragments)?;
 
     let mut report = changelog::check(&fragments.dir).map_err(|error| error.to_string())?;
     for problem in &mut report.problems {
@@ -624,7 +661,86 @@ fn check(ctx: &Context<'_>) -> Result<Output, String> {
     Ok(Output {
         text: format!("{report}\n"),
         code: u8::from(!report.problems.is_empty()),
+        ..Output::default()
     })
+}
+
+/// Print a release's notes or upgrade guide, or the fragments no release has
+/// taken yet, as `render` asks.
+///
+/// Credits link to the configured forge, or to the one git's `origin` remote is
+/// on, and the configured headings name each type's section.
+/// An upgrade guide with no sections prints nothing, and says why on stderr.
+fn render_release(ctx: &Context<'_>, render: &Render) -> Result<Output, String> {
+    let default = if ctx.format.is_json() {
+        Format::Json
+    } else {
+        Format::Markdown
+    };
+    let view = render.view(default)?;
+
+    let fragments = &ctx.fragments;
+    existing(fragments)?;
+    let release = release::read(
+        &fragments.dir,
+        &render.part(),
+        ctx.options.forge,
+        &ctx.options.headings,
+    )
+    .map_err(|error| unreadable(fragments, error))?;
+    let text = view.render(&release, &ctx.options.headings)?;
+
+    let no_guide = text.is_empty() && view == View::UpgradeGuide;
+    let note = no_guide.then(|| match &render.version {
+        Some(version) => {
+            format!("{version} has no upgrade guide: none of its entries has an upgrade section.\n")
+        }
+        None => "The unreleased fragments have no upgrade guide: none has an upgrade section.\n"
+            .to_owned(),
+    });
+
+    Ok(Output {
+        json: view == View::Json,
+        text,
+        note,
+        code: 0,
+    })
+}
+
+/// Refuse a fragments directory that isn't there, saying how to make one.
+fn existing(fragments: &Fragments<'_>) -> Result<(), String> {
+    if fragments.dir.is_dir() {
+        return Ok(());
+    }
+
+    Err(format!(
+        "There is no fragments directory at {}; create it with `jp release init`.",
+        fragments.show(&fragments.dir)
+    ))
+}
+
+/// Why a release couldn't be read, with the paths it names shown from the
+/// workspace root.
+fn unreadable(fragments: &Fragments<'_>, error: ReleaseError) -> String {
+    let shown = |path: &Utf8Path| Utf8PathBuf::from(fragments.show(path));
+
+    match error {
+        ReleaseError::Read(ReadError::Problems(mut problems)) => {
+            for problem in &mut problems {
+                problem.path = shown(&problem.path);
+            }
+            format!(
+                "Fix these first, which `jp release check` reports too:\n{}",
+                ReadError::Problems(problems)
+            )
+        }
+        ReleaseError::Read(ReadError::NoRelease { dir, version }) => ReadError::NoRelease {
+            dir: shown(&dir),
+            version,
+        }
+        .to_string(),
+        error => error.to_string(),
+    }
 }
 
 /// Resolve a directory against the workspace root.
@@ -662,12 +778,22 @@ fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
 
 /// Print `text` on the host's content channel.
 fn print(stdout: &mut impl Write, text: &str) -> Result<(), String> {
+    send_print(stdout, text, "content", "plain")
+}
+
+/// Print `text`, written in `format`, on the host's `channel`.
+fn send_print(
+    stdout: &mut impl Write,
+    text: &str,
+    channel: &str,
+    format: &str,
+) -> Result<(), String> {
     send(
         stdout,
         &PluginToHost::Print(PrintMessage {
             text: text.to_owned(),
-            channel: "content".to_owned(),
-            format: "plain".into(),
+            channel: channel.to_owned(),
+            format: format.to_owned(),
             language: None,
         }),
     )

@@ -28,6 +28,7 @@ In disagreements between code and docs, the code is authoritative.
   - [Terms](#terms)
     - [Attachment](#attachment)
     - [Background Task](#background-task)
+    - [Change Request](#change-request)
     - [Changelog Fragment](#changelog-fragment)
     - [Checklist Item](#checklist-item)
     - [CommandConfig](#commandconfig)
@@ -54,6 +55,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Parent Ticket](#parent-ticket)
     - [Pinned Conversation](#pinned-conversation)
     - [Provider](#provider)
+    - [Release Notes](#release-notes)
     - [RFD](#rfd)
     - [Search Hit](#search-hit)
     - [Service Tier](#service-tier)
@@ -89,6 +91,16 @@ A task is two-phase: `run` (off the main critical path, cancellable, accumulates
 state) and `sync` (with `&mut Workspace`, commits the accumulated state).
 The handler lives at `Ctx::task_handler` and is drained exactly once per `jp`
 invocation, at the end of `jp_cli::lib::run`.
+
+### Change Request
+
+A forge's unit of review: a pull request on GitHub, a merge request on GitLab.
+A release's notes credit each [Changelog Fragment](#changelog-fragment) and
+[Highlight](#highlight) to the change requests that wrote or changed it before a
+release took it, read from the messages of the commits that brought them to the
+default branch, and credit the commit itself when its message names none.
+Read and linked by `changelog::forge`.
+See [RFD-122].
 
 ### Changelog Fragment
 
@@ -448,6 +460,17 @@ An LLM vendor integration — one of `anthropic`, `google`, `openai`,
 `openrouter`, `llamacpp`, `ollama`, `cerebras`, `deepseek`.
 Each implements the `Provider` trait in `jp_llm`.
 
+### Release Notes
+
+The document a release is read in: its overview, its
+[Highlights](#highlight), and every [Changelog Fragment](#changelog-fragment)
+grouped under its type's heading.
+A fragment with an upgrade section is marked as breaking and links to that
+section of the release's other document, its **upgrade guide**.
+Both are rendered from the release's directory by `changelog::markdown`, and
+printed by `jp release render`.
+See [RFD-122].
+
 ### RFD
 
 "Request for Discussion" — JP's design document format, stored in `docs/rfd/`.
@@ -619,5 +642,6 @@ See [RFD-031].
 [RFD-087]: ../rfd/087-session-scoped-active-workspace.md
 [RFD-096]: ../rfd/096-terminal-output-sanitization-for-untrusted-content.md
 [RFD-121]: ../rfd/121-changelog-fragments-and-validation.md
+[RFD-122]: ../rfd/122-release-pipeline.md
 [Turn Summary]: 00dxybc-conversation.md#turn-summary
 [`shlex::split`]: https://docs.rs/shlex
