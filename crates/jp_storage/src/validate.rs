@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, fs, time::SystemTime};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use jp_conversation::ConversationId;
@@ -7,7 +7,10 @@ use tracing::{debug, trace};
 
 use crate::{
     BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, IMPORT_STAGING_PREFIX, METADATA_FILE,
-    Storage, dir_entries, trash::trash_conversation, value::cleanup_tmp_files,
+    Storage, dir_entries,
+    scan::{DirStamps, EventsSummary, SCAN_CACHE_FILE, ScanCache, ScannedDir},
+    trash::trash_conversation,
+    value::cleanup_tmp_files,
 };
 
 /// Result of validating all conversation directories across storage roots.
@@ -107,6 +110,10 @@ impl Storage {
     /// mismatches) are handled at load time by
     /// [`ConversationStream::sanitize`].
     ///
+    /// A directory whose files still carry the size and modification time
+    /// recorded when it last passed is not read again.
+    /// Those records persist in user-local storage across processes.
+    ///
     /// Files and dot-prefixed directories (e.g., `.trash/`) are silently
     /// skipped.
     ///
@@ -116,7 +123,19 @@ impl Storage {
     pub fn validate_conversations(&self) -> ValidationResult {
         trace!("Validating conversations.");
 
+        let scan_started = SystemTime::now();
+        let cache_path = self
+            .user
+            .as_ref()
+            .map(|user| user.join(CONVERSATIONS_DIR))
+            .filter(|dir| dir.is_dir())
+            .map(|dir| dir.join(SCAN_CACHE_FILE));
+        if let Some(path) = &cache_path {
+            self.scan.load(path);
+        }
+
         let mut result = ValidationResult::default();
+        let mut scanned = Vec::new();
 
         for root in [Some(&self.root), self.user.as_ref()] {
             let Some(root) = root else {
@@ -129,7 +148,12 @@ impl Storage {
             }
 
             self.cleanup_import_staging(&conversations_dir);
-            validate_root(&conversations_dir, &mut result);
+            validate_root(&conversations_dir, &self.scan, &mut result, &mut scanned);
+        }
+
+        self.scan.extend(scanned.iter().cloned());
+        if let Some(path) = &cache_path {
+            self.scan.save(path, scanned, scan_started);
         }
 
         debug!(
@@ -194,7 +218,15 @@ pub(crate) fn trash_invalid_conversation(entry: &InvalidConversation) -> crate::
     trash_conversation(&entry.conversations_dir, &entry.dirname, &error_msg)
 }
 
-fn validate_root(conversations_dir: &Utf8Path, result: &mut ValidationResult) {
+/// Validate every conversation directory under `conversations_dir`.
+///
+/// Directories that pass and could be stamped are appended to `scanned`.
+fn validate_root(
+    conversations_dir: &Utf8Path,
+    cache: &ScanCache,
+    result: &mut ValidationResult,
+    scanned: &mut Vec<(Utf8PathBuf, ScannedDir)>,
+) {
     trace!(root = %conversations_dir, "Validating conversation root.");
 
     let entries: Vec<_> = dir_entries(conversations_dir)
@@ -204,34 +236,53 @@ fn validate_root(conversations_dir: &Utf8Path, result: &mut ValidationResult) {
         })
         .collect();
 
-    for entry in &entries {
-        cleanup_tmp_files(entry.path());
-    }
-
     let outcomes: Vec<_> = entries
         .par_iter()
-        .map(|entry| validate_entry(conversations_dir, entry.file_name(), entry.path()))
+        .map(|entry| {
+            cleanup_tmp_files(entry.path());
+            validate_entry(conversations_dir, entry.file_name(), entry.path(), cache)
+        })
         .collect();
 
-    for outcome in outcomes {
+    for (entry, outcome) in entries.into_iter().zip(outcomes) {
         match outcome {
-            Ok(v) => result.valid.push(v),
+            Ok((valid, scan)) => {
+                result.valid.push(valid);
+                if let Some(scan) = scan {
+                    scanned.push((entry.into_path(), scan));
+                }
+            }
             Err(e) => result.invalid.push(e),
         }
     }
 }
 
 /// Validate a single conversation directory entry.
+///
+/// Returns the directory's scan alongside the result, unless one of its files
+/// could not be stamped.
 fn validate_entry(
     conversations_dir: &Utf8Path,
     dirname: &str,
     entry_path: &Utf8Path,
-) -> Result<ValidConversation, InvalidConversation> {
+    cache: &ScanCache,
+) -> Result<(ValidConversation, Option<ScannedDir>), InvalidConversation> {
     let id = ConversationId::try_from_dirname(dirname).map_err(|_| InvalidConversation {
         conversations_dir: conversations_dir.to_path_buf(),
         error: ValidationError::InvalidDirname,
         dirname: dirname.to_owned(),
     })?;
+    let valid = ValidConversation {
+        id,
+        dirname: dirname.to_owned(),
+    };
+
+    // Stamped before anything is read: should a file change mid-check, the
+    // recorded stamp is the older one and the next scan reads it again.
+    let stamps = DirStamps::of(entry_path);
+    if let Some(scan) = cache.get(entry_path, &stamps) {
+        return Ok((valid, Some(scan)));
+    }
 
     let metadata_path = entry_path.join(METADATA_FILE);
     if !metadata_path.is_file() {
@@ -267,16 +318,13 @@ fn validate_entry(
             dirname: dirname.to_owned(),
         });
     }
-    validate_events(&events_path).map_err(|source| InvalidConversation {
+    let summary = validate_events(&events_path).map_err(|source| InvalidConversation {
         conversations_dir: conversations_dir.to_path_buf(),
         error: ValidationError::CorruptEvents { source },
         dirname: dirname.to_owned(),
     })?;
 
-    Ok(ValidConversation {
-        id,
-        dirname: dirname.to_owned(),
-    })
+    Ok((valid, stamps.scanned(summary)))
 }
 
 /// Confirm `metadata.json` is a valid JSON object.
@@ -294,38 +342,24 @@ fn validate_metadata(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + 
 fn validate_json_file(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use serde::de::IgnoredAny;
 
-    let buf = std::fs::read(path)?;
+    let buf = fs::read(path)?;
     serde_json::from_slice::<IgnoredAny>(&buf)?;
     Ok(())
 }
 
 /// Confirm `events.json` is a JSON array of objects with `timestamp` and `type`
-/// fields.
+/// fields, and summarize it from the same parse.
 ///
 /// All elements in the array — both `ConfigDelta` and `ConversationEvent` —
 /// serialize with `timestamp` and `type` as top-level fields.
 /// `type` is the tag for the flattened `EventKind` enum on events, and an
 /// explicit `"config_delta"` tag on config deltas.
-///
-/// Uses [`IgnoredAny`] for field values — the parser skips over them without
-/// allocating.
 /// This confirms the structural shape without materializing any event data.
-///
-/// [`IgnoredAny`]: serde::de::IgnoredAny
-fn validate_events(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use serde::de::IgnoredAny;
-
-    #[derive(serde::Deserialize)]
-    struct EventProbe {
-        #[expect(dead_code)]
-        timestamp: IgnoredAny,
-        #[expect(dead_code)]
-        r#type: IgnoredAny,
-    }
-
-    let buf = std::fs::read(path)?;
-    serde_json::from_slice::<Vec<EventProbe>>(&buf)?;
-    Ok(())
+fn validate_events(
+    path: &Utf8Path,
+) -> Result<EventsSummary, Box<dyn std::error::Error + Send + Sync>> {
+    let buf = fs::read(path)?;
+    Ok(EventsSummary::parse(&buf)?)
 }
 
 #[cfg(test)]

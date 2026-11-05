@@ -7,6 +7,7 @@ pub mod resource_lock;
 pub mod value;
 
 pub mod load;
+mod scan;
 pub mod trash;
 pub mod validate;
 
@@ -23,6 +24,7 @@ use tracing::{trace, warn};
 use crate::{
     backend::Projection,
     error::Result,
+    scan::ScanCache,
     value::{copy_file, write_json},
 };
 
@@ -84,6 +86,9 @@ struct Storage {
     ///
     /// If unset, user storage is disabled.
     user: Option<Utf8PathBuf>,
+
+    /// Conversation directories already validated, shared by clones.
+    scan: ScanCache,
 }
 
 impl Storage {
@@ -103,7 +108,11 @@ impl Storage {
             trace!(path = %root, "Created storage directory.");
         }
 
-        Ok(Self { root, user: None })
+        Ok(Self {
+            root,
+            user: None,
+            scan: ScanCache::default(),
+        })
     }
 
     /// Configure user-local storage for workspace `id` under `root`.
@@ -401,8 +410,9 @@ impl Storage {
             }
 
             let mut conversation: Conversation = load_json(&path)?;
-            (conversation.events_count, conversation.last_event_at) =
-                crate::load::load_count_and_timestamp_events(&conv_dir).unwrap_or((0, None));
+            let summary = self.events_summary(&conv_dir);
+            conversation.events_count = summary.count;
+            conversation.last_event_at = summary.last_event_at;
 
             return Ok(conversation);
         }
