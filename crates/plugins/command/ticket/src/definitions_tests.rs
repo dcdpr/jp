@@ -231,7 +231,7 @@ fn sync_offers_each_tool_its_labels_found_by_source() {
         }
     });
 
-    let output = sync(dir.path(), &config, &vocabulary()).unwrap();
+    let output = sync(dir.path(), &config, &vocabulary(), false).unwrap();
 
     let path = dir.path().join(SYNCED_FILE);
     assert_eq!(
@@ -295,7 +295,7 @@ fn sync_leaves_out_a_tool_that_declares_no_labels() {
         "ticket_edit": { "source": "plugin.command.ticket.edit" }
     }}});
 
-    let output = sync(dir.path(), &config, &vocabulary()).unwrap();
+    let output = sync(dir.path(), &config, &vocabulary(), false).unwrap();
 
     let path = dir.path().join(SYNCED_FILE);
     assert_eq!(
@@ -329,7 +329,7 @@ fn sync_describes_the_bounds_to_the_tools_that_write_labels() {
     )
     .unwrap();
 
-    sync(dir.path(), &config, &vocabulary).unwrap();
+    sync(dir.path(), &config, &vocabulary, false).unwrap();
 
     let lists = r#"
 [conversation.tools.ticket_create.parameters.labels]
@@ -372,7 +372,7 @@ fn sync_with_an_empty_vocabulary_offers_no_lists() {
         "ticket_create": labelled("plugin.command.ticket.create")
     }}});
 
-    sync(dir.path(), &config, &Vocabulary::default()).unwrap();
+    sync(dir.path(), &config, &Vocabulary::default(), false).unwrap();
 
     assert_eq!(
         fs::read_to_string(dir.path().join(SYNCED_FILE)).unwrap(),

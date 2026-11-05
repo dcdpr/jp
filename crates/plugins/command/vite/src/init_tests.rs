@@ -88,13 +88,13 @@ fn writing_creates_the_files_and_their_directories() {
     let root = Utf8TempDir::new().unwrap();
     let site = root.path().join("docs");
 
-    let written = write(root.path(), &site, &missing(&site), &fill()).unwrap();
+    let written = write(root.path(), &site, &plan(&site, &fill()).unwrap(), &fill()).unwrap();
 
     assert_eq!(written, [
-        "docs/package.json",
-        "docs/.vitepress/config.mts",
-        "docs/.vitepress/theme/index.js",
-        "docs/index.md",
+        "Created docs/package.json",
+        "Created docs/.vitepress/config.mts",
+        "Created docs/.vitepress/theme/index.js",
+        "Created docs/index.md",
     ]);
     let theme = fs::read_to_string(site.join(".vitepress/theme/index.js")).unwrap();
     assert!(
@@ -106,16 +106,56 @@ fn writing_creates_the_files_and_their_directories() {
     assert!(theme.contains("    enhanceApp,\n"), "{theme}");
 }
 
-/// A file that appeared after the templates were picked is not replaced.
+/// A file found the same is left alone, and one found different is overwritten.
 #[test]
-fn writing_refuses_a_file_that_exists() {
+fn the_plan_says_which_files_writing_changes() {
     let root = Utf8TempDir::new().unwrap();
     let site = root.path().join("docs");
-    let templates = missing(&site);
+    fs::create_dir_all(&site).unwrap();
+    fs::write(
+        site.join("index.md"),
+        render(&template("index.md"), &fill()),
+    )
+    .unwrap();
+    fs::write(site.join("package.json"), "{}").unwrap();
+
+    let planned = plan(&site, &fill()).unwrap();
+    assert_eq!(
+        planned
+            .iter()
+            .map(|(template, existing)| (template.path, *existing))
+            .collect::<Vec<_>>(),
+        [
+            ("package.json", Existing::Differs),
+            (".vitepress/config.mts", Existing::Missing),
+            (".vitepress/theme/index.js", Existing::Missing),
+            ("index.md", Existing::Same),
+        ]
+    );
+
+    let written = write(root.path(), &site, &planned, &fill()).unwrap();
+
+    assert_eq!(written, [
+        "Overwrote docs/package.json",
+        "Created docs/.vitepress/config.mts",
+        "Created docs/.vitepress/theme/index.js",
+    ]);
+    assert_eq!(
+        fs::read_to_string(site.join("package.json")).unwrap(),
+        render(&template("package.json"), &fill())
+    );
+}
+
+/// A file that appeared after the templates were planned is not replaced.
+#[test]
+fn writing_refuses_a_file_that_appeared_since_the_plan() {
+    let root = Utf8TempDir::new().unwrap();
+    let site = root.path().join("docs");
+    let planned = plan(&site, &fill()).unwrap();
     fs::create_dir_all(&site).unwrap();
     fs::write(site.join("index.md"), "Mine").unwrap();
 
-    let error = write(root.path(), &site, &templates, &fill()).unwrap_err();
+    let error = write(root.path(), &site, &planned, &fill()).unwrap_err();
 
     assert!(
         error.starts_with(&format!("{}: ", site.join("index.md"))),

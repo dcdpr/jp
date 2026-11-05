@@ -1431,6 +1431,54 @@ fn import_requires_a_repository() {
     }
 }
 
+#[test]
+fn tools_init_takes_force() {
+    for (args, expected) in [
+        (&["tools", "init", "config/tools"][..], false),
+        (&["tools", "init", "config/tools", "--force"][..], true),
+    ] {
+        match parse(args).unwrap().command {
+            Command::Tools {
+                command: ToolsCommand::Init { path, force },
+            } => {
+                assert_eq!(path, "config/tools");
+                assert_eq!(force, expected, "{args:?}");
+            }
+            other => panic!("expected tools init, got {other:?}"),
+        }
+    }
+}
+
+/// `--force` overwrites a definition the project changed, which `init` without
+/// it refuses to touch.
+#[test]
+fn tools_init_with_force_overwrites_a_changed_definition() {
+    let dir = Utf8TempDir::new().unwrap();
+    let tools = dir.path().join("config/tools");
+    fs::create_dir_all(&tools).unwrap();
+    fs::write(tools.join("create.toml"), "# mine\n").unwrap();
+    let init = |force| {
+        run_in(dir.path(), Command::Tools {
+            command: ToolsCommand::Init {
+                path: Utf8PathBuf::from("config/tools"),
+                force,
+            },
+        })
+    };
+
+    assert!(init(false).is_err());
+    assert_eq!(
+        fs::read_to_string(tools.join("create.toml")).unwrap(),
+        "# mine\n"
+    );
+
+    init(true).unwrap();
+    assert_eq!(
+        fs::read_to_string(tools.join("create.toml")).unwrap(),
+        include_str!("../tools/create.toml")
+    );
+}
+
 /// The definitions directory is taken against the workspace root, like `--dir`.
 #[test]
 fn tools_init_writes_into_a_directory_under_the_root() {
@@ -1439,6 +1487,7 @@ fn tools_init_writes_into_a_directory_under_the_root() {
     let output = run_in(dir.path(), Command::Tools {
         command: ToolsCommand::Init {
             path: Utf8PathBuf::from("config/tools"),
+            force: false,
         },
     })
     .unwrap();

@@ -1,5 +1,3 @@
-use std::fs;
-
 use camino_tempfile::Utf8TempDir;
 
 use super::*;
@@ -19,7 +17,7 @@ fn git(dir: &Utf8Path, args: &[&str]) {
     );
 }
 
-/// A repository with one commit holding two pages in `sub/docs/rfd/`.
+/// An empty repository.
 ///
 /// The config is set locally so the machine's identity and signing setup can't
 /// reach in and change what the test does.
@@ -30,106 +28,7 @@ fn repository() -> Utf8TempDir {
     git(top.path(), &["config", "user.email", "tester@example.com"]);
     git(top.path(), &["config", "commit.gpgsign", "false"]);
 
-    fs::create_dir_all(top.path().join("sub/docs/rfd")).unwrap();
-    fs::write(top.path().join("sub/docs/rfd/index.md"), "Index").unwrap();
-    fs::write(top.path().join("sub/docs/rfd/priority.md"), "Priority").unwrap();
-    git(top.path(), &["add", "."]);
-    git(top.path(), &["commit", "--quiet", "-m", "Pages"]);
-
     top
-}
-
-#[test]
-fn the_prefix_is_the_root_below_the_top_of_the_work_tree() {
-    let top = repository();
-
-    assert_eq!(prefix(top.path()), Ok(Some(String::new())));
-    assert_eq!(prefix(&top.path().join("sub")), Ok(Some("sub/".to_owned())));
-}
-
-#[test]
-fn a_directory_outside_a_work_tree_has_no_prefix() {
-    let dir = Utf8TempDir::new().unwrap();
-
-    assert_eq!(prefix(dir.path()), Ok(None));
-}
-
-/// What git recorded can be restored; a change it hasn't, or a file it doesn't
-/// track, can't.
-#[test]
-fn modified_and_untracked_files_are_unrecorded() {
-    let top = repository();
-    let root = top.path().join("sub");
-    fs::write(root.join("docs/rfd/index.md"), "Edited").unwrap();
-    fs::write(root.join("docs/rfd/extra.md"), "New").unwrap();
-
-    let found = unrecorded(&root, "sub/", &[
-        Utf8PathBuf::from("docs/rfd/index.md"),
-        Utf8PathBuf::from("docs/rfd/priority.md"),
-        Utf8PathBuf::from("docs/rfd/extra.md"),
-    ])
-    .unwrap();
-
-    assert_eq!(found, [
-        (
-            Utf8PathBuf::from("docs/rfd/extra.md"),
-            Unrecorded::Untracked
-        ),
-        (Utf8PathBuf::from("docs/rfd/index.md"), Unrecorded::Modified),
-    ]);
-}
-
-#[test]
-fn a_staged_change_is_still_unrecorded() {
-    let top = repository();
-    fs::write(top.path().join("sub/docs/rfd/index.md"), "Staged").unwrap();
-    git(top.path(), &["add", "sub/docs/rfd/index.md"]);
-
-    let found = unrecorded(top.path(), "", &[Utf8PathBuf::from(
-        "sub/docs/rfd/index.md",
-    )])
-    .unwrap();
-
-    assert_eq!(found, [(
-        Utf8PathBuf::from("sub/docs/rfd/index.md"),
-        Unrecorded::Modified
-    )]);
-}
-
-/// `git status` leaves ignored files out unless asked, and git has no more copy
-/// of an ignored file than of any other untracked one.
-#[test]
-fn ignored_files_are_untracked() {
-    let top = repository();
-    let root = top.path().join("sub");
-    fs::write(
-        top.path().join(".gitignore"),
-        "sub/docs/generated/\nsub/docs/rfd/notes.md\n",
-    )
-    .unwrap();
-    git(top.path(), &["add", ".gitignore"]);
-    git(top.path(), &["commit", "--quiet", "-m", "Ignore"]);
-    fs::create_dir_all(root.join("docs/generated")).unwrap();
-    fs::write(root.join("docs/generated/config.mjs"), "Edited by hand").unwrap();
-    fs::write(root.join("docs/rfd/notes.md"), "Notes").unwrap();
-
-    let found = unrecorded(&root, "sub/", &[
-        Utf8PathBuf::from("docs/generated/config.mjs"),
-        Utf8PathBuf::from("docs/rfd/notes.md"),
-        Utf8PathBuf::from("docs/rfd/index.md"),
-    ])
-    .unwrap();
-
-    assert_eq!(found, [
-        (
-            Utf8PathBuf::from("docs/generated/config.mjs"),
-            Unrecorded::Untracked
-        ),
-        (
-            Utf8PathBuf::from("docs/rfd/notes.md"),
-            Unrecorded::Untracked
-        ),
-    ]);
 }
 
 #[test]
@@ -161,16 +60,4 @@ fn the_origin_remote_is_read_as_configured() {
         "refs/remotes/origin/trunk",
     ]);
     assert_eq!(remote(top.path()).branch.as_deref(), Some("trunk"));
-}
-
-#[test]
-fn status_entries_are_read_below_the_prefix() {
-    let output =
-        "?? sub/docs/new.md\0 M sub/docs/index.md\0!! sub/docs/ignored.md\0M  other/file.md\0";
-
-    assert_eq!(parse_status(output, "sub/"), [
-        (Utf8PathBuf::from("docs/new.md"), Unrecorded::Untracked),
-        (Utf8PathBuf::from("docs/index.md"), Unrecorded::Modified),
-        (Utf8PathBuf::from("docs/ignored.md"), Unrecorded::Untracked),
-    ]);
 }

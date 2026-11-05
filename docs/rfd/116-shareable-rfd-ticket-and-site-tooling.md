@@ -256,7 +256,7 @@ jp rfd stop ID
 jp rfd list [CATEGORY]
 jp rfd show ID [--body]
 jp rfd rank ID (--before OTHER | --after OTHER | --backlog)
-jp rfd init
+jp rfd init [--force]
 ```
 
 The justfile recipes define the expected repository changes for each command,
@@ -355,6 +355,9 @@ Milestones are created, renamed, and deleted in the web UI.
 
 `init` creates the RFD directory, category templates, an empty `.priority.json`,
 and the `drafts/` subdirectory.
+When run again, it overwrites the templates as described in [Overwriting
+Files](#overwriting-files); an existing `.priority.json` holds the project's
+ranking and is never modified.
 It does not generate an RFD 001, because each project defines its own RFD
 process.
 
@@ -467,7 +470,8 @@ The `source` field connects the two: `[conversation.tools.track]` with `source =
 "plugin.command.ticket.create"` invokes the plugin's `create` handler.
 
 `tools init PATH` writes default tool definitions into the directory at `PATH`,
-one file per tool, and refuses to overwrite existing files.
+one file per tool, overwriting any existing files that differ as described in
+[Overwriting Files](#overwriting-files).
 `PATH` has no default because each project chooses where to store its tool
 configurations; the workspace configuration must load `PATH` for the tools to
 take effect.
@@ -489,6 +493,10 @@ bounds in the `ticket_create` and `ticket_edit` parameter descriptions and marks
 model sees the constraint before its first call.
 `tools sync` overwrites only its own generated file in full, preserving
 hand-edited tool definitions while removing entries for deleted tools.
+The file is overwritten as described in [Overwriting Files](#overwriting-files).
+A file at that path written by another plugin's `tools sync` or by hand is
+overwritten only with `--force`, even when git could restore it, so plugins
+pointed at the same directory do not overwrite each other's file on every sync.
 It replaces `just ticket-labels-sync`.
 
 Both `tools init` and `tools sync` will be retired once plugins can provide
@@ -502,8 +510,10 @@ theme entry point, and a homepage.
 It prompts for the site's title and description via the host's composer and
 writes them into `config.mts` and the homepage, so a new site does not start
 with JP's branding.
-Like the other `init` commands, `jp vite init` refuses to overwrite existing
-files.
+When run again, it prompts for the title and description again and overwrites
+the files as described in [Overwriting Files](#overwriting-files), because it
+needs both values to determine whether `config.mts` and the homepage already
+match the expected content.
 
 Site files divide into two categories:
 
@@ -514,7 +524,7 @@ Site files divide into two categories:
   and all content pages (including the RFD and ticket landing pages).
   `config.mts` imports and merges the `jp-vite` config fragment, and the theme
   entry point registers the components from `jp-vite/theme`.
-  `init` creates both files once and never modifies them again.
+  `sync` never modifies these files; only re-running `init` updates them.
 
 `sync` creates any missing workflow landing pages: the index, priority board,
 and drafts index pages in the RFD directory, and the index and board pages in
@@ -552,9 +562,8 @@ specify a branch (replacing the hardcoded `main` branch in JP's existing site).
 the binary and creates any missing workflow pages, including pages for workflows
 enabled since the previous sync.
 Before writing, `sync` lists the target files and prompts once for confirmation.
-`sync` requires a git repository and aborts if any owned file has unstaged
-modifications or is untracked, because git cannot restore uncommitted edits.
-Passing `--force` overwrites modified or untracked files anyway.
+It overwrites or removes owned files as described in [Overwriting
+Files](#overwriting-files).
 On a clean working tree, `git diff` shows the synced changes and `git checkout`
 restores the previous version.
 Passing `--yes` skips the confirmation prompt for scripts without implying
@@ -607,6 +616,31 @@ that runs longer than 15 seconds.
 
 All styling and component updates land in `jp vite` and reach adopting projects
 on their next `jp vite sync`.
+
+### Overwriting Files
+
+Every command that writes configuration, definitions, or site files into a
+project follows one rule when a file it writes already exists and holds
+something else: `jp ticket tools init` and `tools sync`, the same pair in `jp
+rfd` and `jp wiki`, `jp rfd init` for its templates, and `jp vite init` and
+`sync`.
+
+- In a git work tree, a file git can restore is overwritten: one that is
+  tracked, with no changes since the last commit.
+- A file with changes since the last commit, staged or not, or one git doesn't
+  track or ignores, is refused.
+- Outside a git work tree, nothing can restore a file, so every one is refused.
+- `--force` overwrites a refused file anyway.
+
+A file that doesn't exist, or already holds what the command writes, loses
+nothing and is never refused.
+A refusal lists each file with why git couldn't restore it, and writes nothing.
+The `overwrite` crate in `crates/internal` decides, so the commands can't drift
+apart.
+
+Files that hold a project's state rather than what a command ships, such as
+`.priority.json` and a directory's epoch file, are created when missing and
+never overwritten.
 
 ### Version Skew
 

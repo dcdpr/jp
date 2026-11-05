@@ -287,7 +287,16 @@ enum Command {
 
     /// Set up the RFD directory: its drafts directory, a template for each
     /// category, and an empty priority board.
-    Init,
+    ///
+    /// A template that holds something else is overwritten when git can restore
+    /// it: tracked, with no changes since the last commit.
+    /// Otherwise, or outside a git work tree, it is refused unless `--force`.
+    /// A priority board that exists is never touched.
+    Init {
+        /// Overwrite templates git couldn't restore.
+        #[arg(long)]
+        force: bool,
+    },
 
     /// Write the tool definitions that offer the RFDs to the assistant.
     Tools {
@@ -300,12 +309,19 @@ enum Command {
 enum ToolsCommand {
     /// Write a starting set of tool definitions, one file per tool.
     ///
-    /// Refuses to overwrite a file that exists.
+    /// A file that already holds the shipped definition is left as it is.
+    /// One that holds anything else is overwritten when git can restore it:
+    /// tracked, with no changes since the last commit.
+    /// Otherwise, or outside a git work tree, it is refused unless `--force`.
     /// The workspace configuration has to load the directory for the tools to
     /// appear.
     Init {
         /// Directory to write them into, relative to the workspace root.
         path: Utf8PathBuf,
+
+        /// Overwrite files git couldn't restore.
+        #[arg(long)]
+        force: bool,
     },
 
     /// Regenerate what the tool definitions mirror from configuration.
@@ -316,6 +332,11 @@ enum ToolsCommand {
     Sync {
         /// Directory holding the definitions, relative to the workspace root.
         path: Utf8PathBuf,
+
+        /// Overwrite the synced file when git couldn't restore it, or when
+        /// another plugin wrote it.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -725,18 +746,19 @@ fn execute<R: BufRead, W: Write>(
             (None, None) => Place::Backlog,
         }),
 
-        Command::Init => cmd::init::init(paths, &ctx.options.categories),
+        Command::Init { force } => cmd::init::init(paths, &ctx.options.categories, force),
 
         Command::Tools {
-            command: ToolsCommand::Init { path },
-        } => definitions::init(&resolve_dir(&paths.root, &path)),
+            command: ToolsCommand::Init { path, force },
+        } => definitions::init(&resolve_dir(&paths.root, &path), force),
 
         Command::Tools {
-            command: ToolsCommand::Sync { path },
+            command: ToolsCommand::Sync { path, force },
         } => definitions::sync(
             &resolve_dir(&paths.root, &path),
             ctx.config,
             &ctx.options.categories,
+            force,
         ),
     }
 }

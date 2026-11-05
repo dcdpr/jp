@@ -40,19 +40,30 @@ const SYNCED_NOTES: &str = "\
 ";
 
 /// Write the starting definitions into `dir`, creating it if needed.
-pub(crate) fn init(dir: &Utf8Path) -> Result<Output, String> {
-    DEFINITIONS.init(dir).map(Output::from)
+///
+/// A file git couldn't restore is overwritten only with `force`.
+pub(crate) fn init(dir: &Utf8Path, force: bool) -> Result<Output, String> {
+    DEFINITIONS.init(dir, force).map(Output::from)
 }
 
 /// Write the categories into the schemas of the configured tools that take one,
 /// as `dir`'s synced file.
+///
+/// A synced file git couldn't restore is overwritten only with `force`.
 pub(crate) fn sync(
     dir: &Utf8Path,
     config: &Value,
     categories: &[String],
+    force: bool,
 ) -> Result<Output, String> {
     DEFINITIONS
-        .sync(dir, config, SYNCED_NOTES, |tool| mirrors(tool, categories))
+        .sync(
+            dir,
+            config,
+            SYNCED_NOTES,
+            |tool| mirrors(tool, categories),
+            force,
+        )
         .map(Output::from)
 }
 

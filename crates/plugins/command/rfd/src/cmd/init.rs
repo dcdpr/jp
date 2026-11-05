@@ -2,11 +2,17 @@
 //!
 //! Creates the directory and its drafts directory, a template for each
 //! configured category, and an empty priority board.
-//! What is already there is left as it is, so running it again only adds what
-//! is missing, such as the template for a category added to the configuration.
+//! Running it again writes the templates again, overwriting one that holds
+//! something else only as the `overwrite` crate allows: when git can restore
+//! it, or with `--force`.
+//! The priority board is the project's ranking, not a template, so one that
+//! exists is never touched.
 //! It writes no RFD 001: the process document is each project's own.
 
 use std::fs;
+
+use camino::Utf8PathBuf;
+use overwrite::Existing;
 
 use super::capitalized;
 use crate::{
@@ -28,7 +34,34 @@ const TEMPLATES: [(&str, &str); 4] = [
 const OTHER: &str = include_str!("../../templates/other.md");
 
 /// Set up the RFD directory for `categories`.
-pub(crate) fn init(paths: &Paths, categories: &[String]) -> Result<Output, String> {
+///
+/// A template git couldn't restore is overwritten only with `force`; without
+/// it, nothing is written.
+pub(crate) fn init(paths: &Paths, categories: &[String], force: bool) -> Result<Output, String> {
+    let mut planned = vec![];
+    for category in categories {
+        let name = Utf8PathBuf::from(format!("000-{category}-template.md"));
+        let path = paths.rfds.join(&name);
+        let text = template(category);
+        let existing = overwrite::existing(&path, paths.formatting.apply(&path, &text).as_bytes())?;
+        planned.push((name, text, existing));
+    }
+
+    if !force {
+        let differing: Vec<Utf8PathBuf> = planned
+            .iter()
+            .filter(|(.., existing)| *existing == Existing::Differs)
+            .map(|(name, ..)| name.clone())
+            .collect();
+        let unrecorded: Vec<_> = overwrite::unrecorded(&paths.rfds, &differing)?
+            .into_iter()
+            .map(|(name, why)| (Utf8PathBuf::from(paths.show(&paths.rfds.join(name))), why))
+            .collect();
+        if !unrecorded.is_empty() {
+            return Err(overwrite::refusal("jp rfd init", &unrecorded));
+        }
+    }
+
     let mut output = Output::default();
 
     for dir in [paths.rfds.clone(), paths.drafts()] {
@@ -41,15 +74,22 @@ pub(crate) fn init(paths: &Paths, categories: &[String]) -> Result<Output, Strin
             .push_str(&format!("Created {}/\n", paths.show(&dir)));
     }
 
-    for category in categories {
-        let path = paths.rfds.join(format!("000-{category}-template.md"));
-        if path.exists() {
-            continue;
-        }
-        paths.create(&path, &template(category))?;
+    for (name, text, existing) in planned {
+        let path = paths.rfds.join(name);
+        let verb = match existing {
+            Existing::Same => continue,
+            Existing::Missing => {
+                paths.create(&path, &text)?;
+                "Wrote"
+            }
+            Existing::Differs => {
+                paths.write(&path, &text)?;
+                "Overwrote"
+            }
+        };
         output
             .text
-            .push_str(&format!("Wrote {}\n", paths.show(&path)));
+            .push_str(&format!("{verb} {}\n", paths.show(&path)));
     }
 
     let board = paths.rfds.join(PRIORITY_FILE);

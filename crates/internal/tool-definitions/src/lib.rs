@@ -15,6 +15,9 @@
 //!   It owns a file of its own, [`SYNCED_FILE`], and rewrites it whole, so
 //!   edits to the definitions survive it.
 //!
+//! Both overwrite a file that holds something else only as the `overwrite`
+//! crate allows: when git can restore it, or with `--force`.
+//!
 //! Tools are found by their `source`, not by their key, so a tool a project
 //! renames in its configuration gets what it takes under the name it has there.
 
@@ -25,9 +28,10 @@ use std::{
     io::{self, Write as _},
 };
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use jp_label::Vocabulary;
 pub use labels::Role;
+use overwrite::{Existing, Unrecorded};
 use serde_json::Value;
 
 /// The file `tools sync` writes, inside the definitions directory.
@@ -145,36 +149,51 @@ impl Definitions {
     /// Write the starting definitions into `dir`, creating it if needed, and
     /// say what was written.
     ///
-    /// Refuses before writing anything when one of the files is already there.
-    pub fn init(&self, dir: &Utf8Path) -> Result<String, String> {
-        let existing: Vec<String> = self
-            .files
-            .iter()
-            .map(|(name, _)| dir.join(name))
-            .filter(|path| path.exists())
-            .map(|path| path.to_string())
-            .collect();
-        if !existing.is_empty() {
-            return Err(format!(
-                "Refusing to overwrite {}. Move them aside first.",
-                existing.join(", ")
-            ));
+    /// A file that already holds its shipped definition is left as it is.
+    /// One that holds anything else is overwritten when git can restore it, or
+    /// with `force`; otherwise `init` refuses before writing anything.
+    pub fn init(&self, dir: &Utf8Path, force: bool) -> Result<String, String> {
+        let mut planned = vec![];
+        for (name, content) in self.files {
+            let path = dir.join(name);
+            let existing = overwrite::existing(&path, content.as_bytes())?;
+            planned.push((*name, path, *content, existing));
+        }
+
+        if !force {
+            let differing: Vec<Utf8PathBuf> = planned
+                .iter()
+                .filter(|(.., existing)| *existing == Existing::Differs)
+                .map(|(name, ..)| Utf8PathBuf::from(*name))
+                .collect();
+            refuse_unrecorded(
+                dir,
+                &differing,
+                &format!("jp {} tools init {dir}", self.plugin),
+            )?;
         }
 
         fs::create_dir_all(dir).map_err(|error| format!("failed to create {dir}: {error}"))?;
 
         let mut text = String::new();
-        for (name, content) in self.files {
-            let path = dir.join(name);
-            // `create_new` rather than a plain write, so a file that appeared
-            // since the check above is still not overwritten.
-            OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-                .and_then(|mut file| file.write_all(content.as_bytes()))
-                .map_err(|error| format!("failed to write {path}: {error}"))?;
-            text.push_str(&format!("Wrote {path}\n"));
+        for (_, path, content, existing) in planned {
+            let written = match existing {
+                Existing::Same => {
+                    text.push_str(&format!("Unchanged {path}\n"));
+                    continue;
+                }
+                Existing::Differs => fs::write(&path, content).map(|()| "Overwrote"),
+                // `create_new` rather than a plain write, so a file that
+                // appeared since it was read is still not overwritten.
+                Existing::Missing => OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .and_then(|mut file| file.write_all(content.as_bytes()))
+                    .map(|()| "Wrote"),
+            };
+            let verb = written.map_err(|error| format!("failed to write {path}: {error}"))?;
+            text.push_str(&format!("{verb} {path}\n"));
         }
 
         text.push_str(&format!(
@@ -227,30 +246,44 @@ impl Definitions {
     /// parameter without a type, which leaves the tool out of every
     /// conversation.
     /// What was left out is named.
+    ///
+    /// A synced file that already holds what `sync` would write is left
+    /// untouched.
+    /// One that holds something else is overwritten when git can restore it, or
+    /// with `force`.
+    /// One this plugin's `tools sync` didn't write is overwritten only with
+    /// `force`, so plugins pointed at one directory don't overwrite each
+    /// other's.
     pub fn sync<'a>(
         &self,
         dir: &Utf8Path,
         config: &Value,
         notes: &str,
         mirrors: impl Fn(&str) -> Vec<Mirror<'a>>,
+        force: bool,
     ) -> Result<String, String> {
         if !dir.is_dir() {
             return Err(format!("{dir} is not a directory."));
         }
 
+        let command = format!("jp {} tools sync {dir}", self.plugin);
         let header = self.header();
         let path = dir.join(SYNCED_FILE);
-        match fs::read_to_string(&path) {
-            Ok(existing) if !existing.starts_with(&header) => {
-                return Err(format!(
-                    "{path} was not written by `jp {} tools sync`, so it is left alone. Move it \
-                     aside first.",
-                    self.plugin
-                ));
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        let existing = match fs::read_to_string(&path) {
+            Ok(existing) => Some(existing),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => return Err(format!("{path}: {error}")),
+        };
+        if !force
+            && existing
+                .as_ref()
+                .is_some_and(|text| !text.starts_with(&header))
+        {
+            return Err(format!(
+                "{path} was not written by `jp {} tools sync`, so it is left alone. Move it \
+                 aside, or run `{command} --force` to overwrite it.",
+                self.plugin
+            ));
         }
 
         let mut out = format!("{header}\n{notes}");
@@ -270,16 +303,25 @@ impl Definitions {
             }
         }
 
-        fs::write(&path, out).map_err(|error| format!("failed to write {path}: {error}"))?;
+        let unchanged = existing
+            .as_ref()
+            .is_some_and(|text| overwrite::same_text(text.as_bytes(), out.as_bytes()));
+        if !unchanged {
+            if !force && existing.is_some() {
+                refuse_unrecorded(dir, &[Utf8PathBuf::from(SYNCED_FILE)], &command)?;
+            }
+            fs::write(&path, out).map_err(|error| format!("failed to write {path}: {error}"))?;
+        }
 
+        let verb = if unchanged { "Unchanged" } else { "Wrote" };
         let mut text = if covered.is_empty() {
             format!(
-                "Wrote {path}; no configured tool takes {} from `jp {}`.\n",
+                "{verb} {path}; no configured tool takes {} from `jp {}`.\n",
                 self.offers, self.plugin
             )
         } else {
             format!(
-                "Wrote {path}, with {} for {}\n",
+                "{verb} {path}, with {} for {}\n",
                 self.offers,
                 covered.join(", ")
             )
@@ -294,6 +336,24 @@ impl Definitions {
 
         Ok(text)
     }
+}
+
+/// Refuse when one of `names`, files in `dir` about to be overwritten, holds
+/// something git couldn't restore.
+///
+/// `command` is the command as the user would run it again, without `--force`.
+fn refuse_unrecorded(dir: &Utf8Path, names: &[Utf8PathBuf], command: &str) -> Result<(), String> {
+    let unrecorded = overwrite::unrecorded(dir, names)?;
+    if unrecorded.is_empty() {
+        return Ok(());
+    }
+
+    let shown: Vec<(Utf8PathBuf, Unrecorded)> = unrecorded
+        .into_iter()
+        .map(|(name, why)| (dir.join(name), why))
+        .collect();
+
+    Err(overwrite::refusal(command, &shown))
 }
 
 /// Whether the configured tool `key` declares the parameter `name`, with a

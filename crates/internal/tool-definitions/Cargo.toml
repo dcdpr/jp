@@ -14,6 +14,7 @@ version.workspace = true
 
 [dependencies]
 jp_label = { workspace = true }
+overwrite = { workspace = true }
 
 camino = { workspace = true }
 serde_json = { workspace = true, features = ["std"] }

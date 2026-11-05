@@ -4,7 +4,7 @@
 //!
 //! [`plan`] and [`missing`] read the project and change nothing; [`apply`]
 //! writes what they found.
-//! Whether the project may be written at all is [`crate::git`]'s to say.
+//! Whether a file may be overwritten is the `overwrite` crate's to say.
 
 use std::{
     collections::BTreeSet,
@@ -13,6 +13,7 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use overwrite::same_text;
 
 use crate::site::{self, Owned};
 
@@ -73,24 +74,6 @@ pub(crate) fn plan(
     changes.sort_by(|a, b| a.path().cmp(b.path()));
 
     Ok(changes)
-}
-
-/// Whether a file holds the same text as `other`, however its lines end.
-///
-/// Git can check text files out with CRLF line endings (`core.autocrlf`, on by
-/// default in Git for Windows) and commits them back with LF, so a file that
-/// differs from what `jp vite` writes only there is, to git, the same file.
-/// A `\r` that doesn't end a line still counts.
-pub(crate) fn same_text(file: &[u8], other: &[u8]) -> bool {
-    fn lf(bytes: &[u8]) -> impl Iterator<Item = u8> + '_ {
-        bytes
-            .iter()
-            .enumerate()
-            .filter(|&(index, &byte)| byte != b'\r' || bytes.get(index + 1) != Some(&b'\n'))
-            .map(|(_, &byte)| byte)
-    }
-
-    lf(file).eq(lf(other))
 }
 
 /// The pages among `pages` that the project at `root` doesn't have.

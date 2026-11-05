@@ -1,4 +1,6 @@
-use std::fs;
+use std::{fs, process::Command};
+
+use camino::Utf8Path;
 
 use super::*;
 use crate::{
@@ -20,6 +22,37 @@ fn empty() -> Workspace {
     workspace
 }
 
+/// Run git in `dir`, failing the test with its stderr.
+fn git(dir: &Utf8Path, args: &[&str]) {
+    let output = Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .unwrap_or_else(|error| panic!("git {args:?}: {error}"));
+
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Commit everything in the workspace, making it a repository first.
+///
+/// The config is set locally so the machine's identity and signing setup can't
+/// reach in and change what the test does.
+fn commit(workspace: &Workspace) {
+    let root = &workspace.paths.root;
+    if !root.join(".git").exists() {
+        git(root, &["init", "--quiet", "--initial-branch=main"]);
+        git(root, &["config", "user.name", "Tester"]);
+        git(root, &["config", "user.email", "tester@example.com"]);
+        git(root, &["config", "commit.gpgsign", "false"]);
+    }
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "--quiet", "-m", "Commit"]);
+}
+
 #[test]
 fn init_sets_up_the_rfd_directory() {
     let workspace = empty();
@@ -27,6 +60,7 @@ fn init_sets_up_the_rfd_directory() {
     let output = init(
         &workspace.paths,
         &categories(&["design", "decision", "guide", "process"]),
+        false,
     )
     .unwrap();
 
@@ -60,7 +94,7 @@ fn the_default_templates_are_the_ones_jp_uses() {
 fn a_category_of_the_projects_own_gets_a_template_naming_it() {
     let workspace = empty();
 
-    init(&workspace.paths, &categories(&["post-mortem"])).unwrap();
+    init(&workspace.paths, &categories(&["post-mortem"]), false).unwrap();
 
     let template = workspace.read("docs/rfd/000-post-mortem-template.md");
     assert!(template.contains("# RFD NNN: TITLE\n"), "{template}");
@@ -71,26 +105,89 @@ fn a_category_of_the_projects_own_gets_a_template_naming_it() {
 }
 
 /// Running it again adds what is missing, such as the template for a category
-/// added since, and leaves what is there alone.
+/// added since, and leaves a template as it wrote it alone.
 #[test]
-fn init_only_adds_what_is_missing() {
+fn init_adds_what_is_missing() {
     let workspace = empty();
-    init(&workspace.paths, &categories(&["design"])).unwrap();
-    workspace.write("docs/rfd/000-design-template.md", "Our own.\n");
+    init(&workspace.paths, &categories(&["design"]), false).unwrap();
 
-    let output = init(&workspace.paths, &categories(&["design", "guide"])).unwrap();
+    let output = init(&workspace.paths, &categories(&["design", "guide"]), false).unwrap();
 
     assert_eq!(output.text, "Wrote docs/rfd/000-guide-template.md\n");
-    assert_eq!(
-        workspace.read("docs/rfd/000-design-template.md"),
-        "Our own.\n"
-    );
 
-    let output = init(&workspace.paths, &categories(&["design", "guide"])).unwrap();
+    let output = init(&workspace.paths, &categories(&["design", "guide"]), false).unwrap();
 
     assert_eq!(
         output.text,
         "docs/rfd/ already has its drafts directory, its templates, and its priority board.\n"
+    );
+}
+
+/// Outside git nothing could restore an edited template, so `init` writes
+/// nothing unless forced.
+#[test]
+fn init_overwrites_an_edited_template_outside_git_only_when_forced() {
+    let workspace = empty();
+    init(&workspace.paths, &categories(&["design"]), false).unwrap();
+    workspace.write("docs/rfd/000-design-template.md", "Our own.\n");
+
+    let error = init(&workspace.paths, &categories(&["design", "guide"]), false).unwrap_err();
+
+    assert_eq!(
+        error,
+        "Git couldn't restore these files, so `jp rfd init` leaves them:\n  \
+         docs/rfd/000-design-template.md (not in a git work tree)\nRun `jp rfd init --force` to \
+         overwrite them anyway."
+    );
+    assert_eq!(
+        workspace.read("docs/rfd/000-design-template.md"),
+        "Our own.\n"
+    );
+    assert!(!workspace.exists("docs/rfd/000-guide-template.md"));
+
+    let output = init(&workspace.paths, &categories(&["design", "guide"]), true).unwrap();
+
+    assert_eq!(
+        output.text,
+        "Overwrote docs/rfd/000-design-template.md\nWrote docs/rfd/000-guide-template.md\n"
+    );
+    assert_eq!(
+        workspace.read("docs/rfd/000-design-template.md"),
+        TEMPLATES[0].1
+    );
+}
+
+/// A committed edit is one git can give back, so `init` overwrites it, and an
+/// edit made since is refused.
+/// The priority board is the project's ranking, and stays as it is.
+#[test]
+fn init_overwrites_a_template_git_can_restore() {
+    let workspace = empty();
+    init(&workspace.paths, &categories(&["design", "guide"]), false).unwrap();
+    workspace.write("docs/rfd/000-design-template.md", "Our own.\n");
+    workspace.board("{ \"ranked\": true }\n");
+    commit(&workspace);
+    workspace.write("docs/rfd/000-guide-template.md", "Edited since.\n");
+
+    let error = init(&workspace.paths, &categories(&["design", "guide"]), false).unwrap_err();
+
+    assert_eq!(
+        error,
+        "Git couldn't restore these files, so `jp rfd init` leaves them:\n  \
+         docs/rfd/000-guide-template.md (changed since the last commit)\nCommit them, or run `jp \
+         rfd init --force` to overwrite them anyway."
+    );
+
+    let output = init(&workspace.paths, &categories(&["design"]), false).unwrap();
+
+    assert_eq!(output.text, "Overwrote docs/rfd/000-design-template.md\n");
+    assert_eq!(
+        workspace.read("docs/rfd/000-design-template.md"),
+        TEMPLATES[0].1
+    );
+    assert_eq!(
+        workspace.read("docs/rfd/.priority.json"),
+        "{ \"ranked\": true }\n"
     );
 }
 
@@ -99,7 +196,7 @@ fn init_only_adds_what_is_missing() {
 fn a_draft_can_be_written_right_after_init() {
     let workspace = empty();
     let categories = categories(&["design", "post-mortem"]);
-    init(&workspace.paths, &categories).unwrap();
+    init(&workspace.paths, &categories, false).unwrap();
 
     for (category, title) in [("design", "First Idea"), ("post-mortem", "The Outage")] {
         draft::draft(&workspace.paths, &categories, &Draft {

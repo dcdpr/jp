@@ -2173,6 +2173,7 @@ dependencies = [
  "jp_label",
  "jp_plugin",
  "jp_tool",
+ "overwrite",
  "regex",
  "serde",
  "serde_json",
@@ -2236,6 +2237,7 @@ dependencies = [
  "jp_config",
  "jp_label",
  "jp_plugin",
+ "overwrite",
  "serde",
  "serde_json",
  "site-revision",
@@ -3400,6 +3402,14 @@ checksum = "db335f4760b14ead6290116f2427bf33a14d4f0617d49f78a246de10c1831224"
 dependencies = [
  "libc",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "overwrite"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
 ]
 
 [[package]]
@@ -5226,6 +5236,7 @@ dependencies = [
  "camino-tempfile",
  "jp_config",
  "jp_label",
+ "overwrite",
  "serde_json",
  "toml",
 ]

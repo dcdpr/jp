@@ -246,24 +246,96 @@ fn init_without_a_title_writes_nothing() {
     assert!(!root.path().join("docs").exists());
 }
 
-#[test]
-fn init_leaves_a_set_up_site_alone() {
-    let root = Utf8TempDir::new().unwrap();
-    exchange(&[init(root.path(), &[
-        "init",
-        "--title",
-        "A",
-        "--description",
-        "B",
-    ])]);
+const ANSWERED: [&str; 5] = ["init", "--title", "A", "--description", "B"];
 
-    let (text, code, _) = printed(&exchange(&[init(root.path(), &["init"])]));
+#[test]
+fn init_with_the_same_answers_changes_nothing() {
+    let root = Utf8TempDir::new().unwrap();
+    exchange(&[init(root.path(), &ANSWERED)]);
+
+    let (text, code, _) = printed(&exchange(&[init(root.path(), &ANSWERED)]));
 
     assert_eq!(code, 0);
     assert_eq!(
         text,
-        "docs/ already has its package.json, configuration, theme, and homepage.\n"
+        "docs/ already has the package.json, configuration, theme, and homepage `jp vite init` \
+         writes.\n"
     );
+}
+
+/// The project's `package.json` is committed, so git can give it back.
+#[test]
+fn init_overwrites_what_git_can_restore() {
+    let root = project();
+
+    let (text, code, reason) = printed(&exchange(&[init(root.path(), &ANSWERED)]));
+
+    assert_eq!((code, reason), (0, None));
+    assert_eq!(
+        text,
+        "Overwrote docs/package.json\nCreated docs/.vitepress/config.mts\nCreated \
+         docs/.vitepress/theme/index.js\nCreated docs/index.md\nThe configuration imports files \
+         `jp vite sync` writes, with the RFD and ticket pages: run it next, then `jp vite serve` \
+         to see the site.\n"
+    );
+    assert_ne!(
+        fs::read_to_string(root.path().join("docs/package.json")).unwrap(),
+        "{}\n"
+    );
+}
+
+#[test]
+fn init_refuses_an_edit_git_has_not_recorded() {
+    let root = project();
+    fs::write(
+        root.path().join("docs/package.json"),
+        "{ \"edited\": true }\n",
+    )
+    .unwrap();
+
+    let (_, code, reason) = printed(&exchange(&[init(root.path(), &ANSWERED)]));
+
+    assert_eq!(code, 1);
+    assert_eq!(
+        reason.as_deref(),
+        Some(
+            "Git couldn't restore these files, so `jp vite init` leaves them:\n  \
+             docs/package.json (changed since the last commit)\nCommit them, or run `jp vite init \
+             --force` to overwrite them anyway."
+        )
+    );
+    assert!(!root.path().join("docs/index.md").exists());
+}
+
+/// Outside git nothing can restore a file, so only `--force` overwrites one.
+#[test]
+fn init_overwrites_outside_git_only_when_forced() {
+    let root = Utf8TempDir::new().unwrap();
+    fs::create_dir_all(root.path().join("docs")).unwrap();
+    fs::write(root.path().join("docs/package.json"), "{}\n").unwrap();
+
+    let (_, code, reason) = printed(&exchange(&[init(root.path(), &ANSWERED)]));
+
+    assert_eq!(code, 1);
+    assert_eq!(
+        reason.as_deref(),
+        Some(
+            "Git couldn't restore these files, so `jp vite init` leaves them:\n  \
+             docs/package.json (not in a git work tree)\nRun `jp vite init --force` to overwrite \
+             them anyway."
+        )
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join("docs/package.json")).unwrap(),
+        "{}\n"
+    );
+
+    let mut forced = ANSWERED.to_vec();
+    forced.push("--force");
+    let (text, code, _) = printed(&exchange(&[init(root.path(), &forced)]));
+
+    assert_eq!(code, 0);
+    assert!(text.starts_with("Overwrote docs/package.json\n"), "{text}");
 }
 
 #[test]
@@ -485,21 +557,38 @@ fn a_sync_with_nobody_to_ask_fails() {
     );
 }
 
+/// Outside git a sync writes the files that are new, and overwrites one that
+/// exists only when forced, since nothing could restore it.
 #[test]
-fn sync_needs_a_git_work_tree() {
+fn sync_outside_git_overwrites_only_when_forced() {
     let root = Utf8TempDir::new().unwrap();
     fs::create_dir_all(root.path().join("docs")).unwrap();
 
-    let (_, code, reason) = printed(&exchange(&[init(root.path(), &["sync", "--yes"])]));
+    let (text, code, reason) = printed(&exchange(&[init(root.path(), &["sync", "--yes"])]));
+    assert_eq!((code, reason), (0, None));
+    assert!(text.ends_with(" files.\n"), "{text}");
 
+    let config = root.path().join("docs/.vitepress/jp-vite/config.mjs");
+    fs::write(&config, "Edited").unwrap();
+
+    let (_, code, reason) = printed(&exchange(&[init(root.path(), &["sync", "--yes"])]));
     assert_eq!(code, 1);
     assert_eq!(
         reason.as_deref(),
         Some(
-            "`jp vite sync` writes only in a git work tree, where git can restore what it \
-             overwrites."
+            "Git couldn't restore these files, so `jp vite sync` leaves them:\n  \
+             docs/.vitepress/jp-vite/config.mjs (not in a git work tree)\nRun `jp vite sync \
+             --force` to overwrite them anyway."
         )
     );
+    assert_eq!(fs::read_to_string(&config).unwrap(), "Edited");
+
+    let (text, code, _) = printed(&exchange(&[init(root.path(), &[
+        "sync", "--yes", "--force",
+    ])]));
+    assert_eq!(code, 0);
+    assert!(text.ends_with("Synced 1 file.\n"), "{text}");
+    assert_ne!(fs::read_to_string(&config).unwrap(), "Edited");
 }
 
 #[test]
