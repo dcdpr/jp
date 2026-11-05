@@ -60,3 +60,26 @@ Goodhart applies the moment a number like "tokens per turn" becomes something to
 optimize directly.
 
 Findings and the rest of the proposals: T-0n0nwz3.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-05T12:46:37Z
+
+A data point from Synthetic's OpenAI-compatible endpoint (vLLM 0.33 behind it):
+it sends token usage without being asked, in a trailing chunk with `"choices":
+[]` after the finish chunk, and also on the finish chunk itself:
+
+```json
+{"choices": [], "usage": {"prompt_tokens": 35, "completion_tokens": 111, "total_tokens": 146,
+ "prompt_tokens_details": {"cached_tokens": 0, "created_cache_tokens": 0},
+ "completion_tokens_details": {"reasoning_tokens": 92}}}
+```
+
+`parse_chunk` in `crates/jp_llm/src/provider/openai_compat.rs` returns early on
+a chunk with no choices, so these counts are dropped before any usage handling
+could see them.
+Whatever records usage for the Chat Completions providers has to read that
+chunk, and should not rely on `stream_options.include_usage` being required.
