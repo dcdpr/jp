@@ -38,6 +38,9 @@ shlex = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+# Checks that the configuration `review` asks its query to run under names keys
+# `jp` knows.
+jp_config = { workspace = true }
 jp_test = { workspace = true }
 
 camino-tempfile = { workspace = true }

@@ -40,7 +40,7 @@ use crate::{
 const README: &str = "README.md";
 
 /// The file in a release's directory that introduces the release.
-pub(crate) const OVERVIEW: &str = "overview.md";
+pub const OVERVIEW: &str = "overview.md";
 
 /// The directory, at the top level and in each release's directory, that holds
 /// highlights.
