@@ -2241,20 +2241,19 @@ lint-ci: (_rustup_component "clippy") _install_ci_matchers
         exit 1
     fi
 
-    # `affected-crates` assumes only crates under `crates/plugins/command/` and
-    # `.config/jp/tools` read files outside their own directory, and tests them
-    # whenever `docs/` or `.jp/` changes. A crate elsewhere that climbs out of
-    # `CARGO_MANIFEST_DIR` would go untested on Windows pull requests that
-    # change only what it reads. This catches the idiom every reader uses today,
-    # a string literal climbing two or more levels; reaching the same files
-    # another way slips past it.
+    # `affected-crates` assumes that only crates under `crates/plugins/command/`
+    # and `.config/jp/tools` read files outside their own crate directory, and
+    # selects them whenever `docs/` or `.jp/` changes. Any other crate that
+    # resolves paths above `CARGO_MANIFEST_DIR` would be skipped on Windows PRs
+    # that only modify those external files. This check matches `.rs` files that
+    # combine `CARGO_MANIFEST_DIR` with a `"../../` string literal.
     escaping=$(grep -rlE --include='*.rs' '"(\.\./){2,}' crates .config/jp/tools \
         | grep -vE '^(crates/plugins/command/|\.config/jp/tools/)' \
         | while IFS= read -r file; do grep -l 'CARGO_MANIFEST_DIR' "$file" || true; done)
     if [ -n "$escaping" ]; then
         echo "$escaping" | sed 's/^/error: reads outside its crate: /' >&2
-        echo "error: \`just affected-crates\` only expects that of command plugins and" >&2
-        echo "error: tools. Move the test there, or teach \`affected-crates\` about it." >&2
+        echo "error: \`just affected-crates\` only tracks external file reads for command plugins" >&2
+        echo "error: and \`.config/jp/tools\`. Move the test there, or update \`affected-crates\`." >&2
         exit 1
     fi
 
@@ -2392,12 +2391,13 @@ test-ci SCOPE="workspace" *ARGS: (_install "cargo-nextest@" + nextest_version) _
     # No target selection, matching `just test`; see the reasoning there.
     cargo nextest run --locked --cargo-profile=nextest --status-level=slow --failure-output=immediate-final {{ if SCOPE == "packages" { "--no-tests=warn" } else { "--workspace" } }} --no-fail-fast {{ if SCOPE == "jp-only" { non_jp_excludes } else { "" } }} {{ARGS}}
 
-# Test on CI only the crates a change since `BASE` can affect.
+# Test the crates affected by changes since `BASE` on CI.
 #
-# Selects them with `affected-crates`, drops those in `non_jp_excludes`, and
-# runs `test-ci` on the rest. Falls back to `test-ci jp-only` when the change
-# reaches beyond single crates, and tests nothing when it affects none of the
-# crates tested here. `ARGS` are passed on to `cargo nextest run`.
+# Resolves affected crates via `affected-crates`, filters out `non_jp_excludes`,
+# and runs `test-ci packages` on the remaining crates. When `affected-crates`
+# returns `all`, falls back to `test-ci jp-only`. If no non-excluded crates are
+# affected, exits without running nextest. `ARGS` are passed on to
+# `cargo nextest run`.
 [group('ci')]
 [script("bash")]
 test-affected-ci BASE *ARGS:
@@ -2405,7 +2405,7 @@ test-affected-ci BASE *ARGS:
 
     crates=$(just affected-crates "{{BASE}}")
     if [ "$crates" = all ]; then
-        echo "The change reaches beyond single crates; testing every crate."
+        echo "Global build inputs changed; testing all jp-only crates."
         exec just test-ci jp-only {{ARGS}}
     fi
 
@@ -2419,31 +2419,31 @@ test-affected-ci BASE *ARGS:
     done
 
     if [ ${#selection[@]} -eq 0 ]; then
-        echo "The change affects none of the crates tested here."
+        echo "No non-excluded crates affected; skipping tests."
         exit 0
     fi
 
-    echo "Testing the affected crates: ${names[*]}"
+    echo "Testing affected crates: ${names[*]}"
     exec just test-ci packages {{ARGS}} "${selection[@]}"
 
-# Workspace crates a change since `BASE` can affect, one name per line: the
-# crates whose files it touches, and every crate depending on one of those,
-# directly or not.
+# List workspace crates affected by changes since `BASE`, one per line.
 #
-# Prints `all` when the change touches a file that can change how every crate
-# builds or is tested: a `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`,
-# `.gitattributes`, the insta config, this justfile, or the Rust workflow.
+# Outputs the crates with modified files and all of their transitive workspace
+# dependents.
 #
-# Only crates under `crates/plugins/command/` and `.config/jp/tools` may read
-# files outside their own directory; `lint-ci` fails when another crate does. A
-# change under `docs/` or `.jp/`, or to the site files every command plugin
-# embeds, selects all of them, so a new plugin is covered without being listed.
+# Prints `all` when the diff touches a workspace-wide build or test input: any
+# `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.gitattributes`,
+# `.config/insta.yaml`, `justfile`, or `.github/workflows/rust.yml`.
 #
-# A file outside every crate in a known inert place (the rustqual baselines,
-# supply-chain audits, other workflows, the macOS app, `deny.toml`,
-# `.clippy.toml`) affects none. Any other file outside every crate prints
-# `all`, so a path nobody thought about errs towards testing too much. Only
-# committed changes count.
+# Crates under `crates/plugins/command/` and `.config/jp/tools` read repository
+# files outside their own directory (enforced by `lint-ci`). Changes under
+# `docs/`, `.jp/`, or `crates/plugins/command/vite/site/` select all command
+# plugins and `tools` (plus their dependents).
+#
+# Known non-crate paths that do not affect Rust tests (`.config/rustqual/`,
+# `.config/supply-chain/`, other `.github/` files, `apps/`, `deny.toml`,
+# `.clippy.toml`) are ignored. Any other path outside a crate prints `all`.
+# Compares `BASE...HEAD`, so uncommitted changes are ignored.
 [group('ci')]
 [script("bash")]
 affected-crates BASE="origin/main":
@@ -2453,7 +2453,8 @@ affected-crates BASE="origin/main":
     trap 'rm -f "$meta"' EXIT
     cargo metadata --locked --format-version 1 > "$meta"
 
-    # Paths in the metadata use backslashes on Windows; `git diff` never does.
+    # `cargo metadata` paths use backslashes on Windows; `git diff` always uses
+    # forward slashes.
     git diff --name-only "{{BASE}}...HEAD" | jq -Rrn --slurpfile meta "$meta" '
         $meta[0] as $m
         | ($m.workspace_root | gsub("\\\\"; "/")) as $root

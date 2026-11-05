@@ -125,21 +125,21 @@ jobs:
             # costs about 12s more than downloading the crates again, so this
             # job skips rust-cache and lets sccache carry compilation.
             rust_cache: "false"
-            # The Windows build keeps all four cores busy, and each workspace
-            # test binary is an executable sccache cannot cache, so the only
-            # way to shorten it is to build fewer of them. PR runs test only the
-            # crates the change can affect, against the merge commit's base,
-            # its first parent. The Linux `test` job still builds and tests
-            # everything on every PR, and `main` covers the full workspace on
-            # Windows too.
+            # sccache cannot cache test binaries (executable targets), and the
+            # Windows build already saturates all four runner cores. To shorten
+            # PR runs, Windows tests only the crates affected since the PR merge
+            # commit's first parent (`HEAD^1`). The Linux `test` job still tests
+            # the full workspace on every PR, and `main` tests the full
+            # workspace on Windows.
             recipe: ${{ github.ref == 'refs/heads/main' && 'test-ci' || 'test-affected-ci' }}
             scope: ${{ github.ref == 'refs/heads/main' && 'workspace' || 'HEAD^1' }}
             fetch_depth: 2
-            # Cargo unifies dependency features across the crates selected for
-            # a build, so testing a subset would compile shared dependencies
-            # with fewer features than `main`'s full build, and miss every
-            # sccache entry it wrote. Unifying across the whole workspace keeps
-            # the builds identical.
+            # By default, Cargo unifies dependency features only across the
+            # selected packages. Testing a crate subset would compile shared
+            # dependencies with a narrower feature set than the full workspace
+            # build on `main`, missing its sccache entries. Workspace-wide
+            # feature unification keeps the feature sets and cache keys
+            # identical.
             feature_unification: workspace
           # Expanding macros makes `shear` compile every crate, one after the
           # other, which makes it the slowest job of a pull request run. `main`
@@ -239,8 +239,8 @@ jobs:
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-      # Set for `main` and pull request runs alike: sccache hashes every
-      # `CARGO_*` variable into its keys, so both must see the same ones.
+      # Both `main` and PR runs export these variables because sccache hashes
+      # all `CARGO_*` environment variables into its cache keys.
       - if: ${{ steps.task.outputs.run == 'true' && matrix.feature_unification }}
         shell: bash
         run: |
