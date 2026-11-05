@@ -6,6 +6,7 @@ use jp_plugin::message::{ComposeResponse, PathsInfo, WorkspaceInfo};
 use serde_json::{Map, json};
 
 use super::*;
+use crate::repository_testing::Fixture;
 
 /// The root of JP's own repository, for the tests that read its files.
 ///
@@ -855,6 +856,55 @@ fn render_without_a_fragments_directory_says_how_to_make_one() {
     assert_eq!(
         exit(&messages).reason.as_deref(),
         Some("There is no fragments directory at changelog.d; create it with `jp release init`.")
+    );
+}
+
+#[test]
+fn making_a_release_needs_a_git_repository() {
+    let root = workspace();
+
+    for args in [&["cut"][..], &["finalize", "0.1.0"], &[
+        "pick",
+        "--continue",
+    ]] {
+        let messages = command(root.path(), args, &[]);
+
+        let reason = exit(&messages).reason.clone().unwrap_or_default();
+        assert!(
+            reason.starts_with(&format!(
+                "The workspace at {} isn't in a git repository",
+                root.path()
+            )),
+            "{args:?}: {reason}"
+        );
+    }
+}
+
+#[test]
+fn pick_takes_a_version_and_commits_or_continue() {
+    let root = workspace();
+
+    for args in [
+        &["pick"][..],
+        &["pick", "0.1.1"],
+        &["pick", "--continue", "0.1.1", "4e1f0a2"],
+        &["pick", "v0.1", "4e1f0a2"],
+    ] {
+        let messages = command(root.path(), args, &[]);
+
+        assert_eq!(exit(&messages).code, 1, "{args:?}");
+    }
+}
+
+#[test]
+fn continue_without_a_stopped_pick_has_nothing_to_do() {
+    let fixture = Fixture::new();
+
+    let messages = command(fixture.root(), &["pick", "--continue"], &[]);
+
+    assert_eq!(
+        exit(&messages).reason.as_deref(),
+        Some("No pick is stopped, so there is nothing to continue.")
     );
 }
 

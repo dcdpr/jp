@@ -1,5 +1,5 @@
 //! `jp-release`: record what changes for users as changelog fragments and
-//! highlights, and render release notes from them.
+//! highlights, and make releases from them.
 //!
 //! A command plugin providing `jp release` and its subcommands, and the tool
 //! the assistant reaches through `source = "plugin.command.release.add"`.
@@ -16,15 +16,31 @@
 //! With `format_on_write` on, every file written in the fragments directory is
 //! laid out in the style of the workspace's `.comfort.toml` (`doc::format`).
 //!
+//! `cut`, `pick`, and `finalize` make releases on release branches, from what
+//! `origin` holds: `releases` decides what they may do, `repository` runs the
+//! git they need in worktrees of their own, and `change_request` opens the
+//! change requests that file a release's notes on `main`.
+//!
 //! See: `docs/rfd/121-changelog-fragments-and-validation.md` and
 //! `docs/rfd/122-release-pipeline.md`
 
+mod change_request;
+mod cut;
 mod definitions;
 mod entry;
+mod finalize;
 mod options;
+mod pick;
+mod pipeline;
+mod releases;
+mod repository;
+#[cfg(test)]
+mod repository_testing;
+mod shell;
 mod tool;
 
 use std::{
+    env,
     fs::{self, OpenOptions},
     io::{BufRead, Write},
     iter,
@@ -34,7 +50,7 @@ use std::{
 use camino::{Utf8Path, Utf8PathBuf};
 use changelog::{
     ReleaseError, Type, UnknownType,
-    cli::{Format, Render, View},
+    cli::{Format, Render, View, version as parse_version},
     directory::ReadError,
     release,
 };
@@ -43,11 +59,14 @@ use jp_plugin::message::{
     ComposeMode, ComposeOption, ComposeRequest, DescribeResponse, ExitMessage, HostToPlugin,
     InitMessage, OutputFormat, PluginToHost, PrintMessage, ToolCall, ToolOutcomeMessage,
 };
+use semver::Version;
 use serde_json::Value;
 
 use crate::{
     entry::{Entry, Fragments, HIGHLIGHTS, Planned},
     options::Options,
+    pipeline::Pipeline,
+    shell::Shell,
 };
 
 /// The name the plugin is configured under, `plugins.command.release`.
@@ -73,8 +92,8 @@ const HIGHLIGHT_HELP: &str =
 #[command(
     name = "jp release",
     version,
-    about = "Record what changes for users as changelog fragments and highlights, and render \
-             release notes from them."
+    about = "Record what changes for users as changelog fragments and highlights, and make \
+             releases from them."
 )]
 struct Args {
     #[command(subcommand)]
@@ -137,6 +156,52 @@ enum Command {
     Render {
         #[command(flatten)]
         render: Render,
+    },
+
+    /// Start the next minor or major release from `main`.
+    ///
+    /// Branches `release/<major>.<minor>` from origin's `main`, with a commit
+    /// that removes the fragments directory and runs `bump`, and pushes it.
+    /// A change request from `release-cut/v<version>` moves every unreleased
+    /// fragment and highlight into the release's directory on `main`.
+    Cut {
+        /// The version to start, such as `0.4.0`, rather than the next minor
+        /// release, or from 1.0 on the next major one when a fragment has an
+        /// upgrade section.
+        #[arg(long, value_parser = parse_version)]
+        version: Option<Version>,
+    },
+
+    /// Pick commits from `main` into a release in preparation, or start the
+    /// next patch release with them.
+    ///
+    /// Cherry-picks the commits onto the release branch, leaving out the
+    /// fragments directory, and pushes it.
+    /// A change request from `release-pick/v<version>-<hash>` files the
+    /// fragments and highlights they added into the release's directory on
+    /// `main`.
+    /// A conflict stops the pick in a worktree it names; resolve it there and
+    /// run `jp release pick --continue`.
+    Pick {
+        /// The release, such as `0.3.1`.
+        #[arg(value_parser = parse_version, required_unless_present = "resume")]
+        version: Option<Version>,
+
+        /// The commits to pick, from `main`.
+        #[arg(value_name = "COMMIT", required_unless_present = "resume")]
+        commits: Vec<String>,
+
+        /// Finish the pick a conflict stopped, once it is resolved.
+        #[arg(long = "continue", conflicts_with_all = ["version", "commits"])]
+        resume: bool,
+    },
+
+    /// Tag a release in preparation: the tip of its release branch, as
+    /// `v<version>`, pushed to origin.
+    Finalize {
+        /// The release, such as `0.3.0`.
+        #[arg(value_parser = parse_version)]
+        version: Version,
     },
 
     /// Write the definition of the tool that offers `add` to the assistant.
@@ -253,7 +318,7 @@ const REQUIRED_PROTOCOL: u32 = 12;
 /// `protocol` has to match `REQUIRED_PROTOCOL`.
 pub static MANIFEST: &str = jp_plugin::manifest!(
     protocol: 12,
-    description: "Record what changes for users as changelog fragments, and render release notes",
+    description: "Record what changes for users as changelog fragments, and make releases",
     command: ["release"],
 );
 
@@ -339,6 +404,20 @@ fn handle_command(
         ),
         Command::Check => check(&ctx),
         Command::Render { render } => render_release(&ctx, &render),
+        Command::Cut { version } => make_release(root, &options, |pipeline| {
+            cut::cut(pipeline, version.as_ref())
+        }),
+        Command::Pick {
+            version: Some(version),
+            commits,
+            resume: false,
+        } => make_release(root, &options, |pipeline| {
+            pick::pick(pipeline, &version, &commits)
+        }),
+        Command::Pick { .. } => make_release(root, &options, pick::resume),
+        Command::Finalize { version } => make_release(root, &options, |pipeline| {
+            finalize::finalize(pipeline, &version)
+        }),
         Command::Tools {
             command: ToolsCommand::Init { path, force },
         } => definitions::init(&resolve_dir(root, &path), force),
@@ -705,6 +784,26 @@ fn render_release(ctx: &Context<'_>, render: &Render) -> Result<Output, String> 
         note,
         code: 0,
     })
+}
+
+/// Run `command`, which makes a release in the workspace at `root`.
+fn make_release(
+    root: &Utf8Path,
+    options: &Options,
+    command: impl FnOnce(&Pipeline<'_>) -> Result<String, String>,
+) -> Result<Output, String> {
+    let shell = Shell::new();
+    let pipeline = Pipeline::new(&shell, root, options, github_token())?;
+
+    command(&pipeline).map(Output::from)
+}
+
+/// The token GitHub's API takes: `JP_GITHUB_TOKEN`, or else `GITHUB_TOKEN`, as
+/// JP's other GitHub features read it.
+fn github_token() -> Option<String> {
+    let non_empty = |name: &str| env::var(name).ok().filter(|value| !value.is_empty());
+
+    non_empty("JP_GITHUB_TOKEN").or_else(|| non_empty("GITHUB_TOKEN"))
 }
 
 /// Refuse a fragments directory that isn't there, saying how to make one.

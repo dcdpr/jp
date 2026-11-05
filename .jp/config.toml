@@ -192,6 +192,14 @@ run = "allow"
 fragments_dir = "changelog.d"
 format_on_write = true
 forge = "github"
+# The version lives in `[workspace.package]`, which `cargo set-version` (from
+# cargo-edit) writes through `jp_cli`, one of the crates inheriting it, along
+# with `Cargo.lock`. `--workspace` would also overwrite the crates under
+# `crates/contrib/`, which keep versions of their own.
+bump = "cargo set-version --package jp_cli {version}"
+# The change requests `cut` and `pick` open move fragments rather than add them,
+# which the changelog gate lets through with this label.
+change_request_labels = ["no-changelog"]
 
 # The headings of the release notes' sections that read better than the type's
 # id; the other types keep theirs, capitalized.

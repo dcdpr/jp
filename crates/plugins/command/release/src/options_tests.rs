@@ -26,7 +26,7 @@ fn the_fragments_directory_can_be_named() {
 /// know, still loads.
 #[test]
 fn settings_this_plugin_does_not_read_are_ignored() {
-    let options = read(json!({ "cadence": "2w", "bump": "cargo set-version {version}" })).unwrap();
+    let options = read(json!({ "cadence": "2w" })).unwrap();
 
     assert_eq!(options, Options::default());
 }
@@ -87,6 +87,70 @@ fn an_empty_heading_is_refused() {
     assert_eq!(
         read(json!({ "headings": { "fixed": " " } })),
         Err("`plugins.command.release.options.headings.fixed` is empty.".to_owned())
+    );
+}
+
+#[test]
+fn bump_is_split_into_words_and_takes_the_version() {
+    let options =
+        read(json!({ "bump": "cargo set-version --package 'jp cli' {version}" })).unwrap();
+
+    let (program, args) = options
+        .bump
+        .unwrap()
+        .command(&Version::parse("0.3.0").unwrap());
+    assert_eq!(program, "cargo");
+    assert_eq!(args, ["set-version", "--package", "jp cli", "0.3.0"]);
+}
+
+#[test]
+fn every_version_placeholder_takes_the_version() {
+    let options = read(json!({ "bump": "sed -i s/.*/{version}/ VERSION-{version}" })).unwrap();
+
+    let (_, args) = options
+        .bump
+        .unwrap()
+        .command(&Version::parse("1.0.0").unwrap());
+    assert_eq!(args, ["-i", "s/.*/1.0.0/", "VERSION-1.0.0"]);
+}
+
+#[test]
+fn a_bump_that_cannot_write_the_version_is_refused() {
+    assert_eq!(
+        read(json!({ "bump": "cargo set-version" })),
+        Err(
+            "`plugins.command.release.options.bump` names no `{version}`, so it couldn't write \
+             the new version."
+                .to_owned()
+        )
+    );
+    assert_eq!(
+        read(json!({ "bump": "  " })),
+        Err("`plugins.command.release.options.bump` is empty.".to_owned())
+    );
+    assert_eq!(
+        read(json!({ "bump": "cargo set-version '{version}" })),
+        Err(
+            "`plugins.command.release.options.bump` can't be split into words; check its quotes."
+                .to_owned()
+        )
+    );
+}
+
+#[test]
+fn change_request_labels_are_trimmed_and_listed_once() {
+    let options = read(json!({
+        "change_request_labels": ["no-changelog", " release ", "no-changelog"]
+    }))
+    .unwrap();
+
+    assert_eq!(options.change_request_labels, ["no-changelog", "release"]);
+    assert_eq!(
+        read(json!({ "change_request_labels": [""] })),
+        Err(
+            "`plugins.command.release.options.change_request_labels` lists an empty label."
+                .to_owned()
+        )
     );
 }
 

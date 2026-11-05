@@ -1,6 +1,6 @@
 [package]
 name = "jp-release"
-description = "Record what changes for users as changelog fragments and highlights, and render release notes from them."
+description = "Record what changes for users as changelog fragments and highlights, and make releases from them."
 
 authors.workspace = true
 documentation.workspace = true
@@ -20,6 +20,7 @@ version.workspace = true
 [dependencies]
 changelog = { workspace = true }
 doc = { workspace = true }
+jp_github = { workspace = true }
 jp_md = { workspace = true }
 jp_plugin = { workspace = true }
 jp_tool = { workspace = true }
@@ -28,10 +29,15 @@ tool-definitions = { workspace = true }
 camino = { workspace = true, features = ["serde1"] }
 clap = { workspace = true, features = ["derive", "error-context", "help", "std", "usage"] }
 comrak = { workspace = true }
+semver = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
+shlex = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
+jp_test = { workspace = true }
+
 camino-tempfile = { workspace = true }
 indoc = { workspace = true }
 strip-ansi-escapes = { workspace = true }

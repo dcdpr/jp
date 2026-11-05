@@ -4,6 +4,8 @@
 //! [plugins.command.release.options]
 //! fragments_dir = "changelog.d"
 //! forge = "github"
+//! bump = "cargo set-version --package jp_cli {version}"
+//! change_request_labels = ["no-changelog"]
 //!
 //! [plugins.command.release.options.headings]
 //! added = "New features"
@@ -22,6 +24,13 @@
 //! `headings` renames a type's section of the release notes; a type it doesn't
 //! name is headed by its id capitalized, such as `Added`.
 //!
+//! `bump` is the command that writes a new version wherever the project keeps
+//! it, run in the workspace root with `{version}` replaced by the new version.
+//! It is split into words as a shell splits them, but runs without a shell.
+//! Unset, a version lives only in its tag.
+//! `change_request_labels` lists the labels the change requests `jp release
+//! cut` and `jp release pick` open carry, none by default.
+//!
 //! Every option is optional.
 //! Keys this plugin doesn't read are ignored, so a configuration written for a
 //! newer `jp-release` still loads.
@@ -30,11 +39,15 @@ use std::collections::BTreeMap;
 
 use camino::Utf8PathBuf;
 use changelog::{Forge, Headings, Type, UnknownType};
+use semver::Version;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
 /// The fragments directory, when `fragments_dir` isn't set.
 const DEFAULT_FRAGMENTS_DIR: &str = "changelog.d";
+
+/// What `bump` writes where the new version goes.
+const VERSION: &str = "{version}";
 
 /// The settings every command and tool runs with.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +62,12 @@ pub(crate) struct Options {
 
     /// The heading of each type's section of the release notes.
     pub headings: Headings,
+
+    /// The command that writes a new version where the project keeps it.
+    pub bump: Option<Bump>,
+
+    /// The labels the change requests `cut` and `pick` open carry.
+    pub change_request_labels: Vec<String>,
 }
 
 impl Default for Options {
@@ -57,7 +76,51 @@ impl Default for Options {
             fragments_dir: Utf8PathBuf::from(DEFAULT_FRAGMENTS_DIR),
             forge: None,
             headings: Headings::default(),
+            bump: None,
+            change_request_labels: vec![],
         }
+    }
+}
+
+/// The command `bump` configures: words as a shell splits them, `{version}` in
+/// at least one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Bump {
+    words: Vec<String>,
+}
+
+impl Bump {
+    /// Split `command` into the program and its arguments.
+    ///
+    /// The error says what is wrong with it.
+    fn parse(command: &str) -> Result<Self, String> {
+        let words = shlex::split(command).ok_or(
+            "`plugins.command.release.options.bump` can't be split into words; check its quotes.",
+        )?;
+        if words.is_empty() {
+            return Err("`plugins.command.release.options.bump` is empty.".to_owned());
+        }
+        if !words.iter().any(|word| word.contains(VERSION)) {
+            return Err(format!(
+                "`plugins.command.release.options.bump` names no `{VERSION}`, so it couldn't \
+                 write the new version."
+            ));
+        }
+
+        Ok(Self { words })
+    }
+
+    /// The program to run, and its arguments, with every `{version}` replaced
+    /// by `version`.
+    pub(crate) fn command(&self, version: &Version) -> (String, Vec<String>) {
+        let version = version.to_string();
+        let mut words = self
+            .words
+            .iter()
+            .map(|word| word.replace(VERSION, &version));
+        let program = words.next().unwrap_or_default();
+
+        (program, words.collect())
     }
 }
 
@@ -68,6 +131,8 @@ struct Settings {
     fragments_dir: Utf8PathBuf,
     forge: Option<String>,
     headings: BTreeMap<String, String>,
+    bump: Option<String>,
+    change_request_labels: Vec<String>,
 }
 
 impl Default for Settings {
@@ -76,6 +141,8 @@ impl Default for Settings {
             fragments_dir: Utf8PathBuf::from(DEFAULT_FRAGMENTS_DIR),
             forge: None,
             headings: BTreeMap::new(),
+            bump: None,
+            change_request_labels: vec![],
         }
     }
 }
@@ -113,10 +180,28 @@ impl Options {
             headings.set(type_, heading);
         }
 
+        let bump = settings.bump.as_deref().map(Bump::parse).transpose()?;
+
+        let mut change_request_labels = vec![];
+        for label in &settings.change_request_labels {
+            let label = label.trim();
+            if label.is_empty() {
+                return Err(
+                    "`plugins.command.release.options.change_request_labels` lists an empty label."
+                        .to_owned(),
+                );
+            }
+            if !change_request_labels.iter().any(|known| known == label) {
+                change_request_labels.push(label.to_owned());
+            }
+        }
+
         Ok(Self {
             fragments_dir: settings.fragments_dir,
             forge,
             headings,
+            bump,
+            change_request_labels,
         })
     }
 }

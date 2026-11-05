@@ -55,6 +55,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Parent Ticket](#parent-ticket)
     - [Pinned Conversation](#pinned-conversation)
     - [Provider](#provider)
+    - [Release Branch](#release-branch)
     - [Release Notes](#release-notes)
     - [RFD](#rfd)
     - [Search Hit](#search-hit)
@@ -459,6 +460,18 @@ concept, not conversation pinning.
 An LLM vendor integration — one of `anthropic`, `google`, `openai`,
 `openrouter`, `llamacpp`, `ollama`, `cerebras`, `deepseek`.
 Each implements the `Provider` trait in `jp_llm`.
+
+### Release Branch
+
+The branch `release/<major>.<minor>` holding the code of every release that
+shares the major and minor version: `main` at the cut, then a commit that starts
+each release, with a `Starts-Release` trailer, and the commits picked from
+`main` with `git cherry-pick -x`.
+It has no fragments directory, since a release's notes live on `main`.
+A release is **in preparation** from the commit that starts it until its
+`v<version>` tag, which **finalizes** it.
+Written by `jp release cut`, `pick`, and `finalize`.
+See [RFD-122].
 
 ### Release Notes
 
