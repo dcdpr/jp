@@ -1940,6 +1940,27 @@ ticket-import NNN *ARGS: _install-ticket
     shift # remove NNN from positional params
     jp ticket import {{quote(NNN)}} --repo dcdpr/jp "$@"
 
+# Ask whether the next release should be cut, as JP's daily workflow does.
+#
+# Exits 0 when it should and 1 when it shouldn't. A failure exits non-zero too,
+# often with 1, so a script that has to tell them apart reads the answer from
+# the JSON that `--format json` prints:
+#
+#   just release-due
+#   just release-due --format json
+#
+# Builds `jp` and `jp-release` from this checkout and runs them from the target
+# directory, since no release publishes them yet, and an installed `jp` or
+# plugin may be another build.
+[group('release')]
+[positional-arguments]
+release-due *FLAGS:
+    #!/usr/bin/env sh
+    set -eu
+
+    cargo build {{quiet_flag}} --locked --package jp_cli --package jp-release
+    PATH="${CARGO_TARGET_DIR:-$PWD/target}/debug:$PATH" exec jp "$@" release due
+
 # Locally develop the documentation, with hot-reloading.
 #
 # Runs through `jp vite serve`, which keeps the site's settings in step with the
