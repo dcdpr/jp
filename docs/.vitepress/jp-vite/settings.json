@@ -1,5 +1,5 @@
 {
-  "revision": "67c133a0105563d7",
+  "revision": "e69e07c0b4cfd9c6",
   "site": "docs",
   "repository": "https://github.com/dcdpr/jp",
   "branch": "main",
@@ -126,5 +126,17 @@
     "dir": "docs/wiki",
     "route": "wiki",
     "relevantKey": "relevant-rfd"
+  },
+  "release": {
+    "dir": "changelog.d",
+    "route": "releases",
+    "forge": "github",
+    "headings": {
+      "added": "New features",
+      "fixed": "Bug fixes"
+    }
+  },
+  "redirects": {
+    "/change-log": "/releases/"
   }
 }

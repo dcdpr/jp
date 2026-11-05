@@ -131,6 +131,71 @@ fn the_wiki_options_default_to_what_jp_wiki_uses() {
     );
 }
 
+#[test]
+fn the_release_options_default_to_what_jp_release_uses() {
+    assert_eq!(
+        release_options(&json!({})),
+        Ok(ReleaseOptions {
+            dir: Utf8PathBuf::from("changelog.d"),
+            forge: None,
+            headings: BTreeMap::new(),
+        })
+    );
+}
+
+/// The headings are keyed by the type's id, and `jp release`'s other options
+/// are left to it.
+#[test]
+fn the_release_options_are_read_from_jp_releases_settings() {
+    let options = release_options(&json!({
+        "plugins": { "command": { "release": { "options": {
+            "fragments_dir": "changes",
+            "forge": "none",
+            "headings": { "security": " Security fixes " },
+            "bump": "cargo set-version {version}"
+        } } } }
+    }));
+
+    assert_eq!(
+        options,
+        Ok(ReleaseOptions {
+            dir: Utf8PathBuf::from("changes"),
+            forge: Some(Forge::None),
+            headings: BTreeMap::from([("security".to_owned(), "Security fixes".to_owned())]),
+        })
+    );
+}
+
+/// The site refuses what `jp release` refuses, in the same words.
+#[test]
+fn release_options_jp_release_refuses_are_refused() {
+    let refused = |options: Value| {
+        release_options(&json!({
+            "plugins": { "command": { "release": { "options": options } } }
+        }))
+        .unwrap_err()
+    };
+
+    assert_eq!(
+        refused(json!({ "fragments_dir": " " })),
+        "`plugins.command.release.options.fragments_dir` is empty."
+    );
+    assert_eq!(
+        refused(json!({ "forge": "GitHub" })),
+        "`plugins.command.release.options.forge`: `GitHub` is not a forge; use `github`, \
+         `gitlab`, or `none`."
+    );
+    assert!(
+        refused(json!({ "headings": { "feat": "Features" } })).starts_with(
+            "`plugins.command.release.options.headings`: `feat` is not a changelog type"
+        ),
+    );
+    assert_eq!(
+        refused(json!({ "headings": { "fixed": " " } })),
+        "`plugins.command.release.options.headings.fixed` is empty."
+    );
+}
+
 /// A configuration written for a newer `jp-vite` must still load.
 #[test]
 fn an_unknown_option_is_ignored() {

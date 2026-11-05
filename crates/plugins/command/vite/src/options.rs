@@ -1,5 +1,5 @@
 //! The plugin's settings, read from `plugins.command.vite.options`, and what it
-//! reads of `jp rfd`'s, `jp ticket`'s, and `jp wiki`'s.
+//! reads of `jp rfd`'s, `jp ticket`'s, `jp wiki`'s, and `jp release`'s.
 //!
 //! ```toml
 //! [plugins.command.vite.options]
@@ -26,14 +26,17 @@
 //!
 //! Each setting has one owner.
 //! The document directories, the RFD categories, the label keys a ticket or a
-//! wiki page names an RFD under, the ticket vocabulary, and how much of the
-//! Done column the board shows belong to `jp rfd`, `jp ticket`, and `jp wiki`,
-//! and are read here from the whole configuration ([`rfd_options`],
-//! [`ticket_options`], [`wiki_options`]), with the defaults those plugins use.
+//! wiki page names an RFD under, the ticket vocabulary, how much of the Done
+//! column the board shows, and the fragments directory, forge, and headings the
+//! release notes are rendered with belong to `jp rfd`, `jp ticket`, `jp wiki`,
+//! and `jp release`, and are read here from the whole configuration
+//! ([`rfd_options`], [`ticket_options`], [`wiki_options`],
+//! [`release_options`]), with the defaults those plugins use.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use camino::Utf8PathBuf;
+use changelog::{Forge, Type, UnknownType};
 use doc::repository::is_web_address;
 pub(crate) use doc::repository::web_address;
 use jp_label::Vocabulary;
@@ -66,6 +69,9 @@ const DEFAULT_DONE_LIMIT: usize = 8;
 
 /// Where `jp wiki` keeps the pages when its `dir` isn't set.
 const DEFAULT_WIKI_DIR: &str = "docs/wiki";
+
+/// Where `jp release` keeps the fragments when its `fragments_dir` isn't set.
+const DEFAULT_FRAGMENTS_DIR: &str = "changelog.d";
 
 /// The plugin's own settings.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -249,6 +255,30 @@ pub(crate) struct WikiOptions {
     pub relevant_key: String,
 }
 
+/// What the site reads of `jp release`'s options.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReleaseOptions {
+    /// Where the fragments live, as configured.
+    pub dir: Utf8PathBuf,
+
+    /// The forge the release notes credit change requests on; `None` leaves it
+    /// to the host of git's `origin` remote.
+    pub forge: Option<Forge>,
+
+    /// The heading of each type's section of the release notes, by the type's
+    /// id; a type left out keeps its default heading.
+    pub headings: BTreeMap<String, String>,
+}
+
+/// `jp release`'s options, as the configuration sets them.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct ReleaseSection {
+    fragments_dir: Option<Utf8PathBuf>,
+    forge: Option<String>,
+    headings: BTreeMap<String, String>,
+}
+
 /// `jp wiki`'s options, as the configuration sets them.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -337,6 +367,49 @@ pub(crate) fn wiki_options(config: &Value) -> Result<WikiOptions, String> {
             .relevant
             .key
             .unwrap_or_else(|| DEFAULT_RELEVANT_KEY.to_owned()),
+    })
+}
+
+/// What the site reads of `jp release`'s options, from the whole configuration
+/// the host passed.
+///
+/// The forge and the headings are held to what `jp release` accepts, so a value
+/// it refuses never reaches the snapshot.
+pub(crate) fn release_options(config: &Value) -> Result<ReleaseOptions, String> {
+    let section: ReleaseSection = section(config, "release")?;
+
+    let dir = match section.fragments_dir {
+        None => Utf8PathBuf::from(DEFAULT_FRAGMENTS_DIR),
+        Some(dir) if dir.as_str().trim().is_empty() => {
+            return Err("`plugins.command.release.options.fragments_dir` is empty.".to_owned());
+        }
+        Some(dir) => dir,
+    };
+
+    let forge = section
+        .forge
+        .map(|forge| forge.parse::<Forge>())
+        .transpose()
+        .map_err(|error| format!("`plugins.command.release.options.forge`: {error}."))?;
+
+    let mut headings = BTreeMap::new();
+    for (type_, heading) in &section.headings {
+        let type_ = type_.parse::<Type>().map_err(|error: UnknownType| {
+            format!("`plugins.command.release.options.headings`: {error}.")
+        })?;
+        let heading = heading.trim();
+        if heading.is_empty() {
+            return Err(format!(
+                "`plugins.command.release.options.headings.{type_}` is empty."
+            ));
+        }
+        headings.insert(type_.id().to_owned(), heading.to_owned());
+    }
+
+    Ok(ReleaseOptions {
+        dir,
+        forge,
+        headings,
     })
 }
 

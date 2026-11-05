@@ -6,7 +6,8 @@
 //! It holds where the RFDs, tickets, and wiki pages live and where the site
 //! serves them, the RFD categories, the label keys a ticket or a wiki page
 //! names an RFD under, the ticket vocabulary, how much of the Done column the
-//! board shows, where links to repository files point and the branch they are
+//! board shows, where the release notes' fragments live and what they are
+//! rendered with, where links to repository files point and the branch they are
 //! edited on, the pages that moved, and the revision of the site files it was
 //! written with.
 //!
@@ -14,6 +15,9 @@
 //! it, and the site neither loads it nor links to it.
 //! One that exists has to sit inside the VitePress source directory, which is
 //! the only place VitePress serves pages from.
+//! The releases are the exception: the site renders their pages under
+//! [`RELEASE_ROUTE`] from the fragments directory, which can be anywhere in the
+//! workspace.
 
 use std::collections::BTreeMap;
 
@@ -24,9 +28,15 @@ use serde_json::Value;
 
 use crate::{
     git::Remote,
-    options::{Options, rfd_options, ticket_options, web_address, wiki_options},
+    options::{
+        Options, ReleaseOptions, release_options, rfd_options, ticket_options, web_address,
+        wiki_options,
+    },
     site,
 };
+
+/// Where the site serves the releases, relative to the source directory.
+pub(crate) const RELEASE_ROUTE: &str = "releases";
 
 /// What the site reads of the project's configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -54,6 +64,9 @@ pub(crate) struct Settings {
     /// The wiki, when the project has one.
     pub wiki: Option<WikiSettings>,
 
+    /// The releases, when the project keeps release notes.
+    pub release: Option<ReleaseSettings>,
+
     /// Pages that moved: each old route, and the route or wiki page id it went
     /// to; left out when none did.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -73,6 +86,28 @@ pub(crate) struct WikiSettings {
 
     /// The label key a page names an RFD it relates to under.
     pub relevant_key: String,
+}
+
+/// Where the release notes' fragments live, where the site serves the releases,
+/// and what the notes are rendered with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReleaseSettings {
+    /// The fragments directory, relative to the workspace root, as `jp release`
+    /// reads it.
+    pub dir: String,
+
+    /// Where the site serves the releases: a directory relative to the source
+    /// directory, [`RELEASE_ROUTE`].
+    pub route: String,
+
+    /// The forge the notes credit change requests on, when one is configured;
+    /// otherwise the one git's `origin` remote is on.
+    pub forge: Option<String>,
+
+    /// The heading of each type's section of the release notes, by the type's
+    /// id; a type left out keeps its default heading.
+    pub headings: BTreeMap<String, String>,
 }
 
 /// Where the RFDs live, and what the site shows of them.
@@ -231,6 +266,8 @@ pub(crate) fn snapshot(
             relevant_key: wiki_options.relevant_key,
         });
 
+    let release = releases(root, release_options(config)?)?;
+
     Ok(Settings {
         revision: site::REVISION.to_owned(),
         site,
@@ -242,8 +279,36 @@ pub(crate) fn snapshot(
         rfd,
         ticket,
         wiki,
+        release,
         redirects: options.redirects.clone(),
     })
+}
+
+/// The releases, when the fragments directory `options` names exists.
+///
+/// The fragments directory has to be inside the workspace, since the site is
+/// built from it, but not inside the source directory: the site renders the
+/// release pages rather than serving the fragments.
+fn releases(root: &Utf8Path, options: ReleaseOptions) -> Result<Option<ReleaseSettings>, String> {
+    let absolute = resolve(root, &options.dir);
+    if !absolute.is_dir() {
+        return Ok(None);
+    }
+
+    let dir = below(root, &absolute).ok_or_else(|| {
+        format!(
+            "`plugins.command.release.options.fragments_dir` ({}) is outside the workspace, so \
+             the site can't render the releases from it.",
+            options.dir
+        )
+    })?;
+
+    Ok(Some(ReleaseSettings {
+        dir,
+        route: RELEASE_ROUTE.to_owned(),
+        forge: options.forge.map(|forge| forge.id().to_owned()),
+        headings: options.headings,
+    }))
 }
 
 /// The VitePress source directory, which has to be inside the workspace: the

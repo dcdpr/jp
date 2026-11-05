@@ -3,8 +3,10 @@ on:
   # Allow to run this workflow manually from the Actions tab
   workflow_dispatch:
   pull_request:
+  # Not on tags: the release pages render from `main`'s `changelog.d/`, which a
+  # release tag's tree doesn't have, so a site built from a tag must not
+  # replace `main`'s.
   push:
-    tags: ['*']
     branches: [main]
 env:
   CARGO_TERM_COLOR: always
@@ -19,7 +21,7 @@ permissions:
 # every other branch, where it would be cancelled before reporting its status.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 # Confine `run` steps to the `docs` directory.
 defaults:
   run:
@@ -46,8 +48,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Pushes to `main` and to tags feed the deployment, which needs the
-          # artifact regardless of what changed.
+          # Pushes to `main` feed the deployment, which needs the artifact
+          # regardless of what changed.
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "sync=true" >> "$GITHUB_OUTPUT"
@@ -55,9 +57,11 @@ jobs:
           fi
 
           # The site is assembled from `docs/`, by recipes in the justfile, by
-          # this workflow. The change log is generated from git tags, which a
-          # pull request cannot move.
-          sources='^docs/|^justfile$|^\.github/workflows/docs\.yml$'
+          # this workflow, and its release pages by the `changelog` crate. A
+          # fragment a pull request adds changes only the Unreleased page, which
+          # `changelog check` already holds to its format, so `changelog.d/`
+          # alone doesn't build the site.
+          sources='^docs/|^justfile$|^\.github/workflows/docs\.yml$|^crates/internal/changelog/'
 
           # The site's RFD and ticket files are synced from the `jp-vite`
           # crate, with settings read from `.jp/config.toml`. A change to
@@ -118,11 +122,14 @@ jobs:
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
       - if: ${{ steps.task.outputs.run == 'true' }}
         run: corepack enable
+      # The release pages are rendered by `changelog`, built from this
+      # checkout rather than taken from a cache another commit filled. The
+      # checkout's full history is what it credits the fragments from.
       - if: ${{ steps.task.outputs.run == 'true' }}
-        run: just build-changelog > change-log.md
+        run: JP_INSTALL=1 just _install-changelog
       # Fetch the plugin registry before the build so VitePress copies it from
       # the public directory into the deployed site (served at /plugins.json).
-      - if: ${{ steps.task.outputs.run == 'true' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+      - if: ${{ steps.task.outputs.run == 'true' && github.ref == 'refs/heads/main' }}
         run: just plugin-registry-fetch
       - if: ${{ steps.task.outputs.run == 'true' }}
         run: just build-docs
@@ -135,14 +142,14 @@ jobs:
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
           key: ${{ steps.cache.outputs.cache-primary-key }}
-      - if: ${{ steps.task.outputs.run == 'true' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+      - if: ${{ steps.task.outputs.run == 'true' && github.ref == 'refs/heads/main' }}
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: docs/.vitepress/dist
           # Dotfiles in the build output are part of the site.
           include-hidden-files: true
   deploy:
-    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
+    if: ${{ github.ref == 'refs/heads/main' }}
     needs: build
     runs-on: ubuntu-latest
     permissions:

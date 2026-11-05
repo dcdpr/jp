@@ -6,6 +6,7 @@ use jp_plugin::message::{ComposeResponse, OutputFormat, PathsInfo, WorkspaceInfo
 use serde_json::{Map, json};
 
 use super::*;
+use crate::options::release_options;
 
 fn parse(args: &[&str]) -> Result<Args, ClapError> {
     Args::try_parse_from(iter::once("jp vite").chain(args.iter().copied()))
@@ -629,10 +630,19 @@ fn jp_root() -> Utf8PathBuf {
 /// Run `jp vite sync` to fix it, or, without the plugins installed,
 /// `JP_VITE_BLESS=1 cargo test -p jp-vite jp_site_is_synced`, which writes what
 /// the test expects.
+///
+/// A release branch has no fragments directory, since its notes live on `main`,
+/// so its snapshot leaves the releases out and can't match the copy synced on
+/// `main`.
+/// The site is synced and built from `main`, and the check is made there.
 #[test]
 fn jp_site_is_synced() {
     let root = jp_root();
     let config = jp_config(&root);
+    if !root.join(release_options(&config).unwrap().dir).is_dir() {
+        return;
+    }
+
     let options = Options::from_config(&config).unwrap();
     // Not the checkout's git remote: JP pins what it would give, and a CI clone
     // has no `origin/HEAD` to read.

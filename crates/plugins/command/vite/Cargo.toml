@@ -1,6 +1,6 @@
 [package]
 name = "jp-vite"
-description = "Set up, sync, and serve the site that renders RFDs and tickets."
+description = "Set up, sync, and serve the site that renders RFDs, tickets, wiki pages, and releases."
 
 authors.workspace = true
 documentation.workspace = true
@@ -22,6 +22,8 @@ version.workspace = true
 # made here.
 
 [dependencies]
+# Reads `jp release`'s forge and headings as `jp release` does.
+changelog = { workspace = true }
 doc = { workspace = true }
 jp_label = { workspace = true }
 jp_plugin = { workspace = true }

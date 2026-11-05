@@ -1968,7 +1968,7 @@ release-due *FLAGS:
 # accept edits from. It checks `jp ticket`, `jp rfd`, and `jp wiki` were built
 # from the same site files as `jp vite`, so all four are installed first.
 [group('docs')]
-develop-docs *FLAGS="--host --allowedHosts --open": _docs-install _install-jp _install-site-plugins
+develop-docs *FLAGS="--host --allowedHosts --open": _docs-install _install-jp _install-site-plugins _install-changelog
     jp vite serve -- {{FLAGS}}
 
 # Open the RFD priority board for drag-and-drop reordering.
@@ -1978,7 +1978,7 @@ develop-docs *FLAGS="--host --allowedHosts --open": _docs-install _install-jp _i
 # file to publish the new order. The board is read-only in the production build
 # — the write endpoint only exists on the dev server.
 [group('rfd')]
-rfd-manage: _docs-install _install-jp _install-site-plugins
+rfd-manage: _docs-install _install-jp _install-site-plugins _install-changelog
     jp vite serve -- --host --allowedHosts --open /rfd/priority
 
 # Test the documentation site's own tooling.
@@ -1996,8 +1996,11 @@ test-docs *FLAGS:
     node --test {{FLAGS}} 'crates/plugins/command/vite/js-tests/**/*.test.mjs'
 
 # Build the statically built documentation.
+#
+# The release pages are rendered by the `changelog` binary, so it is installed
+# first.
 [group('docs')]
-build-docs: (_docs "build")
+build-docs: _install-changelog (_docs "build")
 
 # Preview the statically built documentation.
 [group('docs')]
@@ -2630,6 +2633,20 @@ _install-release *args:
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path crates/plugins/command/release --debug {{args}}
+
+# Build and install the `changelog` binary the site's release pages are
+# rendered with, from this checkout: no release publishes it.
+#
+# A rebuild is skipped when one is installed; CI sets `JP_INSTALL=1` so the
+# docs build renders with the `changelog` of the commit it builds.
+_install-changelog *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -z "${JP_INSTALL:-}" ] && command -v changelog >/dev/null 2>&1; then
+        echo "Skipping changelog rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
+        exit 0
+    fi
+    cargo install {{quiet_flag}} --locked --path crates/internal/changelog --debug {{args}}
 
 # Install the four plugins the site needs, from this checkout.
 #

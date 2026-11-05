@@ -180,6 +180,10 @@ run = "allow"
 repository = "https://github.com/dcdpr/jp"
 branch = "main"
 
+# Pages that moved. The release pages took over from the change log jilu wrote.
+[plugins.command.vite.options.redirects]
+"change-log" = "releases/"
+
 # `jp release` writes and checks the changelog fragments the release notes are
 # built from. It is served the same way, installed with `just _install-release`.
 [plugins.command.release]

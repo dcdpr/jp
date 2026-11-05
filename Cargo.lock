@@ -2276,6 +2276,7 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "camino-tempfile",
+ "changelog",
  "clap",
  "doc",
  "jp_config",
