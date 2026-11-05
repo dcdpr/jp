@@ -281,9 +281,17 @@ fn init_lays_the_readme_out_in_the_workspaces_style() {
 }
 
 /// The README a new project starts with is JP's own.
+///
+/// A release branch has no `changelog.d/`, since its notes live on `main`, so
+/// the comparison is made there.
 #[test]
 fn the_readme_init_writes_is_the_one_jp_uses() {
-    let ours = fs::read_to_string(jp_root().join("changelog.d/README.md")).unwrap();
+    let dir = jp_root().join("changelog.d");
+    if !dir.is_dir() {
+        return;
+    }
+
+    let ours = fs::read_to_string(dir.join("README.md")).unwrap();
 
     assert_eq!(README, ours);
 }
