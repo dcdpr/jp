@@ -980,7 +980,6 @@ fn stream_loads_from_newer_root() {
     );
 }
 
-/// A stream holding one turn: a request and its reply.
 fn one_turn_stream() -> ConversationStream {
     let mut stream = ConversationStream::new_test();
     stream.start_turn(ChatRequest::from("hello"));
@@ -988,7 +987,6 @@ fn one_turn_stream() -> ConversationStream {
     stream
 }
 
-/// Write `stream` to `conv_dir` as `base_config.json` + `events.json`.
 fn write_stream(conv_dir: &Utf8Path, stream: &ConversationStream) {
     let (base_config, events) = stream.to_parts().unwrap();
     fs::write(
@@ -1016,7 +1014,6 @@ fn events_load_without_reading_the_base_config() {
     write_stream(&conv, &stream);
     fs::write(conv.join(BASE_CONFIG_FILE), "not valid json").unwrap();
 
-    // The full stream load reads the config, and fails on it.
     assert!(
         storage
             .load_conversation_stream(&id, &PartialAppConfig::empty())

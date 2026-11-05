@@ -243,8 +243,9 @@ impl Use {
             .filter(|id| self.range.matches(*id))
             .collect();
 
-        // 3. Grep filter. The search reads events without loading the stream,
-        // so a match can still be one that activation will fail to load.
+        // 3. Grep filter. `search::filter_ids` matches titles, labels, and raw
+        // events without loading the full stream, whereas `lock_conversation`
+        // during activation requires a loadable stream.
         let final_ids = match &self.grep {
             Some(pattern) => {
                 let matches = search::filter_ids(ctx, &ranged, pattern)
@@ -336,11 +337,7 @@ fn source_ids(
         .collect()
 }
 
-/// The conversations among `ids` whose stream loads, in their original order.
-///
-/// Activating a conversation loads its stream, so one that fails to load cannot
-/// be activated.
-/// The workspace logs each failure.
+/// Retain only the conversation IDs whose event stream loads, preserving order.
 fn loadable(ctx: &Ctx, ids: Vec<ConversationId>) -> Vec<ConversationId> {
     ids.into_par_iter()
         .filter(|id| {

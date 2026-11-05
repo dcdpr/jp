@@ -840,14 +840,16 @@ impl Workspace {
         Ok(arc.read())
     }
 
-    /// Read a conversation's events, in stream order, without its config.
+    /// Read a conversation's events in stream order without resolving its
+    /// config.
     ///
-    /// A stream this workspace has already loaded is read from memory, which
-    /// includes any change not yet persisted.
-    /// Otherwise they are read from the backing store without recovering or
-    /// building the conversation's config, and are not cached.
+    /// If the stream is already loaded in memory, clones the events from the
+    /// in-memory stream (including unpersisted changes).
+    /// Otherwise, loads the events directly from the backing store without
+    /// resolving the conversation's config or caching the stream in the
+    /// workspace.
     ///
-    /// Returns an error if the events cannot be read from the backing store.
+    /// Returns an error if the events cannot be loaded from the backing store.
     pub fn read_events(&self, h: &ConversationHandle) -> Result<Vec<ConversationEvent>> {
         let id = h.id();
         if let Some(stream) = self.state.events.get(&id).and_then(OnceLock::get) {

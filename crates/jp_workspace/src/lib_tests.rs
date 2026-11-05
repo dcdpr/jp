@@ -609,7 +609,8 @@ fn read_events_of_a_loaded_stream_include_unpersisted_changes() {
     let conv = ws.test_lock(handle).into_mut();
     conv.update_events(|events| events.start_turn(ChatRequest::from("hello")));
 
-    // Never flushed, so the backing store has no copy to read.
+    // The turn has not been flushed to storage, so `read_events` can only find
+    // it in memory.
     let handle = ws.acquire_conversation(&id).unwrap();
     let events = ws.read_events(&handle).unwrap();
     assert_eq!(
