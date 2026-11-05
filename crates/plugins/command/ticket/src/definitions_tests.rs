@@ -119,7 +119,8 @@ fn fan_out_value(text: &str) -> Option<toml::Value> {
 }
 
 /// Reads batch freely; writes batch one at a time, in the order written, since
-/// two writes to one ticket would race for its file.
+/// two writes to one ticket would race for its file, and two moves for the
+/// board's order file.
 /// `list` filters already, so it doesn't batch.
 /// JP's own definitions say the same as the ones `tools init` writes.
 #[test]
@@ -128,8 +129,9 @@ fn tools_batch_as_far_as_they_safely_can() {
     let expected = vec![
         ("comment".to_owned(), one_at_a_time.clone()),
         ("create".to_owned(), one_at_a_time.clone()),
-        ("edit".to_owned(), one_at_a_time),
+        ("edit".to_owned(), one_at_a_time.clone()),
         ("list".to_owned(), None),
+        ("move".to_owned(), one_at_a_time),
         ("show".to_owned(), fan_out_value("true")),
     ];
 
@@ -151,7 +153,7 @@ fn enum_values(tool: &toml::Value, parameter: &str) -> Vec<String> {
 /// is hidden.
 fn assert_advertised_values_match_the_parser(routed: &[(String, String, toml::Value)]) {
     for (name, key, tool) in routed {
-        if !matches!(name.as_str(), "edit" | "list") {
+        if !matches!(name.as_str(), "edit" | "list" | "move") {
             continue;
         }
 

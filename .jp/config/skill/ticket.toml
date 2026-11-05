@@ -18,6 +18,9 @@ replies, or its parent's description when you need them.
 replying to an earlier one.
 - ticket_edit: Change a ticket's title, description, status, labels, \
 checklist, or parent, any of them in one call. Status `done` closes it.
+- ticket_move: Move a ticket on the board: to another column, directly above \
+or below another ticket, or to the top or bottom of its column. Each column is \
+a queue worked from the top, so this is how work is prioritized.
 
 Labels classify tickets: `type` says what kind of work a ticket is (`bug`, \
 `feature`, `task`, ...), and every ticket carries exactly one; the other keys \
@@ -84,7 +87,8 @@ ticket_list = { enable = true, run = "allow", result = "allow", style.inline_res
 ticket_show = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
 
 # The writing tools inherit the workspace's `run = "ask"` default: filing,
-# commenting, and editing all leave a diff someone has to review.
+# commenting, editing, and moving all leave a diff someone has to review.
 ticket_create = { enable = true, result = "allow", style.inline_results = "full", style.results_file_link = "off" }
 ticket_comment = { enable = true, result = "allow", style.inline_results = "full", style.results_file_link = "off" }
 ticket_edit = { enable = true, result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+ticket_move = { enable = true, result = "allow", style.inline_results = "full", style.results_file_link = "off" }

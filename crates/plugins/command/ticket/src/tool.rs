@@ -29,7 +29,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 use ticket::{
     Comment, Labels, NewTicket, Selector, Status, Ticket, TicketId, Vocabulary,
-    board::{self, Order},
+    board::{self, Order, Place},
     checklist::{self, Marked},
     parse, render, store,
 };
@@ -46,7 +46,7 @@ type Answer = Result<Outcome, Error>;
 ///
 /// Few, because every tool a model is offered costs context on every turn:
 /// `edit` changes any part of a ticket in one call.
-pub(crate) const TOOLS: &[&str] = &["comment", "create", "edit", "list", "show"];
+pub(crate) const TOOLS: &[&str] = &["comment", "create", "edit", "list", "move", "show"];
 
 /// The longest title `create` accepts, in characters, unless the tool's
 /// `options.max_title_length` overrides it.
@@ -105,6 +105,7 @@ fn answer(init: &InitMessage, call: &ToolCall, options: &Options) -> Answer {
         "create" => create(&tickets, &args, call, preview),
         "comment" => comment(&tickets, &args, preview),
         "edit" => edit(&tickets, &args),
+        "move" => move_(&tickets, &args),
         "show" => show(&tickets, &args),
         "list" => list(&tickets, &args, call),
         // `capabilities` above answers for exactly the names in `TOOLS`.
@@ -132,6 +133,8 @@ fn capabilities(call: &ToolCall) -> Option<&'static [Capability]> {
             Capability::Delete,
         ],
         "comment" | "edit" => &[Capability::Read, Capability::Update],
+        // A board that has ranked nothing yet has no order file to update.
+        "move" => &[Capability::Read, Capability::Update, Capability::Create],
         _ => return None,
     })
 }
@@ -895,6 +898,181 @@ fn edit_labels(
         }
         Err(other) => Err(other.into()),
     }
+}
+
+/// Where `move` places a ticket within the column it ends up in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Placement {
+    /// Directly above or below another ticket.
+    Next(Place, TicketId),
+    Top,
+    Bottom,
+}
+
+/// Move one ticket to another column, to another place within one, or both.
+///
+/// Every check runs before anything is written: a ticket to sit next to has to
+/// be another ticket in the column the move ends in, and a change of column
+/// keeps the parent rules `edit`'s `status` keeps.
+/// `top` and `bottom` are placed against the first and the last other ticket of
+/// the column as the board shows it.
+/// Closing a ticket whose checklist has unchecked items is allowed, and warned
+/// about.
+fn move_(tickets: &Tickets<'_>, args: &Arguments<'_>) -> Answer {
+    let id = match args.id()? {
+        Ok(id) => id,
+        Err(refusal) => return refuse(refusal),
+    };
+    let status = match args
+        .optional::<String>("status")?
+        .map(|status| status.parse::<Status>())
+    {
+        Some(Err(_)) => return refuse("`status` must be one of: todo, in progress, done."),
+        Some(Ok(status)) => Some(status),
+        None => None,
+    };
+    let placement = match placement(args)? {
+        Ok(placement) => placement,
+        Err(refusal) => return refuse(refusal),
+    };
+    if status.is_none() && placement.is_none() {
+        return refuse(
+            "Name where to move it: `status`, or one of `before`, `after`, and `position`.",
+        );
+    }
+
+    let entries = store::list(&tickets.dir)?;
+    let ticket = match entries.iter().find(|entry| entry.id == id) {
+        None => return refuse(format!("No {id}.")),
+        Some(entry) => match &entry.ticket {
+            Ok(ticket) => ticket,
+            Err(error) => return refuse(format!("{id} is not a well-formed ticket: {error}")),
+        },
+    };
+    let to = status.unwrap_or(ticket.metadata.status);
+    let order = board::read(&tickets.dir)?;
+    let at = anchor(placement, id, &column(&entries, &order, to));
+
+    let moved = match board::move_to(&tickets.dir, &tickets.formatting, id, to, at) {
+        Ok(moved) => moved,
+        Err(
+            refused @ (store::Error::NoSuchTicket(_)
+            | store::Error::NotInColumn { .. }
+            | store::Error::SameTicket(_)
+            | store::Error::Parent(_)),
+        ) => return refuse(refused.to_string()),
+        Err(other) => return Err(other.into()),
+    };
+
+    let mut text = format!("Moved {id}:\n");
+    if let Some(status) = status {
+        text.push_str(&if moved.previous == status {
+            format!("- status: already {status}\n")
+        } else {
+            format!("- status: {} -> {status}\n", moved.previous)
+        });
+    }
+    let after = store::list(&tickets.dir)?;
+    let order = board::read(&tickets.dir)?;
+    if let Some(place) = place_in(&column(&after, &order, to), id, to) {
+        text.push_str(&format!("- place: {place}\n"));
+    }
+    if status == Some(Status::Done)
+        && let Some(warning) = unchecked_on_close(&ticket.description)
+    {
+        text.push_str(&format!("- warning: {warning}\n"));
+    }
+
+    Ok(text.into())
+}
+
+/// Read `move`'s placement: `before`, `after`, or `position`, at most one.
+///
+/// The inner error is the refusal, for the assistant.
+fn placement(args: &Arguments<'_>) -> Result<Result<Option<Placement>, String>, Error> {
+    let before = args.optional::<Value>("before")?;
+    let after = args.optional::<Value>("after")?;
+    let position = args.optional::<String>("position")?;
+
+    let named = [before.is_some(), after.is_some(), position.is_some()]
+        .into_iter()
+        .filter(|named| *named)
+        .count();
+    if named > 1 {
+        return Ok(Err("Name one of `before`, `after`, and `position`, not \
+                       several."
+            .to_owned()));
+    }
+
+    Ok(match (before, after, position) {
+        (Some(before), ..) => next_to(Place::Before, &before, "before"),
+        (_, Some(after), _) => next_to(Place::After, &after, "after"),
+        (.., Some(position)) => match position.trim().to_ascii_lowercase().as_str() {
+            "top" => Ok(Some(Placement::Top)),
+            "bottom" => Ok(Some(Placement::Bottom)),
+            _ => Err("`position` must be one of: top, bottom.".to_owned()),
+        },
+        (None, None, None) => Ok(None),
+    })
+}
+
+/// A placement next to the ticket `value` names, read from the argument
+/// `argument`.
+fn next_to(place: Place, value: &Value, argument: &str) -> Result<Option<Placement>, String> {
+    id_arg(value)
+        .map(|other| Some(Placement::Next(place, other)))
+        .map_err(|refusal| format!("`{argument}`: {refusal}"))
+}
+
+/// The tickets of the column holding `status`, top first, as the board shows
+/// them.
+fn column(entries: &[store::Entry], order: &Order, status: Status) -> Vec<TicketId> {
+    let at_status: Vec<TicketId> = entries
+        .iter()
+        .filter(|entry| {
+            entry
+                .ticket
+                .as_ref()
+                .is_ok_and(|ticket| ticket.metadata.status == status)
+        })
+        .map(|entry| entry.id)
+        .collect();
+
+    order.arrange(status, &at_status)
+}
+
+/// The ticket `id` is placed next to, and on which side, for `placement` in a
+/// column laid out as `column`.
+///
+/// `None` when the move names no place, or when `top` or `bottom` meets a
+/// column holding no other ticket, where `id` is both.
+fn anchor(
+    placement: Option<Placement>,
+    id: TicketId,
+    column: &[TicketId],
+) -> Option<(Place, TicketId)> {
+    let mut others = column.iter().copied().filter(|other| *other != id);
+
+    match placement? {
+        Placement::Next(place, other) => Some((place, other)),
+        Placement::Top => others.next().map(|first| (Place::Before, first)),
+        Placement::Bottom => others.next_back().map(|last| (Place::After, last)),
+    }
+}
+
+/// Where `id` sits in `column`, the column holding `status`: its position, and
+/// the ticket directly above it.
+///
+/// `None` when the column doesn't hold `id`.
+fn place_in(column: &[TicketId], id: TicketId, status: Status) -> Option<String> {
+    let index = column.iter().position(|other| *other == id)?;
+    let place = format!("{} of {} in {status}", index + 1, column.len());
+
+    Some(match index.checked_sub(1).map(|above| column[above]) {
+        Some(above) => format!("{place}, below {above}"),
+        None if column.len() > 1 => format!("{place}, at the top"),
+        None => place,
+    })
 }
 
 /// Read one ticket: its metadata, its parent and children, and the description,
